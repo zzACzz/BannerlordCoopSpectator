@@ -1,5 +1,8 @@
 using System; // Підключаємо базові типи .NET (Exception)
+using CoopSpectator.Campaign; // Підключаємо campaign behaviors (HostStateBroadcaster, SpectatorStateReceiver)
 using CoopSpectator.Infrastructure; // Підключаємо інфраструктуру (логер, dispatcher)
+using HarmonyLib; // Підключаємо Harmony для патчингу методів гри
+using TaleWorlds.CampaignSystem; // Підключаємо CampaignGameStarter та Campaign (щоб додати behaviors у кампанію)
 using TaleWorlds.Core; // Підключаємо базові типи Bannerlord (InformationMessage)
 using TaleWorlds.Library; // Підключаємо утиліти Bannerlord (InformationManager)
 using TaleWorlds.MountAndBlade; // Підключаємо базовий API модів (MBSubModuleBase)
@@ -25,12 +28,40 @@ namespace CoopSpectator // Використовуємо кореневий names
             } // Завершуємо блок if
 
             _hasShownLoadedMessage = false; // Скидаємо прапорець, бо OnSubModuleLoad викликається до старту гри, а UI може бути ще не готовий
+
+            TryApplyHarmonyPatches(); // Пробуємо застосувати Harmony патчі (навіть якщо Bannerlord.Harmony мод не встановлений/не увімкнений)
             ModLogger.Info("SubModule завантажено."); // Логуємо завантаження для дебагу
+        } // Завершуємо блок методу
+
+        private static void TryApplyHarmonyPatches() // Пробуємо застосувати всі Harmony патчі з нашої збірки
+        { // Починаємо блок методу
+            try // Обгортаємо патчинг у try/catch, щоб проблема з Harmony не крашнула гру
+            { // Починаємо блок try
+                var harmony = new Harmony("com.coopspectator.mod"); // Створюємо інстанс Harmony з унікальним Id моду
+                harmony.PatchAll(); // Застосовуємо всі патчі з атрибутами [HarmonyPatch] у цій збірці
+                ModLogger.Info("Harmony патчі застосовано успішно."); // Логуємо успіх, щоб було видно що патчинг активний
+            } // Завершуємо блок try
+            catch (Exception ex) // Ловимо будь-які винятки (відсутня DLL, конфлікти, тощо)
+            { // Починаємо блок catch
+                ModLogger.Error("Не вдалося застосувати Harmony патчі.", ex); // Логуємо помилку для діагностики
+            } // Завершуємо блок catch
         } // Завершуємо блок методу
 
         protected override void OnGameStart(Game game, IGameStarter gameStarterObject) // Викликається коли стартує гра/кампанія (UI вже зазвичай ініціалізований)
         { // Починаємо блок методу
             base.OnGameStart(game, gameStarterObject); // Викликаємо базову реалізацію, щоб не ламати ініціалізацію гри
+
+            if (game != null && game.GameType is TaleWorlds.CampaignSystem.Campaign) // Перевіряємо що гра стартувала саме як кампанія (наш мод працює в кампанії)
+            { // Починаємо блок if
+                CampaignGameStarter starter = gameStarterObject as CampaignGameStarter; // Пробуємо привести IGameStarter до CampaignGameStarter, щоб додати behaviors
+
+                if (starter != null) // Перевіряємо що приведення успішне і starter не null
+                { // Починаємо блок if
+                    starter.AddBehavior(new HostStateBroadcaster()); // Додаємо behavior хоста (він буде відправляти STATE тільки коли ми Server)
+                    starter.AddBehavior(new SpectatorStateReceiver()); // Додаємо behavior клієнта (він буде приймати STATE тільки коли ми Client)
+                    ModLogger.Info("Campaign behaviors додано (HostStateBroadcaster + SpectatorStateReceiver)."); // Логуємо факт додавання behaviors для дебагу
+                } // Завершуємо блок if
+            } // Завершуємо блок if
 
             if (_hasShownLoadedMessage) // Перевіряємо прапорець, щоб не показувати повідомлення повторно
             { // Починаємо блок if

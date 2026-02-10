@@ -193,7 +193,7 @@ namespace CoopSpectator.Network // Оголошуємо простір імен 
                 return; // Виходимо, бо немає повідомлення
             } // Завершуємо блок if
 
-            RaiseMessageReceived("MSG:" + message); // Маршалимо подію в головний потік через dispatcher, додаючи префікс для тестів
+            RaiseMessageReceived(message); // Маршалимо подію в головний потік через dispatcher, передаючи "сире" повідомлення протоколу (STATE:/BATTLE_START:/...)
         } // Завершуємо блок методу
 
         private void OnServerClientDisconnected(TcpClientConnection connection) // Callback, який викликається коли серверний клієнт відключився
