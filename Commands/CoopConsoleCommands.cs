@@ -1,6 +1,7 @@
 using System; // Підключаємо базові типи .NET (String, Int32)
 using System.Collections.Generic; // Підключаємо List<string> для аргументів консольних команд
 using CoopSpectator.Infrastructure; // Підключаємо логер для повідомлень
+using CoopSpectator.Network; // Підключаємо типи мережевого шару (NetworkRole)
 using TaleWorlds.Library; // Підключаємо CommandLineFunctionality для реєстрації команд у консолі Bannerlord
 
 namespace CoopSpectator.Commands // Оголошуємо простір імен для консольних команд
@@ -89,13 +90,13 @@ namespace CoopSpectator.Commands // Оголошуємо простір імен
 
             string message = string.Join(" ", args.ToArray()); // Об'єднуємо всі аргументи в один рядок (щоб підтримати пробіли)
 
-            if (CoopRuntime.Network.Role == Network.NetworkRole.Client) // Якщо ми клієнт, відправляємо на сервер
+            if (CoopRuntime.Network.Role == NetworkRole.Client) // Якщо ми клієнт, відправляємо на сервер
             { // Починаємо блок if
                 CoopRuntime.Network.SendToServer(message); // Відправляємо повідомлення хосту
                 return "Sent to server: " + message; // Повертаємо підтвердження
             } // Завершуємо блок if
 
-            if (CoopRuntime.Network.Role == Network.NetworkRole.Server) // Якщо ми сервер, робимо broadcast всім клієнтам
+            if (CoopRuntime.Network.Role == NetworkRole.Server) // Якщо ми сервер, робимо broadcast всім клієнтам
             { // Починаємо блок if
                 CoopRuntime.Network.BroadcastToClients(message); // Відправляємо повідомлення всім клієнтам
                 return "Broadcasted to clients: " + message; // Повертаємо підтвердження

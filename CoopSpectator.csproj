@@ -10,8 +10,12 @@
     <RootNamespace>CoopSpectator</RootNamespace>
     <!-- Забороняємо Prefer32Bit, бо гра 64-бітна -->
     <Prefer32Bit>false</Prefer32Bit>
-    <!-- Виводимо DLL одразу у папку моду, щоб не копіювати вручну після білду -->
-    <BaseOutputPath>Module\CoopSpectator\bin\Win64_Shipping_Client\</BaseOutputPath>
+    <!-- Явно таргетимось під x64, бо DLL гри x64 (інакше MSBuild попереджає про MSIL vs AMD64) -->
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- Встановлюємо платформу за замовчуванням в x64, якщо користувач не передав /p:Platform=... -->
+    <Platform Condition="'$(Platform)'==''">x64</Platform>
+    <!-- Публікуємо DLL одразу у папку моду, щоб не копіювати вручну після білду -->
+    <OutputPath>Module\CoopSpectator\bin\Win64_Shipping_Client\</OutputPath>
     <!-- Не додаємо /Debug або /Release у шлях, щоб вихід завжди був в одній папці моду -->
     <AppendConfigurationToOutputPath>false</AppendConfigurationToOutputPath>
     <!-- Не додаємо net472 у шлях, бо Bannerlord очікує DLL у Win64_Shipping_Client напряму -->
