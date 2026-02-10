@@ -1,0 +1,40 @@
+<!-- Кореневий опис моду для Bannerlord Launcher -->
+<Module>
+  <!-- Відображувана назва моду у лаунчері -->
+  <Name value="Coop Spectator" />
+  <!-- Унікальний Id моду (використовується як папка моду) -->
+  <Id value="CoopSpectator" />
+  <!-- Версія моду (для релізів/сумісності) -->
+  <Version value="v0.1.0" />
+  <!-- Прапорець що мод працює у сингплеєрі (кампанія) -->
+  <SingleplayerModule value="true" />
+  <!-- Прапорець що мод НЕ є окремим мультиплеєрним модулем -->
+  <MultiplayerModule value="false" />
+  <!-- Список залежних модулів ваніли, які мають бути увімкнені -->
+  <DependedModules>
+    <!-- Базовий модуль з ядром гри -->
+    <DependedModule Id="Native" />
+    <!-- Базовий контент для sandbox-режиму -->
+    <DependedModule Id="SandBoxCore" />
+    <!-- Логіка sandbox-кампанії -->
+    <DependedModule Id="Sandbox" />
+    <!-- StoryMode (кампанія) -->
+    <DependedModule Id="StoryMode" />
+  </DependedModules>
+  <!-- Підмодулі (C# DLL), які завантажує гра -->
+  <SubModules>
+    <SubModule>
+      <!-- Назва підмодуля (для відображення/логів) -->
+      <Name value="CoopSpectator" />
+      <!-- Ім'я DLL, яку завантажує гра (лежить у bin/Win64_Shipping_Client/) -->
+      <DLLName value="CoopSpectator.dll" />
+      <!-- Повне ім'я класу-ентріпойнта, який наслідує MBSubModuleBase -->
+      <SubModuleClassType value="CoopSpectator.SubModule" />
+      <!-- Теги для dedicated server (ми не використовуємо) -->
+      <Tags>
+        <Tag key="DedicatedServerType" value="none" />
+      </Tags>
+    </SubModule>
+  </SubModules>
+</Module>
+

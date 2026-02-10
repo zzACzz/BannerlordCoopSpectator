@@ -1,0 +1,25 @@
+# Збірочні артефакти MSBuild/Visual Studio
+bin/
+obj/
+
+# Вихідні артефакти моду (згенерований DLL/залежності)
+Module/**/bin/
+
+# Тимчасові файли Visual Studio
+.vs/
+
+# Кеші Rider/JetBrains
+.idea/
+
+# Кеші ReSharper
+_ReSharper*/
+
+# Файли користувача Visual Studio
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Логи
+*.log
+

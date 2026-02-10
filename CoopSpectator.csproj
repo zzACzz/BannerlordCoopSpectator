@@ -1,0 +1,118 @@
+<!-- SDK-style C# проєкт для збірки Bannerlord моду -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Загальні налаштування проєкту -->
+  <PropertyGroup>
+    <!-- Цільовий фреймворк: Bannerlord моди зазвичай таргетять .NET Framework 4.7.2 -->
+    <TargetFramework>net472</TargetFramework>
+    <!-- Ім'я вихідної збірки (DLL) яку завантажує гра -->
+    <AssemblyName>CoopSpectator</AssemblyName>
+    <!-- Кореневий namespace для типів проєкту -->
+    <RootNamespace>CoopSpectator</RootNamespace>
+    <!-- Забороняємо Prefer32Bit, бо гра 64-бітна -->
+    <Prefer32Bit>false</Prefer32Bit>
+    <!-- Виводимо DLL одразу у папку моду, щоб не копіювати вручну після білду -->
+    <BaseOutputPath>Module\CoopSpectator\bin\Win64_Shipping_Client\</BaseOutputPath>
+    <!-- Не додаємо /Debug або /Release у шлях, щоб вихід завжди був в одній папці моду -->
+    <AppendConfigurationToOutputPath>false</AppendConfigurationToOutputPath>
+    <!-- Не додаємо net472 у шлях, бо Bannerlord очікує DLL у Win64_Shipping_Client напряму -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+
+    <!-- Шлях до кореня інсталяції Bannerlord (Steam); можна перевизначити через /p:BannerlordRootDir=... -->
+    <BannerlordRootDir Condition="'$(BannerlordRootDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\Mount &amp; Blade II Bannerlord</BannerlordRootDir>
+    <!-- Шлях до Win64_Shipping_Client, де лежать DLL гри для компіляції -->
+    <BannerlordBinDir>$(BannerlordRootDir)\bin\Win64_Shipping_Client</BannerlordBinDir>
+    <!-- Прапорець: чи існує DLL з папки гри (як маркер, що шлях правильний) -->
+    <UseGameDlls Condition="Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.dll')">true</UseGameDlls>
+    <!-- Якщо маркер не знайдено, використовуємо локальні DLL з репозиторію -->
+    <UseGameDlls Condition="'$(UseGameDlls)'==''">false</UseGameDlls>
+  </PropertyGroup>
+
+  <!-- Референси на DLL гри з інсталяції (рекомендовано для точної відповідності версії 1.3.14) -->
+  <ItemGroup Condition="'$(UseGameDlls)'=='true'">
+    <!-- Core API гри (InformationManager, Game, тощо) -->
+    <Reference Include="TaleWorlds.Core">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Базова бібліотека TaleWorlds (Vec2, Debug.Print, ViewModel, тощо) -->
+    <Reference Include="TaleWorlds.Library">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.Library.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Engine API (сцена, GameEntity, тощо) -->
+    <Reference Include="TaleWorlds.Engine">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.Engine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Input API (може знадобитися для блокування інпуту клієнта) -->
+    <Reference Include="TaleWorlds.InputSystem">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Localization API (рядки/локалізація) -->
+    <Reference Include="TaleWorlds.Localization">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.Localization.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Основний геймплейний API (MBSubModuleBase, Mission, Agent, тощо) -->
+    <Reference Include="TaleWorlds.MountAndBlade">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.MountAndBlade.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Campaign API (Campaign, MobileParty, тощо) -->
+    <Reference Include="TaleWorlds.CampaignSystem">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.CampaignSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Network API TaleWorlds (може знадобитись у battle integration) -->
+    <Reference Include="TaleWorlds.Network">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.Network.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Fallback: референси на локальні DLL (корисно якщо хтось клонить репозиторій без встановленої гри) -->
+  <ItemGroup Condition="'$(UseGameDlls)'!='true'">
+    <!-- Core API гри (InformationManager, Game, тощо) -->
+    <Reference Include="TaleWorlds.Core">
+      <HintPath>TaleWorlds.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Базова бібліотека TaleWorlds (Vec2, Debug.Print, ViewModel, тощо) -->
+    <Reference Include="TaleWorlds.Library">
+      <HintPath>TaleWorlds.Library.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Engine API (сцена, GameEntity, тощо) -->
+    <Reference Include="TaleWorlds.Engine">
+      <HintPath>TaleWorlds.Engine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Input API (може знадобитися для блокування інпуту клієнта) -->
+    <Reference Include="TaleWorlds.InputSystem">
+      <HintPath>TaleWorlds.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Localization API (рядки/локалізація) -->
+    <Reference Include="TaleWorlds.Localization">
+      <HintPath>TaleWorlds.Localization.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Основний геймплейний API (MBSubModuleBase, Mission, Agent, тощо) -->
+    <Reference Include="TaleWorlds.MountAndBlade">
+      <HintPath>TaleWorlds.MountAndBlade.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Campaign API (Campaign, MobileParty, тощо) -->
+    <Reference Include="TaleWorlds.CampaignSystem">
+      <HintPath>TaleWorlds.CampaignSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Network API TaleWorlds (може знадобитись у battle integration) -->
+    <Reference Include="TaleWorlds.Network">
+      <HintPath>TaleWorlds.Network.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
+
