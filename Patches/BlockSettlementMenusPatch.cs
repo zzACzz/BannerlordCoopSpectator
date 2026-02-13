@@ -11,8 +11,8 @@ namespace CoopSpectator.Patches // Оголошуємо простір імен 
     /// </summary> // Завершуємо XML-коментар
     internal static class BlockSettlementMenusPatch // Оголошуємо internal static, бо це набір патчів без інстансів
     { // Починаємо блок класу
-        private static int _lastUiTickSeconds; // Зберігаємо час останнього повідомлення, щоб не спамити UI при багаторазових викликах
-        private const int UiCooldownSeconds = 2; // Визначаємо cooldown у секундах між повідомленнями
+        private static uint _lastUiTickSeconds; // Store last UI notify time as unsigned seconds (wrap-safe)
+        private const uint UiCooldownSeconds = 2u; // Cooldown in seconds between notifications
 
         [HarmonyPatch(typeof(GameMenuManager))] // Вказуємо тип, який керує переходами між ігровими меню кампанії
         [HarmonyPatch("SetNextMenu")] // Патчимо метод, який виставляє наступне меню по string Id
@@ -24,6 +24,14 @@ namespace CoopSpectator.Patches // Оголошуємо простір імен 
                 if (!ShouldBlockMenus()) // Якщо ми не клієнт у мережевому режимі, нічого не блокуємо
                 { // Починаємо блок if
                     return true; // Дозволяємо оригінальний SetNextMenu
+                } // Завершуємо блок if
+
+                // Якщо зараз активний countdown запрошення в бій, блокуємо будь-які переходи в меню, // Пояснюємо "hard lock"
+                // щоб клієнт не міг відкривати екрани під час підготовки до битви. // Пояснюємо навіщо
+                if (ClientBattleInvitationLock.IsActive) // Перевіряємо глобальний battle lock
+                { // Починаємо блок if
+                    ThrottledNotify("BATTLE_LOCK:" + (menuId ?? "null")); // Показуємо повідомлення з cooldown
+                    return false; // Блокуємо будь-які меню переходи під час lock
                 } // Завершуємо блок if
 
                 if (!IsSettlementMenuId(menuId)) // Якщо це не settlement-меню, дозволяємо перехід (наприклад, encounter/лоадінг/тощо)
@@ -79,16 +87,17 @@ namespace CoopSpectator.Patches // Оголошуємо простір імен 
 
         private static void ThrottledNotify(string menuId) // Показуємо повідомлення з cooldown, щоб не спамити при багаторазових викликах
         { // Починаємо блок методу
-            int nowSeconds = Environment.TickCount / 1000; // Отримуємо “поточний час” у секундах для throttle (достатньо для UI)
+            uint nowSeconds = unchecked((uint)Environment.TickCount) / 1000u; // Unsigned seconds to avoid negative values after TickCount overflow
 
-            if (nowSeconds - _lastUiTickSeconds < UiCooldownSeconds) // Якщо cooldown ще не минув, нічого не показуємо
+            if (nowSeconds - _lastUiTickSeconds < UiCooldownSeconds) // If cooldown has not elapsed, skip
             { // Починаємо блок if
                 return; // Виходимо, щоб не спамити повідомленнями
             } // Завершуємо блок if
 
             _lastUiTickSeconds = nowSeconds; // Оновлюємо час останнього повідомлення
             ModLogger.Info("Заблоковано SetNextMenu для клієнта: " + (menuId ?? "null")); // Логуємо Id меню для дебагу
-            GameUi.ShowMessage("Spectator: settlement menus are disabled."); // Показуємо коротке повідомлення користувачу
+
+            UiFeedback.ShowMessageDeferred("Spectator: settlement menus are disabled."); // Defer UI message to avoid being lost during transitions
         } // Завершуємо блок методу
     } // Завершуємо блок класу
 } // Завершуємо блок простору імен

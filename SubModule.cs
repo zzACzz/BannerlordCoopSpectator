@@ -15,12 +15,14 @@ namespace CoopSpectator // Використовуємо кореневий names
     public sealed class SubModule : MBSubModuleBase // Наслідуємо MBSubModuleBase, щоб отримати callbacks від гри
     { // Починаємо блок класу
         private bool _hasShownLoadedMessage; // Зберігаємо прапорець, щоб показати "mod loaded" лише один раз (і не спамити при перезапусках гри/сесій)
+        private BattleDetector _battleDetector; // Детектор старту битви (відстежує перехід Mission.Current з null → не-null)
 
         protected override void OnSubModuleLoad() // Викликається коли мод завантажується (до старту гри/кампанії)
         { // Починаємо блок методу
             base.OnSubModuleLoad(); // Викликаємо базову реалізацію, щоб не ламати внутрішню логіку гри
 
             CoopRuntime.Initialize(); // Ініціалізуємо глобальний runtime (NetworkManager, тощо)
+            _battleDetector = new BattleDetector(); // Створюємо детектор битви один раз (використовуватиметься з OnApplicationTick)
 
             if (CoopRuntime.Network != null) // Перевіряємо що NetworkManager створився успішно
             { // Починаємо блок if
@@ -59,6 +61,8 @@ namespace CoopSpectator // Використовуємо кореневий names
                 { // Починаємо блок if
                     starter.AddBehavior(new HostStateBroadcaster()); // Додаємо behavior хоста (він буде відправляти STATE тільки коли ми Server)
                     starter.AddBehavior(new SpectatorStateReceiver()); // Додаємо behavior клієнта (він буде приймати STATE тільки коли ми Client)
+                    starter.AddBehavior(new ClientBattleNotification()); // Клієнт: слухає BATTLE_START і показує countdown/notification
+                    starter.AddBehavior(new MainThreadDispatcherPumpBehavior()); // Pump dispatcher from campaign tick for reliable UI feedback
                     ModLogger.Info("Campaign behaviors додано (HostStateBroadcaster + SpectatorStateReceiver)."); // Логуємо факт додавання behaviors для дебагу
                 } // Завершуємо блок if
             } // Завершуємо блок if
@@ -69,7 +73,7 @@ namespace CoopSpectator // Використовуємо кореневий names
             } // Завершуємо блок if
 
             _hasShownLoadedMessage = true; // Встановлюємо прапорець, щоб повторний OnGameStart не спамив повідомленнями
-            ShowMessage("CoopSpectator mod loaded! (v0.1.0)"); // Показуємо коротке повідомлення в UI, коли гра вже стартувала і UI готовий
+            ShowMessage("CoopSpectator mod loaded! (v0.1.1-ui)"); // Version marker to confirm the client runs the latest build
         } // Завершуємо блок методу
 
         protected override void OnSubModuleUnloaded() // Викликається коли мод вивантажується (закриття гри / перезавантаження модів)
@@ -98,6 +102,7 @@ namespace CoopSpectator // Використовуємо кореневий names
             base.OnApplicationTick(dt); // Викликаємо базову реалізацію
 
             MainThreadDispatcher.ExecutePending(); // Виконуємо дії, які були поставлені в чергу з мережевого потоку
+            _battleDetector?.Tick(); // Перевіряємо чи стартувала місія/битва і, якщо ми хост, шлемо BATTLE_START клієнтам
         } // Завершуємо блок методу
 
         private void OnNetworkMessageReceived(string message) // Обробляємо мережеві повідомлення (викликається в головному потоці)
@@ -106,6 +111,20 @@ namespace CoopSpectator // Використовуємо кореневий names
             { // Починаємо блок if
                 return; // Виходимо, бо нічого показувати
             } // Завершуємо блок if
+
+            string trimmed = message.TrimStart(); // Normalize possible leading whitespace from network framing
+
+            // Filter out raw host state sync spam from UI (STATE:{json} is handled elsewhere). // Explain why we skip
+            if (trimmed.StartsWith("STATE:", StringComparison.Ordinal)) // Check protocol prefix safely and fast
+            { // Begin if
+                return; // Don't show NET: STATE:{json} in UI
+            } // End if
+
+            // Filter out raw battle start payload spam (handled by ClientBattleNotification). // Explain why we skip
+            if (trimmed.StartsWith("BATTLE_START:", StringComparison.Ordinal)) // Check protocol prefix safely and fast
+            { // Begin if
+                return; // Don't show NET: BATTLE_START:{json} in UI
+            } // End if
 
             ShowMessage("NET: " + message); // Показуємо повідомлення в UI для швидкого тесту networking
             ModLogger.Info("Отримано мережеве повідомлення: " + message); // Логуємо повідомлення в лог гри

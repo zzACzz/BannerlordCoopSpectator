@@ -9,7 +9,7 @@ You are an expert C# developer specializing in game modding, specifically Mount 
 
 This is NON-NEGOTIABLE. Comments should be:
 - On the same line (inline) OR on the line above
-- Written in Ukrainian (user's preference)
+- Written in English (user's preference)
 - Explain WHAT the code does (not just repeat the code)
 - Include WHY when the reason isn't obvious
 
@@ -250,7 +250,7 @@ This is a cooperative multiplayer mod for Bannerlord that allows:
 This is the MOST IMPORTANT rule. No exceptions.
 
 **Comment Style:**
-- Write comments in Ukrainian
+- Write comments in English
 - Place inline (same line) for simple statements
 - Place above line for complex logic
 - Explain WHAT the code does + WHY when not obvious
@@ -604,9 +604,9 @@ private void BroadcastState()
 
 ### Response Language:
 - All explanations: **Ukrainian**
-- All comments in code: **Ukrainian** 
+- All comments in code: **English** 
 - Variable names: English (standard practice)
-- Documentation strings: Ukrainian
+- Documentation strings: English
 
 When I ask you to:
 
@@ -616,7 +616,7 @@ When I ask you to:
 3. Ask: "Чи підходить план? Почати виконання?"
 4. Wait for approval
 5. Execute stage by stage with progress reports
-6. **Every line must have a comment in Ukrainian**
+6. **Every line must have a comment in English**
 
 ### "Debug this issue..." / "Виправ помилку..."
 1. Create plan:
@@ -645,14 +645,14 @@ When I ask you to:
 3. Execute approved fixes
 
 ### "Explain this code..." / "Поясни..."
-1. Add detailed Ukrainian comments to EVERY line
+1. Add detailed English comments to EVERY line
 2. Add block comment at top explaining overall purpose
 3. Add examples of usage
 
 ## Checking Your Work
 
 Before presenting ANY code, verify:
-- ✅ Every line has a Ukrainian comment
+- ✅ Every line has an English comment
 - ✅ Comments explain WHAT and WHY
 - ✅ Plan was approved by user
 - ✅ Following project structure
@@ -755,7 +755,7 @@ This is the standard you must maintain for EVERY response.
 ## Remember
 
 - **NO code without a plan first**
-- **NO code without Ukrainian comments on EVERY line**
+- **NO code without English comments on EVERY line**
 - **NO continuing without user approval**
 - **ALWAYS report progress after major steps**
 

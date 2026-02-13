@@ -1,3 +1,4 @@
+using System; // Use Environment.TickCount for cooldown timing
 using CoopSpectator.Infrastructure; // Підключаємо логер для діагностики
 using CoopSpectator.Network; // Підключаємо NetworkRole для перевірки ролі (клієнт/сервер)
 using HarmonyLib; // Підключаємо Harmony для патчингу методів гри
@@ -13,6 +14,9 @@ namespace CoopSpectator.Patches // Оголошуємо простір імен 
     /// </summary> // Завершуємо XML-коментар
     internal static class BlockPartyMovementPatch // Оголошуємо internal static клас, бо Harmony шукає патчі по атрибутам, а екземпляр не потрібен
     { // Починаємо блок класу
+        private static uint _lastUiTickSeconds; // Last time we showed UI feedback (unsigned seconds, wrap-safe)
+        private const uint UiCooldownSeconds = 2u; // Cooldown between UI messages to prevent spam
+
         [HarmonyPatch(typeof(MobileParty))] // Вказуємо тип, методи якого ми будемо патчити
         [HarmonyPatch("SetMoveGoToPoint")] // Патчимо рух до довільної точки (клік по землі)
         private static class SetMoveGoToPointPatch // Вкладений патч-клас для SetMoveGoToPoint
@@ -24,7 +28,7 @@ namespace CoopSpectator.Patches // Оголошуємо простір імен 
                     return true; // Дозволяємо оригінальний метод, якщо ми не клієнт
                 } // Завершуємо блок if
 
-                ModLogger.Info("Заблоковано рух партії на клієнті (SetMoveGoToPoint)."); // Логуємо факт блокування для дебагу
+                ThrottledNotify("SetMoveGoToPoint"); // Show reliable UI feedback (throttled)
                 return false; // Блокуємо оригінальний метод, щоб клієнт не міг змінювати маршрут партії
             } // Завершуємо блок методу
         } // Завершуємо блок класу
@@ -40,7 +44,7 @@ namespace CoopSpectator.Patches // Оголошуємо простір імен 
                     return true; // Дозволяємо оригінал
                 } // Завершуємо блок if
 
-                ModLogger.Info("Заблоковано рух до поселення на клієнті (SetMoveGoToSettlement)."); // Логуємо блокування для дебагу
+                ThrottledNotify("SetMoveGoToSettlement"); // Show reliable UI feedback (throttled)
                 return false; // Блокуємо рух до settlement
             } // Завершуємо блок методу
         } // Завершуємо блок класу
@@ -56,7 +60,7 @@ namespace CoopSpectator.Patches // Оголошуємо простір імен 
                     return true; // Дозволяємо оригінал
                 } // Завершуємо блок if
 
-                ModLogger.Info("Заблоковано engage party на клієнті (SetMoveEngageParty)."); // Логуємо блокування
+                ThrottledNotify("SetMoveEngageParty"); // Show reliable UI feedback (throttled)
                 return false; // Блокуємо рух до загону
             } // Завершуємо блок методу
         } // Завершуємо блок класу
@@ -72,10 +76,26 @@ namespace CoopSpectator.Patches // Оголошуємо простір імен 
                     return true; // Дозволяємо оригінал
                 } // Завершуємо блок if
 
-                ModLogger.Info("Заблоковано рух до interactable point на клієнті (SetMoveGoToInteractablePoint)."); // Логуємо блокування
+                ThrottledNotify("SetMoveGoToInteractablePoint"); // Show reliable UI feedback (throttled)
                 return false; // Блокуємо рух
             } // Завершуємо блок методу
         } // Завершуємо блок класу
+
+        private static void ThrottledNotify(string blockedMethod) // Show message with cooldown to avoid spam
+        { // Begin method
+            uint nowSeconds = unchecked((uint)Environment.TickCount) / 1000u; // Unsigned seconds avoid negative values after TickCount overflow
+
+            if (nowSeconds - _lastUiTickSeconds < UiCooldownSeconds) // If cooldown has not elapsed
+            { // Begin if
+                return; // Skip showing/logging again
+            } // End if
+
+            _lastUiTickSeconds = nowSeconds; // Update last UI feedback time
+
+            ModLogger.Info("Blocked party movement for client (" + (blockedMethod ?? "?") + ")."); // Log once per cooldown
+
+            UiFeedback.ShowMessageDeferred("Spectator: party movement is disabled."); // Defer UI message so it reliably appears
+        } // End method
 
         private static bool ShouldBlockMovement() // Визначаємо чи треба блокувати наказ руху прямо зараз
         { // Починаємо блок методу

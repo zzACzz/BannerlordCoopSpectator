@@ -15,8 +15,8 @@ namespace CoopSpectator.Patches // Оголошуємо простір імен 
     /// </summary> // Завершуємо XML-коментар
     internal static class BlockTownMenuPatch // Оголошуємо internal static, бо це набір патчів без стану екземпляра
     { // Починаємо блок класу
-        private static float _lastBlockTime; // Зберігаємо час останнього блокування, щоб не спамити лог/повідомленнями
-        private const float BlockLogCooldownSeconds = 2.0f; // Інтервал (секунди) між логами блокування, щоб не засмічувати логи
+        private static uint _lastUiTickSeconds; // Store last UI notify time as unsigned seconds (wrap-safe)
+        private const uint UiCooldownSeconds = 2u; // Cooldown in seconds between notifications
 
         [HarmonyPatch(typeof(PlayerTownVisitCampaignBehavior))] // Вказуємо клас, метод якого ми патчимо
         [HarmonyPatch("OnSettlementEntered")] // Патчимо приватний метод, який викликається коли партія гравця входить у поселення (і гра готує/відкриває town menu)
@@ -57,18 +57,19 @@ namespace CoopSpectator.Patches // Оголошуємо простір імен 
 
         private static void ThrottledLogBlock(Settlement settlement) // Логуємо блокування з cooldown, щоб не спамити в лог кожен виклик
         { // Починаємо блок методу
-            float now = Environment.TickCount / 1000f; // Отримуємо приблизний час в секундах з системного tick counter (достатньо для throttle)
+            uint nowSeconds = unchecked((uint)Environment.TickCount) / 1000u; // Unsigned seconds to avoid negative values after TickCount overflow
 
-            if (now - _lastBlockTime < BlockLogCooldownSeconds) // Перевіряємо чи минуло достатньо часу з останнього логу
+            if (nowSeconds - _lastUiTickSeconds < UiCooldownSeconds) // If cooldown has not elapsed, skip
             { // Починаємо блок if
                 return; // Виходимо, щоб не спамити
             } // Завершуємо блок if
 
-            _lastBlockTime = now; // Оновлюємо час останнього блокування
+            _lastUiTickSeconds = nowSeconds; // Update last UI notify time
 
             string name = settlement != null ? settlement.Name.ToString() : "unknown"; // Отримуємо назву поселення для логу (або unknown якщо null)
             ModLogger.Info("Заблоковано вхід у поселення/меню для клієнта: " + name + "."); // Логуємо блокування для дебагу
-            GameUi.ShowMessage("Spectator: entering settlements is disabled."); // Показуємо коротке повідомлення клієнту, чому нічого не відкрилось
+
+            UiFeedback.ShowMessageDeferred("Spectator: entering settlements is disabled."); // Defer UI message to avoid being lost during transitions
         } // Завершуємо блок методу
     } // Завершуємо блок класу
 } // Завершуємо блок простору імен
