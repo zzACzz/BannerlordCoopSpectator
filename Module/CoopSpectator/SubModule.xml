@@ -20,6 +20,8 @@
     <DependedModule Id="Sandbox" />
     <!-- StoryMode (кампанія) -->
     <DependedModule Id="StoryMode" />
+    <!-- Multiplayer: потрібен для MP сцен (mp_*) і частини MP ініціалізації (Stage 3.2) -->
+    <DependedModule Id="Multiplayer" />
   </DependedModules>
   <!-- Підмодулі (C# DLL), які завантажує гра -->
   <SubModules>

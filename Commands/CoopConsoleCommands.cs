@@ -1,6 +1,7 @@
 using System; // Підключаємо базові типи .NET (String, Int32)
 using System.Collections.Generic; // Підключаємо List<string> для аргументів консольних команд
 using CoopSpectator.Infrastructure; // Підключаємо логер для повідомлень
+using CoopSpectator.Multiplayer; // Підключаємо PoC запуску MP місії з кампанії
 using CoopSpectator.Network; // Підключаємо типи мережевого шару (NetworkRole)
 using TaleWorlds.Library; // Підключаємо CommandLineFunctionality для реєстрації команд у консолі Bannerlord
 
@@ -114,6 +115,13 @@ namespace CoopSpectator.Commands // Оголошуємо простір імен
             } // Завершуємо блок if
 
             return "Status: Role=" + CoopRuntime.Network.Role + ", IsRunning=" + CoopRuntime.Network.IsRunning + "."; // Повертаємо короткий опис стану
+        } // Завершуємо блок методу
+
+        [CommandLineFunctionality.CommandLineArgumentFunction("test_mp_launch", "coop")] // Реєструємо команду `coop.test_mp_launch`
+        public static string TestMpLaunch(List<string> args) // PoC: стартуємо MP-like місію з кампанії (Stage 3.2)
+        { // Починаємо блок методу
+            // Аргументи поки не використовуємо, бо PoC має бути повністю "хардкод". // Пояснюємо чому args ігнорується
+            return TestMpLaunchPoC.Launch(); // Делегуємо всю логіку в окремий модульний клас (легше підтримувати)
         } // Завершуємо блок методу
     } // Завершуємо блок класу
 } // Завершуємо блок простору імен

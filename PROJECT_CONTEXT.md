@@ -128,7 +128,7 @@ Avoid pasting large files every time (`bannerlord_coop_plan.md`, large logs, DLL
 - Chat “3.1 Battle start detection” (DONE):
   - Add `Campaign/BattleDetector.cs` to detect battle start for host (events or Harmony).
   - Send `BATTLE_START:{json}` to clients (scene/map info + side + troop list).
-- Chat “3.1 Client battle notification” (TODO):
+- Chat “3.1 Client battle notification” (DONE):
   - Client receives `BATTLE_START` and shows countdown/notification; blocks campaign input further.
 - Chat “3.2 MP mission conversion (research)” (TODO, likely multiple chats):
   - Goal: find how Bannerlord creates MP missions and reproduce minimal start from code.

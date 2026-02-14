@@ -19,7 +19,9 @@ namespace CoopSpectator.Patches // Оголошуємо простір імен 
         [HarmonyPatch(new Type[] { typeof(string) })] // Явно задаємо сигнатуру, щоб Harmony точно знайшов потрібний метод
         private static class SetNextMenuPatch // Вкладений клас патчу за стандартом Harmony
         { // Починаємо блок класу
-            private static bool Prefix(string menuId) // Prefix: false = пропустити оригінал (тобто не дозволити перехід у меню)
+            // ВАЖЛИВО: параметр має називатись як у оригіналі (`name`), // Пояснюємо причину
+            // інакше Harmony не зможе замапити аргумент і патч не застосовується. // Пояснюємо помилку "Parameter not found"
+            private static bool Prefix(string name) // Prefix: false = пропустити оригінал (тобто не дозволити перехід у меню)
             { // Починаємо блок методу
                 if (!ShouldBlockMenus()) // Якщо ми не клієнт у мережевому режимі, нічого не блокуємо
                 { // Починаємо блок if
@@ -30,16 +32,16 @@ namespace CoopSpectator.Patches // Оголошуємо простір імен 
                 // щоб клієнт не міг відкривати екрани під час підготовки до битви. // Пояснюємо навіщо
                 if (ClientBattleInvitationLock.IsActive) // Перевіряємо глобальний battle lock
                 { // Починаємо блок if
-                    ThrottledNotify("BATTLE_LOCK:" + (menuId ?? "null")); // Показуємо повідомлення з cooldown
+                    ThrottledNotify("BATTLE_LOCK:" + (name ?? "null")); // Показуємо повідомлення з cooldown
                     return false; // Блокуємо будь-які меню переходи під час lock
                 } // Завершуємо блок if
 
-                if (!IsSettlementMenuId(menuId)) // Якщо це не settlement-меню, дозволяємо перехід (наприклад, encounter/лоадінг/тощо)
+                if (!IsSettlementMenuId(name)) // Якщо це не settlement-меню, дозволяємо перехід (наприклад, encounter/лоадінг/тощо)
                 { // Починаємо блок if
                     return true; // Дозволяємо оригінал, бо це не “місто/село/замок”
                 } // Завершуємо блок if
 
-                ThrottledNotify(menuId); // Показуємо коротке повідомлення гравцю з cooldown
+                ThrottledNotify(name); // Показуємо коротке повідомлення гравцю з cooldown
                 return false; // Блокуємо відкриття settlement-меню для клієнта
             } // Завершуємо блок методу
         } // Завершуємо блок класу
