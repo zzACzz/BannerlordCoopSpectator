@@ -164,6 +164,248 @@ namespace CoopSpectator.Multiplayer // Окремий namespace для MP PoC/д
             } // Завершуємо блок catch
         } // Завершуємо блок методу
 
+        /// <summary>Крок 1: тільки запуск MP-сервера (лобі). Не відкриває місію. Після цього клієнт може coop.test_mp_join.</summary>
+        public static string StartServerOnly()
+        {
+            if (TaleWorlds.CampaignSystem.Campaign.Current == null)
+                return "ERROR: Campaign is not running. Load a campaign first.";
+            if (Mission.Current != null)
+                return "ERROR: Mission is already running. Leave current mission first.";
+
+            string step = "unknown";
+            try
+            {
+                step = "GameNetwork.Initialize(handler)";
+                EnsureGameNetworkInitialized();
+                step = "GameNetwork.InitializeCompressionInfos()";
+                TryInvokeGameNetworkStaticVoidMethodByName(methodName: "InitializeCompressionInfos", args: null);
+                step = "GameNetwork.PreStartMultiplayerOnServer()";
+                GameNetwork.PreStartMultiplayerOnServer();
+                step = "GameNetwork.InitializeServerSide(7777)";
+                InvokeGameNetworkStaticVoidMethodByName(methodName: "InitializeServerSide", args: new object[] { ServerPort });
+
+                if (EnableFullMultiplayerSessionStart)
+                {
+                    try { step = "GameNetwork.StartMultiplayerOnServer(7777)"; GameNetwork.StartMultiplayerOnServer(ServerPort); }
+                    catch (Exception ex) { ModLogger.Info("StartMultiplayerOnServer failed (ignored): " + ex.Message); }
+                    try { step = "GameNetwork.StartMultiplayer()"; InvokeGameNetworkStaticVoidMethodByName(methodName: "StartMultiplayer", args: null); }
+                    catch (Exception ex) { ModLogger.Info("StartMultiplayer failed (ignored): " + ex.Message); }
+                }
+                step = "GameNetwork.AddNewPlayerOnServer(serverPeer=true)";
+                EnsureServerPeerExists();
+
+                UiFeedback.ShowMessageDeferred("MP server: listening on port " + ServerPort + ". Run coop.test_mp_mission after client(s) join.");
+                return "OK: MP server started on port " + ServerPort + ". Wait for client(s), then run coop.test_mp_mission.";
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error("Failed to start MP server (" + step + ").", ex);
+                return "ERROR: GameNetwork server init failed at " + step + ": " + ex.Message;
+            }
+        }
+
+        /// <summary>Крок 2: відкрити MP-місію (після coop.test_mp_server і після того як клієнт(и) підключились).</summary>
+        public static string OpenMission()
+        {
+            if (TaleWorlds.CampaignSystem.Campaign.Current == null)
+                return "ERROR: Campaign is not running. Load a campaign first.";
+            if (Mission.Current != null)
+                return "ERROR: Mission is already running. Leave current mission first.";
+            if (!GameNetwork.IsServer || !GameNetwork.IsSessionActive)
+                return "ERROR: Not server or session not active. Run coop.test_mp_server first, then wait for client(s) to join.";
+
+            try
+            {
+                string sceneName = ResolveSceneNameForPoC();
+                if (string.IsNullOrEmpty(sceneName))
+                    return "ERROR: No suitable MP scene found. Requested '" + RequestedSceneName + "' missing.";
+                MissionInitializerRecord record = new MissionInitializerRecord(sceneName);
+                record.PlayingInCampaignMode = false;
+                record.DoNotUseLoadingScreen = false;
+                MissionState.OpenNew("coop_test_mp_launch", record, CreateMissionBehaviors, addDefaultMissionBehaviors: true, needsMemoryCleanup: true);
+                return "OK: Opening MP mission on scene '" + sceneName + "'.";
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error("Failed to open test MP mission.", ex);
+                return "ERROR: MissionState.OpenNew failed: " + ex.Message;
+            }
+        }
+
+        public static string JoinClient( // Підключаємось до MP сервера хоста і відкриваємо ту ж MP сцену
+            string serverAddress, // IP/hostname хоста (наприклад 192.168.0.10 або 127.0.0.1)
+            int port, // Порт сервера (за замовчуванням 7777)
+            int sessionKey, // SessionKey (для PoC можемо передавати 0)
+            int playerIndex) // PlayerIndex (для PoC: 1,2,3... щоб не конфліктувати)
+        { // Begin method
+            if (string.IsNullOrEmpty(serverAddress)) // Перевіряємо що адреса не порожня
+            { // Begin if
+                return "ERROR: serverAddress is empty."; // Повертаємо помилку в консоль
+            } // End if
+
+            // Контекст: клієнт теж запускає це з кампанії. // Пояснюємо очікуваний контекст
+            if (TaleWorlds.CampaignSystem.Campaign.Current == null) // Якщо кампанія не активна
+            { // Begin if
+                return "ERROR: Campaign is not running. Load a campaign first."; // Повертаємо підказку
+            } // End if
+
+            if (Mission.Current != null) // Якщо вже є активна місія — не запускаємо другу
+            { // Begin if
+                return "ERROR: Mission is already running. Leave current mission first."; // Пояснюємо користувачу що робити
+            } // End if
+
+            // 1) Ініціалізуємо GameNetwork як клієнт. // Пояснюємо етап
+            string step = "unknown"; // Для точного репорту, де саме впало
+            ModLogger.Info("JoinClient: START — serverAddress=" + serverAddress + ", port=" + port + ", sessionKey=" + sessionKey + ", playerIndex=" + playerIndex + "."); // Логуємо початок для діагностики порядку викликів
+
+            try // Обгортаємо в try/catch
+            { // Begin try
+                step = "GameNetwork.Initialize(handler)"; // Крок
+                ModLogger.Info("JoinClient: before GameNetwork.Initialize(handler)."); // Точка логування перед init
+                EnsureGameNetworkInitialized(); // Ініціалізуємо з handler'ом (один раз)
+                ModLogger.Info("JoinClient: after GameNetwork.Initialize(handler)."); // Підтверджуємо виконання кроку
+
+                step = "GameNetwork.InitializeCompressionInfos()"; // Крок
+                TryInvokeGameNetworkStaticVoidMethodByName( // Best-effort виклик
+                    methodName: "InitializeCompressionInfos", // Ім'я методу
+                    args: null); // Без аргументів
+
+                // 1.1) Запускаємо клієнтську сторону multiplayer. // Пояснюємо навіщо
+                // В Bannerlord 1.3.14 є два методи: InitializeClientSide і StartMultiplayerOnClient. // Пояснюємо API
+                // Ми викликаємо обидва best-effort, щоб підвищити шанс успішного підключення. // Пояснюємо підхід
+                step = "GameNetwork.InitializeClientSide(...)"; // Крок
+                ModLogger.Info("JoinClient: before InitializeClientSide."); // Логуємо перед викликом
+                TryInvokeGameNetworkStaticVoidMethodByName( // Best-effort
+                    methodName: "InitializeClientSide", // Ім'я методу
+                    args: new object[] { serverAddress, port, sessionKey, playerIndex }); // Аргументи методу
+                LogGameNetworkState("JoinClient: after InitializeClientSide"); // Фіксуємо стан мережі після кроку
+
+                step = "GameNetwork.StartMultiplayerOnClient(...)"; // Крок
+                ModLogger.Info("JoinClient: before StartMultiplayerOnClient."); // Логуємо перед критичним викликом
+                // Це критичний крок: якщо не вдалось стартувати клієнтський MP — // Пояснюємо
+                // ми НЕ зможемо реально підключитись до хоста. // Пояснюємо наслідок
+                InvokeGameNetworkStaticVoidMethodByName( // Викликаємо “обов’язково” (з винятком при фейлі)
+                    methodName: "StartMultiplayerOnClient", // Ім'я методу
+                    args: new object[] { serverAddress, port, sessionKey, playerIndex }); // Аргументи методу
+                ModLogger.Info("JoinClient: after StartMultiplayerOnClient."); // Підтверджуємо що виклик завершився без винятку
+                LogGameNetworkState("JoinClient: after StartMultiplayerOnClient"); // Фіксуємо стан після старту клієнта
+
+                // 1.2) Пробуємо активувати multiplayer state. // Пояснюємо навіщо
+                step = "GameNetwork.StartMultiplayer()"; // Крок
+                TryInvokeGameNetworkStaticVoidMethodByName( // Best-effort: інколи може кидати виняток або бути зайвим
+                    methodName: "StartMultiplayer", // Ім'я методу
+                    args: null); // Без аргументів
+                LogGameNetworkState("JoinClient: after StartMultiplayer"); // Фінальний стан після всіх init-кроків
+
+                UiFeedback.ShowMessageDeferred( // Показуємо короткий статус на екрані
+                    "MP client init: IsServer=" + GameNetwork.IsServer + // Має бути false
+                    ", IsMultiplayer=" + GameNetwork.IsMultiplayer + // Має бути true
+                    ", IsSessionActive=" + GameNetwork.IsSessionActive + // Має стати true після конекту
+                    ", PeerCount=" + GameNetwork.NetworkPeerCount + // Може бути 1 (ми) або більше
+                    "."); // Крапка
+            } // End try
+            catch (Exception ex) // Якщо init впав
+            { // Begin catch
+                ModLogger.Error("Failed to initialize GameNetwork client-side (" + step + ").", ex); // Логуємо
+                return "ERROR: GameNetwork client init failed at " + step + ": " + ex.Message; // Повертаємо коротку помилку
+            } // End catch
+
+            // 1.5) Guard: не відкриваємо місію, поки GameNetwork не має валідного peer/session. // Пояснюємо навіщо
+            // Якщо MyPeer == null, нативний код при першому тіку місії звертається до null+0x10 і падає з 0xC0000005. // Пояснюємо причину крашу
+            if (GameNetwork.MyPeer == null) // Перевіряємо наявність клієнтського peer'а
+            { // Begin if
+                string msg = "MP client: MyPeer is null, cannot open mission. Is the host running? Connect first."; // Текст для консолі та UI
+                UiFeedback.ShowMessageDeferred(msg); // Показуємо в грі
+                ModLogger.Info("JoinClient: " + msg); // Логуємо для дебагу
+                return "ERROR: " + msg; // Повертаємо помилку в консоль, місію не відкриваємо
+            } // End if
+
+            if (!GameNetwork.IsSessionActive) // Додатково перевіряємо, чи сесія вважається активною
+            { // Begin if
+                string msg = "MP client: IsSessionActive=false, cannot open mission. Wait for connection."; // Текст
+                UiFeedback.ShowMessageDeferred(msg); // Показуємо в грі
+                ModLogger.Info("JoinClient: " + msg); // Логуємо
+                return "ERROR: " + msg; // Повертаємо помилку, місію не відкриваємо
+            } // End if
+
+            // 2) Тимчасово НЕ відкриваємо місію на клієнті. // Пояснюємо етап
+            // Відкриття MP-місії через MissionState.OpenNew призводить до native crash (0xC0000005), // Пояснюємо причину
+            // бо нативний код очікує повноцінний MP mission start flow від сервера. // Пояснюємо наслідок
+            // Клієнт залишається на стратегічній карті; підключення до хоста встановлено. // Пояснюємо поточну поведінку
+            UiFeedback.ShowMessageDeferred( // Показуємо гравцю статус
+                "Connected to host. Host may be in battle; joining the battle from client is not implemented yet."); // Текст
+            ModLogger.Info("JoinClient: connected to " + serverAddress + ":" + port + "; mission open skipped (not implemented)."); // Логуємо для дебагу
+            return "OK: Connected to " + serverAddress + ":" + port + ". (Mission join not implemented yet; staying on map.)"; // Повертаємо успіх в консоль
+        } // End method
+
+        public static string ClientRequestTeam( // Клієнтська команда: просимо сервер змінити команду (attacker/defender/auto)
+            string sideOrIndex) // Текст: "attacker", "defender", "0", "1", "auto"
+        { // Begin method
+            if (string.IsNullOrEmpty(sideOrIndex)) // Перевіряємо аргумент
+            { // Begin if
+                return "Usage: coop.test_mp_team <attacker|defender|auto|0|1>."; // Підказка
+            } // End if
+
+            if (!GameNetwork.IsMultiplayer) // Якщо multiplayer не активний
+            { // Begin if
+                return "ERROR: GameNetwork.IsMultiplayer=false. Join MP first."; // Пояснюємо що треба зробити
+            } // End if
+
+            // Парсимо сторону. // Пояснюємо етап
+            string s = sideOrIndex.Trim().ToLowerInvariant(); // Нормалізуємо рядок
+            bool autoAssign = false; // Чи просимо авто-розподіл
+            int teamIndex = 0; // Індекс команди (0=attacker, 1=defender)
+
+            if (s == "auto") // Якщо користувач хоче auto
+            { // Begin if
+                autoAssign = true; // Вмикаємо авто-розподіл
+                teamIndex = 0; // Значення неважливе при autoAssign, але ставимо 0
+            } // End if
+            else if (s == "attacker" || s == "a" || s == "0") // Attacker
+            { // Begin else-if
+                autoAssign = false; // Не auto
+                teamIndex = 0; // Attacker index
+            } // End else-if
+            else if (s == "defender" || s == "d" || s == "1") // Defender
+            { // Begin else-if
+                autoAssign = false; // Не auto
+                teamIndex = 1; // Defender index
+            } // End else-if
+            else // Невідоме значення
+            { // Begin else
+                return "Usage: coop.test_mp_team <attacker|defender|auto|0|1>."; // Повертаємо usage
+            } // End else
+
+            try // Обгортаємо відправку network message
+            { // Begin try
+                // ВАЖЛИВО: у Bannerlord 1.3.14 у `TeamChange.AutoAssign/TeamIndex` setter'и приватні, // Пояснюємо чому не присвоюємо через properties
+                // тому створюємо повідомлення через конструктор (autoAssign, teamIndex). // Пояснюємо рішення
+                var msg = new NetworkMessages.FromClient.TeamChange( // Створюємо vanilla MP повідомлення TeamChange
+                    autoAssign: autoAssign, // Передаємо autoAssign
+                    teamIndex: teamIndex); // Передаємо teamIndex
+
+                GameNetwork.BeginModuleEventAsClient(); // Починаємо module event як клієнт
+                GameNetwork.WriteMessage(msg); // Пишемо повідомлення в мережу
+                GameNetwork.EndModuleEventAsClient(); // Завершуємо module event
+
+                UiFeedback.ShowMessageDeferred( // Показуємо підтвердження
+                    "MP: team change requested (" + (autoAssign ? "auto" : ("index " + teamIndex)) + ")."); // Текст
+
+                return "OK: TeamChange sent (auto=" + autoAssign + ", teamIndex=" + teamIndex + ")."; // Повертаємо успіх
+            } // End try
+            catch (Exception ex) // Якщо не вдалося відправити
+            { // Begin catch
+                ModLogger.Error("Failed to send TeamChange.", ex); // Логуємо
+                return "ERROR: TeamChange send failed: " + ex.Message; // Повертаємо коротку помилку
+            } // End catch
+        } // End method
+
+        /// <summary>Логує поточний стан GameNetwork для діагностики порядку викликів на клієнті (MyPeer, IsSessionActive, PeerCount).</summary>
+        private static void LogGameNetworkState(string prefix) // prefix — напр. "JoinClient: after StartMultiplayerOnClient"
+        { // Begin helper
+            ModLogger.Info(prefix + " — MyPeer=" + (GameNetwork.MyPeer != null ? "set" : "null") + ", IsSessionActive=" + GameNetwork.IsSessionActive + ", PeerCount=" + GameNetwork.NetworkPeerCount + "."); // Одним рядком для лог-файлу
+        } // End helper
+
         private static string ResolveSceneNameForPoC() // Обираємо сцену, яка точно існує в поточній інсталяції гри
         { // Begin helper
             // 1) Спершу пробуємо сцену, яку попросили в PoC. // Пояснюємо пріоритет
@@ -354,6 +596,15 @@ namespace CoopSpectator.Multiplayer // Окремий namespace для MP PoC/д
                 if (mission == null) // Додатковий захист від несподіваного null
                 { // Begin if
                     return; // Вихід (краще нічого не робити, ніж крашнути)
+                } // End if
+
+                // ВАЖЛИВО: у multiplayer місії тільки сервер має створювати команди/агентів. // Пояснюємо правило MP
+                // Якщо клієнт почне спавнити агентів локально — отримаємо дублікати/краші/десинк. // Пояснюємо наслідки
+                if (!GameNetwork.IsServer) // Якщо ми не сервер (тобто клієнт)
+                { // Begin if
+                    UiFeedback.ShowMessageDeferred( // Показуємо коротке пояснення в UI
+                        "MP test: client detected, skipping server-only AI spawn logic."); // Текст
+                    return; // Виходимо: на клієнті не виконуємо spawn/team логіку
                 } // End if
 
                 // 1) Перемикаємо місію в режим Battle, щоб AI/симуляція поводились як бій. // Пояснюємо навіщо

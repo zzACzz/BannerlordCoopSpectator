@@ -1,5 +1,6 @@
 using System; // Підключаємо базові типи .NET (String, Int32)
 using System.Collections.Generic; // Підключаємо List<string> для аргументів консольних команд
+using CoopSpectator.DedicatedHelper; // Запуск Dedicated Helper з кампанії
 using CoopSpectator.Infrastructure; // Підключаємо логер для повідомлень
 using CoopSpectator.Multiplayer; // Підключаємо PoC запуску MP місії з кампанії
 using CoopSpectator.Network; // Підключаємо типи мережевого шару (NetworkRole)
@@ -120,9 +121,110 @@ namespace CoopSpectator.Commands // Оголошуємо простір імен
         [CommandLineFunctionality.CommandLineArgumentFunction("test_mp_launch", "coop")] // Реєструємо команду `coop.test_mp_launch`
         public static string TestMpLaunch(List<string> args) // PoC: стартуємо MP-like місію з кампанії (Stage 3.2)
         { // Починаємо блок методу
-            // Аргументи поки не використовуємо, бо PoC має бути повністю "хардкод". // Пояснюємо чому args ігнорується
             return TestMpLaunchPoC.Launch(); // Делегуємо всю логіку в окремий модульний клас (легше підтримувати)
         } // Завершуємо блок методу
+
+        [CommandLineFunctionality.CommandLineArgumentFunction("test_mp_server", "coop")] // Тільки запуск MP-сервера (лобі). Клієнт підключається до цього.
+        public static string TestMpServer(List<string> args) // Крок 1: сервер без місії
+        {
+            return TestMpLaunchPoC.StartServerOnly();
+        }
+
+        [CommandLineFunctionality.CommandLineArgumentFunction("test_mp_mission", "coop")] // Відкрити MP-місію після того як клієнт(и) вже підключились.
+        public static string TestMpMission(List<string> args) // Крок 2: відкрити місію
+        {
+            return TestMpLaunchPoC.OpenMission();
+        }
+
+        [CommandLineFunctionality.CommandLineArgumentFunction("test_mp_join", "coop")] // Реєструємо команду `coop.test_mp_join`
+        public static string TestMpJoin(List<string> args) // PoC: підключаємось як клієнт до MP сервера хоста (Stage 3.2+)
+        { // Begin method
+            // Usage: coop.test_mp_join <host_ip> [port] [sessionKey] [playerIndex] // Пояснюємо як викликати
+            if (args == null || args.Count == 0) // Якщо немає аргументів
+            { // Begin if
+                return "Usage: coop.test_mp_join <host_ip> [port] [sessionKey] [playerIndex]"; // Повертаємо підказку
+            } // End if
+
+            string host = args[0]; // Беремо адресу сервера з першого аргументу
+            int port = 7777; // Дефолтний порт
+            int sessionKey = 0; // Дефолтний sessionKey для PoC
+            int playerIndex = 1; // Дефолтний playerIndex для першого клієнта
+
+            if (args.Count > 1) // Якщо передали порт
+            { // Begin if
+                int parsed; // Змінна для парсингу
+
+                if (int.TryParse(args[1], out parsed)) // Парсимо порт
+                { // Begin if
+                    port = parsed; // Записуємо
+                } // End if
+            } // End if
+
+            if (args.Count > 2) // Якщо передали sessionKey
+            { // Begin if
+                int parsed; // Змінна для парсингу
+
+                if (int.TryParse(args[2], out parsed)) // Парсимо sessionKey
+                { // Begin if
+                    sessionKey = parsed; // Записуємо
+                } // End if
+            } // End if
+
+            if (args.Count > 3) // Якщо передали playerIndex
+            { // Begin if
+                int parsed; // Змінна для парсингу
+
+                if (int.TryParse(args[3], out parsed)) // Парсимо playerIndex
+                { // Begin if
+                    playerIndex = parsed; // Записуємо
+                } // End if
+            } // End if
+
+            return TestMpLaunchPoC.JoinClient( // Делегуємо логіку в multiplayer PoC
+                serverAddress: host, // Адреса хоста
+                port: port, // Порт
+                sessionKey: sessionKey, // SessionKey
+                playerIndex: playerIndex); // PlayerIndex
+        } // End method
+
+        /// <summary>Запускає Dedicated Helper (офіційний дедик-сервер). Токен — з Documents\...\Tokens або [token]. Usage: coop.dedicated_start [port] [token].</summary>
+        [CommandLineFunctionality.CommandLineArgumentFunction("dedicated_start", "coop")]
+        public static string DedicatedStart(List<string> args)
+        {
+            int port = 7210;
+            string tokenOverride = null;
+            if (args != null && args.Count > 0)
+            {
+                if (int.TryParse(args[0], out int p))
+                {
+                    port = p;
+                    if (args.Count > 1) tokenOverride = string.Join(" ", args.GetRange(1, args.Count - 1)).Trim();
+                }
+                else
+                    tokenOverride = string.Join(" ", args).Trim();
+            }
+            return DedicatedHelperLauncher.Start(tokenOverride, port);
+        }
+
+        /// <summary>Відкриває папку Tokens у провіднику (для копіювання/генерації токена).</summary>
+        [CommandLineFunctionality.CommandLineArgumentFunction("dedicated_open_tokens", "coop")]
+        public static string DedicatedOpenTokens(List<string> args)
+        {
+            DedicatedHelperLauncher.OpenTokensFolderInExplorer();
+            string path = DedicatedHelperLauncher.GetTokensFolderPath();
+            return "OK: Opened Tokens folder: " + (path ?? "(unknown)");
+        }
+
+        [CommandLineFunctionality.CommandLineArgumentFunction("test_mp_team", "coop")] // Реєструємо команду `coop.test_mp_team`
+        public static string TestMpTeam(List<string> args) // PoC: клієнт просить змінити сторону (attacker/defender/auto)
+        { // Begin method
+            if (args == null || args.Count == 0) // Якщо користувач не передав сторону
+            { // Begin if
+                return "Usage: coop.test_mp_team <attacker|defender|auto|0|1>"; // Повертаємо usage
+            } // End if
+
+            return TestMpLaunchPoC.ClientRequestTeam(args[0]); // Відправляємо vanilla TeamChange повідомлення
+        } // End method
     } // Завершуємо блок класу
 } // Завершуємо блок простору імен
 
