@@ -1,4 +1,4 @@
-# HUMAN_NOTES_MULTIPLAYER_PROGRESS.md (v1.5)
+# HUMAN_NOTES_MULTIPLAYER_PROGRESS.md (v1.7)
 
 ## 1) Що ми тепер знаємо “від і до”
 1. Net-стек Bannerlord’а запускається через:
@@ -168,7 +168,18 @@ UX:
 - У коді три окремі прапорці для тесту (ставити **лише один** true за раз): **AddPortOnly**, **AddTokenOnly**, **AddConfigFileOnly**. Перезапускати dedicated і дивитися: AliveMessage = ок, Disconnected = цей arg ламає. Мета: з’ясувати, чи ламає лише /port, лише token-arg, чи configfile.
 - Якщо ламає тільки /port — токен можна буде передавати аргументом. Якщо ламає token-arg — лишаємось на токені з Documents.
 
+### Dedicated Helper — інтеграція BattleDetector (Етап 3b, зроблено)
+
+- **BattleDetector** при вході хоста в місію: після broadcast BATTLE_START викликається `DedicatedServerCommands.SendStartMission()`.
+- При виході хоста з місії: викликається `DedicatedServerCommands.SendEndMission()`.
+
+### Dedicated Helper — відправка команд (Етап 3b, реалізовано)
+
+- **DedicatedServerCommands.SendCommand**: спочатку спроба HTTP (GET/POST на localhost:7210 — кілька варіантів URL для майбутнього API), потім **stdin** процесу дедик-сервера, якщо він запущений з моду (`coop.dedicated_start`).
+- **Launcher**: при запуску процесу встановлено `RedirectStandardInput = true`, процес зберігається в `_dedicatedProcess`; публічний метод `TrySendConsoleLine(line)` записує рядок у stdin і робить Flush. Чи читає офіційний Dedicated Server консольні команди з stdin — потрібно перевірити в грі (якщо ні, залишається лише пошук HTTP API через DevTools).
+- **start_game**: вже автоматично через конфіг (AddConfigFileOnly).
+
 ### Dedicated Helper — наступні кроки
 
-- **start_game автоматично**: Web panel на порту 7210 (TCP). Офіційного HTTP API для консольних команд у публічній документації немає. Варіант: відкрити http://localhost:7210 після старту сервера, у браузері DevTools → Network, виконати в UI дію (якщо є кнопка/термінал) і подивитися, який запит уходить — потім повторити POST з моду.
-- **Token doctor** (опційно): перевіряти обидві папки Tokens (Mount and Blade II vs Mount & Blade II); якщо токен лише в «не тій» — запропонувати скопіювати або показати шлях, де очікується.
+- Перевірити в робочому середовищі: після `coop.dedicated_start` при вході в битву чи з’являється в консолі дедик-сервера команда start_mission (якщо сервер читає stdin). Якщо ні — дослідити web panel (DevTools → Network) і додати знайдений endpoint у `TrySendCommandViaHttp`.
+- **Token doctor** (зроблено): пошук токена в обох варіантах папки (Mount and Blade II / Mount & Blade II) у Documents і OneDrive; якщо токен лише в одній — у лог підказка скопіювати в іншу. Викликається при `coop.dedicated_start` і при `coop.dedicated_open_tokens`.

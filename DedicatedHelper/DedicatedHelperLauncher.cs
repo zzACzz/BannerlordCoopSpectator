@@ -17,12 +17,16 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const string ServerBinRelativePath = @"bin\Win64_Shipping_Server";
         /// <summary>Єдиний exe для custom dedicated server у стандартній інсталі: DedicatedCustomServer.Starter.exe (core exe в цій папці немає).</summary>
         private static readonly string[] ExeCandidates = new[] { "DedicatedCustomServer.Starter.exe" };
-        /// <summary>Папка Tokens у Documents — у Windows зазвичай "Mount and Blade II Bannerlord" (слово "and"), не "&".</summary>
+        /// <summary>Папка Tokens у Documents — варіант з "and" (гра часто створює саме цю).</summary>
         private const string TokensSubFolder = @"Mount and Blade II Bannerlord\Tokens";
+        /// <summary>Варіант з "&" — іноді з’являється в OneDrive/провіднику; dedicated може очікувати той чи інший.</summary>
+        private const string TokensSubFolderAmpersand = @"Mount & Blade II Bannerlord\Tokens";
         /// <summary>Ім'я файлу токена, який гра створює після customserver.gettoken.</summary>
         private const string OfficialTokenFileName = "DedicatedCustomServerAuthToken.txt";
         /// <summary>Ім'я стартового конфігу для автоматичного start_game (файл у Dedicated Server Modules\Native).</summary>
         private const string StartupConfigFileName = "ds_config_coop_start.txt";
+        /// <summary>Пароль адміна для Dashboard (localhost:7210), щоб увійти в Terminal і дослідити API консольних команд.</summary>
+        private const string DashboardAdminPassword = "coopforever";
         /// <summary>Якщо false — не передаємо конфіг при запуску (як Steam: "Command file is null"), щоб сервер не від'єднувався від Diamond. start_game тоді вводять вручну в консолі сервера.</summary>
         private const bool UseStartupConfig = false;
         /// <summary>Явний список модулів, як у ванільному dedicated (Steam). Без цього сервер може піднятися без Multiplayer/DedicatedCustomServerHelper і від'єднатися від custom battle server manager.</summary>
@@ -38,6 +42,30 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         /// <summary>Конфіг + /dedicatedcustomserverconfigfile — авто start_game (ізоляція: не ламає). Разом з AddPortOnly працює.</summary>
         private const bool AddConfigFileOnly = true;
 
+        /// <summary>Процес дедик-сервера, запущеного з моду (для відправки команд через stdin, якщо сервер їх читає).</summary>
+        private static Process _dedicatedProcess;
+
+        /// <summary>Відправити рядок у stdin процесу дедик-сервера (якщо він був запущений з моду і ще працює). Використовується для start_mission / end_mission. Повертає true, якщо рядок записано.</summary>
+        public static bool TrySendConsoleLine(string line)
+        {
+            if (string.IsNullOrEmpty(line)) return false;
+            Process p = _dedicatedProcess;
+            if (p == null || p.HasExited) return false;
+            try
+            {
+                if (p.StandardInput == null) return false;
+                p.StandardInput.WriteLine(line.Trim());
+                p.StandardInput.Flush();
+                ModLogger.Info("DedicatedHelper: sent to stdin: \"" + line.Trim() + "\"");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("DedicatedHelper: TrySendConsoleLine failed: " + ex.Message);
+                return false;
+            }
+        }
+
         /// <summary>Повертає шлях до папки Tokens для показу користувачу (перший існуючий кандидат або MyDocuments).</summary>
         public static string GetTokensFolderPath()
         {
@@ -50,31 +78,47 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             return string.IsNullOrEmpty(docs) ? null : Path.Combine(docs, TokensSubFolder);
         }
 
-        /// <summary>Кандидати для папки Tokens: MyDocuments, OneDrive\\Documents, OneDrive\\Документи.</summary>
+        /// <summary>Кандидати для папки Tokens: обидва варіанти назви (and / &) у MyDocuments і OneDrive.</summary>
         private static System.Collections.Generic.IEnumerable<string> GetTokenFolderCandidates()
         {
             string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             if (!string.IsNullOrEmpty(docs))
+            {
                 yield return Path.Combine(docs, TokensSubFolder);
+                yield return Path.Combine(docs, TokensSubFolderAmpersand);
+            }
             string user = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             if (!string.IsNullOrEmpty(user))
             {
                 yield return Path.Combine(user, "OneDrive", "Documents", TokensSubFolder);
+                yield return Path.Combine(user, "OneDrive", "Documents", TokensSubFolderAmpersand);
                 yield return Path.Combine(user, "OneDrive", "Документи", TokensSubFolder);
+                yield return Path.Combine(user, "OneDrive", "Документи", TokensSubFolderAmpersand);
             }
         }
 
-        /// <summary>Шукає токен у всіх кандидатах папок. Спочатку DedicatedCustomServerAuthToken.txt, потім будь-який файл.</summary>
-        public static bool TryReadTokenFromFolder(out string tokenContent)
+        /// <summary>Шукає токен у всіх кандидатах папок. Повертає true і заповнює folderWhereFound, якщо передано.</summary>
+        public static bool TryReadTokenFromFolder(out string tokenContent, out string folderWhereFound)
         {
             tokenContent = null;
+            folderWhereFound = null;
             foreach (string folder in GetTokenFolderCandidates())
             {
                 if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) continue;
                 if (TryReadTokenFromFolderInternal(folder, out tokenContent))
+                {
+                    folderWhereFound = folder;
                     return true;
+                }
             }
             return false;
+        }
+
+        /// <summary>Шукає токен у всіх кандидатах папок (перегруз без folderWhereFound).</summary>
+        public static bool TryReadTokenFromFolder(out string tokenContent)
+        {
+            string folder;
+            return TryReadTokenFromFolder(out tokenContent, out folder);
         }
 
         private static bool TryReadTokenFromFolderInternal(string folder, out string tokenContent)
@@ -121,11 +165,36 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             return false;
         }
 
-        /// <summary>Відкриває папку Tokens у провіднику (для UX при відсутності токена).</summary>
+        /// <summary>Повертає "іншу" папку Tokens (and ↔ &), якщо така є в тому ж базовому шляху.</summary>
+        private static string GetOtherTokenFolderPath(string tokenFolderPath)
+        {
+            if (string.IsNullOrEmpty(tokenFolderPath)) return null;
+            string other = tokenFolderPath.IndexOf("Mount and Blade II Bannerlord", StringComparison.OrdinalIgnoreCase) >= 0
+                ? tokenFolderPath.Replace("Mount and Blade II Bannerlord", "Mount & Blade II Bannerlord")
+                : tokenFolderPath.Replace("Mount & Blade II Bannerlord", "Mount and Blade II Bannerlord");
+            return other == tokenFolderPath ? null : other;
+        }
+
+        /// <summary>Token doctor: якщо токен знайдено лише в одній папці, а інша (and/&) існує без токена — підказати скопіювати.</summary>
+        public static void LogTokenDoctorMessage(string tokenFoundInFolder)
+        {
+            if (string.IsNullOrEmpty(tokenFoundInFolder)) return;
+            string other = GetOtherTokenFolderPath(tokenFoundInFolder);
+            if (string.IsNullOrEmpty(other) || !Directory.Exists(other)) return;
+            string officialInOther = Path.Combine(other, OfficialTokenFileName);
+            if (File.Exists(officialInOther)) return;
+            ModLogger.Info("DedicatedHelper [Token doctor]: Token found in \"" + tokenFoundInFolder + "\". Dedicated server may expect \"" + other + "\" — copy DedicatedCustomServerAuthToken.txt there if server fails to auth.");
+        }
+
+        /// <summary>Відкриває папку Tokens у провіднику (для UX при відсутності токена). Викликає Token doctor якщо токен знайдено в одній папці.</summary>
         public static void OpenTokensFolderInExplorer()
         {
             string folder = GetTokensFolderPath();
             if (string.IsNullOrEmpty(folder)) return;
+            string token;
+            string folderWhere;
+            if (TryReadTokenFromFolder(out token, out folderWhere) && !string.IsNullOrEmpty(folderWhere))
+                LogTokenDoctorMessage(folderWhere);
             try
             {
                 if (!Directory.Exists(folder))
@@ -216,7 +285,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             string configPath = Path.Combine(nativeDir, StartupConfigFileName);
             try
             {
-                string content = "ServerName Coop Spectator" + Environment.NewLine + "start_game" + Environment.NewLine;
+                // AdminPassword потрібен для входу в Dashboard (http://localhost:7210) → Terminal для консольних команд
+                string content = "AdminPassword " + DashboardAdminPassword + Environment.NewLine
+                    + "ServerName Coop Spectator" + Environment.NewLine
+                    + "start_game" + Environment.NewLine;
                 File.WriteAllText(configPath, content);
                 ModLogger.Info("DedicatedHelper: wrote startup config to " + configPath);
                 return StartupConfigFileName;
@@ -237,8 +309,9 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             if (port <= 0) port = DefaultPort;
 
             string token = tokenOverride;
+            string tokenFolder = null;
             bool needToken = !SteamLikeLaunch || AddTokenAndPortOnly || AddTokenOnly;
-            if (needToken && string.IsNullOrWhiteSpace(token) && !TryReadTokenFromFolder(out token))
+            if (needToken && string.IsNullOrWhiteSpace(token) && !TryReadTokenFromFolder(out token, out tokenFolder))
             {
                 string tokensPath = GetTokensFolderPath();
                 string msg = "No token found. Multiplayer -> Console (ALT+~) -> customserver.gettoken. Folder: " + (tokensPath ?? "(unknown)");
@@ -246,6 +319,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 ModLogger.Info("DedicatedHelper: " + msg);
                 return "ERROR: " + msg + " Run coop.dedicated_open_tokens to open Tokens folder. Or: coop.dedicated_start [port] [token]";
             }
+            if (string.IsNullOrWhiteSpace(token))
+                TryReadTokenFromFolder(out token, out tokenFolder);
+            if (!string.IsNullOrEmpty(tokenFolder))
+                LogTokenDoctorMessage(tokenFolder);
 
             string exePath = TryFindDedicatedServerExePath();
             if (string.IsNullOrEmpty(exePath))
@@ -304,7 +381,8 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 WorkingDirectory = workingDir ?? "",
                 UseShellExecute = false,
                 CreateNoWindow = false,
-                Arguments = arguments
+                Arguments = arguments,
+                RedirectStandardInput = true // Щоб пізніше можна було відправити start_mission/end_mission через stdin (якщо сервер читає)
             };
 
             LogFullLaunchDiagnostics(startInfo, exePath, arguments, workingDir ?? "");
@@ -317,6 +395,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                     ModLogger.Error("DedicatedHelper: Process.Start returned null.", null);
                     return "ERROR: Failed to start process.";
                 }
+                _dedicatedProcess = p; // Зберігаємо для TrySendConsoleLine (start_mission / end_mission)
                 ModLogger.Info("DedicatedHelper: process started PID=" + p.Id);
                 LogProcessCommandLine(p.Id);
 

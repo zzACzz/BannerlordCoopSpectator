@@ -1,5 +1,6 @@
 using System; // Підключаємо базові типи .NET (Exception)
 using System.Collections.Generic; // Підключаємо List<> для списків у DTO
+using CoopSpectator.DedicatedHelper; // SendStartMission / SendEndMission до Dedicated Helper (Етап 3b)
 using CoopSpectator.Infrastructure; // Підключаємо логер і UI feedback
 using CoopSpectator.Network; // Підключаємо NetworkRole для перевірки ролі
 using CoopSpectator.Network.Messages; // Підключаємо DTO + кодек для BATTLE_START:{json}
@@ -21,18 +22,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
         public void Tick() // Метод, який треба викликати кожен кадр з головного потоку (наприклад з SubModule.OnApplicationTick)
         { // Починаємо блок методу
-            if (!ShouldSendBattleStart()) // Перевіряємо умови: ми маємо бути хостом (Server) і мережа має бути запущена
-            { // Починаємо блок if
-                ResetIfMissionEnded(); // Навіть якщо ми не сервер — тримаємо внутрішній стан консистентним
-                return; // Виходимо, бо клієнт не має розсилати battle повідомлення
-            } // Завершуємо блок if
-
             bool isInMissionNow = Mission.Current != null; // Визначаємо чи зараз є активна місія (битва/сцена)
 
             if (!isInMissionNow) // Якщо місії немає, значить ми не в битві (або вже вийшли з неї)
             { // Починаємо блок if
+                if (_wasInMissionLastTick && ShouldNotifyDedicatedHelper()) // Щойно вийшли з місії — сказати Dedicated Helper end_mission (якщо ми не спектатор-клієнт)
+                { // Починаємо блок if
+                    try { DedicatedServerCommands.SendEndMission(); } catch (Exception ex) { ModLogger.Info("DedicatedServerCommands.SendEndMission: " + ex.Message); }
+                } // Завершуємо блок if
                 _wasInMissionLastTick = false; // Оновлюємо стан "було в місії" на false
                 _hasSentBattleStartForThisMission = false; // Скидаємо прапорець, щоб наступна місія могла знову надіслати BATTLE_START
+                ResetIfMissionEnded(); // Тримаємо стан консистентним
                 return; // Виходимо, бо поки що нема старту битви для відправки
             } // Завершуємо блок if
 
@@ -42,7 +42,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             } // Завершуємо блок if
 
             _wasInMissionLastTick = true; // Фіксуємо, що ми щойно увійшли в місію
-            TrySendBattleStart(); // Пробуємо сформувати DTO і відправити клієнтам
+            if (ShouldSendBattleStart()) // Якщо ми TCP-хост — відправляємо BATTLE_START клієнтам і start_mission дедику
+            { // Починаємо блок if
+                TrySendBattleStart(); // Пробуємо сформувати DTO і відправити клієнтам + SendStartMission
+            } // Завершуємо блок if
+            else if (ShouldNotifyDedicatedHelper()) // Інакше якщо ми не спектатор (кампанія без TCP або TCP-сервер) — лише start_mission дедику
+            { // Починаємо блок else if
+                try { DedicatedServerCommands.SendStartMission(); } catch (Exception ex) { ModLogger.Info("DedicatedServerCommands.SendStartMission: " + ex.Message); }
+            } // Завершуємо блок else if
         } // Завершуємо блок методу
 
         private static bool ShouldSendBattleStart() // Перевіряємо чи поточний інстанс гри має право надсилати BATTLE_START
@@ -64,6 +71,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             return true; // Повертаємо true, бо ми сервер і можемо надсилати BATTLE_START
         } // Завершуємо блок методу
+
+        /// <summary>Чи треба повідомляти Dedicated Helper (start_mission/end_mission). True для хоста кампанії або TCP-сервера, false для спектатор-клієнта.</summary>
+        private static bool ShouldNotifyDedicatedHelper()
+        {
+            if (CoopRuntime.Network == null) return true; // Нема мережі — це кампанія-хост, дедик на цій машині керується тут
+            if (CoopRuntime.Network.Role == NetworkRole.Client) return false; // Спектатор не керує дедиком
+            return true; // Сервер або інший випадок — керуємо
+        }
 
         private void ResetIfMissionEnded() // Helper: тримаємо внутрішній стан коректним, коли місія завершилась
         { // Починаємо блок методу
@@ -93,6 +108,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                 UiFeedback.ShowMessageDeferred("Host: BATTLE_START sent to clients."); // Даємо короткий UI-індикатор для дебагу/перевірки
                 ModLogger.Info("BATTLE_START broadcasted."); // Логуємо факт відправки в лог гри
+                try { DedicatedServerCommands.SendStartMission(); } catch (Exception ex) { ModLogger.Info("DedicatedServerCommands.SendStartMission: " + ex.Message); } // Етап 3b: Dedicated Helper переводить у mission mode (поки stub)
             } // Завершуємо блок try
             catch (Exception ex) // Ловимо будь-які винятки (API changes/null, тощо)
             { // Починаємо блок catch
