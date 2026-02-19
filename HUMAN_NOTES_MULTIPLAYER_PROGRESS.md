@@ -160,4 +160,15 @@ UX:
 ### Dedicated Helper — вирішення Disconnected (працює)
 
 - **Причина**: Коли мод передавав токен + порт + наш _MODULES_ з DedicatedCustomServerHelper, Starter додавав свій блок _MODULES_*Native*Multiplayer*_MODULES_ (без Helper). Останній _MODULES_ перезаписував наш → сервер без Helper → Disconnected.
-- **Рішення**: Запуск як Steam — не передавати наш _MODULES_ і конфіг. SteamLikeLaunch=true: WorkingDirectory = папка exe; аргументи або порожні, або тільки токен + порт (AddTokenAndPortOnly). Starter сам додає свої args; AliveMessage ок.
+- **Рішення**: Запуск як Steam — не передавати наш _MODULES_ і конфіг. SteamLikeLaunch=true, AddTokenAndPortOnly=false: 0 args, WorkingDirectory = папка exe. Токен з Documents\\...\\Tokens. Starter сам додає свої args; AliveMessage ок.
+- **Захист від регресії**: Якщо ввімкнути AddTokenAndPortOnly — у лог пишеться WARN, що цей режим ламає manager-конект.
+
+### Dedicated Helper — ізоляція тестів (який arg ламає)
+
+- У коді три окремі прапорці для тесту (ставити **лише один** true за раз): **AddPortOnly**, **AddTokenOnly**, **AddConfigFileOnly**. Перезапускати dedicated і дивитися: AliveMessage = ок, Disconnected = цей arg ламає. Мета: з’ясувати, чи ламає лише /port, лише token-arg, чи configfile.
+- Якщо ламає тільки /port — токен можна буде передавати аргументом. Якщо ламає token-arg — лишаємось на токені з Documents.
+
+### Dedicated Helper — наступні кроки
+
+- **start_game автоматично**: Web panel на порту 7210 (TCP). Офіційного HTTP API для консольних команд у публічній документації немає. Варіант: відкрити http://localhost:7210 після старту сервера, у браузері DevTools → Network, виконати в UI дію (якщо є кнопка/термінал) і подивитися, який запит уходить — потім повторити POST з моду.
+- **Token doctor** (опційно): перевіряти обидві папки Tokens (Mount and Blade II vs Mount & Blade II); якщо токен лише в «не тій» — запропонувати скопіювати або показати шлях, де очікується.

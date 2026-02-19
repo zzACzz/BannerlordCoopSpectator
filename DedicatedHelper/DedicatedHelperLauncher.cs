@@ -29,8 +29,14 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const string ModulesArg = "_MODULES_*Native*Multiplayer*DedicatedCustomServerHelper*_MODULES_";
         /// <summary>true = не передаємо наш _MODULES_/конфіг (Starter сам додає свої args — тоді AliveMessage ок). Якщо false — передаємо повний набір (раніше давало Disconnected).</summary>
         private const bool SteamLikeLaunch = true;
-        /// <summary>При SteamLikeLaunch: true = додати тільки токен+порт. Перевірено: при передачі токена/порту знову з'являється Disconnected; при false (0 args) — AliveMessage ок. Токен тоді беруть із Documents (папка Tokens).</summary>
+        /// <summary>При SteamLikeLaunch: true = додати тільки токен+порт. ВІДОМО ЛАМАЄ manager-конект (Disconnected). Залишати false.</summary>
         private const bool AddTokenAndPortOnly = false;
+        /// <summary>Передавати /port (ізоляція: не ламає manager).</summary>
+        private const bool AddPortOnly = true;
+        /// <summary>НЕ вмикати: передача токена аргументом ламає manager (Disconnected). Токен лише з Documents.</summary>
+        private const bool AddTokenOnly = false;
+        /// <summary>Конфіг + /dedicatedcustomserverconfigfile — авто start_game (ізоляція: не ламає). Разом з AddPortOnly працює.</summary>
+        private const bool AddConfigFileOnly = true;
 
         /// <summary>Повертає шлях до папки Tokens для показу користувачу (перший існуючий кандидат або MyDocuments).</summary>
         public static string GetTokensFolderPath()
@@ -231,7 +237,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             if (port <= 0) port = DefaultPort;
 
             string token = tokenOverride;
-            bool needToken = !SteamLikeLaunch || AddTokenAndPortOnly;
+            bool needToken = !SteamLikeLaunch || AddTokenAndPortOnly || AddTokenOnly;
             if (needToken && string.IsNullOrWhiteSpace(token) && !TryReadTokenFromFolder(out token))
             {
                 string tokensPath = GetTokensFolderPath();
@@ -256,16 +262,34 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
 
             string arguments;
             string configFile = null;
-            if (SteamLikeLaunch && !AddTokenAndPortOnly)
+            if (SteamLikeLaunch)
             {
-                arguments = "";
-                ModLogger.Info("DedicatedHelper: SteamLikeLaunch=true, token/port not added — args empty.");
-            }
-            else if (SteamLikeLaunch && AddTokenAndPortOnly)
-            {
-                // Тільки токен + порт, без _MODULES_ і без config — Starter сам додасть свої args.
-                arguments = BuildArgumentsTokenAndPortOnly(port, token ?? "");
-                ModLogger.Info("DedicatedHelper: SteamLikeLaunch + AddTokenAndPortOnly — args: token + port only.");
+                if ((AddTokenOnly || AddTokenAndPortOnly) && (AddPortOnly || AddConfigFileOnly))
+                    ModLogger.Warn("DedicatedHelper: token flag + port/config — token via args breaks manager; use only port+config (token from Documents).");
+                if (AddTokenAndPortOnly)
+                {
+                    ModLogger.Warn("DedicatedHelper: AddTokenAndPortOnly is ON — this mode is known to break manager connection (Disconnected). Use false for stable launch.");
+                    arguments = BuildArgumentsTokenAndPortOnly(port, token ?? "");
+                    ModLogger.Info("DedicatedHelper: args = token + port only.");
+                }
+                else if (AddTokenOnly)
+                {
+                    arguments = BuildArgumentsTokenOnly(token ?? "");
+                    ModLogger.Info("DedicatedHelper: AddTokenOnly — args = token only (known to cause Disconnected).");
+                }
+                else
+                {
+                    // Безпечні args: порт і/або конфіг (токен ніколи — ламає manager).
+                    var safeArgs = new System.Collections.Generic.List<string>();
+                    if (AddPortOnly) safeArgs.Add("/port " + port);
+                    if (AddConfigFileOnly)
+                    {
+                        configFile = TryWriteStartupConfig(exePath);
+                        if (!string.IsNullOrEmpty(configFile)) safeArgs.Add("/dedicatedcustomserverconfigfile " + configFile);
+                    }
+                    arguments = safeArgs.Count > 0 ? string.Join(" ", safeArgs) : "";
+                    ModLogger.Info("DedicatedHelper: SteamLikeLaunch, safe args (port+config, no token): " + (string.IsNullOrEmpty(arguments) ? "(none)" : arguments));
+                }
             }
             else
             {
@@ -296,10 +320,14 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 ModLogger.Info("DedicatedHelper: process started PID=" + p.Id);
                 LogProcessCommandLine(p.Id);
 
+                bool safeProfile = SteamLikeLaunch && (AddPortOnly || AddConfigFileOnly) && !AddTokenOnly && !AddTokenAndPortOnly;
+                bool isolationTest = SteamLikeLaunch && (AddTokenOnly || AddTokenAndPortOnly);
                 string okMsg = SteamLikeLaunch
-                    ? (AddTokenAndPortOnly
-                        ? "Dedicated Helper started (PID " + p.Id + ", port " + port + "). In server console type start_game. Friends: Multiplayer -> Custom Server List."
-                        : "Dedicated Helper started (PID " + p.Id + ") Steam-like (0 args). Check server console for AliveMessage / Disconnected.")
+                    ? (isolationTest
+                        ? "Dedicated Helper started (PID " + p.Id + "). Check server console: AliveMessage = ok, Disconnected = this arg breaks."
+                        : safeProfile
+                            ? "Dedicated Helper started (PID " + p.Id + ", port " + port + "). Server visible in Custom Server List (start_game from config). Friends: Multiplayer -> Custom Server List."
+                            : "Dedicated Helper started (PID " + p.Id + ") Steam-like (0 args). In server console type start_game. Friends: Multiplayer -> Custom Server List.")
                     : (configFile != null
                         ? "Dedicated Helper started (PID " + p.Id + ", port " + port + "). Server will be visible in Custom Server List. Friends: Multiplayer -> Custom Server List."
                         : "Dedicated Helper started (PID " + p.Id + ", port " + port + "). In the server console type start_game to make it visible. Friends: Multiplayer -> Custom Server List.");
@@ -369,6 +397,13 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             {
                 ModLogger.Info("DedicatedHelper [WMI] failed for PID " + processId + ": " + ex.Message);
             }
+        }
+
+        /// <summary>Тільки токен (для ізоляції тесту AddTokenOnly).</summary>
+        private static string BuildArgumentsTokenOnly(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token)) return "";
+            return "/dedicatedcustomserverauthtoken \"" + token.Trim().Replace("\"", "\"\"") + "\"";
         }
 
         /// <summary>Тільки токен і порт (для SteamLikeLaunch + AddTokenAndPortOnly). Без _MODULES_ і без config.</summary>
