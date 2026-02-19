@@ -150,3 +150,14 @@ UX:
 - **coop.dedicated_open_tokens** — відкриває папку Tokens у провіднику (якщо токен не знайдено, підказка в консолі пропонує цю команду).
 - Після запуску: у консолі **дедик-сервера** ввести **start_game**, щоб сервер з’явився в Custom Server List. Клієнти приєднуються через Multiplayer -> Custom Server List (порт 7210 за замовчуванням).
 - Далі по плану: IPC для автоматичної відправки start_game / start_mission / end_mission з кампанії (Етап 3b, 5).
+
+### Dedicated Helper — діагностика логів
+
+- **Лог гри (rgl_log_*.txt)** — у `C:\ProgramData\Mount and Blade II Bannerlord\logs\` (або в папці гри). Тут з’являються рядки мода: `[CoopSpectator] INFO: DedicatedHelper: ...` і після останнього білду — `DedicatedHelper launch: exe=... | workingDir=... | args=...` (токен у args замаскований як `(token)`). Тут **немає** повідомлення "Disconnected from custom battle server manager".
+- **"Disconnected from custom battle server manager"** виводить **процес дедик-сервера** (вікно DedicatedCustomServer.Starter.exe). Щоб порівняти з запуском зі Steam: потрібні перші 30–50 рядків з **консолі дедик-сервера** (або його лог-файлу, якщо є) при запуску з моду і при запуску зі Steam.
+- Якщо в rgl_log є "wrote startup config" і "Server will be visible" — це старий білд (конфіг передавався). Після перезбірки має бути рядок "DedicatedHelper launch:" і повідомлення "In the server console type start_game" (без конфігу).
+
+### Dedicated Helper — вирішення Disconnected (працює)
+
+- **Причина**: Коли мод передавав токен + порт + наш _MODULES_ з DedicatedCustomServerHelper, Starter додавав свій блок _MODULES_*Native*Multiplayer*_MODULES_ (без Helper). Останній _MODULES_ перезаписував наш → сервер без Helper → Disconnected.
+- **Рішення**: Запуск як Steam — не передавати наш _MODULES_ і конфіг. SteamLikeLaunch=true: WorkingDirectory = папка exe; аргументи або порожні, або тільки токен + порт (AddTokenAndPortOnly). Starter сам додає свої args; AliveMessage ок.

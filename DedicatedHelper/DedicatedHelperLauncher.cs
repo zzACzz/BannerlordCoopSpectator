@@ -1,6 +1,7 @@
 using System; // Exception, Environment, IntPtr
 using System.Diagnostics; // Process, ProcessStartInfo
 using System.IO; // Path, File, Directory
+using System.Management; // ManagementObjectSearcher, Win32_Process
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback
 
 namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офіційний дедик-сервер) з кампанії
@@ -13,11 +14,23 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
     {
         private const int DefaultPort = 7210; // Офіційний UDP-порт дедик-сервера за замовчуванням
         private const string DedicatedServerFolderName = "Mount & Blade II Dedicated Server";
-        private const string ExeRelativePath = @"bin\Win64_Shipping_Server\DedicatedCustomServer.Starter.exe";
+        private const string ServerBinRelativePath = @"bin\Win64_Shipping_Server";
+        /// <summary>Єдиний exe для custom dedicated server у стандартній інсталі: DedicatedCustomServer.Starter.exe (core exe в цій папці немає).</summary>
+        private static readonly string[] ExeCandidates = new[] { "DedicatedCustomServer.Starter.exe" };
         /// <summary>Папка Tokens у Documents — у Windows зазвичай "Mount and Blade II Bannerlord" (слово "and"), не "&".</summary>
         private const string TokensSubFolder = @"Mount and Blade II Bannerlord\Tokens";
         /// <summary>Ім'я файлу токена, який гра створює після customserver.gettoken.</summary>
         private const string OfficialTokenFileName = "DedicatedCustomServerAuthToken.txt";
+        /// <summary>Ім'я стартового конфігу для автоматичного start_game (файл у Dedicated Server Modules\Native).</summary>
+        private const string StartupConfigFileName = "ds_config_coop_start.txt";
+        /// <summary>Якщо false — не передаємо конфіг при запуску (як Steam: "Command file is null"), щоб сервер не від'єднувався від Diamond. start_game тоді вводять вручну в консолі сервера.</summary>
+        private const bool UseStartupConfig = false;
+        /// <summary>Явний список модулів, як у ванільному dedicated (Steam). Без цього сервер може піднятися без Multiplayer/DedicatedCustomServerHelper і від'єднатися від custom battle server manager.</summary>
+        private const string ModulesArg = "_MODULES_*Native*Multiplayer*DedicatedCustomServerHelper*_MODULES_";
+        /// <summary>true = не передаємо наш _MODULES_/конфіг (Starter сам додає свої args — тоді AliveMessage ок). Якщо false — передаємо повний набір (раніше давало Disconnected).</summary>
+        private const bool SteamLikeLaunch = true;
+        /// <summary>При SteamLikeLaunch: true = додати тільки токен+порт. Перевірено: при передачі токена/порту знову з'являється Disconnected; при false (0 args) — AliveMessage ок. Токен тоді беруть із Documents (папка Tokens).</summary>
+        private const bool AddTokenAndPortOnly = false;
 
         /// <summary>Повертає шлях до папки Tokens для показу користувачу (перший існуючий кандидат або MyDocuments).</summary>
         public static string GetTokensFolderPath()
@@ -119,29 +132,37 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             }
         }
 
-        /// <summary>Шукає exe дедик-сервера: поряд з грою (Steam common) або через змінну середовища.</summary>
+        /// <summary>Шукає exe дедик-сервера: поряд з грою (Steam common) або через змінну середовища. Перебирає кандидатів (core exe, потім Starter).</summary>
         public static string TryFindDedicatedServerExePath()
         {
-            // 1) Змінна середовища (для кастомного шляху)
+            string binDir = null;
+
+            // 1) Змінна середовища (корінь Dedicated Server або повний шлях до exe)
             string envPath = Environment.GetEnvironmentVariable("BANNERLORD_DEDICATED_SERVER_PATH");
             if (!string.IsNullOrWhiteSpace(envPath))
             {
-                string exe = Path.Combine(envPath, ExeRelativePath);
-                if (File.Exists(exe)) return exe;
-                if (File.Exists(envPath)) return envPath; // повний шлях до exe
+                if (File.Exists(envPath)) return envPath;
+                binDir = Path.Combine(envPath, ServerBinRelativePath);
             }
 
             // 2) Поряд з грою: ...\Steam\steamapps\common\Mount & Blade II Bannerlord -> ...\Mount & Blade II Dedicated Server
-            string gameRoot = TryGetGameRootFromProcess();
-            if (!string.IsNullOrEmpty(gameRoot))
+            if (string.IsNullOrEmpty(binDir))
             {
-                string parent = Path.GetDirectoryName(gameRoot);
-                if (!string.IsNullOrEmpty(parent))
+                string gameRoot = TryGetGameRootFromProcess();
+                if (!string.IsNullOrEmpty(gameRoot))
                 {
-                    string dedicatedRoot = Path.Combine(parent, DedicatedServerFolderName);
-                    string exe = Path.Combine(dedicatedRoot, ExeRelativePath);
-                    if (File.Exists(exe)) return exe;
+                    string parent = Path.GetDirectoryName(gameRoot);
+                    if (!string.IsNullOrEmpty(parent))
+                        binDir = Path.Combine(parent, DedicatedServerFolderName, ServerBinRelativePath);
                 }
+            }
+
+            if (string.IsNullOrEmpty(binDir) || !Directory.Exists(binDir)) return null;
+
+            for (int i = 0; i < ExeCandidates.Length; i++)
+            {
+                string exe = Path.Combine(binDir, ExeCandidates[i]);
+                if (File.Exists(exe)) return exe;
             }
             return null;
         }
@@ -163,6 +184,44 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             return null;
         }
 
+        /// <summary>Корінь інсталяції Dedicated Server (exe лежить у bin\Win64_Shipping_Server\).</summary>
+        private static string GetDedicatedServerRootFromExe(string exePath)
+        {
+            if (string.IsNullOrEmpty(exePath)) return null;
+            try
+            {
+                string dir = Path.GetDirectoryName(exePath);  // ...\bin\Win64_Shipping_Server
+                if (string.IsNullOrEmpty(dir)) return null;
+                dir = Path.GetDirectoryName(dir);             // ...\bin
+                if (string.IsNullOrEmpty(dir)) return null;
+                dir = Path.GetDirectoryName(dir);             // корінь Dedicated Server
+                return Directory.Exists(dir) ? dir : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Записує стартовий конфіг (start_game, ServerName) у Dedicated Server Modules\Native. Повертає ім'я файлу для /dedicatedcustomserverconfigfile або null.</summary>
+        private static string TryWriteStartupConfig(string exePath)
+        {
+            string root = GetDedicatedServerRootFromExe(exePath);
+            if (string.IsNullOrEmpty(root)) return null;
+            string nativeDir = Path.Combine(root, "Modules", "Native");
+            if (!Directory.Exists(nativeDir)) return null;
+            string configPath = Path.Combine(nativeDir, StartupConfigFileName);
+            try
+            {
+                string content = "ServerName Coop Spectator" + Environment.NewLine + "start_game" + Environment.NewLine;
+                File.WriteAllText(configPath, content);
+                ModLogger.Info("DedicatedHelper: wrote startup config to " + configPath);
+                return StartupConfigFileName;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("DedicatedHelper: could not write config: " + ex.Message);
+                return null;
+            }
+        }
+
         /// <summary>
         /// Запускає Dedicated Helper. Токен: з папки Tokens або переданий явно.
         /// Повертає повідомлення для консолі (успіх або текст помилки).
@@ -172,7 +231,8 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             if (port <= 0) port = DefaultPort;
 
             string token = tokenOverride;
-            if (string.IsNullOrWhiteSpace(token) && !TryReadTokenFromFolder(out token))
+            bool needToken = !SteamLikeLaunch || AddTokenAndPortOnly;
+            if (needToken && string.IsNullOrWhiteSpace(token) && !TryReadTokenFromFolder(out token))
             {
                 string tokensPath = GetTokensFolderPath();
                 string msg = "No token found. Multiplayer -> Console (ALT+~) -> customserver.gettoken. Folder: " + (tokensPath ?? "(unknown)");
@@ -184,14 +244,35 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             string exePath = TryFindDedicatedServerExePath();
             if (string.IsNullOrEmpty(exePath))
             {
-                string msg = "Dedicated Server exe not found. Install 'Mount & Blade II: Dedicated Server' from Steam (Tools). Path: Steam\\steamapps\\common\\" + DedicatedServerFolderName + "\\" + ExeRelativePath;
+                string msg = "Dedicated Server exe not found. Install 'Mount & Blade II: Dedicated Server' from Steam (Tools). Path: Steam\\steamapps\\common\\" + DedicatedServerFolderName + "\\" + ServerBinRelativePath + " (e.g. DedicatedCustomServer.Starter.exe)";
                 UiFeedback.ShowMessageDeferred(msg);
                 ModLogger.Info("DedicatedHelper: " + msg);
                 return "ERROR: " + msg;
             }
 
+            // WorkingDirectory = строго папка, де лежить exe (як при Steam-запуску).
             string workingDir = Path.GetDirectoryName(exePath);
             if (string.IsNullOrEmpty(workingDir)) workingDir = Path.GetDirectoryName(Path.GetDirectoryName(exePath));
+
+            string arguments;
+            string configFile = null;
+            if (SteamLikeLaunch && !AddTokenAndPortOnly)
+            {
+                arguments = "";
+                ModLogger.Info("DedicatedHelper: SteamLikeLaunch=true, token/port not added — args empty.");
+            }
+            else if (SteamLikeLaunch && AddTokenAndPortOnly)
+            {
+                // Тільки токен + порт, без _MODULES_ і без config — Starter сам додасть свої args.
+                arguments = BuildArgumentsTokenAndPortOnly(port, token ?? "");
+                ModLogger.Info("DedicatedHelper: SteamLikeLaunch + AddTokenAndPortOnly — args: token + port only.");
+            }
+            else
+            {
+                configFile = UseStartupConfig ? TryWriteStartupConfig(exePath) : null;
+                arguments = BuildArguments(port, token, configFile, exePath);
+                LogLaunchParams(exePath, workingDir ?? "", port, configFile, arguments);
+            }
 
             var startInfo = new ProcessStartInfo
             {
@@ -199,8 +280,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 WorkingDirectory = workingDir ?? "",
                 UseShellExecute = false,
                 CreateNoWindow = false,
-                Arguments = BuildArguments(port, token)
+                Arguments = arguments
             };
+
+            LogFullLaunchDiagnostics(startInfo, exePath, arguments, workingDir ?? "");
 
             try
             {
@@ -210,7 +293,16 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                     ModLogger.Error("DedicatedHelper: Process.Start returned null.", null);
                     return "ERROR: Failed to start process.";
                 }
-                string okMsg = "Dedicated Helper started (PID " + p.Id + ", port " + port + "). In the server console type start_game to make it visible. Friends join via Multiplayer -> Custom Server List.";
+                ModLogger.Info("DedicatedHelper: process started PID=" + p.Id);
+                LogProcessCommandLine(p.Id);
+
+                string okMsg = SteamLikeLaunch
+                    ? (AddTokenAndPortOnly
+                        ? "Dedicated Helper started (PID " + p.Id + ", port " + port + "). In server console type start_game. Friends: Multiplayer -> Custom Server List."
+                        : "Dedicated Helper started (PID " + p.Id + ") Steam-like (0 args). Check server console for AliveMessage / Disconnected.")
+                    : (configFile != null
+                        ? "Dedicated Helper started (PID " + p.Id + ", port " + port + "). Server will be visible in Custom Server List. Friends: Multiplayer -> Custom Server List."
+                        : "Dedicated Helper started (PID " + p.Id + ", port " + port + "). In the server console type start_game to make it visible. Friends: Multiplayer -> Custom Server List.");
                 UiFeedback.ShowMessageDeferred(okMsg);
                 ModLogger.Info("DedicatedHelper: " + okMsg);
                 return "OK: " + okMsg;
@@ -222,12 +314,86 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             }
         }
 
-        private static string BuildArguments(int port, string token)
+        /// <summary>Логує exe path, working dir і рядок аргументів (токен замінено на "(token)") для діагностики "модового" vs Steam запуску.</summary>
+        private static void LogLaunchParams(string exePath, string workingDir, int port, string configFileName, string fullArgsWithToken)
+        {
+            string argsForLog = BuildArguments(port, "(token)", configFileName, exePath);
+            ModLogger.Info("DedicatedHelper launch: exe=" + exePath + " | workingDir=" + workingDir + " | args=" + argsForLog);
+        }
+
+        /// <summary>Повний діагностичний лог перед Process.Start: exe, args, CWD, оточення процесу гри, прапорці StartInfo.</summary>
+        private static void LogFullLaunchDiagnostics(ProcessStartInfo startInfo, string exePath, string arguments, string workingDir)
+        {
+            string gameCurrentDir = null;
+            try { gameCurrentDir = Environment.CurrentDirectory; } catch (Exception ex) { gameCurrentDir = "error: " + ex.Message; }
+            ModLogger.Info("DedicatedHelper [before Start] exePath=" + (exePath ?? ""));
+            ModLogger.Info("DedicatedHelper [before Start] arguments=" + (arguments ?? "") + " (length=" + (arguments != null ? arguments.Length : 0) + ")");
+            ModLogger.Info("DedicatedHelper [before Start] WorkingDirectory=" + (workingDir ?? ""));
+            ModLogger.Info("DedicatedHelper [before Start] Environment.CurrentDirectory(game)=" + (gameCurrentDir ?? ""));
+            ModLogger.Info("DedicatedHelper [before Start] UseShellExecute=" + startInfo.UseShellExecute + " CreateNoWindow=" + startInfo.CreateNoWindow + " RedirectStdOut=" + startInfo.RedirectStandardOutput + " RedirectStdErr=" + startInfo.RedirectStandardError);
+            if (startInfo.EnvironmentVariables != null && startInfo.EnvironmentVariables.Count > 0)
+            {
+                var custom = new System.Text.StringBuilder();
+                foreach (System.Collections.DictionaryEntry e in startInfo.EnvironmentVariables)
+                {
+                    if (e.Key == null) continue;
+                    string k = e.Key.ToString();
+                    if (string.IsNullOrEmpty(k)) continue;
+                    custom.Append(" ").Append(k).Append("=").Append((e.Value ?? "").ToString());
+                }
+                ModLogger.Info("DedicatedHelper [before Start] CustomEnv:" + custom.ToString());
+            }
+            else
+                ModLogger.Info("DedicatedHelper [before Start] CustomEnv: (none)");
+        }
+
+        /// <summary>Після старту знімає через WMI CommandLine та ExecutablePath процесу по PID (чи Starter отримав ті ж args).</summary>
+        private static void LogProcessCommandLine(int processId)
+        {
+            try
+            {
+                using (var searcher = new ManagementObjectSearcher("SELECT ExecutablePath, CommandLine FROM Win32_Process WHERE ProcessId = " + processId))
+                using (var results = searcher.Get())
+                {
+                    foreach (ManagementObject obj in results)
+                    {
+                        string exe = obj["ExecutablePath"] != null ? obj["ExecutablePath"].ToString() : "";
+                        string cmd = obj["CommandLine"] != null ? obj["CommandLine"].ToString() : "";
+                        ModLogger.Info("DedicatedHelper [WMI PID " + processId + "] ExecutablePath=" + exe);
+                        ModLogger.Info("DedicatedHelper [WMI PID " + processId + "] CommandLine=" + cmd);
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("DedicatedHelper [WMI] failed for PID " + processId + ": " + ex.Message);
+            }
+        }
+
+        /// <summary>Тільки токен і порт (для SteamLikeLaunch + AddTokenAndPortOnly). Без _MODULES_ і без config.</summary>
+        private static string BuildArgumentsTokenAndPortOnly(int port, string token)
         {
             var args = new System.Collections.Generic.List<string>();
             if (!string.IsNullOrWhiteSpace(token))
                 args.Add("/dedicatedcustomserverauthtoken \"" + token.Trim().Replace("\"", "\"\"") + "\"");
             args.Add("/port " + port);
+            return string.Join(" ", args);
+        }
+
+        private static string BuildArguments(int port, string token, string configFileName, string exePath)
+        {
+            var args = new System.Collections.Generic.List<string>();
+            if (!string.IsNullOrWhiteSpace(token))
+                args.Add("/dedicatedcustomserverauthtoken \"" + token.Trim().Replace("\"", "\"\"") + "\"");
+            args.Add("/port " + port);
+            if (!string.IsNullOrEmpty(configFileName))
+                args.Add("/dedicatedcustomserverconfigfile " + configFileName);
+            args.Add(ModulesArg);
+            // Для core exe передаємо аргументи, які Starter додає; для Starter не додаємо — він сам їх підставить.
+            string exeName = Path.GetFileName(exePath ?? "");
+            if (exeName.IndexOf("Starter", StringComparison.OrdinalIgnoreCase) < 0)
+                args.Add("/dedicatedcustomserver " + port + " USER 0 /playerhosteddedicatedserver");
             return string.Join(" ", args);
         }
     }
