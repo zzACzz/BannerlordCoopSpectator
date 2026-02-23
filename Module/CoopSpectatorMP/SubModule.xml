@@ -1,0 +1,22 @@
+<!-- Модуль тільки для вкладки Мультиплеєр лаунчера: завантажує ту саму CoopSpectator.dll (патч localhost для клієнта). -->
+<Module>
+  <Name value="Coop Spectator (MP)" />
+  <Id value="CoopSpectatorMP" />
+  <Version value="v0.1.1" />
+  <SingleplayerModule value="false" />
+  <MultiplayerModule value="true" />
+  <DependedModules>
+    <DependedModule Id="Native" />
+    <DependedModule Id="Multiplayer" />
+  </DependedModules>
+  <SubModules>
+    <SubModule>
+      <Name value="CoopSpectator" />
+      <DLLName value="CoopSpectator.dll" />
+      <SubModuleClassType value="CoopSpectator.SubModule" />
+      <Tags>
+        <Tag key="DedicatedServerType" value="none" />
+      </Tags>
+    </SubModule>
+  </SubModules>
+</Module>

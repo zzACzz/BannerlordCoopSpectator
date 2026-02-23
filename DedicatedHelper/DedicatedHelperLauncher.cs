@@ -356,9 +356,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 }
                 else
                 {
-                    // Безпечні args: порт і/або конфіг (токен ніколи — ламає manager).
+                    // Безпечні args: слухати на всіх інтерфейсах (0.0.0.0), порт, конфіг (токен ніколи — ламає manager).
                     var safeArgs = new System.Collections.Generic.List<string>();
-                    if (AddPortOnly) safeArgs.Add("/port " + port);
+                    safeArgs.Add("--multihome 0.0.0.0");
+                    if (AddPortOnly) safeArgs.Add("--port " + port);
                     if (AddConfigFileOnly)
                     {
                         configFile = TryWriteStartupConfig(exePath);
@@ -489,18 +490,20 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private static string BuildArgumentsTokenAndPortOnly(int port, string token)
         {
             var args = new System.Collections.Generic.List<string>();
+            args.Add("--multihome 0.0.0.0");
             if (!string.IsNullOrWhiteSpace(token))
                 args.Add("/dedicatedcustomserverauthtoken \"" + token.Trim().Replace("\"", "\"\"") + "\"");
-            args.Add("/port " + port);
+            args.Add("--port " + port);
             return string.Join(" ", args);
         }
 
         private static string BuildArguments(int port, string token, string configFileName, string exePath)
         {
             var args = new System.Collections.Generic.List<string>();
+            args.Add("--multihome 0.0.0.0");
             if (!string.IsNullOrWhiteSpace(token))
                 args.Add("/dedicatedcustomserverauthtoken \"" + token.Trim().Replace("\"", "\"\"") + "\"");
-            args.Add("/port " + port);
+            args.Add("--port " + port);
             if (!string.IsNullOrEmpty(configFileName))
                 args.Add("/dedicatedcustomserverconfigfile " + configFileName);
             args.Add(ModulesArg);

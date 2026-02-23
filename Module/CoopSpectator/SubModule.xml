@@ -8,19 +8,11 @@
   <Version value="v0.1.1" />
   <!-- Прапорець що мод працює у сингплеєрі (кампанія) -->
   <SingleplayerModule value="true" />
-  <!-- Прапорець що мод НЕ є окремим мультиплеєрним модулем -->
-  <MultiplayerModule value="false" />
-  <!-- Список залежних модулів ваніли, які мають бути увімкнені -->
+  <!-- true = мод показується в списку модів для мультиплеєру (клієнт з патчем localhost) -->
+  <MultiplayerModule value="true" />
+  <!-- Тільки Native + Multiplayer — щоб лаунчер показував мод у вкладці мультиплеєр (там немає StoryMode/Sandbox). У кампанії ці модулі все одно завантажуються раніше. -->
   <DependedModules>
-    <!-- Базовий модуль з ядром гри -->
     <DependedModule Id="Native" />
-    <!-- Базовий контент для sandbox-режиму -->
-    <DependedModule Id="SandBoxCore" />
-    <!-- Логіка sandbox-кампанії -->
-    <DependedModule Id="Sandbox" />
-    <!-- StoryMode (кампанія) -->
-    <DependedModule Id="StoryMode" />
-    <!-- Multiplayer: потрібен для MP сцен (mp_*) і частини MP ініціалізації (Stage 3.2) -->
     <DependedModule Id="Multiplayer" />
   </DependedModules>
   <!-- Підмодулі (C# DLL), які завантажує гра -->

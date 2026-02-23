@@ -1,6 +1,7 @@
 using System; // Підключаємо базові типи .NET (Exception)
 using CoopSpectator.Campaign; // Підключаємо campaign behaviors (HostStateBroadcaster, SpectatorStateReceiver)
 using CoopSpectator.Infrastructure; // Підключаємо інфраструктуру (логер, dispatcher)
+using CoopSpectator.Patches; // LobbyCustomGameLocalJoinPatch
 using HarmonyLib; // Підключаємо Harmony для патчингу методів гри
 using TaleWorlds.CampaignSystem; // Підключаємо CampaignGameStarter та Campaign (щоб додати behaviors у кампанію)
 using TaleWorlds.Core; // Підключаємо базові типи Bannerlord (InformationMessage)
@@ -41,6 +42,13 @@ namespace CoopSpectator // Використовуємо кореневий names
             { // Починаємо блок try
                 var harmony = new Harmony("com.coopspectator.mod"); // Створюємо інстанс Harmony з унікальним Id моду
                 harmony.PatchAll(); // Застосовуємо всі патчі з атрибутами [HarmonyPatch] у цій збірці
+                // Патч на Lobby Custom Join (127.0.0.1 для тесту на одній машині) — через reflection, бо збірка Lobby може завантажитись пізніше
+                LobbyCustomGameLocalJoinPatch.Apply(harmony);
+                AppDomain.CurrentDomain.AssemblyLoad += (_, e) => // Коли підвантажиться нова збірка (наприклад Lobby)
+                { // Перевіряємо чи це Lobby — тоді застосуємо патч
+                    if (e.LoadedAssembly.GetName().Name == "TaleWorlds.MountAndBlade.Lobby")
+                        LobbyCustomGameLocalJoinPatch.Apply(harmony);
+                };
                 ModLogger.Info("Harmony патчі застосовано успішно."); // Логуємо успіх, щоб було видно що патчинг активний
             } // Завершуємо блок try
             catch (Exception ex) // Ловимо будь-які винятки (відсутня DLL, конфлікти, тощо)

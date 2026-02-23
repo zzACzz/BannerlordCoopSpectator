@@ -1,4 +1,18 @@
-# HUMAN_NOTES_MULTIPLAYER_PROGRESS.md (v1.7)
+# HUMAN_NOTES_MULTIPLAYER_PROGRESS.md (v1.8)
+
+## Де ми зараз
+
+- **Хост:** Синглплеєр з модом → кампанія → `coop.dedicated_start` → дедик працює, при вході/виході з битви мод шле start_mission / end_mission на Manager API (повідомлення "Coop: start_mission → dedik (HTTP)" та про закінчення перевірені).
+- **Клієнт:** Запуск через **батник** `run_mp_with_mod.bat` (Bannerlord.exe з `/multiplayer` та потрібними модулями) → Multiplayer → Custom Server List → Join → клієнт потрапляє на екран **Awaiting Server** (включно з хостом на тій самій машині).
+- **Що далі:** Перевірити повний цикл: хост заходить у битву → чи клієнт переходить у місію; хост виходить → чи клієнт повертається на Awaiting Server.
+
+### Як вирішили минулі проблеми
+
+| Проблема | Рішення |
+|----------|---------|
+| Клієнт на тій самій машині не міг приєднатися (лобі повертала публічний IP → NAT/RemoveNetworkPeer) | Патч **LobbyCustomGameLocalJoinPatch** (reflection) на `LobbyGameStateCustomGameClient.StartMultiplayer`: підстановка 127.0.0.1 замість публічного IP. Константа `PublicIpToReplace` у `Patches/LobbyCustomGameLocalJoinPatch.cs`. Dedicated запуск з `--multihome 0.0.0.0 --port 7210` (у `DedicatedHelperLauncher`). |
+| Лаунчер у вкладці Мультиплеєр не показує наш мод (лише Native + Multiplayer) | Запуск клієнта через **батник** `run_mp_with_mod.bat`: виклик `Bannerlord.exe /multiplayer _MODULES_*Native*Multiplayer*Bannerlord.Harmony*CoopSpectator*_MODULES_` з папки гри. Файл у корені проєкту, шлях у батнику підлаштовується під інсталяцію. |
+| Ручне копіювання мода в папку гри після збірки | Постбілд у **CoopSpectator.csproj** (таргет **DeployModToGame**): після Build копіюються `SubModule.xml` і вихід збірки в `$(BannerlordRootDir)\Modules\CoopSpectator` та `Modules\CoopSpectatorMP`. |
 
 ## Етапи виконано (статус)
 
@@ -7,11 +21,11 @@
 | Етап 1 (підготовка, середовище, Hello World) | ✅ Виконано | План bannerlord_coop_plan.md §1 |
 | Етап 2 (Spectator: broadcaster, UI, блокування контролю) | ✅ Виконано | §2 |
 | Етап 3.1 (детекція початку битви у хоста) | ✅ Виконано | BattleDetector, BATTLE_START |
-| Dedicated Helper — запуск (Етап 1) | ✅ Виконано | coop.dedicated_start, токен, конфіг, start_game з конфігу |
-| Dedicated Helper — IPC (Етап 3b) | ✅ Виконано | BattleDetector → SendStartMission/SendEndMission, Manager API (GET /Manager/…), Dashboard AdminPassword |
-| Етап 3.2 (клієнт через Custom Server List) | 🔄 Тестування | Потрібно перевірити: клієнт Join → хост у битву → чи клієнт переходить у місію |
-| Етап 3.2.1 (вхід клієнта в MP-місію, TCP/coop_join) | ⏳ Не реалізовано | Дослідження Multiplayer DLL; відкриття місії на клієнті |
-| Етап 3.3–3.5 (меню юніта, spawn, повернення spectator) | ⏳ Далі по плану | Після робочого підключення клієнта |
+| Dedicated Helper — запуск (Етап 1) | ✅ Виконано | coop.dedicated_start, токен, конфіг, start_game, --multihome 0.0.0.0 --port 7210 |
+| Dedicated Helper — IPC (Етап 3b) | ✅ Виконано | BattleDetector → SendStartMission/SendEndMission, Manager API, Dashboard AdminPassword |
+| Етап 3.2 (клієнт через Custom Server List) | 🔄 Частково | Join і екран Awaiting Server працюють (клієнт через батник). Далі: тест переходу клієнта в місію при start_mission. |
+| Етап 3.2.1 (вхід клієнта в MP-місію, TCP/coop_join) | ⏳ За потреби | Якщо ванільний флоу не переведе клієнта в місію |
+| Етап 3.3–3.5 (меню юніта, spawn, повернення spectator) | ⏳ Далі по плану | Після робочого переходу клієнта в місію |
 
 ---
 
@@ -209,7 +223,15 @@ UX:
 - **Хост:** Один ПК з Bannerlord + мод Coop Spectator + встановлений **Mount & Blade II: Dedicated Server** (Steam → Інструменти).
 - **Токен:** Згенерований у мультиплеєрі командою `customserver.gettoken` (консоль ALT+~), файл у `Documents\Mount & Blade II Bannerlord\Tokens\DedicatedCustomServerAuthToken.txt`. Якщо немає — команда `coop.dedicated_open_tokens` відкриє папку, підказка в консолі.
 - **Клієнт:** Другий ПК з Bannerlord і модом, або друга копія гри на тому ж ПК (для тесту "до себе").
-- **Мережа:** Порт **7210 (UDP і TCP)** відкритий на хостові (якщо клієнт на іншому ПК — фаєрвол/роутер). Для тесту на одній машині достатньо localhost.
+- **Мережа:** Порт **7210 (UDP і TCP)** відкритий на хостові (якщо клієнт на іншому ПК — фаєрвол/роутер). Для тесту на **одній машині** мод підставляє **127.0.0.1** замість публічного IP (патч **LobbyCustomGameLocalJoinPatch** / **LocalJoinAddressPatch**), щоб Join йшов на localhost; інакше лобі повертає публічний IP і підключення з того ж ПК часто не проходить через NAT.
+
+### Лаунчер: вкладка Мультиплеєр не показує наш мод — рішення: батник
+
+- **Проблема:** Лаунчер у вкладці **Мультиплеєр** показує лише **Native** і **Multiplayer**; сторонні моди (Coop Spectator, Coop Spectator (MP)) там не з’являються. У грі немає переходу з синглплеєру в мультиплеєр — це окремі точки входу.
+- **Рішення (перевірено):** Запускати клієнта **не з лаунчера**, а через **батник** з викликом `Bannerlord.exe` з аргументом `/multiplayer` і списком модулів. У проєкті є файл **`run_mp_with_mod.bat`** (корінь репозиторію). Він переходить у `bin\Win64_Shipping_Client` гри і запускає:
+  `Bannerlord.exe /multiplayer _MODULES_*Native*Multiplayer*Bannerlord.Harmony*CoopSpectator*_MODULES_`
+  Шлях у батнику за замовчуванням: `C:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Bannerlord\bin\Win64_Shipping_Client` — підкоригуй під свою інсталяцію, якщо потрібно.
+- Після запуску батника гра відкривається в режимі мультиплеєру **з модом CoopSpectator** (і патчем localhost для підключення на ту ж машину). Далі: Multiplayer → Custom Server List → Join → екран **Awaiting Server**. Хост на тій самій машині теж може приєднатися до свого дедик-сервера цим способом.
 
 ### Як перевірити покроково
 
@@ -219,15 +241,16 @@ UX:
    - Очікуваний результат: у консолі гри повідомлення на кшталт "Dedicated Helper started (PID …, port 7210). Server visible in Custom Server List…". Вікно дедик-сервера відкрито, у його консолі немає "Disconnected from custom battle server manager".  
    - Якщо токен не знайдено — з’явиться підказка; виконати `customserver.gettoken` у мультиплеєрі, потім знову `coop.dedicated_start`.
 
-2. **Сервер у списку (клієнт)**  
-   - На клієнті: головне меню → **Multiplayer** → **Custom Server List**.  
-   - Оновити список; має з’явитися сервер типу **"Coop Spectator"** (або назва з конфігу).  
-   - Якщо не з’являється: перевірити на хостові консоль дедик-сервера (чи виконано start_game, чи є рядки про listening); перевірити порт 7210 і фаєрвол.
+2. **Запуск клієнта (з модом)**  
+   - **На одній машині або коли лаунчер не показує мод у вкладці Мультиплеєр:** запустити **`run_mp_with_mod.bat`** з кореня проєкту (шлях у батнику вказує на `...\Mount & Blade II Bannerlord\bin\Win64_Shipping_Client` — змінити під себе, якщо треба). Гра відкриється в мультиплеєрі з модулями Native, Multiplayer, Bannerlord.Harmony, CoopSpectator.  
+   - Інакше: запуск з лаунчера, вкладка Мультиплеєр (без мода, тільки Native + Multiplayer).
 
-3. **Підключення клієнта**  
-   - Натиснути **Join** на сервері "Coop Spectator".  
-   - Очікуваний результат: клієнт заходить у intermission (екран очікування/лобі дедик-сервера), без таймаутів і повідомлень про некоректний стан.  
-   - Якщо помилка "Connection is not at the correct state" — це повідомлення від офіційного лобі; почекати 5–10 с після відкриття Multiplayer і спробувати знову; не використовувати перед цим `coop.dedicated_join_local` / `coop.test_mp_join` без перезапуску гри.
+3. **Сервер у списку і підключення (клієнт)**  
+   - У грі клієнта: головне меню → **Multiplayer** → **Custom Server List** → оновити список → має з’явитися сервер "Coop Spectator".  
+   - Натиснути **Join**. На **одній машині** мод (LobbyCustomGameLocalJoinPatch) підставить 127.0.0.1 замість публічного IP.  
+   - Очікуваний результат: клієнт заходить на екран **Awaiting Server** (intermission), без RemoveNetworkPeer/таймаутів.  
+   - Якщо помилка "Connection is not at the correct state" — почекати 5–10 с після відкриття Multiplayer і спробувати знову.  
+   - **Два ПК:** у `Patches/LobbyCustomGameLocalJoinPatch.cs` константу `PublicIpToReplace` не використовувати для підстановки, або вимкнути патч для зовнішніх клієнтів.
 
 4. **start_mission / end_mission (хост у битві)**  
    - На хостові зайти в кампанію і **увійти в битву** (наприклад, атакувати ворога на карті).  
@@ -241,9 +264,9 @@ UX:
 
 ### Короткий чек-лист перевірки
 
-- [ ] Хост: `coop.dedicated_start` без помилок, вікно дедик-сервера без "Disconnected".  
-- [ ] Клієнт: Custom Server List показує сервер "Coop Spectator".  
-- [ ] Клієнт: Join успішний, екран intermission.  
-- [ ] Хост заходить у битву → у грі хоста з’являється "start_mission → dedik (HTTP)" (або запис у лог).  
-- [ ] Клієнт переходить у місію (завантаження битви) після start_mission.  
-- [ ] Хост виходить з битви → "end_mission → dedik (HTTP)" → клієнт знову в intermission.
+- [x] Хост: `coop.dedicated_start` без помилок, вікно дедик-сервера без "Disconnected".  
+- [x] Клієнт: запуск через `run_mp_with_mod.bat` (мультиплеєр з модом).  
+- [x] Клієнт: Custom Server List показує сервер "Coop Spectator", Join успішний, екран **Awaiting Server**.  
+- [x] Хост заходить у битву → у грі хоста з’являється "start_mission → dedik (HTTP)" (перевірено окремо в синглплеєрі).  
+- [ ] **Наступний тест:** Хост у битві при підключеному клієнті — чи клієнт переходить у місію (завантаження битви).  
+- [ ] Хост виходить з битви → "end_mission → dedik (HTTP)" → клієнт знову на екрані Awaiting Server.

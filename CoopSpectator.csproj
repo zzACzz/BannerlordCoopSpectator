@@ -76,6 +76,11 @@
       <HintPath>$(BannerlordBinDir)\TaleWorlds.MountAndBlade.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- Lobby API (LobbyGameStateCustomGameClient для патчу Join через Custom Server List на локалці) -->
+    <Reference Include="TaleWorlds.MountAndBlade.Lobby" Condition="Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Lobby.dll')">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Lobby.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!-- Campaign API (Campaign, MobileParty, тощо) -->
     <Reference Include="TaleWorlds.CampaignSystem">
       <HintPath>$(BannerlordBinDir)\TaleWorlds.CampaignSystem.dll</HintPath>
@@ -135,6 +140,11 @@
       <HintPath>TaleWorlds.MountAndBlade.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- Lobby API (fallback: для LobbyCustomGameLocalJoinPatch, якщо DLL є в репозиторії) -->
+    <Reference Include="TaleWorlds.MountAndBlade.Lobby" Condition="Exists('TaleWorlds.MountAndBlade.Lobby.dll')">
+      <HintPath>TaleWorlds.MountAndBlade.Lobby.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!-- Campaign API (Campaign, MobileParty, тощо) -->
     <Reference Include="TaleWorlds.CampaignSystem">
       <HintPath>TaleWorlds.CampaignSystem.dll</HintPath>
@@ -158,5 +168,24 @@
     <!-- Fallback JSON: якщо гри немає, підтягуємо Newtonsoft.Json з NuGet (версія близька до тієї, що в грі) -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
   </ItemGroup>
+
+  <!-- Після збірки копіюємо обидва модулі (CoopSpectator + CoopSpectatorMP) у папку гри -->
+  <PropertyGroup>
+    <GameModulesDir>$(BannerlordRootDir)\Modules\CoopSpectator</GameModulesDir>
+    <GameModulesBinDir>$(GameModulesDir)\bin\Win64_Shipping_Client</GameModulesBinDir>
+    <GameModulesMPDir>$(BannerlordRootDir)\Modules\CoopSpectatorMP</GameModulesMPDir>
+    <GameModulesMPBinDir>$(GameModulesMPDir)\bin\Win64_Shipping_Client</GameModulesMPBinDir>
+  </PropertyGroup>
+  <Target Name="DeployModToGame" AfterTargets="Build">
+    <MakeDir Directories="$(GameModulesDir);$(GameModulesBinDir);$(GameModulesMPDir);$(GameModulesMPBinDir)" />
+    <Copy SourceFiles="$(ProjectDir)Module\CoopSpectator\SubModule.xml" DestinationFolder="$(GameModulesDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(ProjectDir)Module\CoopSpectatorMP\SubModule.xml" DestinationFolder="$(GameModulesMPDir)" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <_DeployBinFiles Include="$(OutputPath)*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_DeployBinFiles)" DestinationFolder="$(GameModulesBinDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_DeployBinFiles)" DestinationFolder="$(GameModulesMPBinDir)" SkipUnchangedFiles="true" />
+    <Warning Text="[CoopSpectator] Deploy done: CoopSpectator + CoopSpectatorMP -- restart launcher if open." />
+  </Target>
 </Project>
 
