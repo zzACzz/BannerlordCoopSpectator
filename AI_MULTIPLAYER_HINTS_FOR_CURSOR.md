@@ -1,5 +1,16 @@
 # AI_MULTIPLAYER_HINTS_FOR_CURSOR.md (v1.5)
 
+## Coop mod — виконані етапи (орієнтир для контексту)
+
+- **Етап 1–2:** Підготовка, Spectator mode (broadcaster, UI, блокування) — виконано.
+- **Етап 3.1:** Детекція битви у хоста (BattleDetector, BATTLE_START) — виконано.
+- **Dedicated Helper:** Запуск з кампанії (coop.dedicated_start), токен з Documents, конфіг з start_game і AdminPassword, сервер у Custom Server List — виконано.
+- **IPC кампанія ↔ dedik (Етап 3b):** start_mission / end_mission через HTTP Manager API (GET http://127.0.0.1:7210/Manager/start_mission та end_mission), виклики з BattleDetector при вході/виході хоста з місії — виконано.
+- **Етап 3.2:** Клієнт через Custom Server List — у фазі тестування (перевірити, чи клієнт переходить у місію при start_mission).
+- **Етап 3.2.1 та далі:** Вхід клієнта в MP-місію по TCP/coop_join, меню юніта, spawn, spectator — не реалізовано / далі по плану.
+
+(Деталі й чек-лист тесту — у HUMAN_NOTES_MULTIPLAYER_PROGRESS.md.)
+
 ## Goal
 Provide a decompiled, end‑to‑end map of vanilla Bannerlord MP (custom & matchmaker) so an LLM can:
 - explain "MyPeer is null" when starting from campaign,

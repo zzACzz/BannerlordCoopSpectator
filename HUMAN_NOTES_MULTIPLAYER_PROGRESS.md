@@ -1,5 +1,20 @@
 # HUMAN_NOTES_MULTIPLAYER_PROGRESS.md (v1.7)
 
+## Етапи виконано (статус)
+
+| Етап | Статус | Примітка |
+|------|--------|----------|
+| Етап 1 (підготовка, середовище, Hello World) | ✅ Виконано | План bannerlord_coop_plan.md §1 |
+| Етап 2 (Spectator: broadcaster, UI, блокування контролю) | ✅ Виконано | §2 |
+| Етап 3.1 (детекція початку битви у хоста) | ✅ Виконано | BattleDetector, BATTLE_START |
+| Dedicated Helper — запуск (Етап 1) | ✅ Виконано | coop.dedicated_start, токен, конфіг, start_game з конфігу |
+| Dedicated Helper — IPC (Етап 3b) | ✅ Виконано | BattleDetector → SendStartMission/SendEndMission, Manager API (GET /Manager/…), Dashboard AdminPassword |
+| Етап 3.2 (клієнт через Custom Server List) | 🔄 Тестування | Потрібно перевірити: клієнт Join → хост у битву → чи клієнт переходить у місію |
+| Етап 3.2.1 (вхід клієнта в MP-місію, TCP/coop_join) | ⏳ Не реалізовано | Дослідження Multiplayer DLL; відкриття місії на клієнті |
+| Етап 3.3–3.5 (меню юніта, spawn, повернення spectator) | ⏳ Далі по плану | Після робочого підключення клієнта |
+
+---
+
 ## 1) Що ми тепер знаємо “від і до”
 1. Net-стек Bannerlord’а запускається через:
    - `MultiplayerMain.Initialize(new GameNetworkHandler())` (звичайний MP)
@@ -148,8 +163,8 @@ UX:
 
 - **coop.dedicated_start [port] [token]** — запускає Mount & Blade II Dedicated Server. Токен шукається в кількох папках: MyDocuments, OneDrive\\Documents, OneDrive\\Документи; файл `DedicatedCustomServerAuthToken.txt` має пріоритет.
 - **coop.dedicated_open_tokens** — відкриває папку Tokens у провіднику (якщо токен не знайдено, підказка в консолі пропонує цю команду).
-- Після запуску: у консолі **дедик-сервера** ввести **start_game**, щоб сервер з’явився в Custom Server List. Клієнти приєднуються через Multiplayer -> Custom Server List (порт 7210 за замовчуванням).
-- Далі по плану: IPC для автоматичної відправки start_game / start_mission / end_mission з кампанії (Етап 3b, 5).
+- Після запуску: **start_game** виконується автоматично з конфігу (файл `ds_config_coop_start.txt` у Modules\Native). У конфіг також записується **AdminPassword coopforever** — для входу в Dashboard (http://localhost:7210) → Terminal/Manager. Клієнти приєднуються через Multiplayer → Custom Server List (порт 7210 за замовчуванням).
+- IPC для start_mission / end_mission з кампанії реалізовано (Етап 3b): виклики з BattleDetector, відправка через Manager API.
 
 ### Dedicated Helper — діагностика логів
 
@@ -175,11 +190,60 @@ UX:
 
 ### Dedicated Helper — відправка команд (Етап 3b, реалізовано)
 
-- **DedicatedServerCommands.SendCommand**: спочатку спроба HTTP (GET/POST на localhost:7210 — кілька варіантів URL для майбутнього API), потім **stdin** процесу дедик-сервера, якщо він запущений з моду (`coop.dedicated_start`).
-- **Launcher**: при запуску процесу встановлено `RedirectStandardInput = true`, процес зберігається в `_dedicatedProcess`; публічний метод `TrySendConsoleLine(line)` записує рядок у stdin і робить Flush. Чи читає офіційний Dedicated Server консольні команди з stdin — потрібно перевірити в грі (якщо ні, залишається лише пошук HTTP API через DevTools).
-- **start_game**: вже автоматично через конфіг (AddConfigFileOnly).
+- **Manager API** (перевірено в DevTools): GET `http://127.0.0.1:7210/Manager/start_mission` та `/Manager/end_mission` — використовуються в `TrySendCommandViaHttp`; у грі показуються повідомлення типу "Coop: start_mission → dedik (HTTP)". Константа **ShowDedicatedCommandUiFeedback** у DedicatedServerCommands.cs — встановити `false`, щоб прибрати ці повідомлення з екрану.
+- Запасний варіант: **stdin** процесу дедик-сервера (якщо запущений з моду), метод `DedicatedHelperLauncher.TrySendConsoleLine(line)`.
+- **start_game**: автоматично через конфіг (AddConfigFileOnly). **Token doctor** (зроблено): пошук токена в обох варіантах папки, підказка в лог; викликається при `coop.dedicated_start` і `coop.dedicated_open_tokens`.
 
-### Dedicated Helper — наступні кроки
+### Етап 3.2 — наступний фокус: клієнт через Custom Server List
 
-- Перевірити в робочому середовищі: після `coop.dedicated_start` при вході в битву чи з’являється в консолі дедик-сервера команда start_mission (якщо сервер читає stdin). Якщо ні — дослідити web panel (DevTools → Network) і додати знайдений endpoint у `TrySendCommandViaHttp`.
-- **Token doctor** (зроблено): пошук токена в обох варіантах папки (Mount and Blade II / Mount & Blade II) у Documents і OneDrive; якщо токен лише в одній — у лог підказка скопіювати в іншу. Викликається при `coop.dedicated_start` і при `coop.dedicated_open_tokens`.
+- **Поточний потік:** Хост кампанії + дедик (coop.dedicated_start) → при вході/виході з битви мод шле start_mission/end_mission на Manager API → дедик переходить у mission mode.
+- **Що тестувати:** Клієнт приєднується через Multiplayer → Custom Server List до сервера "[COOP] Coop Spectator". Коли хост у кампанії заходить у битву (викликається start_mission) — чи дедик автоматично переводить уже підключених клієнтів у місію (ванільний MP-флоу). Тест: дві машини або два інстанси — одна campaign+dedik, друга клієнт; клієнт Join через Custom Server List; хост входить у битву → перевірити, чи клієнт отримує завантаження місії.
+- **Альтернативний шлях (TCP):** Клієнт через `coop_join` отримує BATTLE_START по нашому TCP; ClientBattleNotification показує countdown; відкриття місії на клієнті ще не реалізовано (потрібне дослідження Multiplayer DLL, §3.2.1 плану).
+
+---
+
+## Що необхідно для тесту і як перевірити
+
+### Що потрібно мати
+
+- **Хост:** Один ПК з Bannerlord + мод Coop Spectator + встановлений **Mount & Blade II: Dedicated Server** (Steam → Інструменти).
+- **Токен:** Згенерований у мультиплеєрі командою `customserver.gettoken` (консоль ALT+~), файл у `Documents\Mount & Blade II Bannerlord\Tokens\DedicatedCustomServerAuthToken.txt`. Якщо немає — команда `coop.dedicated_open_tokens` відкриє папку, підказка в консолі.
+- **Клієнт:** Другий ПК з Bannerlord і модом, або друга копія гри на тому ж ПК (для тесту "до себе").
+- **Мережа:** Порт **7210 (UDP і TCP)** відкритий на хостові (якщо клієнт на іншому ПК — фаєрвол/роутер). Для тесту на одній машині достатньо localhost.
+
+### Як перевірити покроково
+
+1. **Запуск дедик-сервера (хост)**  
+   - Завантажити кампанію, відкрити консоль (`~` або `Alt+~`).  
+   - Ввести: `coop.dedicated_start` (або `coop.dedicated_start 7210`).  
+   - Очікуваний результат: у консолі гри повідомлення на кшталт "Dedicated Helper started (PID …, port 7210). Server visible in Custom Server List…". Вікно дедик-сервера відкрито, у його консолі немає "Disconnected from custom battle server manager".  
+   - Якщо токен не знайдено — з’явиться підказка; виконати `customserver.gettoken` у мультиплеєрі, потім знову `coop.dedicated_start`.
+
+2. **Сервер у списку (клієнт)**  
+   - На клієнті: головне меню → **Multiplayer** → **Custom Server List**.  
+   - Оновити список; має з’явитися сервер типу **"Coop Spectator"** (або назва з конфігу).  
+   - Якщо не з’являється: перевірити на хостові консоль дедик-сервера (чи виконано start_game, чи є рядки про listening); перевірити порт 7210 і фаєрвол.
+
+3. **Підключення клієнта**  
+   - Натиснути **Join** на сервері "Coop Spectator".  
+   - Очікуваний результат: клієнт заходить у intermission (екран очікування/лобі дедик-сервера), без таймаутів і повідомлень про некоректний стан.  
+   - Якщо помилка "Connection is not at the correct state" — це повідомлення від офіційного лобі; почекати 5–10 с після відкриття Multiplayer і спробувати знову; не використовувати перед цим `coop.dedicated_join_local` / `coop.test_mp_join` без перезапуску гри.
+
+4. **start_mission / end_mission (хост у битві)**  
+   - На хостові зайти в кампанію і **увійти в битву** (наприклад, атакувати ворога на карті).  
+   - Очікуваний результат: у грі хоста коротке повідомлення "Coop: start_mission → dedik (HTTP)" (якщо не вимкнено в коді).  
+   - На клієнті: перевірити, чи **дедик перевів клієнта в місію** (завантаження сцени, поява битви). Якщо так — потік Custom Server List + start_mission працює.  
+   - Вийти з битви на хостові (втеча або завершення). Очікуваний результат: повідомлення "Coop: end_mission → dedik (HTTP)"; клієнт повертається в intermission.
+
+5. **Додатково (Dashboard)**  
+   - У браузері відкрити `http://localhost:7210`, пароль **coopforever**.  
+   - Переконатися, що вкладка Manager/Terminal відкривається (при потребі можна вручну натиснути End Mission / Start Mission для перевірки).
+
+### Короткий чек-лист перевірки
+
+- [ ] Хост: `coop.dedicated_start` без помилок, вікно дедик-сервера без "Disconnected".  
+- [ ] Клієнт: Custom Server List показує сервер "Coop Spectator".  
+- [ ] Клієнт: Join успішний, екран intermission.  
+- [ ] Хост заходить у битву → у грі хоста з’являється "start_mission → dedik (HTTP)" (або запис у лог).  
+- [ ] Клієнт переходить у місію (завантаження битви) після start_mission.  
+- [ ] Хост виходить з битви → "end_mission → dedik (HTTP)" → клієнт знову в intermission.
