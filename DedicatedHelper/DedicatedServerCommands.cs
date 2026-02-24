@@ -1,20 +1,22 @@
 using System; // Exception
-using System.Net; // HttpWebRequest, WebRequest
+using System.IO; // StreamReader
+using System.Net; // HttpWebRequest, WebRequest, WebException
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback
 
 namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_mission, end_mission (Етап 3b)
 {
     /// <summary>
-    /// Відправка консольних команд на локальний Dedicated Server (HTTP web panel або stdin процесу).
+    /// Відправка консольних команд на локальний Dedicated Server: спочатку stdin процесу (якщо запущений з моду), потім HTTP web panel.
     /// Після того як хост заходить у битву — викликати start_mission; при виході — end_mission.
     /// </summary>
     public static class DedicatedServerCommands
     {
         private const int DashboardPort = 7210; // Порт для спроби HTTP (офіційний UDP 7210; web panel може бути тут або на іншому)
         private const int HttpTimeoutMs = 1500; // Короткий таймаут, щоб не блокувати гру
+        private const int MaxResponseBodyLogLength = 400; // Скільки символів body логувати для діагностики
 
-        /// <summary>Відправити команду на дедик-сервер: спочатку спроба HTTP (якщо знайдемо API), потім stdin процесу, якщо він запущений з моду.</summary>
-        /// <returns>true якщо команду прийнято (HTTP успіх або stdin записано), false інакше.</returns>
+        /// <summary>Відправити команду на дедик-сервер: спочатку stdin (якщо процес запущений з моду), потім HTTP fallback.</summary>
+        /// <returns>true якщо команду прийнято (stdin записано або HTTP успіх), false інакше.</returns>
         public static bool SendCommand(string command)
         {
             if (string.IsNullOrWhiteSpace(command))
@@ -24,17 +26,17 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
             }
             string cmd = command.Trim();
             // 1) Спроба HTTP — якщо у майбутньому з’ясуємо endpoint (наприклад з DevTools), додати сюди конкретний URL.
+            bool useOnlyHttp = cmd == "start_mission" || cmd == "end_mission";
+            if (!useOnlyHttp && DedicatedHelperLauncher.HasDedicatedProcess() && DedicatedHelperLauncher.TrySendConsoleLine(cmd))
+            {
+                ModLogger.Info("DedicatedServerCommands: SendCommand(\"" + cmd + "\") sent via stdin.");
+                UiFeedback.ShowMessageDeferred("Coop: " + cmd + " → dedik (stdin)");
+                return true;
+            }
             if (TrySendCommandViaHttp(cmd))
             {
                 ModLogger.Info("DedicatedServerCommands: SendCommand(\"" + cmd + "\") sent via HTTP.");
                 UiFeedback.ShowMessageDeferred("Coop: " + cmd + " → dedik (HTTP)");
-                return true;
-            }
-            // 2) Спроба stdin процесу, запущеного з моду (якщо дедик-сервер читає консольні команди з stdin).
-            if (DedicatedHelperLauncher.TrySendConsoleLine(cmd))
-            {
-                ModLogger.Info("DedicatedServerCommands: SendCommand(\"" + cmd + "\") sent via stdin.");
-                UiFeedback.ShowMessageDeferred("Coop: " + cmd + " → dedik (stdin)");
                 return true;
             }
             ModLogger.Info("DedicatedServerCommands: SendCommand(\"" + cmd + "\") — no channel (HTTP failed, stdin not available or server not started from mod).");
@@ -42,44 +44,80 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
             return false;
         }
 
-        /// <summary>Спроба відправити команду через HTTP. Спочатку Manager API (GET /Manager/start_mission, /Manager/end_mission), потім інші варіанти.</summary>
+        /// <summary>Спроба відправити команду через HTTP web panel: логін (GET Auth → POST login) + GET /Manager/{command} з auth cookie.</summary>
         private static bool TrySendCommandViaHttp(string command)
         {
-            // Офіційний Dashboard Manager: кнопки Start Mission / End Mission роблять GET на /Manager/{command} (перевірено в DevTools)
-            string managerUrl = "http://127.0.0.1:" + DashboardPort + "/Manager/" + Uri.EscapeDataString(command);
-            string[] urlsToTry = new[]
+            string baseUrl = WebPanelAuth.GetBaseUrl(DashboardPort);
+            if (string.IsNullOrEmpty(baseUrl))
             {
-                managerUrl,
-                "http://127.0.0.1:" + DashboardPort + "/command?cmd=" + Uri.EscapeDataString(command),
-                "http://127.0.0.1:" + DashboardPort + "/api/command",
-                "http://127.0.0.1:" + DashboardPort + "/"
-            };
-            foreach (string url in urlsToTry)
+                ModLogger.Info("DedicatedServerCommands: dashboard unreachable, no base URL.");
+                return false;
+            }
+            string managerUrl = baseUrl + "/Manager/" + Uri.EscapeDataString(command);
+            string password = DedicatedHelperLauncher.GetDashboardAdminPassword();
+
+            for (int attempt = 0; attempt < 2; attempt++)
             {
                 try
                 {
-                    var req = (HttpWebRequest)WebRequest.Create(url);
-                    req.Method = (url.Contains("/Manager/") || url == "http://127.0.0.1:" + DashboardPort + "/") ? "GET" : (url.Contains("/command") || url.Contains("/api/") ? "POST" : "GET");
-                    req.Timeout = HttpTimeoutMs;
-                    req.ReadWriteTimeout = HttpTimeoutMs;
-                    req.ContentLength = 0;
-                    if (req.Method == "POST" && url.Contains("/api/command"))
+                    if (!WebPanelAuth.EnsureSignedIn(password, DashboardPort))
                     {
-                        req.ContentType = "application/x-www-form-urlencoded";
-                        string body = "command=" + Uri.EscapeDataString(command);
-                        req.ContentLength = System.Text.Encoding.UTF8.GetByteCount(body);
-                        using (var stream = req.GetRequestStream())
-                            stream.Write(System.Text.Encoding.UTF8.GetBytes(body), 0, (int)req.ContentLength);
+                        ModLogger.Info("DedicatedServerCommands: WebPanelAuth.EnsureSignedIn failed (attempt " + (attempt + 1) + ").");
+                        if (attempt == 0) continue;
+                        return false;
                     }
+
+                    ModLogger.Info("DedicatedServerCommands: GET " + managerUrl);
+                    var req = (HttpWebRequest)WebRequest.Create(managerUrl);
+                    req.Method = "GET";
+                    req.Proxy = null;
+                    req.Timeout = 3000;
+                    req.ReadWriteTimeout = 3000;
+                    req.KeepAlive = false;
+                    req.AllowAutoRedirect = false;
+                    req.CookieContainer = WebPanelAuth.GetCookieContainer();
+                    req.ContentLength = 0;
                     using (var resp = (HttpWebResponse)req.GetResponse())
                     {
-                        if (resp.StatusCode == HttpStatusCode.OK || (int)resp.StatusCode >= 200 && (int)resp.StatusCode < 300)
+                        string bodyPreview = "";
+                        string fullBody = "";
+                        try
+                        {
+                            using (var reader = new StreamReader(resp.GetResponseStream(), System.Text.Encoding.UTF8))
+                            {
+                                fullBody = reader.ReadToEnd();
+                                bodyPreview = fullBody.Length <= MaxResponseBodyLogLength ? fullBody : fullBody.Substring(0, MaxResponseBodyLogLength) + "...";
+                            }
+                        }
+                        catch (Exception) { bodyPreview = "(read error)"; }
+                        int code = (int)resp.StatusCode;
+                        ModLogger.Info("DedicatedServerCommands: HTTP " + managerUrl + " → " + code + " " + (resp.StatusDescription ?? "") + " | body: " + bodyPreview);
+
+                        if (WebPanelAuth.IsLoginPageResponse(fullBody))
+                        {
+                            ModLogger.Info("DedicatedServerCommands: got login page (attempt " + (attempt + 1) + "), re-login and retry once.");
+                            if (attempt == 1) return false;
+                            continue;
+                        }
+                        if (resp.StatusCode == HttpStatusCode.OK || (code >= 200 && code < 300))
                             return true;
+                        return false;
                     }
                 }
                 catch (Exception ex)
                 {
-                    ModLogger.Info("DedicatedServerCommands: HTTP " + url + " — " + ex.Message);
+                    var webEx = ex as WebException;
+                    if (webEx != null)
+                    {
+                        string detail = "Status=" + webEx.Status + " " + (webEx.InnerException != null ? "Inner=" + webEx.InnerException.Message : "");
+                        if (webEx.Response is HttpWebResponse r)
+                            detail += " ResponseStatusCode=" + (int)r.StatusCode;
+                        ModLogger.Info("DedicatedServerCommands: HTTP " + managerUrl + " — " + detail);
+                    }
+                    else
+                        ModLogger.Info("DedicatedServerCommands: HTTP " + managerUrl + " — " + ex.Message);
+                    if (attempt == 0) continue;
+                    return false;
                 }
             }
             return false;

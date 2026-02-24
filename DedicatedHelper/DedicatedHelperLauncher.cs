@@ -2,6 +2,7 @@ using System; // Exception, Environment, IntPtr
 using System.Diagnostics; // Process, ProcessStartInfo
 using System.IO; // Path, File, Directory
 using System.Management; // ManagementObjectSearcher, Win32_Process
+using System.Threading; // Thread.Sleep для очікування дочірнього процесу
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback
 
 namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офіційний дедик-сервер) з кампанії
@@ -27,6 +28,8 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const string StartupConfigFileName = "ds_config_coop_start.txt";
         /// <summary>Пароль адміна для Dashboard (localhost:7210), щоб увійти в Terminal і дослідити API консольних команд.</summary>
         private const string DashboardAdminPassword = "coopforever";
+        /// <summary>Пароль для HTTP-логіну в web panel (DedicatedServerCommands / WebPanelAuth).</summary>
+        public static string GetDashboardAdminPassword() => DashboardAdminPassword;
         /// <summary>Якщо false — не передаємо конфіг при запуску (як Steam: "Command file is null"), щоб сервер не від'єднувався від Diamond. start_game тоді вводять вручну в консолі сервера.</summary>
         private const bool UseStartupConfig = false;
         /// <summary>Явний список модулів, як у ванільному dedicated (Steam). Без цього сервер може піднятися без Multiplayer/DedicatedCustomServerHelper і від'єднатися від custom battle server manager.</summary>
@@ -53,7 +56,12 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             if (p == null || p.HasExited) return false;
             try
             {
-                if (p.StandardInput == null) return false;
+                LogDedicatedProcessInfo(p, "TrySendConsoleLine (sending stdin)");
+                if (p.StandardInput == null)
+                {
+                    ModLogger.Info("DedicatedHelper: StandardInput is null for PID=" + p.Id + " (process not started with RedirectStandardInput?).");
+                    return false;
+                }
                 p.StandardInput.WriteLine(line.Trim());
                 p.StandardInput.Flush();
                 ModLogger.Info("DedicatedHelper: sent to stdin: \"" + line.Trim() + "\"");
@@ -64,6 +72,30 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 ModLogger.Info("DedicatedHelper: TrySendConsoleLine failed: " + ex.Message);
                 return false;
             }
+        }
+
+        /// <summary>Логує PID, ProcessName і (якщо є) MainModule.FileName процесу — для зіставлення з консоллю в Task Manager.</summary>
+        private static void LogDedicatedProcessInfo(Process p, string context)
+        {
+            if (p == null) return;
+            try
+            {
+                string name = p.ProcessName ?? "";
+                string mainModule = "";
+                try { mainModule = p.MainModule != null && p.MainModule.FileName != null ? p.MainModule.FileName : ""; } catch (Exception) { mainModule = "(no access)"; }
+                ModLogger.Info("DedicatedHelper [" + context + "] PID=" + p.Id + " ProcessName=" + name + " MainModule.FileName=" + mainModule);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("DedicatedHelper [LogDedicatedProcessInfo] PID=" + p.Id + " error: " + ex.Message);
+            }
+        }
+
+        /// <summary>Чи є живий процес дедик-сервера, запущений з моду (для пріоритету stdin у SendCommand).</summary>
+        public static bool HasDedicatedProcess()
+        {
+            Process p = _dedicatedProcess;
+            return p != null && !p.HasExited;
         }
 
         /// <summary>Повертає шлях до папки Tokens для показу користувачу (перший існуючий кандидат або MyDocuments).</summary>
@@ -398,7 +430,9 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 }
                 _dedicatedProcess = p; // Зберігаємо для TrySendConsoleLine (start_mission / end_mission)
                 ModLogger.Info("DedicatedHelper: process started PID=" + p.Id);
+                LogDedicatedProcessInfo(p, "after Start (Starter)");
                 LogProcessCommandLine(p.Id);
+                TrySwitchToChildProcessIfAny(p.Id);
 
                 bool safeProfile = SteamLikeLaunch && (AddPortOnly || AddConfigFileOnly) && !AddTokenOnly && !AddTokenAndPortOnly;
                 bool isolationTest = SteamLikeLaunch && (AddTokenOnly || AddTokenAndPortOnly);
@@ -477,6 +511,47 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             {
                 ModLogger.Info("DedicatedHelper [WMI] failed for PID " + processId + ": " + ex.Message);
             }
+        }
+
+        /// <summary>Шукає дочірній процес Starter'а (наприклад DedicatedCustomServer.exe), у якого консоль і куди вводять команди вручну; якщо знайдено — підміняє _dedicatedProcess на нього (stdin може бути недоступний, але PID у лозі збігатиметься з Task Manager).</summary>
+        private static void TrySwitchToChildProcessIfAny(int starterPid)
+        {
+            const int waitSecondsTotal = 8;
+            const int intervalMs = 1000;
+            for (int waited = 0; waited < waitSecondsTotal; waited += (intervalMs / 1000))
+            {
+                if (waited > 0)
+                    Thread.Sleep(intervalMs);
+                try
+                {
+                    using (var searcher = new ManagementObjectSearcher("SELECT ProcessId, Name FROM Win32_Process WHERE ParentProcessId = " + starterPid))
+                    using (var results = searcher.Get())
+                    {
+                        foreach (ManagementObject obj in results)
+                        {
+                            int childPid = obj["ProcessId"] != null ? Convert.ToInt32(obj["ProcessId"]) : 0;
+                            string name = obj["Name"] != null ? (obj["Name"].ToString() ?? "") : "";
+                            if (childPid <= 0) continue;
+                            if (name.IndexOf("DedicatedCustomServer", StringComparison.OrdinalIgnoreCase) >= 0 && name.IndexOf("Starter", StringComparison.OrdinalIgnoreCase) < 0)
+                            {
+                                Process child = Process.GetProcessById(childPid);
+                                if (child != null && !child.HasExited)
+                                {
+                                    _dedicatedProcess = child;
+                                    ModLogger.Info("DedicatedHelper: switched to child process PID=" + childPid + " Name=" + name + " (console where you type commands).");
+                                    LogDedicatedProcessInfo(child, "after switch to child");
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("DedicatedHelper [child lookup] attempt at " + waited + "s: " + ex.Message);
+                }
+            }
+            ModLogger.Info("DedicatedHelper: no child process found for Starter PID=" + starterPid + " (stdin will go to Starter; if commands don't run, compare this PID with Task Manager console window).");
         }
 
         /// <summary>Тільки токен (для ізоляції тесту AddTokenOnly).</summary>

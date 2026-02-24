@@ -2,7 +2,7 @@
 
 ## Де ми зараз
 
-- **Хост:** Синглплеєр з модом → кампанія → `coop.dedicated_start` → дедик працює, при вході/виході з битви мод шле start_mission / end_mission на Manager API (повідомлення "Coop: start_mission → dedik (HTTP)" та про закінчення перевірені).
+- **Хост:** Синглплеєр з модом → кампанія → `coop.dedicated_start` → дедик працює, при вході/виході з битви мод шле start_mission / end_mission спочатку через **stdin** процесу дедику (найнадійніше), при відсутності процесу — через HTTP (повідомлення "Coop: … → dedik (stdin)" або "… → dedik (HTTP)").
 - **Клієнт:** Запуск через **батник** `run_mp_with_mod.bat` (Bannerlord.exe з `/multiplayer` та потрібними модулями) → Multiplayer → Custom Server List → Join → клієнт потрапляє на екран **Awaiting Server** (включно з хостом на тій самій машині).
 - **Що далі:** Перевірити повний цикл: хост заходить у битву → чи клієнт переходить у місію; хост виходить → чи клієнт повертається на Awaiting Server.
 
@@ -204,9 +204,31 @@ UX:
 
 ### Dedicated Helper — відправка команд (Етап 3b, реалізовано)
 
-- **Manager API** (перевірено в DevTools): GET `http://127.0.0.1:7210/Manager/start_mission` та `/Manager/end_mission` — використовуються в `TrySendCommandViaHttp`; у грі показуються повідомлення типу "Coop: start_mission → dedik (HTTP)". Константа **ShowDedicatedCommandUiFeedback** у DedicatedServerCommands.cs — встановити `false`, щоб прибрати ці повідомлення з екрану.
-- Запасний варіант: **stdin** процесу дедик-сервера (якщо запущений з моду), метод `DedicatedHelperLauncher.TrySendConsoleLine(line)`.
+- **Пріоритет:** спочатку **stdin** процесу дедик-сервера (якщо він запущений з моду через `coop.dedicated_start`) — команда передається так само, як при ручному вводі в консолі; потім fallback **HTTP** (Manager API або інші URL), якщо процесу немає (наприклад, дедик запущений з Steam). У грі: "Coop: start_mission → dedik (stdin)" або "… → dedik (HTTP)".
+- **У лозі:** шукати `SendCommand(…) sent via stdin` / `sent via HTTP`; для HTTP додатково логуються URL, StatusCode, початок body (діагностика endpoint).
+- **HTTP (web panel з авторизацією):** основний робочий канал, коли stdin недоступний. Мод логіниться в web panel: GET `/Auth?ReturnUrl=%2F` → витягує `__RequestVerificationToken` з HTML → POST логін (password + token), зберігає cookie `.AspNetCore.Cookies`, потім GET `http://127.0.0.1:7210/Manager/start_mission` та `/Manager/end_mission` з цим cookie. Клас **WebPanelAuth** (EnsureSignedIn, CookieContainer); пароль з **DedicatedHelperLauncher.GetDashboardAdminPassword()** (той самий, що в конфігу AdminPassword).
 - **start_game**: автоматично через конфіг (AddConfigFileOnly). **Token doctor** (зроблено): пошук токена в обох варіантах папки, підказка в лог; викликається при `coop.dedicated_start` і `coop.dedicated_open_tokens`.
+
+### Dedicated Helper — Starter vs дочірній процес (діагностика PID)
+
+- Мод запускає **DedicatedCustomServer.Starter.exe**; він може породити **дочірній процес** (наприклад DedicatedCustomServer.exe), у чиїй консолі ти вводиш команди вручну. Тоді stdin, записаний у Starter, ніхто не читає.
+- **Після старту** у лозі шукай: `DedicatedHelper [after Start (Starter)] PID=… ProcessName=… MainModule.FileName=…` — це процес, у який мод зараз пише stdin.
+- Якщо знайдено дочірній процес (WMI ParentProcessId), у лозі з’явиться: `DedicatedHelper: switched to child process PID=… Name=…` — далі stdin відправляється цьому процесу (у нього може бути StandardInput == null, тоді fallback на HTTP).
+- **Зіставлення з Task Manager:** Task Manager → Details → увімкни колонку PID. Порівняй PID з логу з PID того вікна консолі, де вручну вводиш start_mission. Якщо різні — мод пише не в ту консоль; підміна на child має це виправити. Якщо після підміни в лозі `StandardInput is null for PID=…` — процес правильний, але stdin недоступний (тоді основний канал — HTTP через DevTools).
+
+### Діагностика: якщо при вході в битву (синглплеєр) ніяких дій на сервері не відбувається
+
+- **Очікувана поведінка:** Коли хост у кампанії заходить у битву (будь-який загін), **BattleDetector** має помітити появу `Mission.Current` і викликати `DedicatedServerCommands.SendStartMission()`. У грі з’являється повідомлення "Coop: start_mission → dedik (HTTP)" (або "… not sent (check game log)").
+- **Що перевірити:**
+  1. **Лог гри (rgl_log_*.txt)** — шукати рядки `[CoopSpectator]`:
+     - `BattleDetector: mission entered (Mission.Current set)` — означає, що мод побачив вхід у місію.
+     - `BattleDetector: not TCP host — sending start_mission to dedicated` — гілка для кампанії без coop.host (синглплеєр з дедиком).
+     - `BattleDetector: SendStartMission() returned true/false` — чи команда відправлена. У лозі також: `SendCommand(…) sent via stdin` (дедик з моду) або `sent via HTTP`; для HTTP логуються URL, StatusCode, початок body.
+     - Якщо цих рядків **немає** при вході в битву — можливо, `OnApplicationTick` не викликається під час завантаження битви або `Mission.Current` в кампанії встановлюється пізніше/інакше; тоді варто розглянути підписку на подію старту місії (наприклад, campaign encounter).
+  2. **Дедик запущений:** `coop.dedicated_start` виконано, вікно дедик-сервера відкрито, у консолі дедику немає "Disconnected from custom battle server manager".
+  3. **PID і процес:** у лозі є `DedicatedHelper [after Start]` та/або `[TrySendConsoleLine] PID=… ProcessName=…`. Порівняй цей PID з Task Manager (Details, колонка PID) — вікно консолі, куди вручну вводиш start_mission, має той самий PID. Якщо ні — див. розділ «Starter vs дочірній процес».
+  4. **Dashboard на 7210:** у браузері відкрити `http://127.0.0.1:7210` — має відкритися панель (логін AdminPassword з конфігу). Якщо сторінка не відкривається — дедик не слухає 7210 або фаєрвол блокує.
+- **Якщо start_mission у лозі повертає true, але дедик не переходить у mission mode** — перевірити консоль/лог самого дедик-сервера (чи отримує він HTTP-запит і що робить з командою).
 
 ### Етап 3.2 — наступний фокус: клієнт через Custom Server List
 
@@ -254,9 +276,9 @@ UX:
 
 4. **start_mission / end_mission (хост у битві)**  
    - На хостові зайти в кампанію і **увійти в битву** (наприклад, атакувати ворога на карті).  
-   - Очікуваний результат: у грі хоста коротке повідомлення "Coop: start_mission → dedik (HTTP)" (якщо не вимкнено в коді).  
+   - Очікуваний результат: у грі хоста коротке повідомлення "Coop: start_mission → dedik (stdin)" або "… → dedik (HTTP)" (якщо дедик запущений з моду — зазвичай stdin).  
    - На клієнті: перевірити, чи **дедик перевів клієнта в місію** (завантаження сцени, поява битви). Якщо так — потік Custom Server List + start_mission працює.  
-   - Вийти з битви на хостові (втеча або завершення). Очікуваний результат: повідомлення "Coop: end_mission → dedik (HTTP)"; клієнт повертається в intermission.
+   - Вийти з битви на хостові (втеча або завершення). Очікуваний результат: повідомлення "Coop: end_mission → dedik (stdin)" або "… → dedik (HTTP)"; клієнт повертається в intermission.
 
 5. **Додатково (Dashboard)**  
    - У браузері відкрити `http://localhost:7210`, пароль **coopforever**.  
@@ -269,4 +291,4 @@ UX:
 - [x] Клієнт: Custom Server List показує сервер "Coop Spectator", Join успішний, екран **Awaiting Server**.  
 - [x] Хост заходить у битву → у грі хоста з’являється "start_mission → dedik (HTTP)" (перевірено окремо в синглплеєрі).  
 - [ ] **Наступний тест:** Хост у битві при підключеному клієнті — чи клієнт переходить у місію (завантаження битви).  
-- [ ] Хост виходить з битви → "end_mission → dedik (HTTP)" → клієнт знову на екрані Awaiting Server.
+- [ ] Хост виходить з битви → "end_mission → dedik (stdin)" або "(HTTP)" → клієнт знову на екрані Awaiting Server.
