@@ -3,7 +3,7 @@ using System.Diagnostics; // Process, ProcessStartInfo
 using System.IO; // Path, File, Directory
 using System.Management; // ManagementObjectSearcher, Win32_Process
 using System.Threading; // Thread.Sleep для очікування дочірнього процесу
-using CoopSpectator.Infrastructure; // ModLogger, UiFeedback
+using CoopSpectator.Infrastructure; // ModLogger, UiFeedback, CoopGameModeIds
 
 namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офіційний дедик-сервер) з кампанії
 {
@@ -317,12 +317,19 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             string configPath = Path.Combine(nativeDir, StartupConfigFileName);
             try
             {
-                // AdminPassword потрібен для входу в Dashboard (http://localhost:7210) → Terminal для консольних команд
+                // GameType у dedicated server config ПОВИНЕН бути одним з офіційних режимів:
+                // Captain, TeamDeathmatch, Skirmish, FreeForAll, Duel або Siege.
+                // (див. офіційну документацію hosting_server / GameType).
+                // Наш кастомний режим TdmClone реєструється в модулі, але як GameType у конфігу
+                // він не підтримується → "Cannot find game type: TdmClone".
+                // Тому тут завжди ставимо валідний офіційний режим, наприклад TeamDeathmatch.
+                string gameTypeId = "TeamDeathmatch";
                 string content = "AdminPassword " + DashboardAdminPassword + Environment.NewLine
                     + "ServerName Coop Spectator" + Environment.NewLine
+                    + "GameType " + gameTypeId + Environment.NewLine
                     + "start_game" + Environment.NewLine;
                 File.WriteAllText(configPath, content);
-                ModLogger.Info("DedicatedHelper: wrote startup config to " + configPath);
+                ModLogger.Info("DedicatedHelper: wrote startup config to " + configPath + " [config GameTypeId=" + gameTypeId + "]");
                 return StartupConfigFileName;
             }
             catch (Exception ex)

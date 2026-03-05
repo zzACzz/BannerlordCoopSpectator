@@ -1,0 +1,23 @@
+<!-- Модуль тільки для Dedicated Server: реєстрація CoopTdm, server-side behaviors. Не для SP/клієнта. DLL лише в bin/Win64_Shipping_Server/. -->
+<Module>
+  <Name value="Coop Spectator (Dedicated)" />
+  <Id value="CoopSpectatorDedicated" />
+  <Version value="v0.1.1" />
+  <SingleplayerModule value="false" />
+  <MultiplayerModule value="false" />
+  <DependedModules>
+    <DependedModule Id="Native" />
+    <DependedModule Id="Multiplayer" />
+  </DependedModules>
+  <SubModules>
+    <SubModule>
+      <Name value="CoopSpectatorDedicated" />
+      <!-- Та сама DLL/ентріпойнт що й у клієнті; збирається окремо в bin/Win64_Shipping_Server/ (на дедику немає Win64_Shipping_Client). -->
+      <DLLName value="CoopSpectator.dll" />
+      <SubModuleClassType value="CoopSpectator.SubModule" />
+      <Tags>
+        <Tag key="DedicatedServerType" value="all" />
+      </Tags>
+    </SubModule>
+  </SubModules>
+</Module>

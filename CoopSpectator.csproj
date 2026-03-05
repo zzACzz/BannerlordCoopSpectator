@@ -34,6 +34,14 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
+  <!-- Клієнт/кампанія: не компілюємо DedicatedServer (свій SubModule) та GameMode (потрібен Multiplayer DLL). -->
+  <ItemGroup>
+    <Compile Remove="DedicatedServer\**\*" />
+    <Compile Remove="GameMode\**\*" />
+    <Compile Remove="**\obj\**\*" />
+    <Compile Remove="**\bin\**\*" />
+  </ItemGroup>
+
   <!-- NuGet залежності моду (ми вбудовуємо Harmony, щоб не залежати від Bannerlord.Harmony моду) -->
   <ItemGroup>
     <!-- Lib.Harmony (0Harmony.dll) використовується для патчингу методів гри -->
@@ -185,7 +193,12 @@
     </ItemGroup>
     <Copy SourceFiles="@(_DeployBinFiles)" DestinationFolder="$(GameModulesBinDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_DeployBinFiles)" DestinationFolder="$(GameModulesMPBinDir)" SkipUnchangedFiles="true" />
-    <Warning Text="[CoopSpectator] Deploy done: CoopSpectator + CoopSpectatorMP -- restart launcher if open." />
+    <!-- ModuleData (multiplayer_strings.xml тощо) — щоб гра бачила назви режимів у лобі -->
+    <ItemGroup Condition="Exists('$(ProjectDir)Module\CoopSpectator\ModuleData')">
+      <_ModuleDataFiles Include="$(ProjectDir)Module\CoopSpectator\ModuleData\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ModuleDataFiles)" DestinationFolder="$(GameModulesDir)\ModuleData\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('$(ProjectDir)Module\CoopSpectator\ModuleData')" />
+    <Warning Text="[CoopSpectator] Deploy done: CoopSpectator + CoopSpectatorMP (incl. ModuleData) → $(BannerlordRootDir)\Modules. Restart launcher if open." />
   </Target>
 </Project>
 

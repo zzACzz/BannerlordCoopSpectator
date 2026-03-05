@@ -1,7 +1,7 @@
 using System; // Exception
 using System.IO; // StreamReader
 using System.Net; // HttpWebRequest, WebRequest, WebException
-using CoopSpectator.Infrastructure; // ModLogger, UiFeedback
+using CoopSpectator.Infrastructure; // ModLogger, UiFeedback, CoopGameModeIds
 
 namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_mission, end_mission (Етап 3b)
 {
@@ -123,8 +123,12 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
             return false;
         }
 
-        /// <summary>Зручні обгортки для бойового циклу.</summary>
-        public static bool SendStartMission() => SendCommand("start_mission");
+        /// <summary>Зручні обгортки для бойового циклу. GameType задається в конфігу дедика (rotation); тут лише лог для перевірки узгодження ID.</summary>
+        public static bool SendStartMission()
+        {
+            ModLogger.Info("DedicatedServerCommands: SendStartMission [ID check] expected GameTypeId on dedicated=" + CoopGameModeIds.TdmClone);
+            return SendCommand("start_mission");
+        }
         public static bool SendEndMission() => SendCommand("end_mission");
     }
 }

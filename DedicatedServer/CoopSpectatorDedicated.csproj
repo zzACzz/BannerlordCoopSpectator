@@ -1,0 +1,154 @@
+<!-- Збірка тільки для Dedicated Server: без CampaignSystem, лише реєстрація CoopTdm/CoopBattle + GameMode. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>CoopSpectator</AssemblyName>
+    <RootNamespace>CoopSpectator</RootNamespace>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platform Condition="'$(Platform)'==''">x64</Platform>
+    <OutputPath>..\Module\CoopSpectatorDedicated\bin\Win64_Shipping_Server\</OutputPath>
+    <AppendConfigurationToOutputPath>false</AppendConfigurationToOutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <BannerlordRootDir Condition="'$(BannerlordRootDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\Mount &amp; Blade II Bannerlord</BannerlordRootDir>
+    <BannerlordBinDir>$(BannerlordRootDir)\bin\Win64_Shipping_Client</BannerlordBinDir>
+    <MultiplayerModuleBinDir>$(BannerlordRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Client</MultiplayerModuleBinDir>
+    <UseGameDlls Condition="Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.dll')">true</UseGameDlls>
+    <UseGameDlls Condition="'$(UseGameDlls)'==''">false</UseGameDlls>
+    <DedicatedServerRootDir Condition="'$(DedicatedServerRootDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\Mount &amp; Blade II Dedicated Server</DedicatedServerRootDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.4.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="SubModule.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopBattleMode.cs" Link="GameMode\MissionMultiplayerCoopBattleMode.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopBattle.cs" Link="GameMode\MissionMultiplayerCoopBattle.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopBattleClient.cs" Link="GameMode\MissionMultiplayerCoopBattleClient.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopTdmMode.cs" Link="GameMode\MissionMultiplayerCoopTdmMode.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopTdm.cs" Link="GameMode\MissionMultiplayerCoopTdm.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopTdmClient.cs" Link="GameMode\MissionMultiplayerCoopTdmClient.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerTdmCloneMode.cs" Link="GameMode\MissionMultiplayerTdmCloneMode.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerTdmClone.cs" Link="GameMode\MissionMultiplayerTdmClone.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerTdmCloneClient.cs" Link="GameMode\MissionMultiplayerTdmCloneClient.cs" />
+    <Compile Include="..\GameMode\MissionBehaviorHelpers.cs" Link="GameMode\MissionBehaviorHelpers.cs" />
+    <Compile Include="..\GameMode\MissionBehaviorDiagnostic.cs" Link="GameMode\MissionBehaviorDiagnostic.cs" />
+    <Compile Include="..\Infrastructure\ModLogger.cs" Link="Infrastructure\ModLogger.cs" />
+    <Compile Include="..\Infrastructure\CoopGameModeIds.cs" Link="Infrastructure\CoopGameModeIds.cs" />
+    <Compile Include="Patches\DedicatedWebPanelPatches.cs" Link="Patches\DedicatedWebPanelPatches.cs" />
+  </ItemGroup>
+
+  <!-- Референси з гри — без CampaignSystem (його нема на Dedicated Server). -->
+  <ItemGroup Condition="'$(UseGameDlls)'=='true'">
+    <Reference Include="TaleWorlds.Core">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Library">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.Library.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Engine">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.Engine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.InputSystem">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Localization">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.Localization.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.MountAndBlade.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.DotNet">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.DotNet.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.ObjectSystem">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.ObjectSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Network">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.Network.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(BannerlordBinDir)\Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade.Multiplayer" Condition="Exists('$(MultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">
+      <HintPath>$(MultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseGameDlls)'!='true'">
+    <Reference Include="TaleWorlds.Core">
+      <HintPath>..\TaleWorlds.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Library">
+      <HintPath>..\TaleWorlds.Library.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Engine">
+      <HintPath>..\TaleWorlds.Engine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.InputSystem">
+      <HintPath>..\TaleWorlds.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Localization">
+      <HintPath>..\TaleWorlds.Localization.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade">
+      <HintPath>..\TaleWorlds.MountAndBlade.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.DotNet" Condition="Exists('..\TaleWorlds.DotNet.dll')">
+      <HintPath>..\TaleWorlds.DotNet.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.ObjectSystem" Condition="Exists('..\TaleWorlds.ObjectSystem.dll')">
+      <HintPath>..\TaleWorlds.ObjectSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Network">
+      <HintPath>..\TaleWorlds.Network.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    <Reference Include="TaleWorlds.MountAndBlade.Multiplayer" Condition="Exists('..\TaleWorlds.MountAndBlade.Multiplayer.dll')">
+      <HintPath>..\TaleWorlds.MountAndBlade.Multiplayer.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="DeployServerToDedicated" AfterTargets="Build">
+    <PropertyGroup>
+      <_DedicatedModuleDir Condition="Exists('$(DedicatedServerRootDir)')">$(DedicatedServerRootDir)\Modules\CoopSpectatorDedicated</_DedicatedModuleDir>
+      <_DedicatedBinServer Condition="Exists('$(DedicatedServerRootDir)')">$(_DedicatedModuleDir)\bin\Win64_Shipping_Server</_DedicatedBinServer>
+      <_DedicatedBinClient Condition="Exists('$(DedicatedServerRootDir)')">$(_DedicatedModuleDir)\bin\Win64_Shipping_Client</_DedicatedBinClient>
+      <_MultiplayerServerBin Condition="Exists('$(DedicatedServerRootDir)')">$(DedicatedServerRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Server</_MultiplayerServerBin>
+      <_MultiplayerClientBin Condition="Exists('$(DedicatedServerRootDir)')">$(DedicatedServerRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Client</_MultiplayerClientBin>
+    </PropertyGroup>
+    <MakeDir Directories="$(_DedicatedModuleDir);$(_DedicatedBinServer);$(_DedicatedBinClient)" Condition="Exists('$(DedicatedServerRootDir)')" />
+    <Copy SourceFiles="..\Module\CoopSpectatorDedicated\SubModule.xml" DestinationFolder="$(_DedicatedModuleDir)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
+    <ItemGroup>
+      <_ServerBinFiles Include="$(OutputPath)*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ServerBinFiles)" DestinationFolder="$(_DedicatedBinServer)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
+    <Copy SourceFiles="@(_ServerBinFiles)" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
+    <!-- TaleWorlds.MountAndBlade.Multiplayer.dll має лежати поруч із CoopSpectator.dll у Win64_Shipping_Client, інакше модуль не завантажується → "Cannot find game type: TdmClone". -->
+    <Copy SourceFiles="$(_MultiplayerServerBin)\TaleWorlds.MountAndBlade.Multiplayer.dll" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(_MultiplayerServerBin)\TaleWorlds.MountAndBlade.Multiplayer.dll')" />
+    <Copy SourceFiles="$(_MultiplayerClientBin)\TaleWorlds.MountAndBlade.Multiplayer.dll" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(_MultiplayerClientBin)\TaleWorlds.MountAndBlade.Multiplayer.dll')" />
+    <Warning Text="[CoopSpectatorDedicated] Deploy done → Dedicated Server (bin\Server + Client + Multiplayer.dll). Restart dedicated if running." Condition="Exists('$(DedicatedServerRootDir)')" />
+  </Target>
+</Project>
