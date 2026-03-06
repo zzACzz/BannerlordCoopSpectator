@@ -36,6 +36,12 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const string ModulesArg = "_MODULES_*Native*Multiplayer*DedicatedCustomServerHelper*_MODULES_";
         /// <summary>true = не передаємо наш _MODULES_/конфіг (Starter сам додає свої args — тоді AliveMessage ок). Якщо false — передаємо повний набір (раніше давало Disconnected).</summary>
         private const bool SteamLikeLaunch = true;
+        /// <summary>Тимчасовий debug для ТЗ "дослідити завантаження кастомного модуля". true = додати _MODULES_ з CoopSpectatorDedicated до safe args (очікується Disconnected: Starter перезапише). Не для production.</summary>
+        private const bool DebugTryAddCoopSpectatorDedicatedToModules = false;
+        /// <summary>Окремий debug launch для modded dedicated (ТЗ 1): Starter з явним _MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_, без SteamLikeLaunch. Перевірка: чи взагалі завантажується модуль (loaded.txt). Не для production.</summary>
+        private const bool DebugModdedDedicatedLaunch = false;
+        /// <summary>ТЗ B1: 0=PlainOfficialArgs, 1=ModdedMixedArgs, 2=ModdedOnly, 3=ModdedOnlyWithToken, -1=вимкнено (звичайний flow). Якщо 0..3 — запуск з відповідним preset і лог для таблиці.</summary>
+        private const int LaunchPresetB1 = -1;
         /// <summary>При SteamLikeLaunch: true = додати тільки токен+порт. ВІДОМО ЛАМАЄ manager-конект (Disconnected). Залишати false.</summary>
         private const bool AddTokenAndPortOnly = false;
         /// <summary>Передавати /port (ізоляція: не ламає manager).</summary>
@@ -349,7 +355,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
 
             string token = tokenOverride;
             string tokenFolder = null;
-            bool needToken = !SteamLikeLaunch || AddTokenAndPortOnly || AddTokenOnly;
+            bool needToken = (!SteamLikeLaunch && !DebugModdedDedicatedLaunch) || AddTokenAndPortOnly || AddTokenOnly;
             if (needToken && string.IsNullOrWhiteSpace(token) && !TryReadTokenFromFolder(out token, out tokenFolder))
             {
                 string tokensPath = GetTokensFolderPath();
@@ -375,6 +381,76 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             // WorkingDirectory = строго папка, де лежить exe (як при Steam-запуску).
             string workingDir = Path.GetDirectoryName(exePath);
             if (string.IsNullOrEmpty(workingDir)) workingDir = Path.GetDirectoryName(Path.GetDirectoryName(exePath));
+
+            // ТЗ B1: чотири окремі launch preset'и для таблиці (module load / manager login / dashboard / shutdown reason).
+            if (LaunchPresetB1 >= 0 && LaunchPresetB1 <= 3)
+            {
+                if (string.IsNullOrWhiteSpace(token))
+                    TryReadTokenFromFolder(out token, out tokenFolder);
+                string tempDir = Environment.GetEnvironmentVariable("TEMP") ?? Path.GetTempPath();
+                string logOutputDir = Path.Combine(tempDir, "CoopSpectatorDedicated_logs");
+                try { if (!Directory.Exists(logOutputDir)) Directory.CreateDirectory(logOutputDir); } catch (Exception) { }
+                string presetName = GetB1PresetName(LaunchPresetB1);
+                string b1Args = BuildArgumentsB1Preset(LaunchPresetB1, port, token ?? "", logOutputDir);
+                ModLogger.Info("DedicatedHelper [B1] Launch preset=" + presetName);
+                ModLogger.Info("DedicatedHelper [B1] exact command line=" + b1Args);
+                LogB1Checklist();
+                var b1StartInfo = new ProcessStartInfo { FileName = exePath, WorkingDirectory = workingDir ?? "", UseShellExecute = false, CreateNoWindow = false, Arguments = b1Args, RedirectStandardInput = true };
+                try
+                {
+                    Process p = Process.Start(b1StartInfo);
+                    if (p == null) { ModLogger.Error("DedicatedHelper: Process.Start returned null.", null); return "ERROR: Failed to start process."; }
+                    _dedicatedProcess = p;
+                    ModLogger.Info("DedicatedHelper [B1] Starter PID=" + p.Id);
+                    LogDedicatedProcessInfo(p, "B1 after Start (Starter)");
+                    LogProcessCommandLine(p.Id);
+                    TrySwitchToChildProcessIfAny(p.Id);
+                    Process current = _dedicatedProcess;
+                    if (current != null && current.Id != p.Id)
+                        ModLogger.Info("DedicatedHelper [B1] Child PID=" + current.Id);
+                    LogB1Checklist();
+                    UiFeedback.ShowMessageDeferred("Dedicated started (B1 " + presetName + "). Fill table from server console.");
+                    return "OK: B1 preset " + presetName + ". Check dedicated console and fill table: module load, manager login, dashboard, shutdown reason.";
+                }
+                catch (Exception ex) { ModLogger.Error("DedicatedHelper: B1 start failed.", ex); return "ERROR: " + ex.Message; }
+            }
+
+            // Окремий debug launch для modded dedicated (ТЗ 1): не SteamLikeLaunch, явний _MODULES_ з CoopSpectatorDedicated.
+            if (DebugModdedDedicatedLaunch)
+            {
+                if (string.IsNullOrWhiteSpace(token))
+                    TryReadTokenFromFolder(out token, out tokenFolder);
+                string tempDir = Environment.GetEnvironmentVariable("TEMP") ?? Path.GetTempPath();
+                string logOutputDir = Path.Combine(tempDir, "CoopSpectatorDedicated_logs");
+                try { if (!Directory.Exists(logOutputDir)) Directory.CreateDirectory(logOutputDir); } catch (Exception) { }
+                string loadedPath = Path.Combine(tempDir, "CoopSpectatorDedicated_loaded.txt");
+                string errorPath = Path.Combine(tempDir, "CoopSpectatorDedicated_error.txt");
+                const string ModdedModulesArg = "_MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_";
+                string moddedArgs = BuildArgumentsModdedDedicatedDebug(port, token ?? "", logOutputDir);
+                ModLogger.Info("DedicatedHelper [DEBUG Modded] exe=" + exePath);
+                ModLogger.Info("DedicatedHelper [DEBUG Modded] workingDir=" + (workingDir ?? ""));
+                ModLogger.Info("DedicatedHelper [DEBUG Modded] full args=" + moddedArgs);
+                ModLogger.Info("DedicatedHelper [DEBUG Modded] _MODULES_=" + ModdedModulesArg);
+                ModLogger.Info("DedicatedHelper [DEBUG Modded] Paths: loaded=" + loadedPath + " error=" + errorPath + " LogOutputPath=" + logOutputDir);
+                var moddedStartInfo = new ProcessStartInfo { FileName = exePath, WorkingDirectory = workingDir ?? "", UseShellExecute = false, CreateNoWindow = false, Arguments = moddedArgs, RedirectStandardInput = true };
+                try
+                {
+                    Process p = Process.Start(moddedStartInfo);
+                    if (p == null) { ModLogger.Error("DedicatedHelper: Process.Start returned null.", null); return "ERROR: Failed to start process."; }
+                    _dedicatedProcess = p;
+                    ModLogger.Info("DedicatedHelper [DEBUG Modded] Starter PID=" + p.Id);
+                    LogDedicatedProcessInfo(p, "DEBUG Modded after Start (Starter)");
+                    LogProcessCommandLine(p.Id);
+                    TrySwitchToChildProcessIfAny(p.Id);
+                    Process current = _dedicatedProcess;
+                    if (current != null && current.Id != p.Id)
+                        ModLogger.Info("DedicatedHelper [DEBUG Modded] Child PID=" + current.Id);
+                    ModLogger.Info("DedicatedHelper [DEBUG Modded] After start check: loaded=" + loadedPath + " error=" + errorPath + " LogOutputPath=" + logOutputDir);
+                    UiFeedback.ShowMessageDeferred("Dedicated started (DEBUG Modded). Check " + loadedPath + " for proof-of-load.");
+                    return "OK: DEBUG Modded dedicated started. Check %TEMP%\\CoopSpectatorDedicated_loaded.txt and CoopSpectatorDedicated_logs.";
+                }
+                catch (Exception ex) { ModLogger.Error("DedicatedHelper: DEBUG Modded start failed.", ex); return "ERROR: " + ex.Message; }
+            }
 
             string arguments;
             string configFile = null;
@@ -403,6 +479,11 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                     {
                         configFile = TryWriteStartupConfig(exePath);
                         if (!string.IsNullOrEmpty(configFile)) safeArgs.Add("/dedicatedcustomserverconfigfile " + configFile);
+                    }
+                    if (DebugTryAddCoopSpectatorDedicatedToModules)
+                    {
+                        safeArgs.Add("_MODULES_*Native*Multiplayer*DedicatedCustomServerHelper*CoopSpectatorDedicated*_MODULES_");
+                        ModLogger.Info("DedicatedHelper [DEBUG] Added _MODULES_ with CoopSpectatorDedicated. Expect Starter to append its own _MODULES_ and overwrite → Disconnected. Check child process CommandLine in log.");
                     }
                     arguments = safeArgs.Count > 0 ? string.Join(" ", safeArgs) : "";
                     ModLogger.Info("DedicatedHelper: SteamLikeLaunch, safe args (port+config, no token): " + (string.IsNullOrEmpty(arguments) ? "(none)" : arguments));
@@ -454,6 +535,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                         : "Dedicated Helper started (PID " + p.Id + ", port " + port + "). In the server console type start_game to make it visible. Friends: Multiplayer -> Custom Server List.");
                 UiFeedback.ShowMessageDeferred(okMsg);
                 ModLogger.Info("DedicatedHelper: " + okMsg);
+                string tempDir = Environment.GetEnvironmentVariable("TEMP") ?? Path.GetTempPath();
+                string loadedHint = Path.Combine(tempDir, "CoopSpectatorDedicated_loaded.txt");
+                string errorHint = Path.Combine(tempDir, "CoopSpectatorDedicated_error.txt");
+                ModLogger.Info("DedicatedHelper: Proof-of-load: check " + loadedHint + " and " + errorHint + "; dedicated console for [CoopSpectator] DEDICATED OnSubModuleLoad. Game logs (if any): %ProgramData%\\Mount and Blade II Bannerlord\\logs or server workingDir\\logs.");
                 return "OK: " + okMsg;
             }
             catch (Exception ex)
@@ -545,8 +630,9 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                                 if (child != null && !child.HasExited)
                                 {
                                     _dedicatedProcess = child;
-                                    ModLogger.Info("DedicatedHelper: switched to child process PID=" + childPid + " Name=" + name + " (console where you type commands).");
+                                    ModLogger.Info("DedicatedHelper: switched to child process StarterPID=" + starterPid + " ChildPID=" + childPid + " Name=" + name + " (console where you type commands).");
                                     LogDedicatedProcessInfo(child, "after switch to child");
+                                    LogProcessCommandLine(childPid);
                                     return;
                                 }
                             }
@@ -559,6 +645,78 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 }
             }
             ModLogger.Info("DedicatedHelper: no child process found for Starter PID=" + starterPid + " (stdin will go to Starter; if commands don't run, compare this PID with Task Manager console window).");
+        }
+
+        /// <summary>ТЗ B1: ім'я preset для логу.</summary>
+        private static string GetB1PresetName(int preset)
+        {
+            switch (preset)
+            {
+                case 0: return "PlainOfficialArgs";
+                case 1: return "ModdedMixedArgs";
+                case 2: return "ModdedOnly";
+                case 3: return "ModdedOnlyWithToken";
+                default: return "Preset" + preset;
+            }
+        }
+
+        /// <summary>ТЗ B1: збирає args для preset. 0=без нашого _MODULES_, 1=modded+другий _MODULES_+playerhosted, 2=тільки modded+LogOutputPath, 3=як 2+token.</summary>
+        private static string BuildArgumentsB1Preset(int preset, int port, string token, string logOutputPath)
+        {
+            var args = new System.Collections.Generic.List<string>();
+            args.Add("--multihome 0.0.0.0");
+            args.Add("--port " + port);
+            const string ModdedModules = "_MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_";
+            const string OfficialModules = "_MODULES_*Native*Multiplayer*_MODULES_";
+            switch (preset)
+            {
+                case 0: // PlainOfficialArgs — без CoopSpectatorDedicated, Starter додасть _MODULES_ сам
+                    break;
+                case 1: // ModdedMixedArgs — наш _MODULES_ + другий _MODULES_ + /dedicatedcustomserver ... /playerhosteddedicatedserver
+                    if (!string.IsNullOrWhiteSpace(token))
+                        args.Add("/dedicatedcustomserverauthtoken \"" + token.Trim().Replace("\"", "\"\"") + "\"");
+                    args.Add(ModdedModules);
+                    if (!string.IsNullOrEmpty(logOutputPath))
+                        args.Add("/LogOutputPath \"" + logOutputPath.Trim().Replace("\"", "\"\"") + "\"");
+                    args.Add(OfficialModules);
+                    args.Add("/dedicatedcustomserver " + port + " USER 0 /playerhosteddedicatedserver");
+                    break;
+                case 2: // ModdedOnly — тільки наш _MODULES_ + LogOutputPath, без другого _MODULES_, без /dedicatedcustomserver
+                    args.Add(ModdedModules);
+                    if (!string.IsNullOrEmpty(logOutputPath))
+                        args.Add("/LogOutputPath \"" + logOutputPath.Trim().Replace("\"", "\"\"") + "\"");
+                    break;
+                case 3: // ModdedOnlyWithToken — як 2 + token
+                    if (!string.IsNullOrWhiteSpace(token))
+                        args.Add("/dedicatedcustomserverauthtoken \"" + token.Trim().Replace("\"", "\"\"") + "\"");
+                    args.Add(ModdedModules);
+                    if (!string.IsNullOrEmpty(logOutputPath))
+                        args.Add("/LogOutputPath \"" + logOutputPath.Trim().Replace("\"", "\"\"") + "\"");
+                    break;
+                default:
+                    break;
+            }
+            return string.Join(" ", args);
+        }
+
+        /// <summary>ТЗ B1: лог-нагадування — що перевірити в консолі дедика для заповнення таблиці.</summary>
+        private static void LogB1Checklist()
+        {
+            ModLogger.Info("DedicatedHelper [B1] In dedicated console check: CoopSpectatorDedicated minimal mode active? dashboard startup? Logging in? Login Failed? Disconnected from custom battle server manager? Table: launch preset | module load y/n | manager login y/n | dashboard y/n | shutdown reason.");
+        }
+
+        /// <summary>Args для DEBUG Modded dedicated: _MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_, port, token (якщо є), /LogOutputPath. Не SteamLikeLaunch.</summary>
+        private static string BuildArgumentsModdedDedicatedDebug(int port, string token, string logOutputPath)
+        {
+            var args = new System.Collections.Generic.List<string>();
+            args.Add("--multihome 0.0.0.0");
+            args.Add("--port " + port);
+            if (!string.IsNullOrWhiteSpace(token))
+                args.Add("/dedicatedcustomserverauthtoken \"" + token.Trim().Replace("\"", "\"\"") + "\"");
+            args.Add("_MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_");
+            if (!string.IsNullOrEmpty(logOutputPath))
+                args.Add("/LogOutputPath \"" + logOutputPath.Trim().Replace("\"", "\"\"") + "\"");
+            return string.Join(" ", args);
         }
 
         /// <summary>Тільки токен (для ізоляції тесту AddTokenOnly).</summary>

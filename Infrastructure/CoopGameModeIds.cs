@@ -14,5 +14,8 @@ namespace CoopSpectator.Infrastructure
 
         /// <summary>Точна копія 1:1 TDM з іншою назвою — для тесту без зміни логіки (виключення помилок через розсинхрон ID).</summary>
         public const string TdmClone = "TdmClone";
+
+        /// <summary>Офіційне ім'я TDM у конфігу дедика (Captain, TeamDeathmatch, Skirmish, …). Під це ім'я реєструємо нашу логіку (3+3 спавн), щоб GameType TeamDeathmatch у конфігу запускав нашу місію.</summary>
+        public const string OfficialTeamDeathmatch = "TeamDeathmatch";
     }
 }

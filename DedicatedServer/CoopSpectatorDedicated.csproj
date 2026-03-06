@@ -37,6 +37,7 @@
     <Compile Include="..\Infrastructure\ModLogger.cs" Link="Infrastructure\ModLogger.cs" />
     <Compile Include="..\Infrastructure\CoopGameModeIds.cs" Link="Infrastructure\CoopGameModeIds.cs" />
     <Compile Include="Patches\DedicatedWebPanelPatches.cs" Link="Patches\DedicatedWebPanelPatches.cs" />
+    <Compile Include="Patches\GameModeOverridePatches.cs" Link="Patches\GameModeOverridePatches.cs" />
   </ItemGroup>
 
   <!-- Референси з гри — без CampaignSystem (його нема на Dedicated Server). -->
@@ -130,6 +131,33 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+  <!-- Діагностика деплою: лише лог на стороні білда, exists для критичних файлів (не змінює запуск dedicated). -->
+  <Target Name="DiagnoseDeployPaths" AfterTargets="Build">
+    <PropertyGroup>
+      <_DiagModuleDir Condition="'$(DedicatedServerRootDir)' != ''">$(DedicatedServerRootDir)\Modules\CoopSpectatorDedicated</_DiagModuleDir>
+      <_DiagSubModuleXml Condition="'$(DedicatedServerRootDir)' != ''">$(_DiagModuleDir)\SubModule.xml</_DiagSubModuleXml>
+      <_DiagBinServer Condition="'$(DedicatedServerRootDir)' != ''">$(_DiagModuleDir)\bin\Win64_Shipping_Server</_DiagBinServer>
+      <_DiagBinClient Condition="'$(DedicatedServerRootDir)' != ''">$(_DiagModuleDir)\bin\Win64_Shipping_Client</_DiagBinClient>
+      <_DiagDll Condition="'$(DedicatedServerRootDir)' != ''">$(_DiagBinServer)\CoopSpectator.dll</_DiagDll>
+      <_DiagHarmony Condition="'$(DedicatedServerRootDir)' != ''">$(_DiagBinServer)\0Harmony.dll</_DiagHarmony>
+      <_DiagMultiplayer Condition="'$(DedicatedServerRootDir)' != ''">$(_DiagBinClient)\TaleWorlds.MountAndBlade.Multiplayer.dll</_DiagMultiplayer>
+    </PropertyGroup>
+    <Message Text="[CoopSpectatorDedicated] DiagnoseDeployPaths: DedicatedServerRootDir=$(DedicatedServerRootDir)" Importance="high" />
+    <Message Text="[CoopSpectatorDedicated] DedicatedServerRootDir exists=true" Importance="high" Condition="Exists('$(DedicatedServerRootDir)')" />
+    <Message Text="[CoopSpectatorDedicated] DedicatedServerRootDir exists=false" Importance="high" Condition="!Exists('$(DedicatedServerRootDir)')" />
+    <Message Text="[CoopSpectatorDedicated] SubModule.xml path=$(_DiagSubModuleXml)" Importance="high" Condition="'$(DedicatedServerRootDir)' != ''" />
+    <Message Text="[CoopSpectatorDedicated] SubModule.xml exists=true" Importance="high" Condition="'$(DedicatedServerRootDir)' != '' and Exists('$(_DiagSubModuleXml)')" />
+    <Message Text="[CoopSpectatorDedicated] SubModule.xml exists=false" Importance="high" Condition="'$(DedicatedServerRootDir)' != '' and !Exists('$(_DiagSubModuleXml)')" />
+    <Message Text="[CoopSpectatorDedicated] CoopSpectator.dll path=$(_DiagDll)" Importance="high" Condition="'$(DedicatedServerRootDir)' != ''" />
+    <Message Text="[CoopSpectatorDedicated] CoopSpectator.dll exists=true" Importance="high" Condition="'$(DedicatedServerRootDir)' != '' and Exists('$(_DiagDll)')" />
+    <Message Text="[CoopSpectatorDedicated] CoopSpectator.dll exists=false" Importance="high" Condition="'$(DedicatedServerRootDir)' != '' and !Exists('$(_DiagDll)')" />
+    <Message Text="[CoopSpectatorDedicated] 0Harmony.dll path=$(_DiagHarmony) exists=true" Importance="high" Condition="'$(DedicatedServerRootDir)' != '' and Exists('$(_DiagHarmony)')" />
+    <Message Text="[CoopSpectatorDedicated] 0Harmony.dll path=$(_DiagHarmony) exists=false" Importance="high" Condition="'$(DedicatedServerRootDir)' != '' and !Exists('$(_DiagHarmony)')" />
+    <Message Text="[CoopSpectatorDedicated] Multiplayer.dll (Client) path=$(_DiagMultiplayer) exists=true" Importance="high" Condition="'$(DedicatedServerRootDir)' != '' and Exists('$(_DiagMultiplayer)')" />
+    <Message Text="[CoopSpectatorDedicated] Multiplayer.dll (Client) path=$(_DiagMultiplayer) exists=false" Importance="high" Condition="'$(DedicatedServerRootDir)' != '' and !Exists('$(_DiagMultiplayer)')" />
+    <Message Text="[CoopSpectatorDedicated] Build OutputPath=$(OutputPath) (local build output)" Importance="normal" />
+  </Target>
 
   <Target Name="DeployServerToDedicated" AfterTargets="Build">
     <PropertyGroup>
