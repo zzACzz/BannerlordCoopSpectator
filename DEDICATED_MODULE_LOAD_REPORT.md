@@ -109,4 +109,114 @@
 
 ---
 
+## ТЗ C1 — еталонний робочий modded launch (ModdedOfficialNoTokenArg)
+
+Константа **`ModdedOfficialNoTokenArg`** у DedicatedHelperLauncher: коли **true**, запуск у named mode **ModdedOfficialNoTokenArg**:
+
+- **_MODULES_***Native*Multiplayer*CoopSpectatorDedicated*_MODULES_
+- **/LogOutputPath** у `%TEMP%\CoopSpectatorDedicated_logs`
+- **official tail**: `/dedicatedcustomserver 7210 USER 0 /playerhosteddedicatedserver`
+- **Без** `/dedicatedcustomserverauthtoken` (токен лише з офіційного оточення/файлів)
+
+У лог виводиться: *Using token from official environment/files, not from arg.*
+
+---
+
+## ТЗ C2 — нормалізація official tail (без дублювання)
+
+У **DedicatedHelperLauncher** перед кожним запуском викликається **NormalizeDedicatedArguments(arguments)**:
+
+- Якщо рядок вже містить **/playerhosteddedicatedserver** більше одного разу — дублікат блоку ` /dedicatedcustomserver ... /playerhosteddedicatedserver` видаляється.
+- Якщо вже є **_MODULES_*Native*Multiplayer*_MODULES_** більше одного разу — дублікат видаляється.
+
+Константи для guard: **OfficialModulesTail**, **PlayerHostedSuffix**, **DedicatedCustomServerPrefix**. Нормалізація застосовується для ModdedOfficialNoTokenArg, B1, DEBUG Modded і основного flow перед Process.Start.
+
+---
+
+## C2 cleanup: хто формує tail, прибирання дубля
+
+**Хто формує перший і другий tail у Command Args:**
+
+1. **Перший tail** (наш helper): **BuildArgumentsModdedOfficialNoTokenArg** раніше додавав до рядка аргументів блок `/dedicatedcustomserver &lt;port&gt; USER 0 /playerhosteddedicatedserver`. Цей рядок ми передаємо **DedicatedCustomServer.Starter.exe** як Arguments при Process.Start.
+2. **Другий tail** (Starter): **DedicatedCustomServer.Starter.exe** при запуску **дочірнього** процесу (той, що виводить Command Args у консоль) сам **дописує** свій фіксований блок: `_MODULES_*Native*Multiplayer*_MODULES_ /dedicatedcustomserver &lt;port&gt; USER 0 /playerhosteddedicatedserver`. Код Starter не в репозиторії (exe з інсталяції).
+3. **Іншого wrapper’а** немає: ланцюжок це наш процес → Starter → child (DedicatedCustomServer / рушій).
+
+**Що ми додаємо самі (modded official flow):**
+
+- `--multihome 0.0.0.0`
+- `--port &lt;port&gt;`
+- опційно `/dedicatedcustomserverconfigfile ds_config_coop_listed_test.txt`
+- `_MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_`
+- `/LogOutputPath "..."`
+
+**Що гарантовано додає Starter автоматично:**
+
+- `_MODULES_*Native*Multiplayer*_MODULES_`
+- `/dedicatedcustomserver &lt;port&gt; USER 0 /playerhosteddedicatedserver`
+
+**Фікс дублювання:** У **BuildArgumentsModdedOfficialNoTokenArg** більше **не** додаємо `/dedicatedcustomserver ... /playerhosteddedicatedserver`. До Starter передаємо лише наш набір вище; Starter один раз дописує official tail при формуванні command line дочірнього процесу. У фінальному Command Args лишається **один** коректний launch path.
+
+**Чому дубль був:** Ми додавали official tail у нашому рядку, а Starter теж додавав його при збиранні child command line → у child потрапляло два рази один і той самий блок.
+
+**Чому сервер раніше жив попри дубль:** Рушій/парсер аргументів, ймовірно, використовує **останній** блок (наприклад останній _MODULES_ / останній /dedicatedcustomserver) або ігнорує дублікати, тому один коректний набір застосовувався і сервер працював. Дубль лише засмічував лог.
+
+**Єдиний правильний варіант args тепер:** Наш рядок до Starter = тільки наші args (multihome, port, config file якщо є, _MODULES_ з CoopSpectatorDedicated, LogOutputPath). Фінальний Command Args у child = наш рядок + один блок від Starter (`_MODULES_*Native*Multiplayer*_MODULES_ /dedicatedcustomserver &lt;port&gt; USER 0 /playerhosteddedicatedserver`). Перед стартом у лог виводиться **LaunchPlan**: mode=ModdedOfficial, OurArgs=..., ExpectedStarterAddsArgs=true, ConfigInjectionMode=ListedTest|None.
+
+**Після cleanup:** Дубль `/dedicatedcustomserver ... /playerhosteddedicatedserver` зник. У Command Args усе ще **два блоки _MODULES_**: (1) наш `_MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_`, (2) блок від Starter `_MODULES_*Native*Multiplayer*_MODULES_`.
+
+---
+
+## Подвійний _MODULES_: норма чи зайве дублювання
+
+- **Чи це норма:** Так. Ми **не можемо** прибрати наш блок (потрібен CoopSpectatorDedicated). Starter **завжди** дописує свій блок; ми не керуємо його кодом. Тому два блоки _MODULES_ у фінальному Command Args — **очікувана структура** поточного flow (Helper → Starter → child).
+- **Шкідливий чи косметичний:** У поточному робочому стані (listed dedicated, клієнт приєднується, start_mission/end_mission) наш модуль завантажується і manager стабільний. Тобто рушій або використовує **перший** _MODULES_ (наш), або якось об’єднує обидва. Другий блок (від Starter) у будь-якому випадку **не ламає** роботу — подвійний _MODULES_ можна вважати **косметичним** (надлишковий другий блок у рядку) або частиною офіційної схеми злиття args. Додаткового cleanup до «одного _MODULES_» без зміни Starter неможливо.
+
+---
+
+## Scene selection у working flow
+
+- У конфігу listed-test ми задаємо **add_map_to_usable_maps mp_tdm_map_001 TeamDeathmatch** і start_game. Тим не менш у логах dedicated може фігурувати **mp_skirmish_spawn_test** (наприклад рядок «Selected scene: mp_skirmish_spawn_test»).
+- **Звідки може братися mp_skirmish_spawn_test:** (1) дефолтна сцена рушія для стану intermission / «до першої місії»; (2) внутрішній fallback тестової сцени (skirmish); (3) лог може відноситися до іншого підсистеми (наприклад лобі/тест), а не до фактичної місії після start_mission. Код, що виводить «Selected scene», у нашому репозиторії відсутній — це лог з нативного dedicated/рушія.
+- **Що перевірити:** у логах дедика знайти, де саме виводиться «Selected scene» (який клас/файл), і чи змінюється сцена на mp_tdm_map_001 після виконання start_mission або вибору карти в admin panel. Якщо фактична місія вже йде на mp_tdm_map_001, то mp_skirmish_spawn_test у лозі — лише дефолт/косметика.
+
+---
+
+## Висновок перед переходом до Етап 3.3
+
+| Питання | Висновок |
+|--------|----------|
+| **Подвійний _MODULES_ шкідливий чи косметичний?** | Косметичний (або очікувана структура). Робочий стан підтверджує: наш модуль завантажується, manager стабільний. Прибрати другий блок без зміни Starter неможливо. |
+| **Повторний цикл battle transition — стабільний milestone?** | Так. Підтверджено: вихід з бою в SP і повторний вхід у новий бій у тій самій dedicated-сесії без втрати працездатності; start_mission/end_mission працюють. Етап 3.2 можна вважати виконаним. |
+| **Останній технічний борг перед 3.3** | (1) Дослідити джерело scene selection у логах (чому фігурує mp_skirmish_spawn_test; чи це дефолт/лобі, чи фактична місія). (2) За бажанням — зафіксувати фінальний launch path у одному місці (наш args + що додає Starter). |
+
+---
+
+## ТЗ C3 — coop.dedicated_start на modded official flow
+
+Feature flag **`UseModdedDedicatedOfficialFlow = true`**: коли увімкнено, **coop.dedicated_start** використовує production-like modded launch:
+
+- Dedicated запускається з **CoopSpectatorDedicated** у _MODULES_ (ті самі args, що в ModdedOfficialNoTokenArg).
+- **Не передається** `/dedicatedcustomserverauthtoken`; токен лише з офіційного місця (Documents\...\Tokens).
+- Після старту в лог: exact args, «token arg disabled by design», «expecting official token resolution».
+
+Що перевірити: у консолі дедика — *CoopSpectatorDedicated minimal mode active*, *Logging in*, перший *RestObjectRequestMessage* успішний, далі *AliveMessage*, нема *Disconnected from custom battle server manager*; сервер у Custom Server List; dashboard/manager живий. Harmony та override TeamDeathmatch поки не повертати.
+
+---
+
+## Чому при ручному start_game сервер бере mp_skirmish_spawn_test, а не наш preset
+
+**Джерело startup state у Steam-like / modded flow:**
+
+- **Scene, GameType, ServerName, AdminPassword** задаються **тільки** якщо передано **config file** через `/dedicatedcustomserverconfigfile &lt;file&gt;`. Вміст файлу виконується рядок за рядком (AdminPassword, ServerName, GameType, add_map_to_usable_maps, start_game тощо).
+- Якщо **config file не передається** (наприклад у modded official flow без `UseStartupConfigInModdedOfficialFlow`), dedicated стартує без конфігу — у логах може бути "Command file is null". Тоді:
+  - **ServerName**, **AdminPassword**, **GameType** залишаються дефолтними (ванільні значення гри).
+  - **start_game** не виконується автоматично — користувач вводить його вручну в консолі.
+  - Після ручного **start_game** сервер вибирає **дефолтну сцену/режим** — у ванільній поведінці це часто **mp_skirmish_spawn_test** (тестова сцена з spawnpoint’ами), а не наш intended preset (наприклад **mp_tdm_map_001** для TDM).
+
+**Висновок:** наш intended preset (scene, server name, admin password) застосовується **лише коли** ми пишемо startup config і передаємо його аргументом. У modded official flow раніше ми **не** викликали `TryWriteStartupConfig` і **не** передавали `/dedicatedcustomserverconfigfile`, тому при ручному start_game сервер використовував вбудований дефолт (mp_skirmish_spawn_test тощо).
+
+**Що зроблено:** додано **UseStartupConfigInModdedOfficialFlow** і **TryWriteStartupConfigForListedTest**: при увімкненні в modded flow записується тестовий конфіг (scene=mp_tdm_map_001, ServerName=ZZZ_COOP_TEST_7210, AdminPassword=coopforever, add_map_to_usable_maps, start_game) і передається `/dedicatedcustomserverconfigfile ds_config_coop_listed_test.txt`. Це дозволяє перевірити появу сервера в Custom Server List з нашим ім’ям/паролем/сценою без повернення до token arg (який ламав manager). У лог виводяться явні [startup] значення: config applied, path, scene, gameType, serverName, adminPassword source, start_game sent via, а також прапорці SteamLikeLaunch, AddConfigFileOnly, AddPortOnly, AddTokenOnly, AddTokenAndPortOnly.
+
+---
+
 *Звіт згенеровано за ТЗ: дослідити і довести, як dedicated завантажує кастомний модуль. MissionMultiplayerTdmClone, spawn, Harmony GetMultiplayerGameMode, start_mission payload не змінювалися.*

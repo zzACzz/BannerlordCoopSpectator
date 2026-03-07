@@ -15,9 +15,10 @@
 ## Де ми зараз
 
 
-- **Хост:** Синглплеєр з модом → кампанія → `coop.dedicated_start` → дедик працює. При вході хоста в битву мод відправляє **start_mission** (HTTP web panel з логіном), при виході — **end_mission**. **Підтверджено:** коли хост у синглплеєрі входить у битву — на дедик-сервері теж починається битва (GET /Manager/start_mission після логіну).
-- **Клієнт:** Запуск через **батник** `run_mp_with_mod.bat` → Multiplayer → Custom Server List → Join → екран **Awaiting Server**.
-- **Що далі за планом:** Тест **повного циклу з клієнтом**: клієнт на Awaiting Server → хост заходить у битву → перевірити, чи клієнт **автоматично** переходить у місію (ванільний MP-флоу); потім хост виходить з битви → перевірити end_mission і повернення клієнта на Awaiting Server. Чек-лист нижче в розділі «Тест повного циклу (Етап 3.2)».
+- **Хост:** Синглплеєр з модом → кампанія → `coop.dedicated_start` → listed dedicated працює. При вході хоста в битву мод відправляє **start_mission** (HTTP web panel), при виході — **end_mission**. Сервер видно в Custom Server List, клієнт приєднується; start_mission / end_mission працюють; **повторний цикл** (вихід з бою в SP і повторний вхід у новий бій) у тій самій dedicated-сесії підтверджено без втрати працездатності.
+- **Клієнт:** Запуск через **батник** `run_mp_with_mod.bat` → Multiplayer → Custom Server List → Join → екран **Awaiting Server** → при start_mission перехід у місію, при end_mission повернення на Awaiting Server.
+- **Етап 3.2:** Фактично виконано (milestone). Далі — Етап 3.3 (меню юніта, spawn тощо).
+- **Висновок перед 3.3:** Подвійний _MODULES_ у Command Args — косметичний (структура очікувана; прибрати без зміни Starter неможливо). Повторний цикл battle transition — стабільно підтверджений milestone. Технічний борг: джерело scene selection у логах (mp_skirmish_spawn_test). Детально — DEDICATED_MODULE_LOAD_REPORT.md § «Висновок перед 3.3».
 
 
 ### Як вирішили минулі проблеми
@@ -40,7 +41,7 @@
 | Етап 3.1 (детекція початку битви у хоста) | ✅ Виконано | BattleDetector, BATTLE_START |
 | Dedicated Helper — запуск (Етап 1) | ✅ Виконано | coop.dedicated_start, токен, конфіг, start_game, --multihome 0.0.0.0 --port 7210 |
 | Dedicated Helper — IPC (Етап 3b) | ✅ Виконано | BattleDetector → SendStartMission/SendEndMission, Manager API, Dashboard AdminPassword |
-| Етап 3.2 (клієнт через Custom Server List) | 🔄 Частково | Join і Awaiting Server працюють; start_mission на сервері при вході хоста в битву — підтверджено. **Далі:** тест з клієнтом на Awaiting Server → перехід клієнта в місію та повернення при end_mission. |
+| Етап 3.2 (клієнт через Custom Server List) | ✅ Виконано | Listed dedicated, сервер у Custom Server List, клієнт приєднується; start_mission / end_mission працюють; **повторний цикл** (вихід з бою → вхід у новий бій у тій самій сесії) підтверджено. Milestone зафіксовано. |
 | Етап 3.2.1 (вхід клієнта в MP-місію, TCP/coop_join) | ⏳ За потреби | Якщо ванільний флоу не переведе клієнта в місію |
 | Етап 3.3–3.5 (меню юніта, spawn, повернення spectator) | ⏳ Далі по плану | Після робочого переходу клієнта в місію |
 
@@ -360,15 +361,14 @@ UX:
 
 ### Тест повного циклу (Етап 3.2) — чек-лист
 
-
-Виконуй по порядку; після виконання пунктів 4–5 Етап 3.2 можна вважати завершеним (або переходити до 3.2.1, якщо клієнт не переходить у місію).
+**Milestone:** Етап 3.2 виконано. Підтверджено: listed dedicated, Custom Server List, клієнт приєднується, start_mission/end_mission, **повторний цикл** (вихід з бою в SP і повторний вхід у новий бій у тій самій dedicated-сесії) без втрати працездатності.
 
 
 1. [x] Хост: кампанія, `coop.dedicated_start`, дедик без "Disconnected".  
 2. [x] Клієнт: запуск через `run_mp_with_mod.bat` → Multiplayer → Custom Server List → Join → екран **Awaiting Server**.  
 3. [x] Хост заходить у битву (синглплеєр) → у грі хоста з’являється "start_mission → dedik (HTTP)" (перевірено окремо в синглплеєрі).  
-4. [ ] **Клієнт на Awaiting Server:** хост у битві — чи клієнт **автоматично** завантажує місію і потрапляє в битву? (Якщо ні — див. Етап 3.2.1.)  
-5. [ ] Хост виходить з битви → у грі "end_mission → dedik (HTTP)" → клієнт повертається на екран **Awaiting Server**.
+4. [x] **Клієнт на Awaiting Server:** хост у битві — клієнт автоматично завантажує місію і потрапляє в битву.  
+5. [x] Хост виходить з битви → "end_mission → dedik (HTTP)" → клієнт повертається на **Awaiting Server**. Повторний вхід хоста в новий бій у тій самій dedicated-сесії — цикл повторюється без втрати працездатності.
 
 
 ### Таймаут ListedServer ("Couldn't start the game in time")
