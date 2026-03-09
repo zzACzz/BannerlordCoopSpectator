@@ -1,5 +1,6 @@
 using TaleWorlds.MountAndBlade; // GameNetwork
 using TaleWorlds.MountAndBlade.Multiplayer; // MissionMultiplayerGameModeBaseClient, MissionRepresentativeBase, MultiplayerGameType
+using CoopSpectator.Infrastructure;
 
 namespace CoopSpectator.GameMode
 {
@@ -14,6 +15,20 @@ namespace CoopSpectator.GameMode
         public override bool IsGameModeUsingGold => false;
         public override bool IsGameModeTactical => false;
         public override int GetGoldAmount() => 0;
+
+        public override void OnBehaviorInitialize()
+        {
+            ModLogger.Info("MissionMultiplayerTdmCloneClient OnBehaviorInitialize ENTER");
+            base.OnBehaviorInitialize();
+            ModLogger.Info("MissionMultiplayerTdmCloneClient OnBehaviorInitialize EXIT");
+        }
+
+        public override void AfterStart()
+        {
+            ModLogger.Info("MissionMultiplayerTdmCloneClient AfterStart ENTER");
+            base.AfterStart();
+            ModLogger.Info("MissionMultiplayerTdmCloneClient AfterStart EXIT");
+        }
 
         public override void OnGoldAmountChangedForRepresentative(MissionRepresentativeBase representative, int newAmount)
         {

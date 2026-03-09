@@ -12,6 +12,7 @@ namespace CoopSpectator.GameMode
 
         public override void AfterStart()
         {
+            ModLogger.Info("MissionBehaviorDiagnostic AfterStart ENTER");
             base.AfterStart();
             Mission mission = Mission;
             if (mission == null) return;

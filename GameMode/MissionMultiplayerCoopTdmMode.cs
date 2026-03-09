@@ -43,12 +43,23 @@ namespace CoopSpectator.GameMode
 
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerAchievementComponent"));
             list.Add(new MultiplayerTimerComponent());
-            list.Add(new MultiplayerMissionAgentVisualSpawnComponent());
-            list.Add(new MissionLobbyEquipmentNetworkComponent());
+            MissionBehavior visualSpawnTdm = null;
+            if (isServer)
+                ModLogger.Info("CoopTdm: MultiplayerMissionAgentVisualSpawnComponent skipped on server (client-only type).");
+            else
+                visualSpawnTdm = MissionBehaviorHelpers.TryCreateMissionAgentVisualSpawnComponent();
+            if (isServer || visualSpawnTdm != null)
+            {
+                if (visualSpawnTdm != null)
+                    list.Add(visualSpawnTdm);
+                list.Add(new MissionLobbyEquipmentNetworkComponent());
+            }
+            else
+                ModLogger.Info("CoopTdm client: skip MissionLobbyEquipmentNetworkComponent (MultiplayerMissionAgentVisualSpawnComponent unavailable).");
             list.Add(new MultiplayerTeamSelectComponent());
             AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
-            AddOptional(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
             list.Add(new MultiplayerPollComponent());
             list.Add(new MultiplayerAdminComponent());
             if (!isDedicated)

@@ -30,17 +30,30 @@
     <!-- Якщо маркер не знайдено, використовуємо локальні DLL з репозиторію -->
     <UseGameDlls Condition="'$(UseGameDlls)'==''">false</UseGameDlls>
 
+    <!-- Шлях до клієнтської Multiplayer DLL: спочатку root bin, інакше модуль Multiplayer (Steam-інсталяція має DLL у Modules\Multiplayer\bin\Win64_Shipping_Client). -->
+    <BannerlordMultiplayerModuleBinDir>$(BannerlordRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Client</BannerlordMultiplayerModuleBinDir>
+    <!-- Є саме Multiplayer DLL: root bin, модуль Multiplayer, або копія в корені проєкту — тоді компілюємо GameMode і HAS_GAMEMODE для TdmClone. -->
+    <HasGameModeDll Condition="'$(UseGameDlls)'=='true' and Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">true</HasGameModeDll>
+    <HasGameModeDll Condition="'$(UseGameDlls)'=='true' and Exists('$(BannerlordMultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">true</HasGameModeDll>
+    <HasGameModeDll Condition="'$(UseGameDlls)'!='true' and Exists('TaleWorlds.MountAndBlade.Multiplayer.dll')">true</HasGameModeDll>
+    <DefineConstants Condition="'$(HasGameModeDll)'=='true'">$(DefineConstants);HAS_GAMEMODE</DefineConstants>
+
     <!-- Гарантуємо копіювання NuGet-залежностей у OutputPath (потрібно для HarmonyLib, якщо він не присутній у грі) -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
-  <!-- Клієнт/кампанія: не компілюємо DedicatedServer (свій SubModule) та GameMode (потрібен Multiplayer DLL). -->
+  <!-- Клієнт/кампанія: не компілюємо DedicatedServer. GameMode виключаємо за замовчуванням; додаємо назад у таргеті лише якщо є Multiplayer DLL. Щоб зібрати клієнта з TdmClone: вкажіть /p:BannerlordRootDir= на інсталяцію гри з bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll або скопіюйте цю DLL у корінь проєкту. -->
   <ItemGroup>
     <Compile Remove="DedicatedServer\**\*" />
     <Compile Remove="GameMode\**\*" />
     <Compile Remove="**\obj\**\*" />
     <Compile Remove="**\bin\**\*" />
   </ItemGroup>
+  <Target Name="IncludeGameModeWhenHasMultiplayerDll" BeforeTargets="CoreCompile" Condition="'$(HasGameModeDll)'=='true'">
+    <ItemGroup>
+      <Compile Include="GameMode\**\*.cs" />
+    </ItemGroup>
+  </Target>
 
   <!-- NuGet залежності моду (ми вбудовуємо Harmony, щоб не залежати від Bannerlord.Harmony моду) -->
   <ItemGroup>
@@ -87,6 +100,15 @@
     <!-- Lobby API (LobbyGameStateCustomGameClient для патчу Join через Custom Server List на локалці) -->
     <Reference Include="TaleWorlds.MountAndBlade.Lobby" Condition="Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Lobby.dll')">
       <HintPath>$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Lobby.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Multiplayer API: root bin або Modules\Multiplayer\bin\Win64_Shipping_Client (Steam часто має DLL лише в модулі). -->
+    <Reference Include="TaleWorlds.MountAndBlade.Multiplayer" Condition="Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade.Multiplayer" Condition="!Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll') and Exists('$(BannerlordMultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">
+      <HintPath>$(BannerlordMultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <!-- Campaign API (Campaign, MobileParty, тощо) -->
@@ -151,6 +173,11 @@
     <!-- Lobby API (fallback: для LobbyCustomGameLocalJoinPatch, якщо DLL є в репозиторії) -->
     <Reference Include="TaleWorlds.MountAndBlade.Lobby" Condition="Exists('TaleWorlds.MountAndBlade.Lobby.dll')">
       <HintPath>TaleWorlds.MountAndBlade.Lobby.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Multiplayer API (fallback: копія з гри bin\Win64_Shipping_Client у корінь проєкту — для збірки з GameMode/TdmClone) -->
+    <Reference Include="TaleWorlds.MountAndBlade.Multiplayer" Condition="Exists('TaleWorlds.MountAndBlade.Multiplayer.dll')">
+      <HintPath>TaleWorlds.MountAndBlade.Multiplayer.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <!-- Campaign API (Campaign, MobileParty, тощо) -->

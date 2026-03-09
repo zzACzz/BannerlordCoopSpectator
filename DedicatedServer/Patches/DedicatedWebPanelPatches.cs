@@ -58,6 +58,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
+                ModLogger.Info("[HarmonyFallback] DedicatedWebPanelPatches.Apply failed. patchName=DedicatedCustomGameServerStateActivated_Prefix/OnSubModuleUnloaded_Postfix targetType=" + TargetTypeName + ". skipped intentionally, fallback active. " + ex.GetType().FullName + ": " + ex.Message);
                 ModLogger.Error("DedicatedWebPanelPatches.Apply failed.", ex);
             }
         }

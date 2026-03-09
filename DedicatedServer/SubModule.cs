@@ -13,8 +13,8 @@ namespace CoopSpectator
 {
     public sealed class SubModule : MBSubModuleBase
     {
-        /// <summary>ТЗ A: true = тільки proof-of-load, без Harmony і без реєстрації game mode (чистий module-load для перевірки завантаження і стабільності).</summary>
-        private const bool CleanModuleLoadOnly = true;
+        /// <summary>ТЗ A: true = тільки proof-of-load, без Harmony і без реєстрації game mode. false = реєструємо TdmClone + Harmony (для Етапу 3.3 — тест з нашими mission behaviors і логуванням; UseTdmCloneForListedTest у Launcher має бути true).</summary>
+        private const bool CleanModuleLoadOnly = false;
 
         private static Harmony _harmony;
 
@@ -44,7 +44,10 @@ namespace CoopSpectator
                     DateTime.UtcNow, pid, processName, baseDir, asmLocation, Environment.NewLine);
                 try { File.AppendAllText(loadedPath, line); } catch (Exception ex) { System.Console.WriteLine("[CoopSpectator] failed to write loaded file: " + ex.Message); }
 
-                try { ModLogger.Info("CoopSpectatorDedicated OnSubModuleLoad (proof-of-load). PID=" + pid + " BaseDir=" + baseDir); } catch (Exception) { }
+                try { ModLogger.Info("[DedicatedDiag] CoopSpectatorDedicated OnSubModuleLoad. PID=" + pid + " BaseDir=" + baseDir + " ExecutingAssembly.Location=" + asmLocation); } catch (Exception) { }
+
+                // Runtime diagnostics: assembly paths/versions, BUILD_MARKER, SERVER_BINARY_ID.
+                try { AssemblyDiagnostics.LogRuntimeLoadPaths(); AssemblyDiagnostics.WarnIfAssemblyPathUnexpected(); } catch (Exception ex) { ModLogger.Info("[DedicatedDiag] AssemblyDiagnostics failed: " + ex.Message); }
 
                 base.OnSubModuleLoad();
 
@@ -56,6 +59,7 @@ namespace CoopSpectator
                 else
                 {
                     TryApplyGameModeOverridePatch();
+                    TryApplyMissionStateOpenNewPatches();
                     RegisterCoopBattleGameMode();
                     TryApplyWebPanelPatches();
                     AppDomain.CurrentDomain.AssemblyLoad += (_, e) =>
@@ -78,6 +82,12 @@ namespace CoopSpectator
 
         private static void TryApplyGameModeOverridePatch()
         {
+            if (!ExperimentalFeatures.EnableTdmCloneExperiment)
+            {
+                ModLogger.Info("[GameModeReg] Stable baseline active: skip TeamDeathmatch override patch.");
+                return;
+            }
+
             try
             {
                 if (_harmony == null)
@@ -86,7 +96,21 @@ namespace CoopSpectator
             }
             catch (Exception ex)
             {
-                ModLogger.Info("CoopSpectatorDedicated: GameModeOverride patch apply failed: " + ex.Message);
+                ModLogger.Info("[HarmonyFallback] GameModeOverridePatches.Apply failed. patch=GetMultiplayerGameMode postfix target=Module.GetMultiplayerGameMode(string). skipped intentionally, fallback active. Exception: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        private static void TryApplyMissionStateOpenNewPatches()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                MissionStateOpenNewPatches.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: MissionStateOpenNew patches apply failed: " + ex.Message);
             }
         }
 
@@ -100,7 +124,7 @@ namespace CoopSpectator
             }
             catch (Exception ex)
             {
-                ModLogger.Info("CoopSpectatorDedicated: WebPanel patches apply failed: " + ex.Message);
+                ModLogger.Info("[HarmonyFallback] DedicatedWebPanelPatches.Apply failed. patch=DedicatedCustomGameServerStateActivated/OnSubModuleUnloaded. skipped intentionally, fallback active. Exception: " + ex.GetType().Name + " " + ex.Message);
             }
         }
 
@@ -108,21 +132,27 @@ namespace CoopSpectator
         {
             try
             {
+                ModLogger.Info("[GameModeReg] add CoopBattle id=" + MissionMultiplayerCoopBattleMode.GameModeId);
                 TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(new MissionMultiplayerCoopBattleMode(MissionMultiplayerCoopBattleMode.GameModeId));
+                ModLogger.Info("[GameModeReg] add CoopTdm id=" + MissionMultiplayerCoopTdmMode.GameModeId);
                 TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(new MissionMultiplayerCoopTdmMode(MissionMultiplayerCoopTdmMode.GameModeId));
-                TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(new MissionMultiplayerTdmCloneMode(MissionMultiplayerTdmCloneMode.GameModeId));
-                // Під офіційне ім'я TeamDeathmatch: реєструємо нашу місію (3+3 спавн) і зберігаємо її для Harmony-патча GetMultiplayerGameMode (ванільний TDM реєструється раніше).
-                var teamDeathmatchOverride = new MissionMultiplayerTdmCloneMode(CoopGameModeIds.OfficialTeamDeathmatch);
-                GameModeOverridePatches.SetTeamDeathmatchOverride(teamDeathmatchOverride);
-                TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(teamDeathmatchOverride);
-                ModLogger.Info("CoopBattle registered.");
-                ModLogger.Info("CoopTdm registered.");
-                ModLogger.Info("TdmClone registered. [ID check] GameTypeId=" + CoopGameModeIds.TdmClone);
-                ModLogger.Info("TeamDeathmatch overridden with TdmClone logic (3+3 spawn). Registered: CoopBattle, CoopTdm, TdmClone, TeamDeathmatch.");
+                if (ExperimentalFeatures.EnableTdmCloneExperiment)
+                {
+                    ModLogger.Info("[GameModeReg] add TdmClone id=" + MissionMultiplayerTdmCloneMode.GameModeId);
+                    TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(new MissionMultiplayerTdmCloneMode(MissionMultiplayerTdmCloneMode.GameModeId));
+                    var teamDeathmatchOverride = new MissionMultiplayerTdmCloneMode(CoopGameModeIds.OfficialTeamDeathmatch);
+                    GameModeOverridePatches.SetTeamDeathmatchOverride(teamDeathmatchOverride);
+                    ModLogger.Info("[GameModeReg] skip AddMultiplayerGameMode(TeamDeathmatch) — use Harmony override only (avoids same key). GetMultiplayerGameMode(TeamDeathmatch) will return TdmClone 3+3.");
+                    ModLogger.Info("[GameModeReg] Registered: CoopBattle, CoopTdm, TdmClone. TeamDeathmatch handled by Harmony postfix.");
+                }
+                else
+                {
+                    ModLogger.Info("[GameModeReg] Stable baseline active: TdmClone registration/override disabled. Listed flow stays on vanilla TeamDeathmatch.");
+                }
             }
             catch (Exception ex)
             {
-                ModLogger.Error("Failed to register game modes.", ex);
+                ModLogger.Error("[GameModeReg] Failed to register game modes.", ex);
             }
         }
     }

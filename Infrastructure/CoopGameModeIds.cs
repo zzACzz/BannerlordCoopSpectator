@@ -18,4 +18,14 @@ namespace CoopSpectator.Infrastructure
         /// <summary>Офіційне ім'я TDM у конфігу дедика (Captain, TeamDeathmatch, Skirmish, …). Під це ім'я реєструємо нашу логіку (3+3 спавн), щоб GameType TeamDeathmatch у конфігу запускав нашу місію.</summary>
         public const string OfficialTeamDeathmatch = "TeamDeathmatch";
     }
+
+    /// <summary>
+    /// Тимчасовий мінімальний режим dedicated: повертати мінімальний список behaviors без spawn/team setup,
+    /// щоб перевірити, чи dedicated взагалі переживає post-create_mission стадію. Вимкнути після діагностики.
+    /// </summary>
+    public static class MinimalDedicatedMissionMode
+    {
+        /// <summary>true = на dedicated повертати мінімальний список behaviors і не виконувати InitializeTeamsAndMinimalSpawn.</summary>
+        public static bool UseMinimalDedicatedMode => true;
+    }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoopSpectator.Infrastructure; // Підключаємо ModLogger для діагностики
+using CoopSpectator.MissionBehaviors; // Етап 3.3: логування spectator/agent/spawn
 using TaleWorlds.Core; // Підключаємо MissionInitializerRecord
 using TaleWorlds.MountAndBlade; // Підключаємо Mission, MissionState
 using TaleWorlds.MountAndBlade.Multiplayer; // Підключаємо MissionBasedMultiplayerGameMode та компоненти (MissionLobbyComponent, MultiplayerTimerComponent, тощо)
@@ -45,12 +46,23 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerAchievementComponent"));
             list.Add(new MultiplayerTimerComponent());
-            list.Add(new MultiplayerMissionAgentVisualSpawnComponent());
-            list.Add(new MissionLobbyEquipmentNetworkComponent());
+            MissionBehavior visualSpawnBattle = null;
+            if (isServer)
+                ModLogger.Info("CoopBattle: MultiplayerMissionAgentVisualSpawnComponent skipped on server (client-only type).");
+            else
+                visualSpawnBattle = MissionBehaviorHelpers.TryCreateMissionAgentVisualSpawnComponent();
+            if (isServer || visualSpawnBattle != null)
+            {
+                if (visualSpawnBattle != null)
+                    list.Add(visualSpawnBattle);
+                list.Add(new MissionLobbyEquipmentNetworkComponent());
+            }
+            else
+                ModLogger.Info("CoopBattle client: skip MissionLobbyEquipmentNetworkComponent (MultiplayerMissionAgentVisualSpawnComponent unavailable).");
             list.Add(new MultiplayerTeamSelectComponent());
             AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
-            AddOptional(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
             list.Add(new MultiplayerPollComponent());
             list.Add(new MultiplayerAdminComponent());
             if (!isDedicated)
@@ -69,6 +81,9 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             }
 
             list.Add(new MissionBehaviorDiagnostic());
+            list.Add(new CoopMissionClientLogic());
+            if (isServer)
+                list.Add(new CoopMissionSpawnLogic());
 
             try
             {

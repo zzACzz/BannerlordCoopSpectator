@@ -45,6 +45,7 @@ namespace CoopSpectator.Patches
             }
             catch (System.Exception ex)
             {
+                ModLogger.Info("[HarmonyFallback] GameModeOverridePatches.Apply failed. patchName=GetMultiplayerGameMode_Postfix originalTarget=Module.GetMultiplayerGameMode(string). skipped intentionally, fallback active. " + ex.GetType().FullName + ": " + ex.Message);
                 ModLogger.Error("GameModeOverridePatches.Apply failed.", ex);
             }
         }

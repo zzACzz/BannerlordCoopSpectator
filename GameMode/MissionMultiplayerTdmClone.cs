@@ -29,8 +29,21 @@ namespace CoopSpectator.GameMode
 
         public override void OnBehaviorInitialize()
         {
+            if (GameNetwork.IsServer)
+                ModLogger.Info("MissionMultiplayerTdmClone OnBehaviorInitialize (server)");
             base.OnBehaviorInitialize();
             _hasInitialized = false;
+        }
+
+        public override void AfterStart()
+        {
+            if (GameNetwork.IsServer)
+                ModLogger.Info("MissionMultiplayerTdmClone AfterStart ENTER (server)");
+
+            base.AfterStart();
+
+            if (GameNetwork.IsServer)
+                ModLogger.Info("MissionMultiplayerTdmClone AfterStart EXIT (server)");
         }
 
         public override void OnMissionTick(float dt)
@@ -45,6 +58,13 @@ namespace CoopSpectator.GameMode
             if (!GameNetwork.IsServer)
                 return;
 
+            if (MinimalDedicatedMissionMode.UseMinimalDedicatedMode && IsDedicatedServerProcess())
+            {
+                ModLogger.Info("MissionMultiplayerTdmClone OnMissionTick: minimal dedicated mode active, skipping InitializeTeamsAndMinimalSpawn.");
+                return;
+            }
+
+            ModLogger.Info("MissionMultiplayerTdmClone OnMissionTick: calling InitializeTeamsAndMinimalSpawn (server)");
             try
             {
                 InitializeTeamsAndMinimalSpawn();
@@ -52,6 +72,19 @@ namespace CoopSpectator.GameMode
             catch (System.Exception ex)
             {
                 ModLogger.Error("TdmClone server: InitializeTeamsAndMinimalSpawn failed.", ex);
+            }
+        }
+
+        private static bool IsDedicatedServerProcess()
+        {
+            try
+            {
+                string name = System.Diagnostics.Process.GetCurrentProcess().ProcessName ?? "";
+                return name.IndexOf("Dedicated", System.StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -70,7 +103,6 @@ namespace CoopSpectator.GameMode
             attackerTeam.SetIsEnemyOf(defenderTeam, true);
             defenderTeam.SetIsEnemyOf(attackerTeam, true);
 
-            // Етап 1: troop тільки з MBObjectManager (без Campaign — працює на дедику).
             BasicCharacterObject troop = GetInfantryTroopForDedicated();
             if (troop == null)
             {
@@ -78,7 +110,6 @@ namespace CoopSpectator.GameMode
                 return;
             }
 
-            // Базові позиції: attackers зліва, defenders справа (прості зміщення від центру).
             Vec3 attackerBase = new Vec3(-12f, 0f, 0f);
             Vec3 defenderBase = new Vec3(12f, 0f, 0f);
             Vec2 right = new Vec2(0f, 1f);
@@ -120,7 +151,6 @@ namespace CoopSpectator.GameMode
             ModLogger.Info("TdmClone mission started: teams + " + attackerAgents.Count + "+" + defenderAgents.Count + " agents (Stage 1).");
         }
 
-        /// <summary>Повертає одного піхотного troop з MBObjectManager (без Campaign). Для дедика.</summary>
         private static BasicCharacterObject GetInfantryTroopForDedicated()
         {
             string[] ids = { "imperial_infantryman", "imperial_legionary", "aserai_infantryman", "sturgian_warrior" };
@@ -159,3 +189,4 @@ namespace CoopSpectator.GameMode
         }
     }
 }
+

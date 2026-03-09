@@ -64,6 +64,8 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const string TestListedServerName = "ZZZ_COOP_TEST_7210";
         /// <summary>Для контрольного тесту: сцена TDM (listed flow safer за mp_skirmish_spawn_test).</summary>
         private const string TestListedScene = "mp_tdm_map_001";
+        /// <summary>Етап 3.3: true = у listed-test конфігу використовувати GameType TdmClone (і add_map_to_usable_maps ... TdmClone), щоб на дедику працювали наші mission behaviors з логуванням. На дедику потрібно CleanModuleLoadOnly = false.</summary>
+        private const bool UseTdmCloneForListedTest = ExperimentalFeatures.EnableTdmCloneExperiment;
 
         /// <summary>Процес дедик-сервера, запущеного з моду (для відправки команд через stdin, якщо сервер їх читає).</summary>
         private static Process _dedicatedProcess;
@@ -359,7 +361,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             }
         }
 
-        /// <summary>Записує стартовий конфіг для контрольного тесту listed flow: scene=mp_tdm_map_001, ServerName=ZZZ_COOP_TEST_7210, AdminPassword=coopforever, add_map_to_usable_maps, start_game. Файл ds_config_coop_listed_test.txt у Modules\Native.</summary>
+        /// <summary>Записує стартовий конфіг для контрольного тесту listed flow: scene=mp_tdm_map_001, ServerName=ZZZ_COOP_TEST_7210, AdminPassword=coopforever, явний Map + add_map_to_usable_maps + start_game. UseTdmCloneForListedTest=true → GameType TdmClone (для Етапу 3.3 з нашими mission behaviors). Файл ds_config_coop_listed_test.txt у Modules\Native.</summary>
         private static string TryWriteStartupConfigForListedTest(string exePath)
         {
             string root = GetDedicatedServerRootFromExe(exePath);
@@ -370,14 +372,15 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             string configPath = Path.Combine(nativeDir, testConfigFileName);
             try
             {
-                const string gameTypeId = "TeamDeathmatch";
+                string gameTypeId = UseTdmCloneForListedTest ? CoopGameModeIds.TdmClone : "TeamDeathmatch";
                 string content = "AdminPassword " + DashboardAdminPassword + Environment.NewLine
                     + "ServerName " + TestListedServerName + Environment.NewLine
                     + "GameType " + gameTypeId + Environment.NewLine
+                    + "Map " + TestListedScene + Environment.NewLine
                     + "add_map_to_usable_maps " + TestListedScene + " " + gameTypeId + Environment.NewLine
                     + "start_game" + Environment.NewLine;
                 File.WriteAllText(configPath, content);
-                ModLogger.Info("DedicatedHelper: wrote listed-test startup config to " + configPath + " [scene=" + TestListedScene + " serverName=" + TestListedServerName + " gameType=" + gameTypeId + "]");
+                ModLogger.Info("DedicatedHelper: wrote listed-test startup config to " + configPath + " [scene=" + TestListedScene + " serverName=" + TestListedServerName + " gameType=" + gameTypeId + " mapLine=true]");
                 return testConfigFileName;
             }
             catch (Exception ex)
@@ -563,7 +566,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                         string root = GetDedicatedServerRootFromExe(exePath);
                         moddedConfigPath = !string.IsNullOrEmpty(root) ? Path.Combine(root, "Modules", "Native", moddedConfigFile) : moddedConfigFile;
                     }
-                    LogStartupState(!string.IsNullOrEmpty(moddedConfigFile), moddedConfigPath, TestListedScene, "TeamDeathmatch", TestListedServerName, "config file (listed-test)", string.IsNullOrEmpty(moddedConfigFile) ? "none" : "config");
+                    LogStartupState(!string.IsNullOrEmpty(moddedConfigFile), moddedConfigPath, TestListedScene, UseTdmCloneForListedTest ? "TdmClone" : "TeamDeathmatch", TestListedServerName, "config file (listed-test)", string.IsNullOrEmpty(moddedConfigFile) ? "none" : "config");
                 }
                 else
                 {

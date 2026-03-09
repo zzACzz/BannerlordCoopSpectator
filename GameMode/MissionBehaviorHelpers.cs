@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text;
 using CoopSpectator.Infrastructure;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Multiplayer;
 
 namespace CoopSpectator.GameMode
 {
@@ -44,6 +45,85 @@ namespace CoopSpectator.GameMode
             return sb.ToString();
         }
 
+        /// <summary>Клієнт-онлі тип: на dedicated/server відсутній. Шукаємо в Multiplayer, потім у базовій збірці, потім по короткому імені в усіх збірках; на сервері не викликати.</summary>
+        public static MissionBehavior TryCreateMissionAgentVisualSpawnComponent()
+        {
+            const string multiFullName = "TaleWorlds.MountAndBlade.Multiplayer.MultiplayerMissionAgentVisualSpawnComponent";
+            const string baseFullName = "TaleWorlds.MountAndBlade.MultiplayerMissionAgentVisualSpawnComponent";
+            const string shortName = "MultiplayerMissionAgentVisualSpawnComponent";
+
+            // 1) Multiplayer assembly (стандартний namespace)
+            MissionBehavior b = TryCreateBehavior(multiFullName);
+            if (b != null)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: MultiplayerMissionAgentVisualSpawnComponent created from Multiplayer assembly.");
+                return b;
+            }
+
+            // 2) Базова збірка TaleWorlds.MountAndBlade (деякі build мають тип там)
+            try
+            {
+                Type baseType = typeof(Mission).Assembly.GetType(baseFullName, throwOnError: false);
+                if (baseType != null && typeof(MissionBehavior).IsAssignableFrom(baseType))
+                {
+                    object obj = Activator.CreateInstance(baseType);
+                    if (obj is MissionBehavior behavior)
+                    {
+                        ModLogger.Info("MissionBehaviorHelpers: MultiplayerMissionAgentVisualSpawnComponent created from TaleWorlds.MountAndBlade assembly.");
+                        return behavior;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: MultiplayerMissionAgentVisualSpawnComponent base assembly try failed: " + ex.Message);
+            }
+
+            // 3) Пошук по короткому імені в усіх завантажених збірках
+            foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.IsDynamic) continue;
+                Type type = asm.GetType(multiFullName, throwOnError: false) ?? asm.GetType(baseFullName, throwOnError: false);
+                if (type == null)
+                {
+                    try
+                    {
+                        type = asm.GetExportedTypes().FirstOrDefault(t => t.Name == shortName && typeof(MissionBehavior).IsAssignableFrom(t));
+                    }
+                    catch { /* ignore */ }
+                }
+                if (type == null || !typeof(MissionBehavior).IsAssignableFrom(type)) continue;
+                try
+                {
+                    object obj = Activator.CreateInstance(type);
+                    if (obj is MissionBehavior behavior)
+                    {
+                        ModLogger.Info("MissionBehaviorHelpers: MultiplayerMissionAgentVisualSpawnComponent created from assembly " + asm.GetName().Name);
+                        return behavior;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: CreateInstance " + type.FullName + " from " + asm.GetName().Name + " failed: " + ex.Message);
+                }
+            }
+
+            ModLogger.Info("MissionBehaviorHelpers: MultiplayerMissionAgentVisualSpawnComponent not found in any assembly; using safe fallback (do not add MissionLobbyEquipmentNetworkComponent).");
+            return null;
+        }
+
+        /// <summary>Перевіряє, чи в списку є behavior з заданим коротким іменем типу.</summary>
+        public static bool ListContainsBehaviorType(List<MissionBehavior> list, string typeShortName)
+        {
+            if (list == null || string.IsNullOrEmpty(typeShortName)) return false;
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] != null && list[i].GetType().Name == typeShortName)
+                    return true;
+            }
+            return false;
+        }
+
         /// <summary>Створює behavior за повним ім'ям типу з збірки Multiplayer. Повертає null і логує, якщо тип не знайдено або створення не вдалося.</summary>
         public static MissionBehavior TryCreateBehavior(string fullTypeName)
         {
@@ -70,6 +150,78 @@ namespace CoopSpectator.GameMode
         }
 
         /// <summary>Шукає тип тільки серед allowlist-кандидатів по всіх завантажених збірках; кешує Type. Повертає null, якщо fullTypeName не в allowlist або тип не знайдено.</summary>
+        public static MissionBehavior TryCreateBehaviorFromMountAndBlade(string fullTypeName)
+        {
+            if (string.IsNullOrEmpty(fullTypeName)) return null;
+            try
+            {
+                Type type = typeof(Mission).Assembly.GetType(fullTypeName, throwOnError: false);
+                if (type == null)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: type not found in TaleWorlds.MountAndBlade assembly: " + fullTypeName);
+                    return null;
+                }
+                object obj = Activator.CreateInstance(type);
+                if (obj is MissionBehavior behavior)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: " + type.Name + " created from TaleWorlds.MountAndBlade assembly.");
+                    return behavior;
+                }
+                ModLogger.Info("MissionBehaviorHelpers: created " + fullTypeName + " from TaleWorlds.MountAndBlade but is not MissionBehavior.");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: Could not create from TaleWorlds.MountAndBlade " + fullTypeName + ": " + ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>Шукає тип за повним ім'ям у всіх already-loaded assemblies і створює його через parameterless ctor.</summary>
+        public static MissionBehavior TryCreateBehaviorFromLoadedAssemblies(string fullTypeName)
+        {
+            if (string.IsNullOrEmpty(fullTypeName)) return null;
+
+            foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.IsDynamic) continue;
+
+                Type type = null;
+                try
+                {
+                    type = asm.GetType(fullTypeName, throwOnError: false);
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: assembly scan failed for " + asm.GetName().Name + " / " + fullTypeName + ": " + ex.Message);
+                }
+
+                if (type == null || !typeof(MissionBehavior).IsAssignableFrom(type))
+                    continue;
+
+                try
+                {
+                    object obj = Activator.CreateInstance(type);
+                    if (obj is MissionBehavior behavior)
+                    {
+                        ModLogger.Info("MissionBehaviorHelpers: " + type.Name + " created from loaded assembly " + asm.GetName().Name + ".");
+                        return behavior;
+                    }
+
+                    ModLogger.Info("MissionBehaviorHelpers: created " + fullTypeName + " from loaded assembly " + asm.GetName().Name + " but is not MissionBehavior.");
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: Could not create " + fullTypeName + " from loaded assembly " + asm.GetName().Name + ": " + ex.Message);
+                    return null;
+                }
+            }
+
+            ModLogger.Info("MissionBehaviorHelpers: type not found in loaded assemblies: " + fullTypeName);
+            return null;
+        }
+
         public static MissionBehavior TryCreateBehaviorFromAnyAssembly(string fullTypeName)
         {
             if (string.IsNullOrEmpty(fullTypeName)) return null;
@@ -248,69 +400,115 @@ namespace CoopSpectator.GameMode
             return null;
         }
 
-        /// <summary>MissionBoundaryCrossingHandler — потрібен BoundaryCrossingVM. Спроба: Multiplayer, потім allowlist; ctor(Mission), fallback parameterless ctor.</summary>
+        /// <summary>MissionBoundaryCrossingHandler — обов'язковий для BoundaryCrossingVM (ванільний UI крашиться без нього). Ваніль: TaleWorlds.MountAndBlade.MissionBoundaryCrossingHandler, ctor(float leewayTime=10f).</summary>
         public static MissionBehavior TryCreateBoundaryCrossingHandler(Mission mission)
         {
-            MissionBehavior fromMultiplayer = TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionBoundaryCrossingHandler");
-            if (fromMultiplayer != null)
-            {
-                ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler created via Multiplayer assembly (parameterless).");
-                return fromMultiplayer;
-            }
-            const string fullName = "TaleWorlds.MountAndBlade.MissionBoundaryCrossingHandler";
-            if (!AnyAssemblyAllowlist.Contains(fullName)) return null;
-            foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                if (asm.IsDynamic) continue;
-                Type type = asm.GetType(fullName, throwOnError: false);
-                if (type == null || !typeof(MissionBehavior).IsAssignableFrom(type)) continue;
+            const string baseFullName = "TaleWorlds.MountAndBlade.MissionBoundaryCrossingHandler";
+            const string multiFullName = "TaleWorlds.MountAndBlade.Multiplayer.MissionBoundaryCrossingHandler";
+            const float VanillaLeewayTime = 10f;
 
-                // 1) Спробувати ctor(Mission)
-                ConstructorInfo ctorMission = null;
-                foreach (var c in type.GetConstructors(BindingFlags.Public | BindingFlags.Instance))
+            // 1) Ванільний тип у базовій збірці MountAndBlade (API 1.3.4: ctor(float leewayTime=10f))
+            Type baseType = typeof(Mission).Assembly.GetType(baseFullName, throwOnError: false);
+            if (baseType != null && typeof(MissionBehavior).IsAssignableFrom(baseType))
+            {
+                MissionBehavior created = TryCreateBoundaryCrossingHandlerFromType(baseType, baseType.Assembly.GetName().Name, mission, VanillaLeewayTime);
+                if (created != null) return created;
+            }
+
+            // 2) Тип у Multiplayer (якщо є окремий клас)
+            Type multiType = MultiplayerAssembly.GetType(multiFullName, throwOnError: false);
+            if (multiType != null && typeof(MissionBehavior).IsAssignableFrom(multiType))
+            {
+                MissionBehavior created = TryCreateBoundaryCrossingHandlerFromType(multiType, MultiplayerAssembly.GetName().Name, mission, VanillaLeewayTime);
+                if (created != null) return created;
+            }
+
+            // 3) Пошук по всіх збірках (allowlist)
+            Type lastTriedType = baseType ?? multiType;
+            if (AnyAssemblyAllowlist.Contains(baseFullName))
+            {
+                foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
                 {
-                    var p = c.GetParameters();
-                    if (p.Length == 1 && p[0].ParameterType == typeof(Mission))
-                    {
-                        ctorMission = c;
-                        break;
-                    }
+                    if (asm.IsDynamic) continue;
+                    Type type = asm.GetType(baseFullName, throwOnError: false);
+                    if (type == null || !typeof(MissionBehavior).IsAssignableFrom(type)) continue;
+                    lastTriedType = type;
+                    MissionBehavior created = TryCreateBoundaryCrossingHandlerFromType(type, asm.GetName().Name, mission, VanillaLeewayTime);
+                    if (created != null) return created;
                 }
-                if (ctorMission != null && mission != null)
+            }
+
+            ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler could not be created. BoundaryCrossingVM will crash without it. Expected ctor(float leewayTime=10f) or parameterless. Signatures: " + GetConstructorSignatures(lastTriedType));
+            return null;
+        }
+
+        /// <summary>Пробує створити handler: ctor(float) з leewayTime=10f (ваніль), ctor(Mission), потім parameterless.</summary>
+        private static MissionBehavior TryCreateBoundaryCrossingHandlerFromType(Type type, string assemblyName, Mission mission, float leewayTime)
+        {
+            if (type == null) return null;
+            var ctors = type.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+            // 1) ctor(float) — як у ванілі (float leewayTime=10f)
+            foreach (var c in ctors)
+            {
+                var p = c.GetParameters();
+                if (p.Length == 1 && (p[0].ParameterType == typeof(float) || p[0].ParameterType == typeof(double)))
                 {
                     try
                     {
-                        object obj = ctorMission.Invoke(new object[] { mission });
+                        object arg = p[0].ParameterType == typeof(double) ? (object)(double)leewayTime : (object)leewayTime;
+                        object obj = c.Invoke(new object[] { arg });
                         if (obj is MissionBehavior behavior)
                         {
-                            ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler created via ctor(Mission) from " + asm.GetName().Name + ".");
+                            ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler created via ctor(float) from " + assemblyName + ".");
                             return behavior;
                         }
                     }
                     catch (Exception ex)
                     {
-                        ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler ctor(Mission) failed for " + asm.GetName().Name + ": " + ex.Message);
+                        ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler ctor(float) failed for " + assemblyName + ": " + ex.Message);
                     }
-                }
-                else if (ctorMission == null)
-                    ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler has no ctor(Mission) in " + asm.GetName().Name + ", trying parameterless.");
-
-                // 2) Fallback: parameterless ctor
-                try
-                {
-                    object obj = Activator.CreateInstance(type);
-                    if (obj is MissionBehavior behavior)
-                    {
-                        ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler created via parameterless ctor from " + asm.GetName().Name + ".");
-                        return behavior;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler parameterless ctor failed for " + asm.GetName().Name + ": " + ex.Message);
+                    break;
                 }
             }
-            ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler could not be created (optional; mission will continue without it).");
+            // 2) ctor(Mission) — деякі збірки можуть мати такий варіант
+            if (mission != null)
+            {
+                foreach (var c in ctors)
+                {
+                    var p = c.GetParameters();
+                    if (p.Length == 1 && p[0].ParameterType == typeof(Mission))
+                    {
+                        try
+                        {
+                            object obj = c.Invoke(new object[] { mission });
+                            if (obj is MissionBehavior behavior)
+                            {
+                                ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler created via ctor(Mission) from " + assemblyName + ".");
+                                return behavior;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler ctor(Mission) failed for " + assemblyName + ": " + ex.Message);
+                        }
+                        break;
+                    }
+                }
+            }
+            // 3) parameterless (C# optional float leewayTime=10f виглядає як parameterless)
+            try
+            {
+                object obj = Activator.CreateInstance(type);
+                if (obj is MissionBehavior behavior)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler created via parameterless ctor from " + assemblyName + ".");
+                    return behavior;
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: MissionBoundaryCrossingHandler parameterless failed for " + assemblyName + ": " + ex.Message);
+            }
             return null;
         }
 
@@ -327,5 +525,20 @@ namespace CoopSpectator.GameMode
             return TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionBoundaryPlacer")
                 ?? TryCreateBehaviorFromAnyAssembly("TaleWorlds.MountAndBlade.MissionBoundaryPlacer");
         }
+
+        /// <summary>MissionScoreboardComponent — потрібен для MissionCustomGameServerComponent.AfterStart на dedicated. Повертає null при помилці (інший build/assembly).</summary>
+        public static MissionBehavior TryCreateMissionScoreboardComponent()
+        {
+            try
+            {
+                return new MissionScoreboardComponent(new TDMScoreboardData());
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error("[TdmCloneStack] MissionScoreboardComponent create failed (MissionCustomGameServerComponent.AfterStart may crash): " + ex.Message, ex);
+                return null;
+            }
+        }
     }
 }
+

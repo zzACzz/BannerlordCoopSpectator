@@ -1,0 +1,349 @@
+# План розробки моду Bannerlord Coop Spectator
+**Мод для кооперативної гри в Mount & Blade II: Bannerlord**
+
+---
+
+## 📋 Огляд проєкту
+
+### Концепція
+Створення спрощеного кооперативного моду який дозволяє:
+- **Хост** грає звичайну сингплеєрну кампанію
+- **Клієнти** пасивно спостерігають за грою хоста на карті
+- **У битвах** всі клієнти приєднуються і грають за юнітів за будь-яку сторону
+
+### Переваги підходу
+✅ Не ламає існуючу механіку кампанії  
+✅ Використовує вбудований мультиплеєр для битв  
+✅ Мінімальні зміни = менше багів при оновленнях  
+✅ Простіша архітектура ніж повний кооп  
+
+### Цільова аудиторія
+- Гравці які хочуть разом грати у битвах без складного full coop
+- ~45,000 учасників Discord Bannerlord Coop які чекають робочий мод
+- Друзі які хочуть просто "зайти і побитися"
+
+## 🎯 Детальна розбивка по етапах
+
+---
+
+## ЕТАП 1: Підготовка (Виконано)
+
+#### 1.1 Встановлення середовища розробки
+```
+✓ Visual Studio 2022 Community (безкоштовна)
+✓ .NET SDK 6.0+
+✓ Bannerlord гра (Steam)
+✓ Vortex Mod Manager або ручне встановлення модів
+```
+
+**Налаштування проєкту:**
+```
+1. Створити папку проєкту: BannerlordCoopSpectator/
+2. Додати посилання на DLL гри:
+   - TaleWorlds.Core.dll
+   - TaleWorlds.MountAndBlade.dll
+   - TaleWorlds.CampaignSystem.dll
+   - TaleWorlds.Library.dll
+3. Налаштувати компіляцію в папку модів Bannerlord
+```
+
+**Команди для Cursor:**
+```
+"Create C# project structure for Bannerlord mod"
+"Show me how to reference Bannerlord DLL files"
+"Generate SubModule.xml template for Bannerlord"
+```
+
+#### 1.2 Перший "Hello World" мод
+
+**Завдання:**
+Створити мод який виводить повідомлення коли гравець входить у битву.
+
+**Тестування:**
+1. Скомпілювати мод
+2. Запустити Bannerlord
+3. Активувати мод у Launcher
+4. Завантажити кампанію
+5. Побачити повідомлення "Coop Spectator mod loaded!"
+
+**Команди для Cursor:**
+```
+"How to detect battle start in Bannerlord using Harmony"
+"Create Bannerlord behavior that logs when player enters mission"
+"Show me Bannerlord Mission lifecycle events"
+```
+
+#### 1.3 Вивчення Bannerlord API
+
+**Campaign система:**
+```csharp
+Campaign.Current                    // Поточна кампанія
+Campaign.Current.MainParty          // Армія гравця
+Hero.MainHero                       // Персонаж гравця
+MobileParty.MainParty.Position2D    // Позиція на карті
+```
+
+**Mission (битва) система:**
+```csharp
+Mission.Current                     // Поточна місія (битва)
+Mission.OnMissionModeChange         // Подія зміни режиму місії
+Agent.Main                          // Агент (персонаж) гравця
+Mission.Agents                      // Всі агенти у битві
+```
+
+**Networking:**
+```csharp
+GameNetwork.IsServer                // Чи є сервером?
+GameNetwork.IsClient                // Чи є клієнтом?
+GameNetwork.NetworkPeers            // Підключені гравці
+```
+
+**Практичні вправи:**
+1. Створити behavior який логує позицію гравця кожні 5 секунд
+2. Створити код який витягує склад армії гравця
+3. Підписатися на події входу/виходу з битви
+
+**Команди для Cursor:**
+```
+"Bannerlord CampaignBehaviorBase example"
+"How to get player party troops in Bannerlord"
+"Bannerlord Mission events documentation"
+```
+
+#### 1.4 Простий TCP сервер/клієнт
+
+**Завдання:**
+Створити базовий мережевий код який може передавати дані між двома Bannerlord клієнтами.
+
+**Архітектура:**
+```
+[Хост Bannerlord] ←→ [TCP Server] ←→ [TCP Client] ←→ [Клієнт Bannerlord]
+```
+
+**Тестування networking:**
+1. Запустити дві копії Bannerlord
+2. На одній натиснути "Host Server" (консольна команда)
+3. На другій "Connect to 127.0.0.1"
+4. Відправити тестове повідомлення
+5. Перевірити що воно отримане
+
+**Команди для Cursor:**
+```
+"Add JSON serialization to C# TCP networking"
+"Create message protocol for game state sync"
+"Handle TCP connection errors and reconnection"
+```
+
+---
+
+## ЕТАП 2: Spectator Mode (Виконано)
+
+### 2.1 Broadcaster - відправка даних хоста
+
+**Завдання:**
+Хост періодично відправляє свій стан клієнтам.
+
+### 2.2 Spectator UI - відображення для клієнтів
+
+**Завдання:**
+Створити UI який показує карту і позицію хоста.
+
+### 2.3 Блокування контролю для клієнтів
+
+**Завдання:**
+Заборонити клієнтам керувати грою на карті.
+
+## ЕТАП 3: Battle Integration (Розроблюється)
+
+### 3.1 Детекція початку битви у хоста (Виконано)
+
+### 3.2 Конвертація в мультиплеєрну битву
+
+**MissionConverter.cs:**
+```csharp
+using TaleWorlds.Core;
+using TaleWorlds.MountAndBlade;
+using TaleWorlds.Engine;
+
+namespace CoopSpectator.Mission
+{
+    public class MissionConverter
+    {
+        // Взяти поточну сингплеєрну місію і конвертувати у MP
+        public static void ConvertToMultiplayer()
+        {
+            // 1. Зберегти стан поточної битви
+            Mission currentMission = Mission.Current;
+            if (currentMission == null)
+            {
+                InformationManager.DisplayMessage(
+                    new InformationMessage("No active battle to convert")
+                );
+                return;
+            }
+            
+            // 2. Отримати параметри місії
+            string sceneName = currentMission.SceneName;
+            string missionName = currentMission.Name;
+            
+            // 3. Завершити сингплеєрну місію
+            currentMission.EndMission();
+            
+            // 4. Створити мультиплеєрну місію з тими ж параметрами
+            MissionInitializerRecord initRecord = new MissionInitializerRecord(sceneName);
+            initRecord.PlayingInCampaignMode = false; // MP режим
+            initRecord.DoNotUseLoadingScreen = false;
+            
+            // 5. Додати мультиплеєрні behaviors
+            // Це найскладніша частина - треба вивчити як працює MP система
+        }
+    }
+}
+```
+
+**ПРИМІТКА:** Ця частина потребує глибокого вивчення того як Bannerlord створює MP битви. Доведеться:
+1. Вивчити вихідний код мультиплеєрних модів
+2. Зрозуміти різницю між SP і MP missions
+3. Навчитися спавнити агентів для клієнтів
+
+**Команди для Cursor:**
+```
+"Bannerlord how to create multiplayer mission from code"
+"Difference between Campaign Mission and Multiplayer Mission"
+"Bannerlord Agent spawning in custom missions"
+```
+
+#### 3.2.1 Вхід клієнта в MP-місію (дослідження та чек-лист)
+
+**Проблема:** Клієнт не "входить" у місію, бо ми не повторюємо офіційний MP-флоу гри. Хост відкриває місію через `MissionState.OpenNew` і все працює (він же сервер, peer вже створений). Якщо клієнт теж викликає "голий" `MissionState.OpenNew` з тією ж сценою — гра починає завантаження, але нативний код очікує, що місія запущена мережевим пайплайном (MissionPeer, мережеві компоненти, синхронізація). Цього стану немає → звертання до null → краш 0xC0000005.
+
+**Що з’ясувати (дослідження Multiplayer-модуля):**
+- Хто і коли відкриває місію на клієнті в офіційному MP (клас/метод у `Modules\Multiplayer`, напр. у `TaleWorlds.MountAndBlade.Multiplayer.dll`).
+- Чи сервер надсилає мережеве повідомлення типу "відкрий місію X", після якого клієнт викликає відкриття; чи клієнт сам викликає відкриття після певних подій.
+- Які об’єкти/стан мають існувати до відкриття місії: `GameNetwork.MyPeer`, `MissionPeer` для локального гравця, мережеві behaviors у Mission.
+- Які `MissionBehavior`’и додає гра для MP-місії (щоб на клієнті при відкритті вже були ті самі компоненти).
+- Чи є окремий "mission initializer" / мережеве повідомлення з параметрами місії (сцена, команди, гравці).
+
+**Практичні кроки:**
+1. **Огляд DLL:** Відкрити в dnSpy/ILSpy `Mount & Blade II Bannerlord\Modules\Multiplayer\` — шукати `OpenNew`, `MissionState`, `MissionPeer`, `StartMission`, `MissionInitializer`.
+2. **Логування в моді:** У `TestMpLaunchPoC.JoinClient` додано логування перед/після `InitializeClientSide`, `StartMultiplayerOnClient` та виклик `LogGameNetworkState` після кожного кроку — перевірити порядок викликів і стан (MyPeer, IsSessionActive, PeerCount) у логах.
+3. **Порівняння з офіційним MP:** Запустити гру через меню Multiplayer (Host/Join), зайти в битву; у дебагері перевірити, коли на клієнті з’являється `Mission.Current`, чи перед цим створений `MissionPeer`, breakpoint на `MissionState.OpenNew` і подивитися call stack — хто викликає відкриття місії на клієнті.
+
+**Чек-лист "що необхідно клієнту" (заповнити після дослідження):**
+- [ ] Підключення через GameNetwork (`InitializeClientSide` / `StartMultiplayerOnClient`) — реалізовано.
+- [ ] Наявність `GameNetwork.MyPeer` і активна сесія перед відкриттям місії — перевірки є.
+- [ ] Не викликати "голий" `MissionState.OpenNew` на клієнті до того, як:
+  - [ ] або сервер надіслав офіційне "start mission" і клієнт обробив його так само, як ванільний MP;
+  - [ ] або вручну створено той самий набір компонентів/стану (MissionPeer тощо) згідно зі сценарієм з Multiplayer DLL.
+- [ ] Відкривати місію з тими самими MissionBehavior’ами (або з тим самим mission initializer), що й офіційний MP.
+- [ ] *(Після дослідження)* Записати сюди конкретний клас/метод у Multiplayer-модулі, який відкриває місію на клієнті: _[заповнити]_.
+
+**Реалізація (після дослідження):** Викликати знайдений "mission start" шлях на клієнті після події "хост почав битву", або реалізувати той самий стан (MissionPeer + правильні behaviors) перед нашим `MissionState.OpenNew`.
+
+### 3.3 Меню вибору юніта для клієнтів
+
+### 3.4 Spawn system - створення агентів для клієнтів
+
+### 3.5 Повернення до spectator mode після битви
+
+## ЕТАП 4: Тестування та полірування (2-4 тижні)
+
+### 4.1 Базове тестування
+**Час: 10-15 годин**
+
+**Тестові сценарії:**
+
+1. **Підключення/відключення:**
+   - [ ] Хост може запустити сервер
+   - [ ] Клієнт може підключитися
+   - [ ] Корректне відключення без крашу
+   - [ ] Reconnect після обриву з'єднання
+
+2. **Spectator mode:**
+   - [ ] Клієнт бачить позицію хоста на карті
+   - [ ] Оновлення кожні 2 секунди
+   - [ ] Клієнт не може керувати партією
+   - [ ] Клієнт не може входити в міста
+
+3. **Битви:**
+   - [ ] Клієнт отримує сповіщення про початок битви
+   - [ ] Меню вибору юніта відображається
+   - [ ] Клієнт spawn'иться як вибраний юніт
+   - [ ] Битва працює з 2+ клієнтами
+   - [ ] Після битви повернення до spectator mode
+
+4. **Edge cases:**
+   - [ ] Що якщо хост помер у битві?
+   - [ ] Що якщо клієнт відключився під час битви?
+   - [ ] Що якщо хост втік з битви?
+   - [ ] Що якщо битва була програна?
+
+### 4.2 Оптимізація та баг-фікси
+
+### 4.3 UI/UX покращення
+**Час: 8-10 годин**
+
+**Додати якісний UI:**
+
+1. **Lobby екран:**
+   - Список підключених гравців
+   - Їх статус (Ready/Not Ready)
+   - Налаштування (friendly fire, difficulty)
+
+2. **In-game HUD:**
+   - Індикатор підключення
+   - Ping до хоста
+   - Кількість підключених гравців
+
+3. **Повідомлення:**
+   - "John joined the game"
+   - "Battle starting in 5... 4... 3..."
+   - "You were killed - spectating"
+
+### 4.4 Документація
+**Час: 4-6 годин**
+
+**README.md:**
+```markdown
+# Bannerlord Coop Spectator
+
+Simple cooperative mod for Mount & Blade II: Bannerlord
+
+## Features
+- Spectate host's campaign
+- Join battles as host's troops
+- No campaign sync needed
+
+## Installation
+1. Download latest release
+2. Extract to Bannerlord/Modules/
+3. Enable in launcher
+
+## How to Play
+**Host:**
+1. Start campaign
+2. Open console (`) and type: coop_host
+3. Share your IP with friends
+
+**Clients:**
+1. Start Bannerlord
+2. Console: coop_join <host_ip>
+3. Spectate and wait for battles!
+
+## Troubleshooting
+- Port 7777 must be open
+- Both players need same game version
+- Disable other coop mods
+
+## Known Issues
+- See GitHub issues page
+
+## Credits
+Created by [Ваше ім'я]
+```
+
+---
+
+## ЕТАП 5: Реліз та підтримка
+
+### 5.1 Публікація

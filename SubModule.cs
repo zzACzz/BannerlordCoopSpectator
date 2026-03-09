@@ -1,5 +1,8 @@
 using System; // Підключаємо базові типи .NET (Exception)
 using CoopSpectator.Campaign; // Підключаємо campaign behaviors (HostStateBroadcaster, SpectatorStateReceiver)
+#if HAS_GAMEMODE
+using CoopSpectator.GameMode; // Реєстрація TdmClone на клієнті для Join до сервера з GameType TdmClone (Етап 3.3)
+#endif
 using CoopSpectator.Infrastructure; // Підключаємо інфраструктуру (логер, dispatcher)
 using CoopSpectator.Patches; // LobbyCustomGameLocalJoinPatch
 using HarmonyLib; // Підключаємо Harmony для патчингу методів гри
@@ -22,6 +25,9 @@ namespace CoopSpectator // Використовуємо кореневий names
         { // Починаємо блок методу
             base.OnSubModuleLoad(); // Викликаємо базову реалізацію, щоб не ламати внутрішню логіку гри
 
+            // Runtime diagnostics: assembly paths/versions (to detect build mismatch vs dedicated).
+            try { AssemblyDiagnostics.LogRuntimeLoadPaths(); AssemblyDiagnostics.WarnIfAssemblyPathUnexpected(); } catch (Exception ex) { ModLogger.Info("AssemblyDiagnostics failed: " + ex.Message); }
+
             CoopRuntime.Initialize(); // Ініціалізуємо глобальний runtime (NetworkManager, тощо)
             _battleDetector = new BattleDetector(); // Створюємо детектор битви один раз (використовуватиметься з OnApplicationTick)
 
@@ -33,8 +39,41 @@ namespace CoopSpectator // Використовуємо кореневий names
             _hasShownLoadedMessage = false; // Скидаємо прапорець, бо OnSubModuleLoad викликається до старту гри, а UI може бути ще не готовий
 
             TryApplyHarmonyPatches(); // Пробуємо застосувати Harmony патчі (навіть якщо Bannerlord.Harmony мод не встановлений/не увімкнений)
+#if HAS_GAMEMODE
+            ModLogger.Info("[CoopSpectator] HAS_GAMEMODE=true (build with TdmClone support).");
+            if (ExperimentalFeatures.EnableTdmCloneExperiment)
+                TryRegisterTdmCloneForClient(); // Реєструємо TdmClone лише коли експериментальний path явно увімкнено.
+            else
+                ModLogger.Info("[CoopSpectator] Stable baseline active: skip TdmClone client registration, using vanilla TeamDeathmatch listed flow.");
+#else
+            ModLogger.Info("[CoopSpectator] HAS_GAMEMODE=false (build without TdmClone; campaign + listed dedicated only).");
+#endif
             ModLogger.Info("SubModule завантажено."); // Логуємо завантаження для дебагу
         } // Завершуємо блок методу
+
+#if HAS_GAMEMODE
+        /// <summary>Реєструємо TdmClone на клієнті, щоб при Join до сервера з GameType TdmClone гра знайшла наш режим (multiplayer_strings.TdmClone вже є).</summary>
+        private static void TryRegisterTdmCloneForClient()
+        {
+            ModLogger.Info("[CoopSpectator] TdmClone client registration start.");
+            try
+            {
+                if (TaleWorlds.MountAndBlade.Module.CurrentModule != null)
+                {
+                    TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(new MissionMultiplayerTdmCloneMode(MissionMultiplayerTdmCloneMode.GameModeId));
+                    ModLogger.Info("[CoopSpectator] TdmClone client registration success (ready for joining TdmClone servers).");
+                }
+                else
+                {
+                    ModLogger.Info("[CoopSpectator] TdmClone client registration fail: Module.CurrentModule is null.");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("[CoopSpectator] TdmClone client registration fail: " + ex.Message);
+            }
+        }
+#endif
 
         private static void TryApplyHarmonyPatches() // Пробуємо застосувати всі Harmony патчі з нашої збірки
         { // Починаємо блок методу
@@ -44,6 +83,8 @@ namespace CoopSpectator // Використовуємо кореневий names
                 harmony.PatchAll(); // Застосовуємо всі патчі з атрибутами [HarmonyPatch] у цій збірці
                 // Патч на Lobby Custom Join (127.0.0.1 для тесту на одній машині) — через reflection, бо збірка Lobby може завантажитись пізніше
                 LobbyCustomGameLocalJoinPatch.Apply(harmony);
+                IntermissionVmCrashGuardPatch.Apply(harmony);
+                MissionStateOpenNewPatches.Apply(harmony);
                 AppDomain.CurrentDomain.AssemblyLoad += (_, e) => // Коли підвантажиться нова збірка (наприклад Lobby)
                 { // Перевіряємо чи це Lobby — тоді застосуємо патч
                     if (e.LoadedAssembly.GetName().Name == "TaleWorlds.MountAndBlade.Lobby")
