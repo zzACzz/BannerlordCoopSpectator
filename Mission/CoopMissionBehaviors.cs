@@ -3,6 +3,7 @@
 
 using System; // Exception
 using System.Collections.Generic; // List<string>
+using System.Collections; // IEnumerable
 using System.Linq; // Distinct, FirstOrDefault
 using System.Reflection; // MethodInfo
 using TaleWorlds.Core; // BasicCharacterObject, MBObjectManager (для спавну)
@@ -23,6 +24,16 @@ namespace CoopSpectator.MissionBehaviors
         private float _timeUntilNextStateLog;
         private Agent _lastControlledAgent; // Попередній Agent.Main для детекції зміни контролю / повернення в spectator.
         private string _lastRequestedPreferredTroopKey;
+        private bool _visualSpawnAutoConfirmHooked;
+        private bool _visualSpawnAutoConfirmTriggered;
+        private object _visualSpawnComponent;
+        private Delegate _onMyAgentVisualSpawnedDelegate;
+        private bool _hasLoggedAutoConfirmBehaviorDiagnostics;
+        private bool _hasLoggedMissionBehaviorCatalog;
+        private bool _hasLoggedClassLoadoutDiagnostics;
+        private bool _hasLoggedActiveClassLoadoutDiagnostics;
+        private bool _hasLoggedClassLoadoutPendingInitialization;
+        private string _lastAppliedClassLoadoutFilterKey;
 
         public override void AfterStart()
         {
@@ -35,6 +46,10 @@ namespace CoopSpectator.MissionBehaviors
             LogCurrentState(mission);
             _lastControlledAgent = Agent.Main;
             _timeUntilNextStateLog = LogStateIntervalSeconds;
+            TryHookVisualSpawnAutoConfirm(mission);
+            LogClassLoadoutDiagnosticsOnce(mission);
+            LogActiveClassLoadoutDiagnosticsOnce(mission);
+            TryFilterClassLoadoutToCoopUnits(mission);
 
 #if !COOPSPECTATOR_DEDICATED
             UiFeedback.ShowMessageDeferred("Coop: in battle. (Leave battle on host to return to lobby.)");
@@ -54,12 +69,20 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     ModLogger.Info("CoopMissionClientLogic: controlled agent changed — now controlling agent " + (currentMain.Name?.ToString() ?? currentMain.Index.ToString()));
                     _lastRequestedPreferredTroopKey = null;
+                    _visualSpawnAutoConfirmTriggered = false;
                 }
                 else if (_lastControlledAgent != null)
+                {
                     ModLogger.Info("CoopMissionClientLogic: returned to spectator (agent lost or died).");
+                    _lastAppliedClassLoadoutFilterKey = null;
+                }
                 _lastControlledAgent = currentMain;
             }
 
+            TryHookVisualSpawnAutoConfirm(mission);
+            LogClassLoadoutDiagnosticsOnce(mission);
+            LogActiveClassLoadoutDiagnosticsOnce(mission);
+            TryFilterClassLoadoutToCoopUnits(mission);
             TryTriggerClientPreferredTroopRequest(mission);
 
             _timeUntilNextStateLog -= dt;
@@ -74,6 +97,12 @@ namespace CoopSpectator.MissionBehaviors
         {
             base.OnMissionResultReady(missionResult);
             ModLogger.Info("CoopMissionClientLogic: mission result ready — returning to lobby.");
+        }
+
+        protected override void OnEndMission()
+        {
+            UnhookVisualSpawnAutoConfirm();
+            base.OnEndMission();
         }
 
         private static void LogMissionEntered(Mission mission)
@@ -205,6 +234,837 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private void TryHookVisualSpawnAutoConfirm(Mission mission)
+        {
+            if (_visualSpawnAutoConfirmHooked || mission == null || !GameNetwork.IsClient)
+                return;
+
+            try
+            {
+                MissionBehavior visualSpawnBehavior = mission.MissionBehaviors
+                    .FirstOrDefault(behavior =>
+                        behavior != null &&
+                        behavior.GetType().Name.IndexOf("MultiplayerMissionAgentVisualSpawnComponent", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (visualSpawnBehavior == null)
+                    return;
+
+                EventInfo eventInfo = visualSpawnBehavior.GetType().GetEvent(
+                    "OnMyAgentVisualSpawned",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (eventInfo == null)
+                    return;
+
+                MethodInfo handler = GetType().GetMethod(
+                    nameof(OnMyAgentVisualSpawned),
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                if (handler == null)
+                    return;
+
+                Delegate callback = Delegate.CreateDelegate(eventInfo.EventHandlerType, this, handler, false);
+                if (callback == null)
+                    return;
+
+                eventInfo.AddEventHandler(visualSpawnBehavior, callback);
+                _visualSpawnComponent = visualSpawnBehavior;
+                _onMyAgentVisualSpawnedDelegate = callback;
+                _visualSpawnAutoConfirmHooked = true;
+                ModLogger.Info("CoopMissionClientLogic: hooked OnMyAgentVisualSpawned for coop auto-confirm.");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: visual spawn auto-confirm hook failed: " + ex.Message);
+            }
+        }
+
+        private void UnhookVisualSpawnAutoConfirm()
+        {
+            if (!_visualSpawnAutoConfirmHooked || _visualSpawnComponent == null || _onMyAgentVisualSpawnedDelegate == null)
+                return;
+
+            try
+            {
+                EventInfo eventInfo = _visualSpawnComponent.GetType().GetEvent(
+                    "OnMyAgentVisualSpawned",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                eventInfo?.RemoveEventHandler(_visualSpawnComponent, _onMyAgentVisualSpawnedDelegate);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: visual spawn auto-confirm unhook failed: " + ex.Message);
+            }
+            finally
+            {
+                _visualSpawnAutoConfirmHooked = false;
+                _visualSpawnComponent = null;
+                _onMyAgentVisualSpawnedDelegate = null;
+            }
+        }
+
+        private void OnMyAgentVisualSpawned()
+        {
+            if (_visualSpawnAutoConfirmTriggered || Agent.Main != null)
+                return;
+
+            Mission mission = Mission;
+            if (mission == null)
+                return;
+
+            _visualSpawnAutoConfirmTriggered = true;
+            LogMissionBehaviorCatalogOnce(mission);
+
+            TryInvokeAutoSpawnConfirm(mission);
+        }
+
+        private void TryInvokeAutoSpawnConfirm(Mission mission)
+        {
+            foreach (MissionBehavior behavior in mission.MissionBehaviors)
+            {
+                if (behavior == null)
+                    continue;
+
+                string typeName = behavior.GetType().Name;
+                if (typeName.IndexOf("MissionLobbyEquipmentNetworkComponent", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    typeName.IndexOf("MultiplayerTeamSelectComponent", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                LogAutoConfirmBehaviorDiagnosticsOnce(behavior);
+
+                MethodInfo[] candidateMethods;
+                try
+                {
+                    candidateMethods = behavior.GetType()
+                        .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                        .Where(method =>
+                            method.ReturnType == typeof(void) &&
+                            method.GetParameters().Length == 0 &&
+                            method.Name.IndexOf("Spawn", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                            (method.Name.IndexOf("Request", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                             method.Name.IndexOf("Confirm", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                             method.Name.IndexOf("Finalize", StringComparison.OrdinalIgnoreCase) >= 0))
+                        .OrderBy(method => method.Name)
+                        .ToArray();
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (MethodInfo method in candidateMethods)
+                {
+                    try
+                    {
+                        method.Invoke(behavior, Array.Empty<object>());
+                        ModLogger.Info(
+                            "CoopMissionClientLogic: auto-confirm spawn invoked. " +
+                            "Behavior=" + behavior.GetType().FullName +
+                            " Method=" + method.Name);
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        ModLogger.Info(
+                            "CoopMissionClientLogic: auto-confirm candidate failed. " +
+                            "Behavior=" + behavior.GetType().FullName +
+                            " Method=" + method.Name +
+                            " Error=" + ex.Message);
+                    }
+                }
+            }
+        }
+
+        private void LogMissionBehaviorCatalogOnce(Mission mission)
+        {
+            if (_hasLoggedMissionBehaviorCatalog || mission == null)
+                return;
+
+            _hasLoggedMissionBehaviorCatalog = true;
+
+            try
+            {
+                MissionBehavior[] behaviors = mission.MissionBehaviors?.Where(behavior => behavior != null).ToArray() ?? Array.Empty<MissionBehavior>();
+                ModLogger.Info("CoopMissionClientLogic: mission behavior catalog count = " + behaviors.Length);
+                foreach (MissionBehavior behavior in behaviors)
+                    ModLogger.Info("CoopMissionClientLogic: mission behavior => " + behavior.GetType().FullName);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: mission behavior catalog logging failed: " + ex.Message);
+            }
+        }
+
+        private void LogAutoConfirmBehaviorDiagnosticsOnce(MissionBehavior behavior)
+        {
+            if (_hasLoggedAutoConfirmBehaviorDiagnostics || behavior == null)
+                return;
+
+            _hasLoggedAutoConfirmBehaviorDiagnostics = true;
+
+            try
+            {
+                MethodInfo[] interestingMethods = behavior.GetType()
+                    .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Where(method =>
+                        method.Name.IndexOf("Spawn", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        method.Name.IndexOf("Visual", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        method.Name.IndexOf("Agent", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        method.Name.IndexOf("Ready", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        method.Name.IndexOf("Invul", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        method.Name.IndexOf("Confirm", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        method.Name.IndexOf("Request", StringComparison.OrdinalIgnoreCase) >= 0)
+                    .OrderBy(method => method.Name)
+                    .ToArray();
+
+                ModLogger.Info(
+                    "CoopMissionClientLogic: auto-confirm diagnostics for behavior " +
+                    behavior.GetType().FullName +
+                    " MethodCount=" + interestingMethods.Length);
+
+                foreach (MethodInfo method in interestingMethods)
+                {
+                    ParameterInfo[] parameters = method.GetParameters();
+                    string parameterList = string.Join(", ", parameters.Select(parameter => parameter.ParameterType.Name + " " + parameter.Name));
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: auto-confirm method candidate => " +
+                        method.ReturnType.Name + " " +
+                        method.Name + "(" + parameterList + ")");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: auto-confirm diagnostics failed: " + ex.Message);
+            }
+        }
+
+        private void LogClassLoadoutDiagnosticsOnce(Mission mission)
+        {
+            if (_hasLoggedClassLoadoutDiagnostics || mission == null)
+                return;
+
+            try
+            {
+                object classLoadout = mission.MissionBehaviors
+                    .FirstOrDefault(behavior =>
+                        behavior != null &&
+                        behavior.GetType().FullName != null &&
+                        behavior.GetType().FullName.IndexOf("MissionGauntletClassLoadout", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (classLoadout == null)
+                    return;
+
+                _hasLoggedClassLoadoutDiagnostics = true;
+
+                Type loadoutType = classLoadout.GetType();
+                ModLogger.Info("CoopMissionClientLogic: class loadout diagnostics type = " + loadoutType.FullName);
+
+                foreach (FieldInfo field in loadoutType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    object value = null;
+                    string valueDescription;
+                    try
+                    {
+                        value = field.GetValue(classLoadout);
+                        valueDescription = DescribeDiagnosticValue(value);
+                    }
+                    catch (Exception ex)
+                    {
+                        valueDescription = "unavailable (" + ex.Message + ")";
+                    }
+
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: class loadout field => " +
+                        field.FieldType.FullName + " " +
+                        field.Name + " = " + valueDescription);
+
+                    LogNestedDiagnosticMembers(field.Name, value);
+                }
+
+                foreach (PropertyInfo property in loadoutType.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    if (property.GetIndexParameters().Length != 0)
+                        continue;
+
+                    object value = null;
+                    string valueDescription;
+                    try
+                    {
+                        if (!property.CanRead)
+                            continue;
+
+                        value = property.GetValue(classLoadout, null);
+                        valueDescription = DescribeDiagnosticValue(value);
+                    }
+                    catch (Exception ex)
+                    {
+                        valueDescription = "unavailable (" + ex.Message + ")";
+                    }
+
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: class loadout property => " +
+                        property.PropertyType.FullName + " " +
+                        property.Name + " = " + valueDescription);
+
+                    LogNestedDiagnosticMembers(property.Name, value);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: class loadout diagnostics failed: " + ex.Message);
+            }
+        }
+
+        private static void LogNestedDiagnosticMembers(string ownerName, object value)
+        {
+            if (value == null)
+                return;
+
+            Type valueType = value.GetType();
+            string typeName = valueType.FullName ?? valueType.Name;
+            bool interestingType =
+                typeName.IndexOf("VM", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("ViewModel", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("List", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("Binding", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("Class", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("Troop", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!interestingType)
+                return;
+
+            foreach (FieldInfo nestedField in valueType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (!IsInterestingDiagnosticMember(nestedField.Name, nestedField.FieldType))
+                    continue;
+
+                string valueDescription;
+                try
+                {
+                    valueDescription = DescribeDiagnosticValue(nestedField.GetValue(value));
+                }
+                catch (Exception ex)
+                {
+                    valueDescription = "unavailable (" + ex.Message + ")";
+                }
+
+                ModLogger.Info(
+                    "CoopMissionClientLogic: class loadout nested field => " +
+                    ownerName + "." + nestedField.Name +
+                    " : " + nestedField.FieldType.FullName +
+                    " = " + valueDescription);
+            }
+
+            foreach (PropertyInfo nestedProperty in valueType.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (nestedProperty.GetIndexParameters().Length != 0 ||
+                    !nestedProperty.CanRead ||
+                    !IsInterestingDiagnosticMember(nestedProperty.Name, nestedProperty.PropertyType))
+                {
+                    continue;
+                }
+
+                string valueDescription;
+                try
+                {
+                    valueDescription = DescribeDiagnosticValue(nestedProperty.GetValue(value, null));
+                }
+                catch (Exception ex)
+                {
+                    valueDescription = "unavailable (" + ex.Message + ")";
+                }
+
+                ModLogger.Info(
+                    "CoopMissionClientLogic: class loadout nested property => " +
+                    ownerName + "." + nestedProperty.Name +
+                    " : " + nestedProperty.PropertyType.FullName +
+                    " = " + valueDescription);
+            }
+
+            LogDiagnosticCollectionItems(ownerName, value);
+        }
+
+        private static void LogDiagnosticCollectionItems(string ownerName, object value)
+        {
+            if (value == null || value is string || !(value is IEnumerable enumerable))
+                return;
+
+            int itemIndex = 0;
+            foreach (object item in enumerable)
+            {
+                if (itemIndex >= 4)
+                    break;
+
+                if (item == null)
+                {
+                    ModLogger.Info("CoopMissionClientLogic: diagnostic collection item => " + ownerName + "[" + itemIndex + "] = null");
+                    itemIndex++;
+                    continue;
+                }
+
+                Type itemType = item.GetType();
+                ModLogger.Info(
+                    "CoopMissionClientLogic: diagnostic collection item => " +
+                    ownerName + "[" + itemIndex + "] = " +
+                    DescribeDiagnosticValue(item));
+
+                foreach (FieldInfo nestedField in itemType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    if (!IsInterestingDiagnosticMember(nestedField.Name, nestedField.FieldType))
+                        continue;
+
+                    string valueDescription;
+                    try
+                    {
+                        valueDescription = DescribeDiagnosticValue(nestedField.GetValue(item));
+                    }
+                    catch (Exception ex)
+                    {
+                        valueDescription = "unavailable (" + ex.Message + ")";
+                    }
+
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: diagnostic item field => " +
+                        ownerName + "[" + itemIndex + "]." + nestedField.Name +
+                        " : " + nestedField.FieldType.FullName +
+                        " = " + valueDescription);
+                }
+
+                foreach (PropertyInfo nestedProperty in itemType.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    if (nestedProperty.GetIndexParameters().Length != 0 ||
+                        !nestedProperty.CanRead ||
+                        !IsInterestingDiagnosticMember(nestedProperty.Name, nestedProperty.PropertyType))
+                    {
+                        continue;
+                    }
+
+                    string valueDescription;
+                    try
+                    {
+                        valueDescription = DescribeDiagnosticValue(nestedProperty.GetValue(item, null));
+                    }
+                    catch (Exception ex)
+                    {
+                        valueDescription = "unavailable (" + ex.Message + ")";
+                    }
+
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: diagnostic item property => " +
+                        ownerName + "[" + itemIndex + "]." + nestedProperty.Name +
+                        " : " + nestedProperty.PropertyType.FullName +
+                        " = " + valueDescription);
+                }
+
+                itemIndex++;
+            }
+        }
+
+        private static bool IsInterestingDiagnosticMember(string memberName, Type memberType)
+        {
+            string typeName = memberType?.FullName ?? memberType?.Name ?? string.Empty;
+            return memberName.IndexOf("class", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("troop", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("item", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("list", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("data", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("VM", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("ViewModel", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("List", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("Binding", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string DescribeDiagnosticValue(object value)
+        {
+            if (value == null)
+                return "null";
+
+            if (value is string text)
+                return "\"" + text + "\"";
+
+            if (value is System.Collections.ICollection collection)
+                return value.GetType().FullName + " Count=" + collection.Count;
+
+            return value.GetType().FullName + " :: " + value;
+        }
+
+        private void LogActiveClassLoadoutDiagnosticsOnce(Mission mission)
+        {
+            if (_hasLoggedActiveClassLoadoutDiagnostics || mission == null)
+                return;
+
+            try
+            {
+                object classLoadout = mission.MissionBehaviors
+                    .FirstOrDefault(behavior =>
+                        behavior != null &&
+                        behavior.GetType().FullName != null &&
+                        behavior.GetType().FullName.IndexOf("MissionGauntletClassLoadout", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (classLoadout == null)
+                    return;
+
+                Type loadoutType = classLoadout.GetType();
+                FieldInfo dataSourceField = loadoutType.GetField("_dataSource", BindingFlags.Instance | BindingFlags.NonPublic);
+                FieldInfo tryToInitializeField = loadoutType.GetField("_tryToInitialize", BindingFlags.Instance | BindingFlags.NonPublic);
+                PropertyInfo isActiveProperty = loadoutType.GetProperty("IsActive", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (dataSourceField == null)
+                    return;
+
+                object dataSource = dataSourceField.GetValue(classLoadout);
+                bool isActive = false;
+                bool tryToInitialize = false;
+                try
+                {
+                    if (isActiveProperty != null)
+                        isActive = (bool)isActiveProperty.GetValue(classLoadout, null);
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    if (tryToInitializeField != null)
+                        tryToInitialize = (bool)tryToInitializeField.GetValue(classLoadout);
+                }
+                catch
+                {
+                }
+
+                if (dataSource == null && !isActive && !tryToInitialize)
+                    return;
+
+                if (dataSource == null)
+                {
+                    if (!_hasLoggedClassLoadoutPendingInitialization)
+                    {
+                        _hasLoggedClassLoadoutPendingInitialization = true;
+                        ModLogger.Info(
+                            "CoopMissionClientLogic: class loadout waiting for datasource. " +
+                            "IsActive=" + isActive +
+                            " TryToInitialize=" + tryToInitialize);
+                    }
+                    return;
+                }
+
+                _hasLoggedActiveClassLoadoutDiagnostics = true;
+                ModLogger.Info(
+                    "CoopMissionClientLogic: active class loadout state. " +
+                    "IsActive=" + isActive +
+                    " TryToInitialize=" + tryToInitialize +
+                    " DataSource=" + DescribeDiagnosticValue(dataSource));
+                Type dataSourceType = dataSource.GetType();
+                ModLogger.Info("CoopMissionClientLogic: active class loadout datasource type = " + dataSourceType.FullName);
+
+                foreach (FieldInfo field in dataSourceType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    if (!IsInterestingDiagnosticMember(field.Name, field.FieldType))
+                        continue;
+
+                    string valueDescription;
+                    try
+                    {
+                        valueDescription = DescribeDiagnosticValue(field.GetValue(dataSource));
+                    }
+                    catch (Exception ex)
+                    {
+                        valueDescription = "unavailable (" + ex.Message + ")";
+                    }
+
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: active datasource field => " +
+                        field.FieldType.FullName + " " +
+                        field.Name + " = " + valueDescription);
+
+                    object nestedValue = null;
+                    try
+                    {
+                        nestedValue = field.GetValue(dataSource);
+                    }
+                    catch
+                    {
+                    }
+
+                    LogNestedDiagnosticMembers("datasource." + field.Name, nestedValue);
+                }
+
+                foreach (PropertyInfo property in dataSourceType.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    if (property.GetIndexParameters().Length != 0 ||
+                        !property.CanRead ||
+                        !IsInterestingDiagnosticMember(property.Name, property.PropertyType))
+                    {
+                        continue;
+                    }
+
+                    string valueDescription;
+                    try
+                    {
+                        valueDescription = DescribeDiagnosticValue(property.GetValue(dataSource, null));
+                    }
+                    catch (Exception ex)
+                    {
+                        valueDescription = "unavailable (" + ex.Message + ")";
+                    }
+
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: active datasource property => " +
+                        property.PropertyType.FullName + " " +
+                        property.Name + " = " + valueDescription);
+
+                    object nestedValue = null;
+                    try
+                    {
+                        nestedValue = property.GetValue(dataSource, null);
+                    }
+                    catch
+                    {
+                    }
+
+                    LogNestedDiagnosticMembers("datasource." + property.Name, nestedValue);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: active class loadout diagnostics failed: " + ex.Message);
+            }
+        }
+
+        private void TryFilterClassLoadoutToCoopUnits(Mission mission)
+        {
+            if (mission == null)
+                return;
+
+            try
+            {
+                object classLoadout = mission.MissionBehaviors
+                    .FirstOrDefault(behavior =>
+                        behavior != null &&
+                        behavior.GetType().FullName != null &&
+                        behavior.GetType().FullName.IndexOf("MissionGauntletClassLoadout", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (classLoadout == null)
+                    return;
+
+                FieldInfo dataSourceField = classLoadout.GetType().GetField("_dataSource", BindingFlags.Instance | BindingFlags.NonPublic);
+                object dataSource = dataSourceField?.GetValue(classLoadout);
+                if (dataSource == null)
+                    return;
+
+                string filterKey = BuildClassLoadoutFilterKey(mission, dataSource);
+                if (string.Equals(_lastAppliedClassLoadoutFilterKey, filterKey, StringComparison.Ordinal))
+                    return;
+
+                object classesObject = GetMemberValue(dataSource, "_classes") ?? GetMemberValue(dataSource, "Classes");
+                if (!(classesObject is IList groups) || groups.Count == 0)
+                    return;
+
+                bool anyRemoved = false;
+                int keptSubclassCount = 0;
+                for (int groupIndex = groups.Count - 1; groupIndex >= 0; groupIndex--)
+                {
+                    object groupVm = groups[groupIndex];
+                    object subClassesObject = GetMemberValue(groupVm, "_subClasses") ?? GetMemberValue(groupVm, "SubClasses");
+                    if (!(subClassesObject is IList subClasses))
+                        continue;
+
+                    for (int subClassIndex = subClasses.Count - 1; subClassIndex >= 0; subClassIndex--)
+                    {
+                        object heroClassVm = subClasses[subClassIndex];
+                        if (IsCoopHeroClassVm(heroClassVm))
+                        {
+                            keptSubclassCount++;
+                            continue;
+                        }
+
+                        subClasses.RemoveAt(subClassIndex);
+                        anyRemoved = true;
+                    }
+
+                    if (subClasses.Count == 0)
+                    {
+                        groups.RemoveAt(groupIndex);
+                        anyRemoved = true;
+                    }
+                }
+
+                if (!anyRemoved)
+                    return;
+
+                object currentSelectedClass = GetMemberValue(dataSource, "_currentSelectedClass") ?? GetMemberValue(dataSource, "CurrentSelectedClass");
+                if (!IsCoopHeroClassVm(currentSelectedClass))
+                {
+                    object firstCoopClass = FindFirstCoopHeroClass(groups);
+                    if (firstCoopClass != null)
+                    {
+                        SetMemberValue(dataSource, "_currentSelectedClass", firstCoopClass);
+                        SetMemberValue(dataSource, "CurrentSelectedClass", firstCoopClass);
+                    }
+                }
+
+                _lastAppliedClassLoadoutFilterKey = filterKey;
+                ModLogger.Info(
+                    "CoopMissionClientLogic: filtered class loadout to coop units. " +
+                    "FilterKey=" + filterKey + " " +
+                    "RemainingGroups=" + groups.Count +
+                    " RemainingCoopSubClasses=" + keptSubclassCount);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: class loadout coop filter failed: " + ex.Message);
+            }
+        }
+
+        private static object FindFirstCoopHeroClass(IList groups)
+        {
+            foreach (object groupVm in groups)
+            {
+                object subClassesObject = GetMemberValue(groupVm, "_subClasses") ?? GetMemberValue(groupVm, "SubClasses");
+                if (!(subClassesObject is IList subClasses))
+                    continue;
+
+                foreach (object heroClassVm in subClasses)
+                {
+                    if (IsCoopHeroClassVm(heroClassVm))
+                        return heroClassVm;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool IsCoopHeroClassVm(object heroClassVm)
+        {
+            if (heroClassVm == null)
+                return false;
+
+            object heroClass = GetMemberValue(heroClassVm, "HeroClass");
+            if (IsCoopHeroClassObject(heroClass))
+                return true;
+
+            string troopTypeId = GetMemberValue(heroClassVm, "_troopTypeId") as string ?? GetMemberValue(heroClassVm, "TroopTypeId") as string;
+            if (!string.IsNullOrEmpty(troopTypeId) && troopTypeId.IndexOf("coop", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            foreach (string memberName in new[] { "Name", "_name", "ClassName", "_className", "Title", "_title" })
+            {
+                string text = GetMemberValue(heroClassVm, memberName)?.ToString();
+                if (!string.IsNullOrEmpty(text) && text.IndexOf("coop", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsCoopHeroClassObject(object heroClass)
+        {
+            if (heroClass == null)
+                return false;
+
+            foreach (string memberName in new[] { "StringId", "Id" })
+            {
+                string text = GetMemberValue(heroClass, memberName) as string;
+                if (!string.IsNullOrEmpty(text) && text.IndexOf("mp_coop_", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+
+            foreach (string memberName in new[] { "Name", "ClassName" })
+            {
+                string text = GetMemberValue(heroClass, memberName)?.ToString();
+                if (!string.IsNullOrEmpty(text) && text.IndexOf("coop", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+
+            foreach (string memberName in new[] { "Character", "CharacterObject", "TroopCharacter", "HeroCharacter" })
+            {
+                object character = GetMemberValue(heroClass, memberName);
+                if (character == null)
+                    continue;
+
+                string stringId = GetMemberValue(character, "StringId") as string ?? GetMemberValue(character, "Id") as string;
+                if (!string.IsNullOrEmpty(stringId) && stringId.IndexOf("mp_coop_", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+
+                string name = GetMemberValue(character, "Name")?.ToString();
+                if (!string.IsNullOrEmpty(name) && name.IndexOf("coop", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static object GetMemberValue(object instance, string memberName)
+        {
+            if (instance == null || string.IsNullOrEmpty(memberName))
+                return null;
+
+            Type type = instance.GetType();
+            PropertyInfo property = type.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property != null && property.CanRead && property.GetIndexParameters().Length == 0)
+            {
+                try
+                {
+                    return property.GetValue(instance, null);
+                }
+                catch
+                {
+                }
+            }
+
+            FieldInfo field = type.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (field != null)
+            {
+                try
+                {
+                    return field.GetValue(instance);
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
+        }
+
+        private static void SetMemberValue(object instance, string memberName, object value)
+        {
+            if (instance == null || string.IsNullOrEmpty(memberName))
+                return;
+
+            Type type = instance.GetType();
+            PropertyInfo property = type.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property != null && property.CanWrite && property.GetIndexParameters().Length == 0)
+            {
+                try
+                {
+                    property.SetValue(instance, value, null);
+                    return;
+                }
+                catch
+                {
+                }
+            }
+
+            FieldInfo field = type.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (field != null)
+            {
+                try
+                {
+                    field.SetValue(instance, value);
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private static string BuildClassLoadoutFilterKey(Mission mission, object dataSource)
+        {
+            MissionPeer missionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            int teamIndex = missionPeer?.Team?.TeamIndex ?? -1;
+            int selectedTroopIndex = missionPeer?.SelectedTroopIndex ?? -1;
+            string dataSourceIdentity = dataSource.GetType().FullName + "#" + dataSource.GetHashCode();
+            string culture = missionPeer?.Culture?.StringId ?? "none";
+            string missionMode = mission?.Mode.ToString() ?? "unknown";
+            return missionMode + "|" + teamIndex + "|" + culture + "|" + selectedTroopIndex + "|" + dataSourceIdentity;
+        }
+
     }
 
     /// <summary>
@@ -225,7 +1085,15 @@ namespace CoopSpectator.MissionBehaviors
         private static bool _hasTransferredDiagnosticAllowedAgentToPeer;
         private static readonly HashSet<int> _spawnedCoopPeerIndices = new HashSet<int>();
         private static HashSet<string> _loggedForcedPreferredClassKeys = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly Dictionary<FormationClass, bool> _appliedCoopClassAvailabilityStates = new Dictionary<FormationClass, bool>();
         private static Agent _diagnosticAllowedAgent;
+        private static readonly FormationClass[] RestrictableFormationClasses =
+        {
+            FormationClass.Infantry,
+            FormationClass.Ranged,
+            FormationClass.Cavalry,
+            FormationClass.HorseArcher
+        };
 
         /// <summary>Після читання файлу — список troop ID з кампанії для обмеження вибору юнітів клієнтами (варіант A).</summary>
         public static List<string> CampaignRosterTroopIds { get; private set; } = new List<string>();
@@ -244,6 +1112,7 @@ namespace CoopSpectator.MissionBehaviors
             if (_hasLoggedStart) return;
             _hasLoggedStart = true;
             _spawnedCoopPeerIndices.Clear();
+            _appliedCoopClassAvailabilityStates.Clear();
 
             ModLogger.Info("CoopMissionSpawnLogic: server mission entered.");
             try
@@ -960,6 +1829,129 @@ namespace CoopSpectator.MissionBehaviors
                         " Reason=" + debugReason);
                 }
             }
+
+            TrySyncCoopClassRestrictions(mission, source);
+        }
+
+        private static void TrySyncCoopClassRestrictions(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer)
+                return;
+
+            MissionLobbyComponent lobbyComponent = mission.GetMissionBehavior<MissionLobbyComponent>();
+            if (lobbyComponent == null)
+                return;
+
+            HashSet<FormationClass> allowedClasses = ResolveAllowedFormationClassesForMission(mission);
+            if (allowedClasses.Count == 0)
+                return;
+
+            foreach (FormationClass formationClass in RestrictableFormationClasses)
+            {
+                bool desiredAvailability = allowedClasses.Contains(formationClass);
+                if (_appliedCoopClassAvailabilityStates.TryGetValue(formationClass, out bool appliedAvailability) &&
+                    appliedAvailability == desiredAvailability)
+                {
+                    continue;
+                }
+
+                bool finalAvailability = ApplyCoopClassRestriction(lobbyComponent, formationClass, desiredAvailability);
+                _appliedCoopClassAvailabilityStates[formationClass] = finalAvailability;
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: synced class restriction (" + source + "). " +
+                    "FormationClass=" + formationClass +
+                    " DesiredAvailability=" + desiredAvailability +
+                    " FinalAvailability=" + finalAvailability);
+            }
+        }
+
+        private static HashSet<FormationClass> ResolveAllowedFormationClassesForMission(Mission mission)
+        {
+            HashSet<FormationClass> allowedClasses = new HashSet<FormationClass>();
+            if (mission == null || GameNetwork.NetworkPeers == null)
+                return allowedClasses;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    continue;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                if (missionPeer == null || missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
+                    continue;
+
+                BasicCharacterObject controlledCharacter = missionPeer.ControlledAgent?.Character as BasicCharacterObject;
+                if (controlledCharacter != null)
+                {
+                    allowedClasses.Add(controlledCharacter.DefaultFormationClass);
+                    continue;
+                }
+
+                int currentTroopIndex = missionPeer.SelectedTroopIndex;
+                MultiplayerClassDivisions.MPHeroClass currentClass = null;
+                List<MultiplayerClassDivisions.MPHeroClass> cultureClasses = MultiplayerClassDivisions
+                    .GetMPHeroClasses(missionPeer.Culture)
+                    ?.Where(heroClass => heroClass?.HeroCharacter != null)
+                    .ToList();
+                if (cultureClasses != null && currentTroopIndex >= 0 && currentTroopIndex < cultureClasses.Count)
+                    currentClass = cultureClasses[currentTroopIndex];
+
+                if (!TryResolvePreferredHeroClassForPeer(
+                        missionPeer,
+                        currentClass,
+                        false,
+                        out MultiplayerClassDivisions.MPHeroClass preferredClass,
+                        out _,
+                        out _))
+                {
+                    continue;
+                }
+
+                BasicCharacterObject preferredCharacter = preferredClass?.HeroCharacter;
+                if (preferredCharacter != null)
+                    allowedClasses.Add(preferredCharacter.DefaultFormationClass);
+            }
+
+            if (allowedClasses.Count == 0 && SelectedAllowedCharacter != null)
+                allowedClasses.Add(SelectedAllowedCharacter.DefaultFormationClass);
+
+            return allowedClasses;
+        }
+
+        private static bool ApplyCoopClassRestriction(
+            MissionLobbyComponent lobbyComponent,
+            FormationClass formationClass,
+            bool desiredAvailability)
+        {
+            bool finalAvailability = desiredAvailability;
+            bool broadcastValue = !desiredAvailability;
+
+            try
+            {
+                lobbyComponent.ChangeClassRestriction(formationClass, broadcastValue);
+                finalAvailability = lobbyComponent.IsClassAvailable(formationClass);
+                if (finalAvailability != desiredAvailability)
+                {
+                    broadcastValue = desiredAvailability;
+                    lobbyComponent.ChangeClassRestriction(formationClass, broadcastValue);
+                    finalAvailability = lobbyComponent.IsClassAvailable(formationClass);
+                }
+
+                GameNetwork.BeginBroadcastModuleEvent();
+                GameNetwork.WriteMessage(new NetworkMessages.FromServer.ChangeClassRestrictions(formationClass, broadcastValue));
+                GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: class restriction sync failed. " +
+                    "FormationClass=" + formationClass +
+                    " DesiredAvailability=" + desiredAvailability +
+                    " Error=" + ex.Message);
+            }
+
+            return finalAvailability;
         }
 
         private static string GetPreferredTargetTroopIdForPeerCulture(MissionPeer missionPeer)
