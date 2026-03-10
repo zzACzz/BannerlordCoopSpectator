@@ -15,11 +15,19 @@
 - Dedicated startup path працює.
 - Listed server join працює.
 - Mission start/end цикл повторюється в межах однієї сесії.
+- Vanilla `TeamDeathmatch` listed baseline стабільний.
+- `battle_roster.json` path працює: SP write -> dedicated read -> MP-safe surrogate resolve.
 
 ## In progress
-- Spawn за campaign roster.
-- Надійне призначення контролю агентів.
+- Власний coop spawn flow поверх vanilla mission baseline.
+- Spawn за campaign roster без залежності від TDM troop menu.
+- Надійне призначення контролю агентів без late ownership transfer.
 - Spectator transitions без десинків.
+
+## Current architectural conclusion
+- Observer/tick hacks для `MissionPeer.SelectedTroopIndex` непридатні.
+- Late ownership transfer після vanilla spawn непридатний: дає "напівживого" агента.
+- Правильний довгостроковий напрямок: не підміняти vanilla TDM class selection, а прибрати залежність від TDM troop selection UI і робити власний coop-controlled spawn path після вибору сторони.
 
 ## Engineering principles
 - Використовувати ванільний MP flow, не ламати його.
@@ -31,6 +39,7 @@
 - Не змішувати client/dedicated DLL reference профілі.
 - `GameTypeId` має бути узгоджений у code/config/runtime.
 - Dedicated stack не повинен містити client-only behaviors.
+- Campaign troop ids і MP troop ids — різні простори ідентифікаторів; між ними потрібен явний mapping layer.
 
 ## Definition of done (iteration)
 - 3 послідовні battle cycles без critical crash.

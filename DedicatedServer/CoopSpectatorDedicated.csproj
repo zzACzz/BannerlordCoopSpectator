@@ -6,6 +6,8 @@
     <DefineConstants>$(DefineConstants);COOPSPECTATOR_DEDICATED</DefineConstants>
     <AssemblyName>CoopSpectator</AssemblyName>
     <RootNamespace>CoopSpectator</RootNamespace>
+    <DebugSymbols>false</DebugSymbols>
+    <DebugType>none</DebugType>
     <PlatformTarget>x64</PlatformTarget>
     <Platform Condition="'$(Platform)'==''">x64</Platform>
     <OutputPath>..\Module\CoopSpectatorDedicated\bin\Win64_Shipping_Server\</OutputPath>
@@ -45,12 +47,14 @@
     <Compile Include="..\GameMode\MissionBehaviorHelpers.cs" Link="GameMode\MissionBehaviorHelpers.cs" />
     <Compile Include="..\GameMode\MissionBehaviorDiagnostic.cs" Link="GameMode\MissionBehaviorDiagnostic.cs" />
     <Compile Include="..\Mission\CoopMissionBehaviors.cs" Link="Mission\CoopMissionBehaviors.cs" />
+    <Compile Include="..\Campaign\BattleRosterFile.cs" Link="Campaign\BattleRosterFile.cs" />
     <Compile Include="..\Infrastructure\ModLogger.cs" Link="Infrastructure\ModLogger.cs" />
     <Compile Include="..\Infrastructure\AssemblyDiagnostics.cs" Link="Infrastructure\AssemblyDiagnostics.cs" />
     <Compile Include="..\Infrastructure\ExperimentalFeatures.cs" Link="Infrastructure\ExperimentalFeatures.cs" />
     <Compile Include="..\Infrastructure\CoopGameModeIds.cs" Link="Infrastructure\CoopGameModeIds.cs" />
     <Compile Include="Patches\DedicatedWebPanelPatches.cs" Link="Patches\DedicatedWebPanelPatches.cs" />
     <Compile Include="Patches\GameModeOverridePatches.cs" Link="Patches\GameModeOverridePatches.cs" />
+    <Compile Include="..\Patches\MultiplayerHeroClassOverridePatch.cs" Link="Patches\MultiplayerHeroClassOverridePatch.cs" />
     <Compile Include="..\Patches\MissionStateOpenNewPatches.cs" Link="Patches\MissionStateOpenNewPatches.cs" />
   </ItemGroup>
 
@@ -187,16 +191,23 @@
       <_DedicatedModuleDir Condition="Exists('$(DedicatedServerRootDir)')">$(DedicatedServerRootDir)\Modules\CoopSpectatorDedicated</_DedicatedModuleDir>
       <_DedicatedBinServer Condition="Exists('$(DedicatedServerRootDir)')">$(_DedicatedModuleDir)\bin\Win64_Shipping_Server</_DedicatedBinServer>
       <_DedicatedBinClient Condition="Exists('$(DedicatedServerRootDir)')">$(_DedicatedModuleDir)\bin\Win64_Shipping_Client</_DedicatedBinClient>
+      <_DedicatedModuleData Condition="Exists('$(DedicatedServerRootDir)')">$(_DedicatedModuleDir)\ModuleData</_DedicatedModuleData>
       <_MultiplayerServerBin Condition="Exists('$(DedicatedServerRootDir)')">$(DedicatedServerRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Server</_MultiplayerServerBin>
       <_MultiplayerClientBin Condition="Exists('$(DedicatedServerRootDir)')">$(DedicatedServerRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Client</_MultiplayerClientBin>
     </PropertyGroup>
-    <MakeDir Directories="$(_DedicatedModuleDir);$(_DedicatedBinServer);$(_DedicatedBinClient)" Condition="Exists('$(DedicatedServerRootDir)')" />
+    <MakeDir Directories="$(_DedicatedModuleDir);$(_DedicatedBinServer);$(_DedicatedBinClient);$(_DedicatedModuleData)" Condition="Exists('$(DedicatedServerRootDir)')" />
     <Copy SourceFiles="..\Module\CoopSpectatorDedicated\SubModule.xml" DestinationFolder="$(_DedicatedModuleDir)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
     <ItemGroup>
       <_ServerBinFiles Include="$(OutputPath)*" />
+      <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpcharacters.xml" />
+      <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpclassdivisions.xml" />
+      <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\multiplayer_strings.xml" />
     </ItemGroup>
+    <Delete Files="$(_DedicatedBinServer)\CoopSpectator.pdb" Condition="Exists('$(_DedicatedBinServer)\CoopSpectator.pdb')" />
+    <Delete Files="$(_DedicatedBinClient)\CoopSpectator.pdb" Condition="Exists('$(_DedicatedBinClient)\CoopSpectator.pdb')" />
     <Copy SourceFiles="@(_ServerBinFiles)" DestinationFolder="$(_DedicatedBinServer)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
     <Copy SourceFiles="@(_ServerBinFiles)" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
+    <Copy SourceFiles="@(_DedicatedModuleDataFiles)" DestinationFolder="$(_DedicatedModuleData)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
     <!-- TaleWorlds.MountAndBlade.Multiplayer.dll має лежати поруч із CoopSpectator.dll у Win64_Shipping_Client, інакше модуль не завантажується → "Cannot find game type: TdmClone". -->
     <Copy SourceFiles="$(_MultiplayerServerBin)\TaleWorlds.MountAndBlade.Multiplayer.dll" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(_MultiplayerServerBin)\TaleWorlds.MountAndBlade.Multiplayer.dll')" />
     <Copy SourceFiles="$(_MultiplayerClientBin)\TaleWorlds.MountAndBlade.Multiplayer.dll" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(_MultiplayerClientBin)\TaleWorlds.MountAndBlade.Multiplayer.dll')" />

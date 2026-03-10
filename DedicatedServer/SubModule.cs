@@ -6,6 +6,7 @@ using System.Reflection;
 using HarmonyLib;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Patches;
 using TaleWorlds.MountAndBlade;
 
@@ -22,6 +23,27 @@ namespace CoopSpectator
         {
             string dir = Environment.GetEnvironmentVariable("TEMP") ?? Path.GetTempPath();
             return Path.Combine(dir, name);
+        }
+
+        protected override void OnApplicationTick(float dt)
+        {
+            base.OnApplicationTick(dt);
+
+            if (ExperimentalFeatures.EnableTdmCloneExperiment)
+                return;
+
+            try
+            {
+                Mission currentMission = Mission.Current;
+                if (currentMission == null)
+                    return;
+
+                CoopMissionSpawnLogic.TryRunDedicatedMissionObserver(currentMission);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: mission observer tick failed: " + ex.Message);
+            }
         }
 
         protected override void OnSubModuleLoad()
@@ -60,6 +82,7 @@ namespace CoopSpectator
                 {
                     TryApplyGameModeOverridePatch();
                     TryApplyMissionStateOpenNewPatches();
+                    TryApplyMultiplayerHeroClassOverridePatch();
                     RegisterCoopBattleGameMode();
                     TryApplyWebPanelPatches();
                     AppDomain.CurrentDomain.AssemblyLoad += (_, e) =>
@@ -111,6 +134,20 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: MissionStateOpenNew patches apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyMultiplayerHeroClassOverridePatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                MultiplayerHeroClassOverridePatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: MultiplayerHeroClass override patch apply failed: " + ex.Message);
             }
         }
 

@@ -7,6 +7,7 @@ using CoopSpectator.Network.Messages; // Підключаємо DTO + кодек
 using TaleWorlds.CampaignSystem; // Підключаємо Campaign (для доступу до поточної кампанії)
 using TaleWorlds.CampaignSystem.Party; // Підключаємо MobileParty (партія гравця в кампанії)
 using TaleWorlds.MountAndBlade; // Підключаємо Mission (детекція входу в місію/битву)
+using System.Reflection; // Reflection для mission-safe fallback ids героїв/лордів із кампанії.
 
 namespace CoopSpectator.Campaign // Тримаємо battle/campaign логіку в одному namespace
 { // Починаємо блок простору імен
@@ -62,6 +63,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 ModLogger.Info("BattleDetector: not TCP host — sending start_mission to dedicated (campaign host path).");
                 try
                 {
+                    TryWriteBattleRosterFile(BuildBattleStartPayload()); // Для host-only campaign path теж пишемо battle_roster.json перед start_mission.
                     bool sent = DedicatedServerCommands.SendStartMission();
                     ModLogger.Info("BattleDetector: SendStartMission() returned " + sent + ".");
                 }
@@ -123,6 +125,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             try // Захищаємо збір даних від винятків, щоб мод не крашив гру
             { // Починаємо блок try
                 BattleStartMessage payload = BuildBattleStartPayload(); // Будуємо DTO з даними про битву/місію
+                TryWriteBattleRosterFile(payload); // Варіант A: зберігаємо roster у спільний файл для dedicated на цьому ж ПК.
                 string wireMessage = BattleStartMessageCodec.BuildBattleStartMessage(payload); // Серіалізуємо DTO в `BATTLE_START:{json}`
                 CoopRuntime.Network.BroadcastToClients(wireMessage); // Відправляємо повідомлення всім підключеним клієнтам
 
@@ -135,6 +138,33 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 ModLogger.Error("Failed to send BATTLE_START.", ex); // Логуємо помилку, щоб її можна було діагностувати
             } // Завершуємо блок catch
         } // Завершуємо блок методу
+
+        private static void TryWriteBattleRosterFile(BattleStartMessage payload)
+        {
+            if (payload == null || payload.Troops == null || payload.Troops.Count == 0)
+            {
+                ModLogger.Info("BattleDetector: skipping battle_roster.json write (payload troops empty).");
+                return;
+            }
+
+            try
+            {
+                var troopIds = new List<string>();
+                foreach (TroopStackInfo troop in payload.Troops)
+                {
+                    if (troop == null || string.IsNullOrWhiteSpace(troop.CharacterId))
+                        continue;
+                    troopIds.Add(troop.CharacterId);
+                }
+
+                bool wrote = BattleRosterFileHelper.WriteRoster(troopIds);
+                ModLogger.Info("BattleDetector: battle_roster.json write result = " + wrote + " (troop ids collected = " + troopIds.Count + ").");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error("BattleDetector: failed to write battle_roster.json.", ex);
+            }
+        }
 
         private static BattleStartMessage BuildBattleStartPayload() // Будуємо мінімальні дані про старт битви/місії
         { // Починаємо блок методу
@@ -245,7 +275,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             try // Захищаємо доступ до ростеру, щоб не крашнути гру
             { // Починаємо блок try
-                foreach (var element in MobileParty.MainParty.MemberRoster.GetTroopRoster()) // Проходимо по елементах ростеру партії
+                var rosterElements = new List<TaleWorlds.CampaignSystem.Roster.TroopRosterElement>();
+                var rosterCharacters = new List<object>();
+                foreach (var rosterElement in MobileParty.MainParty.MemberRoster.GetTroopRoster())
+                {
+                    rosterElements.Add(rosterElement);
+                    if (rosterElement.Character != null)
+                        rosterCharacters.Add(rosterElement.Character);
+                }
+
+                foreach (var element in rosterElements) // Проходимо по елементах ростеру партії
                 { // Починаємо блок foreach
                     if (element.Character == null) // Перевіряємо що є Character (тип юнита)
                     { // Починаємо блок if
@@ -253,7 +292,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     } // Завершуємо блок if
 
                     TroopStackInfo stack = new TroopStackInfo(); // Створюємо DTO стеку
-                    stack.CharacterId = element.Character.StringId; // Записуємо StringId юнита (стабільний ключ)
+                    stack.CharacterId = GetMissionSafeCharacterId(element.Character, rosterCharacters); // Записуємо mission-safe troop id (для героїв шукаємо surrogate в ростері).
                     stack.TroopName = element.Character.Name != null ? element.Character.Name.ToString() : element.Character.StringId; // Беремо ім'я або fallback на id
                     stack.Tier = element.Character.Tier; // Записуємо tier
                     stack.IsMounted = element.Character.IsMounted; // Записуємо чи верховий
@@ -335,6 +374,318 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return "Unknown"; // Fallback
             } // Завершуємо блок catch
         } // Завершуємо блок методу
+
+        private static string GetMissionSafeCharacterId(object characterObject, List<object> rosterCharacters)
+        {
+            if (characterObject == null)
+                return null;
+
+            string originalId = TryGetStringId(characterObject);
+            string multiplayerSafeId = TryResolveMultiplayerSafeCharacterId(characterObject as TaleWorlds.CampaignSystem.CharacterObject);
+            if (!string.IsNullOrWhiteSpace(multiplayerSafeId) && !string.Equals(multiplayerSafeId, originalId, StringComparison.Ordinal))
+            {
+                ModLogger.Info("BattleDetector: mapped campaign troop id '" + originalId + "' to multiplayer-safe id '" + multiplayerSafeId + "'.");
+                return multiplayerSafeId;
+            }
+
+            bool isHero = TryGetBoolProperty(characterObject, "IsHero");
+            if (!isHero)
+                return originalId;
+
+            LogHeroRosterContext(originalId, rosterCharacters);
+
+            string rosterSurrogateId = TryFindRosterSurrogateId(characterObject, rosterCharacters);
+            if (!string.IsNullOrWhiteSpace(rosterSurrogateId) && !string.Equals(rosterSurrogateId, originalId, StringComparison.Ordinal))
+            {
+                ModLogger.Info("BattleDetector: mapped hero troop id '" + originalId + "' to roster surrogate '" + rosterSurrogateId + "'.");
+                return rosterSurrogateId;
+            }
+
+            string typedHeroFallbackId = TryResolveTypedHeroFallbackId(characterObject as TaleWorlds.CampaignSystem.CharacterObject);
+            if (!string.IsNullOrWhiteSpace(typedHeroFallbackId) && !string.Equals(typedHeroFallbackId, originalId, StringComparison.Ordinal))
+            {
+                ModLogger.Info("BattleDetector: mapped hero troop id '" + originalId + "' to typed fallback '" + typedHeroFallbackId + "'.");
+                return typedHeroFallbackId;
+            }
+
+            object originalCharacter = TryGetPropertyValue(characterObject, "OriginalCharacter");
+            string originalCharacterId = TryGetStringId(originalCharacter);
+            if (!string.IsNullOrWhiteSpace(originalCharacterId) && !string.Equals(originalCharacterId, originalId, StringComparison.Ordinal))
+            {
+                ModLogger.Info("BattleDetector: mapped hero troop id '" + originalId + "' to OriginalCharacter '" + originalCharacterId + "'.");
+                return originalCharacterId;
+            }
+
+            object templateCharacter = TryGetPropertyValue(characterObject, "Template");
+            string templateCharacterId = TryGetStringId(templateCharacter);
+            if (!string.IsNullOrWhiteSpace(templateCharacterId) && !string.Equals(templateCharacterId, originalId, StringComparison.Ordinal))
+            {
+                ModLogger.Info("BattleDetector: mapped hero troop id '" + originalId + "' to Template '" + templateCharacterId + "'.");
+                return templateCharacterId;
+            }
+
+            object culture = TryGetPropertyValue(characterObject, "Culture");
+            string cultureFallbackId = TryResolveCultureTroopId(culture);
+            if (!string.IsNullOrWhiteSpace(cultureFallbackId) && !string.Equals(cultureFallbackId, originalId, StringComparison.Ordinal))
+            {
+                ModLogger.Info("BattleDetector: mapped hero troop id '" + originalId + "' to culture fallback '" + cultureFallbackId + "'.");
+                return cultureFallbackId;
+            }
+
+            const string guaranteedVanillaFallbackId = "imperial_infantryman";
+            ModLogger.Info("BattleDetector: no mission-safe fallback found for hero troop id '" + originalId + "'. Using guaranteed vanilla fallback '" + guaranteedVanillaFallbackId + "'.");
+            return guaranteedVanillaFallbackId;
+        }
+
+        private static string TryFindRosterSurrogateId(object heroCharacter, List<object> rosterCharacters)
+        {
+            if (heroCharacter == null || rosterCharacters == null || rosterCharacters.Count == 0)
+                return null;
+
+            bool heroMounted = TryGetBoolProperty(heroCharacter, "IsMounted");
+            int heroTier = TryGetIntProperty(heroCharacter, "Tier");
+            string heroCultureId = TryGetStringId(TryGetPropertyValue(heroCharacter, "Culture"));
+
+            object bestCandidate = null;
+            int bestScore = int.MinValue;
+
+            foreach (object candidate in rosterCharacters)
+            {
+                if (candidate == null || TryGetBoolProperty(candidate, "IsHero"))
+                    continue;
+
+                string candidateId = TryGetStringId(candidate);
+                if (string.IsNullOrWhiteSpace(candidateId))
+                    continue;
+
+                int score = 0;
+                bool candidateMounted = TryGetBoolProperty(candidate, "IsMounted");
+                int candidateTier = TryGetIntProperty(candidate, "Tier");
+                string candidateCultureId = TryGetStringId(TryGetPropertyValue(candidate, "Culture"));
+
+                if (candidateMounted == heroMounted)
+                    score += 50;
+                if (!string.IsNullOrWhiteSpace(heroCultureId) && string.Equals(heroCultureId, candidateCultureId, StringComparison.Ordinal))
+                    score += 100;
+
+                score -= Math.Abs(candidateTier - heroTier) * 5;
+
+                if (bestCandidate == null || score > bestScore)
+                {
+                    bestCandidate = candidate;
+                    bestScore = score;
+                }
+            }
+
+            return TryGetStringId(bestCandidate);
+        }
+
+        private static string TryResolveTypedHeroFallbackId(TaleWorlds.CampaignSystem.CharacterObject heroCharacter)
+        {
+            if (heroCharacter == null)
+                return null;
+
+            TaleWorlds.Core.BasicCharacterObject[] candidates =
+            {
+                heroCharacter.OriginalCharacter,
+                heroCharacter.Culture?.BasicTroop,
+                heroCharacter.Culture?.EliteBasicTroop
+            };
+
+            foreach (TaleWorlds.Core.BasicCharacterObject candidate in candidates)
+            {
+                if (candidate == null)
+                    continue;
+
+                string candidateId = candidate.StringId;
+                if (!string.IsNullOrWhiteSpace(candidateId))
+                    return candidateId;
+            }
+
+            return null;
+        }
+
+        private static string TryResolveMultiplayerSafeCharacterId(TaleWorlds.CampaignSystem.CharacterObject character)
+        {
+            if (character == null)
+                return null;
+
+            string cultureId = character.Culture?.StringId;
+            string cultureToken = TryMapCultureToMultiplayerToken(cultureId);
+            if (string.IsNullOrWhiteSpace(cultureToken))
+                return null;
+
+            bool isMounted = character.IsMounted;
+            bool isRanged = character.IsRanged;
+            int tier = character.Tier;
+
+            string coopControlTroopId = TryResolveCoopControlTroopId(cultureToken, isMounted, isRanged, tier);
+            if (!string.IsNullOrWhiteSpace(coopControlTroopId))
+                return coopControlTroopId;
+
+            var candidates = new List<string>();
+            if (isMounted)
+            {
+                if (isRanged && string.Equals(cultureToken, "khuzait", StringComparison.Ordinal))
+                    candidates.Add("mp_horse_archer_khuzait_troop");
+
+                candidates.Add((tier >= 4 ? "mp_heavy_cavalry_" : "mp_light_cavalry_") + cultureToken + "_troop");
+                candidates.Add("mp_light_cavalry_" + cultureToken + "_troop");
+                candidates.Add("mp_heavy_cavalry_" + cultureToken + "_troop");
+            }
+            else if (isRanged)
+            {
+                candidates.Add((tier >= 4 ? "mp_heavy_ranged_" : "mp_light_ranged_") + cultureToken + "_troop");
+                candidates.Add("mp_light_ranged_" + cultureToken + "_troop");
+                candidates.Add("mp_heavy_ranged_" + cultureToken + "_troop");
+                candidates.Add("mp_skirmisher_" + cultureToken + "_troop");
+            }
+            else
+            {
+                if (tier >= 5)
+                    candidates.Add("mp_shock_infantry_" + cultureToken + "_troop");
+
+                candidates.Add("mp_heavy_infantry_" + cultureToken + "_troop");
+                candidates.Add("mp_light_infantry_" + cultureToken + "_troop");
+                candidates.Add("mp_shock_infantry_" + cultureToken + "_troop");
+                candidates.Add("mp_skirmisher_" + cultureToken + "_troop");
+            }
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string candidate in candidates)
+            {
+                if (string.IsNullOrWhiteSpace(candidate))
+                    continue;
+                if (!seen.Add(candidate))
+                    continue;
+                return candidate;
+            }
+
+            return null;
+        }
+
+        private static string TryResolveCoopControlTroopId(string cultureToken, bool isMounted, bool isRanged, int tier)
+        {
+            if (string.IsNullOrWhiteSpace(cultureToken))
+                return null;
+
+            if (isMounted)
+                return "mp_coop_light_cavalry_" + cultureToken + "_troop";
+
+            if (string.Equals(cultureToken, "empire", StringComparison.Ordinal) && !isMounted && !isRanged && tier >= 4)
+                return "mp_coop_heavy_infantry_empire_troop";
+
+            return null;
+        }
+
+        private static string TryMapCultureToMultiplayerToken(string cultureId)
+        {
+            if (string.IsNullOrWhiteSpace(cultureId))
+                return null;
+
+            string normalized = cultureId.Trim().ToLowerInvariant();
+            if (normalized.Contains("empire") || normalized.StartsWith("imperial"))
+                return "empire";
+            if (normalized.Contains("aserai"))
+                return "aserai";
+            if (normalized.Contains("battania") || normalized.Contains("battania") || normalized.StartsWith("battanian"))
+                return "battania";
+            if (normalized.Contains("khuzait"))
+                return "khuzait";
+            if (normalized.Contains("sturgia") || normalized.StartsWith("sturgian"))
+                return "sturgia";
+            if (normalized.Contains("vlandia") || normalized.StartsWith("vlandian"))
+                return "vlandia";
+
+            return null;
+        }
+
+        private static void LogHeroRosterContext(string heroId, List<object> rosterCharacters)
+        {
+            if (string.IsNullOrWhiteSpace(heroId) || rosterCharacters == null || rosterCharacters.Count == 0)
+                return;
+
+            try
+            {
+                List<string> candidates = new List<string>();
+                foreach (object candidate in rosterCharacters)
+                {
+                    if (candidate == null)
+                        continue;
+
+                    string candidateId = TryGetStringId(candidate);
+                    bool isHero = TryGetBoolProperty(candidate, "IsHero");
+                    int tier = TryGetIntProperty(candidate, "Tier");
+                    bool mounted = TryGetBoolProperty(candidate, "IsMounted");
+                    candidates.Add((isHero ? "hero:" : "troop:") + candidateId + "/tier=" + tier + "/mounted=" + mounted);
+                }
+
+                ModLogger.Info("BattleDetector: hero '" + heroId + "' roster candidates = [" + string.Join(", ", candidates) + "].");
+            }
+            catch
+            {
+            }
+        }
+
+        private static string TryResolveCultureTroopId(object culture)
+        {
+            if (culture == null)
+                return null;
+
+            string[] candidateProperties =
+            {
+                "BasicTroop",
+                "EliteBasicTroop",
+                "MeleeMilitiaTroop",
+                "RangedMilitiaTroop",
+                "MeleeEliteMilitiaTroop",
+                "RangedEliteMilitiaTroop"
+            };
+
+            foreach (string propertyName in candidateProperties)
+            {
+                object troop = TryGetPropertyValue(culture, propertyName);
+                string troopId = TryGetStringId(troop);
+                if (!string.IsNullOrWhiteSpace(troopId))
+                    return troopId;
+            }
+
+            return null;
+        }
+
+        private static object TryGetPropertyValue(object instance, string propertyName)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(propertyName))
+                return null;
+
+            try
+            {
+                PropertyInfo property = instance.GetType().GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance);
+                return property?.GetValue(instance, null);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string TryGetStringId(object instance)
+        {
+            object value = TryGetPropertyValue(instance, "StringId");
+            return value?.ToString();
+        }
+
+        private static bool TryGetBoolProperty(object instance, string propertyName)
+        {
+            object value = TryGetPropertyValue(instance, propertyName);
+            return value is bool b && b;
+        }
+
+        private static int TryGetIntProperty(object instance, string propertyName)
+        {
+            object value = TryGetPropertyValue(instance, propertyName);
+            return value is int i ? i : 0;
+        }
     } // Завершуємо блок класу
 } // Завершуємо блок простору імен
 

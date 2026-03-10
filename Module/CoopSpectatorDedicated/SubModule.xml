@@ -20,4 +20,24 @@
       </Tags>
     </SubModule>
   </SubModules>
+  <Xmls>
+    <XmlNode>
+      <XmlName id="MPCharacters" path="coopspectator_mpcharacters" />
+      <IncludedGameTypes>
+        <GameType value="MultiplayerGame" />
+      </IncludedGameTypes>
+    </XmlNode>
+    <XmlNode>
+      <XmlName id="MPClassDivisions" path="coopspectator_mpclassdivisions" />
+      <IncludedGameTypes>
+        <GameType value="MultiplayerGame" />
+      </IncludedGameTypes>
+    </XmlNode>
+    <XmlNode>
+      <XmlName id="GameText" path="multiplayer_strings" />
+      <IncludedGameTypes>
+        <GameType value="MultiplayerGame" />
+      </IncludedGameTypes>
+    </XmlNode>
+  </Xmls>
 </Module>
