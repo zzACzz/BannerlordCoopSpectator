@@ -33,11 +33,5 @@
         <GameType value="MultiplayerGame" />
       </IncludedGameTypes>
     </XmlNode>
-    <XmlNode>
-      <XmlName id="GameText" path="multiplayer_strings" />
-      <IncludedGameTypes>
-        <GameType value="MultiplayerGame" />
-      </IncludedGameTypes>
-    </XmlNode>
   </Xmls>
 </Module>

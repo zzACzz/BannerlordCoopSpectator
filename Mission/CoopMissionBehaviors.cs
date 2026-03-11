@@ -6,6 +6,7 @@ using System.Collections.Generic; // List<string>
 using System.Collections; // IEnumerable
 using System.Linq; // Distinct, FirstOrDefault
 using System.Reflection; // MethodInfo
+using System.Runtime.CompilerServices; // RuntimeHelpers
 using TaleWorlds.Core; // BasicCharacterObject, MBObjectManager (для спавну)
 using TaleWorlds.Library; // Vec2, Vec3
 using TaleWorlds.MountAndBlade; // Mission, MissionLogic, GameNetwork, Agent, Team, MissionMode
@@ -24,6 +25,7 @@ namespace CoopSpectator.MissionBehaviors
         private float _timeUntilNextStateLog;
         private Agent _lastControlledAgent; // Попередній Agent.Main для детекції зміни контролю / повернення в spectator.
         private string _lastRequestedPreferredTroopKey;
+        private string _lastObservedSpectatorTroopSelectionKey;
         private bool _visualSpawnAutoConfirmHooked;
         private bool _visualSpawnAutoConfirmTriggered;
         private object _visualSpawnComponent;
@@ -33,7 +35,16 @@ namespace CoopSpectator.MissionBehaviors
         private bool _hasLoggedClassLoadoutDiagnostics;
         private bool _hasLoggedActiveClassLoadoutDiagnostics;
         private bool _hasLoggedClassLoadoutPendingInitialization;
+        private bool _hasLoggedTeamSelectDiagnostics;
+        private bool _hasLoggedScoreboardDiagnostics;
         private string _lastAppliedClassLoadoutFilterKey;
+        private string _lastAppliedTeamSelectCultureSyncKey;
+        private string _lastAppliedScoreboardCultureSyncKey;
+        private const bool EnableClientPreferredTroopRequestExperiment = false;
+        private const bool EnableVisualSpawnAutoConfirmExperiment = false;
+        private const bool EnableFixedClientTeamSelectCulturesExperiment = true;
+        private const string FixedClientAttackerCultureId = "empire";
+        private const string FixedClientDefenderCultureId = "vlandia";
 
         public override void AfterStart()
         {
@@ -46,9 +57,12 @@ namespace CoopSpectator.MissionBehaviors
             LogCurrentState(mission);
             _lastControlledAgent = Agent.Main;
             _timeUntilNextStateLog = LogStateIntervalSeconds;
-            TryHookVisualSpawnAutoConfirm(mission);
+            if (EnableVisualSpawnAutoConfirmExperiment)
+                TryHookVisualSpawnAutoConfirm(mission);
             LogClassLoadoutDiagnosticsOnce(mission);
             LogActiveClassLoadoutDiagnosticsOnce(mission);
+            TrySyncFixedTeamSelectCultures(mission);
+            TrySyncFixedScoreboardCultures(mission);
             TryFilterClassLoadoutToCoopUnits(mission);
 
 #if !COOPSPECTATOR_DEDICATED
@@ -69,21 +83,30 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     ModLogger.Info("CoopMissionClientLogic: controlled agent changed — now controlling agent " + (currentMain.Name?.ToString() ?? currentMain.Index.ToString()));
                     _lastRequestedPreferredTroopKey = null;
+                    _lastObservedSpectatorTroopSelectionKey = null;
                     _visualSpawnAutoConfirmTriggered = false;
                 }
                 else if (_lastControlledAgent != null)
                 {
                     ModLogger.Info("CoopMissionClientLogic: returned to spectator (agent lost or died).");
+                    _lastRequestedPreferredTroopKey = null;
+                    _lastObservedSpectatorTroopSelectionKey = null;
+                    _visualSpawnAutoConfirmTriggered = false;
                     _lastAppliedClassLoadoutFilterKey = null;
                 }
                 _lastControlledAgent = currentMain;
             }
 
-            TryHookVisualSpawnAutoConfirm(mission);
+            if (EnableVisualSpawnAutoConfirmExperiment)
+                TryHookVisualSpawnAutoConfirm(mission);
             LogClassLoadoutDiagnosticsOnce(mission);
             LogActiveClassLoadoutDiagnosticsOnce(mission);
+            TrySyncFixedTeamSelectCultures(mission);
+            TrySyncFixedScoreboardCultures(mission);
             TryFilterClassLoadoutToCoopUnits(mission);
-            TryTriggerClientPreferredTroopRequest(mission);
+            TryResetSpawnPreviewStateForPreferredTroopChange(mission);
+            if (EnableClientPreferredTroopRequestExperiment)
+                TryTriggerClientPreferredTroopRequest(mission);
 
             _timeUntilNextStateLog -= dt;
             if (_timeUntilNextStateLog <= 0f)
@@ -101,7 +124,8 @@ namespace CoopSpectator.MissionBehaviors
 
         protected override void OnEndMission()
         {
-            UnhookVisualSpawnAutoConfirm();
+            if (EnableVisualSpawnAutoConfirmExperiment)
+                UnhookVisualSpawnAutoConfirm();
             base.OnEndMission();
         }
 
@@ -144,6 +168,9 @@ namespace CoopSpectator.MissionBehaviors
 
         private void TryTriggerClientPreferredTroopRequest(Mission mission)
         {
+            if (!EnableClientPreferredTroopRequestExperiment)
+                return;
+
             if (mission == null || !GameNetwork.IsClient || Agent.Main != null || !GameNetwork.IsSessionActive)
                 return;
 
@@ -198,6 +225,38 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private void TryResetSpawnPreviewStateForPreferredTroopChange(Mission mission)
+        {
+            if (mission == null || !GameNetwork.IsClient || Agent.Main != null || !GameNetwork.IsSessionActive)
+                return;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            if (myPeer == null || !myPeer.IsConnectionActive || !myPeer.IsSynchronized)
+                return;
+
+            MissionPeer missionPeer = myPeer.GetComponent<MissionPeer>();
+            if (missionPeer == null || missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
+                return;
+
+            int selectedTroopIndex = missionPeer.SelectedTroopIndex;
+            if (selectedTroopIndex < 0)
+                return;
+
+            string selectionKey = missionPeer.Team.TeamIndex + "|" + selectedTroopIndex;
+            if (string.Equals(_lastObservedSpectatorTroopSelectionKey, selectionKey, StringComparison.Ordinal))
+                return;
+
+            _lastObservedSpectatorTroopSelectionKey = selectionKey;
+            _lastRequestedPreferredTroopKey = null;
+            _visualSpawnAutoConfirmTriggered = false;
+
+            ModLogger.Info(
+                "CoopMissionClientLogic: spectator troop selection changed. " +
+                "Team=" + missionPeer.Team.TeamIndex +
+                " TroopIndex=" + selectedTroopIndex +
+                " AutoConfirmReset=True");
+        }
+
         private static bool TryInvokePreferredTroopRequestMethod(
             MissionBehavior behavior,
             MethodInfo method,
@@ -236,6 +295,9 @@ namespace CoopSpectator.MissionBehaviors
 
         private void TryHookVisualSpawnAutoConfirm(Mission mission)
         {
+            if (!EnableVisualSpawnAutoConfirmExperiment)
+                return;
+
             if (_visualSpawnAutoConfirmHooked || mission == null || !GameNetwork.IsClient)
                 return;
 
@@ -278,6 +340,9 @@ namespace CoopSpectator.MissionBehaviors
 
         private void UnhookVisualSpawnAutoConfirm()
         {
+            if (!EnableVisualSpawnAutoConfirmExperiment)
+                return;
+
             if (!_visualSpawnAutoConfirmHooked || _visualSpawnComponent == null || _onMyAgentVisualSpawnedDelegate == null)
                 return;
 
@@ -302,6 +367,9 @@ namespace CoopSpectator.MissionBehaviors
 
         private void OnMyAgentVisualSpawned()
         {
+            if (!EnableVisualSpawnAutoConfirmExperiment)
+                return;
+
             if (_visualSpawnAutoConfirmTriggered || Agent.Main != null)
                 return;
 
@@ -317,6 +385,9 @@ namespace CoopSpectator.MissionBehaviors
 
         private void TryInvokeAutoSpawnConfirm(Mission mission)
         {
+            if (!EnableVisualSpawnAutoConfirmExperiment)
+                return;
+
             foreach (MissionBehavior behavior in mission.MissionBehaviors)
             {
                 if (behavior == null)
@@ -661,10 +732,18 @@ namespace CoopSpectator.MissionBehaviors
         {
             string typeName = memberType?.FullName ?? memberType?.Name ?? string.Empty;
             return memberName.IndexOf("class", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("team", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("score", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("culture", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("banner", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("color", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    memberName.IndexOf("troop", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    memberName.IndexOf("item", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    memberName.IndexOf("list", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    memberName.IndexOf("data", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("Team", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("Scoreboard", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("Culture", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    typeName.IndexOf("VM", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    typeName.IndexOf("ViewModel", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    typeName.IndexOf("List", StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -827,6 +906,617 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private void TrySyncFixedTeamSelectCultures(Mission mission)
+        {
+            if (!EnableFixedClientTeamSelectCulturesExperiment || mission == null || !GameNetwork.IsClient)
+                return;
+
+            try
+            {
+                object teamSelection = mission.MissionBehaviors
+                    .FirstOrDefault(behavior =>
+                        behavior != null &&
+                        behavior.GetType().FullName != null &&
+                        behavior.GetType().FullName.IndexOf("MissionGauntletTeamSelection", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (teamSelection == null)
+                    return;
+
+                object dataSource = GetMemberValue(teamSelection, "_dataSource") ?? GetMemberValue(teamSelection, "DataSource");
+                if (dataSource == null)
+                    return;
+
+                LogTeamSelectDiagnosticsOnce(teamSelection, dataSource);
+
+                string syncKey = BuildTeamSelectCultureSyncKey(mission, dataSource);
+                if (string.Equals(_lastAppliedTeamSelectCultureSyncKey, syncKey, StringComparison.Ordinal))
+                    return;
+
+                int updatedTeamCount = 0;
+                HashSet<int> visited = new HashSet<int>();
+                updatedTeamCount += TryApplyFixedCultureToKnownTeamVm(
+                    GetMemberValue(dataSource, "_attackerTeam") ?? GetMemberValue(dataSource, "AttackerTeam"),
+                    FixedClientAttackerCultureId,
+                    "datasource.attacker",
+                    visited);
+                updatedTeamCount += TryApplyFixedCultureToKnownTeamVm(
+                    GetMemberValue(dataSource, "_defenderTeam") ?? GetMemberValue(dataSource, "DefenderTeam"),
+                    FixedClientDefenderCultureId,
+                    "datasource.defender",
+                    visited);
+                updatedTeamCount += TryApplyFixedCultureToKnownTeamVm(
+                    GetMemberValue(dataSource, "_team1") ?? GetMemberValue(dataSource, "Team1"),
+                    FixedClientAttackerCultureId,
+                    "datasource.team1",
+                    visited);
+                updatedTeamCount += TryApplyFixedCultureToKnownTeamVm(
+                    GetMemberValue(dataSource, "_team2") ?? GetMemberValue(dataSource, "Team2"),
+                    FixedClientDefenderCultureId,
+                    "datasource.team2",
+                    visited);
+                updatedTeamCount += TryApplyFixedCultureToTeamVmCollection(
+                    GetMemberValue(dataSource, "_teams") ?? GetMemberValue(dataSource, "Teams"),
+                    visited);
+
+                if (updatedTeamCount <= 0)
+                    return;
+
+                InvokeRefreshValuesIfPresent(dataSource);
+                InvokeRefreshValuesIfPresent(teamSelection);
+                _lastAppliedTeamSelectCultureSyncKey = syncKey;
+
+                ModLogger.Info(
+                    "CoopMissionClientLogic: synced fixed cultures into early team-select UI. " +
+                    "SyncKey=" + syncKey +
+                    " UpdatedTeams=" + updatedTeamCount +
+                    " AttackerCulture=" + FixedClientAttackerCultureId +
+                    " DefenderCulture=" + FixedClientDefenderCultureId);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: fixed team-select culture sync failed: " + ex.Message);
+            }
+        }
+
+        private void LogTeamSelectDiagnosticsOnce(object teamSelection, object dataSource)
+        {
+            if (_hasLoggedTeamSelectDiagnostics)
+                return;
+
+            _hasLoggedTeamSelectDiagnostics = true;
+
+            try
+            {
+                ModLogger.Info("CoopMissionClientLogic: team select diagnostics type = " + teamSelection.GetType().FullName);
+                ModLogger.Info("CoopMissionClientLogic: team select datasource type = " + dataSource.GetType().FullName);
+
+                foreach (FieldInfo field in dataSource.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    if (!IsInterestingTeamSelectMember(field.Name, field.FieldType))
+                        continue;
+
+                    string valueDescription;
+                    try
+                    {
+                        valueDescription = DescribeDiagnosticValue(field.GetValue(dataSource));
+                    }
+                    catch (Exception ex)
+                    {
+                        valueDescription = "unavailable (" + ex.Message + ")";
+                    }
+
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: team select datasource field => " +
+                        field.FieldType.FullName + " " +
+                        field.Name + " = " + valueDescription);
+                }
+
+                foreach (PropertyInfo property in dataSource.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    if (property.GetIndexParameters().Length != 0 ||
+                        !property.CanRead ||
+                        !IsInterestingTeamSelectMember(property.Name, property.PropertyType))
+                    {
+                        continue;
+                    }
+
+                    string valueDescription;
+                    try
+                    {
+                        valueDescription = DescribeDiagnosticValue(property.GetValue(dataSource, null));
+                    }
+                    catch (Exception ex)
+                    {
+                        valueDescription = "unavailable (" + ex.Message + ")";
+                    }
+
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: team select datasource property => " +
+                        property.PropertyType.FullName + " " +
+                        property.Name + " = " + valueDescription);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: team select diagnostics failed: " + ex.Message);
+            }
+        }
+
+        private void TrySyncFixedScoreboardCultures(Mission mission)
+        {
+            if (!EnableFixedClientTeamSelectCulturesExperiment || mission == null || !GameNetwork.IsClient)
+                return;
+
+            try
+            {
+                object scoreboardBehavior = mission.MissionBehaviors
+                    .FirstOrDefault(behavior =>
+                        behavior != null &&
+                        behavior.GetType().FullName != null &&
+                        behavior.GetType().FullName.IndexOf("MissionGauntletMultiplayerScoreboard", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (scoreboardBehavior == null)
+                    return;
+
+                object dataSource = ResolveScoreboardDataSource(scoreboardBehavior);
+                if (dataSource == null)
+                    return;
+
+                LogScoreboardDiagnosticsOnce(scoreboardBehavior, dataSource);
+
+                string syncKey = BuildScoreboardCultureSyncKey(mission, dataSource);
+                if (string.Equals(_lastAppliedScoreboardCultureSyncKey, syncKey, StringComparison.Ordinal))
+                    return;
+
+                int updatedTeamCount = 0;
+                HashSet<int> visited = new HashSet<int>();
+                updatedTeamCount += TryApplyFixedCultureToKnownTeamVm(
+                    GetMemberValue(dataSource, "_team1") ?? GetMemberValue(dataSource, "Team1") ?? GetMemberValue(dataSource, "_attackerTeam") ?? GetMemberValue(dataSource, "AttackerTeam"),
+                    FixedClientAttackerCultureId,
+                    "scoreboard.team1",
+                    visited);
+                updatedTeamCount += TryApplyFixedCultureToKnownTeamVm(
+                    GetMemberValue(dataSource, "_team2") ?? GetMemberValue(dataSource, "Team2") ?? GetMemberValue(dataSource, "_defenderTeam") ?? GetMemberValue(dataSource, "DefenderTeam"),
+                    FixedClientDefenderCultureId,
+                    "scoreboard.team2",
+                    visited);
+                updatedTeamCount += TryApplyFixedCultureToTeamVmCollection(
+                    GetMemberValue(dataSource, "_teams") ?? GetMemberValue(dataSource, "Teams") ?? GetMemberValue(dataSource, "_scoreboardSides") ?? GetMemberValue(dataSource, "ScoreboardSides"),
+                    visited);
+                updatedTeamCount += TryApplyFixedCultureToScoreboardSideCollection(
+                    GetMemberValue(dataSource, "_sides") ?? GetMemberValue(dataSource, "Sides"),
+                    visited);
+                updatedTeamCount += TryApplyFixedCultureToScoreboardSideDictionary(
+                    GetMemberValue(dataSource, "_missionSides") ?? GetMemberValue(dataSource, "MissionSides"),
+                    visited);
+
+                if (updatedTeamCount <= 0)
+                    return;
+
+                InvokeRefreshValuesIfPresent(dataSource);
+                InvokeRefreshValuesIfPresent(scoreboardBehavior);
+                _lastAppliedScoreboardCultureSyncKey = syncKey;
+
+                ModLogger.Info(
+                    "CoopMissionClientLogic: synced fixed cultures into scoreboard UI. " +
+                    "SyncKey=" + syncKey +
+                    " UpdatedTeams=" + updatedTeamCount +
+                    " AttackerCulture=" + FixedClientAttackerCultureId +
+                    " DefenderCulture=" + FixedClientDefenderCultureId);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: fixed scoreboard culture sync failed: " + ex.Message);
+            }
+        }
+
+        private void LogScoreboardDiagnosticsOnce(object scoreboardBehavior, object dataSource)
+        {
+            if (_hasLoggedScoreboardDiagnostics)
+                return;
+
+            _hasLoggedScoreboardDiagnostics = true;
+
+            try
+            {
+                ModLogger.Info("CoopMissionClientLogic: scoreboard diagnostics type = " + scoreboardBehavior.GetType().FullName);
+                ModLogger.Info("CoopMissionClientLogic: scoreboard datasource type = " + dataSource.GetType().FullName);
+                LogInterestingMembers("scoreboard behavior", scoreboardBehavior);
+                LogInterestingMembers("scoreboard datasource", dataSource);
+                LogNestedDiagnosticMembers("scoreboard.datasource", dataSource);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: scoreboard diagnostics failed: " + ex.Message);
+            }
+        }
+
+        private static object ResolveScoreboardDataSource(object scoreboardBehavior)
+        {
+            if (scoreboardBehavior == null)
+                return null;
+
+            object directDataSource = GetMemberValue(scoreboardBehavior, "_dataSource") ??
+                                      GetMemberValue(scoreboardBehavior, "DataSource") ??
+                                      GetMemberValue(scoreboardBehavior, "_scoreboardDataSource") ??
+                                      GetMemberValue(scoreboardBehavior, "ScoreboardDataSource") ??
+                                      GetMemberValue(scoreboardBehavior, "_multiplayerScoreboardVM") ??
+                                      GetMemberValue(scoreboardBehavior, "MultiplayerScoreboardVM");
+            if (IsUsefulScoreboardDataSourceCandidate(directDataSource))
+                return directDataSource;
+
+            foreach (FieldInfo field in scoreboardBehavior.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (!IsInterestingScoreboardMember(field.Name, field.FieldType))
+                    continue;
+
+                object value = null;
+                try
+                {
+                    value = field.GetValue(scoreboardBehavior);
+                }
+                catch
+                {
+                }
+
+                if (IsUsefulScoreboardDataSourceCandidate(value))
+                    return value;
+            }
+
+            foreach (PropertyInfo property in scoreboardBehavior.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (property.GetIndexParameters().Length != 0 || !property.CanRead || !IsInterestingScoreboardMember(property.Name, property.PropertyType))
+                    continue;
+
+                object value = null;
+                try
+                {
+                    value = property.GetValue(scoreboardBehavior, null);
+                }
+                catch
+                {
+                }
+
+                if (IsUsefulScoreboardDataSourceCandidate(value))
+                    return value;
+            }
+
+            return null;
+        }
+
+        private static bool IsUsefulScoreboardDataSourceCandidate(object value)
+        {
+            if (value == null)
+                return false;
+
+            Type type = value.GetType();
+            if (type.IsPrimitive || type.IsEnum || type == typeof(string) || type == typeof(decimal))
+                return false;
+
+            string typeName = type.FullName ?? type.Name;
+            if (typeName.IndexOf("Scoreboard", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("Team", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("ViewModel", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("VM", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                typeName.IndexOf("DataSource", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsInterestingScoreboardMember(string memberName, Type memberType)
+        {
+            string typeName = memberType?.FullName ?? memberType?.Name ?? string.Empty;
+            return memberName.IndexOf("score", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("team", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("data", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("vm", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("Scoreboard", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("Team", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("ViewModel", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("VM", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static void LogInterestingMembers(string ownerName, object instance)
+        {
+            if (instance == null)
+                return;
+
+            foreach (FieldInfo field in instance.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (!IsInterestingScoreboardMember(field.Name, field.FieldType) && !IsInterestingTeamSelectMember(field.Name, field.FieldType))
+                    continue;
+
+                string valueDescription;
+                try
+                {
+                    valueDescription = DescribeDiagnosticValue(field.GetValue(instance));
+                }
+                catch (Exception ex)
+                {
+                    valueDescription = "unavailable (" + ex.Message + ")";
+                }
+
+                ModLogger.Info(
+                    "CoopMissionClientLogic: " + ownerName + " field => " +
+                    field.FieldType.FullName + " " +
+                    field.Name + " = " + valueDescription);
+            }
+
+            foreach (PropertyInfo property in instance.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (property.GetIndexParameters().Length != 0 ||
+                    !property.CanRead ||
+                    (!IsInterestingScoreboardMember(property.Name, property.PropertyType) && !IsInterestingTeamSelectMember(property.Name, property.PropertyType)))
+                {
+                    continue;
+                }
+
+                string valueDescription;
+                try
+                {
+                    valueDescription = DescribeDiagnosticValue(property.GetValue(instance, null));
+                }
+                catch (Exception ex)
+                {
+                    valueDescription = "unavailable (" + ex.Message + ")";
+                }
+
+                ModLogger.Info(
+                    "CoopMissionClientLogic: " + ownerName + " property => " +
+                    property.PropertyType.FullName + " " +
+                    property.Name + " = " + valueDescription);
+            }
+        }
+
+        private static bool IsInterestingTeamSelectMember(string memberName, Type memberType)
+        {
+            string typeName = memberType?.FullName ?? memberType?.Name ?? string.Empty;
+            return memberName.IndexOf("team", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("culture", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("attacker", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   memberName.IndexOf("defender", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("Team", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("Culture", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static int TryApplyFixedCultureToTeamVmCollection(object teamsObject, HashSet<int> visited)
+        {
+            if (!(teamsObject is IEnumerable teams))
+                return 0;
+
+            int updatedTeamCount = 0;
+            foreach (object teamVm in teams)
+            {
+                string cultureId = ResolveFixedCultureIdForClientTeamVm(teamVm);
+                if (string.IsNullOrWhiteSpace(cultureId))
+                    continue;
+
+                updatedTeamCount += TryApplyFixedCultureToKnownTeamVm(teamVm, cultureId, "datasource.teams", visited);
+            }
+
+            return updatedTeamCount;
+        }
+
+        private static int TryApplyFixedCultureToScoreboardSideCollection(object sidesObject, HashSet<int> visited)
+        {
+            if (!(sidesObject is IEnumerable sides))
+                return 0;
+
+            int updatedTeamCount = 0;
+            foreach (object sideVm in sides)
+            {
+                string cultureId = ResolveFixedCultureIdForClientTeamVm(sideVm);
+                if (string.IsNullOrWhiteSpace(cultureId))
+                    continue;
+
+                updatedTeamCount += TryApplyFixedCultureToKnownTeamVm(sideVm, cultureId, "scoreboard.sides", visited);
+            }
+
+            return updatedTeamCount;
+        }
+
+        private static int TryApplyFixedCultureToScoreboardSideDictionary(object missionSidesObject, HashSet<int> visited)
+        {
+            if (!(missionSidesObject is IDictionary dictionary))
+                return 0;
+
+            int updatedTeamCount = 0;
+            foreach (DictionaryEntry entry in dictionary)
+            {
+                string cultureId = null;
+                if (entry.Key is BattleSideEnum keySide)
+                {
+                    if (keySide == BattleSideEnum.Attacker)
+                        cultureId = FixedClientAttackerCultureId;
+                    else if (keySide == BattleSideEnum.Defender)
+                        cultureId = FixedClientDefenderCultureId;
+                }
+
+                if (string.IsNullOrWhiteSpace(cultureId))
+                    cultureId = ResolveFixedCultureIdForClientTeamVm(entry.Value);
+                if (string.IsNullOrWhiteSpace(cultureId))
+                    continue;
+
+                updatedTeamCount += TryApplyFixedCultureToKnownTeamVm(entry.Value, cultureId, "scoreboard.missionSides", visited);
+            }
+
+            return updatedTeamCount;
+        }
+
+        private static string ResolveFixedCultureIdForClientTeamVm(object teamVm)
+        {
+            if (teamVm == null)
+                return null;
+
+            object sideValue = GetMemberValue(teamVm, "Side") ?? GetMemberValue(teamVm, "_side");
+            if (sideValue is BattleSideEnum side)
+            {
+                if (side == BattleSideEnum.Attacker)
+                    return FixedClientAttackerCultureId;
+                if (side == BattleSideEnum.Defender)
+                    return FixedClientDefenderCultureId;
+            }
+            else
+            {
+                string sideText = sideValue?.ToString();
+                if (string.Equals(sideText, nameof(BattleSideEnum.Attacker), StringComparison.OrdinalIgnoreCase))
+                    return FixedClientAttackerCultureId;
+                if (string.Equals(sideText, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase))
+                    return FixedClientDefenderCultureId;
+            }
+
+            object teamIndexValue = GetMemberValue(teamVm, "TeamIndex") ?? GetMemberValue(teamVm, "_teamIndex");
+            if (teamIndexValue is int teamIndex)
+            {
+                if (teamIndex == 1)
+                    return FixedClientAttackerCultureId;
+                if (teamIndex == 2)
+                    return FixedClientDefenderCultureId;
+            }
+
+            return null;
+        }
+
+        private static int TryApplyFixedCultureToKnownTeamVm(object teamVm, string cultureId, string path, HashSet<int> visited)
+        {
+            if (teamVm == null || string.IsNullOrWhiteSpace(cultureId))
+                return 0;
+
+            int objectId = RuntimeHelpers.GetHashCode(teamVm);
+            if (visited != null && !visited.Add(objectId))
+                return 0;
+
+            BasicCultureObject culture = MBObjectManager.Instance?.GetObject<BasicCultureObject>(cultureId);
+            string cultureName = culture?.Name?.ToString();
+            if (string.IsNullOrWhiteSpace(cultureName))
+                cultureName = cultureId;
+
+            bool updated = false;
+            updated |= TrySetTeamVmCultureMember(teamVm, "Culture", culture, cultureId);
+            updated |= TrySetTeamVmCultureMember(teamVm, "_culture", culture, cultureId);
+            updated |= TrySetTeamVmCultureMember(teamVm, "<Culture>k__BackingField", culture, cultureId);
+            updated |= TrySetTeamVmTextMember(teamVm, "CultureId", cultureId);
+            updated |= TrySetTeamVmTextMember(teamVm, "_cultureId", cultureId);
+            updated |= TrySetTeamVmTextMember(teamVm, "CultureCode", cultureId);
+            updated |= TrySetTeamVmTextMember(teamVm, "_cultureCode", cultureId);
+            updated |= TrySetTeamVmTextMember(teamVm, "FactionId", cultureId);
+            updated |= TrySetTeamVmTextMember(teamVm, "_factionId", cultureId);
+            updated |= TrySetTeamVmTextMember(teamVm, "CultureName", cultureName);
+            updated |= TrySetTeamVmTextMember(teamVm, "_cultureName", cultureName);
+            updated |= TrySetTeamVmTextMember(teamVm, "FactionName", cultureName);
+            updated |= TrySetTeamVmTextMember(teamVm, "_factionName", cultureName);
+            updated |= TrySetTeamVmTextMember(teamVm, "Name", cultureName);
+            updated |= TrySetTeamVmTextMember(teamVm, "_name", cultureName);
+            updated |= TrySetTeamVmTextMember(teamVm, "TeamName", cultureName);
+            updated |= TrySetTeamVmTextMember(teamVm, "_teamName", cultureName);
+
+            if (updated)
+            {
+                InvokeRefreshValuesIfPresent(teamVm);
+                ModLogger.Info(
+                    "CoopMissionClientLogic: fixed early team-select culture VM. " +
+                    "Path=" + path +
+                    " Type=" + teamVm.GetType().FullName +
+                    " AppliedCulture=" + cultureId +
+                    " AppliedName=" + cultureName);
+                return 1;
+            }
+
+            return 0;
+        }
+
+        private static bool TrySetTeamVmCultureMember(object instance, string memberName, BasicCultureObject culture, string cultureId)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(memberName))
+                return false;
+
+            try
+            {
+                Type type = instance.GetType();
+                PropertyInfo property = type.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (property != null && property.CanWrite && property.GetIndexParameters().Length == 0)
+                {
+                    if (property.PropertyType == typeof(string))
+                    {
+                        property.SetValue(instance, cultureId, null);
+                        return true;
+                    }
+
+                    if (culture != null && property.PropertyType.IsAssignableFrom(culture.GetType()))
+                    {
+                        property.SetValue(instance, culture, null);
+                        return true;
+                    }
+                }
+
+                FieldInfo field = type.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (field != null)
+                {
+                    if (field.FieldType == typeof(string))
+                    {
+                        field.SetValue(instance, cultureId);
+                        return true;
+                    }
+
+                    if (culture != null && field.FieldType.IsAssignableFrom(culture.GetType()))
+                    {
+                        field.SetValue(instance, culture);
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private static bool TrySetTeamVmTextMember(object instance, string memberName, string value)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(memberName) || value == null)
+                return false;
+
+            try
+            {
+                Type type = instance.GetType();
+                PropertyInfo property = type.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (property != null && property.CanWrite && property.GetIndexParameters().Length == 0 && property.PropertyType == typeof(string))
+                {
+                    property.SetValue(instance, value, null);
+                    return true;
+                }
+
+                FieldInfo field = type.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (field != null && field.FieldType == typeof(string))
+                {
+                    field.SetValue(instance, value);
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private static void InvokeRefreshValuesIfPresent(object instance)
+        {
+            if (instance == null)
+                return;
+
+            try
+            {
+                MethodInfo method = instance.GetType().GetMethod("RefreshValues", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+                method?.Invoke(instance, Array.Empty<object>());
+            }
+            catch
+            {
+            }
+        }
+
         private void TryFilterClassLoadoutToCoopUnits(Mission mission)
         {
             if (mission == null)
@@ -847,6 +1537,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (dataSource == null)
                     return;
 
+                HashSet<string> allowedTroopIds = ResolveAllowedCoopTroopIdsForClientPicker();
                 string filterKey = BuildClassLoadoutFilterKey(mission, dataSource);
                 if (string.Equals(_lastAppliedClassLoadoutFilterKey, filterKey, StringComparison.Ordinal))
                     return;
@@ -854,6 +1545,15 @@ namespace CoopSpectator.MissionBehaviors
                 object classesObject = GetMemberValue(dataSource, "_classes") ?? GetMemberValue(dataSource, "Classes");
                 if (!(classesObject is IList groups) || groups.Count == 0)
                     return;
+
+                if (allowedTroopIds.Count > 0 && !HasAnyAllowedCoopHeroClass(groups, allowedTroopIds))
+                {
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: allowed troop ids did not match any class-loadout subclass; " +
+                        "falling back to broad coop filter. " +
+                        "AllowedTroops=" + string.Join(",", allowedTroopIds));
+                    allowedTroopIds.Clear();
+                }
 
                 bool anyRemoved = false;
                 int keptSubclassCount = 0;
@@ -867,7 +1567,7 @@ namespace CoopSpectator.MissionBehaviors
                     for (int subClassIndex = subClasses.Count - 1; subClassIndex >= 0; subClassIndex--)
                     {
                         object heroClassVm = subClasses[subClassIndex];
-                        if (IsCoopHeroClassVm(heroClassVm))
+                        if (ShouldKeepHeroClassVmForCoopPicker(heroClassVm, allowedTroopIds))
                         {
                             keptSubclassCount++;
                             continue;
@@ -888,9 +1588,9 @@ namespace CoopSpectator.MissionBehaviors
                     return;
 
                 object currentSelectedClass = GetMemberValue(dataSource, "_currentSelectedClass") ?? GetMemberValue(dataSource, "CurrentSelectedClass");
-                if (!IsCoopHeroClassVm(currentSelectedClass))
+                if (!ShouldKeepHeroClassVmForCoopPicker(currentSelectedClass, allowedTroopIds))
                 {
-                    object firstCoopClass = FindFirstCoopHeroClass(groups);
+                    object firstCoopClass = FindFirstAllowedCoopHeroClass(groups, allowedTroopIds);
                     if (firstCoopClass != null)
                     {
                         SetMemberValue(dataSource, "_currentSelectedClass", firstCoopClass);
@@ -902,6 +1602,7 @@ namespace CoopSpectator.MissionBehaviors
                 ModLogger.Info(
                     "CoopMissionClientLogic: filtered class loadout to coop units. " +
                     "FilterKey=" + filterKey + " " +
+                    "AllowedTroops=" + string.Join(",", allowedTroopIds) + " " +
                     "RemainingGroups=" + groups.Count +
                     " RemainingCoopSubClasses=" + keptSubclassCount);
             }
@@ -911,7 +1612,28 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static object FindFirstCoopHeroClass(IList groups)
+        private static bool HasAnyAllowedCoopHeroClass(IList groups, HashSet<string> allowedTroopIds)
+        {
+            if (groups == null || allowedTroopIds == null || allowedTroopIds.Count == 0)
+                return false;
+
+            foreach (object groupVm in groups)
+            {
+                object subClassesObject = GetMemberValue(groupVm, "_subClasses") ?? GetMemberValue(groupVm, "SubClasses");
+                if (!(subClassesObject is IList subClasses))
+                    continue;
+
+                foreach (object heroClassVm in subClasses)
+                {
+                    if (ShouldKeepHeroClassVmForCoopPicker(heroClassVm, allowedTroopIds))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static object FindFirstAllowedCoopHeroClass(IList groups, HashSet<string> allowedTroopIds)
         {
             foreach (object groupVm in groups)
             {
@@ -921,12 +1643,27 @@ namespace CoopSpectator.MissionBehaviors
 
                 foreach (object heroClassVm in subClasses)
                 {
-                    if (IsCoopHeroClassVm(heroClassVm))
+                    if (ShouldKeepHeroClassVmForCoopPicker(heroClassVm, allowedTroopIds))
                         return heroClassVm;
                 }
             }
 
             return null;
+        }
+
+        private static bool ShouldKeepHeroClassVmForCoopPicker(object heroClassVm, HashSet<string> allowedTroopIds)
+        {
+            if (!IsCoopHeroClassVm(heroClassVm))
+                return false;
+
+            if (allowedTroopIds == null || allowedTroopIds.Count == 0)
+                return true;
+
+            string heroClassTroopId = TryGetHeroClassVmTroopId(heroClassVm);
+            if (string.IsNullOrWhiteSpace(heroClassTroopId))
+                return true;
+
+            return allowedTroopIds.Contains(heroClassTroopId);
         }
 
         private static bool IsCoopHeroClassVm(object heroClassVm)
@@ -950,6 +1687,177 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return false;
+        }
+
+        private static string TryGetHeroClassVmTroopId(object heroClassVm)
+        {
+            if (heroClassVm == null)
+                return null;
+
+            object heroClass = GetMemberValue(heroClassVm, "HeroClass");
+            string heroClassTroopId = TryGetHeroClassTroopId(heroClass);
+            if (!string.IsNullOrWhiteSpace(heroClassTroopId))
+                return heroClassTroopId;
+
+            return NormalizeTroopId(
+                GetMemberValue(heroClassVm, "_troopTypeId") as string ??
+                GetMemberValue(heroClassVm, "TroopTypeId") as string);
+        }
+
+        private static string TryGetHeroClassTroopId(object heroClass)
+        {
+            if (heroClass == null)
+                return null;
+
+            foreach (string memberName in new[] { "Character", "CharacterObject", "TroopCharacter", "HeroCharacter" })
+            {
+                object character = GetMemberValue(heroClass, memberName);
+                if (character == null)
+                    continue;
+
+                string stringId = NormalizeTroopId(
+                    GetMemberValue(character, "StringId") as string ??
+                    GetMemberValue(character, "Id") as string);
+                if (!string.IsNullOrWhiteSpace(stringId))
+                    return stringId;
+            }
+
+            return NormalizeTroopId(GetMemberValue(heroClass, "StringId") as string ?? GetMemberValue(heroClass, "Id") as string);
+        }
+
+        private static HashSet<string> ResolveAllowedCoopTroopIdsForClientPicker()
+        {
+            HashSet<string> allowedTroopIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            MissionPeer missionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            if (missionPeer == null)
+                return allowedTroopIds;
+
+            BattleSideEnum teamSide = missionPeer?.Team?.Side ?? BattleSideEnum.None;
+            IReadOnlyList<string> allowedBaseTroopIds = CoopMissionSpawnLogic.GetAllowedControlTroopIdsSnapshot(teamSide);
+            foreach (string baseTargetTroopId in allowedBaseTroopIds)
+            {
+                string cultureSpecificTargetTroopId = TryBuildClientCultureSpecificCoopTroopId(baseTargetTroopId, missionPeer?.Culture);
+                AddAllowedCoopTroopId(allowedTroopIds, cultureSpecificTargetTroopId);
+                AddAllowedCoopTroopId(allowedTroopIds, baseTargetTroopId);
+            }
+
+            List<MultiplayerClassDivisions.MPHeroClass> cultureClasses = MultiplayerClassDivisions
+                .GetMPHeroClasses(missionPeer.Culture)
+                ?.Where(heroClass => heroClass?.HeroCharacter != null)
+                .ToList();
+
+            int selectedTroopIndex = missionPeer.SelectedTroopIndex;
+            if (cultureClasses != null && selectedTroopIndex >= 0 && selectedTroopIndex < cultureClasses.Count)
+                AddAllowedCoopTroopId(allowedTroopIds, cultureClasses[selectedTroopIndex]?.HeroCharacter?.StringId);
+
+            return allowedTroopIds;
+        }
+
+        private static string TryBuildClientCultureSpecificCoopTroopId(string targetTroopId, BasicCultureObject culture)
+        {
+            string cultureToken = TryExtractCultureTokenForClientPicker(culture);
+            if (string.IsNullOrWhiteSpace(cultureToken))
+                return NormalizeTroopId(targetTroopId);
+
+            return TryBuildCultureSpecificCoopTroopIdForClientPicker(targetTroopId, cultureToken);
+        }
+
+        private static string TryBuildCultureSpecificCoopTroopIdForClientPicker(string targetTroopId, string cultureToken)
+        {
+            string normalizedTargetTroopId = NormalizeTroopId(targetTroopId);
+            if (string.IsNullOrWhiteSpace(normalizedTargetTroopId) ||
+                string.IsNullOrWhiteSpace(cultureToken) ||
+                !normalizedTargetTroopId.StartsWith("mp_coop_", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            string role = GetTroopRoleForClientPicker(normalizedTargetTroopId);
+            if (string.IsNullOrWhiteSpace(role))
+                return null;
+
+            string weight = GetTroopWeightForClientPicker(normalizedTargetTroopId);
+            string prefix = string.IsNullOrWhiteSpace(weight)
+                ? "mp_coop_" + role + "_"
+                : "mp_coop_" + weight + "_" + role + "_";
+
+            return prefix + cultureToken + "_troop";
+        }
+
+        private static string TryExtractCultureTokenForClientPicker(BasicCultureObject culture)
+        {
+            string cultureId = culture?.StringId;
+            if (string.IsNullOrWhiteSpace(cultureId))
+                return null;
+
+            int dotIndex = cultureId.LastIndexOf('.');
+            if (dotIndex >= 0 && dotIndex < cultureId.Length - 1)
+                return cultureId.Substring(dotIndex + 1).Trim().ToLowerInvariant();
+
+            return cultureId.Trim().ToLowerInvariant();
+        }
+
+        private static string GetTroopRoleForClientPicker(string troopId)
+        {
+            if (string.IsNullOrWhiteSpace(troopId))
+                return string.Empty;
+
+            if (troopId.Contains("_cavalry_"))
+                return "cavalry";
+            if (troopId.Contains("_ranged_") || troopId.Contains("_archer_"))
+                return "ranged";
+            if (troopId.Contains("_infantry_"))
+                return "infantry";
+            return string.Empty;
+        }
+
+        private static string GetTroopWeightForClientPicker(string troopId)
+        {
+            if (string.IsNullOrWhiteSpace(troopId))
+                return string.Empty;
+
+            if (troopId.Contains("_heavy_"))
+                return "heavy";
+            if (troopId.Contains("_light_"))
+                return "light";
+            if (troopId.Contains("_medium_"))
+                return "medium";
+            return string.Empty;
+        }
+
+        private static void AddAllowedCoopTroopId(HashSet<string> allowedTroopIds, string troopId)
+        {
+            string normalizedTroopId = NormalizeTroopId(troopId);
+            if (string.IsNullOrWhiteSpace(normalizedTroopId) || normalizedTroopId.IndexOf("mp_coop_", StringComparison.OrdinalIgnoreCase) < 0)
+                return;
+
+            allowedTroopIds.Add(normalizedTroopId);
+
+            string alternateTroopId = GetAlternateCoopTroopIdVariant(normalizedTroopId);
+            if (!string.IsNullOrWhiteSpace(alternateTroopId))
+                allowedTroopIds.Add(alternateTroopId);
+        }
+
+        private static string NormalizeTroopId(string troopId)
+        {
+            return string.IsNullOrWhiteSpace(troopId)
+                ? null
+                : troopId.Trim().ToLowerInvariant();
+        }
+
+        private static string GetAlternateCoopTroopIdVariant(string troopId)
+        {
+            string normalizedTroopId = NormalizeTroopId(troopId);
+            if (string.IsNullOrWhiteSpace(normalizedTroopId))
+                return null;
+
+            if (normalizedTroopId.EndsWith("_troop", StringComparison.Ordinal))
+                return normalizedTroopId.Substring(0, normalizedTroopId.Length - "_troop".Length) + "_hero";
+
+            if (normalizedTroopId.EndsWith("_hero", StringComparison.Ordinal))
+                return normalizedTroopId.Substring(0, normalizedTroopId.Length - "_hero".Length) + "_troop";
+
+            return null;
         }
 
         private static bool IsCoopHeroClassObject(object heroClass)
@@ -1062,7 +1970,28 @@ namespace CoopSpectator.MissionBehaviors
             string dataSourceIdentity = dataSource.GetType().FullName + "#" + dataSource.GetHashCode();
             string culture = missionPeer?.Culture?.StringId ?? "none";
             string missionMode = mission?.Mode.ToString() ?? "unknown";
-            return missionMode + "|" + teamIndex + "|" + culture + "|" + selectedTroopIndex + "|" + dataSourceIdentity;
+            string allowedTroopIds = string.Join(",", ResolveAllowedCoopTroopIdsForClientPicker().OrderBy(id => id, StringComparer.Ordinal));
+            return missionMode + "|" + teamIndex + "|" + culture + "|" + selectedTroopIndex + "|" + allowedTroopIds + "|" + dataSourceIdentity;
+        }
+
+        private static string BuildTeamSelectCultureSyncKey(Mission mission, object dataSource)
+        {
+            MissionPeer missionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            int teamIndex = missionPeer?.Team?.TeamIndex ?? -1;
+            string culture = missionPeer?.Culture?.StringId ?? "none";
+            string missionMode = mission?.Mode.ToString() ?? "unknown";
+            string dataSourceIdentity = dataSource.GetType().FullName + "#" + RuntimeHelpers.GetHashCode(dataSource);
+            return missionMode + "|" + teamIndex + "|" + culture + "|" + FixedClientAttackerCultureId + "|" + FixedClientDefenderCultureId + "|" + dataSourceIdentity;
+        }
+
+        private static string BuildScoreboardCultureSyncKey(Mission mission, object dataSource)
+        {
+            MissionPeer missionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            int teamIndex = missionPeer?.Team?.TeamIndex ?? -1;
+            string culture = missionPeer?.Culture?.StringId ?? "none";
+            string missionMode = mission?.Mode.ToString() ?? "unknown";
+            string dataSourceIdentity = dataSource.GetType().FullName + "#" + RuntimeHelpers.GetHashCode(dataSource);
+            return missionMode + "|" + teamIndex + "|" + culture + "|scoreboard|" + FixedClientAttackerCultureId + "|" + FixedClientDefenderCultureId + "|" + dataSourceIdentity;
         }
 
     }
@@ -1073,6 +2002,7 @@ namespace CoopSpectator.MissionBehaviors
     public sealed class CoopMissionSpawnLogic : MissionLogic
     {
         private const bool EnableDirectCoopPlayerSpawnExperiment = false;
+        private const bool EnableCoopClassRestrictionSyncExperiment = false;
         private bool _hasLoggedStart;
         private const float ServerLogIntervalSeconds = 8f;
         private float _timeUntilNextPeerLog;
@@ -1085,8 +2015,12 @@ namespace CoopSpectator.MissionBehaviors
         private static bool _hasTransferredDiagnosticAllowedAgentToPeer;
         private static readonly HashSet<int> _spawnedCoopPeerIndices = new HashSet<int>();
         private static HashSet<string> _loggedForcedPreferredClassKeys = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly Dictionary<int, string> _appliedFixedMissionCultureByPeer = new Dictionary<int, string>();
         private static readonly Dictionary<FormationClass, bool> _appliedCoopClassAvailabilityStates = new Dictionary<FormationClass, bool>();
         private static Agent _diagnosticAllowedAgent;
+        private const bool EnableFixedMissionCulturesExperiment = true;
+        private const string FixedMissionAttackerCultureId = "empire";
+        private const string FixedMissionDefenderCultureId = "vlandia";
         private static readonly FormationClass[] RestrictableFormationClasses =
         {
             FormationClass.Infantry,
@@ -1098,6 +2032,10 @@ namespace CoopSpectator.MissionBehaviors
         /// <summary>Після читання файлу — список troop ID з кампанії для обмеження вибору юнітів клієнтами (варіант A).</summary>
         public static List<string> CampaignRosterTroopIds { get; private set; } = new List<string>();
         public static List<string> ControlTroopIds { get; private set; } = new List<string>();
+        public static List<string> AllowedControlTroopIds { get; private set; } = new List<string>();
+        public static List<BasicCharacterObject> AllowedControlCharacters { get; private set; } = new List<BasicCharacterObject>();
+        public static Dictionary<BattleSideEnum, List<string>> AllowedControlTroopIdsBySide { get; private set; } = new Dictionary<BattleSideEnum, List<string>>();
+        public static Dictionary<BattleSideEnum, List<BasicCharacterObject>> AllowedControlCharactersBySide { get; private set; } = new Dictionary<BattleSideEnum, List<BasicCharacterObject>>();
         /// <summary>Перший дозволений troop ID із нормалізованого roster. Поки що лише для контрольованої серверної фіксації.</summary>
         public static string SelectedAllowedTroopId { get; private set; }
         /// <summary>Резолвлений character object для першого дозволеного troop ID. Поки тільки для діагностики.</summary>
@@ -1221,6 +2159,8 @@ namespace CoopSpectator.MissionBehaviors
                 return "mp_light_cavalry_khuzait_troop";
             if (string.Equals(normalized, "mp_coop_heavy_infantry_empire_troop", StringComparison.Ordinal))
                 return "mp_heavy_infantry_empire_troop";
+            if (string.Equals(normalized, "mp_coop_heavy_infantry_vlandia_troop", StringComparison.Ordinal))
+                return "mp_heavy_infantry_vlandia_troop";
             if (normalized.StartsWith("imperial_"))
                 return "imperial_infantryman";
             if (normalized.StartsWith("sturgian_"))
@@ -1411,6 +2351,7 @@ namespace CoopSpectator.MissionBehaviors
                 _hasTransferredDiagnosticAllowedAgentToPeer = false;
                 _spawnedCoopPeerIndices.Clear();
                 _loggedForcedPreferredClassKeys.Clear();
+                _appliedFixedMissionCultureByPeer.Clear();
                 _diagnosticAllowedAgent = null;
 
                 ModLogger.Info("CoopMissionSpawnLogic: dedicated observer detected active mission.");
@@ -1437,40 +2378,381 @@ namespace CoopSpectator.MissionBehaviors
                 LogAllowedCharacterResolution();
             }
 
+            TryForceFixedMissionCultures(mission, "dedicated observer");
             TryForcePreferredHeroClassForPeer(mission, "dedicated observer");
             TrySpawnPeersIntoCoopControl(mission, "dedicated observer");
+        }
+
+        private static void TryForceFixedMissionCultures(Mission mission, string source)
+        {
+            if (!EnableFixedMissionCulturesExperiment || mission == null || !GameNetwork.IsServer || GameNetwork.NetworkPeers == null)
+                return;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    continue;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                if (missionPeer == null || missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
+                    continue;
+
+                string targetCultureId = ResolveFixedMissionCultureIdForTeam(missionPeer.Team);
+                if (string.IsNullOrWhiteSpace(targetCultureId))
+                    continue;
+
+                BasicCultureObject targetCulture = MBObjectManager.Instance?.GetObject<BasicCultureObject>(targetCultureId);
+                if (targetCulture == null)
+                    continue;
+
+                string currentCultureId = missionPeer.Culture?.StringId;
+                if (string.Equals(currentCultureId, targetCulture.StringId, StringComparison.Ordinal))
+                    continue;
+
+                SetServerMemberValue(missionPeer, "Culture", targetCulture);
+                if (!ReferenceEquals(GetServerMemberValue(missionPeer, "Culture"), targetCulture))
+                    SetServerMemberValue(missionPeer, "_culture", targetCulture);
+                if (!ReferenceEquals(GetServerMemberValue(missionPeer, "Culture"), targetCulture))
+                    SetServerMemberValue(missionPeer, "<Culture>k__BackingField", targetCulture);
+
+                string appliedCultureId = (GetServerMemberValue(missionPeer, "Culture") as BasicCultureObject)?.StringId;
+                if (!string.Equals(appliedCultureId, targetCulture.StringId, StringComparison.Ordinal))
+                    continue;
+
+                if (_appliedFixedMissionCultureByPeer.TryGetValue(peer.Index, out string lastAppliedCultureId) &&
+                    string.Equals(lastAppliedCultureId, appliedCultureId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                _appliedFixedMissionCultureByPeer[peer.Index] = appliedCultureId;
+
+                TryBroadcastFixedMissionCulture(peer, missionPeer, targetCulture);
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: forced fixed mission culture (" + source + "). " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " TeamIndex=" + missionPeer.Team.TeamIndex +
+                    " Side=" + missionPeer.Team.Side +
+                    " PreviousCulture=" + (currentCultureId ?? "null") +
+                    " AppliedCulture=" + appliedCultureId);
+            }
+        }
+
+        private static string ResolveFixedMissionCultureIdForTeam(Team team)
+        {
+            if (team == null)
+                return null;
+
+            if (team.Side == BattleSideEnum.Attacker)
+                return FixedMissionAttackerCultureId;
+
+            if (team.Side == BattleSideEnum.Defender)
+                return FixedMissionDefenderCultureId;
+
+            return null;
+        }
+
+        private static void TryBroadcastFixedMissionCulture(NetworkCommunicator peer, MissionPeer missionPeer, BasicCultureObject targetCulture)
+        {
+            if (peer == null || missionPeer == null || targetCulture == null || !GameNetwork.IsServer)
+                return;
+
+            try
+            {
+                GameNetwork.BeginBroadcastModuleEvent();
+                GameNetwork.WriteMessage(new NetworkMessages.FromServer.ChangeCulture(missionPeer, targetCulture));
+                GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rebroadcast fixed culture after server override. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " TeamIndex=" + (missionPeer.Team?.TeamIndex ?? -1) +
+                    " Side=" + (missionPeer.Team?.Side.ToString() ?? "None") +
+                    " Culture=" + targetCulture.StringId);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSpawnLogic: rebroadcast fixed culture failed: " + ex.Message);
+            }
+        }
+
+        private static object GetServerMemberValue(object instance, string memberName)
+        {
+            if (instance == null || string.IsNullOrEmpty(memberName))
+                return null;
+
+            Type type = instance.GetType();
+            PropertyInfo property = type.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property != null && property.CanRead && property.GetIndexParameters().Length == 0)
+            {
+                try
+                {
+                    return property.GetValue(instance, null);
+                }
+                catch
+                {
+                }
+            }
+
+            FieldInfo field = type.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (field != null)
+            {
+                try
+                {
+                    return field.GetValue(instance);
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
+        }
+
+        private static void SetServerMemberValue(object instance, string memberName, object value)
+        {
+            if (instance == null || string.IsNullOrEmpty(memberName))
+                return;
+
+            Type type = instance.GetType();
+            PropertyInfo property = type.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property != null && property.CanWrite && property.GetIndexParameters().Length == 0)
+            {
+                try
+                {
+                    property.SetValue(instance, value, null);
+                    return;
+                }
+                catch
+                {
+                }
+            }
+
+            FieldInfo field = type.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (field != null)
+            {
+                try
+                {
+                    field.SetValue(instance, value);
+                }
+                catch
+                {
+                }
+            }
         }
 
         private static void RefreshAllowedTroopsFromRoster(string source)
         {
             List<string> roster = BattleRosterFileHelper.ReadRoster();
             CampaignRosterTroopIds = NormalizeRosterTroopIds(roster);
-            ControlTroopIds = CampaignRosterTroopIds.Take(2).ToList();
+            AllowedControlTroopIds = new List<string>();
+            AllowedControlCharacters = new List<BasicCharacterObject>();
+            AllowedControlTroopIdsBySide = new Dictionary<BattleSideEnum, List<string>>();
+            AllowedControlCharactersBySide = new Dictionary<BattleSideEnum, List<BasicCharacterObject>>();
 
             SelectedAllowedTroopId = null;
             SelectedAllowedCharacter = null;
 
-            foreach (string troopId in ControlTroopIds)
+            if (EnableFixedMissionCulturesExperiment)
             {
-                BasicCharacterObject resolvedCharacter = ResolveAllowedCharacter(troopId);
-                if (resolvedCharacter == null)
-                    continue;
+                List<string> attackerRoster = new List<string>
+                {
+                    "mp_coop_light_cavalry_empire_troop",
+                    "mp_coop_heavy_infantry_empire_troop",
+                };
+                List<string> defenderRoster = new List<string>
+                {
+                    "mp_coop_light_cavalry_vlandia_troop",
+                    "mp_coop_heavy_infantry_vlandia_troop",
+                };
 
-                SelectedAllowedTroopId = troopId;
-                SelectedAllowedCharacter = resolvedCharacter;
-                break;
+                CampaignRosterTroopIds = attackerRoster.Concat(defenderRoster).ToList();
+                ControlTroopIds = CampaignRosterTroopIds.ToList();
+
+                foreach (string troopId in attackerRoster)
+                    TryAddAllowedControlTroop(BattleSideEnum.Attacker, troopId, preferAsSelected: SelectedAllowedCharacter == null);
+
+                foreach (string troopId in defenderRoster)
+                    TryAddAllowedControlTroop(BattleSideEnum.Defender, troopId, preferAsSelected: false);
+
+                LogAllowedControlTroops(source, "fixed-test", attackerRoster, defenderRoster);
+                return;
+            }
+
+            ControlTroopIds = CampaignRosterTroopIds.Take(2).ToList();
+            foreach (string troopId in BuildAllowedControlTroopCandidates(ControlTroopIds))
+            {
+                TryAddAllowedControlTroop(BattleSideEnum.None, troopId, preferAsSelected: SelectedAllowedCharacter == null);
             }
 
             if (SelectedAllowedCharacter == null && CampaignRosterTroopIds.Count > 0)
             {
                 SelectedAllowedTroopId = CampaignRosterTroopIds[0];
                 SelectedAllowedCharacter = ResolveAllowedCharacter(SelectedAllowedTroopId);
+                if (SelectedAllowedCharacter != null)
+                {
+                    TryAddAllowedControlTroop(BattleSideEnum.None, SelectedAllowedTroopId, preferAsSelected: true);
+                }
             }
 
+            LogAllowedControlTroops(source, "campaign-roster", ControlTroopIds, Array.Empty<string>());
+        }
+
+        private static void LogAllowedControlTroops(string source, string mode, IReadOnlyCollection<string> attackerRoster, IReadOnlyCollection<string> defenderRoster)
+        {
             string controlUnits = ControlTroopIds.Count > 0
                 ? string.Join(", ", ControlTroopIds)
                 : "(none)";
-            ModLogger.Info("CoopMissionSpawnLogic: control troop candidates (" + source + ") = [" + controlUnits + "].");
+            ModLogger.Info("CoopMissionSpawnLogic: control troop candidates (" + source + ", " + mode + ") = [" + controlUnits + "].");
+
+            string allowedUnits = AllowedControlTroopIds.Count > 0
+                ? string.Join(", ", AllowedControlTroopIds)
+                : "(none)";
+            ModLogger.Info("CoopMissionSpawnLogic: allowed control troop ids (" + source + ", " + mode + ") = [" + allowedUnits + "].");
+
+            string attackerUnits = AllowedControlTroopIdsBySide.TryGetValue(BattleSideEnum.Attacker, out List<string> attackerAllowed) && attackerAllowed.Count > 0
+                ? string.Join(", ", attackerAllowed)
+                : (attackerRoster != null && attackerRoster.Count > 0 ? string.Join(", ", attackerRoster) : "(none)");
+            string defenderUnits = AllowedControlTroopIdsBySide.TryGetValue(BattleSideEnum.Defender, out List<string> defenderAllowed) && defenderAllowed.Count > 0
+                ? string.Join(", ", defenderAllowed)
+                : (defenderRoster != null && defenderRoster.Count > 0 ? string.Join(", ", defenderRoster) : "(none)");
+
+            ModLogger.Info("CoopMissionSpawnLogic: attacker allowed troop ids (" + source + ", " + mode + ") = [" + attackerUnits + "].");
+            ModLogger.Info("CoopMissionSpawnLogic: defender allowed troop ids (" + source + ", " + mode + ") = [" + defenderUnits + "].");
+        }
+
+        private static IEnumerable<string> BuildAllowedControlTroopCandidates(IEnumerable<string> baseControlTroopIds)
+        {
+            HashSet<string> yieldedTroopIds = new HashSet<string>(StringComparer.Ordinal);
+            if (baseControlTroopIds == null)
+                yield break;
+
+            foreach (string troopId in baseControlTroopIds)
+            {
+                if (string.IsNullOrWhiteSpace(troopId) || !yieldedTroopIds.Add(troopId))
+                    continue;
+
+                yield return troopId;
+
+                foreach (string companionTroopId in GetCuratedCompanionControlTroopIds(troopId))
+                {
+                    if (string.IsNullOrWhiteSpace(companionTroopId) || !yieldedTroopIds.Add(companionTroopId))
+                        continue;
+
+                    yield return companionTroopId;
+                }
+            }
+        }
+
+        private static IEnumerable<string> GetCuratedCompanionControlTroopIds(string troopId)
+        {
+            if (string.IsNullOrWhiteSpace(troopId))
+                yield break;
+
+            string normalizedTroopId = troopId.Trim().ToLowerInvariant();
+            if (normalizedTroopId.IndexOf("_empire_", StringComparison.Ordinal) >= 0)
+            {
+                yield return "mp_coop_light_cavalry_empire_troop";
+                yield return "mp_coop_heavy_infantry_empire_troop";
+            }
+
+            if (normalizedTroopId.IndexOf("_vlandia_", StringComparison.Ordinal) >= 0)
+            {
+                yield return "mp_coop_light_cavalry_vlandia_troop";
+                yield return "mp_coop_heavy_infantry_vlandia_troop";
+            }
+        }
+
+        private static bool TryAddAllowedControlTroop(BattleSideEnum side, string troopId, bool preferAsSelected)
+        {
+            if (string.IsNullOrWhiteSpace(troopId) || AllowedControlTroopIds.Contains(troopId))
+                return false;
+
+            BasicCharacterObject resolvedCharacter = ResolveAllowedCharacter(troopId);
+            if (resolvedCharacter == null)
+                return false;
+
+            if (!AllowedControlTroopIdsBySide.TryGetValue(side, out List<string> sideTroopIds))
+            {
+                sideTroopIds = new List<string>();
+                AllowedControlTroopIdsBySide[side] = sideTroopIds;
+            }
+
+            if (!AllowedControlCharactersBySide.TryGetValue(side, out List<BasicCharacterObject> sideCharacters))
+            {
+                sideCharacters = new List<BasicCharacterObject>();
+                AllowedControlCharactersBySide[side] = sideCharacters;
+            }
+
+            AllowedControlTroopIds.Add(troopId);
+            AllowedControlCharacters.Add(resolvedCharacter);
+            sideTroopIds.Add(troopId);
+            sideCharacters.Add(resolvedCharacter);
+
+            if (preferAsSelected)
+            {
+                SelectedAllowedTroopId = troopId;
+                SelectedAllowedCharacter = resolvedCharacter;
+            }
+
+            return true;
+        }
+
+        public static IReadOnlyList<string> GetAllowedControlTroopIdsSnapshot()
+        {
+            if (AllowedControlTroopIds == null || AllowedControlTroopIds.Count == 0)
+            {
+                if (!string.IsNullOrWhiteSpace(SelectedAllowedTroopId))
+                    return new[] { SelectedAllowedTroopId };
+
+                return Array.Empty<string>();
+            }
+
+            return AllowedControlTroopIds.ToArray();
+        }
+
+        public static IReadOnlyList<string> GetAllowedControlTroopIdsSnapshot(BattleSideEnum side)
+        {
+            if (AllowedControlTroopIdsBySide != null &&
+                AllowedControlTroopIdsBySide.TryGetValue(side, out List<string> sideTroopIds) &&
+                sideTroopIds != null &&
+                sideTroopIds.Count > 0)
+            {
+                return sideTroopIds.ToArray();
+            }
+
+            IReadOnlyList<string> fixedTestTroopIds = GetFixedTestAllowedControlTroopIdsForSide(side);
+            if (fixedTestTroopIds.Count > 0)
+                return fixedTestTroopIds;
+
+            return GetAllowedControlTroopIdsSnapshot();
+        }
+
+        private static IReadOnlyList<string> GetFixedTestAllowedControlTroopIdsForSide(BattleSideEnum side)
+        {
+            if (!EnableFixedMissionCulturesExperiment)
+                return Array.Empty<string>();
+
+            if (side == BattleSideEnum.Attacker)
+            {
+                return new[]
+                {
+                    "mp_coop_light_cavalry_empire_troop",
+                    "mp_coop_heavy_infantry_empire_troop",
+                };
+            }
+
+            if (side == BattleSideEnum.Defender)
+            {
+                return new[]
+                {
+                    "mp_coop_light_cavalry_vlandia_troop",
+                    "mp_coop_heavy_infantry_vlandia_troop",
+                };
+            }
+
+            return Array.Empty<string>();
         }
 
         private static void TrySpawnPeersIntoCoopControl(Mission mission, string source)
@@ -1746,6 +3028,20 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            int currentSelectedTroopIndex = missionPeer.SelectedTroopIndex;
+            if (currentSelectedTroopIndex >= 0 && currentSelectedTroopIndex < cultureClasses.Count)
+            {
+                MultiplayerClassDivisions.MPHeroClass currentlySelectedClass = cultureClasses[currentSelectedTroopIndex];
+                string matchedAllowedTroopId = ResolveMatchedAllowedTroopId(currentlySelectedClass, missionPeer);
+                if (!string.IsNullOrWhiteSpace(matchedAllowedTroopId))
+                {
+                    preferredClass = currentlySelectedClass;
+                    preferredTroopIndex = currentSelectedTroopIndex;
+                    debugReason = "preserve player-selected allowed class '" + matchedAllowedTroopId + "'";
+                    return !ReferenceEquals(preferredClass, vanillaClass) || missionPeer.SelectedTroopIndex != preferredTroopIndex;
+                }
+            }
+
             int exactIndex = cultureClasses.FindIndex(heroClass =>
                 MatchesPreferredHeroClass(heroClass, targetTroopId));
             if (exactIndex >= 0)
@@ -1767,6 +3063,20 @@ namespace CoopSpectator.MissionBehaviors
             preferredTroopIndex = bestIndex;
             debugReason = "peer-culture surrogate for '" + targetTroopId + "'";
             return !ReferenceEquals(preferredClass, vanillaClass) || missionPeer.SelectedTroopIndex != preferredTroopIndex;
+        }
+
+        private static string ResolveMatchedAllowedTroopId(MultiplayerClassDivisions.MPHeroClass heroClass, MissionPeer missionPeer)
+        {
+            if (heroClass?.HeroCharacter == null || missionPeer == null)
+                return null;
+
+            foreach (string allowedTroopId in ResolveAllowedTargetTroopIdsForPeerCulture(missionPeer))
+            {
+                if (MatchesPreferredHeroClass(heroClass, allowedTroopId))
+                    return allowedTroopId;
+            }
+
+            return null;
         }
 
         private static void TryForcePreferredHeroClassForPeer(Mission mission, string source)
@@ -1835,6 +3145,9 @@ namespace CoopSpectator.MissionBehaviors
 
         private static void TrySyncCoopClassRestrictions(Mission mission, string source)
         {
+            if (!EnableCoopClassRestrictionSyncExperiment)
+                return;
+
             if (mission == null || !GameNetwork.IsServer)
                 return;
 
@@ -1888,29 +3201,11 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
                 }
 
-                int currentTroopIndex = missionPeer.SelectedTroopIndex;
-                MultiplayerClassDivisions.MPHeroClass currentClass = null;
-                List<MultiplayerClassDivisions.MPHeroClass> cultureClasses = MultiplayerClassDivisions
-                    .GetMPHeroClasses(missionPeer.Culture)
-                    ?.Where(heroClass => heroClass?.HeroCharacter != null)
-                    .ToList();
-                if (cultureClasses != null && currentTroopIndex >= 0 && currentTroopIndex < cultureClasses.Count)
-                    currentClass = cultureClasses[currentTroopIndex];
-
-                if (!TryResolvePreferredHeroClassForPeer(
-                        missionPeer,
-                        currentClass,
-                        false,
-                        out MultiplayerClassDivisions.MPHeroClass preferredClass,
-                        out _,
-                        out _))
+                foreach (BasicCharacterObject allowedCharacter in ResolveAllowedCharactersForPeerCulture(missionPeer))
                 {
-                    continue;
+                    if (allowedCharacter != null)
+                        allowedClasses.Add(allowedCharacter.DefaultFormationClass);
                 }
-
-                BasicCharacterObject preferredCharacter = preferredClass?.HeroCharacter;
-                if (preferredCharacter != null)
-                    allowedClasses.Add(preferredCharacter.DefaultFormationClass);
             }
 
             if (allowedClasses.Count == 0 && SelectedAllowedCharacter != null)
@@ -1956,23 +3251,51 @@ namespace CoopSpectator.MissionBehaviors
 
         private static string GetPreferredTargetTroopIdForPeerCulture(MissionPeer missionPeer)
         {
-            string baseTargetTroopId = SelectedAllowedCharacter?.StringId ?? SelectedAllowedTroopId;
-            if (string.IsNullOrWhiteSpace(baseTargetTroopId))
-                return null;
+            return ResolveAllowedTargetTroopIdsForPeerCulture(missionPeer).FirstOrDefault();
+        }
+
+        private static List<string> ResolveAllowedTargetTroopIdsForPeerCulture(MissionPeer missionPeer)
+        {
+            List<string> targetTroopIds = new List<string>();
+            BattleSideEnum teamSide = missionPeer?.Team?.Side ?? BattleSideEnum.None;
+            IReadOnlyList<string> allowedBaseTroopIds = GetAllowedControlTroopIdsSnapshot(teamSide);
+            if (allowedBaseTroopIds.Count == 0)
+                return targetTroopIds;
 
             string cultureToken = ExtractCultureToken(missionPeer?.Culture);
-            if (string.IsNullOrWhiteSpace(cultureToken))
-                return baseTargetTroopId;
+            HashSet<string> seenTroopIds = new HashSet<string>(StringComparer.Ordinal);
 
-            string cultureSpecificCoopTroopId = TryBuildCultureSpecificCoopTroopId(baseTargetTroopId, cultureToken);
-            if (!string.IsNullOrWhiteSpace(cultureSpecificCoopTroopId))
+            foreach (string baseTargetTroopId in allowedBaseTroopIds)
             {
-                BasicCharacterObject cultureSpecificCharacter = ResolveAllowedCharacter(cultureSpecificCoopTroopId);
-                if (cultureSpecificCharacter != null)
-                    return cultureSpecificCoopTroopId;
+                string preferredTroopId = baseTargetTroopId;
+                if (!string.IsNullOrWhiteSpace(cultureToken))
+                {
+                    string cultureSpecificCoopTroopId = TryBuildCultureSpecificCoopTroopId(baseTargetTroopId, cultureToken);
+                    if (!string.IsNullOrWhiteSpace(cultureSpecificCoopTroopId))
+                    {
+                        BasicCharacterObject cultureSpecificCharacter = ResolveAllowedCharacter(cultureSpecificCoopTroopId);
+                        if (cultureSpecificCharacter != null)
+                            preferredTroopId = cultureSpecificCoopTroopId;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(preferredTroopId) || !seenTroopIds.Add(preferredTroopId))
+                    continue;
+
+                targetTroopIds.Add(preferredTroopId);
             }
 
-            return baseTargetTroopId;
+            return targetTroopIds;
+        }
+
+        private static IEnumerable<BasicCharacterObject> ResolveAllowedCharactersForPeerCulture(MissionPeer missionPeer)
+        {
+            foreach (string targetTroopId in ResolveAllowedTargetTroopIdsForPeerCulture(missionPeer))
+            {
+                BasicCharacterObject allowedCharacter = ResolveAllowedCharacter(targetTroopId);
+                if (allowedCharacter != null)
+                    yield return allowedCharacter;
+            }
         }
 
         private static string TryBuildCultureSpecificCoopTroopId(string targetTroopId, string cultureToken)

@@ -16,8 +16,14 @@ namespace CoopSpectator
     {
         /// <summary>ТЗ A: true = тільки proof-of-load, без Harmony і без реєстрації game mode. false = реєструємо TdmClone + Harmony (для Етапу 3.3 — тест з нашими mission behaviors і логуванням; UseTdmCloneForListedTest у Launcher має бути true).</summary>
         private const bool CleanModuleLoadOnly = false;
+        private const bool EnableFixedTestCultures = true;
+        private const string FixedAttackerCultureId = "empire";
+        private const string FixedDefenderCultureId = "vlandia";
 
         private static Harmony _harmony;
+        private static bool _hasAppliedFixedTestCultures;
+        private static DateTime _fixedCultureFirstAttemptUtc = DateTime.MinValue;
+        private static DateTime _nextFixedCultureAttemptUtc = DateTime.MinValue;
 
         private static string GetProofFilePath(string name)
         {
@@ -36,13 +42,64 @@ namespace CoopSpectator
             {
                 Mission currentMission = Mission.Current;
                 if (currentMission == null)
+                {
+                    TryApplyFixedTestCulturesForNextMission();
                     return;
+                }
+
+                _hasAppliedFixedTestCultures = false;
 
                 CoopMissionSpawnLogic.TryRunDedicatedMissionObserver(currentMission);
             }
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: mission observer tick failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyFixedTestCulturesForNextMission()
+        {
+            if (!EnableFixedTestCultures || _hasAppliedFixedTestCultures)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (_fixedCultureFirstAttemptUtc == DateTime.MinValue)
+            {
+                _fixedCultureFirstAttemptUtc = nowUtc;
+                _nextFixedCultureAttemptUtc = nowUtc.AddSeconds(10);
+                return;
+            }
+
+            if (nowUtc < _nextFixedCultureAttemptUtc)
+                return;
+
+            _nextFixedCultureAttemptUtc = nowUtc.AddSeconds(1);
+
+            try
+            {
+                MultiplayerOptions.OptionType attackerCultureOption = (MultiplayerOptions.OptionType)14;
+                MultiplayerOptions.OptionType defenderCultureOption = (MultiplayerOptions.OptionType)15;
+                MultiplayerOptions.MultiplayerOptionsAccessMode accessMode = (MultiplayerOptions.MultiplayerOptionsAccessMode)2;
+
+                MultiplayerOptionsExtensions.SetValue(attackerCultureOption, FixedAttackerCultureId, accessMode);
+                MultiplayerOptionsExtensions.SetValue(defenderCultureOption, FixedDefenderCultureId, accessMode);
+
+                string appliedAttackerCulture = MultiplayerOptionsExtensions.GetStrValue(attackerCultureOption, accessMode);
+                string appliedDefenderCulture = MultiplayerOptionsExtensions.GetStrValue(defenderCultureOption, accessMode);
+
+                _hasAppliedFixedTestCultures = true;
+                ModLogger.Info(
+                    "CoopSpectatorDedicated: applied fixed next-mission cultures. " +
+                    "Attacker=" + appliedAttackerCulture +
+                    " Defender=" + appliedDefenderCulture);
+            }
+            catch (NullReferenceException)
+            {
+                // MultiplayerOptions internals are not initialized yet during early dedicated startup.
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: fixed next-mission culture override failed: " + ex.Message);
             }
         }
 
@@ -83,6 +140,7 @@ namespace CoopSpectator
                     TryApplyGameModeOverridePatch();
                     TryApplyMissionStateOpenNewPatches();
                     TryApplyMultiplayerHeroClassOverridePatch();
+                    TryApplyServerChangeCultureCanonicalizationPatch();
                     RegisterCoopBattleGameMode();
                     TryApplyWebPanelPatches();
                     AppDomain.CurrentDomain.AssemblyLoad += (_, e) =>
@@ -148,6 +206,20 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: MultiplayerHeroClass override patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyServerChangeCultureCanonicalizationPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                ServerChangeCultureCanonicalizationPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: server ChangeCulture canonicalization patch apply failed: " + ex.Message);
             }
         }
 
