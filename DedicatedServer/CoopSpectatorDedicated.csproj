@@ -50,6 +50,8 @@
     <Compile Include="..\Campaign\BattleRosterFile.cs" Link="Campaign\BattleRosterFile.cs" />
     <Compile Include="..\Network\Messages\BattleStartMessage.cs" Link="Network\Messages\BattleStartMessage.cs" />
     <Compile Include="..\Infrastructure\ModLogger.cs" Link="Infrastructure\ModLogger.cs" />
+    <Compile Include="..\Infrastructure\CoopBattlePhaseBridgeFile.cs" Link="Infrastructure\CoopBattlePhaseBridgeFile.cs" />
+    <Compile Include="..\Infrastructure\CoopBattlePhaseRuntimeState.cs" Link="Infrastructure\CoopBattlePhaseRuntimeState.cs" />
     <Compile Include="..\Infrastructure\BattleSnapshotRuntimeState.cs" Link="Infrastructure\BattleSnapshotRuntimeState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleAuthorityState.cs" Link="Infrastructure\CoopBattleAuthorityState.cs" />
     <Compile Include="..\Infrastructure\AssemblyDiagnostics.cs" Link="Infrastructure\AssemblyDiagnostics.cs" />

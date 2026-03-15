@@ -2127,6 +2127,7 @@ namespace CoopSpectator.MissionBehaviors
             else
                 ModLogger.Info("CoopMissionSpawnLogic: no allowed troop id available yet (roster empty).");
             LogAllowedCharacterResolution();
+            CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, "CoopMissionSpawnLogic.AfterStart", mission);
 
             _timeUntilNextPeerLog = ServerLogIntervalSeconds;
         }
@@ -2148,6 +2149,13 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             TrySpawnPeersIntoCoopControl(Mission, "server behavior");
+            TryUpdateBattlePhaseState(Mission, "server behavior tick");
+        }
+
+        protected override void OnEndMission()
+        {
+            CoopBattlePhaseRuntimeState.SetPhase(CoopBattlePhase.BattleEnded, "CoopMissionSpawnLogic.OnEndMission", Mission, allowRegression: true);
+            base.OnEndMission();
         }
 
         private static List<string> NormalizeRosterTroopIds(List<string> troopIds)
@@ -2431,11 +2439,91 @@ namespace CoopSpectator.MissionBehaviors
                 else
                     ModLogger.Info("CoopMissionSpawnLogic: dedicated observer found no allowed troop id (roster empty).");
                 LogAllowedCharacterResolution();
+                CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, "dedicated observer mission detected", mission);
             }
 
             TryForceFixedMissionCultures(mission, "dedicated observer");
             TryForcePreferredHeroClassForPeer(mission, "dedicated observer");
             TrySpawnPeersIntoCoopControl(mission, "dedicated observer");
+            TryUpdateBattlePhaseState(mission, "dedicated observer");
+            TryConsumeBattlePhaseRequests(mission);
+        }
+
+        private static void TryUpdateBattlePhaseState(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer || GameNetwork.NetworkPeers == null)
+                return;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase >= CoopBattlePhase.BattleActive)
+                return;
+
+            int assignedPeerCount = 0;
+            int previewReadyPeerCount = 0;
+            int controlledPeerCount = 0;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    continue;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                if (missionPeer == null || missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
+                    continue;
+
+                assignedPeerCount++;
+                if (missionPeer.HasSpawnedAgentVisuals)
+                    previewReadyPeerCount++;
+                if (missionPeer.ControlledAgent != null)
+                    controlledPeerCount++;
+            }
+
+            if (controlledPeerCount > 0)
+            {
+                CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.Deployment, source + " controlled-agent", mission);
+                if (assignedPeerCount > 0 && controlledPeerCount >= assignedPeerCount)
+                    CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.PreBattleHold, source + " all-peers-controlled", mission);
+                return;
+            }
+
+            if (previewReadyPeerCount > 0)
+            {
+                CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.Deployment, source + " visuals-ready", mission);
+                return;
+            }
+
+            if (assignedPeerCount > 0)
+            {
+                CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.UnitSelection, source + " side-assigned", mission);
+                return;
+            }
+
+            CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, source + " waiting-for-side", mission);
+        }
+
+        private static void TryConsumeBattlePhaseRequests(Mission mission)
+        {
+            if (mission == null || !GameNetwork.IsServer)
+                return;
+
+            if (!CoopBattlePhaseBridgeFile.ConsumeStartBattleRequest(out string requestSource))
+                return;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase < CoopBattlePhase.PreBattleHold)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: ignored start battle request because phase is not ready. " +
+                    "CurrentPhase=" + currentPhase +
+                    " Source=" + (requestSource ?? "unknown"));
+                return;
+            }
+
+            CoopBattlePhaseRuntimeState.SetPhase(
+                CoopBattlePhase.BattleActive,
+                "bridge-file start battle request from " + (requestSource ?? "unknown"),
+                mission,
+                allowRegression: false);
         }
 
         private static void TryForceFixedMissionCultures(Mission mission, string source)
@@ -3515,6 +3603,8 @@ namespace CoopSpectator.MissionBehaviors
                 if (missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam) || missionPeer.Culture == null)
                     continue;
 
+                bool hasExplicitSelection = CoopBattleAuthorityState.HasExplicitSelection(missionPeer);
+
                 int currentTroopIndex = missionPeer.SelectedTroopIndex;
                 MultiplayerClassDivisions.MPHeroClass currentClass = null;
                 List<MultiplayerClassDivisions.MPHeroClass> cultureClasses = MultiplayerClassDivisions
@@ -3523,6 +3613,15 @@ namespace CoopSpectator.MissionBehaviors
                     .ToList();
                 if (cultureClasses != null && currentTroopIndex >= 0 && currentTroopIndex < cultureClasses.Count)
                     currentClass = cultureClasses[currentTroopIndex];
+
+                if (!hasExplicitSelection && currentClass != null)
+                    continue;
+
+                // If the peer already has a local vanilla class selection, avoid rebroadcasting the same
+                // preferred index during the preview/equipment-update window. This rebroadcast path is
+                // currently the strongest suspect for dedicated crashes on infantry preview.
+                if (hasExplicitSelection && currentClass != null)
+                    continue;
 
                 if (!TryResolvePreferredHeroClassForPeer(
                         missionPeer,
@@ -3951,11 +4050,28 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
 
             string normalizedTarget = targetTroopId.Trim();
+            string canonicalTarget = NormalizeTroopIdForHeroClassMatch(normalizedTarget);
+            string canonicalHeroId = NormalizeTroopIdForHeroClassMatch(heroId);
+            if (!string.IsNullOrWhiteSpace(canonicalTarget) &&
+                !string.IsNullOrWhiteSpace(canonicalHeroId) &&
+                string.Equals(canonicalHeroId, canonicalTarget, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
             if (normalizedTarget.EndsWith("_troop", StringComparison.Ordinal))
             {
                 string expectedHeroId = normalizedTarget.Substring(0, normalizedTarget.Length - "_troop".Length) + "_hero";
                 if (string.Equals(heroId, expectedHeroId, StringComparison.Ordinal))
                     return true;
+
+                string canonicalExpectedHeroId = NormalizeTroopIdForHeroClassMatch(expectedHeroId);
+                if (!string.IsNullOrWhiteSpace(canonicalExpectedHeroId) &&
+                    !string.IsNullOrWhiteSpace(canonicalHeroId) &&
+                    string.Equals(canonicalHeroId, canonicalExpectedHeroId, StringComparison.Ordinal))
+                {
+                    return true;
+                }
             }
 
             if (normalizedTarget.EndsWith("_hero", StringComparison.Ordinal))
@@ -3963,9 +4079,29 @@ namespace CoopSpectator.MissionBehaviors
                 string expectedTroopId = normalizedTarget.Substring(0, normalizedTarget.Length - "_hero".Length) + "_troop";
                 if (string.Equals(heroId, expectedTroopId, StringComparison.Ordinal))
                     return true;
+
+                string canonicalExpectedTroopId = NormalizeTroopIdForHeroClassMatch(expectedTroopId);
+                if (!string.IsNullOrWhiteSpace(canonicalExpectedTroopId) &&
+                    !string.IsNullOrWhiteSpace(canonicalHeroId) &&
+                    string.Equals(canonicalHeroId, canonicalExpectedTroopId, StringComparison.Ordinal))
+                {
+                    return true;
+                }
             }
 
             return false;
+        }
+
+        private static string NormalizeTroopIdForHeroClassMatch(string troopId)
+        {
+            if (string.IsNullOrWhiteSpace(troopId))
+                return null;
+
+            string normalized = troopId.Trim();
+            if (normalized.StartsWith("mp_coop_", StringComparison.Ordinal))
+                normalized = "mp_" + normalized.Substring("mp_coop_".Length);
+
+            return normalized;
         }
 
         private static string GetTroopRole(string troopId)

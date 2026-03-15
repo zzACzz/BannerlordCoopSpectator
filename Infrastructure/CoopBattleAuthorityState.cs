@@ -156,6 +156,15 @@ namespace CoopSpectator.Infrastructure
             return selectionState.EntryId;
         }
 
+        public static bool HasExplicitSelection(MissionPeer missionPeer)
+        {
+            NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();
+            if (networkPeer == null)
+                return false;
+
+            return _selectedTroopIdByPeer.ContainsKey(networkPeer.Index) || _selectedEntryIdByPeer.ContainsKey(networkPeer.Index);
+        }
+
         public static bool TrySetSelectedTroopId(MissionPeer missionPeer, string troopId, string source)
         {
             NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();
