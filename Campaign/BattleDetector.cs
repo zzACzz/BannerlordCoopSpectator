@@ -8,6 +8,8 @@ using TaleWorlds.CampaignSystem; // Підключаємо Campaign (для до
 using TaleWorlds.CampaignSystem.Party; // Підключаємо MobileParty (партія гравця в кампанії)
 using TaleWorlds.MountAndBlade; // Підключаємо Mission (детекція входу в місію/битву)
 using System.Reflection; // Reflection для mission-safe fallback ids героїв/лордів із кампанії.
+using System.Linq;
+using TaleWorlds.Core;
 
 namespace CoopSpectator.Campaign // Тримаємо battle/campaign логіку в одному namespace
 { // Починаємо блок простору імен
@@ -157,8 +159,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     troopIds.Add(troop.CharacterId);
                 }
 
-                bool wrote = BattleRosterFileHelper.WriteRoster(troopIds);
-                ModLogger.Info("BattleDetector: battle_roster.json write result = " + wrote + " (troop ids collected = " + troopIds.Count + ").");
+                bool wrote = BattleRosterFileHelper.WriteRoster(troopIds, payload.Snapshot);
+                ModLogger.Info("BattleDetector: battle_roster.json write result = " + wrote + " (troop ids collected = " + troopIds.Count + ", snapshot sides = " + (payload.Snapshot?.Sides?.Count ?? 0) + ").");
             }
             catch (Exception ex)
             {
@@ -193,9 +195,15 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             // 3) Player side (best-effort) // Пояснюємо блок
             message.PlayerSide = TryGetPlayerSideTextSafe(); // Пишемо "Attacker/Defender/Unknown" як текст
 
-            // 4) Troops list (party roster) // Пояснюємо блок
-            message.Troops = BuildPartyTroopStacksSafe(); // Збираємо стеки військ з ростера партії
-            message.ArmySize = TryGetArmySizeSafe(); // Записуємо сумарну кількість людей (для UI і тестів)
+            // 4) Extended battle snapshot (best-effort) // Пояснюємо блок
+            message.Snapshot = BuildBattleSnapshotSafe(message.MapScene, message.PlayerSide);
+            BattleSnapshotRuntimeState.SetCurrent(message.Snapshot, "host-battle-detector");
+
+            // 5) Legacy fields for transitional clients/runtime // Пояснюємо блок
+            message.Troops = BuildLegacyTroopsFromSnapshot(message.Snapshot) ?? BuildPartyTroopStacksSafe();
+            message.ArmySize = BuildLegacyArmySizeFromSnapshot(message.Snapshot);
+            if (message.ArmySize <= 0)
+                message.ArmySize = TryGetArmySizeSafe(); // Записуємо сумарну кількість людей (для UI і тестів)
 
             return message; // Повертаємо сформований DTO
         } // Завершуємо блок методу
@@ -323,6 +331,323 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             return troops; // Повертаємо список (може бути порожнім — це ок для MVP)
         } // Завершуємо блок методу
+
+        private static BattleSnapshotMessage BuildBattleSnapshotSafe(string mapScene, string playerSideText)
+        {
+            try
+            {
+                object battle = TryGetCurrentBattleObject();
+                if (battle == null)
+                    return BuildFallbackBattleSnapshot(mapScene, playerSideText);
+
+                var snapshot = new BattleSnapshotMessage
+                {
+                    BattleId = battle.GetType().FullName,
+                    BattleType = battle.GetType().Name,
+                    MapScene = mapScene,
+                    PlayerSide = playerSideText
+                };
+
+                BattleSideSnapshotMessage attackerSide = BuildBattleSideSnapshot(
+                    TryGetPropertyValue(battle, "AttackerSide"),
+                    "attacker",
+                    nameof(BattleSideEnum.Attacker),
+                    playerSideText);
+                BattleSideSnapshotMessage defenderSide = BuildBattleSideSnapshot(
+                    TryGetPropertyValue(battle, "DefenderSide"),
+                    "defender",
+                    nameof(BattleSideEnum.Defender),
+                    playerSideText);
+
+                if (attackerSide != null)
+                    snapshot.Sides.Add(attackerSide);
+                if (defenderSide != null)
+                    snapshot.Sides.Add(defenderSide);
+
+                if (snapshot.Sides.Count == 0)
+                    return BuildFallbackBattleSnapshot(mapScene, playerSideText);
+
+                return snapshot;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: extended battle snapshot build failed: " + ex.Message);
+                return BuildFallbackBattleSnapshot(mapScene, playerSideText);
+            }
+        }
+
+        private static BattleSnapshotMessage BuildFallbackBattleSnapshot(string mapScene, string playerSideText)
+        {
+            var snapshot = new BattleSnapshotMessage
+            {
+                BattleId = "fallback",
+                BattleType = "Unknown",
+                MapScene = mapScene,
+                PlayerSide = playerSideText
+            };
+
+            var mainPartySide = new BattleSideSnapshotMessage
+            {
+                SideId = string.Equals(playerSideText, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase) ? "defender" : "attacker",
+                SideText = string.Equals(playerSideText, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase)
+                    ? nameof(BattleSideEnum.Defender)
+                    : nameof(BattleSideEnum.Attacker),
+                IsPlayerSide = true
+            };
+
+            var mainParty = new BattlePartySnapshotMessage
+            {
+                PartyId = MobileParty.MainParty?.StringId ?? "main_party",
+                PartyName = MobileParty.MainParty?.Name?.ToString() ?? "Main Party",
+                IsMainParty = true,
+                Troops = BuildPartyTroopStacksSafe()
+            };
+            mainParty.TotalManCount = mainParty.Troops?.Sum(t => t?.Count ?? 0) ?? 0;
+            mainPartySide.Parties.Add(mainParty);
+            mainPartySide.Troops.AddRange(mainParty.Troops ?? new List<TroopStackInfo>());
+            mainPartySide.TotalManCount = mainParty.TotalManCount;
+            snapshot.Sides.Add(mainPartySide);
+
+            return snapshot;
+        }
+
+        private static BattleSideSnapshotMessage BuildBattleSideSnapshot(object sideObject, string sideId, string sideText, string playerSideText)
+        {
+            var sideSnapshot = new BattleSideSnapshotMessage
+            {
+                SideId = sideId,
+                SideText = sideText,
+                IsPlayerSide = string.Equals(playerSideText, sideText, StringComparison.OrdinalIgnoreCase)
+            };
+
+            HashSet<string> seenPartyIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (object partyObject in EnumerateBattleParties(sideObject))
+            {
+                BattlePartySnapshotMessage partySnapshot = BuildBattlePartySnapshot(partyObject, sideId);
+                if (partySnapshot == null)
+                    continue;
+
+                string partyId = string.IsNullOrWhiteSpace(partySnapshot.PartyId)
+                    ? "party_" + seenPartyIds.Count
+                    : partySnapshot.PartyId;
+                if (!seenPartyIds.Add(partyId))
+                    continue;
+
+                partySnapshot.PartyId = partyId;
+                sideSnapshot.Parties.Add(partySnapshot);
+                if (partySnapshot.Troops != null && partySnapshot.Troops.Count > 0)
+                    sideSnapshot.Troops.AddRange(partySnapshot.Troops);
+            }
+
+            sideSnapshot.TotalManCount = sideSnapshot.Parties.Sum(p => p?.TotalManCount ?? 0);
+            return sideSnapshot.Parties.Count > 0 ? sideSnapshot : null;
+        }
+
+        private static BattlePartySnapshotMessage BuildBattlePartySnapshot(object partyObject, string sideId)
+        {
+            object partyBase = UnwrapPartyBase(partyObject);
+            if (partyBase == null)
+                return null;
+
+            List<TroopStackInfo> troops = BuildTroopStacksFromPartySafe(partyBase, sideId);
+            if (troops.Count == 0)
+                return null;
+
+            string partyId = TryGetStringId(partyBase) ?? TryGetStringId(TryGetPropertyValue(partyBase, "MobileParty"));
+            string partyName = TryGetPartyName(partyBase);
+            bool isMainParty = ReferenceEquals(partyBase, MobileParty.MainParty?.Party);
+
+            return new BattlePartySnapshotMessage
+            {
+                PartyId = partyId,
+                PartyName = partyName,
+                IsMainParty = isMainParty,
+                TotalManCount = troops.Sum(t => t?.Count ?? 0),
+                Troops = troops
+            };
+        }
+
+        private static IEnumerable<object> EnumerateBattleParties(object sideObject)
+        {
+            if (sideObject == null)
+                yield break;
+
+            foreach (string propertyName in new[] { "Parties", "BattleParties", "PartiesOnSide", "MemberParties", "MapEventPartySides", "PartyBases", "MobileParties" })
+            {
+                object collection = TryGetPropertyValue(sideObject, propertyName);
+                if (!(collection is System.Collections.IEnumerable enumerable) || collection is string)
+                    continue;
+
+                foreach (object item in enumerable)
+                {
+                    if (item != null)
+                        yield return item;
+                }
+
+                yield break;
+            }
+
+            if (sideObject is System.Collections.IEnumerable selfEnumerable && !(sideObject is string))
+            {
+                foreach (object item in selfEnumerable)
+                {
+                    if (item != null)
+                        yield return item;
+                }
+            }
+        }
+
+        private static object UnwrapPartyBase(object partyObject)
+        {
+            if (partyObject == null)
+                return null;
+
+            foreach (string propertyName in new[] { "Party", "PartyBase", "MobileParty", "MapEventParty", "PartyComponent" })
+            {
+                object nested = TryGetPropertyValue(partyObject, propertyName);
+                if (nested == null)
+                    continue;
+
+                object nestedPartyBase = TryGetPropertyValue(nested, "Party") ?? TryGetPropertyValue(nested, "PartyBase");
+                if (nestedPartyBase != null)
+                    return nestedPartyBase;
+
+                if (TryGetPropertyValue(nested, "MemberRoster") != null || TryGetPropertyValue(nested, "Roster") != null)
+                    return nested;
+            }
+
+            return TryGetPropertyValue(partyObject, "MemberRoster") != null || TryGetPropertyValue(partyObject, "Roster") != null
+                ? partyObject
+                : null;
+        }
+
+        private static List<TroopStackInfo> BuildTroopStacksFromPartySafe(object partyBase, string sideId)
+        {
+            var troops = new List<TroopStackInfo>();
+            if (partyBase == null)
+                return troops;
+
+            try
+            {
+                object memberRoster = TryGetPropertyValue(partyBase, "MemberRoster");
+                object troopRoster = TryInvokeMethod(memberRoster, "GetTroopRoster");
+                if (!(troopRoster is System.Collections.IEnumerable enumerable))
+                    return troops;
+
+                var rosterCharacters = new List<object>();
+                var rosterElements = new List<object>();
+                foreach (object element in enumerable)
+                {
+                    if (element == null)
+                        continue;
+
+                    rosterElements.Add(element);
+                    object character = TryGetPropertyValue(element, "Character");
+                    if (character != null)
+                        rosterCharacters.Add(character);
+                }
+
+                string partyId = TryGetStringId(partyBase) ?? TryGetStringId(TryGetPropertyValue(partyBase, "MobileParty"));
+                foreach (object element in rosterElements)
+                {
+                    object character = TryGetPropertyValue(element, "Character");
+                    if (character == null)
+                        continue;
+
+                    string characterId = GetMissionSafeCharacterId(character, rosterCharacters);
+                    var stack = new TroopStackInfo
+                    {
+                        EntryId = sideId + "|" + (partyId ?? "party") + "|" + (characterId ?? "unknown"),
+                        SideId = sideId,
+                        PartyId = partyId,
+                        CharacterId = characterId,
+                        TroopName = TryGetPropertyValue(character, "Name")?.ToString() ?? TryGetStringId(character),
+                        Tier = TryGetIntProperty(character, "Tier"),
+                        IsMounted = TryGetBoolProperty(character, "IsMounted"),
+                        IsHero = TryGetBoolProperty(character, "IsHero"),
+                        Count = TryGetIntProperty(element, "Number"),
+                        WoundedCount = TryGetIntProperty(element, "WoundedNumber")
+                    };
+                    troops.Add(stack);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to build side party troop stacks: " + ex.Message);
+            }
+
+            return troops;
+        }
+
+        private static List<TroopStackInfo> BuildLegacyTroopsFromSnapshot(BattleSnapshotMessage snapshot)
+        {
+            if (snapshot?.Sides == null || snapshot.Sides.Count == 0)
+                return null;
+
+            BattleSideSnapshotMessage playerSide = snapshot.Sides.FirstOrDefault(side => side != null && side.IsPlayerSide);
+            BattleSideSnapshotMessage fallbackSide = playerSide ?? snapshot.Sides.FirstOrDefault(side => side != null);
+            return fallbackSide?.Troops;
+        }
+
+        private static int BuildLegacyArmySizeFromSnapshot(BattleSnapshotMessage snapshot)
+        {
+            if (snapshot?.Sides == null || snapshot.Sides.Count == 0)
+                return 0;
+
+            BattleSideSnapshotMessage playerSide = snapshot.Sides.FirstOrDefault(side => side != null && side.IsPlayerSide);
+            BattleSideSnapshotMessage fallbackSide = playerSide ?? snapshot.Sides.FirstOrDefault(side => side != null);
+            return fallbackSide?.TotalManCount ?? 0;
+        }
+
+        private static object TryGetCurrentBattleObject()
+        {
+            try
+            {
+                var campaignAssembly = typeof(TaleWorlds.CampaignSystem.Campaign).Assembly;
+                Type typeA = campaignAssembly.GetType("TaleWorlds.CampaignSystem.Encounters.PlayerEncounter");
+                Type typeB = campaignAssembly.GetType("TaleWorlds.CampaignSystem.PlayerEncounter");
+                Type playerEncounterType = typeA ?? typeB;
+                if (playerEncounterType == null)
+                    return null;
+
+                PropertyInfo battleProperty = playerEncounterType.GetProperty("Battle");
+                return battleProperty?.GetValue(null, null);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static object TryInvokeMethod(object instance, string methodName)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(methodName))
+                return null;
+
+            try
+            {
+                MethodInfo method = instance.GetType().GetMethod(methodName, BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                return method?.Invoke(instance, null);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string TryGetPartyName(object partyBase)
+        {
+            object directName = TryGetPropertyValue(partyBase, "Name");
+            if (directName != null)
+                return directName.ToString();
+
+            object mobileParty = TryGetPropertyValue(partyBase, "MobileParty");
+            object mobilePartyName = TryGetPropertyValue(mobileParty, "Name");
+            if (mobilePartyName != null)
+                return mobilePartyName.ToString();
+
+            return TryGetStringId(partyBase) ?? "Unknown Party";
+        }
 
         private static string TryGetPlayerSideTextSafe() // Best-effort: намагаємось визначити сторону гравця в поточному encounter
         { // Починаємо блок методу

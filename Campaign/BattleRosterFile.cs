@@ -5,9 +5,11 @@
 
 using System; // Exception, Environment, SpecialFolder
 using System.Collections.Generic; // List<string>
+using System.Linq;
 using System.IO; // File, Path, Directory
 using Newtonsoft.Json; // JsonConvert, серіалізація
 using CoopSpectator.Infrastructure; // ModLogger
+using CoopSpectator.Network.Messages;
 
 namespace CoopSpectator.Campaign
 {
@@ -17,6 +19,7 @@ namespace CoopSpectator.Campaign
     public sealed class BattleRosterFileDto
     {
         public List<string> TroopIds { get; set; } = new List<string>();
+        public BattleSnapshotMessage Snapshot { get; set; }
     }
 
     /// <summary>
@@ -38,6 +41,11 @@ namespace CoopSpectator.Campaign
         /// <summary>Записує список troop ID у файл. Створює папку, якщо її немає. Повертає true при успіху.</summary>
         public static bool WriteRoster(List<string> troopIds)
         {
+            return WriteRoster(troopIds, null);
+        }
+
+        public static bool WriteRoster(List<string> troopIds, BattleSnapshotMessage snapshot)
+        {
             if (troopIds == null)
             {
                 ModLogger.Info("BattleRosterFile: WriteRoster skipped (null list).");
@@ -51,10 +59,14 @@ namespace CoopSpectator.Campaign
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
-                var dto = new BattleRosterFileDto { TroopIds = troopIds };
+                var dto = new BattleRosterFileDto
+                {
+                    TroopIds = troopIds,
+                    Snapshot = snapshot
+                };
                 string json = JsonConvert.SerializeObject(dto, Formatting.Indented);
                 File.WriteAllText(path, json);
-                ModLogger.Info("BattleRosterFile: wrote " + troopIds.Count + " troop IDs to " + path);
+                ModLogger.Info("BattleRosterFile: wrote " + troopIds.Count + " troop IDs to " + path + " (snapshot sides=" + (snapshot?.Sides?.Count ?? 0) + ").");
                 return true;
             }
             catch (Exception ex)
@@ -78,16 +90,59 @@ namespace CoopSpectator.Campaign
 
                 string json = File.ReadAllText(path);
                 var dto = JsonConvert.DeserializeObject<BattleRosterFileDto>(json);
-                if (dto?.TroopIds == null)
+                if (dto == null)
                     return new List<string>();
-                ModLogger.Info("BattleRosterFile: read " + dto.TroopIds.Count + " troop IDs from " + path);
-                return dto.TroopIds;
+
+                List<string> troopIds = dto.TroopIds != null && dto.TroopIds.Count > 0
+                    ? dto.TroopIds
+                    : FlattenTroopIds(dto.Snapshot);
+                ModLogger.Info("BattleRosterFile: read " + troopIds.Count + " troop IDs from " + path + " (snapshot sides=" + (dto.Snapshot?.Sides?.Count ?? 0) + ").");
+                return troopIds;
             }
             catch (Exception ex)
             {
                 ModLogger.Error("BattleRosterFile: failed to read " + path, ex);
                 return new List<string>();
             }
+        }
+
+        public static BattleSnapshotMessage ReadSnapshot()
+        {
+            string path = GetRosterFilePath();
+            try
+            {
+                if (!File.Exists(path))
+                    return null;
+
+                string json = File.ReadAllText(path);
+                var dto = JsonConvert.DeserializeObject<BattleRosterFileDto>(json);
+                BattleSnapshotMessage snapshot = dto?.Snapshot;
+                if (snapshot?.Sides == null || snapshot.Sides.Count == 0)
+                    return null;
+
+                BattleSnapshotRuntimeState.SetCurrent(snapshot, "battle-roster-file");
+                ModLogger.Info("BattleRosterFile: read snapshot with " + snapshot.Sides.Count + " sides from " + path);
+                return snapshot;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error("BattleRosterFile: failed to read snapshot from " + path, ex);
+                return null;
+            }
+        }
+
+        private static List<string> FlattenTroopIds(BattleSnapshotMessage snapshot)
+        {
+            if (snapshot?.Sides == null || snapshot.Sides.Count == 0)
+                return new List<string>();
+
+            return snapshot.Sides
+                .Where(side => side?.Troops != null)
+                .SelectMany(side => side.Troops)
+                .Select(troop => troop?.CharacterId)
+                .Where(characterId => !string.IsNullOrWhiteSpace(characterId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
     }
 }
