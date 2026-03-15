@@ -52,9 +52,10 @@
     <Compile Include="..\Infrastructure\ModLogger.cs" Link="Infrastructure\ModLogger.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePhaseBridgeFile.cs" Link="Infrastructure\CoopBattlePhaseBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePhaseRuntimeState.cs" Link="Infrastructure\CoopBattlePhaseRuntimeState.cs" />
-    <Compile Include="..\Infrastructure\BattleSnapshotRuntimeState.cs" Link="Infrastructure\BattleSnapshotRuntimeState.cs" />
-    <Compile Include="..\Infrastructure\CoopBattleAuthorityState.cs" Link="Infrastructure\CoopBattleAuthorityState.cs" />
-    <Compile Include="..\Infrastructure\AssemblyDiagnostics.cs" Link="Infrastructure\AssemblyDiagnostics.cs" />
+  <Compile Include="..\Infrastructure\BattleSnapshotRuntimeState.cs" Link="Infrastructure\BattleSnapshotRuntimeState.cs" />
+  <Compile Include="..\Infrastructure\CoopBattleAuthorityState.cs" Link="Infrastructure\CoopBattleAuthorityState.cs" />
+  <Compile Include="..\Infrastructure\CoopBattleSpawnRequestState.cs" Link="Infrastructure\CoopBattleSpawnRequestState.cs" />
+  <Compile Include="..\Infrastructure\AssemblyDiagnostics.cs" Link="Infrastructure\AssemblyDiagnostics.cs" />
     <Compile Include="..\Infrastructure\ExperimentalFeatures.cs" Link="Infrastructure\ExperimentalFeatures.cs" />
     <Compile Include="..\Infrastructure\CoopGameModeIds.cs" Link="Infrastructure\CoopGameModeIds.cs" />
     <Compile Include="Patches\DedicatedWebPanelPatches.cs" Link="Patches\DedicatedWebPanelPatches.cs" />

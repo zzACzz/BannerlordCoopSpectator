@@ -14,15 +14,17 @@ namespace CoopSpectator.Infrastructure
     {
         internal readonly struct PeerSelectionState
         {
-            public PeerSelectionState(int peerIndex, BattleSideEnum side, string troopId, string entryId)
+            public PeerSelectionState(int peerIndex, BattleSideEnum requestedSide, BattleSideEnum assignedSide, string troopId, string entryId)
             {
                 PeerIndex = peerIndex;
-                Side = side;
+                RequestedSide = requestedSide;
+                Side = assignedSide;
                 TroopId = troopId;
                 EntryId = entryId;
             }
 
             public int PeerIndex { get; }
+            public BattleSideEnum RequestedSide { get; }
             public BattleSideEnum Side { get; }
             public string TroopId { get; }
             public string EntryId { get; }
@@ -32,6 +34,7 @@ namespace CoopSpectator.Infrastructure
         private static readonly Dictionary<BattleSideEnum, List<string>> _allowedEntryIdsBySide = new Dictionary<BattleSideEnum, List<string>>();
         private static readonly Dictionary<int, string> _selectedTroopIdByPeer = new Dictionary<int, string>();
         private static readonly Dictionary<int, string> _selectedEntryIdByPeer = new Dictionary<int, string>();
+        private static readonly Dictionary<int, BattleSideEnum> _requestedSideByPeer = new Dictionary<int, BattleSideEnum>();
         private static readonly Dictionary<int, BattleSideEnum> _assignedSideByPeer = new Dictionary<int, BattleSideEnum>();
         private static readonly List<string> _fallbackAllowedTroopIds = new List<string>();
         private static readonly List<string> _fallbackAllowedEntryIds = new List<string>();
@@ -50,6 +53,7 @@ namespace CoopSpectator.Infrastructure
             _allowedEntryIdsBySide.Clear();
             _selectedTroopIdByPeer.Clear();
             _selectedEntryIdByPeer.Clear();
+            _requestedSideByPeer.Clear();
             _assignedSideByPeer.Clear();
             _fallbackAllowedTroopIds.Clear();
             _fallbackAllowedEntryIds.Clear();
@@ -115,15 +119,40 @@ namespace CoopSpectator.Infrastructure
         {
             NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();
             int peerIndex = networkPeer?.Index ?? -1;
-            BattleSideEnum side = ResolveAssignedSide(missionPeer, networkPeer);
-            string troopId = ResolveSelectedTroopId(missionPeer, networkPeer, side);
-            string entryId = ResolveSelectedEntryId(networkPeer, side, troopId);
-            return new PeerSelectionState(peerIndex, side, troopId, entryId);
+            BattleSideEnum requestedSide = ResolveRequestedSide(missionPeer, networkPeer);
+            BattleSideEnum assignedSide = ResolveAssignedSide(missionPeer, networkPeer);
+            string troopId = ResolveSelectedTroopId(missionPeer, networkPeer, assignedSide);
+            string entryId = ResolveSelectedEntryId(networkPeer, assignedSide, troopId);
+            return new PeerSelectionState(peerIndex, requestedSide, assignedSide, troopId, entryId);
+        }
+
+        public static BattleSideEnum GetRequestedSide(MissionPeer missionPeer)
+        {
+            return ResolveRequestedSide(missionPeer, missionPeer?.GetNetworkPeer());
         }
 
         public static BattleSideEnum GetAssignedSide(MissionPeer missionPeer)
         {
             return ResolveAssignedSide(missionPeer, missionPeer?.GetNetworkPeer());
+        }
+
+        public static bool TryRequestSide(MissionPeer missionPeer, BattleSideEnum side, string source)
+        {
+            NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();
+            if (networkPeer == null || side == BattleSideEnum.None)
+                return false;
+
+            if (_requestedSideByPeer.TryGetValue(networkPeer.Index, out BattleSideEnum previousRequestedSide) && previousRequestedSide == side)
+                return true;
+
+            _requestedSideByPeer[networkPeer.Index] = side;
+            ModLogger.Info(
+                "CoopBattleAuthorityState: side request updated. " +
+                "Peer=" + (networkPeer.UserName ?? networkPeer.Index.ToString()) +
+                " PreviousRequestedSide=" + previousRequestedSide +
+                " RequestedSide=" + side +
+                " Source=" + source);
+            return true;
         }
 
         public static bool TryAssignSide(MissionPeer missionPeer, BattleSideEnum side, string source)
@@ -132,14 +161,23 @@ namespace CoopSpectator.Infrastructure
             if (networkPeer == null || side == BattleSideEnum.None)
                 return false;
 
+            _requestedSideByPeer[networkPeer.Index] = side;
+
             if (_assignedSideByPeer.TryGetValue(networkPeer.Index, out BattleSideEnum previousSide) && previousSide == side)
                 return true;
 
             _assignedSideByPeer[networkPeer.Index] = side;
+            if (previousSide != BattleSideEnum.None && previousSide != side)
+            {
+                _selectedTroopIdByPeer.Remove(networkPeer.Index);
+                _selectedEntryIdByPeer.Remove(networkPeer.Index);
+            }
             ModLogger.Info(
                 "CoopBattleAuthorityState: authoritative side assigned. " +
                 "Peer=" + (networkPeer.UserName ?? networkPeer.Index.ToString()) +
+                " PreviousSide=" + previousSide +
                 " Side=" + side +
+                " ClearedSelection=" + (previousSide != BattleSideEnum.None && previousSide != side) +
                 " Source=" + source);
             return true;
         }
@@ -303,11 +341,19 @@ namespace CoopSpectator.Infrastructure
                 return assignedSide;
             }
 
-            BattleSideEnum runtimeSide = missionPeer?.Team?.Side ?? BattleSideEnum.None;
-            if (networkPeer != null && runtimeSide != BattleSideEnum.None)
-                _assignedSideByPeer[networkPeer.Index] = runtimeSide;
+            return BattleSideEnum.None;
+        }
 
-            return runtimeSide;
+        private static BattleSideEnum ResolveRequestedSide(MissionPeer missionPeer, NetworkCommunicator networkPeer)
+        {
+            if (networkPeer != null &&
+                _requestedSideByPeer.TryGetValue(networkPeer.Index, out BattleSideEnum requestedSide) &&
+                requestedSide != BattleSideEnum.None)
+            {
+                return requestedSide;
+            }
+
+            return missionPeer?.Team?.Side ?? BattleSideEnum.None;
         }
 
         private static string ResolveSelectedTroopId(MissionPeer missionPeer, NetworkCommunicator networkPeer, BattleSideEnum side)
