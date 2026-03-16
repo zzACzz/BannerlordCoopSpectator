@@ -86,6 +86,38 @@ namespace CoopSpectator.Infrastructure
             return true;
         }
 
+        public static bool TryQueueFromSelectionRequest(CoopBattleSelectionRequestState.PeerSelectionRequestState selectionRequest, string source)
+        {
+            if (selectionRequest.PeerIndex < 0 || selectionRequest.Side == BattleSideEnum.None || string.IsNullOrWhiteSpace(selectionRequest.TroopId))
+                return false;
+
+            if (_pendingRequestsByPeer.TryGetValue(selectionRequest.PeerIndex, out PeerSpawnRequestState previousRequest) &&
+                previousRequest.Side == selectionRequest.Side &&
+                string.Equals(previousRequest.TroopId, selectionRequest.TroopId, StringComparison.Ordinal) &&
+                string.Equals(previousRequest.EntryId, selectionRequest.EntryId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            PeerSpawnRequestState requestState = new PeerSpawnRequestState(
+                selectionRequest.PeerIndex,
+                selectionRequest.Side,
+                selectionRequest.TroopId,
+                selectionRequest.EntryId,
+                source,
+                DateTime.UtcNow);
+            _pendingRequestsByPeer[selectionRequest.PeerIndex] = requestState;
+
+            ModLogger.Info(
+                "CoopBattleSpawnRequestState: pending spawn request queued from selection request. " +
+                "Peer=" + selectionRequest.PeerIndex +
+                " Side=" + selectionRequest.Side +
+                " TroopId=" + selectionRequest.TroopId +
+                " EntryId=" + (selectionRequest.EntryId ?? "null") +
+                " Source=" + source);
+            return true;
+        }
+
         public static void Clear(MissionPeer missionPeer, string source)
         {
             NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();

@@ -59,7 +59,11 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             }
             else
                 ModLogger.Info("CoopBattle client: skip MissionLobbyEquipmentNetworkComponent (MultiplayerMissionAgentVisualSpawnComponent unavailable).");
-            list.Add(new MultiplayerTeamSelectComponent());
+            // CoopBattle now uses its own side/troop/spawn contract. Leaving the vanilla
+            // TDM team-select component in the stack keeps the Team Selection/Class Loadout
+            // shell alive as an active overlay over an already spawned player.
+            if (isServer)
+                ModLogger.Info("CoopBattle: MultiplayerTeamSelectComponent skipped (own coop entry flow).");
             AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");

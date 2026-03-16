@@ -54,7 +54,15 @@
     <Compile Include="..\Infrastructure\CoopBattlePhaseRuntimeState.cs" Link="Infrastructure\CoopBattlePhaseRuntimeState.cs" />
   <Compile Include="..\Infrastructure\BattleSnapshotRuntimeState.cs" Link="Infrastructure\BattleSnapshotRuntimeState.cs" />
   <Compile Include="..\Infrastructure\CoopBattleAuthorityState.cs" Link="Infrastructure\CoopBattleAuthorityState.cs" />
-  <Compile Include="..\Infrastructure\CoopBattleSpawnRequestState.cs" Link="Infrastructure\CoopBattleSpawnRequestState.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleEntryPolicy.cs" Link="Infrastructure\CoopBattleEntryPolicy.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleEntryStatusBridgeFile.cs" Link="Infrastructure\CoopBattleEntryStatusBridgeFile.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleSelectionBridgeFile.cs" Link="Infrastructure\CoopBattleSelectionBridgeFile.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleSelectionIntentState.cs" Link="Infrastructure\CoopBattleSelectionIntentState.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleSpawnBridgeFile.cs" Link="Infrastructure\CoopBattleSpawnBridgeFile.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleSpawnIntentState.cs" Link="Infrastructure\CoopBattleSpawnIntentState.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleSelectionRequestState.cs" Link="Infrastructure\CoopBattleSelectionRequestState.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleSpawnRequestState.cs" Link="Infrastructure\CoopBattleSpawnRequestState.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleSpawnRuntimeState.cs" Link="Infrastructure\CoopBattleSpawnRuntimeState.cs" />
   <Compile Include="..\Infrastructure\AssemblyDiagnostics.cs" Link="Infrastructure\AssemblyDiagnostics.cs" />
     <Compile Include="..\Infrastructure\ExperimentalFeatures.cs" Link="Infrastructure\ExperimentalFeatures.cs" />
     <Compile Include="..\Infrastructure\CoopGameModeIds.cs" Link="Infrastructure\CoopGameModeIds.cs" />
