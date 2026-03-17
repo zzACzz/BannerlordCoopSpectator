@@ -290,7 +290,8 @@ namespace CoopSpectator.MissionBehaviors
 
             if (Input.IsKeyPressed(InputKey.T))
             {
-                OnOwnEntryHotkeyHandled("Coop Entry: respawn reset temporarily disabled");
+                if (CoopBattleSpawnBridgeFile.WriteForceRespawnableRequest("MP client hotkey"))
+                    OnOwnEntryHotkeyHandled("Coop Entry: reset queued");
                 return;
             }
 
@@ -3223,6 +3224,8 @@ namespace CoopSpectator.MissionBehaviors
     /// </summary>
     public sealed class CoopMissionSpawnLogic : MissionLogic
     {
+        // Direct/manual SpawnAgent-based player spawn is intentionally retired.
+        // Proven-good path is coop authority + vanilla TDM/SpawningBehaviorBase spawn.
         private const bool EnableDirectCoopPlayerSpawnExperiment = false;
         private const bool EnableCoopClassRestrictionSyncExperiment = false;
         private bool _hasLoggedStart;
@@ -3335,7 +3338,6 @@ namespace CoopSpectator.MissionBehaviors
             TryApplySpawnIntentToPrimaryPeer(Mission, "server behavior");
             TryRefreshPendingSpawnRequests(Mission, "server behavior");
             TryFinalizePendingVanillaSpawnVisuals(Mission, "server behavior");
-            TrySpawnPeersIntoCoopControl(Mission, "server behavior");
             TryUpdateBattlePhaseState(Mission, "server behavior tick");
             TryWriteEntryStatusSnapshot(Mission, "server behavior tick");
         }
@@ -3652,7 +3654,6 @@ namespace CoopSpectator.MissionBehaviors
             TryApplySpawnIntentToPrimaryPeer(mission, "dedicated observer");
             TryForcePreferredHeroClassForPeer(mission, "dedicated observer");
             TryFinalizePendingVanillaSpawnVisuals(mission, "dedicated observer");
-            TrySpawnPeersIntoCoopControl(mission, "dedicated observer");
             TryUpdateBattlePhaseState(mission, "dedicated observer");
             TryConsumeBattlePhaseRequests(mission);
             TryWriteEntryStatusSnapshot(mission, "dedicated observer");
@@ -4597,29 +4598,30 @@ namespace CoopSpectator.MissionBehaviors
 
             NetworkCommunicator peer = missionPeer.GetNetworkPeer();
             Agent controlledAgent = missionPeer.ControlledAgent;
-            if (controlledAgent != null)
+            bool triggeredVanillaRemoval = false;
+            if (controlledAgent != null && controlledAgent.IsActive())
             {
                 try
                 {
-                    controlledAgent.MissionPeer = null;
-                    controlledAgent.Controller = AgentControllerType.AI;
+                    mission.KillAgentCheat(controlledAgent);
+                    triggeredVanillaRemoval = true;
                 }
                 catch (Exception ex)
                 {
-                    ModLogger.Info("CoopMissionSpawnLogic: failed to detach controlled agent during force-respawnable: " + ex.Message);
+                    ModLogger.Info("CoopMissionSpawnLogic: failed to kill controlled agent during force-respawnable: " + ex.Message);
                 }
             }
 
-            missionPeer.ControlledAgent = null;
             missionPeer.FollowedAgent = null;
-            if (peer != null)
-                peer.ControlledAgent = null;
-
             if (peer != null)
                 _spawnedCoopPeerIndices.Remove(peer.Index);
 
             missionPeer.HasSpawnedAgentVisuals = false;
             missionPeer.EquipmentUpdatingExpired = true;
+            if (missionPeer.SpawnTimer != null)
+                missionPeer.SpawnTimer.Reset(mission.CurrentTime, 0f);
+            missionPeer.HasSpawnTimerExpired = true;
+            missionPeer.WantsToSpawnAsBot = false;
             CoopBattleSpawnRequestState.Clear(missionPeer, source + " forced-respawnable");
             CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " forced-respawnable");
             CoopBattlePeerLifecycleRuntimeState.MarkRespawnable(
@@ -4631,6 +4633,7 @@ namespace CoopSpectator.MissionBehaviors
             ModLogger.Info(
                 "CoopMissionSpawnLogic: forced peer into respawnable state. " +
                 "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                " TriggeredVanillaRemoval=" + triggeredVanillaRemoval +
                 " Source=" + source);
         }
 
@@ -4901,6 +4904,8 @@ namespace CoopSpectator.MissionBehaviors
 
         private static void TrySpawnPeersIntoCoopControl(Mission mission, string source)
         {
+            // Legacy direct-spawn experiment. Left in source for reference while respawn/reset
+            // is being redesigned, but no longer participates in the runtime tick path.
             if (!EnableDirectCoopPlayerSpawnExperiment || mission == null || !GameNetwork.IsServer)
                 return;
 
