@@ -15,6 +15,36 @@ dotnet build DedicatedServer\CoopSpectatorDedicated.csproj /p:UseDedicatedServer
 2. Переконатися, що потрібні DLL реально доступні в runtime profile.
 3. Перезапустити клієнт/сервер після оновлення бінарників.
 
+## Fast dev loop
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\CoopDevLoop.ps1
+```
+
+Що робить за замовчуванням:
+1. Білдить `CoopSpectator.csproj`.
+2. Білдить `DedicatedServer\CoopSpectatorDedicated.csproj` з `UseDedicatedServerRefs=true`.
+3. Показує timestamps deployed DLL.
+4. Перевіряє найсвіжіші client/dedicated `rgl_log_*.txt` на ключові маркери.
+
+Корисні режими:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\CoopDevLoop.ps1 -RestartDedicated
+powershell -ExecutionPolicy Bypass -File .\scripts\CoopDevLoop.ps1 -LaunchClient
+powershell -ExecutionPolicy Bypass -File .\scripts\CoopDevLoop.ps1 -RestartDedicated -LaunchClient
+powershell -ExecutionPolicy Bypass -File .\scripts\CoopDevLoop.ps1 -RestartDedicated -RestartClient
+powershell -ExecutionPolicy Bypass -File .\scripts\CoopDevLoop.ps1 -CheckLogs
+```
+
+`-LaunchClient` стартує Bannerlord одразу в multiplayer з модулем `CoopSpectator`.
+`-RestartClient` спершу завершує поточний `Bannerlord.exe`, потім запускає заново.
+
+Поточні маркери для spawn-handshake:
+- `requested vanilla agent visuals before direct spawn`
+- `awaiting agent visuals`
+- `spawn agent ownership finalized`
+- `SpawnFromVisuals=True`
+- `HadVisuals=True`
+
 ## Runtime smoke test
 1. Host: campaign -> `coop.dedicated_start`.
 2. Client: запуск MP з модом, join через Custom Server List.

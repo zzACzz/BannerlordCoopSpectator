@@ -72,6 +72,8 @@ namespace CoopSpectator.Commands
                 " HasAgent=" + snapshot.HasAgent +
                 " CanRespawn=" + snapshot.CanRespawn +
                 " Lifecycle=" + (snapshot.LifecycleState ?? string.Empty) +
+                " LifecycleSource=" + (snapshot.LifecycleSource ?? string.Empty) +
+                " Deaths=" + snapshot.DeathCount +
                 " Requested=" + (snapshot.RequestedSide ?? string.Empty) +
                 " Assigned=" + (snapshot.AssignedSide ?? string.Empty) +
                 " SelectedTroop=" + (snapshot.SelectedTroopId ?? string.Empty) +
@@ -210,6 +212,8 @@ namespace CoopSpectator.Commands
                 " HasAgent=" + snapshot.HasAgent +
                 " CanRespawn=" + snapshot.CanRespawn +
                 " Lifecycle=" + (snapshot.LifecycleState ?? string.Empty) +
+                " LifecycleSource=" + (snapshot.LifecycleSource ?? string.Empty) +
+                " Deaths=" + snapshot.DeathCount +
                 " | Use: coop.select_side_index 1|2, coop.select_troop_index <n>, coop.select_troop_index_side attacker|defender <n>, coop.spawn_now, coop.force_respawnable" +
                 " | Troops: " + troopList;
         }

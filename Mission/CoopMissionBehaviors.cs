@@ -11,6 +11,7 @@ using TaleWorlds.Core; // BasicCharacterObject, MBObjectManager (для спав
 using TaleWorlds.InputSystem; // Input, InputKey
 using TaleWorlds.Library; // Vec2, Vec3
 using TaleWorlds.MountAndBlade; // Mission, MissionLogic, GameNetwork, Agent, Team, MissionMode
+using TaleWorlds.MountAndBlade.Multiplayer;
 using TaleWorlds.ObjectSystem; // MBObjectManager
 using CoopSpectator.Campaign; // BattleRosterFileHelper (варіант A: roster з кампанії)
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback
@@ -29,11 +30,14 @@ namespace CoopSpectator.MissionBehaviors
         private Agent _lastControlledAgent; // Попередній Agent.Main для детекції зміни контролю / повернення в spectator.
         private string _lastRequestedPreferredTroopKey;
         private string _lastObservedSpectatorTroopSelectionKey;
+        private string _lastMirroredLegacyOverlaySelectionKey;
+        private string _lastMirroredAuthoritativeStatusKey;
         private bool _visualSpawnAutoConfirmHooked;
         private bool _visualSpawnAutoConfirmTriggered;
         private object _visualSpawnComponent;
         private Delegate _onMyAgentVisualSpawnedDelegate;
-        private bool _hasLoggedAutoConfirmBehaviorDiagnostics;
+        private string _visualSpawnLifecycleEventName;
+        private readonly HashSet<string> _loggedAutoConfirmBehaviorDiagnostics = new HashSet<string>(StringComparer.Ordinal);
         private bool _hasLoggedMissionBehaviorCatalog;
         private bool _hasLoggedClassLoadoutDiagnostics;
         private bool _hasLoggedActiveClassLoadoutDiagnostics;
@@ -46,12 +50,24 @@ namespace CoopSpectator.MissionBehaviors
         private string _lastAppliedScoreboardCultureSyncKey;
         private string _lastSuppressedVanillaEntryUiKey;
         private string _lastAutoRequestedTeamChangeKey;
+        private string _lastRequestedVanillaSpawnKey;
+        private readonly HashSet<int> _loggedControlFinalizeDiagnosticsByAgentIndex = new HashSet<int>();
+        private int _pendingPostControlDiagnosticAgentIndex = -1;
+        private float _pendingPostControlDiagnosticDelay;
+        private readonly HashSet<int> _loggedPostControlDiagnosticsByAgentIndex = new HashSet<int>();
+        private BattleSideEnum _lastObservedLegacyOverlaySide = BattleSideEnum.None;
         private string _lastShownOwnEntryHintKey;
+        private string _lastShownOwnEntryMenuKey;
+        private float _legacyOverlayAutoRequestCooldownRemaining;
         private float _timeUntilNextOwnEntryHotkey;
+        private float _timeUntilNextOwnEntryMenuRefresh;
+        private bool _showOwnEntryMenu;
         private const float EntryHintIntervalSeconds = 4f;
         private const float EntryHotkeyCooldownSeconds = 0.25f;
+        private const float EntryMenuRefreshIntervalSeconds = 1.25f;
+        private const float LegacyOverlayAutoRequestCooldownSeconds = 2f;
         private const bool EnableClientPreferredTroopRequestExperiment = false;
-        private const bool EnableVisualSpawnAutoConfirmExperiment = false;
+        private const bool EnableVisualSpawnAutoConfirmExperiment = true;
         private const bool EnableFixedClientTeamSelectCulturesExperiment = true;
         private const bool EnableVanillaEntryUiSuppressionExperiment = true;
         private const string FixedClientAttackerCultureId = "empire";
@@ -70,11 +86,14 @@ namespace CoopSpectator.MissionBehaviors
             _timeUntilNextStateLog = LogStateIntervalSeconds;
             _timeUntilNextEntryHint = 0f;
             _timeUntilNextOwnEntryHotkey = 0f;
+            _timeUntilNextOwnEntryMenuRefresh = 0f;
+            _showOwnEntryMenu = true;
             if (EnableVisualSpawnAutoConfirmExperiment)
                 TryHookVisualSpawnAutoConfirm(mission);
             LogClassLoadoutDiagnosticsOnce(mission);
             LogActiveClassLoadoutDiagnosticsOnce(mission);
             LogEntryPolicySnapshot(mission);
+            TryMirrorLegacyOverlaySelectionToBridge(mission);
             TryAutoRequestTeamChangeFromBridge(mission);
             TrySuppressVanillaEntryUi(mission);
             TrySyncFixedTeamSelectCultures(mission);
@@ -92,23 +111,43 @@ namespace CoopSpectator.MissionBehaviors
             Mission mission = Mission;
             if (mission == null) return;
 
+            if (_legacyOverlayAutoRequestCooldownRemaining > 0f)
+                _legacyOverlayAutoRequestCooldownRemaining = Math.Max(0f, _legacyOverlayAutoRequestCooldownRemaining - dt);
+
             Agent currentMain = Agent.Main;
             if (currentMain != _lastControlledAgent)
             {
                 if (currentMain != null)
                 {
                     ModLogger.Info("CoopMissionClientLogic: controlled agent changed — now controlling agent " + (currentMain.Name?.ToString() ?? currentMain.Index.ToString()));
+                    TryRepairMainAgentControllerState(mission, currentMain);
+                    LogControlFinalizeDiagnosticsForCurrentAgent(mission, currentMain);
+                    _pendingPostControlDiagnosticAgentIndex = currentMain.Index;
+                    _pendingPostControlDiagnosticDelay = 0.9f;
                     _lastRequestedPreferredTroopKey = null;
                     _lastObservedSpectatorTroopSelectionKey = null;
+                    _lastMirroredLegacyOverlaySelectionKey = null;
+                    _lastMirroredAuthoritativeStatusKey = null;
+                    _lastRequestedVanillaSpawnKey = null;
+                    _lastObservedLegacyOverlaySide = BattleSideEnum.None;
                     _visualSpawnAutoConfirmTriggered = false;
                 }
                 else if (_lastControlledAgent != null)
                 {
                     ModLogger.Info("CoopMissionClientLogic: returned to spectator (agent lost or died).");
+                    _pendingPostControlDiagnosticAgentIndex = -1;
+                    _pendingPostControlDiagnosticDelay = 0f;
                     _lastRequestedPreferredTroopKey = null;
                     _lastObservedSpectatorTroopSelectionKey = null;
+                    _lastMirroredLegacyOverlaySelectionKey = null;
+                    _lastMirroredAuthoritativeStatusKey = null;
+                    _lastRequestedVanillaSpawnKey = null;
+                    _lastObservedLegacyOverlaySide = BattleSideEnum.None;
                     _visualSpawnAutoConfirmTriggered = false;
                     _lastAppliedClassLoadoutFilterKey = null;
+                    _showOwnEntryMenu = true;
+                    _timeUntilNextOwnEntryMenuRefresh = 0f;
+                    _lastShownOwnEntryMenuKey = null;
                 }
                 _lastControlledAgent = currentMain;
             }
@@ -118,14 +157,19 @@ namespace CoopSpectator.MissionBehaviors
             LogClassLoadoutDiagnosticsOnce(mission);
             LogActiveClassLoadoutDiagnosticsOnce(mission);
             LogEntryPolicySnapshot(mission);
+            TryMirrorAuthoritativeStatusToBridge();
+            TryMirrorLegacyOverlaySelectionToBridge(mission);
             TryAutoRequestTeamChangeFromBridge(mission);
             TrySuppressVanillaEntryUi(mission);
             TrySyncFixedTeamSelectCultures(mission);
             TrySyncFixedScoreboardCultures(mission);
             TryFilterClassLoadoutToCoopUnits(mission);
+            TryRequestVanillaSpawnFromAuthoritativeStatus(mission);
             TryResetSpawnPreviewStateForPreferredTroopChange(mission);
             TryHandleOwnEntryHotkeys(mission, dt);
             TryShowOwnEntryHint(mission, dt);
+            TryShowOwnEntryMenu(mission, dt);
+            TryLogPostControlAgentDiagnostics(mission, dt);
             if (EnableClientPreferredTroopRequestExperiment)
                 TryTriggerClientPreferredTroopRequest(mission);
 
@@ -148,6 +192,9 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null)
                 return;
 
+            if (_showOwnEntryMenu)
+                return;
+
             _timeUntilNextEntryHint -= dt;
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
             if (snapshot == null || !snapshot.HasPeer)
@@ -165,6 +212,12 @@ namespace CoopSpectator.MissionBehaviors
             string side = snapshot.AssignedSide ?? snapshot.RequestedSide ?? snapshot.IntentSide ?? "none";
             string troop = snapshot.SelectedTroopId ?? snapshot.IntentTroopOrEntryId ?? "none";
             string spawn = snapshot.SpawnStatus ?? string.Empty;
+            BattleSideEnum resolvedSide = ResolveStatusSide(snapshot);
+            string[] sideTroops = GetAllowedTroopIdsForSide(snapshot, resolvedSide);
+            int troopIndex = Array.FindIndex(sideTroops, troopId => string.Equals(troopId, troop, StringComparison.OrdinalIgnoreCase));
+            string troopOrderText = troopIndex >= 0
+                ? " [" + (troopIndex + 1) + "/" + sideTroops.Length + "]"
+                : (sideTroops.Length > 0 ? " [0/" + sideTroops.Length + "]" : string.Empty);
             string hintKey = side + "|" + troop + "|" + spawn + "|" + lifecycle + "|" + snapshot.CanRespawn + "|" + snapshot.HasAgent;
 
             if (_timeUntilNextEntryHint > 0f && string.Equals(_lastShownOwnEntryHintKey, hintKey, StringComparison.Ordinal))
@@ -176,6 +229,7 @@ namespace CoopSpectator.MissionBehaviors
             string message =
                 "Coop Entry: side=" + side +
                 " troop=" + troop +
+                troopOrderText +
                 " state=" + lifecycle +
                 " spawn=" + spawn +
                 (snapshot.CanRespawn ? " | respawn ready" : string.Empty) +
@@ -236,11 +290,269 @@ namespace CoopSpectator.MissionBehaviors
 
             if (Input.IsKeyPressed(InputKey.T))
             {
-                if (CoopBattleSpawnBridgeFile.WriteForceRespawnableRequest("MP client hotkey"))
-                {
-                    OnOwnEntryHotkeyHandled("Coop Entry: respawn reset queued");
-                }
+                OnOwnEntryHotkeyHandled("Coop Entry: respawn reset temporarily disabled");
+                return;
             }
+
+            if (Input.IsKeyPressed(InputKey.M))
+            {
+                _showOwnEntryMenu = !_showOwnEntryMenu;
+                _timeUntilNextOwnEntryMenuRefresh = 0f;
+                _lastShownOwnEntryMenuKey = null;
+                OnOwnEntryHotkeyHandled(_showOwnEntryMenu ? "Coop Entry Menu: shown" : "Coop Entry Menu: hidden");
+            }
+        }
+
+        private void TryMirrorAuthoritativeStatusToBridge()
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return;
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            if (snapshot == null || !snapshot.HasPeer)
+                return;
+
+            BattleSideEnum side = ResolveStatusSide(snapshot);
+            string troopId = ResolveStatusTroopId(snapshot);
+            string mirrorKey = side + "|" + (troopId ?? string.Empty);
+            if (string.Equals(_lastMirroredAuthoritativeStatusKey, mirrorKey, StringComparison.Ordinal))
+                return;
+
+            bool wroteSide = side != BattleSideEnum.None &&
+                             CoopBattleSelectionBridgeFile.WriteSelectSideRequest(side.ToString(), "MP client authoritative status");
+            bool wroteTroop = !string.IsNullOrWhiteSpace(troopId) &&
+                              CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(troopId, "MP client authoritative status");
+            if (!wroteSide && !wroteTroop)
+                return;
+
+            _lastMirroredAuthoritativeStatusKey = mirrorKey;
+            if (wroteSide)
+            {
+                _legacyOverlayAutoRequestCooldownRemaining = LegacyOverlayAutoRequestCooldownSeconds;
+                _lastAutoRequestedTeamChangeKey = null;
+            }
+
+            ModLogger.Info(
+                "CoopMissionClientLogic: mirrored authoritative entry status into coop bridge. " +
+                "Side=" + side +
+                " TroopId=" + (troopId ?? "null"));
+        }
+
+        private void TryRequestVanillaSpawnFromAuthoritativeStatus(Mission mission)
+        {
+            if (mission == null || !GameNetwork.IsClient || !GameNetwork.IsSessionActive || Agent.Main != null)
+                return;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            MissionPeer missionPeer = myPeer?.GetComponent<MissionPeer>();
+            if (missionPeer == null || missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
+                return;
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            if (snapshot == null || !snapshot.HasPeer || snapshot.HasAgent)
+                return;
+
+            string troopId = ResolveStatusTroopId(snapshot);
+            if (string.IsNullOrWhiteSpace(snapshot.SpawnRequestSide) || string.IsNullOrWhiteSpace(troopId))
+                return;
+
+            string lifecycle = snapshot.LifecycleState ?? string.Empty;
+            bool shouldRequestSpawn =
+                string.Equals(lifecycle, "AwaitingSelection", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, "Respawnable", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, "SpawnQueued", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, "Waiting", StringComparison.OrdinalIgnoreCase);
+            if (!shouldRequestSpawn)
+                return;
+
+            string spawnKey =
+                snapshot.PeerIndex + "|" +
+                (snapshot.SpawnRequestSide ?? string.Empty) + "|" +
+                troopId + "|" +
+                (snapshot.SpawnRequestEntryId ?? string.Empty) + "|" +
+                lifecycle;
+            if (string.Equals(_lastRequestedVanillaSpawnKey, spawnKey, StringComparison.Ordinal))
+                return;
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(new NetworkMessages.FromClient.RequestToSpawnAsBot());
+                GameNetwork.EndModuleEventAsClient();
+                _lastRequestedVanillaSpawnKey = spawnKey;
+                ModLogger.Info(
+                    "CoopMissionClientLogic: requested vanilla spawn from authoritative status. " +
+                    "Lifecycle=" + lifecycle +
+                    " TeamIndex=" + missionPeer.Team.TeamIndex +
+                    " Side=" + missionPeer.Team.Side +
+                    " TroopId=" + troopId +
+                    " EntryId=" + (snapshot.SpawnRequestEntryId ?? "null"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: vanilla spawn request failed: " + ex.Message);
+            }
+        }
+
+        private void TryMirrorLegacyOverlaySelectionToBridge(Mission mission)
+        {
+            if (mission == null || !GameNetwork.IsClient || !GameNetwork.IsSessionActive || Agent.Main != null)
+                return;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            if (myPeer == null || !myPeer.IsConnectionActive || !myPeer.IsSynchronized)
+                return;
+
+            MissionPeer missionPeer = myPeer.GetComponent<MissionPeer>();
+            if (missionPeer == null || missionPeer.Team == null)
+                return;
+
+            BattleSideEnum observedSide = !ReferenceEquals(missionPeer.Team, mission.SpectatorTeam)
+                ? missionPeer.Team.Side
+                : BattleSideEnum.None;
+            if (observedSide != BattleSideEnum.None && observedSide != _lastObservedLegacyOverlaySide)
+            {
+                if (CoopBattleSelectionBridgeFile.WriteSelectSideRequest(observedSide.ToString(), "MP client legacy overlay team change"))
+                {
+                    _legacyOverlayAutoRequestCooldownRemaining = LegacyOverlayAutoRequestCooldownSeconds;
+                    _lastAutoRequestedTeamChangeKey = null;
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: mirrored legacy overlay side into coop bridge. " +
+                        "Side=" + observedSide +
+                        " Cooldown=" + LegacyOverlayAutoRequestCooldownSeconds.ToString("0.##"));
+                }
+
+                _lastObservedLegacyOverlaySide = observedSide;
+            }
+
+            if (observedSide == BattleSideEnum.None)
+                return;
+
+            int selectedTroopIndex = missionPeer.SelectedTroopIndex;
+            string selectedTroopId = ResolveLegacyOverlaySelectedTroopId(missionPeer, observedSide, selectedTroopIndex);
+            string selectionKey = observedSide + "|" + selectedTroopIndex + "|" + (selectedTroopId ?? "null");
+            if (string.Equals(_lastMirroredLegacyOverlaySelectionKey, selectionKey, StringComparison.Ordinal))
+                return;
+
+            bool wroteSide = CoopBattleSelectionBridgeFile.WriteSelectSideRequest(observedSide.ToString(), "MP client legacy overlay");
+            bool wroteTroop = !string.IsNullOrWhiteSpace(selectedTroopId) &&
+                              CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(selectedTroopId, "MP client legacy overlay");
+            if (!wroteSide && !wroteTroop)
+                return;
+
+            _lastMirroredLegacyOverlaySelectionKey = selectionKey;
+            _legacyOverlayAutoRequestCooldownRemaining = LegacyOverlayAutoRequestCooldownSeconds;
+            _lastAutoRequestedTeamChangeKey = null;
+            ModLogger.Info(
+                "CoopMissionClientLogic: mirrored legacy overlay selection into coop bridge. " +
+                "Side=" + observedSide +
+                " TroopIndex=" + selectedTroopIndex +
+                " TroopId=" + (selectedTroopId ?? "null"));
+        }
+
+        private static string ResolveLegacyOverlaySelectedTroopId(MissionPeer missionPeer, BattleSideEnum side, int selectedTroopIndex)
+        {
+            if (missionPeer == null || selectedTroopIndex < 0)
+                return null;
+
+            List<MultiplayerClassDivisions.MPHeroClass> cultureClasses = MultiplayerClassDivisions
+                .GetMPHeroClasses(missionPeer.Culture)
+                ?.Where(heroClass => heroClass?.HeroCharacter != null)
+                .ToList();
+            if (cultureClasses == null || selectedTroopIndex >= cultureClasses.Count)
+                return null;
+
+            string heroClassTroopId = cultureClasses[selectedTroopIndex]?.HeroCharacter?.StringId;
+            if (string.IsNullOrWhiteSpace(heroClassTroopId))
+                return null;
+
+            string[] allowedTroopIds = GetAllowedTroopIdsForSide(CoopBattleEntryStatusBridgeFile.ReadStatus(), side);
+            if (allowedTroopIds.Length == 0)
+                return heroClassTroopId;
+
+            string normalizedHeroClassTroopId = NormalizeOverlayTroopMatchId(heroClassTroopId);
+            foreach (string allowedTroopId in allowedTroopIds)
+            {
+                if (string.IsNullOrWhiteSpace(allowedTroopId))
+                    continue;
+
+                if (string.Equals(NormalizeOverlayTroopMatchId(allowedTroopId), normalizedHeroClassTroopId, StringComparison.OrdinalIgnoreCase))
+                    return allowedTroopId;
+            }
+
+            return heroClassTroopId;
+        }
+
+        private static string NormalizeOverlayTroopMatchId(string troopId)
+        {
+            if (string.IsNullOrWhiteSpace(troopId))
+                return string.Empty;
+
+            string normalized = troopId.Trim();
+            if (normalized.StartsWith("mp_coop_", StringComparison.OrdinalIgnoreCase))
+                normalized = "mp_" + normalized.Substring("mp_coop_".Length);
+
+            return normalized;
+        }
+
+        private void TryShowOwnEntryMenu(Mission mission, float dt)
+        {
+            if (!_showOwnEntryMenu || mission == null || !GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return;
+
+            _timeUntilNextOwnEntryMenuRefresh -= dt;
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            if (snapshot == null)
+                return;
+
+            BattleSideEnum side = ResolveStatusSide(snapshot);
+            string sideLabel = side == BattleSideEnum.None ? "none" : side.ToString();
+            string troop = ResolveStatusTroopId(snapshot);
+            string lifecycle = snapshot.LifecycleState ?? string.Empty;
+            string lifecycleSource = snapshot.LifecycleSource ?? string.Empty;
+            string spawn = snapshot.SpawnStatus ?? string.Empty;
+            string[] troopIds = GetAllowedTroopIdsForSide(snapshot, side);
+            int troopIndex = Array.FindIndex(troopIds, troopId => string.Equals(troopId, troop, StringComparison.OrdinalIgnoreCase));
+            string troopOrderText = troopIndex >= 0
+                ? "[" + (troopIndex + 1) + "/" + troopIds.Length + "]"
+                : (troopIds.Length > 0 ? "[0/" + troopIds.Length + "]" : "[0/0]");
+            string troopOptionsText = troopIds.Length == 0
+                ? "none"
+                : string.Join(" | ", troopIds.Select((troopId, index) =>
+                    (index + 1) + "=" + troopId + (string.Equals(troopId, troop, StringComparison.OrdinalIgnoreCase) ? "*" : string.Empty)));
+
+            string menuKey =
+                sideLabel + "|" +
+                troop + "|" +
+                troopOrderText + "|" +
+                lifecycle + "|" +
+                spawn + "|" +
+                snapshot.CanRespawn + "|" +
+                snapshot.HasAgent + "|" +
+                troopOptionsText;
+
+            if (_timeUntilNextOwnEntryMenuRefresh > 0f &&
+                string.Equals(_lastShownOwnEntryMenuKey, menuKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastShownOwnEntryMenuKey = menuKey;
+            _timeUntilNextOwnEntryMenuRefresh = EntryMenuRefreshIntervalSeconds;
+
+            string message =
+                "Coop Entry Menu\n" +
+                "Side: " + sideLabel + "\n" +
+                "Troop: " + troop + " " + troopOrderText + "\n" +
+                "State: " + lifecycle + " | Deaths: " + snapshot.DeathCount + "\n" +
+                "Source: " + lifecycleSource + "\n" +
+                "Spawn: " + spawn + (snapshot.CanRespawn ? " | respawn ready" : string.Empty) + "\n" +
+                "Options: " + troopOptionsText + "\n" +
+                "Keys: Ctrl+1/2 side | Ctrl+Q/E troop | Ctrl+R spawn | Ctrl+T reset | Ctrl+M menu";
+#if !COOPSPECTATOR_DEDICATED
+            UiFeedback.ShowMessageDeferred(message);
+#endif
         }
 
         private void TryWriteOwnSideSelection(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot, BattleSideEnum side)
@@ -257,7 +569,8 @@ namespace CoopSpectator.MissionBehaviors
             if (troopIds.Length > 0 && !troopIds.Contains(currentTroopId, StringComparer.OrdinalIgnoreCase))
                 CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(troopIds[0], "MP client hotkey side default troop");
 
-            OnOwnEntryHotkeyHandled("Coop Entry: side -> " + sideToken);
+            string currentTroopLabel = troopIds.Length > 0 ? troopIds[0] + " [1/" + troopIds.Length + "]" : "none";
+            OnOwnEntryHotkeyHandled("Coop Entry: side -> " + sideToken + " troop=" + currentTroopLabel);
         }
 
         private void TryCycleOwnTroopSelection(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot, bool moveNext)
@@ -287,7 +600,7 @@ namespace CoopSpectator.MissionBehaviors
             if (!CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(nextTroopId, "MP client hotkey troop cycle"))
                 return;
 
-            OnOwnEntryHotkeyHandled("Coop Entry: troop -> " + nextTroopId);
+            OnOwnEntryHotkeyHandled("Coop Entry: troop -> " + nextTroopId + " [" + (nextIndex + 1) + "/" + troopIds.Length + "] side=" + side);
         }
 
         private void OnOwnEntryHotkeyHandled(string message)
@@ -303,6 +616,22 @@ namespace CoopSpectator.MissionBehaviors
         {
             if (snapshot == null)
                 return BattleSideEnum.None;
+
+            string lifecycle = snapshot.LifecycleState ?? string.Empty;
+            bool preferRequestedSide =
+                !snapshot.HasAgent ||
+                string.Equals(lifecycle, "NoSide", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, "AwaitingSelection", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, "Respawnable", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, "SpawnQueued", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, "Waiting", StringComparison.OrdinalIgnoreCase);
+
+            if (preferRequestedSide)
+            {
+                BattleSideEnum requestedSide = ParseBattleSide(snapshot.RequestedSide);
+                if (requestedSide != BattleSideEnum.None)
+                    return requestedSide;
+            }
 
             BattleSideEnum side = ParseBattleSide(snapshot.AssignedSide);
             if (side != BattleSideEnum.None)
@@ -550,8 +879,11 @@ namespace CoopSpectator.MissionBehaviors
                     return;
 
                 EventInfo eventInfo = visualSpawnBehavior.GetType().GetEvent(
-                    "OnMyAgentVisualSpawned",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    "OnMyAgentSpawnedFromVisual",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) ??
+                    visualSpawnBehavior.GetType().GetEvent(
+                        "OnMyAgentVisualSpawned",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (eventInfo == null)
                     return;
 
@@ -568,8 +900,10 @@ namespace CoopSpectator.MissionBehaviors
                 eventInfo.AddEventHandler(visualSpawnBehavior, callback);
                 _visualSpawnComponent = visualSpawnBehavior;
                 _onMyAgentVisualSpawnedDelegate = callback;
+                _visualSpawnLifecycleEventName = eventInfo.Name;
                 _visualSpawnAutoConfirmHooked = true;
-                ModLogger.Info("CoopMissionClientLogic: hooked OnMyAgentVisualSpawned for coop auto-confirm.");
+                ModLogger.Info(
+                    "CoopMissionClientLogic: hooked " + _visualSpawnLifecycleEventName + " for coop visual finalize.");
             }
             catch (Exception ex)
             {
@@ -587,9 +921,11 @@ namespace CoopSpectator.MissionBehaviors
 
             try
             {
-                EventInfo eventInfo = _visualSpawnComponent.GetType().GetEvent(
-                    "OnMyAgentVisualSpawned",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                EventInfo eventInfo = !string.IsNullOrWhiteSpace(_visualSpawnLifecycleEventName)
+                    ? _visualSpawnComponent.GetType().GetEvent(
+                        _visualSpawnLifecycleEventName,
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    : null;
                 eventInfo?.RemoveEventHandler(_visualSpawnComponent, _onMyAgentVisualSpawnedDelegate);
             }
             catch (Exception ex)
@@ -601,6 +937,7 @@ namespace CoopSpectator.MissionBehaviors
                 _visualSpawnAutoConfirmHooked = false;
                 _visualSpawnComponent = null;
                 _onMyAgentVisualSpawnedDelegate = null;
+                _visualSpawnLifecycleEventName = null;
             }
         }
 
@@ -619,7 +956,63 @@ namespace CoopSpectator.MissionBehaviors
             _visualSpawnAutoConfirmTriggered = true;
             LogMissionBehaviorCatalogOnce(mission);
 
+            if (TryRemoveMyPendingAgentVisuals(mission))
+                return;
+
             TryInvokeAutoSpawnConfirm(mission);
+        }
+
+        private bool TryRemoveMyPendingAgentVisuals(Mission mission)
+        {
+            if (!EnableVisualSpawnAutoConfirmExperiment || mission == null || _visualSpawnComponent == null)
+                return false;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            MissionPeer missionPeer = myPeer?.GetComponent<MissionPeer>();
+            if (missionPeer == null)
+                return false;
+
+            try
+            {
+                Type componentType = _visualSpawnComponent.GetType();
+                MethodInfo removeMethod = componentType.GetMethod(
+                    "RemoveAgentVisuals",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(MissionPeer), typeof(bool) },
+                    null);
+                if (removeMethod != null)
+                {
+                    removeMethod.Invoke(_visualSpawnComponent, new object[] { missionPeer, true });
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: removed pending visuals after " +
+                        (_visualSpawnLifecycleEventName ?? "visual-spawn event") +
+                        ". Peer=" + (myPeer?.UserName ?? myPeer?.Index.ToString() ?? "null"));
+                    return true;
+                }
+
+                removeMethod = componentType.GetMethod(
+                    "RemoveAgentVisuals",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(MissionPeer) },
+                    null);
+                if (removeMethod != null)
+                {
+                    removeMethod.Invoke(_visualSpawnComponent, new object[] { missionPeer });
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: removed pending visuals after " +
+                        (_visualSpawnLifecycleEventName ?? "visual-spawn event") +
+                        ". Peer=" + (myPeer?.UserName ?? myPeer?.Index.ToString() ?? "null"));
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: remove pending visuals after visual spawn failed: " + ex.Message);
+            }
+
+            return false;
         }
 
         private void TryInvokeAutoSpawnConfirm(Mission mission)
@@ -634,7 +1027,8 @@ namespace CoopSpectator.MissionBehaviors
 
                 string typeName = behavior.GetType().Name;
                 if (typeName.IndexOf("MissionLobbyEquipmentNetworkComponent", StringComparison.OrdinalIgnoreCase) < 0 &&
-                    typeName.IndexOf("MultiplayerTeamSelectComponent", StringComparison.OrdinalIgnoreCase) < 0)
+                    typeName.IndexOf("MultiplayerTeamSelectComponent", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    typeName.IndexOf("MultiplayerMissionAgentVisualSpawnComponent", StringComparison.OrdinalIgnoreCase) < 0)
                 {
                     continue;
                 }
@@ -706,10 +1100,12 @@ namespace CoopSpectator.MissionBehaviors
 
         private void LogAutoConfirmBehaviorDiagnosticsOnce(MissionBehavior behavior)
         {
-            if (_hasLoggedAutoConfirmBehaviorDiagnostics || behavior == null)
+            if (behavior == null)
                 return;
 
-            _hasLoggedAutoConfirmBehaviorDiagnostics = true;
+            string behaviorKey = behavior.GetType().FullName ?? behavior.GetType().Name;
+            if (!_loggedAutoConfirmBehaviorDiagnostics.Add(behaviorKey))
+                return;
 
             try
             {
@@ -1277,6 +1673,9 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || !GameNetwork.IsClient || !GameNetwork.IsMultiplayer)
                 return;
 
+            if (_legacyOverlayAutoRequestCooldownRemaining > 0f)
+                return;
+
             MissionPeer missionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
             if (missionPeer == null)
                 return;
@@ -1620,6 +2019,231 @@ namespace CoopSpectator.MissionBehaviors
                    typeName.IndexOf("Team", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    typeName.IndexOf("ViewModel", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    typeName.IndexOf("VM", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private void LogControlFinalizeDiagnosticsForCurrentAgent(Mission mission, Agent currentMain)
+        {
+            if (mission == null || currentMain == null)
+                return;
+
+            if (!_loggedControlFinalizeDiagnosticsByAgentIndex.Add(currentMain.Index))
+                return;
+
+            try
+            {
+                NetworkCommunicator myPeer = GameNetwork.MyPeer;
+                MissionPeer missionPeer = myPeer?.GetComponent<MissionPeer>();
+                ModLogger.Info(
+                    "CoopMissionClientLogic: control finalize diagnostics. " +
+                    "AgentIndex=" + currentMain.Index +
+                    " AgentTeam=" + (currentMain.Team?.TeamIndex ?? -1) +
+                    " AgentSide=" + (currentMain.Team?.Side ?? BattleSideEnum.None) +
+                    " AgentController=" + currentMain.Controller +
+                    " AgentMissionPeer=" + DescribeDiagnosticValue(currentMain.MissionPeer) +
+                    " MyPeer=" + (myPeer?.UserName ?? myPeer?.Index.ToString() ?? "null") +
+                    " MissionPeerTeam=" + (missionPeer?.Team?.TeamIndex ?? -1) +
+                    " MissionPeerSide=" + (missionPeer?.Team?.Side ?? BattleSideEnum.None) +
+                    " MissionPeerCulture=" + (missionPeer?.Culture?.StringId ?? "null") +
+                    " SelectedTroopIndex=" + (missionPeer?.SelectedTroopIndex ?? -1));
+
+                MissionBehavior[] behaviors = mission.MissionBehaviors?.Where(behavior => behavior != null).ToArray() ?? Array.Empty<MissionBehavior>();
+                foreach (MissionBehavior behavior in behaviors)
+                {
+                    string fullName = behavior.GetType().FullName ?? behavior.GetType().Name;
+                    if (fullName.IndexOf("MissionMainAgentController", StringComparison.OrdinalIgnoreCase) < 0 &&
+                        fullName.IndexOf("MainAgentControl", StringComparison.OrdinalIgnoreCase) < 0 &&
+                        fullName.IndexOf("Order", StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        continue;
+                    }
+
+                    ModLogger.Info("CoopMissionClientLogic: control behavior diagnostics type = " + fullName);
+                    LogControlInterestingMembers("control behavior", behavior);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: control finalize diagnostics failed: " + ex.Message);
+            }
+        }
+
+        private void TryRepairMainAgentControllerState(Mission mission, Agent currentMain)
+        {
+            if (mission == null || currentMain == null || !GameNetwork.IsClient)
+                return;
+
+            try
+            {
+                MissionBehavior controllerBehavior = mission.MissionBehaviors?.FirstOrDefault(behavior =>
+                    behavior != null &&
+                    ((behavior.GetType().FullName ?? behavior.GetType().Name).IndexOf("MissionMainAgentController", StringComparison.OrdinalIgnoreCase) >= 0));
+                if (controllerBehavior == null)
+                    return;
+
+                Type controllerType = controllerBehavior.GetType();
+                FieldInfo isPlayerAgentAddedField = controllerType.GetField("_isPlayerAgentAdded", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                bool isPlayerAgentAdded = isPlayerAgentAddedField != null && isPlayerAgentAddedField.FieldType == typeof(bool) &&
+                                          (bool)isPlayerAgentAddedField.GetValue(controllerBehavior);
+                if (isPlayerAgentAdded)
+                    return;
+
+                MethodInfo repairMethod = controllerType.GetMethod(
+                    "Mission_OnMainAgentChanged",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(Agent) },
+                    null);
+                if (repairMethod == null)
+                {
+                    ModLogger.Info("CoopMissionClientLogic: main agent controller repair skipped: Mission_OnMainAgentChanged(Agent) missing.");
+                    return;
+                }
+
+                repairMethod.Invoke(controllerBehavior, new object[] { null });
+
+                bool repairedIsPlayerAgentAdded = isPlayerAgentAddedField != null && isPlayerAgentAddedField.FieldType == typeof(bool) &&
+                                                  (bool)isPlayerAgentAddedField.GetValue(controllerBehavior);
+                ModLogger.Info(
+                    "CoopMissionClientLogic: main agent controller repair invoked. " +
+                    "AgentIndex=" + currentMain.Index +
+                    " BeforeIsPlayerAgentAdded=" + isPlayerAgentAdded +
+                    " AfterIsPlayerAgentAdded=" + repairedIsPlayerAgentAdded);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: main agent controller repair failed: " + ex.Message);
+            }
+        }
+
+        private void TryLogPostControlAgentDiagnostics(Mission mission, float dt)
+        {
+            if (mission == null || !GameNetwork.IsClient || _pendingPostControlDiagnosticAgentIndex < 0)
+                return;
+
+            _pendingPostControlDiagnosticDelay -= dt;
+            if (_pendingPostControlDiagnosticDelay > 0f)
+                return;
+
+            int agentIndex = _pendingPostControlDiagnosticAgentIndex;
+            _pendingPostControlDiagnosticAgentIndex = -1;
+            _pendingPostControlDiagnosticDelay = 0f;
+
+            Agent currentMain = Agent.Main;
+            if (currentMain == null || currentMain.Index != agentIndex)
+                return;
+
+            if (!_loggedPostControlDiagnosticsByAgentIndex.Add(agentIndex))
+                return;
+
+            try
+            {
+                MissionWeapon wieldedWeapon = currentMain.WieldedWeapon;
+                string wieldedItemId = wieldedWeapon.Item?.StringId ?? "null";
+                string wieldedUsage = wieldedWeapon.CurrentUsageItem?.ItemUsage ?? "null";
+
+                ModLogger.Info(
+                    "CoopMissionClientLogic: post-control agent diagnostics. " +
+                    "AgentIndex=" + currentMain.Index +
+                    " State=" + currentMain.State +
+                    " Controller=" + currentMain.Controller +
+                    " IsActive=" + currentMain.IsActive() +
+                    " IsPlayerControlled=" + currentMain.IsPlayerControlled +
+                    " IsAIControlled=" + currentMain.IsAIControlled +
+                    " IsMount=" + currentMain.IsMount +
+                    " HasMount=" + currentMain.HasMount +
+                    " MountAgent=" + DescribeDiagnosticValue(currentMain.MountAgent) +
+                    " RiderAgent=" + DescribeDiagnosticValue(currentMain.RiderAgent) +
+                    " Health=" + currentMain.Health +
+                    " HealthLimit=" + currentMain.HealthLimit +
+                    " Team=" + (currentMain.Team?.TeamIndex ?? -1) +
+                    " Side=" + (currentMain.Team?.Side ?? BattleSideEnum.None) +
+                    " MovementFlags=" + currentMain.MovementFlags +
+                    " ActionStage=" + currentMain.GetCurrentActionStage(0) +
+                    " WieldedItem=" + wieldedItemId +
+                    " WieldedUsage=" + wieldedUsage +
+                    " MissionPeer=" + DescribeDiagnosticValue(currentMain.MissionPeer));
+
+                MissionBehavior[] behaviors = mission.MissionBehaviors?.Where(behavior =>
+                    behavior != null &&
+                    (((behavior.GetType().FullName ?? behavior.GetType().Name).IndexOf("MainAgentControl", StringComparison.OrdinalIgnoreCase) >= 0) ||
+                     ((behavior.GetType().FullName ?? behavior.GetType().Name).IndexOf("Order", StringComparison.OrdinalIgnoreCase) >= 0) ||
+                     ((behavior.GetType().FullName ?? behavior.GetType().Name).IndexOf("MissionMainAgentController", StringComparison.OrdinalIgnoreCase) >= 0)))
+                    .ToArray() ?? Array.Empty<MissionBehavior>();
+
+                foreach (MissionBehavior behavior in behaviors)
+                {
+                    ModLogger.Info("CoopMissionClientLogic: post-control behavior diagnostics type = " + (behavior.GetType().FullName ?? behavior.GetType().Name));
+                    LogControlInterestingMembers("post-control behavior", behavior);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionClientLogic: post-control diagnostics failed: " + ex.Message);
+            }
+        }
+
+        private static void LogControlInterestingMembers(string ownerName, object instance)
+        {
+            if (instance == null)
+                return;
+
+            foreach (FieldInfo field in instance.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (!IsInterestingControlMember(field.Name, field.FieldType))
+                    continue;
+
+                string valueDescription;
+                try
+                {
+                    valueDescription = DescribeDiagnosticValue(field.GetValue(instance));
+                }
+                catch (Exception ex)
+                {
+                    valueDescription = "unavailable (" + ex.Message + ")";
+                }
+
+                ModLogger.Info(
+                    "CoopMissionClientLogic: " + ownerName + " field => " +
+                    field.FieldType.FullName + " " +
+                    field.Name + " = " + valueDescription);
+            }
+
+            foreach (PropertyInfo property in instance.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (property.GetIndexParameters().Length != 0 || !property.CanRead || !IsInterestingControlMember(property.Name, property.PropertyType))
+                    continue;
+
+                string valueDescription;
+                try
+                {
+                    valueDescription = DescribeDiagnosticValue(property.GetValue(instance, null));
+                }
+                catch (Exception ex)
+                {
+                    valueDescription = "unavailable (" + ex.Message + ")";
+                }
+
+                ModLogger.Info(
+                    "CoopMissionClientLogic: " + ownerName + " property => " +
+                    property.PropertyType.FullName + " " +
+                    property.Name + " = " + valueDescription);
+            }
+        }
+
+        private static bool IsInterestingControlMember(string memberName, Type memberType)
+        {
+            string loweredName = memberName ?? string.Empty;
+            string typeName = memberType?.FullName ?? memberType?.Name ?? string.Empty;
+            return loweredName.IndexOf("owner", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   loweredName.IndexOf("order", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   loweredName.IndexOf("control", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   loweredName.IndexOf("agent", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   loweredName.IndexOf("peer", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   loweredName.IndexOf("team", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("Agent", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("Peer", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("Order", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   typeName.IndexOf("Team", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static void LogInterestingMembers(string ownerName, object instance)
@@ -2599,7 +3223,7 @@ namespace CoopSpectator.MissionBehaviors
     /// </summary>
     public sealed class CoopMissionSpawnLogic : MissionLogic
     {
-        private const bool EnableDirectCoopPlayerSpawnExperiment = true;
+        private const bool EnableDirectCoopPlayerSpawnExperiment = false;
         private const bool EnableCoopClassRestrictionSyncExperiment = false;
         private bool _hasLoggedStart;
         private const float ServerLogIntervalSeconds = 8f;
@@ -2614,6 +3238,7 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly HashSet<int> _spawnedCoopPeerIndices = new HashSet<int>();
         private static HashSet<string> _loggedForcedPreferredClassKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly Dictionary<int, int> _lastBridgedSelectedTroopIndexByPeer = new Dictionary<int, int>();
+        private static readonly Dictionary<int, int> _lastBridgedPeerTeamIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, string> _appliedFixedMissionCultureByPeer = new Dictionary<int, string>();
         private static readonly Dictionary<FormationClass, bool> _appliedCoopClassAvailabilityStates = new Dictionary<FormationClass, bool>();
         private static Agent _diagnosticAllowedAgent;
@@ -2660,6 +3285,7 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattleSpawnIntentState.Reset();
             CoopBattleSpawnRequestState.Reset();
             CoopBattleSpawnRuntimeState.Reset();
+            CoopBattlePeerLifecycleRuntimeState.Reset();
 
             ModLogger.Info("CoopMissionSpawnLogic: server mission entered.");
             try
@@ -2708,6 +3334,7 @@ namespace CoopSpectator.MissionBehaviors
             TryConsumeSpawnRequests(Mission);
             TryApplySpawnIntentToPrimaryPeer(Mission, "server behavior");
             TryRefreshPendingSpawnRequests(Mission, "server behavior");
+            TryFinalizePendingVanillaSpawnVisuals(Mission, "server behavior");
             TrySpawnPeersIntoCoopControl(Mission, "server behavior");
             TryUpdateBattlePhaseState(Mission, "server behavior tick");
             TryWriteEntryStatusSnapshot(Mission, "server behavior tick");
@@ -2720,6 +3347,7 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattleSpawnIntentState.Reset();
             CoopBattleSpawnRequestState.Reset();
             CoopBattleSpawnRuntimeState.Reset();
+            CoopBattlePeerLifecycleRuntimeState.Reset();
             CoopBattlePhaseRuntimeState.SetPhase(CoopBattlePhase.BattleEnded, "CoopMissionSpawnLogic.OnEndMission", Mission, allowRegression: true);
             TryWriteEntryStatusSnapshot(Mission, "server behavior end-mission");
             base.OnEndMission();
@@ -2980,13 +3608,15 @@ namespace CoopSpectator.MissionBehaviors
                 _hasTransferredDiagnosticAllowedAgentToPeer = false;
                 _spawnedCoopPeerIndices.Clear();
                 _loggedForcedPreferredClassKeys.Clear();
-                _lastBridgedSelectedTroopIndexByPeer.Clear();
-                _appliedFixedMissionCultureByPeer.Clear();
+            _lastBridgedSelectedTroopIndexByPeer.Clear();
+            _lastBridgedPeerTeamIndexByPeer.Clear();
+            _appliedFixedMissionCultureByPeer.Clear();
                 CoopBattleSelectionIntentState.Reset();
                 CoopBattleSelectionRequestState.Reset();
                 CoopBattleSpawnIntentState.Reset();
                 CoopBattleSpawnRequestState.Reset();
                 CoopBattleSpawnRuntimeState.Reset();
+                CoopBattlePeerLifecycleRuntimeState.Reset();
                 _diagnosticAllowedAgent = null;
 
                 ModLogger.Info("CoopMissionSpawnLogic: dedicated observer detected active mission.");
@@ -3014,12 +3644,14 @@ namespace CoopSpectator.MissionBehaviors
                 CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, "dedicated observer mission detected", mission);
             }
 
-            TryForceFixedMissionCultures(mission, "dedicated observer");
             TryConsumeSelectionRequests(mission);
             TryApplySelectionIntentToPrimaryPeer(mission, "dedicated observer");
+            TryForceAuthoritativePeerTeams(mission, "dedicated observer");
+            TryForceFixedMissionCultures(mission, "dedicated observer");
             TryConsumeSpawnRequests(mission);
             TryApplySpawnIntentToPrimaryPeer(mission, "dedicated observer");
             TryForcePreferredHeroClassForPeer(mission, "dedicated observer");
+            TryFinalizePendingVanillaSpawnVisuals(mission, "dedicated observer");
             TrySpawnPeersIntoCoopControl(mission, "dedicated observer");
             TryUpdateBattlePhaseState(mission, "dedicated observer");
             TryConsumeBattlePhaseRequests(mission);
@@ -3161,6 +3793,72 @@ namespace CoopSpectator.MissionBehaviors
                     " Side=" + missionPeer.Team.Side +
                     " PreviousCulture=" + (currentCultureId ?? "null") +
                     " AppliedCulture=" + appliedCultureId);
+            }
+        }
+
+        private static void TryForceAuthoritativePeerTeams(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer || GameNetwork.NetworkPeers == null)
+                return;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    continue;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                if (missionPeer == null)
+                    continue;
+
+                bool hasPendingSpawnRequest = CoopBattleSpawnRequestState.HasPendingRequest(missionPeer);
+                if (!hasPendingSpawnRequest)
+                    continue;
+
+                BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " peer-team-sync");
+                Team authoritativeTeam = ResolveAuthoritativeMissionTeam(mission, missionPeer, authoritativeSide);
+                if (authoritativeTeam == null || ReferenceEquals(authoritativeTeam, mission.SpectatorTeam))
+                    continue;
+
+                Team currentTeam = missionPeer.Team;
+                int authoritativeTeamIndex = authoritativeTeam.TeamIndex;
+                if (ReferenceEquals(currentTeam, authoritativeTeam) &&
+                    _lastBridgedPeerTeamIndexByPeer.TryGetValue(peer.Index, out int lastBridgedTeamIndex) &&
+                    lastBridgedTeamIndex == authoritativeTeamIndex)
+                {
+                    continue;
+                }
+
+                SetServerMemberValue(missionPeer, "Team", authoritativeTeam);
+                if (!ReferenceEquals(GetServerMemberValue(missionPeer, "Team"), authoritativeTeam))
+                    SetServerMemberValue(missionPeer, "_team", authoritativeTeam);
+                if (!ReferenceEquals(GetServerMemberValue(missionPeer, "Team"), authoritativeTeam))
+                    SetServerMemberValue(missionPeer, "<Team>k__BackingField", authoritativeTeam);
+
+                Team appliedTeam = GetServerMemberValue(missionPeer, "Team") as Team;
+                if (!ReferenceEquals(appliedTeam, authoritativeTeam))
+                    appliedTeam = GetServerMemberValue(missionPeer, "_team") as Team;
+                if (!ReferenceEquals(appliedTeam, authoritativeTeam))
+                    continue;
+
+                _lastBridgedPeerTeamIndexByPeer[peer.Index] = authoritativeTeamIndex;
+
+                try
+                {
+                    GameNetwork.BeginBroadcastModuleEvent();
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetPeerTeam(peer, authoritativeTeamIndex));
+                    GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: forced authoritative peer team (" + source + "). " +
+                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                        " PreviousTeamIndex=" + (currentTeam?.TeamIndex ?? -1) +
+                        " AppliedTeamIndex=" + authoritativeTeamIndex +
+                        " AppliedSide=" + authoritativeTeam.Side);
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("CoopMissionSpawnLogic: rebroadcast authoritative peer team failed: " + ex.Message);
+                }
             }
         }
 
@@ -3781,10 +4479,13 @@ namespace CoopSpectator.MissionBehaviors
                             peer.ControlledAgent = null;
                     }
 
+                    string lastTroopId = (controlledAgent?.Character as BasicCharacterObject)?.StringId ?? CoopBattleAuthorityState.GetSelectedTroopId(missionPeer);
+                    string lastEntryId = CoopBattleAuthorityState.GetSelectedEntryId(missionPeer);
                     _spawnedCoopPeerIndices.Remove(peer.Index);
                     missionPeer.HasSpawnedAgentVisuals = false;
                     missionPeer.EquipmentUpdatingExpired = true;
                     CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " lost-controlled-agent");
+                    CoopBattlePeerLifecycleRuntimeState.MarkDeadAwaitingRespawn(missionPeer, lastTroopId, lastEntryId, source + " lost-controlled-agent");
                     ModLogger.Info(
                         "CoopMissionSpawnLogic: peer returned to respawnable state (" + source + "). " +
                         "Peer=" + (peer.UserName ?? peer.Index.ToString()));
@@ -3795,6 +4496,11 @@ namespace CoopSpectator.MissionBehaviors
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " controlled-agent");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " controlled-agent");
                     CoopBattleSpawnRuntimeState.MarkSpawned(
+                        missionPeer,
+                        (missionPeer.ControlledAgent.Character as BasicCharacterObject)?.StringId,
+                        CoopBattleAuthorityState.GetSelectedEntryId(missionPeer),
+                        source + " controlled-agent");
+                    CoopBattlePeerLifecycleRuntimeState.MarkAlive(
                         missionPeer,
                         (missionPeer.ControlledAgent.Character as BasicCharacterObject)?.StringId,
                         CoopBattleAuthorityState.GetSelectedEntryId(missionPeer),
@@ -3810,6 +4516,7 @@ namespace CoopSpectator.MissionBehaviors
                         CoopBattleSelectionRequestState.Clear(missionPeer, source + " spectator");
                         CoopBattleSpawnRequestState.Clear(missionPeer, source + " spectator");
                         CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " spectator");
+                        CoopBattlePeerLifecycleRuntimeState.MarkNoSide(missionPeer, BattleSideEnum.None, source + " spectator");
                         continue;
                     }
                 }
@@ -3820,6 +4527,7 @@ namespace CoopSpectator.MissionBehaviors
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " no-side");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " no-side");
                     CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " no-side");
+                    CoopBattlePeerLifecycleRuntimeState.MarkNoSide(missionPeer, BattleSideEnum.None, source + " no-side");
                     continue;
                 }
 
@@ -3832,6 +4540,7 @@ namespace CoopSpectator.MissionBehaviors
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " no-selection");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " no-selection");
                     CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " no-selection");
+                    CoopBattlePeerLifecycleRuntimeState.MarkAwaitingSelection(missionPeer, authoritativeSide, source + " no-selection");
                     continue;
                 }
 
@@ -3841,6 +4550,11 @@ namespace CoopSpectator.MissionBehaviors
                     CoopBattleSpawnRequestState.TryGetPendingRequest(missionPeer, out CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest))
                 {
                     CoopBattleSpawnRuntimeState.MarkPending(pendingRequest);
+                    CoopBattlePeerLifecycleRuntimeState.MarkSpawnQueued(missionPeer, pendingRequest.TroopId, pendingRequest.EntryId, source + " pending-request");
+                }
+                else
+                {
+                    CoopBattlePeerLifecycleRuntimeState.MarkWaiting(missionPeer, authoritativeSide, selectionState.TroopId, selectionState.EntryId, source + " waiting");
                 }
             }
         }
@@ -3908,6 +4622,11 @@ namespace CoopSpectator.MissionBehaviors
             missionPeer.EquipmentUpdatingExpired = true;
             CoopBattleSpawnRequestState.Clear(missionPeer, source + " forced-respawnable");
             CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " forced-respawnable");
+            CoopBattlePeerLifecycleRuntimeState.MarkRespawnable(
+                missionPeer,
+                CoopBattleAuthorityState.GetSelectedTroopId(missionPeer),
+                CoopBattleAuthorityState.GetSelectedEntryId(missionPeer),
+                source + " forced-respawnable");
 
             ModLogger.Info(
                 "CoopMissionSpawnLogic: forced peer into respawnable state. " +
@@ -4030,6 +4749,8 @@ namespace CoopSpectator.MissionBehaviors
                 HasAgent = missionPeer?.ControlledAgent != null && missionPeer.ControlledAgent.IsActive(),
                 CanRespawn = false,
                 LifecycleState = "NoPeer",
+                LifecycleSource = source,
+                DeathCount = 0,
                 IntentSide = intentSide == BattleSideEnum.None ? string.Empty : intentSide.ToString(),
                 IntentTroopOrEntryId = selectionIntent.TroopOrEntryId,
                 AttackerAllowedTroopIds = string.Join("|", CoopBattleAuthorityState.GetAllowedTroopIds(BattleSideEnum.Attacker) ?? Array.Empty<string>()),
@@ -4069,8 +4790,16 @@ namespace CoopSpectator.MissionBehaviors
                     snapshot.SpawnReason = spawnState.Reason;
                 }
 
+                if (CoopBattlePeerLifecycleRuntimeState.TryGetState(missionPeer, out PeerLifecycleRuntimeState lifecycleState))
+                {
+                    snapshot.LifecycleState = lifecycleState.Status.ToString();
+                    snapshot.LifecycleSource = lifecycleState.Source;
+                    snapshot.DeathCount = lifecycleState.DeathCount;
+                }
+
                 snapshot.CanRespawn = CanPeerRespawn(mission, missionPeer);
-                snapshot.LifecycleState = ResolveEntryLifecycleState(mission, missionPeer, snapshot);
+                if (string.IsNullOrWhiteSpace(snapshot.LifecycleState))
+                    snapshot.LifecycleState = ResolveEntryLifecycleState(mission, missionPeer, snapshot);
             }
 
             BattleSideEnum statusSide = BattleSideEnum.None;
@@ -4183,7 +4912,10 @@ namespace CoopSpectator.MissionBehaviors
                 if (!TryGetSpawnablePeerState(mission, peer, out MissionPeer missionPeer, out string reason))
                 {
                     if (missionPeer != null && CoopBattleSpawnRequestState.HasPendingRequest(missionPeer))
+                    {
                         CoopBattleSpawnRuntimeState.MarkRejected(missionPeer, source + " spawnable-check", reason);
+                        AdvanceLifecycleAfterSpawnWaitOrReject(mission, missionPeer, reason, source + " spawnable-check");
+                    }
                     LogSkippedSpawn(peer, reason, source);
                     continue;
                 }
@@ -4191,8 +4923,25 @@ namespace CoopSpectator.MissionBehaviors
                 if (!TryResolveAuthoritativeCharacterForPeer(missionPeer, out BasicCharacterObject selectedCharacter, out string selectedTroopId, out string selectedEntryId, out string resolveReason))
                 {
                     CoopBattleSpawnRuntimeState.MarkRejected(missionPeer, source + " resolve-character", resolveReason);
+                    AdvanceLifecycleAfterSpawnWaitOrReject(mission, missionPeer, resolveReason, source + " resolve-character");
                     LogSkippedSpawn(peer, "authoritative troop unresolved: " + resolveReason, source);
                     continue;
+                }
+
+                if (!missionPeer.HasSpawnedAgentVisuals)
+                {
+                    BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " visuals");
+                    Team authoritativeTeam = ResolveAuthoritativeMissionTeam(mission, missionPeer, authoritativeSide);
+                    if (TryEnsurePendingSpawnVisuals(mission, missionPeer, peer, selectedCharacter, authoritativeTeam, source))
+                    {
+                        CoopBattlePeerLifecycleRuntimeState.MarkSpawnQueued(
+                            missionPeer,
+                            selectedTroopId,
+                            selectedEntryId,
+                            source + " visual-preview");
+                        LogSkippedSpawn(peer, "awaiting agent visuals", source);
+                        continue;
+                    }
                 }
 
                 Agent spawnedAgent = SpawnCoopControlledAgent(mission, missionPeer, peer, selectedCharacter, source);
@@ -4202,8 +4951,7 @@ namespace CoopSpectator.MissionBehaviors
                 _spawnedCoopPeerIndices.Add(peer.Index);
                 CoopBattleSpawnRequestState.Clear(missionPeer, source + " spawn-succeeded");
                 CoopBattleSpawnRuntimeState.MarkSpawned(missionPeer, selectedTroopId, selectedEntryId, source + " spawn-succeeded");
-                missionPeer.HasSpawnedAgentVisuals = true;
-                missionPeer.EquipmentUpdatingExpired = false;
+                CoopBattlePeerLifecycleRuntimeState.MarkAlive(missionPeer, selectedTroopId, selectedEntryId, source + " spawn-succeeded");
 
                 string peerName = peer.UserName ?? peer.Index.ToString();
                 string agentName = spawnedAgent.Name?.ToString() ?? spawnedAgent.Index.ToString();
@@ -4269,9 +5017,46 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            selectedEntryId = preferredEntry?.EntryId;
-            selectedTroopId = ResolveCultureSpecificTargetTroopId(requestedTroopId, missionPeer.Culture);
-            selectedCharacter = BattleSnapshotRuntimeState.TryResolveCharacterObject(selectedEntryId) ?? ResolveAllowedCharacter(selectedTroopId);
+            bool hasExplicitEntrySelection =
+                !string.IsNullOrWhiteSpace(pendingRequest.EntryId) ||
+                !string.IsNullOrWhiteSpace(selectionState.EntryId);
+
+            selectedEntryId = hasExplicitEntrySelection
+                ? preferredEntry?.EntryId
+                : null;
+            selectedTroopId = requestedTroopId;
+            selectedCharacter = hasExplicitEntrySelection
+                ? BattleSnapshotRuntimeState.TryResolveCharacterObject(selectedEntryId) ?? ResolveAllowedCharacter(selectedTroopId)
+                : ResolveAllowedCharacter(selectedTroopId);
+            if (selectedCharacter == null)
+            {
+                string cultureFallbackTroopId = ResolveCultureSpecificTargetTroopId(requestedTroopId, missionPeer.Culture);
+                if (!string.IsNullOrWhiteSpace(cultureFallbackTroopId) &&
+                    !string.Equals(cultureFallbackTroopId, requestedTroopId, StringComparison.Ordinal))
+                {
+                    BasicCharacterObject cultureFallbackCharacter = hasExplicitEntrySelection
+                        ? BattleSnapshotRuntimeState.TryResolveCharacterObject(selectedEntryId) ?? ResolveAllowedCharacter(cultureFallbackTroopId)
+                        : ResolveAllowedCharacter(cultureFallbackTroopId);
+                    if (cultureFallbackCharacter != null)
+                    {
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: authoritative troop direct lookup failed, using peer-culture fallback. " +
+                            "RequestedTroopId=" + requestedTroopId +
+                            " FallbackTroopId=" + cultureFallbackTroopId +
+                            " PeerCulture=" + (missionPeer.Culture?.StringId ?? "null"));
+                        selectedTroopId = cultureFallbackTroopId;
+                        selectedCharacter = cultureFallbackCharacter;
+                    }
+                }
+            }
+
+            if (!hasExplicitEntrySelection && !string.IsNullOrWhiteSpace(preferredEntry?.EntryId))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: skipped snapshot entry character resolution for troop-only spawn request. " +
+                    "RequestedTroopId=" + requestedTroopId +
+                    " PreferredEntryId=" + preferredEntry.EntryId);
+            }
             if (selectedCharacter == null)
             {
                 reason = "pending troop/entry not resolved (troop='" + selectedTroopId + "', entry='" + (selectedEntryId ?? "null") + "')";
@@ -4374,6 +5159,44 @@ namespace CoopSpectator.MissionBehaviors
                 " Reason=" + reason);
         }
 
+        private static void AdvanceLifecycleAfterSpawnWaitOrReject(Mission mission, MissionPeer missionPeer, string reason, string source)
+        {
+            if (missionPeer == null)
+                return;
+
+            CoopBattleAuthorityState.PeerSelectionState selectionState = CoopBattleAuthorityState.GetSelectionState(missionPeer);
+            string troopId = selectionState.TroopId;
+            string entryId = selectionState.EntryId;
+
+            if (selectionState.Side == BattleSideEnum.None)
+            {
+                CoopBattlePeerLifecycleRuntimeState.MarkNoSide(missionPeer, BattleSideEnum.None, source + " no-side");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(selectionState.TroopId))
+            {
+                CoopBattlePeerLifecycleRuntimeState.MarkAwaitingSelection(missionPeer, selectionState.Side, source + " awaiting-selection");
+                return;
+            }
+
+            if (string.Equals(reason, "spawn timer not ready", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "team perk info not ready", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "authoritative mission team not ready", StringComparison.OrdinalIgnoreCase))
+            {
+                CoopBattlePeerLifecycleRuntimeState.MarkSpawnQueued(missionPeer, troopId, entryId, source + " queued");
+                return;
+            }
+
+            if (!CoopBattleSpawnRequestState.HasPendingRequest(missionPeer) && CanPeerRespawn(mission, missionPeer))
+            {
+                CoopBattlePeerLifecycleRuntimeState.MarkRespawnable(missionPeer, troopId, entryId, source + " respawnable");
+                return;
+            }
+
+            CoopBattlePeerLifecycleRuntimeState.MarkWaiting(missionPeer, selectionState.Side, troopId, entryId, source + " waiting");
+        }
+
         private static Team ResolveAuthoritativeMissionTeam(
             Mission mission,
             MissionPeer missionPeer,
@@ -4429,15 +5252,29 @@ namespace CoopSpectator.MissionBehaviors
                 if (spawnEquipment != null)
                     buildData.Equipment(spawnEquipment);
 
-                Agent spawnedAgent = mission.SpawnAgent(buildData, spawnFromAgentVisuals: false);
+                bool spawnFromAgentVisuals = missionPeer.HasSpawnedAgentVisuals;
+                Agent spawnedAgent = mission.SpawnAgent(buildData, spawnFromAgentVisuals: spawnFromAgentVisuals);
                 if (spawnedAgent == null)
                     return null;
+
+                spawnedAgent.AddComponent(new MPPerksAgentComponent(spawnedAgent));
+                spawnedAgent.MountAgent?.UpdateAgentProperties();
+
+                MPPerkObject.MPOnSpawnPerkHandler onSpawnPerkHandler = MPPerkObject.GetOnSpawnPerkHandler(missionPeer);
+                float extraHitpoints = onSpawnPerkHandler?.GetHitpoints(true) ?? 0f;
+                if (extraHitpoints > 0f)
+                {
+                    spawnedAgent.HealthLimit += extraHitpoints;
+                    spawnedAgent.Health = spawnedAgent.HealthLimit;
+                }
 
                 mission.TakeControlOfAgent(spawnedAgent);
                 missionPeer.ControlledAgent = spawnedAgent;
                 missionPeer.FollowedAgent = spawnedAgent;
                 peer.ControlledAgent = spawnedAgent;
                 spawnedAgent.MissionPeer = missionPeer;
+                if (spawnedAgent.SpawnEquipment != null)
+                    spawnedAgent.UpdateSpawnEquipmentAndRefreshVisuals(spawnedAgent.SpawnEquipment);
                 spawnedAgent.WieldInitialWeapons(
                     Agent.WeaponWieldActionType.Instant,
                     Equipment.InitialWeaponEquipPreference.Any);
@@ -4446,12 +5283,154 @@ namespace CoopSpectator.MissionBehaviors
                 GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetAgentOwningMissionPeer(spawnedAgent.Index, peer.VirtualPlayer));
                 GameNetwork.EndModuleEventAsServer();
 
+                missionPeer.SpawnCountThisRound++;
+
+                bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
+
+                missionPeer.HasSpawnedAgentVisuals = false;
+                MPPerkObject.GetPerkHandler(missionPeer)?.OnEvent(MPPerkCondition.PerkEventFlags.SpawnEnd);
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: spawn agent ownership finalized. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " Agent=" + spawnedAgent.Index +
+                    " SpawnFromVisuals=" + spawnFromAgentVisuals +
+                    " HadVisuals=" + missionPeer.HasSpawnedAgentVisuals +
+                    " RefreshedSpawnEquipment=" + (spawnedAgent.SpawnEquipment != null) +
+                    " AddedPerksComponent=True" +
+                    " SpawnCountThisRound=" + missionPeer.SpawnCountThisRound +
+                    " ExtraHitpoints=" + extraHitpoints +
+                    " VisualsRemoved=" + removedPendingVisuals);
+
                 return spawnedAgent;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("CoopMissionSpawnLogic: coop direct spawn failed (" + source + "): " + ex.Message);
                 return null;
+            }
+        }
+
+        private static bool TryRemovePendingAgentVisuals(Mission mission, MissionPeer missionPeer)
+        {
+            if (mission == null || missionPeer == null || mission.MissionBehaviors == null)
+                return false;
+
+            foreach (MissionBehavior behavior in mission.MissionBehaviors)
+            {
+                if (behavior == null)
+                    continue;
+
+                Type behaviorType = behavior.GetType();
+                if (behaviorType.Name.IndexOf("MissionAgentVisualSpawnComponent", StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
+                try
+                {
+                    MethodInfo removeMethod = behaviorType.GetMethod(
+                        "RemoveAgentVisuals",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                        null,
+                        new[] { typeof(MissionPeer), typeof(bool) },
+                        null);
+                    if (removeMethod != null)
+                    {
+                        removeMethod.Invoke(behavior, new object[] { missionPeer, true });
+                        return true;
+                    }
+
+                    removeMethod = behaviorType.GetMethod(
+                        "RemoveAgentVisuals",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                        null,
+                        new[] { typeof(MissionPeer) },
+                        null);
+                    if (removeMethod != null)
+                    {
+                        removeMethod.Invoke(behavior, new object[] { missionPeer });
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("CoopMissionSpawnLogic: removing pending agent visuals failed: " + ex.Message);
+                    return false;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryEnsurePendingSpawnVisuals(
+            Mission mission,
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            BasicCharacterObject troop,
+            Team authoritativeTeam,
+            string source)
+        {
+            if (mission == null || missionPeer == null || peer == null || troop == null)
+                return false;
+
+            if (missionPeer.HasSpawnedAgentVisuals)
+                return true;
+
+            try
+            {
+                MissionMultiplayerGameModeBase gameMode = mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
+                if (gameMode == null)
+                {
+                    ModLogger.Info("CoopMissionSpawnLogic: pending spawn visuals unavailable (" + source + "): multiplayer game mode missing.");
+                    return false;
+                }
+
+                Team team = authoritativeTeam ?? missionPeer.Team;
+                if (team == null || ReferenceEquals(team, mission.SpectatorTeam))
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: pending spawn visuals unavailable (" + source + "): authoritative team missing or spectator. " +
+                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                        " MissionPeerTeam=" + (missionPeer.Team?.TeamIndex ?? -1) +
+                        " AuthoritativeTeam=" + (authoritativeTeam?.TeamIndex ?? -1));
+                    return false;
+                }
+
+                Equipment previewEquipment = troop.Equipment?.Clone(false);
+                if (previewEquipment == null)
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: pending spawn visuals unavailable (" + source + "): preview equipment missing. " +
+                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                        " TroopId=" + troop.StringId);
+                    return false;
+                }
+
+                AgentBuildData previewBuildData = new AgentBuildData(troop);
+                previewBuildData.MissionPeer(missionPeer);
+                previewBuildData.Team(team);
+                previewBuildData.TroopOrigin(new BasicBattleAgentOrigin(troop));
+                previewBuildData.Equipment(previewEquipment);
+                previewBuildData.IsFemale(missionPeer.Peer?.IsFemale ?? false);
+                previewBuildData.BodyProperties((missionPeer.Peer?.BodyProperties).GetValueOrDefault());
+                previewBuildData.VisualsIndex(0);
+                previewBuildData.ClothingColor1(team.Color);
+                previewBuildData.ClothingColor2(team.Color2);
+
+                gameMode.HandleAgentVisualSpawning(peer, previewBuildData);
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: requested vanilla agent visuals before direct spawn. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " TroopId=" + troop.StringId +
+                    " TeamIndex=" + (team.TeamIndex) +
+                    " Side=" + team.Side +
+                    " Source=" + source);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSpawnLogic: failed to request pending spawn visuals (" + source + "): " + ex.Message);
+                return false;
             }
         }
 
@@ -4597,9 +5576,12 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             CoopBattleAuthorityState.PeerSelectionState selectionState = CoopBattleAuthorityState.GetSelectionState(missionPeer);
+            bool hasExplicitSelection = CoopBattleAuthorityState.HasExplicitSelection(missionPeer);
             RosterEntryState preferredAllowedEntry = ResolvePreferredAllowedEntryStateForPeer(missionPeer, selectionState);
             int currentSelectedTroopIndex = missionPeer.SelectedTroopIndex;
-            if (currentSelectedTroopIndex >= 0 && currentSelectedTroopIndex < cultureClasses.Count)
+            if (!hasExplicitSelection &&
+                currentSelectedTroopIndex >= 0 &&
+                currentSelectedTroopIndex < cultureClasses.Count)
             {
                 MultiplayerClassDivisions.MPHeroClass currentlySelectedClass = cultureClasses[currentSelectedTroopIndex];
                 string matchedAllowedTroopId = ResolveMatchedAllowedTroopId(currentlySelectedClass, missionPeer);
@@ -4785,12 +5767,6 @@ namespace CoopSpectator.MissionBehaviors
                 if (!hasExplicitSelection && currentClass != null)
                     continue;
 
-                // If the peer already has a local vanilla class selection, avoid rebroadcasting the same
-                // preferred index during the preview/equipment-update window. This rebroadcast path is
-                // currently the strongest suspect for dedicated crashes on infantry preview.
-                if (hasExplicitSelection && currentClass != null)
-                    continue;
-
                 if (!TryResolvePreferredHeroClassForPeer(
                         missionPeer,
                         currentClass,
@@ -4803,6 +5779,9 @@ namespace CoopSpectator.MissionBehaviors
                 }
 
                 if (preferredTroopIndex < 0)
+                    continue;
+
+                if (hasExplicitSelection && currentClass != null && missionPeer.SelectedTroopIndex == preferredTroopIndex)
                     continue;
 
                 ApplySelectedTroopIndexBridge(missionPeer, peer, preferredTroopIndex);
@@ -4823,6 +5802,90 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             TrySyncCoopClassRestrictions(mission, source);
+        }
+
+        private static void TryFinalizePendingVanillaSpawnVisuals(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer || GameNetwork.NetworkPeers == null || GameNetwork.NetworkPeers.Count == 0)
+                return;
+
+            SpawnComponent spawnComponent = mission.GetMissionBehavior<SpawnComponent>();
+            MissionMultiplayerGameModeBase gameMode = mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
+            if (spawnComponent == null || gameMode == null)
+                return;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    continue;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                if (missionPeer == null || missionPeer.ControlledAgent != null)
+                    continue;
+
+                if (!CoopBattleSpawnRequestState.HasPendingRequest(missionPeer))
+                    continue;
+
+                if (!missionPeer.HasSpawnedAgentVisuals || missionPeer.EquipmentUpdatingExpired)
+                    continue;
+
+                try
+                {
+                    TryEnsureVanillaSpawnGoldFloor(gameMode, peer, missionPeer, source);
+                    spawnComponent.SetEarlyAgentVisualsDespawning(missionPeer, canDespawnEarly: true);
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: finalized pending vanilla spawn visuals for agent creation. " +
+                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                        " TeamIndex=" + (missionPeer.Team?.TeamIndex ?? -1) +
+                        " Side=" + missionPeer.Team?.Side +
+                        " SelectedTroopIndex=" + missionPeer.SelectedTroopIndex +
+                        " Source=" + source);
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("CoopMissionSpawnLogic: failed to finalize pending vanilla spawn visuals (" + source + "): " + ex.Message);
+                }
+            }
+        }
+
+        private static void TryEnsureVanillaSpawnGoldFloor(
+            MissionMultiplayerGameModeBase gameMode,
+            NetworkCommunicator peer,
+            MissionPeer missionPeer,
+            string source)
+        {
+            if (gameMode == null || peer == null || missionPeer == null || missionPeer.Culture == null)
+                return;
+
+            int selectedTroopIndex = missionPeer.SelectedTroopIndex;
+            if (selectedTroopIndex < 0)
+                return;
+
+            List<MultiplayerClassDivisions.MPHeroClass> cultureClasses = MultiplayerClassDivisions
+                .GetMPHeroClasses(missionPeer.Culture)
+                ?.Where(heroClass => heroClass?.HeroCharacter != null)
+                .ToList();
+            if (cultureClasses == null || selectedTroopIndex >= cultureClasses.Count)
+                return;
+
+            MultiplayerClassDivisions.MPHeroClass selectedClass = cultureClasses[selectedTroopIndex];
+            int troopCasualCost = selectedClass?.TroopCasualCost ?? 0;
+            if (troopCasualCost <= 0)
+                return;
+
+            int currentGold = gameMode.GetCurrentGoldForPeer(missionPeer);
+            if (currentGold >= troopCasualCost)
+                return;
+
+            gameMode.ChangeCurrentGoldForPeer(missionPeer, troopCasualCost);
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: raised vanilla spawn gold floor before visuals finalize. " +
+                "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                " SelectedTroopIndex=" + selectedTroopIndex +
+                " HeroClass=" + (selectedClass?.HeroCharacter?.StringId ?? "null") +
+                " PreviousGold=" + currentGold +
+                " AppliedGold=" + troopCasualCost +
+                " Source=" + source);
         }
 
         private static void ApplySelectedTroopIndexBridge(MissionPeer missionPeer, NetworkCommunicator peer, int preferredTroopIndex)

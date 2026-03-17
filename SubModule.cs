@@ -85,6 +85,7 @@ namespace CoopSpectator // Використовуємо кореневий names
                 LobbyCustomGameLocalJoinPatch.Apply(harmony);
                 IntermissionVmCrashGuardPatch.Apply(harmony);
                 MissionStateOpenNewPatches.Apply(harmony);
+                VanillaEntryUiSuppressionPatch.Apply(harmony);
                 ClientChangeCultureCanonicalizationPatch.Apply(harmony);
                 AppDomain.CurrentDomain.AssemblyLoad += (_, e) => // Коли підвантажиться нова збірка (наприклад Lobby)
                 { // Перевіряємо чи це Lobby — тоді застосуємо патч

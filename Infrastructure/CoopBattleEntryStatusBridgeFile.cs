@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace CoopSpectator.Infrastructure
@@ -18,6 +19,8 @@ namespace CoopSpectator.Infrastructure
             public bool HasAgent { get; set; }
             public bool CanRespawn { get; set; }
             public string LifecycleState { get; set; }
+            public string LifecycleSource { get; set; }
+            public int DeathCount { get; set; }
             public string RequestedSide { get; set; }
             public string AssignedSide { get; set; }
             public string SelectedTroopId { get; set; }
@@ -59,6 +62,8 @@ namespace CoopSpectator.Infrastructure
                     "HasAgent=" + snapshot.HasAgent,
                     "CanRespawn=" + snapshot.CanRespawn,
                     "LifecycleState=" + (snapshot.LifecycleState ?? string.Empty),
+                    "LifecycleSource=" + (snapshot.LifecycleSource ?? string.Empty),
+                    "DeathCount=" + snapshot.DeathCount,
                     "RequestedSide=" + (snapshot.RequestedSide ?? string.Empty),
                     "AssignedSide=" + (snapshot.AssignedSide ?? string.Empty),
                     "SelectedTroopId=" + (snapshot.SelectedTroopId ?? string.Empty),
@@ -81,7 +86,13 @@ namespace CoopSpectator.Infrastructure
                     "DefenderAllowedEntryIds=" + (snapshot.DefenderAllowedEntryIds ?? string.Empty),
                     "UpdatedUtc=" + snapshot.UpdatedUtc.ToString("O")
                 };
-                File.WriteAllLines(GetStatusFilePath(), lines);
+                string path = GetStatusFilePath();
+                using (FileStream stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
+                using (StreamWriter writer = new StreamWriter(stream))
+                {
+                    foreach (string line in lines)
+                        writer.WriteLine(line);
+                }
             }
             catch (Exception ex)
             {
@@ -97,7 +108,15 @@ namespace CoopSpectator.Infrastructure
                 if (!File.Exists(path))
                     return null;
 
-                string[] lines = File.ReadAllLines(path);
+                string[] lines;
+                using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (StreamReader reader = new StreamReader(stream))
+                {
+                    List<string> collectedLines = new List<string>();
+                    while (!reader.EndOfStream)
+                        collectedLines.Add(reader.ReadLine());
+                    lines = collectedLines.ToArray();
+                }
                 EntryStatusSnapshot snapshot = new EntryStatusSnapshot
                 {
                     MissionName = string.Empty,
@@ -108,6 +127,8 @@ namespace CoopSpectator.Infrastructure
                     HasAgent = false,
                     CanRespawn = false,
                     LifecycleState = string.Empty,
+                    LifecycleSource = string.Empty,
+                    DeathCount = 0,
                     RequestedSide = string.Empty,
                     AssignedSide = string.Empty,
                     SelectedTroopId = string.Empty,
@@ -171,6 +192,13 @@ namespace CoopSpectator.Infrastructure
                             break;
                         case "LifecycleState":
                             snapshot.LifecycleState = value;
+                            break;
+                        case "LifecycleSource":
+                            snapshot.LifecycleSource = value;
+                            break;
+                        case "DeathCount":
+                            if (int.TryParse(value, out int deathCount))
+                                snapshot.DeathCount = deathCount;
                             break;
                         case "RequestedSide":
                             snapshot.RequestedSide = value;
