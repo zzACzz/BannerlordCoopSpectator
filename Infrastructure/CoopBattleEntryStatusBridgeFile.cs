@@ -13,11 +13,14 @@ namespace CoopSpectator.Infrastructure
         {
             public string MissionName { get; set; }
             public string Source { get; set; }
+            public string BattlePhase { get; set; }
+            public string BattlePhaseSource { get; set; }
             public string PeerName { get; set; }
             public int PeerIndex { get; set; }
             public bool HasPeer { get; set; }
             public bool HasAgent { get; set; }
             public bool CanRespawn { get; set; }
+            public bool CanStartBattle { get; set; }
             public string LifecycleState { get; set; }
             public string LifecycleSource { get; set; }
             public int DeathCount { get; set; }
@@ -56,11 +59,14 @@ namespace CoopSpectator.Infrastructure
                 {
                     "MissionName=" + (snapshot.MissionName ?? string.Empty),
                     "Source=" + (snapshot.Source ?? string.Empty),
+                    "BattlePhase=" + (snapshot.BattlePhase ?? string.Empty),
+                    "BattlePhaseSource=" + (snapshot.BattlePhaseSource ?? string.Empty),
                     "PeerName=" + (snapshot.PeerName ?? string.Empty),
                     "PeerIndex=" + snapshot.PeerIndex,
                     "HasPeer=" + snapshot.HasPeer,
                     "HasAgent=" + snapshot.HasAgent,
                     "CanRespawn=" + snapshot.CanRespawn,
+                    "CanStartBattle=" + snapshot.CanStartBattle,
                     "LifecycleState=" + (snapshot.LifecycleState ?? string.Empty),
                     "LifecycleSource=" + (snapshot.LifecycleSource ?? string.Empty),
                     "DeathCount=" + snapshot.DeathCount,
@@ -121,11 +127,14 @@ namespace CoopSpectator.Infrastructure
                 {
                     MissionName = string.Empty,
                     Source = string.Empty,
+                    BattlePhase = string.Empty,
+                    BattlePhaseSource = string.Empty,
                     PeerName = string.Empty,
                     PeerIndex = -1,
                     HasPeer = false,
                     HasAgent = false,
                     CanRespawn = false,
+                    CanStartBattle = false,
                     LifecycleState = string.Empty,
                     LifecycleSource = string.Empty,
                     DeathCount = 0,
@@ -171,6 +180,12 @@ namespace CoopSpectator.Infrastructure
                         case "Source":
                             snapshot.Source = value;
                             break;
+                        case "BattlePhase":
+                            snapshot.BattlePhase = value;
+                            break;
+                        case "BattlePhaseSource":
+                            snapshot.BattlePhaseSource = value;
+                            break;
                         case "PeerName":
                             snapshot.PeerName = value;
                             break;
@@ -189,6 +204,10 @@ namespace CoopSpectator.Infrastructure
                         case "CanRespawn":
                             if (bool.TryParse(value, out bool canRespawn))
                                 snapshot.CanRespawn = canRespawn;
+                            break;
+                        case "CanStartBattle":
+                            if (bool.TryParse(value, out bool canStartBattle))
+                                snapshot.CanStartBattle = canStartBattle;
                             break;
                         case "LifecycleState":
                             snapshot.LifecycleState = value;

@@ -53,7 +53,9 @@ namespace CoopSpectator.Network.Messages // Оголошуємо простір 
         public string EntryId { get; set; } // Стабільний ідентифікатор стеку в межах snapshot.
         public string SideId { get; set; } // Сторона, до якої належить стек.
         public string PartyId { get; set; } // Партія-джерело цього стеку.
-        public string CharacterId { get; set; } // Унікальний StringId персонажа/юнита (для майбутнього спавну)
+        public string CharacterId { get; set; } // Back-compat alias; runtime now treats this as SpawnTemplateId.
+        public string OriginalCharacterId { get; set; } // Справжній campaign StringId персонажа/юнита.
+        public string SpawnTemplateId { get; set; } // MP-safe runtime template id for mission spawn/materialization.
         public string TroopName { get; set; } // Людська назва юнита (для UI клієнта)
         public int Tier { get; set; } // Тір (рівень) юнита (для фільтрації/балансу)
         public bool IsMounted { get; set; } // Чи юнит верховий (на коні)

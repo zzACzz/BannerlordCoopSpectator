@@ -300,7 +300,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     } // Завершуємо блок if
 
                     TroopStackInfo stack = new TroopStackInfo(); // Створюємо DTO стеку
-                    stack.CharacterId = GetMissionSafeCharacterId(element.Character, rosterCharacters); // Записуємо mission-safe troop id (для героїв шукаємо surrogate в ростері).
+                    string originalCharacterId = TryGetStringId(element.Character);
+                    string spawnTemplateId = GetMissionSafeCharacterId(element.Character, rosterCharacters);
+                    stack.CharacterId = spawnTemplateId; // Back-compat alias for older runtime readers.
+                    stack.OriginalCharacterId = originalCharacterId;
+                    stack.SpawnTemplateId = spawnTemplateId;
                     stack.TroopName = element.Character.Name != null ? element.Character.Name.ToString() : element.Character.StringId; // Беремо ім'я або fallback на id
                     stack.Tier = element.Character.Tier; // Записуємо tier
                     stack.IsMounted = element.Character.IsMounted; // Записуємо чи верховий
@@ -329,6 +333,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 ModLogger.Error("Failed to build troop roster for BATTLE_START.", ex); // Логуємо помилку
             } // Завершуємо блок catch
 
+            LogTroopStackMappings("main-party-roster", troops);
             return troops; // Повертаємо список (може бути порожнім — це ок для MVP)
         } // Завершуємо блок методу
 
@@ -339,6 +344,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 object battle = TryGetCurrentBattleObject();
                 if (battle == null)
                     return BuildFallbackBattleSnapshot(mapScene, playerSideText);
+
+                ModLogger.Info("BattleDetector: building live battle snapshot from battle type = " + battle.GetType().FullName + ".");
 
                 var snapshot = new BattleSnapshotMessage
                 {
@@ -359,6 +366,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     nameof(BattleSideEnum.Defender),
                     playerSideText);
 
+                ModLogger.Info(
+                    "BattleDetector: live battle side build result. " +
+                    "AttackerBuilt=" + (attackerSide != null) +
+                    " DefenderBuilt=" + (defenderSide != null) + ".");
+
                 if (attackerSide != null)
                     snapshot.Sides.Add(attackerSide);
                 if (defenderSide != null)
@@ -367,6 +379,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 if (snapshot.Sides.Count == 0)
                     return BuildFallbackBattleSnapshot(mapScene, playerSideText);
 
+                LogSnapshotMappings("live-battle", snapshot);
                 return snapshot;
             }
             catch (Exception ex)
@@ -408,11 +421,23 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             mainPartySide.TotalManCount = mainParty.TotalManCount;
             snapshot.Sides.Add(mainPartySide);
 
+            LogSnapshotMappings("fallback", snapshot);
             return snapshot;
         }
 
         private static BattleSideSnapshotMessage BuildBattleSideSnapshot(object sideObject, string sideId, string sideText, string playerSideText)
         {
+            if (sideObject == null)
+            {
+                ModLogger.Info("BattleDetector: live side snapshot skipped because side object is null. SideId=" + (sideId ?? "unknown") + ".");
+                return null;
+            }
+
+            ModLogger.Info(
+                "BattleDetector: building side snapshot. " +
+                "SideId=" + (sideId ?? "unknown") +
+                " SideType=" + sideObject.GetType().FullName + ".");
+
             var sideSnapshot = new BattleSideSnapshotMessage
             {
                 SideId = sideId,
@@ -421,8 +446,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             };
 
             HashSet<string> seenPartyIds = new HashSet<string>(StringComparer.Ordinal);
+            int enumeratedPartyCount = 0;
             foreach (object partyObject in EnumerateBattleParties(sideObject))
             {
+                enumeratedPartyCount++;
                 BattlePartySnapshotMessage partySnapshot = BuildBattlePartySnapshot(partyObject, sideId);
                 if (partySnapshot == null)
                     continue;
@@ -440,6 +467,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             sideSnapshot.TotalManCount = sideSnapshot.Parties.Sum(p => p?.TotalManCount ?? 0);
+            ModLogger.Info(
+                "BattleDetector: side snapshot built. " +
+                "SideId=" + (sideId ?? "unknown") +
+                " EnumeratedPartyObjects=" + enumeratedPartyCount +
+                " SnapshotParties=" + sideSnapshot.Parties.Count +
+                " TotalTroopStacks=" + sideSnapshot.Troops.Count + ".");
             return sideSnapshot.Parties.Count > 0 ? sideSnapshot : null;
         }
 
@@ -447,11 +480,24 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         {
             object partyBase = UnwrapPartyBase(partyObject);
             if (partyBase == null)
+            {
+                ModLogger.Info(
+                    "BattleDetector: party snapshot skipped because party base unwrap failed. " +
+                    "SideId=" + (sideId ?? "unknown") +
+                    " PartyObjectType=" + (partyObject?.GetType().FullName ?? "null") + ".");
                 return null;
+            }
 
             List<TroopStackInfo> troops = BuildTroopStacksFromPartySafe(partyBase, sideId);
             if (troops.Count == 0)
+            {
+                ModLogger.Info(
+                    "BattleDetector: party snapshot skipped because troop stack build returned 0 entries. " +
+                    "SideId=" + (sideId ?? "unknown") +
+                    " PartyBaseType=" + partyBase.GetType().FullName +
+                    " PartyId=" + (TryGetStringId(partyBase) ?? TryGetStringId(TryGetPropertyValue(partyBase, "MobileParty")) ?? "null") + ".");
                 return null;
+            }
 
             string partyId = TryGetStringId(partyBase) ?? TryGetStringId(TryGetPropertyValue(partyBase, "MobileParty"));
             string partyName = TryGetPartyName(partyBase);
@@ -484,6 +530,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         yield return item;
                 }
 
+                ModLogger.Info(
+                    "BattleDetector: enumerated battle parties via property '" + propertyName + "'. " +
+                    "SideType=" + sideObject.GetType().FullName + ".");
+
                 yield break;
             }
 
@@ -494,6 +544,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     if (item != null)
                         yield return item;
                 }
+
+                ModLogger.Info(
+                    "BattleDetector: enumerated battle parties via self-enumerable side object. " +
+                    "SideType=" + sideObject.GetType().FullName + ".");
             }
         }
 
@@ -530,9 +584,30 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             try
             {
                 object memberRoster = TryGetPropertyValue(partyBase, "MemberRoster");
-                object troopRoster = TryInvokeMethod(memberRoster, "GetTroopRoster");
-                if (!(troopRoster is System.Collections.IEnumerable enumerable))
+                if (memberRoster == null)
+                {
+                    ModLogger.Info(
+                        "BattleDetector: party troop build missing MemberRoster. " +
+                        "SideId=" + (sideId ?? "unknown") +
+                        " PartyBaseType=" + partyBase.GetType().FullName + ".");
                     return troops;
+                }
+
+                object troopRoster = TryInvokeMethod(memberRoster, "GetTroopRoster");
+                if (troopRoster == null)
+                {
+                    troopRoster = TryGetPropertyValue(memberRoster, "TroopRoster") ?? TryGetPropertyValue(memberRoster, "_roster");
+                }
+                if (!(troopRoster is System.Collections.IEnumerable enumerable))
+                {
+                    ModLogger.Info(
+                        "BattleDetector: party troop build missing enumerable troop roster. " +
+                        "SideId=" + (sideId ?? "unknown") +
+                        " PartyBaseType=" + partyBase.GetType().FullName +
+                        " MemberRosterType=" + memberRoster.GetType().FullName +
+                        " TroopRosterType=" + (troopRoster?.GetType().FullName ?? "null") + ".");
+                    return troops;
+                }
 
                 var rosterCharacters = new List<object>();
                 var rosterElements = new List<object>();
@@ -554,13 +629,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     if (character == null)
                         continue;
 
-                    string characterId = GetMissionSafeCharacterId(character, rosterCharacters);
+                    string originalCharacterId = TryGetStringId(character);
+                    string spawnTemplateId = GetMissionSafeCharacterId(character, rosterCharacters);
                     var stack = new TroopStackInfo
                     {
-                        EntryId = sideId + "|" + (partyId ?? "party") + "|" + (characterId ?? "unknown"),
+                        EntryId = sideId + "|" + (partyId ?? "party") + "|" + (spawnTemplateId ?? "unknown"),
                         SideId = sideId,
                         PartyId = partyId,
-                        CharacterId = characterId,
+                        CharacterId = spawnTemplateId,
+                        OriginalCharacterId = originalCharacterId,
+                        SpawnTemplateId = spawnTemplateId,
                         TroopName = TryGetPropertyValue(character, "Name")?.ToString() ?? TryGetStringId(character),
                         Tier = TryGetIntProperty(character, "Tier"),
                         IsMounted = TryGetBoolProperty(character, "IsMounted"),
@@ -576,7 +654,53 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 ModLogger.Info("BattleDetector: failed to build side party troop stacks: " + ex.Message);
             }
 
+            string partyIdForLog = TryGetStringId(partyBase) ?? TryGetStringId(TryGetPropertyValue(partyBase, "MobileParty")) ?? "party";
+            LogTroopStackMappings("side-party " + (sideId ?? "unknown") + "/" + partyIdForLog, troops);
             return troops;
+        }
+
+        private static void LogTroopStackMappings(string source, List<TroopStackInfo> troops)
+        {
+            if (troops == null || troops.Count == 0)
+                return;
+
+            IEnumerable<string> mappings = troops
+                .Where(troop => troop != null)
+                .Take(24)
+                .Select(troop =>
+                    (troop.OriginalCharacterId ?? "null") +
+                    " -> " +
+                    ((!string.IsNullOrWhiteSpace(troop.SpawnTemplateId) ? troop.SpawnTemplateId : troop.CharacterId) ?? "null") +
+                    " x" + troop.Count);
+
+            ModLogger.Info(
+                "BattleDetector: troop stack mapping summary (" + (source ?? "unknown") + ") = [" +
+                string.Join("; ", mappings) +
+                "].");
+        }
+
+        private static void LogSnapshotMappings(string source, BattleSnapshotMessage snapshot)
+        {
+            if (snapshot?.Sides == null || snapshot.Sides.Count == 0)
+                return;
+
+            IEnumerable<string> mappings = snapshot.Sides
+                .Where(side => side?.Troops != null)
+                .SelectMany(side => side.Troops)
+                .Where(troop => troop != null)
+                .Take(32)
+                .Select(troop =>
+                    (troop.SideId ?? "side") + "/" +
+                    (troop.PartyId ?? "party") + "/" +
+                    (troop.EntryId ?? "entry") + ": " +
+                    (troop.OriginalCharacterId ?? "null") +
+                    " -> " +
+                    ((!string.IsNullOrWhiteSpace(troop.SpawnTemplateId) ? troop.SpawnTemplateId : troop.CharacterId) ?? "null"));
+
+            ModLogger.Info(
+                "BattleDetector: snapshot mapping summary (" + (source ?? "unknown") + ") = [" +
+                string.Join("; ", mappings) +
+                "].");
         }
 
         private static List<TroopStackInfo> BuildLegacyTroopsFromSnapshot(BattleSnapshotMessage snapshot)
@@ -608,10 +732,73 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 Type typeB = campaignAssembly.GetType("TaleWorlds.CampaignSystem.PlayerEncounter");
                 Type playerEncounterType = typeA ?? typeB;
                 if (playerEncounterType == null)
+                {
+                    ModLogger.Info("BattleDetector: TryGetCurrentBattleObject failed because PlayerEncounter type was not found.");
                     return null;
+                }
 
-                PropertyInfo battleProperty = playerEncounterType.GetProperty("Battle");
-                return battleProperty?.GetValue(null, null);
+                object currentEncounter = TryGetStaticPropertyValue(playerEncounterType, "Current");
+                object directBattle = TryGetStaticPropertyValue(playerEncounterType, "Battle");
+                if (directBattle != null)
+                {
+                    ModLogger.Info("BattleDetector: TryGetCurrentBattleObject resolved via PlayerEncounter.Battle.");
+                    return directBattle;
+                }
+
+                object encounteredBattle = TryGetStaticPropertyValue(playerEncounterType, "EncounteredBattle");
+                if (encounteredBattle != null)
+                {
+                    ModLogger.Info("BattleDetector: TryGetCurrentBattleObject resolved via PlayerEncounter.EncounteredBattle.");
+                    return encounteredBattle;
+                }
+
+                object currentEncounterBattle = TryGetPropertyValue(currentEncounter, "Battle") ?? TryGetPropertyValue(currentEncounter, "_mapEvent");
+                if (currentEncounterBattle != null)
+                {
+                    ModLogger.Info("BattleDetector: TryGetCurrentBattleObject resolved via PlayerEncounter.Current.Battle/_mapEvent.");
+                    return currentEncounterBattle;
+                }
+
+                object currentEncounteredParty = TryGetPropertyValue(currentEncounter, "EncounteredParty") ?? TryGetPropertyValue(currentEncounter, "_encounteredParty");
+                object currentEncounterPartyBattle =
+                    TryGetPropertyValue(currentEncounteredParty, "MapEvent") ??
+                    TryGetPropertyValue(TryGetPropertyValue(currentEncounteredParty, "MobileParty"), "MapEvent");
+                if (currentEncounterPartyBattle != null)
+                {
+                    ModLogger.Info("BattleDetector: TryGetCurrentBattleObject resolved via encountered party MapEvent.");
+                    return currentEncounterPartyBattle;
+                }
+
+                object mainPartyBattle = TryGetPropertyValue(MobileParty.MainParty, "MapEvent");
+                if (mainPartyBattle != null)
+                {
+                    ModLogger.Info("BattleDetector: TryGetCurrentBattleObject resolved via MobileParty.MainParty.MapEvent.");
+                    return mainPartyBattle;
+                }
+
+                ModLogger.Info(
+                    "BattleDetector: TryGetCurrentBattleObject returned null. " +
+                    "HasCurrentEncounter=" + (currentEncounter != null) +
+                    " HasEncounteredParty=" + (currentEncounteredParty != null) +
+                    " HasMainPartyMapEvent=" + (mainPartyBattle != null));
+                return null;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: TryGetCurrentBattleObject failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static object TryGetStaticPropertyValue(Type type, string propertyName)
+        {
+            if (type == null || string.IsNullOrWhiteSpace(propertyName))
+                return null;
+
+            try
+            {
+                PropertyInfo property = type.GetProperty(propertyName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                return property?.GetValue(null, null);
             }
             catch
             {
@@ -626,7 +813,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             try
             {
-                MethodInfo method = instance.GetType().GetMethod(methodName, BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                MethodInfo method = instance.GetType().GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null);
                 return method?.Invoke(instance, null);
             }
             catch
@@ -715,7 +902,23 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             bool isHero = TryGetBoolProperty(characterObject, "IsHero");
             if (!isHero)
+            {
+                string banditFallbackId = TryResolveBanditMissionSafeCharacterId(characterObject);
+                if (!string.IsNullOrWhiteSpace(banditFallbackId) && !string.Equals(banditFallbackId, originalId, StringComparison.Ordinal))
+                {
+                    ModLogger.Info("BattleDetector: mapped bandit campaign troop id '" + originalId + "' to mission-safe bandit fallback '" + banditFallbackId + "'.");
+                    return banditFallbackId;
+                }
+
+                string genericFallbackId = TryResolveGenericMissionSafeCharacterId(characterObject);
+                if (!string.IsNullOrWhiteSpace(genericFallbackId) && !string.Equals(genericFallbackId, originalId, StringComparison.Ordinal))
+                {
+                    ModLogger.Info("BattleDetector: mapped unsupported campaign troop id '" + originalId + "' to generic mission-safe fallback '" + genericFallbackId + "'.");
+                    return genericFallbackId;
+                }
+
                 return originalId;
+            }
 
             LogHeroRosterContext(originalId, rosterCharacters);
 
@@ -760,6 +963,53 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             const string guaranteedVanillaFallbackId = "imperial_infantryman";
             ModLogger.Info("BattleDetector: no mission-safe fallback found for hero troop id '" + originalId + "'. Using guaranteed vanilla fallback '" + guaranteedVanillaFallbackId + "'.");
             return guaranteedVanillaFallbackId;
+        }
+
+        private static string TryResolveBanditMissionSafeCharacterId(object characterObject)
+        {
+            string originalId = TryGetStringId(characterObject);
+            if (string.IsNullOrWhiteSpace(originalId))
+                return null;
+
+            string normalized = originalId.Trim().ToLowerInvariant();
+            if (normalized.Contains("looter"))
+                return "mp_skirmisher_empire_troop";
+            if (normalized.Contains("sea_raider"))
+                return "mp_heavy_infantry_sturgia_troop";
+            if (normalized.Contains("forest_bandit"))
+                return "mp_light_ranged_battania_troop";
+            if (normalized.Contains("mountain_bandit"))
+                return "mp_light_infantry_vlandia_troop";
+            if (normalized.Contains("desert_bandit"))
+                return "mp_skirmisher_aserai_troop";
+            if (normalized.Contains("steppe_bandit"))
+                return "mp_horse_archer_khuzait_troop";
+            if (normalized.Contains("bandit"))
+                return "mp_skirmisher_empire_troop";
+
+            return null;
+        }
+
+        private static string TryResolveGenericMissionSafeCharacterId(object characterObject)
+        {
+            if (characterObject == null)
+                return null;
+
+            bool isMounted = TryGetBoolProperty(characterObject, "IsMounted");
+            bool isRanged = TryGetBoolProperty(characterObject, "IsRanged");
+            int tier = TryGetIntProperty(characterObject, "Tier");
+
+            if (isMounted)
+                return "mp_coop_light_cavalry_sturgia_troop";
+
+            if (isRanged)
+                return tier >= 4
+                    ? "mp_heavy_ranged_vlandia_troop"
+                    : "mp_light_ranged_empire_troop";
+
+            return tier >= 4
+                ? "mp_coop_heavy_infantry_empire_troop"
+                : "mp_heavy_infantry_empire_troop";
         }
 
         private static string TryFindRosterSurrogateId(object heroCharacter, List<object> rosterCharacters)
@@ -985,8 +1235,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             try
             {
-                PropertyInfo property = instance.GetType().GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance);
-                return property?.GetValue(instance, null);
+                PropertyInfo property = instance.GetType().GetProperty(propertyName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (property != null)
+                    return property.GetValue(instance, null);
+
+                FieldInfo field = instance.GetType().GetField(propertyName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                return field?.GetValue(instance);
             }
             catch
             {

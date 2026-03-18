@@ -139,7 +139,7 @@ namespace CoopSpectator.Campaign
             return snapshot.Sides
                 .Where(side => side?.Troops != null)
                 .SelectMany(side => side.Troops)
-                .Select(troop => troop?.CharacterId)
+                .Select(troop => !string.IsNullOrWhiteSpace(troop?.SpawnTemplateId) ? troop.SpawnTemplateId : troop?.CharacterId)
                 .Where(characterId => !string.IsNullOrWhiteSpace(characterId))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();

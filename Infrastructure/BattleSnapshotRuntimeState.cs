@@ -56,6 +56,8 @@ namespace CoopSpectator.Infrastructure
         public string SideId { get; set; }
         public string PartyId { get; set; }
         public string CharacterId { get; set; }
+        public string OriginalCharacterId { get; set; }
+        public string SpawnTemplateId { get; set; }
         public string TroopName { get; set; }
         public int Count { get; set; }
         public int WoundedCount { get; set; }
@@ -93,6 +95,8 @@ namespace CoopSpectator.Infrastructure
         public string SideId { get; set; }
         public string PartyId { get; set; }
         public string CharacterId { get; set; }
+        public string OriginalCharacterId { get; set; }
+        public string SpawnTemplateId { get; set; }
         public string TroopName { get; set; }
         public int Count { get; set; }
         public int WoundedCount { get; set; }
@@ -209,7 +213,7 @@ namespace CoopSpectator.Infrastructure
             return snapshot.Sides
                 .Where(side => side?.Troops != null)
                 .SelectMany(side => side.Troops)
-                .Select(troop => troop?.CharacterId)
+                .Select(troop => ResolveSpawnTemplateId(troop))
                 .Where(characterId => !string.IsNullOrWhiteSpace(characterId))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -261,7 +265,7 @@ namespace CoopSpectator.Infrastructure
 
                 RosterEntryState entry = sideState.Entries.FirstOrDefault(candidate =>
                     candidate != null &&
-                    string.Equals(candidate.CharacterId, troopId, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(ResolveSpawnTemplateId(candidate), troopId, StringComparison.OrdinalIgnoreCase));
                 return entry?.EntryId;
             }
         }
@@ -269,12 +273,13 @@ namespace CoopSpectator.Infrastructure
         public static BasicCharacterObject TryResolveCharacterObject(string entryId)
         {
             BattleRosterEntryProjectionState entry = GetEntry(entryId);
-            if (entry == null || string.IsNullOrWhiteSpace(entry.CharacterId))
+            string spawnTemplateId = ResolveSpawnTemplateId(entry);
+            if (string.IsNullOrWhiteSpace(spawnTemplateId))
                 return null;
 
             try
             {
-                return MBObjectManager.Instance.GetObject<BasicCharacterObject>(entry.CharacterId);
+                return MBObjectManager.Instance.GetObject<BasicCharacterObject>(spawnTemplateId);
             }
             catch
             {
@@ -333,7 +338,7 @@ namespace CoopSpectator.Infrastructure
                     }
 
                     partyProjection.TroopIds = partyProjection.Entries
-                        .Select(entry => entry.CharacterId)
+                        .Select(entry => ResolveSpawnTemplateId(entry))
                         .Where(characterId => !string.IsNullOrWhiteSpace(characterId))
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToList();
@@ -354,7 +359,7 @@ namespace CoopSpectator.Infrastructure
                 }
 
                 sideProjection.TroopIds = sideProjection.Entries
-                    .Select(entry => entry.CharacterId)
+                    .Select(entry => ResolveSpawnTemplateId(entry))
                     .Where(characterId => !string.IsNullOrWhiteSpace(characterId))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
@@ -413,6 +418,8 @@ namespace CoopSpectator.Infrastructure
                         SideId = entryProjection.SideId,
                         PartyId = entryProjection.PartyId,
                         CharacterId = entryProjection.CharacterId,
+                        OriginalCharacterId = entryProjection.OriginalCharacterId,
+                        SpawnTemplateId = entryProjection.SpawnTemplateId,
                         TroopName = entryProjection.TroopName,
                         Count = entryProjection.Count,
                         WoundedCount = entryProjection.WoundedCount,
@@ -431,7 +438,7 @@ namespace CoopSpectator.Infrastructure
                 }
 
                 sideState.TroopIds = sideState.Entries
-                    .Select(entry => entry.CharacterId)
+                    .Select(entry => ResolveSpawnTemplateId(entry))
                     .Where(characterId => !string.IsNullOrWhiteSpace(characterId))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
@@ -456,7 +463,8 @@ namespace CoopSpectator.Infrastructure
 
         private static BattleRosterEntryProjectionState BuildEntryProjection(TroopStackInfo troop, string canonicalSideKey, string fallbackPartyId, int ordinal)
         {
-            if (troop == null || string.IsNullOrWhiteSpace(troop.CharacterId))
+            string spawnTemplateId = ResolveSpawnTemplateId(troop);
+            if (troop == null || string.IsNullOrWhiteSpace(spawnTemplateId))
                 return null;
 
             return new BattleRosterEntryProjectionState
@@ -464,7 +472,9 @@ namespace CoopSpectator.Infrastructure
                 EntryId = ResolveEntryId(troop, canonicalSideKey, fallbackPartyId, ordinal),
                 SideId = canonicalSideKey,
                 PartyId = string.IsNullOrWhiteSpace(troop.PartyId) ? fallbackPartyId : troop.PartyId,
-                CharacterId = troop.CharacterId,
+                CharacterId = spawnTemplateId,
+                OriginalCharacterId = ResolveOriginalCharacterId(troop),
+                SpawnTemplateId = spawnTemplateId,
                 TroopName = troop.TroopName,
                 Count = troop.Count,
                 WoundedCount = troop.WoundedCount,
@@ -480,8 +490,48 @@ namespace CoopSpectator.Infrastructure
                 return troop.EntryId;
 
             string partyId = string.IsNullOrWhiteSpace(troop?.PartyId) ? fallbackPartyId : troop.PartyId;
-            string characterId = troop?.CharacterId ?? "unknown";
+            string characterId = ResolveSpawnTemplateId(troop) ?? "unknown";
             return (canonicalSideKey ?? "unknown") + "|" + (partyId ?? "party") + "|" + characterId + "|" + ordinal;
+        }
+
+        private static string ResolveSpawnTemplateId(TroopStackInfo troop)
+        {
+            if (troop == null)
+                return null;
+
+            return !string.IsNullOrWhiteSpace(troop.SpawnTemplateId)
+                ? troop.SpawnTemplateId
+                : troop.CharacterId;
+        }
+
+        private static string ResolveSpawnTemplateId(BattleRosterEntryProjectionState entry)
+        {
+            if (entry == null)
+                return null;
+
+            return !string.IsNullOrWhiteSpace(entry.SpawnTemplateId)
+                ? entry.SpawnTemplateId
+                : entry.CharacterId;
+        }
+
+        private static string ResolveSpawnTemplateId(RosterEntryState entry)
+        {
+            if (entry == null)
+                return null;
+
+            return !string.IsNullOrWhiteSpace(entry.SpawnTemplateId)
+                ? entry.SpawnTemplateId
+                : entry.CharacterId;
+        }
+
+        private static string ResolveOriginalCharacterId(TroopStackInfo troop)
+        {
+            if (troop == null)
+                return null;
+
+            return !string.IsNullOrWhiteSpace(troop.OriginalCharacterId)
+                ? troop.OriginalCharacterId
+                : troop.CharacterId;
         }
 
         private static string NormalizeSideKey(string sideText)
