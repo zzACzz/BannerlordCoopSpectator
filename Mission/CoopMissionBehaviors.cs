@@ -154,7 +154,11 @@ namespace CoopSpectator.MissionBehaviors
                     _showOwnEntryMenu = true;
                     _timeUntilNextOwnEntryMenuRefresh = 0f;
                     _lastShownOwnEntryMenuKey = null;
-                    _lastAnnouncedBattlePhaseKey = null;
+
+                    CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot phaseSnapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
+                    string currentBattlePhase = phaseSnapshot?.BattlePhase ?? string.Empty;
+                    if (!string.Equals(currentBattlePhase, CoopBattlePhase.BattleActive.ToString(), StringComparison.OrdinalIgnoreCase))
+                        _lastAnnouncedBattlePhaseKey = null;
                 }
                 _lastControlledAgent = currentMain;
             }
@@ -3391,9 +3395,11 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<int, int> _lastAlignedControlledAgentIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, string> _materializedArmyEntryIdByAgentIndex = new Dictionary<int, string>();
         private static readonly Dictionary<int, BattleSideEnum> _materializedArmySideByAgentIndex = new Dictionary<int, BattleSideEnum>();
+        private static readonly HashSet<int> _battlePhaseHeldFormationKeys = new HashSet<int>();
         private static Mission _lastBattlePhaseAiHoldMission;
         private static Mission _lastMaterializedArmyMission;
         private static bool? _lastAppliedBattlePhaseAiHold;
+        private static CoopBattlePhase? _lastAppliedFormationHoldPhase;
         private static bool _hasMaterializedBattlefieldArmies;
         private static Agent _diagnosticAllowedAgent;
         private const bool EnableFixedMissionCulturesExperiment = true;
@@ -3440,8 +3446,10 @@ namespace CoopSpectator.MissionBehaviors
             _lastAlignedControlledAgentIndexByPeer.Clear();
             _materializedArmyEntryIdByAgentIndex.Clear();
             _materializedArmySideByAgentIndex.Clear();
+            _battlePhaseHeldFormationKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
             _lastAppliedBattlePhaseAiHold = null;
+            _lastAppliedFormationHoldPhase = null;
             _lastMaterializedArmyMission = null;
             _hasMaterializedBattlefieldArmies = false;
             CoopBattleSelectionIntentState.Reset();
@@ -3508,6 +3516,7 @@ namespace CoopSpectator.MissionBehaviors
             TryAlignControlledAgentsWithMaterializedArmy(Mission, "server behavior");
             TryUpdateBattlePhaseState(Mission, "server behavior tick");
             TryApplyBattlePhaseAiHold(Mission, "server behavior tick");
+            TryApplyBattlePhaseFormationHold(Mission, "server behavior tick");
             TryWriteEntryStatusSnapshot(Mission, "server behavior tick");
         }
 
@@ -3522,8 +3531,10 @@ namespace CoopSpectator.MissionBehaviors
             _lastAlignedControlledAgentIndexByPeer.Clear();
             _materializedArmyEntryIdByAgentIndex.Clear();
             _materializedArmySideByAgentIndex.Clear();
+            _battlePhaseHeldFormationKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
             _lastAppliedBattlePhaseAiHold = null;
+            _lastAppliedFormationHoldPhase = null;
             _lastMaterializedArmyMission = null;
             _hasMaterializedBattlefieldArmies = false;
             CoopBattlePhaseRuntimeState.SetPhase(CoopBattlePhase.BattleEnded, "CoopMissionSpawnLogic.OnEndMission", Mission, allowRegression: true);
@@ -3792,8 +3803,10 @@ namespace CoopSpectator.MissionBehaviors
                 _lastAlignedControlledAgentIndexByPeer.Clear();
                 _materializedArmyEntryIdByAgentIndex.Clear();
                 _materializedArmySideByAgentIndex.Clear();
+                _battlePhaseHeldFormationKeys.Clear();
                 _lastBattlePhaseAiHoldMission = null;
                 _lastAppliedBattlePhaseAiHold = null;
+                _lastAppliedFormationHoldPhase = null;
                 _lastMaterializedArmyMission = null;
                 _hasMaterializedBattlefieldArmies = false;
                 CoopBattleSelectionIntentState.Reset();
@@ -3846,6 +3859,7 @@ namespace CoopSpectator.MissionBehaviors
             TryUpdateBattlePhaseState(mission, "dedicated observer");
             TryConsumeBattlePhaseRequests(mission);
             TryApplyBattlePhaseAiHold(mission, "dedicated observer");
+            TryApplyBattlePhaseFormationHold(mission, "dedicated observer");
             TryWriteEntryStatusSnapshot(mission, "dedicated observer");
         }
 
@@ -3905,6 +3919,37 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, source + " waiting-for-side", mission);
         }
 
+        private static bool IsBattleStartReady(Mission mission, out int assignedPeerCount, out int controlledPeerCount)
+        {
+            assignedPeerCount = 0;
+            controlledPeerCount = 0;
+
+            if (mission == null || GameNetwork.NetworkPeers == null)
+                return false;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    continue;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                if (missionPeer == null || missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
+                    continue;
+
+                BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, "battle-start-ready");
+                if (authoritativeSide == BattleSideEnum.None)
+                    continue;
+
+                assignedPeerCount++;
+                if (missionPeer.ControlledAgent != null && missionPeer.ControlledAgent.IsActive())
+                    controlledPeerCount++;
+            }
+
+            return _hasMaterializedBattlefieldArmies &&
+                assignedPeerCount > 0 &&
+                controlledPeerCount >= assignedPeerCount;
+        }
+
         private static void TryConsumeBattlePhaseRequests(Mission mission)
         {
             if (mission == null || !GameNetwork.IsServer)
@@ -3914,11 +3959,16 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
-            if (currentPhase < CoopBattlePhase.PreBattleHold)
+            bool battleStartReady = IsBattleStartReady(mission, out int assignedPeerCount, out int controlledPeerCount);
+            if (currentPhase < CoopBattlePhase.PreBattleHold || !battleStartReady)
             {
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: ignored start battle request because phase is not ready. " +
                     "CurrentPhase=" + currentPhase +
+                    " BattleStartReady=" + battleStartReady +
+                    " AssignedPeers=" + assignedPeerCount +
+                    " ControlledPeers=" + controlledPeerCount +
+                    " MaterializedArmies=" + _hasMaterializedBattlefieldArmies +
                     " Source=" + (requestSource ?? "unknown"));
                 return;
             }
@@ -3960,6 +4010,168 @@ namespace CoopSpectator.MissionBehaviors
                 "Phase=" + currentPhase +
                 " PauseAITick=" + shouldPauseAi +
                 " Source=" + (source ?? "unknown"));
+        }
+
+        private static void TryApplyBattlePhaseFormationHold(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer)
+                return;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            bool shouldHoldFormations = currentPhase >= CoopBattlePhase.PreBattleHold && currentPhase < CoopBattlePhase.BattleActive;
+
+            if (!ReferenceEquals(_lastBattlePhaseAiHoldMission, mission))
+            {
+                _battlePhaseHeldFormationKeys.Clear();
+                _lastAppliedFormationHoldPhase = null;
+            }
+
+            if (_lastAppliedFormationHoldPhase.HasValue && _lastAppliedFormationHoldPhase.Value == currentPhase)
+                return;
+
+            int affectedFormationCount = 0;
+            int delegatedTeamCount = 0;
+            int pulsedAgentCount = 0;
+            foreach (Team team in mission.Teams)
+            {
+                if (team == null || team.Side == BattleSideEnum.None || ReferenceEquals(team, mission.SpectatorTeam))
+                    continue;
+
+                foreach (Formation formation in team.FormationsIncludingSpecialAndEmpty)
+                {
+                    if (formation == null || formation.CountOfUnits <= 0)
+                        continue;
+
+                    int formationKey = GetBattlePhaseFormationKey(team, formation);
+                    if (shouldHoldFormations)
+                    {
+                        if (ShouldSkipBattlePhaseFormationHold(formation))
+                            continue;
+
+                        formation.SetMovementOrder(MovementOrder.MovementOrderStop);
+                        formation.SetFiringOrder(FiringOrder.FiringOrderHoldYourFire);
+                        formation.SetControlledByAI(true, true);
+                        _battlePhaseHeldFormationKeys.Add(formationKey);
+                        affectedFormationCount++;
+                    }
+                    else
+                    {
+                        bool wasHeld = _battlePhaseHeldFormationKeys.Remove(formationKey);
+                        formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
+                        formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
+                        formation.SetControlledByAI(true, true);
+                        int pulsedFormationAgents = TryPulseFormationAiEngage(formation, team);
+                        pulsedAgentCount += pulsedFormationAgents;
+                        affectedFormationCount++;
+
+                        bool hasPlayerControlledTroop = (GetServerMemberValue(formation, "HasPlayerControlledTroop") as bool?) ?? false;
+                        bool isPlayerTroopInFormation = (GetServerMemberValue(formation, "IsPlayerTroopInFormation") as bool?) ?? false;
+                        object playerOwner = GetServerMemberValue(formation, "PlayerOwner");
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: battle phase formation release detail. " +
+                            "Team=" + team.Side +
+                            " Formation=" + formation.FormationIndex +
+                            " UnitCount=" + formation.CountOfUnits +
+                            " WasHeld=" + wasHeld +
+                            " HasPlayerControlledTroop=" + hasPlayerControlledTroop +
+                            " IsPlayerTroopInFormation=" + isPlayerTroopInFormation +
+                            " HasPlayerOwner=" + (playerOwner != null) +
+                            " PulsedAgents=" + pulsedFormationAgents +
+                            " Source=" + (source ?? "unknown"));
+                    }
+                }
+
+                if (!shouldHoldFormations &&
+                    currentPhase >= CoopBattlePhase.BattleActive &&
+                    team.HasTeamAi &&
+                    team.HasAnyEnemyTeamsWithAgents(false))
+                {
+                    team.ResetTactic();
+                    team.DelegateCommandToAI();
+                    delegatedTeamCount++;
+                }
+            }
+
+            _lastAppliedFormationHoldPhase = currentPhase;
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: battle phase formation hold state applied. " +
+                "Phase=" + currentPhase +
+                " HoldApplied=" + shouldHoldFormations +
+                " AffectedFormations=" + affectedFormationCount +
+                " DelegatedTeams=" + delegatedTeamCount +
+                " PulsedAgents=" + pulsedAgentCount +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        private static bool ShouldSkipBattlePhaseFormationHold(Formation formation)
+        {
+            if (formation == null)
+                return true;
+
+            object playerOwner = GetServerMemberValue(formation, "PlayerOwner");
+            if (playerOwner != null)
+                return true;
+
+            bool hasPlayerControlledTroop = (GetServerMemberValue(formation, "HasPlayerControlledTroop") as bool?) ?? false;
+            if (hasPlayerControlledTroop)
+                return true;
+
+            bool isPlayerTroopInFormation = (GetServerMemberValue(formation, "IsPlayerTroopInFormation") as bool?) ?? false;
+            return isPlayerTroopInFormation;
+        }
+
+        private static int GetBattlePhaseFormationKey(Team team, Formation formation)
+        {
+            int teamKey = ((int)team.Side + 1) * 100;
+            int formationKey = formation != null ? (int)formation.FormationIndex : -1;
+            return teamKey + formationKey;
+        }
+
+        private static int TryPulseFormationAiEngage(Formation formation, Team team)
+        {
+            if (formation == null || team == null || formation.CountOfUnits <= 0)
+                return 0;
+
+            Team enemyTeam = null;
+            foreach (Team candidate in team.Mission.Teams)
+            {
+                if (candidate == null || ReferenceEquals(candidate, team) || ReferenceEquals(candidate, team.Mission.SpectatorTeam))
+                    continue;
+
+                if (!team.IsEnemyOf(candidate))
+                    continue;
+
+                if (!candidate.FormationsIncludingSpecialAndEmpty.Any(x => x != null && x.CountOfUnits > 0))
+                    continue;
+
+                enemyTeam = candidate;
+                break;
+            }
+
+            if (enemyTeam == null)
+                return 0;
+
+            Formation enemyFormation = enemyTeam.FormationsIncludingSpecialAndEmpty.FirstOrDefault(x => x != null && x.CountOfUnits > 0);
+            Agent enemyAgent = enemyFormation?.GetFirstUnit();
+            int pulsedAgentCount = 0;
+
+            formation.ApplyActionOnEachUnit(agent =>
+            {
+                if (agent == null || !agent.IsActive() || agent.Controller != AgentControllerType.AI)
+                    return;
+
+                agent.SetAutomaticTargetSelection(true);
+                agent.SetWatchState(Agent.WatchState.Alarmed);
+                agent.SetAlarmState(Agent.AIStateFlag.Alarmed);
+                if (enemyFormation != null)
+                    agent.SetTargetFormationIndex((int)enemyFormation.FormationIndex);
+                if (enemyAgent != null && enemyAgent.IsActive())
+                    agent.SetTargetAgent(enemyAgent);
+                agent.ForceAiBehaviorSelection();
+                pulsedAgentCount++;
+            }, null);
+
+            return pulsedAgentCount;
         }
 
         private static void TryEnsureBattlefieldArmiesMaterialized(Mission mission, string source)
@@ -5588,6 +5800,8 @@ namespace CoopSpectator.MissionBehaviors
 
             try
             {
+                Formation controlledFormation = controlledAgent.Formation;
+                controlledAgent.SetOwningAgentMissionPeer(null);
                 controlledAgent.MissionPeer = null;
                 controlledAgent.Controller = AgentControllerType.AI;
                 controlledAgent.SetAutomaticTargetSelection(true);
@@ -5596,8 +5810,25 @@ namespace CoopSpectator.MissionBehaviors
                     Agent.WeaponWieldActionType.Instant,
                     Equipment.InitialWeaponEquipPreference.Any);
 
+                if (peer != null)
+                {
+                    GameNetwork.BeginModuleEventAsServer(peer.VirtualPlayer);
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetAgentIsPlayer(controlledAgent.Index, false));
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetAgentOwningMissionPeer(controlledAgent.Index, null));
+                    GameNetwork.EndModuleEventAsServer();
+                }
+
+                bool resetFormationPlayerState = TryResetMaterializedFormationPlayerState(
+                    missionPeer,
+                    controlledFormation,
+                    controlledAgent,
+                    source);
+
                 missionPeer.ControlledAgent = null;
                 missionPeer.FollowedAgent = null;
+                missionPeer.ControlledFormation = null;
+                TrySetBotsUnderControlTotal(missionPeer, 0);
+                missionPeer.BotsUnderControlAlive = 0;
                 if (peer != null && ReferenceEquals(peer.ControlledAgent, controlledAgent))
                     peer.ControlledAgent = null;
 
@@ -5605,6 +5836,8 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopMissionSpawnLogic: returned materialized agent control to AI for respawn. " +
                     "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
                     " AgentIndex=" + controlledAgent.Index +
+                    " Formation=" + (controlledFormation?.FormationIndex.ToString() ?? "none") +
+                    " ResetFormationPlayerState=" + resetFormationPlayerState +
                     " Source=" + (source ?? "unknown"));
                 return true;
             }
@@ -5613,6 +5846,86 @@ namespace CoopSpectator.MissionBehaviors
                 ModLogger.Info("CoopMissionSpawnLogic: failed to return materialized agent control to AI during force-respawnable: " + ex.Message);
                 return false;
             }
+        }
+
+        private static bool TryResetMaterializedFormationPlayerState(
+            MissionPeer missionPeer,
+            Formation formation,
+            Agent controlledAgent,
+            string source)
+        {
+            if (formation == null)
+                return false;
+
+            bool changed = false;
+            try
+            {
+                object playerOwner = GetServerMemberValue(formation, "PlayerOwner");
+                if (ReferenceEquals(playerOwner, controlledAgent))
+                {
+                    SetServerMemberValue(formation, "PlayerOwner", null);
+                    changed = true;
+                }
+
+                bool hadPlayerControlledTroop = (GetServerMemberValue(formation, "HasPlayerControlledTroop") as bool?) ?? false;
+                SetServerMemberValue(formation, "HasPlayerControlledTroop", false);
+                if (hadPlayerControlledTroop && !((GetServerMemberValue(formation, "HasPlayerControlledTroop") as bool?) ?? true))
+                    changed = true;
+
+                bool hadPlayerTroopInFormation = (GetServerMemberValue(formation, "IsPlayerTroopInFormation") as bool?) ?? false;
+                SetServerMemberValue(formation, "IsPlayerTroopInFormation", false);
+                if (hadPlayerTroopInFormation && !((GetServerMemberValue(formation, "IsPlayerTroopInFormation") as bool?) ?? true))
+                    changed = true;
+
+                bool wasAiControlled = (GetServerMemberValue(formation, "IsAIControlled") as bool?) ?? false;
+                SetServerMemberValue(formation, "IsAIControlled", true);
+                if (!wasAiControlled && ((GetServerMemberValue(formation, "IsAIControlled") as bool?) ?? false))
+                    changed = true;
+
+                MethodInfo setControlledByAiMethod = formation.GetType().GetMethod(
+                    "SetControlledByAI",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(bool), typeof(bool) },
+                    null);
+                if (setControlledByAiMethod != null)
+                {
+                    setControlledByAiMethod.Invoke(formation, new object[] { true, true });
+                    changed = true;
+                }
+
+                MethodInfo onAgentControllerChangedMethod = formation.GetType().GetMethod(
+                    "OnAgentControllerChanged",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(Agent), typeof(AgentControllerType) },
+                    null);
+                if (onAgentControllerChangedMethod != null)
+                {
+                    onAgentControllerChangedMethod.Invoke(formation, new object[] { controlledAgent, AgentControllerType.AI });
+                    changed = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: failed to reset materialized formation player state. " +
+                    "Formation=" + formation.FormationIndex +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+            }
+
+            if (changed)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: reset materialized formation player state. " +
+                    "Formation=" + formation.FormationIndex +
+                    " MissionPeer=" + (missionPeer?.GetNetworkPeer()?.UserName ?? missionPeer?.GetNetworkPeer()?.Index.ToString() ?? "none") +
+                    " AgentIndex=" + controlledAgent.Index +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            return changed;
         }
 
         private static void StoreSelectionSideIntent(string requestedSideRaw, string source)
@@ -5721,6 +6034,9 @@ namespace CoopSpectator.MissionBehaviors
             BattleSideEnum intentSide = selectionIntent.Side;
             CoopBattlePhaseStateSnapshot phaseSnapshot = CoopBattlePhaseRuntimeState.GetCurrent();
             CoopBattlePhase currentPhase = phaseSnapshot?.Phase ?? CoopBattlePhase.None;
+            bool canStartBattle = IsBattleStartReady(mission, out int assignedPeerCount, out int controlledPeerCount) &&
+                currentPhase >= CoopBattlePhase.PreBattleHold &&
+                currentPhase < CoopBattlePhase.BattleActive;
 
             var snapshot = new CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot
             {
@@ -5733,7 +6049,7 @@ namespace CoopSpectator.MissionBehaviors
                 HasPeer = missionPeer != null,
                 HasAgent = missionPeer?.ControlledAgent != null && missionPeer.ControlledAgent.IsActive(),
                 CanRespawn = false,
-                CanStartBattle = currentPhase >= CoopBattlePhase.PreBattleHold && currentPhase < CoopBattlePhase.BattleActive,
+                CanStartBattle = canStartBattle,
                 LifecycleState = "NoPeer",
                 LifecycleSource = source,
                 DeathCount = 0,
