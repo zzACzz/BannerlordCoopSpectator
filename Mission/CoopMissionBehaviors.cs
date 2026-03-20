@@ -3414,6 +3414,7 @@ namespace CoopSpectator.MissionBehaviors
         private static bool _hasLoggedImportedEquipmentAvailabilityDiagnostics;
         private static Agent _diagnosticAllowedAgent;
         private const bool EnableFixedMissionCulturesExperiment = true;
+        private const string SyntheticAllCampaignTroopsBattleId = "synthetic_all_campaign_troops";
         private const int MaxMaterializedArmyAgentsPerSide = 24;
         private const int MaxMaterializedAgentsPerEntry = 12;
         private const int FallbackMaterializedAgentsPerTroop = 4;
@@ -4241,6 +4242,7 @@ namespace CoopSpectator.MissionBehaviors
 
             int spawnedCount = 0;
             IReadOnlyList<RosterEntryState> entryStates = GetAllowedControlEntryStatesSnapshot(side);
+            int sideCap = GetMaterializedArmyAgentsPerSideCap(entryStates.Count);
             if (entryStates.Count > 0)
             {
                 var materializableEntries = new List<(RosterEntryState EntryState, BasicCharacterObject Troop, int AvailableCount, string ResolvedTroopSource)>();
@@ -4276,7 +4278,7 @@ namespace CoopSpectator.MissionBehaviors
                 // hero/ranged/specialized entries such as crossbowmen under tight limits.
                 foreach ((RosterEntryState entryState, BasicCharacterObject troop, int availableCount, string resolvedTroopSource) in materializableEntries)
                 {
-                    int remainingCapacity = MaxMaterializedArmyAgentsPerSide - spawnedCount;
+                    int remainingCapacity = sideCap - spawnedCount;
                     if (remainingCapacity <= 0)
                         break;
 
@@ -4298,11 +4300,11 @@ namespace CoopSpectator.MissionBehaviors
                 // Second pass: fill remaining side capacity up to per-entry caps.
                 foreach ((RosterEntryState entryState, BasicCharacterObject troop, int availableCount, string resolvedTroopSource) in materializableEntries)
                 {
-                    int remainingCapacity = MaxMaterializedArmyAgentsPerSide - spawnedCount;
+                    int remainingCapacity = sideCap - spawnedCount;
                     if (remainingCapacity <= 0)
                         break;
 
-                    int remainingEntryCapacity = Math.Min(availableCount, MaxMaterializedAgentsPerEntry) - 1;
+                    int remainingEntryCapacity = Math.Min(availableCount, GetMaterializedAgentsPerEntryCap()) - 1;
                     if (remainingEntryCapacity <= 0)
                         continue;
 
@@ -4325,21 +4327,46 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             IReadOnlyList<string> troopIds = GetAllowedControlTroopIdsSnapshot(side);
+            sideCap = GetMaterializedArmyAgentsPerSideCap(troopIds.Count);
             foreach (string troopId in troopIds)
             {
                 BasicCharacterObject troop = ResolveAllowedCharacter(troopId);
                 if (troop == null)
                     continue;
 
-                int remainingCapacity = MaxMaterializedArmyAgentsPerSide - spawnedCount;
+                int remainingCapacity = sideCap - spawnedCount;
                 if (remainingCapacity <= 0)
                     break;
 
-                int spawnCount = Math.Min(FallbackMaterializedAgentsPerTroop, remainingCapacity);
+                int spawnCount = Math.Min(GetFallbackMaterializedAgentsPerTroopCap(), remainingCapacity);
                 spawnedCount += SpawnMaterializedAgentsForEntry(mission, team, side, troop, null, spawnCount, spawnedCount, source);
             }
 
             return spawnedCount;
+        }
+
+        private static bool IsSyntheticAllCampaignTroopsRuntime()
+        {
+            BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            return string.Equals(snapshot?.BattleId, SyntheticAllCampaignTroopsBattleId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int GetMaterializedArmyAgentsPerSideCap(int requestedEntryCount)
+        {
+            if (!IsSyntheticAllCampaignTroopsRuntime())
+                return MaxMaterializedArmyAgentsPerSide;
+
+            return Math.Max(MaxMaterializedArmyAgentsPerSide, Math.Max(0, requestedEntryCount));
+        }
+
+        private static int GetMaterializedAgentsPerEntryCap()
+        {
+            return IsSyntheticAllCampaignTroopsRuntime() ? 1 : MaxMaterializedAgentsPerEntry;
+        }
+
+        private static int GetFallbackMaterializedAgentsPerTroopCap()
+        {
+            return IsSyntheticAllCampaignTroopsRuntime() ? 1 : FallbackMaterializedAgentsPerTroop;
         }
 
         private static BasicCharacterObject ResolveMaterializedArmyCharacter(

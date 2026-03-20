@@ -21,8 +21,28 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
     /// </summary> // Завершуємо XML-коментар
     public sealed class BattleDetector // Оголошуємо sealed сервіс-клас (стан + простий tick)
     { // Починаємо блок класу
+        private const string SyntheticAllCampaignTroopsBattleId = "synthetic_all_campaign_troops";
         private bool _wasInMissionLastTick; // Пам'ятаємо стан попереднього тіку: чи вже була активна місія
         private bool _hasSentBattleStartForThisMission; // Прапорець, щоб не відправляти BATTLE_START багато разів за одну місію
+        private static bool _useSyntheticAllCampaignTroopsRoster;
+
+        public static bool IsSyntheticAllCampaignTroopsRosterEnabled()
+        {
+            return _useSyntheticAllCampaignTroopsRoster;
+        }
+
+        public static string SetSyntheticAllCampaignTroopsRosterEnabled(bool enabled)
+        {
+            _useSyntheticAllCampaignTroopsRoster = enabled;
+            string summary = enabled
+                ? BuildSyntheticAllCampaignTroopsPreviewSummary()
+                : "disabled";
+            ModLogger.Info(
+                "BattleDetector: synthetic all-campaign-troops test roster " +
+                (enabled ? "enabled" : "disabled") +
+                ". Summary=" + summary + ".");
+            return summary;
+        }
 
         public void Tick() // Метод, який треба викликати кожен кадр з головного потоку (наприклад з SubModule.OnApplicationTick)
         { // Починаємо блок методу
@@ -197,7 +217,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             message.PlayerSide = TryGetPlayerSideTextSafe(); // Пишемо "Attacker/Defender/Unknown" як текст
 
             // 4) Extended battle snapshot (best-effort) // Пояснюємо блок
-            message.Snapshot = BuildBattleSnapshotSafe(message.MapScene, message.PlayerSide);
+            message.Snapshot = _useSyntheticAllCampaignTroopsRoster
+                ? BuildSyntheticAllCampaignTroopsSnapshot(message.MapScene, message.PlayerSide)
+                : BuildBattleSnapshotSafe(message.MapScene, message.PlayerSide);
             BattleSnapshotRuntimeState.SetCurrent(message.Snapshot, "host-battle-detector");
 
             // 5) Legacy fields for transitional clients/runtime // Пояснюємо блок
@@ -208,6 +230,207 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             return message; // Повертаємо сформований DTO
         } // Завершуємо блок методу
+
+        private static BattleSnapshotMessage BuildSyntheticAllCampaignTroopsSnapshot(string mapScene, string playerSideText)
+        {
+            List<BasicCharacterObject> characters = CollectSyntheticAllCampaignTroops();
+            if (characters.Count == 0)
+            {
+                ModLogger.Info("BattleDetector: synthetic all-campaign-troops snapshot had no eligible characters, falling back to live snapshot.");
+                return BuildBattleSnapshotSafe(mapScene, playerSideText);
+            }
+
+            var snapshot = new BattleSnapshotMessage
+            {
+                BattleId = SyntheticAllCampaignTroopsBattleId,
+                BattleType = "SyntheticAllCampaignTroops",
+                MapScene = mapScene,
+                PlayerSide = playerSideText
+            };
+
+            var attackerSide = new BattleSideSnapshotMessage
+            {
+                SideId = "attacker",
+                SideText = nameof(BattleSideEnum.Attacker),
+                IsPlayerSide = string.Equals(playerSideText, nameof(BattleSideEnum.Attacker), StringComparison.OrdinalIgnoreCase)
+            };
+            var defenderSide = new BattleSideSnapshotMessage
+            {
+                SideId = "defender",
+                SideText = nameof(BattleSideEnum.Defender),
+                IsPlayerSide = string.Equals(playerSideText, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase)
+            };
+
+            Dictionary<string, List<BasicCharacterObject>> groupsByCulture = characters
+                .GroupBy(character => TryGetCultureId(character) ?? "neutral_culture", StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.OrderBy(character => character.StringId, StringComparer.OrdinalIgnoreCase).ToList(), StringComparer.OrdinalIgnoreCase);
+
+            var orderedGroups = groupsByCulture
+                .OrderByDescending(group => group.Value.Count)
+                .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            int attackerAssigned = 0;
+            int defenderAssigned = 0;
+            var rosterCharacters = characters.Cast<object>().ToList();
+            foreach (KeyValuePair<string, List<BasicCharacterObject>> group in orderedGroups)
+            {
+                BattleSideSnapshotMessage targetSide = attackerAssigned <= defenderAssigned ? attackerSide : defenderSide;
+                string canonicalCultureId = group.Key;
+                string partyId = "synthetic_" + targetSide.SideId + "_" + canonicalCultureId;
+                string partyName = "Synthetic " + canonicalCultureId + " roster";
+
+                var partySnapshot = new BattlePartySnapshotMessage
+                {
+                    PartyId = partyId,
+                    PartyName = partyName,
+                    IsMainParty = false
+                };
+
+                foreach (BasicCharacterObject character in group.Value)
+                {
+                    if (character == null || string.IsNullOrWhiteSpace(character.StringId))
+                        continue;
+
+                    string originalCharacterId = character.StringId;
+                    string spawnTemplateId = GetMissionSafeCharacterId(character, rosterCharacters);
+                    var troop = new TroopStackInfo
+                    {
+                        EntryId = targetSide.SideId + "|" + partyId + "|" + originalCharacterId,
+                        SideId = targetSide.SideId,
+                        PartyId = partyId,
+                        CharacterId = spawnTemplateId,
+                        OriginalCharacterId = originalCharacterId,
+                        SpawnTemplateId = spawnTemplateId,
+                        TroopName = character.Name?.ToString() ?? originalCharacterId,
+                        CultureId = TryGetCultureId(character),
+                        Tier = TryGetIntProperty(character, "Tier"),
+                        IsMounted = TryGetBoolProperty(character, "IsMounted"),
+                        IsRanged = TryGetCharacterIsRanged(character),
+                        HasShield = TryGetCharacterHasShield(character),
+                        HasThrown = TryGetCharacterHasThrown(character),
+                        IsHero = false,
+                        Count = 1,
+                        WoundedCount = 0
+                    };
+                    ApplyCombatEquipmentSnapshot(troop, character);
+                    partySnapshot.Troops.Add(troop);
+                    targetSide.Troops.Add(troop);
+                }
+
+                if (partySnapshot.Troops.Count <= 0)
+                    continue;
+
+                partySnapshot.TotalManCount = partySnapshot.Troops.Count;
+                targetSide.Parties.Add(partySnapshot);
+                if (ReferenceEquals(targetSide, attackerSide))
+                    attackerAssigned += partySnapshot.TotalManCount;
+                else
+                    defenderAssigned += partySnapshot.TotalManCount;
+            }
+
+            attackerSide.TotalManCount = attackerSide.Troops.Count;
+            defenderSide.TotalManCount = defenderSide.Troops.Count;
+
+            if (attackerSide.Parties.Count > 0)
+                snapshot.Sides.Add(attackerSide);
+            if (defenderSide.Parties.Count > 0)
+                snapshot.Sides.Add(defenderSide);
+
+            ModLogger.Info(
+                "BattleDetector: using synthetic all-campaign-troops snapshot. " +
+                "Characters=" + characters.Count +
+                " AttackerEntries=" + attackerSide.Troops.Count +
+                " DefenderEntries=" + defenderSide.Troops.Count + ".");
+            LogSnapshotMappings("synthetic-all-campaign-troops", snapshot);
+            return snapshot;
+        }
+
+        private static List<BasicCharacterObject> CollectSyntheticAllCampaignTroops()
+        {
+            var results = new List<BasicCharacterObject>();
+            try
+            {
+                MethodInfo getObjectTypeList = typeof(MBObjectManager).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(method =>
+                        string.Equals(method.Name, "GetObjectTypeList", StringComparison.Ordinal) &&
+                        method.IsGenericMethodDefinition &&
+                        method.GetParameters().Length == 0);
+                if (getObjectTypeList == null || MBObjectManager.Instance == null)
+                    return results;
+
+                object objectList = getObjectTypeList.MakeGenericMethod(typeof(BasicCharacterObject)).Invoke(MBObjectManager.Instance, null);
+                if (!(objectList is System.Collections.IEnumerable enumerable))
+                    return results;
+
+                var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (object item in enumerable)
+                {
+                    if (!(item is BasicCharacterObject character))
+                        continue;
+
+                    if (!IsSyntheticAllCampaignTroopCandidate(character))
+                        continue;
+
+                    if (!seenIds.Add(character.StringId))
+                        continue;
+
+                    results.Add(character);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to collect synthetic campaign troop roster: " + ex.Message);
+            }
+
+            return results
+                .OrderBy(character => TryGetCultureId(character) ?? "neutral_culture", StringComparer.OrdinalIgnoreCase)
+                .ThenBy(character => TryGetIntProperty(character, "Tier"))
+                .ThenBy(character => character.StringId, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static bool IsSyntheticAllCampaignTroopCandidate(BasicCharacterObject character)
+        {
+            if (character == null || string.IsNullOrWhiteSpace(character.StringId))
+                return false;
+
+            if (character.IsHero)
+                return false;
+
+            string id = character.StringId;
+            if (id.StartsWith("mp_", StringComparison.OrdinalIgnoreCase) ||
+                id.StartsWith("multiplayer_", StringComparison.OrdinalIgnoreCase) ||
+                id.StartsWith("dummy_", StringComparison.OrdinalIgnoreCase) ||
+                id.IndexOf("template", StringComparison.OrdinalIgnoreCase) >= 0)
+                return false;
+
+            if (TryResolvePrimaryCombatEquipment(character) == null)
+                return false;
+
+            int tier = TryGetIntProperty(character, "Tier");
+            bool isMounted = TryGetBoolProperty(character, "IsMounted");
+            bool isRanged = TryGetCharacterIsRanged(character);
+            bool hasShield = TryGetCharacterHasShield(character);
+            bool hasThrown = TryGetCharacterHasThrown(character);
+
+            return tier > 0 || isMounted || isRanged || hasShield || hasThrown;
+        }
+
+        private static string BuildSyntheticAllCampaignTroopsPreviewSummary()
+        {
+            List<BasicCharacterObject> characters = CollectSyntheticAllCampaignTroops();
+            if (characters.Count == 0)
+                return "eligible=0";
+
+            Dictionary<string, int> byCulture = characters
+                .GroupBy(character => TryGetCultureId(character) ?? "neutral_culture", StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
+            return "eligible=" + characters.Count + " cultures=[" +
+                   string.Join(", ", byCulture.Select(pair => pair.Key + "=" + pair.Value)) + "]";
+        }
 
         private static string TryGetMapSceneNameSafe() // Best-effort: намагаємось отримати назву сцени карти кампанії
         { // Починаємо блок методу
