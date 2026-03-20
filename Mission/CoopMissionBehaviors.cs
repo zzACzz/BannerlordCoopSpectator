@@ -4231,6 +4231,7 @@ namespace CoopSpectator.MissionBehaviors
             IReadOnlyList<RosterEntryState> entryStates = GetAllowedControlEntryStatesSnapshot(side);
             if (entryStates.Count > 0)
             {
+                var materializableEntries = new List<(RosterEntryState EntryState, BasicCharacterObject Troop, int AvailableCount, string ResolvedTroopSource)>();
                 foreach (RosterEntryState entryState in entryStates)
                 {
                     string spawnTemplateId = ResolveEntrySpawnTemplateId(entryState);
@@ -4255,12 +4256,57 @@ namespace CoopSpectator.MissionBehaviors
                         continue;
                     }
 
+                    materializableEntries.Add((entryState, troop, availableCount, resolvedTroopSource));
+                }
+
+                // First pass: ensure each distinct roster entry gets at least one spawned body
+                // before large stacks consume the side cap. This preserves representation for
+                // hero/ranged/specialized entries such as crossbowmen under tight limits.
+                foreach ((RosterEntryState entryState, BasicCharacterObject troop, int availableCount, string resolvedTroopSource) in materializableEntries)
+                {
                     int remainingCapacity = MaxMaterializedArmyAgentsPerSide - spawnedCount;
                     if (remainingCapacity <= 0)
                         break;
 
-                    int spawnCount = Math.Min(Math.Min(availableCount, MaxMaterializedAgentsPerEntry), remainingCapacity);
-                    spawnedCount += SpawnMaterializedAgentsForEntry(mission, team, side, troop, entryState, spawnCount, spawnedCount, source + " character=" + resolvedTroopSource);
+                    int seedCount = Math.Min(1, Math.Min(availableCount, remainingCapacity));
+                    if (seedCount <= 0)
+                        continue;
+
+                    spawnedCount += SpawnMaterializedAgentsForEntry(
+                        mission,
+                        team,
+                        side,
+                        troop,
+                        entryState,
+                        seedCount,
+                        spawnedCount,
+                        source + " character=" + resolvedTroopSource + " pass=seed");
+                }
+
+                // Second pass: fill remaining side capacity up to per-entry caps.
+                foreach ((RosterEntryState entryState, BasicCharacterObject troop, int availableCount, string resolvedTroopSource) in materializableEntries)
+                {
+                    int remainingCapacity = MaxMaterializedArmyAgentsPerSide - spawnedCount;
+                    if (remainingCapacity <= 0)
+                        break;
+
+                    int remainingEntryCapacity = Math.Min(availableCount, MaxMaterializedAgentsPerEntry) - 1;
+                    if (remainingEntryCapacity <= 0)
+                        continue;
+
+                    int extraCount = Math.Min(remainingEntryCapacity, remainingCapacity);
+                    if (extraCount <= 0)
+                        continue;
+
+                    spawnedCount += SpawnMaterializedAgentsForEntry(
+                        mission,
+                        team,
+                        side,
+                        troop,
+                        entryState,
+                        extraCount,
+                        spawnedCount,
+                        source + " character=" + resolvedTroopSource + " pass=fill");
                 }
 
                 return spawnedCount;
@@ -4525,18 +4571,18 @@ namespace CoopSpectator.MissionBehaviors
             }
             else
             {
-                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon0, entryState.CombatItem0Id, "Item0", appliedSlots, missedSlots);
-                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon1, entryState.CombatItem1Id, "Item1", appliedSlots, missedSlots);
-                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon2, entryState.CombatItem2Id, "Item2", appliedSlots, missedSlots);
-                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon3, entryState.CombatItem3Id, "Item3", appliedSlots, missedSlots);
+                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon0, entryState.CombatItem0Id, "Item0", entryState, appliedSlots, missedSlots);
+                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon1, entryState.CombatItem1Id, "Item1", entryState, appliedSlots, missedSlots);
+                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon2, entryState.CombatItem2Id, "Item2", entryState, appliedSlots, missedSlots);
+                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon3, entryState.CombatItem3Id, "Item3", entryState, appliedSlots, missedSlots);
             }
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Head, entryState.CombatHeadId, "Head", appliedSlots, missedSlots);
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Body, entryState.CombatBodyId, "Body", appliedSlots, missedSlots);
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Leg, entryState.CombatLegId, "Leg", appliedSlots, missedSlots);
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Gloves, entryState.CombatGlovesId, "Gloves", appliedSlots, missedSlots);
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Cape, entryState.CombatCapeId, "Cape", appliedSlots, missedSlots);
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Horse, entryState.CombatHorseId, "Horse", appliedSlots, missedSlots);
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.HorseHarness, entryState.CombatHorseHarnessId, "HorseHarness", appliedSlots, missedSlots);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Head, entryState.CombatHeadId, "Head", entryState, appliedSlots, missedSlots);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Body, entryState.CombatBodyId, "Body", entryState, appliedSlots, missedSlots);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Leg, entryState.CombatLegId, "Leg", entryState, appliedSlots, missedSlots);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Gloves, entryState.CombatGlovesId, "Gloves", entryState, appliedSlots, missedSlots);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Cape, entryState.CombatCapeId, "Cape", entryState, appliedSlots, missedSlots);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Horse, entryState.CombatHorseId, "Horse", entryState, appliedSlots, missedSlots);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.HorseHarness, entryState.CombatHorseHarnessId, "HorseHarness", entryState, appliedSlots, missedSlots);
             return appliedSlots.Count > 0 ? string.Join(", ", appliedSlots) : "(none)";
         }
 
@@ -4566,10 +4612,10 @@ namespace CoopSpectator.MissionBehaviors
             List<string> missedSlots)
         {
             var resolvedItems = new List<ResolvedMaterializedEquipmentOverride>();
-            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem0Id, "Item0", resolvedItems, missedSlots);
-            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem1Id, "Item1", resolvedItems, missedSlots);
-            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem2Id, "Item2", resolvedItems, missedSlots);
-            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem3Id, "Item3", resolvedItems, missedSlots);
+            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem0Id, "Item0", entryState, resolvedItems, missedSlots);
+            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem1Id, "Item1", entryState, resolvedItems, missedSlots);
+            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem2Id, "Item2", entryState, resolvedItems, missedSlots);
+            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem3Id, "Item3", entryState, resolvedItems, missedSlots);
             if (resolvedItems.Count == 0)
                 return;
 
@@ -4589,6 +4635,7 @@ namespace CoopSpectator.MissionBehaviors
         private static void TryAddResolvedMaterializedEquipmentOverride(
             string itemId,
             string sourceSlotLabel,
+            RosterEntryState entryState,
             List<ResolvedMaterializedEquipmentOverride> resolvedItems,
             List<string> missedSlots)
         {
@@ -4597,7 +4644,7 @@ namespace CoopSpectator.MissionBehaviors
 
             string resolvedItemId;
             string resolutionSource;
-            ItemObject item = ResolveMaterializedEquipmentItem(itemId, out resolvedItemId, out resolutionSource);
+            ItemObject item = ResolveMaterializedEquipmentItem(itemId, entryState, sourceSlotLabel, out resolvedItemId, out resolutionSource);
             if (item == null)
             {
                 missedSlots?.Add(sourceSlotLabel + "=" + itemId);
@@ -4757,6 +4804,7 @@ namespace CoopSpectator.MissionBehaviors
             EquipmentIndex slot,
             string itemId,
             string slotLabel,
+            RosterEntryState entryState,
             List<string> appliedSlots,
             List<string> missedSlots)
         {
@@ -4765,7 +4813,7 @@ namespace CoopSpectator.MissionBehaviors
 
             string resolvedItemId;
             string resolutionSource;
-            ItemObject item = ResolveMaterializedEquipmentItem(itemId, out resolvedItemId, out resolutionSource);
+            ItemObject item = ResolveMaterializedEquipmentItem(itemId, entryState, slotLabel, out resolvedItemId, out resolutionSource);
             if (item == null)
             {
                 missedSlots?.Add(slotLabel + "=" + itemId);
@@ -4787,6 +4835,8 @@ namespace CoopSpectator.MissionBehaviors
 
         private static ItemObject ResolveMaterializedEquipmentItem(
             string itemId,
+            RosterEntryState entryState,
+            string slotLabel,
             out string resolvedItemId,
             out string resolutionSource)
         {
@@ -4815,7 +4865,7 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (TryNormalizeCampaignEquipmentToMpItemId(itemId, out string normalizedItemId))
+            if (TryNormalizeCampaignEquipmentToMpItemId(itemId, entryState, slotLabel, out string normalizedItemId))
             {
                 ItemObject normalizedItem = TryGetMaterializedEquipmentItem(normalizedItemId);
                 if (normalizedItem != null)
@@ -4844,7 +4894,11 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static bool TryNormalizeCampaignEquipmentToMpItemId(string itemId, out string normalizedItemId)
+        private static bool TryNormalizeCampaignEquipmentToMpItemId(
+            string itemId,
+            RosterEntryState entryState,
+            string slotLabel,
+            out string normalizedItemId)
         {
             normalizedItemId = null;
             if (string.IsNullOrWhiteSpace(itemId))
@@ -4889,10 +4943,10 @@ namespace CoopSpectator.MissionBehaviors
                     normalizedItemId = "mp_hatchet_axe";
                     return true;
                 case "sling_wool":
-                    normalizedItemId = "mp_light_javelin";
+                    normalizedItemId = "mp_sling_stone";
                     return true;
                 case "sling_stoneammo":
-                    normalizedItemId = "mp_light_javelin";
+                    normalizedItemId = "mp_sling_stone";
                     return true;
                 case "sturgia_axe_2_t2":
                     normalizedItemId = "mp_sturgia_axe";
@@ -4900,9 +4954,274 @@ namespace CoopSpectator.MissionBehaviors
                 case "northern_spear_1_t2":
                     normalizedItemId = "mp_sturgia_spear";
                     return true;
+                case "battania_sword_1_t2":
+                    normalizedItemId = "mp_battania_long_sword";
+                    return true;
+                case "empire_noble_sword_3_t5":
+                    normalizedItemId = "mp_empire_paramerion";
+                    return true;
+                case "empire_sword_3_t3":
+                    normalizedItemId = "mp_empire_paramerion";
+                    return true;
+                case "aserai_sword_1_t2":
+                case "aserai_sword_2_t2":
+                case "aserai_sword_3_t3":
+                case "aserai_sword_4_t4":
+                case "desert_long_sword_t4":
+                case "aserai_noble_sword_2_t5":
+                    normalizedItemId = "mp_aserai_sword";
+                    return true;
+                case "peasant_hammer_2_t1":
+                    normalizedItemId = "mp_aserai_heavy_mace";
+                    return true;
+                case "noble_horse_southern":
+                case "war_camel":
+                    normalizedItemId = "mp_aserai_horse_war";
+                    return true;
+                case "noble_horse_imperial":
+                    normalizedItemId = "mp_empire_horse_war";
+                    return true;
+                case "mail_and_plate_barding":
+                    normalizedItemId = "mp_mail_and_plate_barding";
+                    return true;
+                case "aserai_chain_plate_armor_d":
+                    normalizedItemId = "mp_aserai_robe_c_chain";
+                    return true;
+                case "leatherlame_roundkettle_over_imperial_leather":
+                    normalizedItemId = "mp_roundkettle_over_imperial_leather";
+                    return true;
                 default:
-                    return false;
+                    return TryNormalizeCampaignWeaponPatternToMpItemId(itemId, entryState, slotLabel, out normalizedItemId);
             }
+        }
+
+        private static bool TryNormalizeCampaignWeaponPatternToMpItemId(
+            string itemId,
+            RosterEntryState entryState,
+            string slotLabel,
+            out string normalizedItemId)
+        {
+            normalizedItemId = null;
+            if (string.IsNullOrWhiteSpace(itemId))
+                return false;
+
+            string normalized = itemId.Trim().ToLowerInvariant();
+            string cultureId = entryState?.CultureId?.Trim().ToLowerInvariant();
+            string spawnTemplateId = entryState?.SpawnTemplateId?.Trim().ToLowerInvariant();
+            bool isMounted = entryState?.IsMounted == true;
+            bool isHeavyRanged = !string.IsNullOrWhiteSpace(spawnTemplateId) &&
+                (spawnTemplateId.Contains("heavy_ranged") || spawnTemplateId.Contains("crossbow"));
+            bool isHorseArcher = !string.IsNullOrWhiteSpace(spawnTemplateId) &&
+                spawnTemplateId.Contains("horse_archer");
+            bool isLightRanged = !string.IsNullOrWhiteSpace(spawnTemplateId) &&
+                spawnTemplateId.Contains("light_ranged");
+
+            if (normalized.Contains("crossbow"))
+            {
+                normalizedItemId = normalized.Contains("light") || isLightRanged
+                    ? "mp_light_crossbow"
+                    : "mp_crossbow";
+                return true;
+            }
+
+            if (normalized.Contains("bolt"))
+            {
+                if (string.Equals(cultureId, "empire", StringComparison.Ordinal))
+                {
+                    normalizedItemId = "mp_bolts_imperial";
+                    return true;
+                }
+
+                if (string.Equals(cultureId, "vlandia", StringComparison.Ordinal))
+                {
+                    normalizedItemId = "mp_bolts_western";
+                    return true;
+                }
+
+                normalizedItemId = normalized.Contains("empire") || normalized.Contains("imperial")
+                    ? "mp_bolts_imperial"
+                    : "mp_bolts_western";
+                return true;
+            }
+
+            if (normalized.Contains("bow"))
+            {
+                if (string.Equals(cultureId, "khuzait", StringComparison.Ordinal))
+                {
+                    normalizedItemId = "mp_nomad_bow";
+                    return true;
+                }
+
+                if (string.Equals(cultureId, "battania", StringComparison.Ordinal))
+                {
+                    normalizedItemId = isHeavyRanged ? "mp_long_bow" : "mp_mountain_hunting_bow";
+                    return true;
+                }
+
+                if (string.Equals(cultureId, "sturgia", StringComparison.Ordinal))
+                {
+                    normalizedItemId = "mp_nordic_short_bow";
+                    return true;
+                }
+
+                if (string.Equals(cultureId, "aserai", StringComparison.Ordinal))
+                {
+                    normalizedItemId = "mp_imperial_recurve_bow";
+                    return true;
+                }
+
+                if (string.Equals(cultureId, "empire", StringComparison.Ordinal))
+                {
+                    normalizedItemId = "mp_imperial_recurve_bow";
+                    return true;
+                }
+
+                if (normalized.Contains("nomad") || normalized.Contains("steppe") || normalized.Contains("composite"))
+                {
+                    normalizedItemId = "mp_nomad_bow";
+                    return true;
+                }
+
+                if (normalized.Contains("empire") || normalized.Contains("imperial") || normalized.Contains("recurve") || normalized.Contains("desert"))
+                {
+                    normalizedItemId = "mp_imperial_recurve_bow";
+                    return true;
+                }
+
+                if (normalized.Contains("mountain"))
+                {
+                    normalizedItemId = "mp_mountain_hunting_bow";
+                    return true;
+                }
+
+                if (normalized.Contains("nordic") || normalized.Contains("sturgia"))
+                {
+                    normalizedItemId = "mp_nordic_short_bow";
+                    return true;
+                }
+
+                if (normalized.Contains("longbow") ||
+                    normalized.Contains("long_bow") ||
+                    normalized.Contains("woodland") ||
+                    normalized.Contains("lowland") ||
+                    normalized.Contains("highland") ||
+                    normalized.Contains("yew") ||
+                    normalized.Contains("ranger") ||
+                    normalized.Contains("tribal") ||
+                    normalized.Contains("battania"))
+                {
+                    normalizedItemId = "mp_long_bow";
+                    return true;
+                }
+
+                normalizedItemId = "mp_hunting_bow";
+                return true;
+            }
+
+            if (normalized.Contains("arrow"))
+            {
+                if (string.Equals(cultureId, "khuzait", StringComparison.Ordinal))
+                {
+                    normalizedItemId = isMounted || isHorseArcher
+                        ? "mp_arrows_steppe_mounted"
+                        : "mp_arrows_steppe";
+                    return true;
+                }
+
+                if (string.Equals(cultureId, "battania", StringComparison.Ordinal) ||
+                    string.Equals(cultureId, "sturgia", StringComparison.Ordinal))
+                {
+                    normalizedItemId = "mp_arrows_bodkin";
+                    return true;
+                }
+
+                if (string.Equals(cultureId, "empire", StringComparison.Ordinal) ||
+                    string.Equals(cultureId, "aserai", StringComparison.Ordinal))
+                {
+                    normalizedItemId = "mp_arrows_barbed";
+                    return true;
+                }
+
+                if (normalized.Contains("steppe"))
+                {
+                    normalizedItemId = isMounted || isHorseArcher
+                        ? "mp_arrows_steppe_mounted"
+                        : "mp_arrows_steppe";
+                    return true;
+                }
+
+                if (normalized.Contains("barbed"))
+                {
+                    normalizedItemId = "mp_arrows_barbed";
+                    return true;
+                }
+
+                if (normalized.Contains("bodkin") || normalized.Contains("piercing"))
+                {
+                    normalizedItemId = "mp_arrows_bodkin";
+                    return true;
+                }
+
+                normalizedItemId = "mp_arrows_barbed";
+                return true;
+            }
+
+            if (normalized.Contains("javelin"))
+            {
+                if (string.Equals(cultureId, "aserai", StringComparison.Ordinal))
+                {
+                    normalizedItemId = "mp_javelin";
+                    return true;
+                }
+
+                if (normalized.Contains("empire") || normalized.Contains("imperial"))
+                {
+                    normalizedItemId = "mp_empire_javelin";
+                    return true;
+                }
+
+                if (normalized.Contains("battania"))
+                {
+                    normalizedItemId = "mp_battania_javelin";
+                    return true;
+                }
+
+                if (normalized.Contains("light"))
+                {
+                    normalizedItemId = "mp_light_javelin";
+                    return true;
+                }
+
+                normalizedItemId = "mp_javelin";
+                return true;
+            }
+
+            if (normalized.Contains("spear") || normalized.Contains("lance"))
+            {
+                if (string.Equals(cultureId, "aserai", StringComparison.Ordinal))
+                {
+                    normalizedItemId = entryState?.IsMounted == true
+                        ? "mp_aserai_long_spear"
+                        : "mp_southern_spear";
+                    return true;
+                }
+
+                if (normalized.Contains("southern"))
+                {
+                    normalizedItemId = "mp_southern_spear";
+                    return true;
+                }
+            }
+
+            if (normalized.Contains("stone"))
+            {
+                normalizedItemId = normalized.Contains("sling")
+                    ? "mp_sling_stone"
+                    : "mp_throwing_stone";
+                return true;
+            }
+
+            return false;
         }
 
         private static string BuildMaterializedEquipmentOverrideDiagnostics(RosterEntryState entryState, BasicCharacterObject troop)
@@ -7968,6 +8287,9 @@ namespace CoopSpectator.MissionBehaviors
             if (string.IsNullOrWhiteSpace(authoritativeBaseTroopId))
                 return ResolveAllowedTargetTroopIdsForPeerCulture(missionPeer).FirstOrDefault();
 
+            if (ShouldPreserveExactHeroRuntimeTarget(preferredEntry, authoritativeBaseTroopId))
+                return authoritativeBaseTroopId;
+
             string cultureSpecificTargetTroopId = ResolveCultureSpecificTargetTroopId(authoritativeBaseTroopId, missionPeer?.Culture);
             return string.IsNullOrWhiteSpace(cultureSpecificTargetTroopId)
                 ? authoritativeBaseTroopId
@@ -8023,7 +8345,11 @@ namespace CoopSpectator.MissionBehaviors
             foreach (string baseTargetTroopId in allowedBaseTroopIds)
             {
                 string preferredTroopId = baseTargetTroopId;
-                if (!string.IsNullOrWhiteSpace(cultureToken))
+                RosterEntryState matchingEntry = orderedEntries.FirstOrDefault(entry =>
+                    entry != null &&
+                    string.Equals(entry.CharacterId, baseTargetTroopId, StringComparison.Ordinal));
+                if (!ShouldPreserveExactHeroRuntimeTarget(matchingEntry, baseTargetTroopId) &&
+                    !string.IsNullOrWhiteSpace(cultureToken))
                 {
                     string cultureSpecificCoopTroopId = TryBuildCultureSpecificCoopTroopId(baseTargetTroopId, cultureToken);
                     if (!string.IsNullOrWhiteSpace(cultureSpecificCoopTroopId))
@@ -8075,7 +8401,8 @@ namespace CoopSpectator.MissionBehaviors
                         continue;
 
                     string resolvedTroopId = baseTroopId;
-                    if (!string.IsNullOrWhiteSpace(cultureToken))
+                    if (!ShouldPreserveExactHeroRuntimeTarget(entry, baseTroopId) &&
+                        !string.IsNullOrWhiteSpace(cultureToken))
                     {
                         string cultureSpecificTroopId = TryBuildCultureSpecificCoopTroopId(baseTroopId, cultureToken);
                         if (!string.IsNullOrWhiteSpace(cultureSpecificTroopId) && ResolveAllowedCharacter(cultureSpecificTroopId) != null)
@@ -8099,6 +8426,17 @@ namespace CoopSpectator.MissionBehaviors
                 if (allowedCharacter != null)
                     yield return allowedCharacter;
             }
+        }
+
+        private static bool ShouldPreserveExactHeroRuntimeTarget(RosterEntryState entry, string troopId)
+        {
+            if (entry == null || string.IsNullOrWhiteSpace(troopId))
+                return false;
+
+            if (!string.Equals(entry.CharacterId, troopId, StringComparison.Ordinal))
+                return false;
+
+            return IsHeroRoleEntry(entry, "player", "companion", "wanderer", "lord");
         }
 
         private static string TryBuildCultureSpecificCoopTroopId(string targetTroopId, string cultureToken)
