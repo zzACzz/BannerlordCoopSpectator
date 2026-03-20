@@ -59,10 +59,33 @@ namespace CoopSpectator.Infrastructure
         public string OriginalCharacterId { get; set; }
         public string SpawnTemplateId { get; set; }
         public string TroopName { get; set; }
+        public string CultureId { get; set; }
+        public string HeroId { get; set; }
+        public string HeroRole { get; set; }
+        public string HeroOccupationId { get; set; }
+        public string HeroClanId { get; set; }
+        public string HeroTemplateId { get; set; }
+        public int HeroLevel { get; set; }
+        public float HeroAge { get; set; }
+        public bool HeroIsFemale { get; set; }
         public int Count { get; set; }
         public int WoundedCount { get; set; }
         public bool IsHero { get; set; }
         public bool IsMounted { get; set; }
+        public bool IsRanged { get; set; }
+        public bool HasShield { get; set; }
+        public bool HasThrown { get; set; }
+        public string CombatItem0Id { get; set; }
+        public string CombatItem1Id { get; set; }
+        public string CombatItem2Id { get; set; }
+        public string CombatItem3Id { get; set; }
+        public string CombatHeadId { get; set; }
+        public string CombatBodyId { get; set; }
+        public string CombatLegId { get; set; }
+        public string CombatGlovesId { get; set; }
+        public string CombatCapeId { get; set; }
+        public string CombatHorseId { get; set; }
+        public string CombatHorseHarnessId { get; set; }
         public int Tier { get; set; }
     }
 
@@ -98,10 +121,33 @@ namespace CoopSpectator.Infrastructure
         public string OriginalCharacterId { get; set; }
         public string SpawnTemplateId { get; set; }
         public string TroopName { get; set; }
+        public string CultureId { get; set; }
+        public string HeroId { get; set; }
+        public string HeroRole { get; set; }
+        public string HeroOccupationId { get; set; }
+        public string HeroClanId { get; set; }
+        public string HeroTemplateId { get; set; }
+        public int HeroLevel { get; set; }
+        public float HeroAge { get; set; }
+        public bool HeroIsFemale { get; set; }
         public int Count { get; set; }
         public int WoundedCount { get; set; }
         public bool IsHero { get; set; }
         public bool IsMounted { get; set; }
+        public bool IsRanged { get; set; }
+        public bool HasShield { get; set; }
+        public bool HasThrown { get; set; }
+        public string CombatItem0Id { get; set; }
+        public string CombatItem1Id { get; set; }
+        public string CombatItem2Id { get; set; }
+        public string CombatItem3Id { get; set; }
+        public string CombatHeadId { get; set; }
+        public string CombatBodyId { get; set; }
+        public string CombatLegId { get; set; }
+        public string CombatGlovesId { get; set; }
+        public string CombatCapeId { get; set; }
+        public string CombatHorseId { get; set; }
+        public string CombatHorseHarnessId { get; set; }
         public int Tier { get; set; }
     }
 
@@ -421,10 +467,33 @@ namespace CoopSpectator.Infrastructure
                         OriginalCharacterId = entryProjection.OriginalCharacterId,
                         SpawnTemplateId = entryProjection.SpawnTemplateId,
                         TroopName = entryProjection.TroopName,
+                        CultureId = entryProjection.CultureId,
+                        HeroId = entryProjection.HeroId,
+                        HeroRole = entryProjection.HeroRole,
+                        HeroOccupationId = entryProjection.HeroOccupationId,
+                        HeroClanId = entryProjection.HeroClanId,
+                        HeroTemplateId = entryProjection.HeroTemplateId,
+                        HeroLevel = entryProjection.HeroLevel,
+                        HeroAge = entryProjection.HeroAge,
+                        HeroIsFemale = entryProjection.HeroIsFemale,
                         Count = entryProjection.Count,
                         WoundedCount = entryProjection.WoundedCount,
                         IsHero = entryProjection.IsHero,
                         IsMounted = entryProjection.IsMounted,
+                        IsRanged = entryProjection.IsRanged,
+                        HasShield = entryProjection.HasShield,
+                        HasThrown = entryProjection.HasThrown,
+                        CombatItem0Id = entryProjection.CombatItem0Id,
+                        CombatItem1Id = entryProjection.CombatItem1Id,
+                        CombatItem2Id = entryProjection.CombatItem2Id,
+                        CombatItem3Id = entryProjection.CombatItem3Id,
+                        CombatHeadId = entryProjection.CombatHeadId,
+                        CombatBodyId = entryProjection.CombatBodyId,
+                        CombatLegId = entryProjection.CombatLegId,
+                        CombatGlovesId = entryProjection.CombatGlovesId,
+                        CombatCapeId = entryProjection.CombatCapeId,
+                        CombatHorseId = entryProjection.CombatHorseId,
+                        CombatHorseHarnessId = entryProjection.CombatHorseHarnessId,
                         Tier = entryProjection.Tier
                     };
                     sideState.Entries.Add(entryState);
@@ -476,10 +545,33 @@ namespace CoopSpectator.Infrastructure
                 OriginalCharacterId = ResolveOriginalCharacterId(troop),
                 SpawnTemplateId = spawnTemplateId,
                 TroopName = troop.TroopName,
+                CultureId = troop.CultureId,
+                HeroId = troop.HeroId,
+                HeroRole = troop.HeroRole,
+                HeroOccupationId = troop.HeroOccupationId,
+                HeroClanId = troop.HeroClanId,
+                HeroTemplateId = troop.HeroTemplateId,
+                HeroLevel = troop.HeroLevel,
+                HeroAge = troop.HeroAge,
+                HeroIsFemale = troop.HeroIsFemale,
                 Count = troop.Count,
                 WoundedCount = troop.WoundedCount,
                 IsHero = troop.IsHero,
                 IsMounted = troop.IsMounted,
+                IsRanged = troop.IsRanged,
+                HasShield = troop.HasShield,
+                HasThrown = troop.HasThrown,
+                CombatItem0Id = troop.CombatItem0Id,
+                CombatItem1Id = troop.CombatItem1Id,
+                CombatItem2Id = troop.CombatItem2Id,
+                CombatItem3Id = troop.CombatItem3Id,
+                CombatHeadId = troop.CombatHeadId,
+                CombatBodyId = troop.CombatBodyId,
+                CombatLegId = troop.CombatLegId,
+                CombatGlovesId = troop.CombatGlovesId,
+                CombatCapeId = troop.CombatCapeId,
+                CombatHorseId = troop.CombatHorseId,
+                CombatHorseHarnessId = troop.CombatHorseHarnessId,
                 Tier = troop.Tier
             };
         }

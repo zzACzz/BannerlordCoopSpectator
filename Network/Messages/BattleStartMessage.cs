@@ -1,21 +1,17 @@
-using System.Collections.Generic; // Підключаємо List<> для списків у DTO
+using System.Collections.Generic;
 
-namespace CoopSpectator.Network.Messages // Оголошуємо простір імен для мережевих моделей
-{ // Починаємо блок простору імен
-    /// <summary> // Документуємо клас
-    /// DTO для повідомлення `BATTLE_START:{json}` — мінімальні дані, // Пояснюємо призначення
-    /// щоб клієнт міг показати запрошення в бій і підготувати вибір військ. // Додаємо контекст майбутніх етапів
-    /// </summary> // Завершуємо XML-коментар
-    public sealed class BattleStartMessage // Оголошуємо sealed DTO-клас без наслідування
-    { // Починаємо блок класу
-        public string MapScene { get; set; } // Назва сцени/карти (поки що: з кампанії; потім може бути сцена битви)
-        public float MapX { get; set; } // X координата місця (на мапі кампанії) де стартує бій
-        public float MapY { get; set; } // Y координата місця (на мапі кампанії) де стартує бій
-        public string PlayerSide { get; set; } // Сторона гравця ("Attacker"/"Defender"/"Unknown") як текст
-        public int ArmySize { get; set; } // Загальна кількість бійців у партії хоста на момент старту
-        public List<TroopStackInfo> Troops { get; set; } // Список стеків військ (тип юнита + кількість)
-        public BattleSnapshotMessage Snapshot { get; set; } // Розширений двосторонній snapshot битви для coop runtime.
-    } // Завершуємо блок класу
+namespace CoopSpectator.Network.Messages
+{
+    public sealed class BattleStartMessage
+    {
+        public string MapScene { get; set; }
+        public float MapX { get; set; }
+        public float MapY { get; set; }
+        public string PlayerSide { get; set; }
+        public int ArmySize { get; set; }
+        public List<TroopStackInfo> Troops { get; set; }
+        public BattleSnapshotMessage Snapshot { get; set; }
+    }
 
     public sealed class BattleSnapshotMessage
     {
@@ -45,22 +41,42 @@ namespace CoopSpectator.Network.Messages // Оголошуємо простір 
         public List<TroopStackInfo> Troops { get; set; } = new List<TroopStackInfo>();
     }
 
-    /// <summary> // Документуємо клас
-    /// Інформація про один "стек" військ одного типу (агрегація замість списку з 1000 елементів). // Пояснюємо чому так
-    /// </summary> // Завершуємо XML-коментар
-    public sealed class TroopStackInfo // Оголошуємо sealed DTO-клас для одного стеку військ
-    { // Починаємо блок класу
-        public string EntryId { get; set; } // Стабільний ідентифікатор стеку в межах snapshot.
-        public string SideId { get; set; } // Сторона, до якої належить стек.
-        public string PartyId { get; set; } // Партія-джерело цього стеку.
-        public string CharacterId { get; set; } // Back-compat alias; runtime now treats this as SpawnTemplateId.
-        public string OriginalCharacterId { get; set; } // Справжній campaign StringId персонажа/юнита.
-        public string SpawnTemplateId { get; set; } // MP-safe runtime template id for mission spawn/materialization.
-        public string TroopName { get; set; } // Людська назва юнита (для UI клієнта)
-        public int Tier { get; set; } // Тір (рівень) юнита (для фільтрації/балансу)
-        public bool IsMounted { get; set; } // Чи юнит верховий (на коні)
-        public bool IsHero { get; set; } // Чи це герой (унікальний персонаж; важливо для правил відбору)
-        public int Count { get; set; } // Скільки таких юнитів у партії
-        public int WoundedCount { get; set; } // Скільки з них поранені (на майбутнє: щоб не пропонувати wounded)
-    } // Завершуємо блок класу
-} // Завершуємо блок простору імен
+    public sealed class TroopStackInfo
+    {
+        public string EntryId { get; set; }
+        public string SideId { get; set; }
+        public string PartyId { get; set; }
+        public string CharacterId { get; set; }
+        public string OriginalCharacterId { get; set; }
+        public string SpawnTemplateId { get; set; }
+        public string TroopName { get; set; }
+        public string CultureId { get; set; }
+        public string HeroId { get; set; }
+        public string HeroRole { get; set; }
+        public string HeroOccupationId { get; set; }
+        public string HeroClanId { get; set; }
+        public string HeroTemplateId { get; set; }
+        public int HeroLevel { get; set; }
+        public float HeroAge { get; set; }
+        public bool HeroIsFemale { get; set; }
+        public int Tier { get; set; }
+        public bool IsMounted { get; set; }
+        public bool IsRanged { get; set; }
+        public bool HasShield { get; set; }
+        public bool HasThrown { get; set; }
+        public string CombatItem0Id { get; set; }
+        public string CombatItem1Id { get; set; }
+        public string CombatItem2Id { get; set; }
+        public string CombatItem3Id { get; set; }
+        public string CombatHeadId { get; set; }
+        public string CombatBodyId { get; set; }
+        public string CombatLegId { get; set; }
+        public string CombatGlovesId { get; set; }
+        public string CombatCapeId { get; set; }
+        public string CombatHorseId { get; set; }
+        public string CombatHorseHarnessId { get; set; }
+        public bool IsHero { get; set; }
+        public int Count { get; set; }
+        public int WoundedCount { get; set; }
+    }
+}

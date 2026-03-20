@@ -10,6 +10,7 @@ using TaleWorlds.MountAndBlade; // Підключаємо Mission (детекц�
 using System.Reflection; // Reflection для mission-safe fallback ids героїв/лордів із кампанії.
 using System.Linq;
 using TaleWorlds.Core;
+using TaleWorlds.ObjectSystem;
 
 namespace CoopSpectator.Campaign // Тримаємо battle/campaign логіку в одному namespace
 { // Починаємо блок простору імен
@@ -305,6 +306,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     stack.CharacterId = spawnTemplateId; // Back-compat alias for older runtime readers.
                     stack.OriginalCharacterId = originalCharacterId;
                     stack.SpawnTemplateId = spawnTemplateId;
+                    stack.CultureId = TryGetCultureId(element.Character);
+                    stack.HasShield = TryGetCharacterHasShield(element.Character);
+                    stack.HasThrown = TryGetCharacterHasThrown(element.Character);
+                    ApplyCombatEquipmentSnapshot(stack, element.Character);
+                    ApplyHeroIdentitySnapshot(stack, element.Character);
+                    stack.IsRanged = TryGetCharacterIsRanged(element.Character);
                     stack.TroopName = element.Character.Name != null ? element.Character.Name.ToString() : element.Character.StringId; // Беремо ім'я або fallback на id
                     stack.Tier = element.Character.Tier; // Записуємо tier
                     stack.IsMounted = element.Character.IsMounted; // Записуємо чи верховий
@@ -639,13 +646,19 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         CharacterId = spawnTemplateId,
                         OriginalCharacterId = originalCharacterId,
                         SpawnTemplateId = spawnTemplateId,
+                        HasShield = TryGetCharacterHasShield(character),
+                        HasThrown = TryGetCharacterHasThrown(character),
                         TroopName = TryGetPropertyValue(character, "Name")?.ToString() ?? TryGetStringId(character),
+                        CultureId = TryGetCultureId(character),
                         Tier = TryGetIntProperty(character, "Tier"),
                         IsMounted = TryGetBoolProperty(character, "IsMounted"),
+                        IsRanged = TryGetCharacterIsRanged(character),
                         IsHero = TryGetBoolProperty(character, "IsHero"),
                         Count = TryGetIntProperty(element, "Number"),
                         WoundedCount = TryGetIntProperty(element, "WoundedNumber")
                     };
+                    ApplyCombatEquipmentSnapshot(stack, character);
+                    ApplyHeroIdentitySnapshot(stack, character);
                     troops.Add(stack);
                 }
             }
@@ -671,7 +684,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     (troop.OriginalCharacterId ?? "null") +
                     " -> " +
                     ((!string.IsNullOrWhiteSpace(troop.SpawnTemplateId) ? troop.SpawnTemplateId : troop.CharacterId) ?? "null") +
-                    " x" + troop.Count);
+                    " x" + troop.Count +
+                    " culture=" + (troop.CultureId ?? "null") +
+                    " ranged=" + troop.IsRanged +
+                    " shield=" + troop.HasShield +
+                    " thrown=" + troop.HasThrown +
+                    FormatHeroIdentitySummary(troop) +
+                    FormatCombatEquipmentSummary(troop));
 
             ModLogger.Info(
                 "BattleDetector: troop stack mapping summary (" + (source ?? "unknown") + ") = [" +
@@ -695,7 +714,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     (troop.EntryId ?? "entry") + ": " +
                     (troop.OriginalCharacterId ?? "null") +
                     " -> " +
-                    ((!string.IsNullOrWhiteSpace(troop.SpawnTemplateId) ? troop.SpawnTemplateId : troop.CharacterId) ?? "null"));
+                    ((!string.IsNullOrWhiteSpace(troop.SpawnTemplateId) ? troop.SpawnTemplateId : troop.CharacterId) ?? "null") +
+                    " culture=" + (troop.CultureId ?? "null") +
+                    " ranged=" + troop.IsRanged +
+                    " shield=" + troop.HasShield +
+                    " thrown=" + troop.HasThrown +
+                    FormatHeroIdentitySummary(troop) +
+                    FormatCombatEquipmentSummary(troop));
 
             ModLogger.Info(
                 "BattleDetector: snapshot mapping summary (" + (source ?? "unknown") + ") = [" +
@@ -893,14 +918,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return null;
 
             string originalId = TryGetStringId(characterObject);
-            string multiplayerSafeId = TryResolveMultiplayerSafeCharacterId(characterObject as TaleWorlds.CampaignSystem.CharacterObject);
-            if (!string.IsNullOrWhiteSpace(multiplayerSafeId) && !string.Equals(multiplayerSafeId, originalId, StringComparison.Ordinal))
+            bool isHero = TryGetBoolProperty(characterObject, "IsHero");
+            if (isHero)
             {
-                ModLogger.Info("BattleDetector: mapped campaign troop id '" + originalId + "' to multiplayer-safe id '" + multiplayerSafeId + "'.");
-                return multiplayerSafeId;
+                string heroRoleSafeId = TryResolveHeroRoleMissionSafeCharacterId(characterObject as TaleWorlds.CampaignSystem.CharacterObject);
+                if (!string.IsNullOrWhiteSpace(heroRoleSafeId) && !string.Equals(heroRoleSafeId, originalId, StringComparison.Ordinal))
+                {
+                    ModLogger.Info("BattleDetector: mapped hero troop id '" + originalId + "' to hero-role runtime template '" + heroRoleSafeId + "'.");
+                    return heroRoleSafeId;
+                }
             }
 
-            bool isHero = TryGetBoolProperty(characterObject, "IsHero");
             if (!isHero)
             {
                 string banditFallbackId = TryResolveBanditMissionSafeCharacterId(characterObject);
@@ -909,7 +937,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     ModLogger.Info("BattleDetector: mapped bandit campaign troop id '" + originalId + "' to mission-safe bandit fallback '" + banditFallbackId + "'.");
                     return banditFallbackId;
                 }
+            }
 
+            string multiplayerSafeId = TryResolveMultiplayerSafeCharacterId(characterObject as TaleWorlds.CampaignSystem.CharacterObject);
+            if (!string.IsNullOrWhiteSpace(multiplayerSafeId) && !string.Equals(multiplayerSafeId, originalId, StringComparison.Ordinal))
+            {
+                ModLogger.Info("BattleDetector: mapped campaign troop id '" + originalId + "' to multiplayer-safe id '" + multiplayerSafeId + "'.");
+                return multiplayerSafeId;
+            }
+
+            if (!isHero)
+            {
                 string genericFallbackId = TryResolveGenericMissionSafeCharacterId(characterObject);
                 if (!string.IsNullOrWhiteSpace(genericFallbackId) && !string.Equals(genericFallbackId, originalId, StringComparison.Ordinal))
                 {
@@ -996,16 +1034,44 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return null;
 
             bool isMounted = TryGetBoolProperty(characterObject, "IsMounted");
-            bool isRanged = TryGetBoolProperty(characterObject, "IsRanged");
+            bool isRanged = TryGetCharacterIsRanged(characterObject);
+            bool hasShield = TryGetCharacterHasShield(characterObject);
+            bool hasThrown = TryGetCharacterHasThrown(characterObject);
             int tier = TryGetIntProperty(characterObject, "Tier");
+            string cultureToken = TryMapCultureToMultiplayerToken(TryGetCultureId(characterObject));
 
             if (isMounted)
-                return "mp_coop_light_cavalry_sturgia_troop";
+                return !string.IsNullOrWhiteSpace(cultureToken)
+                    ? "mp_light_cavalry_" + cultureToken + "_troop"
+                    : "mp_coop_light_cavalry_sturgia_troop";
 
             if (isRanged)
+            {
+                if (!string.IsNullOrWhiteSpace(cultureToken))
+                    return tier >= 4
+                        ? "mp_heavy_ranged_" + cultureToken + "_troop"
+                        : "mp_light_ranged_" + cultureToken + "_troop";
+
                 return tier >= 4
                     ? "mp_heavy_ranged_vlandia_troop"
                     : "mp_light_ranged_empire_troop";
+            }
+
+            if (!string.IsNullOrWhiteSpace(cultureToken))
+            {
+                if (string.Equals(cultureToken, "empire", StringComparison.Ordinal) && tier < 4 && hasShield)
+                    return "mp_coop_light_infantry_empire_troop";
+
+                if (string.Equals(cultureToken, "empire", StringComparison.Ordinal) && tier < 4 && hasThrown)
+                    return "mp_skirmisher_empire_troop";
+
+                if (string.Equals(cultureToken, "empire", StringComparison.Ordinal) && tier >= 4)
+                    return "mp_coop_heavy_infantry_empire_troop";
+
+                return tier >= 4
+                    ? "mp_heavy_infantry_" + cultureToken + "_troop"
+                    : "mp_light_infantry_" + cultureToken + "_troop";
+            }
 
             return tier >= 4
                 ? "mp_coop_heavy_infantry_empire_troop"
@@ -1080,6 +1146,142 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return null;
         }
 
+        private static string TryResolveHeroRoleMissionSafeCharacterId(TaleWorlds.CampaignSystem.CharacterObject heroCharacter)
+        {
+            if (heroCharacter == null || !heroCharacter.IsHero)
+                return null;
+
+            string heroRole = TryGetHeroRole(heroCharacter);
+            if (string.IsNullOrWhiteSpace(heroRole))
+                return null;
+
+            string cultureId = TryGetCultureId(heroCharacter) ?? heroCharacter.Culture?.StringId;
+            string cultureToken = TryMapCultureToMultiplayerToken(cultureId);
+            if (string.IsNullOrWhiteSpace(cultureToken))
+                return null;
+
+            bool isMounted = heroCharacter.IsMounted;
+            bool isRanged = heroCharacter.IsRanged;
+            bool hasShield = TryGetCharacterHasShield(heroCharacter);
+            bool hasThrown = TryGetCharacterHasThrown(heroCharacter);
+            int effectiveTier = ComputeHeroRuntimeTier(heroCharacter, heroRole);
+
+            string troopTemplateId = TryResolveRoleAwareTroopTemplateId(
+                cultureToken,
+                heroRole,
+                isMounted,
+                isRanged,
+                hasShield,
+                hasThrown,
+                effectiveTier);
+
+            return TryConvertTroopTemplateToHeroTemplate(troopTemplateId);
+        }
+
+        private static int ComputeHeroRuntimeTier(TaleWorlds.CampaignSystem.CharacterObject heroCharacter, string heroRole)
+        {
+            int tier = heroCharacter?.Tier ?? 0;
+            int heroLevel = TryGetHeroLevel(heroCharacter);
+
+            if (heroLevel >= 24)
+                tier = Math.Max(tier, 5);
+            else if (heroLevel >= 16)
+                tier = Math.Max(tier, 4);
+            else if (heroLevel >= 8)
+                tier = Math.Max(tier, 3);
+
+            if (string.Equals(heroRole, "lord", StringComparison.OrdinalIgnoreCase))
+                return Math.Max(tier, 5);
+
+            if (string.Equals(heroRole, "companion", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(heroRole, "wanderer", StringComparison.OrdinalIgnoreCase))
+            {
+                return Math.Max(tier, 4);
+            }
+
+            if (string.Equals(heroRole, "player", StringComparison.OrdinalIgnoreCase))
+                return Math.Max(tier, 3);
+
+            return Math.Max(tier, 1);
+        }
+
+        private static string TryResolveRoleAwareTroopTemplateId(
+            string cultureToken,
+            string heroRole,
+            bool isMounted,
+            bool isRanged,
+            bool hasShield,
+            bool hasThrown,
+            int tier)
+        {
+            if (string.IsNullOrWhiteSpace(cultureToken))
+                return null;
+
+            bool isLord = string.Equals(heroRole, "lord", StringComparison.OrdinalIgnoreCase);
+
+            if (isMounted)
+            {
+                string cavalryTemplateId = (isLord ? "mp_heavy_cavalry_" : "mp_light_cavalry_") + cultureToken + "_troop";
+                return NormalizeKnownMissionSafeTemplateId(cavalryTemplateId);
+            }
+
+            if (isRanged)
+            {
+                string rangedTemplateId = ((isLord || tier >= 4) ? "mp_heavy_ranged_" : "mp_light_ranged_") + cultureToken + "_troop";
+                return NormalizeKnownMissionSafeTemplateId(rangedTemplateId);
+            }
+
+            if (hasThrown)
+                return NormalizeKnownMissionSafeTemplateId("mp_skirmisher_" + cultureToken + "_troop");
+
+            if (string.Equals(cultureToken, "empire", StringComparison.OrdinalIgnoreCase))
+            {
+                if (isLord || tier >= 4)
+                    return "mp_coop_heavy_infantry_empire_troop";
+
+                if (hasShield)
+                    return "mp_coop_light_infantry_empire_troop";
+            }
+
+            if (isLord || tier >= 5)
+                return NormalizeKnownMissionSafeTemplateId("mp_shock_infantry_" + cultureToken + "_troop");
+
+            return NormalizeKnownMissionSafeTemplateId(
+                (tier >= 4 ? "mp_heavy_infantry_" : "mp_light_infantry_") + cultureToken + "_troop");
+        }
+
+        private static string TryConvertTroopTemplateToHeroTemplate(string troopTemplateId)
+        {
+            if (string.IsNullOrWhiteSpace(troopTemplateId))
+                return null;
+
+            string normalizedTroopTemplateId = NormalizeKnownMissionSafeTemplateId(troopTemplateId);
+            if (string.IsNullOrWhiteSpace(normalizedTroopTemplateId))
+                return null;
+
+            if (normalizedTroopTemplateId.EndsWith("_hero", StringComparison.Ordinal))
+                return normalizedTroopTemplateId;
+
+            if (!normalizedTroopTemplateId.EndsWith("_troop", StringComparison.Ordinal))
+                return normalizedTroopTemplateId;
+
+            string heroTemplateId = normalizedTroopTemplateId.Substring(0, normalizedTroopTemplateId.Length - "_troop".Length) + "_hero";
+            if (heroTemplateId.StartsWith("mp_", StringComparison.Ordinal))
+                return heroTemplateId;
+
+            try
+            {
+                BasicCharacterObject heroTemplate = MBObjectManager.Instance.GetObject<BasicCharacterObject>(heroTemplateId);
+                if (heroTemplate != null)
+                    return heroTemplate.StringId;
+            }
+            catch
+            {
+            }
+
+            return normalizedTroopTemplateId;
+        }
+
         private static string TryResolveMultiplayerSafeCharacterId(TaleWorlds.CampaignSystem.CharacterObject character)
         {
             if (character == null)
@@ -1092,11 +1294,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             bool isMounted = character.IsMounted;
             bool isRanged = character.IsRanged;
+            bool hasShield = TryGetCharacterHasShield(character);
+            bool hasThrown = TryGetCharacterHasThrown(character);
             int tier = character.Tier;
 
             string coopControlTroopId = TryResolveCoopControlTroopId(cultureToken, isMounted, isRanged, tier);
             if (!string.IsNullOrWhiteSpace(coopControlTroopId))
                 return coopControlTroopId;
+
+            if (!isMounted && !isRanged && string.Equals(cultureToken, "empire", StringComparison.Ordinal) && tier < 4)
+            {
+                if (hasShield)
+                    return "mp_coop_light_infantry_empire_troop";
+                if (hasThrown)
+                    return "mp_skirmisher_empire_troop";
+            }
 
             var candidates = new List<string>();
             if (isMounted)
@@ -1120,8 +1332,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 if (tier >= 5)
                     candidates.Add("mp_shock_infantry_" + cultureToken + "_troop");
 
-                candidates.Add("mp_heavy_infantry_" + cultureToken + "_troop");
+                if (tier >= 4)
+                    candidates.Add("mp_heavy_infantry_" + cultureToken + "_troop");
+
                 candidates.Add("mp_light_infantry_" + cultureToken + "_troop");
+                if (tier < 4)
+                    candidates.Add("mp_heavy_infantry_" + cultureToken + "_troop");
                 candidates.Add("mp_shock_infantry_" + cultureToken + "_troop");
                 candidates.Add("mp_skirmisher_" + cultureToken + "_troop");
             }
@@ -1133,10 +1349,24 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     continue;
                 if (!seen.Add(candidate))
                     continue;
-                return candidate;
+                return NormalizeKnownMissionSafeTemplateId(candidate);
             }
 
             return null;
+        }
+
+        private static string NormalizeKnownMissionSafeTemplateId(string candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+                return candidate;
+
+            switch (candidate)
+            {
+                case "mp_light_infantry_empire_troop":
+                    return "mp_coop_light_infantry_empire_troop";
+                default:
+                    return candidate;
+            }
         }
 
         private static string TryResolveCoopControlTroopId(string cultureToken, bool isMounted, bool isRanged, int tier)
@@ -1159,6 +1389,20 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return null;
 
             string normalized = cultureId.Trim().ToLowerInvariant();
+            if (normalized.Contains("looter") || normalized.Contains("looters"))
+                return "empire";
+            if (normalized.Contains("sea_raider"))
+                return "sturgia";
+            if (normalized.Contains("forest_bandit"))
+                return "battania";
+            if (normalized.Contains("mountain_bandit"))
+                return "vlandia";
+            if (normalized.Contains("desert_bandit"))
+                return "aserai";
+            if (normalized.Contains("steppe_bandit"))
+                return "khuzait";
+            if (normalized.Contains("bandit"))
+                return "empire";
             if (normalized.Contains("empire") || normalized.StartsWith("imperial"))
                 return "empire";
             if (normalized.Contains("aserai"))
@@ -1250,6 +1494,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
         private static string TryGetStringId(object instance)
         {
+            if (instance is TaleWorlds.ObjectSystem.MBObjectBase mbObject)
+                return mbObject.StringId;
+
             object value = TryGetPropertyValue(instance, "StringId");
             return value?.ToString();
         }
@@ -1260,10 +1507,535 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return value is bool b && b;
         }
 
+        private static string TryGetCultureId(object instance)
+        {
+            if (instance is BasicCharacterObject basicCharacter)
+                return basicCharacter.Culture?.StringId;
+
+            object culture = TryGetPropertyValue(instance, "Culture");
+            return TryGetStringId(culture);
+        }
+
+        private static void ApplyHeroIdentitySnapshot(TroopStackInfo troop, object characterObject)
+        {
+            if (troop == null || characterObject == null)
+                return;
+
+            troop.HeroId = TryGetHeroId(characterObject);
+            troop.HeroRole = TryGetHeroRole(characterObject);
+            troop.HeroOccupationId = TryGetHeroOccupationId(characterObject);
+            troop.HeroClanId = TryGetHeroClanId(characterObject);
+            troop.HeroTemplateId = TryGetHeroTemplateId(characterObject);
+            troop.HeroLevel = TryGetHeroLevel(characterObject);
+            troop.HeroAge = TryGetHeroAge(characterObject);
+            troop.HeroIsFemale = TryGetHeroIsFemale(characterObject);
+        }
+
+        private static Hero TryResolveHeroObject(object instance)
+        {
+            if (instance is Hero hero)
+                return hero;
+
+            if (instance is CharacterObject characterObject)
+                return characterObject.HeroObject;
+
+            object heroObject = TryGetPropertyValue(instance, "HeroObject") ?? TryGetPropertyValue(instance, "Hero");
+            return heroObject as Hero;
+        }
+
+        private static string TryGetHeroId(object instance)
+        {
+            Hero hero = TryResolveHeroObject(instance);
+            if (hero != null)
+                return hero.StringId;
+
+            object heroObject = TryGetPropertyValue(instance, "HeroObject") ?? TryGetPropertyValue(instance, "Hero");
+            return TryGetStringId(heroObject);
+        }
+
+        private static string TryGetHeroRole(object instance)
+        {
+            Hero hero = TryResolveHeroObject(instance);
+            if (hero == null)
+                return null;
+
+            bool isMainHero = false;
+            try
+            {
+                isMainHero = Hero.MainHero != null && ReferenceEquals(hero, Hero.MainHero);
+            }
+            catch
+            {
+                isMainHero = TryGetBoolProperty(hero, "IsMainHero");
+            }
+
+            if (isMainHero || hero.IsHumanPlayerCharacter)
+                return "player";
+
+            if (hero.IsPlayerCompanion || hero.CompanionOf != null)
+                return "companion";
+
+            if (hero.IsLord)
+                return "lord";
+
+            if (hero.IsWanderer)
+                return "wanderer";
+
+            string occupationId = NormalizeHeroIdentityToken(hero.Occupation.ToString());
+            return string.IsNullOrWhiteSpace(occupationId)
+                ? "hero"
+                : occupationId;
+        }
+
+        private static string TryGetHeroOccupationId(object instance)
+        {
+            Hero hero = TryResolveHeroObject(instance);
+            if (hero != null)
+                return NormalizeHeroIdentityToken(hero.Occupation.ToString());
+
+            object heroObject = TryGetPropertyValue(instance, "HeroObject") ?? TryGetPropertyValue(instance, "Hero");
+            object occupation = TryGetPropertyValue(heroObject, "Occupation");
+            return NormalizeHeroIdentityToken(occupation?.ToString());
+        }
+
+        private static string TryGetHeroClanId(object instance)
+        {
+            Hero hero = TryResolveHeroObject(instance);
+            if (hero != null)
+                return hero.Clan?.StringId;
+
+            object heroObject = TryGetPropertyValue(instance, "HeroObject") ?? TryGetPropertyValue(instance, "Hero");
+            object clan = TryGetPropertyValue(heroObject, "Clan");
+            return TryGetStringId(clan);
+        }
+
+        private static string TryGetHeroTemplateId(object instance)
+        {
+            if (instance is CharacterObject characterObject)
+            {
+                string templateId = TryGetStringId(TryGetPropertyValue(characterObject, "Template"));
+                if (!string.IsNullOrWhiteSpace(templateId))
+                    return templateId;
+
+                string originalCharacterId = characterObject.OriginalCharacter?.StringId;
+                if (!string.IsNullOrWhiteSpace(originalCharacterId))
+                    return originalCharacterId;
+
+                if (!string.IsNullOrWhiteSpace(characterObject.StringId))
+                    return characterObject.StringId;
+            }
+
+            Hero hero = TryResolveHeroObject(instance);
+            if (hero?.CharacterObject != null)
+            {
+                string heroTemplateId = TryGetStringId(TryGetPropertyValue(hero.CharacterObject, "Template"));
+                if (!string.IsNullOrWhiteSpace(heroTemplateId))
+                    return heroTemplateId;
+
+                if (hero.CharacterObject.OriginalCharacter != null)
+                    return hero.CharacterObject.OriginalCharacter.StringId;
+
+                if (!string.IsNullOrWhiteSpace(hero.CharacterObject.StringId))
+                    return hero.CharacterObject.StringId;
+            }
+
+            object originalCharacter = TryGetPropertyValue(instance, "OriginalCharacter");
+            string originalCharacterIdFallback = TryGetStringId(originalCharacter);
+            if (!string.IsNullOrWhiteSpace(originalCharacterIdFallback))
+                return originalCharacterIdFallback;
+
+            string templateIdFallback = TryGetStringId(TryGetPropertyValue(instance, "Template"));
+            if (!string.IsNullOrWhiteSpace(templateIdFallback))
+                return templateIdFallback;
+
+            object heroObject = TryGetPropertyValue(instance, "HeroObject") ?? TryGetPropertyValue(instance, "Hero");
+            object heroCharacter = TryGetPropertyValue(heroObject, "CharacterObject");
+            string heroCharacterTemplateId = TryGetStringId(TryGetPropertyValue(heroCharacter, "Template"));
+            if (!string.IsNullOrWhiteSpace(heroCharacterTemplateId))
+                return heroCharacterTemplateId;
+
+            object heroOriginalCharacter = TryGetPropertyValue(heroCharacter, "OriginalCharacter");
+            string heroOriginalCharacterId = TryGetStringId(heroOriginalCharacter);
+            if (!string.IsNullOrWhiteSpace(heroOriginalCharacterId))
+                return heroOriginalCharacterId;
+
+            string heroCharacterId = TryGetStringId(heroCharacter);
+            if (!string.IsNullOrWhiteSpace(heroCharacterId))
+                return heroCharacterId;
+
+            return TryGetHeroId(instance);
+        }
+
+        private static int TryGetHeroLevel(object instance)
+        {
+            Hero hero = TryResolveHeroObject(instance);
+            if (hero != null)
+                return TryGetIntProperty(hero, "Level");
+
+            object heroObject = TryGetPropertyValue(instance, "HeroObject") ?? TryGetPropertyValue(instance, "Hero");
+            return TryGetIntProperty(heroObject, "Level");
+        }
+
+        private static float TryGetHeroAge(object instance)
+        {
+            Hero hero = TryResolveHeroObject(instance);
+            if (hero != null)
+                return TryGetFloatProperty(hero, "Age");
+
+            object heroObject = TryGetPropertyValue(instance, "HeroObject") ?? TryGetPropertyValue(instance, "Hero");
+            return TryGetFloatProperty(heroObject, "Age");
+        }
+
+        private static bool TryGetHeroIsFemale(object instance)
+        {
+            Hero hero = TryResolveHeroObject(instance);
+            if (hero != null)
+                return TryGetBoolProperty(hero, "IsFemale") || TryGetBoolProperty(hero.CharacterObject, "IsFemale");
+
+            if (instance is CharacterObject characterObject)
+                return characterObject.IsFemale;
+
+            object heroObject = TryGetPropertyValue(instance, "HeroObject") ?? TryGetPropertyValue(instance, "Hero");
+            if (TryGetBoolProperty(heroObject, "IsFemale"))
+                return true;
+
+            object heroCharacter = TryGetPropertyValue(heroObject, "CharacterObject");
+            return TryGetBoolProperty(heroCharacter, "IsFemale");
+        }
+
+        private static string NormalizeHeroIdentityToken(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            var normalized = new List<char>(value.Length + 4);
+            for (int i = 0; i < value.Length; i++)
+            {
+                char current = value[i];
+                if (char.IsWhiteSpace(current) || current == '-')
+                {
+                    if (normalized.Count > 0 && normalized[normalized.Count - 1] != '_')
+                        normalized.Add('_');
+                    continue;
+                }
+
+                if (char.IsUpper(current) && i > 0)
+                {
+                    char previous = value[i - 1];
+                    char next = i + 1 < value.Length ? value[i + 1] : '\0';
+                    if (char.IsLower(previous) || (next != '\0' && char.IsLower(next)))
+                        normalized.Add('_');
+                }
+
+                normalized.Add(char.ToLowerInvariant(current));
+            }
+
+            return new string(normalized.ToArray()).Trim('_');
+        }
+
+        private static void ApplyCombatEquipmentSnapshot(TroopStackInfo troop, object characterObject)
+        {
+            if (troop == null || characterObject == null)
+                return;
+
+            object equipment = TryResolvePrimaryCombatEquipment(characterObject);
+            if (equipment == null)
+                return;
+
+            troop.CombatItem0Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon0);
+            troop.CombatItem1Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon1);
+            troop.CombatItem2Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon2);
+            troop.CombatItem3Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon3);
+            troop.CombatHeadId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Head);
+            troop.CombatBodyId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Body);
+            troop.CombatLegId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Leg);
+            troop.CombatGlovesId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Gloves);
+            troop.CombatCapeId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Cape);
+            troop.CombatHorseId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Horse);
+            troop.CombatHorseHarnessId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.HorseHarness);
+        }
+
+        private static object TryResolvePrimaryCombatEquipment(object instance)
+        {
+            if (instance == null)
+                return null;
+
+            foreach (string propertyName in new[] { "FirstBattleEquipment", "BattleEquipment", "SecondBattleEquipment", "Equipment" })
+            {
+                object equipment = TryGetPropertyValue(instance, propertyName);
+                if (equipment != null && !TryGetBoolProperty(equipment, "IsCivilian"))
+                    return equipment;
+            }
+
+            foreach (object equipment in EnumerateCharacterEquipments(instance))
+            {
+                if (equipment != null && !TryGetBoolProperty(equipment, "IsCivilian"))
+                    return equipment;
+            }
+
+            foreach (object equipment in EnumerateCharacterEquipments(instance))
+            {
+                if (equipment != null)
+                    return equipment;
+            }
+
+            return null;
+        }
+
+        private static string TryGetEquipmentSlotItemId(object equipment, EquipmentIndex slot)
+        {
+            if (equipment == null)
+                return null;
+
+            try
+            {
+                MethodInfo getEquipmentFromSlot = equipment.GetType().GetMethod(
+                    "GetEquipmentFromSlot",
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(EquipmentIndex) },
+                    null);
+
+                if (getEquipmentFromSlot != null)
+                {
+                    object equipmentElement = getEquipmentFromSlot.Invoke(equipment, new object[] { slot });
+                    string itemId = TryGetEquipmentElementItemId(equipmentElement);
+                    if (!string.IsNullOrWhiteSpace(itemId))
+                        return itemId;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                MethodInfo getEquipmentElement = equipment.GetType().GetMethod(
+                    "GetEquipmentElement",
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(EquipmentIndex) },
+                    null);
+
+                if (getEquipmentElement != null)
+                {
+                    object equipmentElement = getEquipmentElement.Invoke(equipment, new object[] { slot });
+                    string itemId = TryGetEquipmentElementItemId(equipmentElement);
+                    if (!string.IsNullOrWhiteSpace(itemId))
+                        return itemId;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                PropertyInfo indexer = equipment.GetType()
+                    .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(property =>
+                    {
+                        ParameterInfo[] parameters = property.GetIndexParameters();
+                        return parameters.Length == 1 && parameters[0].ParameterType == typeof(EquipmentIndex);
+                    });
+
+                if (indexer != null)
+                {
+                    object equipmentElement = indexer.GetValue(equipment, new object[] { slot });
+                    string itemId = TryGetEquipmentElementItemId(equipmentElement);
+                    if (!string.IsNullOrWhiteSpace(itemId))
+                        return itemId;
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static string TryGetEquipmentElementItemId(object equipmentElement)
+        {
+            if (equipmentElement == null)
+                return null;
+
+            object item = TryGetPropertyValue(equipmentElement, "Item") ?? TryGetPropertyValue(equipmentElement, "ItemObject");
+            return TryGetStringId(item);
+        }
+
+        private static string FormatCombatEquipmentSummary(TroopStackInfo troop)
+        {
+            if (troop == null)
+                return string.Empty;
+
+            List<string> parts = new List<string>();
+            AddCombatEquipmentSummaryPart(parts, "Item0", troop.CombatItem0Id);
+            AddCombatEquipmentSummaryPart(parts, "Item1", troop.CombatItem1Id);
+            AddCombatEquipmentSummaryPart(parts, "Item2", troop.CombatItem2Id);
+            AddCombatEquipmentSummaryPart(parts, "Item3", troop.CombatItem3Id);
+            AddCombatEquipmentSummaryPart(parts, "Head", troop.CombatHeadId);
+            AddCombatEquipmentSummaryPart(parts, "Body", troop.CombatBodyId);
+            AddCombatEquipmentSummaryPart(parts, "Leg", troop.CombatLegId);
+            AddCombatEquipmentSummaryPart(parts, "Gloves", troop.CombatGlovesId);
+            AddCombatEquipmentSummaryPart(parts, "Cape", troop.CombatCapeId);
+            AddCombatEquipmentSummaryPart(parts, "Horse", troop.CombatHorseId);
+            AddCombatEquipmentSummaryPart(parts, "HorseHarness", troop.CombatHorseHarnessId);
+
+            return parts.Count == 0
+                ? " eq=[]"
+                : " eq=[" + string.Join(", ", parts) + "]";
+        }
+
+        private static string FormatHeroIdentitySummary(TroopStackInfo troop)
+        {
+            if (troop == null)
+                return string.Empty;
+
+            bool hasHeroIdentity =
+                !string.IsNullOrWhiteSpace(troop.HeroId) ||
+                !string.IsNullOrWhiteSpace(troop.HeroRole) ||
+                !string.IsNullOrWhiteSpace(troop.HeroOccupationId) ||
+                !string.IsNullOrWhiteSpace(troop.HeroClanId);
+
+            if (!hasHeroIdentity)
+                return troop.IsHero ? " hero_role=hero" : string.Empty;
+
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(troop.HeroId))
+                parts.Add("hero_id=" + troop.HeroId);
+            if (!string.IsNullOrWhiteSpace(troop.HeroRole))
+                parts.Add("hero_role=" + troop.HeroRole);
+            if (!string.IsNullOrWhiteSpace(troop.HeroOccupationId))
+                parts.Add("occupation=" + troop.HeroOccupationId);
+            if (!string.IsNullOrWhiteSpace(troop.HeroClanId))
+                parts.Add("clan=" + troop.HeroClanId);
+            if (!string.IsNullOrWhiteSpace(troop.HeroTemplateId))
+                parts.Add("template=" + troop.HeroTemplateId);
+            if (troop.HeroLevel > 0)
+                parts.Add("level=" + troop.HeroLevel);
+            if (troop.HeroAge > 0.01f)
+                parts.Add("age=" + troop.HeroAge.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+            parts.Add("female=" + troop.HeroIsFemale);
+
+            return parts.Count == 0
+                ? string.Empty
+                : " " + string.Join(" ", parts);
+        }
+
+        private static void AddCombatEquipmentSummaryPart(List<string> parts, string label, string itemId)
+        {
+            if (parts == null || string.IsNullOrWhiteSpace(itemId))
+                return;
+
+            parts.Add(label + "=" + itemId);
+        }
+
+        private static bool TryGetCharacterIsRanged(object instance)
+        {
+            if (instance is BasicCharacterObject basicCharacter)
+                return basicCharacter.IsRanged;
+
+            return TryGetBoolProperty(instance, "IsRanged");
+        }
+
+        private static bool TryGetCharacterHasShield(object instance)
+        {
+            return TryCharacterHasWeaponClass(instance, WeaponClass.SmallShield) ||
+                   TryCharacterHasWeaponClass(instance, WeaponClass.LargeShield);
+        }
+
+        private static bool TryGetCharacterHasThrown(object instance)
+        {
+            return TryCharacterHasWeaponClass(instance, WeaponClass.Javelin) ||
+                   TryCharacterHasWeaponClass(instance, WeaponClass.ThrowingAxe) ||
+                   TryCharacterHasWeaponClass(instance, WeaponClass.ThrowingKnife) ||
+                   TryCharacterHasWeaponClass(instance, WeaponClass.Stone) ||
+                   TryCharacterHasWeaponClass(instance, WeaponClass.SlingStone);
+        }
+
+        private static bool TryCharacterHasWeaponClass(object instance, WeaponClass weaponClass)
+        {
+            foreach (object equipment in EnumerateCharacterEquipments(instance))
+            {
+                if (equipment == null)
+                    continue;
+
+                try
+                {
+                    MethodInfo hasWeaponOfClass = equipment.GetType().GetMethod(
+                        "HasWeaponOfClass",
+                        BindingFlags.Public | BindingFlags.Instance,
+                        null,
+                        new[] { typeof(WeaponClass) },
+                        null);
+
+                    if (hasWeaponOfClass == null)
+                        continue;
+
+                    object result = hasWeaponOfClass.Invoke(equipment, new object[] { weaponClass });
+                    if (result is bool hasWeapon && hasWeapon)
+                        return true;
+                }
+                catch
+                {
+                }
+            }
+
+            return false;
+        }
+
+        private static IEnumerable<object> EnumerateCharacterEquipments(object instance)
+        {
+            if (instance == null)
+                yield break;
+
+            var yielded = new HashSet<object>();
+            foreach (string propertyName in new[] { "Equipment", "BattleEquipment", "FirstBattleEquipment", "SecondBattleEquipment", "CivilianEquipment" })
+            {
+                object equipment = TryGetPropertyValue(instance, propertyName);
+                if (equipment != null && yielded.Add(equipment))
+                    yield return equipment;
+            }
+
+            object allEquipments = TryGetPropertyValue(instance, "AllEquipments");
+            if (allEquipments is System.Collections.IEnumerable enumerable && !(allEquipments is string))
+            {
+                foreach (object equipment in enumerable)
+                {
+                    if (equipment != null && yielded.Add(equipment))
+                        yield return equipment;
+                }
+            }
+        }
+
         private static int TryGetIntProperty(object instance, string propertyName)
         {
             object value = TryGetPropertyValue(instance, propertyName);
             return value is int i ? i : 0;
+        }
+
+        private static float TryGetFloatProperty(object instance, string propertyName)
+        {
+            object value = TryGetPropertyValue(instance, propertyName);
+            if (value is float f)
+                return f;
+            if (value is double d)
+                return (float)d;
+            if (value is decimal m)
+                return (float)m;
+            if (value is int i)
+                return i;
+            if (value is long l)
+                return l;
+
+            try
+            {
+                return value != null ? Convert.ToSingle(value, System.Globalization.CultureInfo.InvariantCulture) : 0f;
+            }
+            catch
+            {
+                return 0f;
+            }
         }
     } // Завершуємо блок класу
 } // Завершуємо блок простору імен
