@@ -192,6 +192,106 @@
 		<Flags
 			Civilian="true" />
 	</Item>
+	<Item
+		multiplayer_item="true"
+		id="bound_adarga"
+		name="{=gfQDDkEY}Wooden Adarga"
+		body_name="bo_cap_aserai_shields_h"
+		shield_body_name="bo_aserai_shields_h"
+		recalculate_body="false"
+		mesh="aserai_shields_h"
+		culture="Culture.aserai"
+		using_tableau="true"
+		weight="2.2"
+		appearance="1"
+		Type="Shield"
+		item_holsters="shield:shield_2:shield_3:shield_4"
+		has_lower_holster_priority="true"
+		holster_position_shift="-0.1,-0.0,0">
+		<ItemComponent>
+			<Weapon
+				weapon_class="LargeShield"
+				body_armor="1"
+				thrust_speed="82"
+				thrust_damage_type="Blunt"
+				speed_rating="82"
+				physics_material="wood_shield"
+				item_usage="shield"
+				position="0.0, 0.00, 0.00"
+				rotation="0.0,10.0,40.00"
+				weapon_length="60"
+				center_of_mass="0.0,0.05,0.05"
+				hit_points="245"
+				modifier_group="shield">
+				<WeaponFlags
+					CanBlockRanged="true"
+					HasHitPoints="true" />
+			</Weapon>
+		</ItemComponent>
+		<Flags
+			WoodenParry="true"
+			HeldInOffHand="true"
+			ForceAttachOffHandSecondaryItemBone="true" />
+	</Item>
+	<Item
+		multiplayer_item="true"
+		id="adarga"
+		name="{=QcKpipVr}Adarga"
+		body_name="bo_cap_shield_aserai_cavalary_a"
+		shield_body_name="bo_shield_aserai_cavalary_a"
+		recalculate_body="false"
+		mesh="shield_aserai_cavalary_a"
+		culture="Culture.aserai"
+		using_tableau="true"
+		weight="1.3"
+		appearance="1"
+		Type="Shield"
+		item_holsters="shield:shield_2:shield_3:shield_4"
+		has_lower_holster_priority="true"
+		holster_position_shift="-0.1,-0.0,0">
+		<ItemComponent>
+			<Weapon
+				weapon_class="LargeShield"
+				body_armor="1"
+				thrust_speed="82"
+				thrust_damage_type="Blunt"
+				speed_rating="82"
+				physics_material="wood_shield"
+				item_usage="shield"
+				position="0.0, 0.00, 0.00"
+				rotation="0.0,10.0,40.00"
+				weapon_length="60"
+				center_of_mass="-0.0,0.0,0.05"
+				hit_points="160"
+				modifier_group="shield">
+				<WeaponFlags
+					CanBlockRanged="true"
+					HasHitPoints="true" />
+			</Weapon>
+		</ItemComponent>
+		<Flags
+			WoodenParry="true"
+			HeldInOffHand="true"
+			ForceAttachOffHandSecondaryItemBone="true" />
+	</Item>
+	<Item
+		multiplayer_item="true"
+		id="a_aserai_scale_b_shoulder_c"
+		name="{=imHoaCGi}Bronze Scale Shoulder Guards"
+		mesh="aserai_scale_b_shoulder_c"
+		culture="Culture.aserai"
+		weight="6"
+		appearance="5"
+		Type="Cape">
+		<ItemComponent>
+			<Armor
+				body_armor="14"
+				arm_armor="7"
+				modifier_group="plate"
+				material_type="Plate" />
+		</ItemComponent>
+		<Flags />
+	</Item>
 	<CraftedItem
 		id="eastern_spear_1_t2"
 		name="{=yCvBx27Z}Jagged Spear"
@@ -380,6 +480,40 @@
 			<Piece
 				id="aserai_noble_pommel_4"
 				Type="Pommel"
+				scale_factor="100" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem
+		id="aserai_2haxe_3_t5"
+		name="{=hTPJXK1w}Heavy Executioner Axe"
+		crafting_template="TwoHandedAxe"
+		culture="Culture.aserai"
+		modifier_group="axe">
+		<Pieces>
+			<Piece
+				id="axe_craft_38_head"
+				Type="Blade"
+				scale_factor="100" />
+			<Piece
+				id="axe_craft_1_handle"
+				Type="Handle"
+				scale_factor="100" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem
+		id="aserai_lance_1_t5"
+		name="{=hsRwbHSk}Mamluke Lance"
+		crafting_template="TwoHandedPolearm"
+		culture="Culture.aserai"
+		modifier_group="polearm">
+		<Pieces>
+			<Piece
+				id="spear_blade_42"
+				Type="Blade"
+				scale_factor="100" />
+			<Piece
+				id="spear_handle_19"
+				Type="Handle"
 				scale_factor="100" />
 		</Pieces>
 	</CraftedItem>

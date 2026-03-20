@@ -32,6 +32,12 @@
   </SubModules>
   <Xmls>
     <XmlNode>
+      <XmlName id="CraftingPieces" path="coopspectator_crafting_pieces" />
+      <IncludedGameTypes>
+        <GameType value="MultiplayerGame" />
+      </IncludedGameTypes>
+    </XmlNode>
+    <XmlNode>
       <XmlName id="Items" path="coopspectator_items" />
       <IncludedGameTypes>
         <GameType value="MultiplayerGame" />
