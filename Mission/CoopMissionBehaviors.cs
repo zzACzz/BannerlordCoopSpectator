@@ -3411,6 +3411,7 @@ namespace CoopSpectator.MissionBehaviors
         private static bool? _lastAppliedBattlePhaseAiHold;
         private static CoopBattlePhase? _lastAppliedFormationHoldPhase;
         private static bool _hasMaterializedBattlefieldArmies;
+        private static bool _hasLoggedImportedEquipmentAvailabilityDiagnostics;
         private static Agent _diagnosticAllowedAgent;
         private const bool EnableFixedMissionCulturesExperiment = true;
         private const int MaxMaterializedArmyAgentsPerSide = 24;
@@ -3418,6 +3419,15 @@ namespace CoopSpectator.MissionBehaviors
         private const int FallbackMaterializedAgentsPerTroop = 4;
         private const string FixedMissionAttackerCultureId = "empire";
         private const string FixedMissionDefenderCultureId = "vlandia";
+        private static readonly string[] ImportedEquipmentProbeIds =
+        {
+            "aserai_chain_plate_armor_d",
+            "pointed_skullcap_over_cloth_headwrap",
+            "eastern_spear_3_t3",
+            "aserai_sword_3_t3",
+            "noble_horse_southern",
+            "mail_and_plate_barding"
+        };
         private static readonly FormationClass[] RestrictableFormationClasses =
         {
             FormationClass.Infantry,
@@ -3462,6 +3472,7 @@ namespace CoopSpectator.MissionBehaviors
             _lastAppliedFormationHoldPhase = null;
             _lastMaterializedArmyMission = null;
             _hasMaterializedBattlefieldArmies = false;
+            _hasLoggedImportedEquipmentAvailabilityDiagnostics = false;
             CoopBattleSelectionIntentState.Reset();
             CoopBattleSelectionRequestState.Reset();
             CoopBattleSpawnIntentState.Reset();
@@ -3490,6 +3501,7 @@ namespace CoopSpectator.MissionBehaviors
             else
                 ModLogger.Info("CoopMissionSpawnLogic: no allowed troop id available yet (roster empty).");
             LogAllowedCharacterResolution();
+            LogImportedEquipmentAvailabilityDiagnostics();
             CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, "CoopMissionSpawnLogic.AfterStart", mission);
 
             _timeUntilNextPeerLog = ServerLogIntervalSeconds;
@@ -4876,7 +4888,42 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
+            if (ImportedEquipmentProbeIds.Contains(itemId, StringComparer.Ordinal))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: exact imported item lookup still unresolved. " +
+                    "ItemId=" + itemId +
+                    " Slot=" + (slotLabel ?? "(null)") +
+                    " SpawnTemplate=" + (entryState?.SpawnTemplateId ?? "(null)") +
+                    " Culture=" + (entryState?.CultureId ?? "(null)"));
+            }
+
             return null;
+        }
+
+        private static void LogImportedEquipmentAvailabilityDiagnostics()
+        {
+            if (_hasLoggedImportedEquipmentAvailabilityDiagnostics)
+                return;
+
+            _hasLoggedImportedEquipmentAvailabilityDiagnostics = true;
+            var diagnostics = new List<string>();
+            foreach (string itemId in ImportedEquipmentProbeIds)
+            {
+                ItemObject item = TryGetMaterializedEquipmentItem(itemId);
+                if (item == null)
+                {
+                    diagnostics.Add(itemId + "=missing");
+                    continue;
+                }
+
+                diagnostics.Add(itemId + "=" + item.StringId + ":" + item.Type);
+            }
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: imported equipment availability diagnostics = [" +
+                string.Join(", ", diagnostics) +
+                "].");
         }
 
         private static ItemObject TryGetMaterializedEquipmentItem(string itemId)

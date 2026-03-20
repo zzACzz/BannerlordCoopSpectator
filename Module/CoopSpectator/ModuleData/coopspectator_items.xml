@@ -1,0 +1,386 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Items>
+	<Item
+		multiplayer_item="true"
+		id="aserai_archer_armor"
+		name="{=2cSOn9qb}Gambeson over Mail Armor"
+		lod_atlas_index="1"
+		subtype="body_armor"
+		mesh="aserai_archer_armor"
+		culture="Culture.aserai"
+		weight="11.0"
+		difficulty="0"
+		appearance="2"
+		Type="BodyArmor">
+		<ItemComponent>
+			<Armor
+				body_armor="29"
+				leg_armor="15"
+				arm_armor="8"
+				has_gender_variations="true"
+				covers_body="true"
+				modifier_group="cloth"
+				material_type="Chainmail" />
+		</ItemComponent>
+		<Flags
+			UseTeamColor="true" />
+	</Item>
+	<Item
+		multiplayer_item="true"
+		id="aserai_chain_plate_armor_d"
+		name="{=zVieddxB}Southern Reinforced Short Mail Armor"
+		lod_atlas_index="3"
+		mesh="aserai_chain_plate_armor_d"
+		culture="Culture.aserai"
+		weight="18.0"
+		appearance="4"
+		Type="BodyArmor">
+		<ItemComponent>
+			<Armor
+				body_armor="31"
+				leg_armor="6"
+				arm_armor="16"
+				covers_body="true"
+				modifier_group="chain"
+				material_type="Chainmail" />
+		</ItemComponent>
+		<Flags
+			UseTeamColor="true" />
+	</Item>
+	<Item
+		multiplayer_item="true"
+		id="pointed_skullcap_over_cloth_headwrap"
+		name="{=LqA9uBH9}Pointed Skullcap over Cloth Headwrap"
+		subtype="head_armor"
+		mesh="vlandia_helmet_l_d"
+		culture="Culture.aserai"
+		weight="2.1"
+		difficulty="0"
+		appearance="1.6"
+		Type="HeadArmor">
+		<ItemComponent>
+			<Armor
+				head_armor="30"
+				has_gender_variations="false"
+				hair_cover_type="all"
+				modifier_group="plate"
+				material_type="Plate"
+				beard_cover_type="all" />
+		</ItemComponent>
+		<Flags
+			UseTeamColor="true" />
+	</Item>
+	<Item
+		multiplayer_item="true"
+		id="war_camel"
+		name="{=TXpQetkh}War Camel{@Plural}war camels{\@}"
+		mesh="camel_mesh"
+		item_category="war_horse"
+		culture="Culture.aserai"
+		weight="500"
+		difficulty="45"
+		appearance="0"
+		Type="Horse">
+		<ItemComponent>
+			<Horse
+				monster="Monster.camel"
+				maneuver="67"
+				speed="48"
+				charge_damage="24"
+				body_length="115"
+				extra_health="30"
+				is_pack_animal="false"
+				is_mountable="true" />
+		</ItemComponent>
+		<Flags
+			Civilian="true" />
+	</Item>
+	<Item
+		multiplayer_item="true"
+		id="noble_horse_southern"
+		name="{=b56X0QOh}Wadar Hotblood{@Plural}Wadar Hotbloods{\@}"
+		mesh="horse_brown"
+		item_category="noble_horse"
+		subtype="horse"
+		weight="485"
+		difficulty="95"
+		is_merchandise="false"
+		culture="Culture.aserai"
+		Type="Horse">
+		<ItemComponent>
+			<Horse
+				monster="Monster.horse"
+				maneuver="78"
+				speed="68"
+				charge_damage="24"
+				body_length="109"
+				is_mountable="true"
+				extra_health="30"
+				modifier_group="horse">
+				<AdditionalMeshes>
+					<Mesh
+						name="horse_mane"
+						affected_by_cover="true" />
+				</AdditionalMeshes>
+				<Materials>
+					<Material
+						name="horse_brown_mat">
+						<MeshMultipliers>
+							<MeshMultiplier
+								mesh_multiplier="FF010101"
+								percentage="0.75" />
+							<MeshMultiplier
+								mesh_multiplier="FF909090"
+								percentage="0.25" />
+						</MeshMultipliers>
+					</Material>
+					<Material
+						name="horse_black_mat">
+						<MeshMultipliers>
+							<MeshMultiplier
+								mesh_multiplier="FF010101"
+								percentage="0.75" />
+							<MeshMultiplier
+								mesh_multiplier="FF909090"
+								percentage="0.25" />
+						</MeshMultipliers>
+					</Material>
+					<Material
+						name="horse_grey_mat">
+						<MeshMultipliers>
+							<MeshMultiplier
+								mesh_multiplier="FF303030"
+								percentage="0.75" />
+							<MeshMultiplier
+								mesh_multiplier="FF909090"
+								percentage="0.25" />
+						</MeshMultipliers>
+					</Material>
+					<Material
+						name="horse_white_mat">
+						<MeshMultipliers>
+							<MeshMultiplier
+								mesh_multiplier="FF303030"
+								percentage="1.0" />
+						</MeshMultipliers>
+					</Material>
+				</Materials>
+			</Horse>
+		</ItemComponent>
+		<Flags
+			Civilian="true" />
+	</Item>
+	<Item
+		multiplayer_item="true"
+		id="mail_and_plate_barding"
+		name="{=Vj4ZBxm5}Reinforced Plate Barding"
+		mesh="horse_harness_aserai_c_clotest"
+		culture="Culture.aserai"
+		subtype="body_armor"
+		weight="145"
+		difficulty="0"
+		appearance="0.4"
+		Type="HorseHarness">
+		<ItemComponent>
+			<Armor
+				body_armor="68"
+				mane_cover_type="all"
+				family_type="1"
+				reins_mesh="horse_harness_aserai_c_rein"
+				material_type="Plate" />
+		</ItemComponent>
+		<Flags
+			Civilian="true" />
+	</Item>
+	<CraftedItem
+		id="eastern_spear_1_t2"
+		name="{=yCvBx27Z}Jagged Spear"
+		crafting_template="TwoHandedPolearm"
+		culture="Culture.aserai"
+		modifier_group="polearm">
+		<Pieces>
+			<Piece
+				id="spear_blade_35"
+				Type="Blade"
+				scale_factor="95" />
+			<Piece
+				id="spear_handle_3"
+				Type="Handle"
+				scale_factor="95" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem
+		id="eastern_spear_3_t3"
+		name="{=YGndAhTr}Weighted Steppe Spear"
+		crafting_template="TwoHandedPolearm"
+		culture="Culture.khuzait"
+		modifier_group="polearm">
+		<Pieces>
+			<Piece
+				id="spear_blade_35"
+				Type="Blade"
+				scale_factor="95" />
+			<Piece
+				id="default_polearm_guard"
+				Type="Guard" />
+			<Piece
+				id="spear_handle_22"
+				Type="Handle"
+				scale_factor="90" />
+			<Piece
+				id="default_polearm_pommel"
+				Type="Pommel" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem
+		id="eastern_spear_4_t4"
+		name="{=bwXACVOb}Fine Steel Leaf Spear"
+		crafting_template="TwoHandedPolearm"
+		culture="Culture.aserai"
+		modifier_group="polearm">
+		<Pieces>
+			<Piece
+				id="spear_blade_42"
+				Type="Blade"
+				scale_factor="100" />
+			<Piece
+				id="spear_guard_3"
+				Type="Guard"
+				scale_factor="100" />
+			<Piece
+				id="spear_handle_16"
+				Type="Handle"
+				scale_factor="110" />
+			<Piece
+				id="spear_pommel_11"
+				Type="Pommel"
+				scale_factor="100" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem
+		id="aserai_sword_2_t2"
+		name="{=JPByibJQ}Iron Scimitar"
+		crafting_template="OneHandedSword"
+		culture="Culture.aserai"
+		modifier_group="sword">
+		<Pieces>
+			<Piece
+				id="aserai_blade_3"
+				Type="Blade"
+				scale_factor="100" />
+			<Piece
+				id="aserai_guard_6"
+				Type="Guard"
+				scale_factor="100" />
+			<Piece
+				id="aserai_grip_5"
+				Type="Handle"
+				scale_factor="100" />
+			<Piece
+				id="aserai_pommel_1"
+				Type="Pommel"
+				scale_factor="100" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem
+		id="aserai_sword_3_t3"
+		name="{=bANXyotg}Slightly Ridged Flyssa"
+		crafting_template="OneHandedSword"
+		culture="Culture.aserai"
+		modifier_group="sword">
+		<Pieces>
+			<Piece
+				id="aserai_blade_2"
+				Type="Blade"
+				scale_factor="100" />
+			<Piece
+				id="aserai_guard_7"
+				Type="Guard"
+				scale_factor="100" />
+			<Piece
+				id="aserai_grip_7"
+				Type="Handle"
+				scale_factor="100" />
+			<Piece
+				id="aserai_pommel_3"
+				Type="Pommel"
+				scale_factor="100" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem
+		id="aserai_sword_4_t4"
+		name="{=dCbrowBV}Fine Steel Long Kaskara"
+		crafting_template="OneHandedSword"
+		culture="Culture.aserai"
+		modifier_group="sword">
+		<Pieces>
+			<Piece
+				id="aserai_blade_10"
+				Type="Blade"
+				scale_factor="105" />
+			<Piece
+				id="aserai_guard_9"
+				Type="Guard"
+				scale_factor="100" />
+			<Piece
+				id="aserai_grip_9"
+				Type="Handle"
+				scale_factor="100" />
+			<Piece
+				id="aserai_pommel_5"
+				Type="Pommel"
+				scale_factor="100" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem
+		id="desert_long_sword_t4"
+		name="{=gsGjXj8J}Desert Long Sword"
+		crafting_template="OneHandedSword"
+		culture="Culture.aserai"
+		modifier_group="sword">
+		<Pieces>
+			<Piece
+				id="aserai_blade_7"
+				Type="Blade"
+				scale_factor="100" />
+			<Piece
+				id="aserai_guard_9"
+				Type="Guard"
+				scale_factor="100" />
+			<Piece
+				id="aserai_grip_24"
+				Type="Handle"
+				scale_factor="100" />
+			<Piece
+				id="aserai_noble_pommel_1"
+				Type="Pommel"
+				scale_factor="100" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem
+		id="aserai_noble_sword_2_t5"
+		name="{=93OHSnEV}Decorated Long Scimitar"
+		crafting_template="OneHandedSword"
+		is_merchandise="false"
+		culture="Culture.aserai"
+		modifier_group="sword">
+		<Pieces>
+			<Piece
+				id="aserai_noble_blade_1"
+				Type="Blade"
+				scale_factor="100" />
+			<Piece
+				id="aserai_noble_guard_4"
+				Type="Guard"
+				scale_factor="100" />
+			<Piece
+				id="aserai_noble_grip_4"
+				Type="Handle"
+				scale_factor="100" />
+			<Piece
+				id="aserai_noble_pommel_4"
+				Type="Pommel"
+				scale_factor="100" />
+		</Pieces>
+	</CraftedItem>
+</Items>

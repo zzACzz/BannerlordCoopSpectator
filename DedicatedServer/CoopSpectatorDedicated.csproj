@@ -218,6 +218,7 @@
     <Copy SourceFiles="..\Module\CoopSpectatorDedicated\SubModule.xml" DestinationFolder="$(_DedicatedModuleDir)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
     <ItemGroup>
       <_ServerBinFiles Include="$(OutputPath)*" />
+      <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_items.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpcharacters.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpclassdivisions.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\multiplayer_strings.xml" />
@@ -227,6 +228,7 @@
     <Copy SourceFiles="@(_ServerBinFiles)" DestinationFolder="$(_DedicatedBinServer)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
     <Copy SourceFiles="@(_ServerBinFiles)" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
     <Copy SourceFiles="@(_DedicatedModuleDataFiles)" DestinationFolder="$(_DedicatedModuleData)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
+    <Copy SourceFiles="..\Module\CoopSpectator\ModuleData\coopspectator_items.xml" DestinationFolder="$(_DedicatedModuleData)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and Exists('..\Module\CoopSpectator\ModuleData\coopspectator_items.xml')" />
     <!-- TaleWorlds.MountAndBlade.Multiplayer.dll має лежати поруч із CoopSpectator.dll у Win64_Shipping_Client, інакше модуль не завантажується → "Cannot find game type: TdmClone". -->
     <Copy SourceFiles="$(_MultiplayerServerBin)\TaleWorlds.MountAndBlade.Multiplayer.dll" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(_MultiplayerServerBin)\TaleWorlds.MountAndBlade.Multiplayer.dll')" />
     <Copy SourceFiles="$(_MultiplayerClientBin)\TaleWorlds.MountAndBlade.Multiplayer.dll" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(_MultiplayerClientBin)\TaleWorlds.MountAndBlade.Multiplayer.dll')" />
