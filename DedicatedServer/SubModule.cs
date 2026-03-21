@@ -141,6 +141,7 @@ namespace CoopSpectator
                     TryApplyMissionStateOpenNewPatches();
                     TryApplyMultiplayerHeroClassOverridePatch();
                     TryApplyServerChangeCultureCanonicalizationPatch();
+                    TryApplyCampaignCombatProfileAgentStatsPatch();
                     RegisterCoopBattleGameMode();
                     TryApplyWebPanelPatches();
                     AppDomain.CurrentDomain.AssemblyLoad += (_, e) =>
@@ -221,6 +222,11 @@ namespace CoopSpectator
             {
                 ModLogger.Info("CoopSpectatorDedicated: server ChangeCulture canonicalization patch apply failed: " + ex.Message);
             }
+        }
+
+        private static void TryApplyCampaignCombatProfileAgentStatsPatch()
+        {
+            ModLogger.Info("CoopSpectatorDedicated: skipping CampaignCombatProfileAgentStatsPatch on dedicated; using manual combat-profile refresh path.");
         }
 
         private static void TryApplyWebPanelPatches()

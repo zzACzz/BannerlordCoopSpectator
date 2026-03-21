@@ -64,6 +64,19 @@ namespace CoopSpectator.Network.Messages
         public bool IsRanged { get; set; }
         public bool HasShield { get; set; }
         public bool HasThrown { get; set; }
+        public int AttributeVigor { get; set; }
+        public int AttributeControl { get; set; }
+        public int AttributeEndurance { get; set; }
+        public int SkillOneHanded { get; set; }
+        public int SkillTwoHanded { get; set; }
+        public int SkillPolearm { get; set; }
+        public int SkillBow { get; set; }
+        public int SkillCrossbow { get; set; }
+        public int SkillThrowing { get; set; }
+        public int SkillRiding { get; set; }
+        public int SkillAthletics { get; set; }
+        public int BaseHitPoints { get; set; }
+        public List<string> PerkIds { get; set; } = new List<string>();
         public string CombatItem0Id { get; set; }
         public string CombatItem1Id { get; set; }
         public string CombatItem2Id { get; set; }

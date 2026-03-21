@@ -87,6 +87,7 @@ namespace CoopSpectator // Використовуємо кореневий names
                 MissionStateOpenNewPatches.Apply(harmony);
                 VanillaEntryUiSuppressionPatch.Apply(harmony);
                 ClientChangeCultureCanonicalizationPatch.Apply(harmony);
+                CampaignCombatProfileAgentStatsPatch.Apply(harmony);
                 AppDomain.CurrentDomain.AssemblyLoad += (_, e) => // Коли підвантажиться нова збірка (наприклад Lobby)
                 { // Перевіряємо чи це Lobby — тоді застосуємо патч
                     if (e.LoadedAssembly.GetName().Name == "TaleWorlds.MountAndBlade.Lobby")

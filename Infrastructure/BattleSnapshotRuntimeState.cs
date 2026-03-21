@@ -75,6 +75,19 @@ namespace CoopSpectator.Infrastructure
         public bool IsRanged { get; set; }
         public bool HasShield { get; set; }
         public bool HasThrown { get; set; }
+        public int AttributeVigor { get; set; }
+        public int AttributeControl { get; set; }
+        public int AttributeEndurance { get; set; }
+        public int SkillOneHanded { get; set; }
+        public int SkillTwoHanded { get; set; }
+        public int SkillPolearm { get; set; }
+        public int SkillBow { get; set; }
+        public int SkillCrossbow { get; set; }
+        public int SkillThrowing { get; set; }
+        public int SkillRiding { get; set; }
+        public int SkillAthletics { get; set; }
+        public int BaseHitPoints { get; set; }
+        public List<string> PerkIds { get; set; } = new List<string>();
         public string CombatItem0Id { get; set; }
         public string CombatItem1Id { get; set; }
         public string CombatItem2Id { get; set; }
@@ -137,6 +150,19 @@ namespace CoopSpectator.Infrastructure
         public bool IsRanged { get; set; }
         public bool HasShield { get; set; }
         public bool HasThrown { get; set; }
+        public int AttributeVigor { get; set; }
+        public int AttributeControl { get; set; }
+        public int AttributeEndurance { get; set; }
+        public int SkillOneHanded { get; set; }
+        public int SkillTwoHanded { get; set; }
+        public int SkillPolearm { get; set; }
+        public int SkillBow { get; set; }
+        public int SkillCrossbow { get; set; }
+        public int SkillThrowing { get; set; }
+        public int SkillRiding { get; set; }
+        public int SkillAthletics { get; set; }
+        public int BaseHitPoints { get; set; }
+        public List<string> PerkIds { get; set; } = new List<string>();
         public string CombatItem0Id { get; set; }
         public string CombatItem1Id { get; set; }
         public string CombatItem2Id { get; set; }
@@ -483,6 +509,19 @@ namespace CoopSpectator.Infrastructure
                         IsRanged = entryProjection.IsRanged,
                         HasShield = entryProjection.HasShield,
                         HasThrown = entryProjection.HasThrown,
+                        AttributeVigor = entryProjection.AttributeVigor,
+                        AttributeControl = entryProjection.AttributeControl,
+                        AttributeEndurance = entryProjection.AttributeEndurance,
+                        SkillOneHanded = entryProjection.SkillOneHanded,
+                        SkillTwoHanded = entryProjection.SkillTwoHanded,
+                        SkillPolearm = entryProjection.SkillPolearm,
+                        SkillBow = entryProjection.SkillBow,
+                        SkillCrossbow = entryProjection.SkillCrossbow,
+                        SkillThrowing = entryProjection.SkillThrowing,
+                        SkillRiding = entryProjection.SkillRiding,
+                        SkillAthletics = entryProjection.SkillAthletics,
+                        BaseHitPoints = entryProjection.BaseHitPoints,
+                        PerkIds = entryProjection.PerkIds != null ? new List<string>(entryProjection.PerkIds) : new List<string>(),
                         CombatItem0Id = entryProjection.CombatItem0Id,
                         CombatItem1Id = entryProjection.CombatItem1Id,
                         CombatItem2Id = entryProjection.CombatItem2Id,
@@ -561,6 +600,19 @@ namespace CoopSpectator.Infrastructure
                 IsRanged = troop.IsRanged,
                 HasShield = troop.HasShield,
                 HasThrown = troop.HasThrown,
+                AttributeVigor = troop.AttributeVigor,
+                AttributeControl = troop.AttributeControl,
+                AttributeEndurance = troop.AttributeEndurance,
+                SkillOneHanded = troop.SkillOneHanded,
+                SkillTwoHanded = troop.SkillTwoHanded,
+                SkillPolearm = troop.SkillPolearm,
+                SkillBow = troop.SkillBow,
+                SkillCrossbow = troop.SkillCrossbow,
+                SkillThrowing = troop.SkillThrowing,
+                SkillRiding = troop.SkillRiding,
+                SkillAthletics = troop.SkillAthletics,
+                BaseHitPoints = troop.BaseHitPoints,
+                PerkIds = troop.PerkIds != null ? new List<string>(troop.PerkIds) : new List<string>(),
                 CombatItem0Id = troop.CombatItem0Id,
                 CombatItem1Id = troop.CombatItem1Id,
                 CombatItem2Id = troop.CombatItem2Id,

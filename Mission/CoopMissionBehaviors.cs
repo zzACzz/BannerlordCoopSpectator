@@ -3548,6 +3548,43 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<string, int> MaterializedEquipmentResolutionSourceCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> MaterializedEquipmentMissCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> MaterializedEquipmentNormalizedFallbackCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, int> MaterializedCombatProfileApplyCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<int, MaterializedCombatProfileRuntimeState> _materializedCombatProfilesByAgentIndex = new Dictionary<int, MaterializedCombatProfileRuntimeState>();
+        private static Mission _lastMaterializedCombatProfileMission;
+        private static Mission _lastCombatProfileDrivenRefreshMission;
+        private static float _lastCombatProfileDrivenRefreshMissionTime = -1f;
+        private static bool _hasLoggedManualCombatProfileRefreshForMission;
+        private static PropertyInfo _agentDrivenPropertiesProperty;
+        private static bool _agentDrivenPropertiesPropertyResolved;
+        private static bool _loggedMissingAgentDrivenPropertiesAccessor;
+
+        private sealed class MaterializedCombatProfileRuntimeState
+        {
+            public string EntryId { get; set; }
+            public int AttributeVigor { get; set; }
+            public int AttributeControl { get; set; }
+            public int AttributeEndurance { get; set; }
+            public int SkillOneHanded { get; set; }
+            public int SkillTwoHanded { get; set; }
+            public int SkillPolearm { get; set; }
+            public int SkillBow { get; set; }
+            public int SkillCrossbow { get; set; }
+            public int SkillThrowing { get; set; }
+            public int SkillRiding { get; set; }
+            public int SkillAthletics { get; set; }
+            public int BaseHitPoints { get; set; }
+            public List<string> PerkIds { get; set; } = new List<string>();
+            public bool CountedPerkRegistration;
+            public bool CountedWeaponSkillAdjustment;
+            public bool CountedWeaponInaccuracyAdjustment;
+            public bool CountedVigorAttributeAdjustment;
+            public bool CountedControlAttributeAdjustment;
+            public bool CountedEnduranceAttributeAdjustment;
+            public bool CountedRidingAttributeAdjustment;
+            public bool CountedMountedPenaltyAdjustment;
+            public bool CountedMountStatAdjustment;
+        }
+
         private static readonly FormationClass[] RestrictableFormationClasses =
         {
             FormationClass.Infantry,
@@ -3591,6 +3628,7 @@ namespace CoopSpectator.MissionBehaviors
             _lastAppliedBattlePhaseAiHold = null;
             _lastAppliedFormationHoldPhase = null;
             _lastMaterializedArmyMission = null;
+            ResetMaterializedCombatProfileRuntimeState();
             _hasMaterializedBattlefieldArmies = false;
             _hasLoggedImportedEquipmentAvailabilityDiagnostics = false;
             CoopBattleSelectionIntentState.Reset();
@@ -3659,6 +3697,8 @@ namespace CoopSpectator.MissionBehaviors
             TryUpdateBattlePhaseState(Mission, "server behavior tick");
             TryApplyBattlePhaseAiHold(Mission, "server behavior tick");
             TryApplyBattlePhaseFormationHold(Mission, "server behavior tick");
+            TryRefreshMaterializedCombatProfileDrivenStats(Mission, "server behavior tick");
+            LogMaterializedEquipmentCoverageSummaryIfNeeded();
             TryWriteEntryStatusSnapshot(Mission, "server behavior tick");
         }
 
@@ -3678,6 +3718,7 @@ namespace CoopSpectator.MissionBehaviors
             _lastAppliedBattlePhaseAiHold = null;
             _lastAppliedFormationHoldPhase = null;
             _lastMaterializedArmyMission = null;
+            ResetMaterializedCombatProfileRuntimeState();
             _hasMaterializedBattlefieldArmies = false;
             CoopBattlePhaseRuntimeState.SetPhase(CoopBattlePhase.BattleEnded, "CoopMissionSpawnLogic.OnEndMission", Mission, allowRegression: true);
             TryWriteEntryStatusSnapshot(Mission, "server behavior end-mission");
@@ -3950,6 +3991,7 @@ namespace CoopSpectator.MissionBehaviors
                 _lastAppliedBattlePhaseAiHold = null;
                 _lastAppliedFormationHoldPhase = null;
                 _lastMaterializedArmyMission = null;
+                ResetMaterializedCombatProfileRuntimeState();
                 _hasMaterializedBattlefieldArmies = false;
                 CoopBattleSelectionIntentState.Reset();
                 CoopBattleSelectionRequestState.Reset();
@@ -4002,6 +4044,8 @@ namespace CoopSpectator.MissionBehaviors
             TryConsumeBattlePhaseRequests(mission);
             TryApplyBattlePhaseAiHold(mission, "dedicated observer");
             TryApplyBattlePhaseFormationHold(mission, "dedicated observer");
+            TryRefreshMaterializedCombatProfileDrivenStats(mission, "dedicated observer");
+            LogMaterializedEquipmentCoverageSummaryIfNeeded();
             TryWriteEntryStatusSnapshot(mission, "dedicated observer");
         }
 
@@ -4335,6 +4379,7 @@ namespace CoopSpectator.MissionBehaviors
                 MaterializedEquipmentResolutionSourceCounts.Clear();
                 MaterializedEquipmentMissCounts.Clear();
                 MaterializedEquipmentNormalizedFallbackCounts.Clear();
+                ResetMaterializedCombatProfileRuntimeState();
             }
 
             if (_hasMaterializedBattlefieldArmies)
@@ -4356,7 +4401,6 @@ namespace CoopSpectator.MissionBehaviors
                 "AttackerAgents=" + attackerCount +
                 " DefenderAgents=" + defenderCount +
                 " Source=" + (source ?? "unknown"));
-            LogMaterializedEquipmentCoverageSummaryIfNeeded();
         }
 
         private static int MaterializeArmyForSide(Mission mission, Team team, BattleSideEnum side, string source)
@@ -4566,6 +4610,7 @@ namespace CoopSpectator.MissionBehaviors
             Vec3 basePosition = formationSpawnPosition.IsValid ? formationSpawnPosition.GetGroundVec3() : new Vec3(0f, 0f, 0f);
 
             string equipmentOverrideDiagnostics = BuildMaterializedEquipmentOverrideDiagnostics(entryState, troop);
+            string combatProfileDiagnostics = "AppliedCombatProfile=(none)";
             int spawnedCount = 0;
             for (int i = 0; i < spawnCount; i++)
             {
@@ -4577,12 +4622,23 @@ namespace CoopSpectator.MissionBehaviors
                 Vec3 spawnPosition = basePosition + right * lateralOffset + forward * depthOffset;
 
                 string appliedArmorOverrides;
-                Agent agent = SpawnBattlefieldArmyAgent(mission, team, troop, entryState, formationClass, spawnPosition, formationDirection, out appliedArmorOverrides);
+                string appliedCombatProfile;
+                Agent agent = SpawnBattlefieldArmyAgent(
+                    mission,
+                    team,
+                    troop,
+                    entryState,
+                    formationClass,
+                    spawnPosition,
+                    formationDirection,
+                    out appliedArmorOverrides,
+                    out appliedCombatProfile);
                 if (agent == null)
                     continue;
 
                 _materializedArmyEntryIdByAgentIndex[agent.Index] = entryId ?? string.Empty;
                 _materializedArmySideByAgentIndex[agent.Index] = side;
+                combatProfileDiagnostics = appliedCombatProfile;
                 spawnedCount++;
             }
 
@@ -4596,6 +4652,7 @@ namespace CoopSpectator.MissionBehaviors
                     " Spawned=" + spawnedCount +
                     " SpawnFrameSource=" + spawnFrameSource +
                     " " + equipmentOverrideDiagnostics +
+                    " " + combatProfileDiagnostics +
                     " Source=" + (source ?? "unknown"));
             }
 
@@ -4665,9 +4722,11 @@ namespace CoopSpectator.MissionBehaviors
             FormationClass formationClass,
             Vec3 spawnPosition,
             Vec2 direction,
-            out string appliedArmorOverrides)
+            out string appliedArmorOverrides,
+            out string appliedCombatProfile)
         {
             appliedArmorOverrides = "(none)";
+            appliedCombatProfile = "AppliedCombatProfile=(none)";
             if (mission == null || team == null || troop == null)
                 return null;
 
@@ -4703,6 +4762,7 @@ namespace CoopSpectator.MissionBehaviors
 
                     agent.SetAutomaticTargetSelection(true);
                     agent.SetFiringOrder(FiringOrder.RangedWeaponUsageOrderEnum.FireAtWill);
+                    appliedCombatProfile = TryApplyMaterializedCombatProfile(agent, entryState);
                 }
                 else
                 {
@@ -4720,6 +4780,709 @@ namespace CoopSpectator.MissionBehaviors
                 ModLogger.Info("CoopMissionSpawnLogic: SpawnBattlefieldArmyAgent failed: " + ex.Message);
                 return null;
             }
+        }
+
+        private static string TryApplyMaterializedCombatProfile(Agent agent, RosterEntryState entryState)
+        {
+            if (agent == null || entryState == null)
+                return "AppliedCombatProfile=(none)";
+
+            RegisterMaterializedCombatProfile(agent, entryState);
+
+            var parts = new List<string>();
+            if (entryState.BaseHitPoints > 0)
+            {
+                float targetHitPoints = Math.Max(1f, entryState.BaseHitPoints);
+                try
+                {
+                    agent.HealthLimit = targetHitPoints;
+                    agent.Health = targetHitPoints;
+                    parts.Add("Hp=" + targetHitPoints.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+                }
+                catch (Exception ex)
+                {
+                    parts.Add("HpApplyFailed=" + ex.GetType().Name);
+                }
+            }
+
+            return parts.Count == 0
+                ? "AppliedCombatProfile=(none)"
+                : "AppliedCombatProfile=" + string.Join(", ", parts);
+        }
+
+        private static void ResetMaterializedCombatProfileRuntimeState()
+        {
+            _materializedCombatProfilesByAgentIndex.Clear();
+            MaterializedCombatProfileApplyCounts.Clear();
+            _lastMaterializedCombatProfileMission = null;
+            _lastCombatProfileDrivenRefreshMission = null;
+            _lastCombatProfileDrivenRefreshMissionTime = -1f;
+            _hasLoggedManualCombatProfileRefreshForMission = false;
+        }
+
+        private static void EnsureMaterializedCombatProfileMission(Mission mission)
+        {
+            if (ReferenceEquals(_lastMaterializedCombatProfileMission, mission))
+                return;
+
+            _materializedCombatProfilesByAgentIndex.Clear();
+            MaterializedCombatProfileApplyCounts.Clear();
+            _lastMaterializedCombatProfileMission = mission;
+            _lastCombatProfileDrivenRefreshMission = null;
+            _lastCombatProfileDrivenRefreshMissionTime = -1f;
+            _hasLoggedManualCombatProfileRefreshForMission = false;
+        }
+
+        private static void RegisterMaterializedCombatProfile(Agent agent, RosterEntryState entryState)
+        {
+            if (agent?.Mission == null || entryState == null)
+                return;
+
+            EnsureMaterializedCombatProfileMission(agent.Mission);
+            _materializedCombatProfilesByAgentIndex[agent.Index] = new MaterializedCombatProfileRuntimeState
+            {
+                EntryId = entryState.EntryId,
+                AttributeVigor = entryState.AttributeVigor,
+                AttributeControl = entryState.AttributeControl,
+                AttributeEndurance = entryState.AttributeEndurance,
+                SkillOneHanded = entryState.SkillOneHanded,
+                SkillTwoHanded = entryState.SkillTwoHanded,
+                SkillPolearm = entryState.SkillPolearm,
+                SkillBow = entryState.SkillBow,
+                SkillCrossbow = entryState.SkillCrossbow,
+                SkillThrowing = entryState.SkillThrowing,
+                SkillRiding = entryState.SkillRiding,
+                SkillAthletics = entryState.SkillAthletics,
+                BaseHitPoints = entryState.BaseHitPoints,
+                PerkIds = entryState.PerkIds != null
+                    ? entryState.PerkIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+                    : new List<string>()
+            };
+            MaterializedCombatProfileRuntimeState profile = _materializedCombatProfilesByAgentIndex[agent.Index];
+            IncrementMaterializedEquipmentCounter(MaterializedCombatProfileApplyCounts, "registered");
+            if (profile.PerkIds.Count > 0)
+                CountMaterializedCombatProfileApply(profile, "perks", ref profile.CountedPerkRegistration);
+        }
+
+        private static void TryRefreshMaterializedCombatProfileDrivenStats(Mission mission, string source)
+        {
+            if (mission == null || _materializedCombatProfilesByAgentIndex.Count == 0)
+                return;
+
+            EnsureMaterializedCombatProfileMission(mission);
+
+            float currentMissionTime = mission.CurrentTime;
+            if (ReferenceEquals(_lastCombatProfileDrivenRefreshMission, mission) &&
+                Math.Abs(_lastCombatProfileDrivenRefreshMissionTime - currentMissionTime) <= 0.0001f)
+            {
+                return;
+            }
+
+            _lastCombatProfileDrivenRefreshMission = mission;
+            _lastCombatProfileDrivenRefreshMissionTime = currentMissionTime;
+
+            bool appliedAny = false;
+            if (mission.AllAgents != null)
+            {
+                for (int i = 0; i < mission.AllAgents.Count; i++)
+                {
+                    Agent agent = mission.AllAgents[i];
+                    if (agent == null || !agent.IsActive())
+                        continue;
+
+                    AgentDrivenProperties agentDrivenProperties = TryGetAgentDrivenProperties(agent);
+                    if (agentDrivenProperties == null)
+                        continue;
+
+                    if (TryApplyDrivenSkillCombatProfile(agent, agentDrivenProperties))
+                        appliedAny = true;
+                }
+            }
+
+            if (appliedAny)
+            {
+                if (!_hasLoggedManualCombatProfileRefreshForMission)
+                {
+                    _hasLoggedManualCombatProfileRefreshForMission = true;
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: applied manual combat-profile driven-stat refresh. " +
+                        "MissionTime=" + currentMissionTime.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                        " Source=" + (source ?? "unknown"));
+                }
+            }
+        }
+
+        private static AgentDrivenProperties TryGetAgentDrivenProperties(Agent agent)
+        {
+            if (agent == null)
+                return null;
+
+            if (!_agentDrivenPropertiesPropertyResolved)
+            {
+                _agentDrivenPropertiesProperty =
+                    typeof(Agent).GetProperty("AgentDrivenProperties", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance) ??
+                    typeof(Agent).GetProperty("DrivenProperties", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                _agentDrivenPropertiesPropertyResolved = true;
+
+                if (_agentDrivenPropertiesProperty == null && !_loggedMissingAgentDrivenPropertiesAccessor)
+                {
+                    _loggedMissingAgentDrivenPropertiesAccessor = true;
+                    ModLogger.Info("CoopMissionSpawnLogic: AgentDrivenProperties accessor was not found; manual combat-profile refresh is unavailable.");
+                }
+            }
+
+            if (_agentDrivenPropertiesProperty == null)
+                return null;
+
+            try
+            {
+                return _agentDrivenPropertiesProperty.GetValue(agent, null) as AgentDrivenProperties;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public static bool TryApplyDrivenSkillCombatProfile(Agent agent, AgentDrivenProperties agentDrivenProperties)
+        {
+            if (agent == null || agentDrivenProperties == null)
+                return false;
+
+            Mission mission = agent.Mission;
+            if (mission == null)
+                return false;
+
+            EnsureMaterializedCombatProfileMission(mission);
+
+            if (agent.IsMount)
+                return TryApplyMountDrivenSkillCombatProfile(agent, agentDrivenProperties);
+
+            if (!agent.IsHuman || !_materializedCombatProfilesByAgentIndex.TryGetValue(agent.Index, out MaterializedCombatProfileRuntimeState profile))
+                return false;
+
+            bool applied = false;
+
+            var equipment = agent.Equipment;
+            EquipmentIndex primaryWieldedItemIndex = agent.GetPrimaryWieldedItemIndex();
+            ItemObject primaryItem = primaryWieldedItemIndex != EquipmentIndex.None ? equipment[primaryWieldedItemIndex].Item : null;
+            WeaponComponentData primaryWeapon = primaryItem?.PrimaryWeapon;
+            SkillObject relevantSkill = primaryItem?.RelevantSkill ?? DefaultSkills.Athletics;
+            int templateRelevantSkill = TryGetCharacterSkillValue(agent.Character, relevantSkill);
+            int desiredRelevantSkill = TryGetCombatProfileSkillValue(profile, relevantSkill, templateRelevantSkill);
+
+            if (TryApplyPrimaryWeaponSkillDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill))
+            {
+                applied = true;
+                CountMaterializedCombatProfileApply(profile, "weapon-skill", ref profile.CountedWeaponSkillAdjustment);
+            }
+
+            if (TryApplyPrimaryWeaponInaccuracyDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill))
+            {
+                applied = true;
+                CountMaterializedCombatProfileApply(profile, "weapon-inaccuracy", ref profile.CountedWeaponInaccuracyAdjustment);
+            }
+
+            if (TryApplyLoadoutAttributeDrivenStats(agent, profile, agentDrivenProperties))
+                applied = true;
+
+            if (TryApplyEnduranceDrivenStats(agent, profile, agentDrivenProperties))
+                applied = true;
+
+            if (agent.HasMount || agent.MountAgent != null)
+            {
+                int templateRiding = TryGetCharacterSkillValue(agent.Character, DefaultSkills.Riding);
+                int desiredRiding = profile.SkillRiding > 0 ? profile.SkillRiding : templateRiding;
+                if (TryApplyMountedHumanRidingDrivenStats(agent, agentDrivenProperties, templateRiding, desiredRiding))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "riding", ref profile.CountedRidingAttributeAdjustment);
+                    CountMaterializedCombatProfileApply(profile, "mounted-penalty", ref profile.CountedMountedPenaltyAdjustment);
+                }
+            }
+
+            return applied;
+        }
+
+        private static bool TryApplyLoadoutAttributeDrivenStats(
+            Agent agent,
+            MaterializedCombatProfileRuntimeState profile,
+            AgentDrivenProperties agentDrivenProperties)
+        {
+            if (agent == null || profile == null || agentDrivenProperties == null)
+                return false;
+
+            int templateVigor = DeriveCharacterVigorAttribute(agent.Character);
+            int templateControl = DeriveCharacterControlAttribute(agent.Character);
+
+            int desiredVigor = profile.AttributeVigor > 0 ? profile.AttributeVigor : DeriveCombatAttributeFromSkills(profile.SkillOneHanded, profile.SkillTwoHanded, profile.SkillPolearm);
+            int desiredControl = profile.AttributeControl > 0 ? profile.AttributeControl : DeriveCombatAttributeFromSkills(profile.SkillBow, profile.SkillCrossbow, profile.SkillThrowing);
+
+            bool applied = false;
+            if (AgentLoadoutContainsRelevantSkill(agent, "OneHanded", "TwoHanded", "Polearm"))
+            {
+                if (TryApplyVigorDrivenStats(agentDrivenProperties, templateVigor, desiredVigor))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "attribute-vigor", ref profile.CountedVigorAttributeAdjustment);
+                }
+            }
+
+            if (AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing"))
+            {
+                if (TryApplyControlDrivenStats(agentDrivenProperties, templateControl, desiredControl))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "attribute-control", ref profile.CountedControlAttributeAdjustment);
+                }
+            }
+
+            return applied;
+        }
+
+        private static bool AgentLoadoutContainsRelevantSkill(Agent agent, params string[] relevantSkillIds)
+        {
+            if (agent == null || relevantSkillIds == null || relevantSkillIds.Length == 0)
+                return false;
+
+            MissionEquipment equipment = agent.Equipment;
+            if (equipment == null)
+                return false;
+
+            for (EquipmentIndex index = EquipmentIndex.Weapon0; index <= EquipmentIndex.Weapon3; index++)
+            {
+                MissionWeapon missionWeapon = equipment[index];
+                ItemObject item = missionWeapon.Item;
+                if (item == null)
+                    continue;
+
+                WeaponComponentData usageItem = missionWeapon.CurrentUsageItem ?? item.PrimaryWeapon;
+                if (MatchesRelevantSkillIdsByWeaponUsage(item, usageItem, relevantSkillIds))
+                    return true;
+
+                string skillId = item.RelevantSkill?.StringId;
+                if (string.IsNullOrWhiteSpace(skillId))
+                    continue;
+
+                for (int i = 0; i < relevantSkillIds.Length; i++)
+                {
+                    if (string.Equals(skillId, relevantSkillIds[i], StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool MatchesRelevantSkillIdsByWeaponUsage(ItemObject item, WeaponComponentData usageItem, params string[] relevantSkillIds)
+        {
+            if (relevantSkillIds == null || relevantSkillIds.Length == 0)
+                return false;
+
+            bool wantsMelee = ContainsRelevantSkillId(relevantSkillIds, "OneHanded")
+                || ContainsRelevantSkillId(relevantSkillIds, "TwoHanded")
+                || ContainsRelevantSkillId(relevantSkillIds, "Polearm");
+            bool wantsRanged = ContainsRelevantSkillId(relevantSkillIds, "Bow")
+                || ContainsRelevantSkillId(relevantSkillIds, "Crossbow")
+                || ContainsRelevantSkillId(relevantSkillIds, "Throwing");
+
+            if (usageItem != null)
+            {
+                if (wantsMelee && (usageItem.IsOneHanded || usageItem.IsTwoHanded || usageItem.IsPolearm || usageItem.IsMeleeWeapon))
+                    return true;
+
+                if (wantsRanged && (usageItem.IsRangedWeapon
+                    || usageItem.WeaponClass == WeaponClass.Javelin
+                    || usageItem.WeaponClass == WeaponClass.ThrowingAxe
+                    || usageItem.WeaponClass == WeaponClass.ThrowingKnife
+                    || usageItem.WeaponClass == WeaponClass.Stone
+                    || usageItem.WeaponClass == WeaponClass.SlingStone))
+                    return true;
+            }
+
+            if (item == null)
+                return false;
+
+            switch (item.ItemType)
+            {
+                case ItemObject.ItemTypeEnum.OneHandedWeapon:
+                case ItemObject.ItemTypeEnum.TwoHandedWeapon:
+                case ItemObject.ItemTypeEnum.Polearm:
+                    return wantsMelee;
+                case ItemObject.ItemTypeEnum.Bow:
+                case ItemObject.ItemTypeEnum.Crossbow:
+                case ItemObject.ItemTypeEnum.Sling:
+                case ItemObject.ItemTypeEnum.Thrown:
+                    return wantsRanged;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool ContainsRelevantSkillId(string[] relevantSkillIds, string skillId)
+        {
+            if (relevantSkillIds == null || string.IsNullOrWhiteSpace(skillId))
+                return false;
+
+            for (int i = 0; i < relevantSkillIds.Length; i++)
+            {
+                if (string.Equals(relevantSkillIds[i], skillId, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryApplyEnduranceDrivenStats(
+            Agent agent,
+            MaterializedCombatProfileRuntimeState profile,
+            AgentDrivenProperties agentDrivenProperties)
+        {
+            if (agent == null || profile == null || agentDrivenProperties == null || agent.IsMount)
+                return false;
+
+            int templateEndurance = DeriveCharacterEnduranceAttribute(agent.Character);
+            int desiredEndurance = profile.AttributeEndurance > 0 ? profile.AttributeEndurance : DeriveCombatAttributeFromSkills(profile.SkillRiding, profile.SkillAthletics);
+            if (!TryApplyEnduranceDrivenProperties(agentDrivenProperties, templateEndurance, desiredEndurance))
+                return false;
+
+            CountMaterializedCombatProfileApply(profile, "attribute-endurance", ref profile.CountedEnduranceAttributeAdjustment);
+            return true;
+        }
+
+        private static bool TryApplyMountDrivenSkillCombatProfile(Agent mountAgent, AgentDrivenProperties agentDrivenProperties)
+        {
+            Agent riderAgent = mountAgent?.RiderAgent;
+            if (mountAgent == null || riderAgent == null || !_materializedCombatProfilesByAgentIndex.TryGetValue(riderAgent.Index, out MaterializedCombatProfileRuntimeState profile))
+                return false;
+
+            int templateRiding = TryGetCharacterSkillValue(riderAgent.Character, DefaultSkills.Riding);
+            int desiredRiding = profile.SkillRiding > 0 ? profile.SkillRiding : templateRiding;
+            if (templateRiding <= 0 || desiredRiding <= 0)
+                return false;
+
+            bool applied = false;
+            float mountSpeedBaseFactor = 1f + templateRiding * 0.0032f;
+            float mountSpeedDesiredFactor = 1f + desiredRiding * 0.0032f;
+            float mountManeuverBaseFactor = 1f + templateRiding * 0.0035f;
+            float mountManeuverDesiredFactor = 1f + desiredRiding * 0.0035f;
+
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MountSpeed, mountSpeedBaseFactor, mountSpeedDesiredFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MountManeuver, mountManeuverBaseFactor, mountManeuverDesiredFactor);
+            if (applied)
+                CountMaterializedCombatProfileApply(profile, "mount", ref profile.CountedMountStatAdjustment);
+
+            return applied;
+        }
+
+        private static bool TryApplyPrimaryWeaponSkillDrivenStats(
+            AgentDrivenProperties agentDrivenProperties,
+            WeaponComponentData primaryWeapon,
+            int templateRelevantSkill,
+            int desiredRelevantSkill)
+        {
+            if (desiredRelevantSkill <= 0)
+                return false;
+
+            float baseFactor = 0.93f + 0.0007f * templateRelevantSkill;
+            float desiredFactor = 0.93f + 0.0007f * desiredRelevantSkill;
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.SwingSpeedMultiplier, baseFactor, desiredFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, baseFactor, desiredFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, baseFactor, desiredFactor);
+            return applied;
+        }
+
+        private static bool TryApplyVigorDrivenStats(
+            AgentDrivenProperties agentDrivenProperties,
+            int templateVigor,
+            int desiredVigor)
+        {
+            if (agentDrivenProperties == null || desiredVigor <= 0)
+                return false;
+
+            float baseFactor = ComputeAttributeOffenseFactor(templateVigor);
+            float desiredFactor = ComputeAttributeOffenseFactor(desiredVigor);
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.HandlingMultiplier, baseFactor, desiredFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MeleeWeaponDamageMultiplierBonus, baseFactor, desiredFactor);
+            return applied;
+        }
+
+        private static bool TryApplyControlDrivenStats(
+            AgentDrivenProperties agentDrivenProperties,
+            int templateControl,
+            int desiredControl)
+        {
+            if (agentDrivenProperties == null || desiredControl <= 0)
+                return false;
+
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(
+                agentDrivenProperties,
+                DrivenProperty.MissileSpeedMultiplier,
+                ComputeAttributeOffenseFactor(templateControl),
+                ComputeAttributeOffenseFactor(desiredControl));
+            applied |= TryScaleDrivenProperty(
+                agentDrivenProperties,
+                DrivenProperty.WeaponInaccuracy,
+                ComputeAccuracyPenaltyFactor(templateControl),
+                ComputeAccuracyPenaltyFactor(desiredControl));
+            applied |= TryScaleDrivenProperty(
+                agentDrivenProperties,
+                DrivenProperty.WeaponBestAccuracyWaitTime,
+                ComputeAccuracyPenaltyFactor(templateControl),
+                ComputeAccuracyPenaltyFactor(desiredControl));
+            return applied;
+        }
+
+        private static bool TryApplyEnduranceDrivenProperties(
+            AgentDrivenProperties agentDrivenProperties,
+            int templateEndurance,
+            int desiredEndurance)
+        {
+            if (agentDrivenProperties == null || desiredEndurance <= 0)
+                return false;
+
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(
+                agentDrivenProperties,
+                DrivenProperty.CombatMaxSpeedMultiplier,
+                ComputeAttributeOffenseFactor(templateEndurance),
+                ComputeAttributeOffenseFactor(desiredEndurance));
+            applied |= TryScaleDrivenProperty(
+                agentDrivenProperties,
+                DrivenProperty.TopSpeedReachDuration,
+                ComputeSpeedReachDurationFactor(templateEndurance),
+                ComputeSpeedReachDurationFactor(desiredEndurance));
+            return applied;
+        }
+
+        private static bool TryApplyPrimaryWeaponInaccuracyDrivenStats(
+            AgentDrivenProperties agentDrivenProperties,
+            WeaponComponentData primaryWeapon,
+            int templateRelevantSkill,
+            int desiredRelevantSkill)
+        {
+            if (primaryWeapon == null || desiredRelevantSkill <= 0)
+                return false;
+
+            float baseInaccuracy = ComputeWeaponInaccuracy(primaryWeapon, templateRelevantSkill);
+            float desiredInaccuracy = ComputeWeaponInaccuracy(primaryWeapon, desiredRelevantSkill);
+            return TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponInaccuracy, baseInaccuracy, desiredInaccuracy);
+        }
+
+        private static bool TryApplyMountedHumanRidingDrivenStats(
+            Agent agent,
+            AgentDrivenProperties agentDrivenProperties,
+            int templateRiding,
+            int desiredRiding)
+        {
+            if (desiredRiding <= 0)
+                return false;
+
+            bool applied = false;
+
+            float mountRidingFactor = agent.MountAgent?.GetAgentDrivenPropertyValue(DrivenProperty.AttributeRiding) ?? 1f;
+            float desiredAttributeRiding = desiredRiding * mountRidingFactor;
+            applied |= TrySetDrivenProperty(agentDrivenProperties, DrivenProperty.AttributeRiding, desiredAttributeRiding, 0.01f);
+
+            float baseMountedSpeedFactor = ComputeMountedWeaponSpeedFactor(templateRiding);
+            float desiredMountedSpeedFactor = ComputeMountedWeaponSpeedFactor(desiredRiding);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.SwingSpeedMultiplier, baseMountedSpeedFactor, desiredMountedSpeedFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, baseMountedSpeedFactor, desiredMountedSpeedFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, baseMountedSpeedFactor, desiredMountedSpeedFactor);
+
+            float baseWaitFactor = ComputeMountedWeaponAccuracyWaitFactor(templateRiding);
+            float desiredWaitFactor = ComputeMountedWeaponAccuracyWaitFactor(desiredRiding);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponBestAccuracyWaitTime, baseWaitFactor, desiredWaitFactor);
+
+            float baseInaccuracyFactor = ComputeMountedWeaponInaccuracyFactor(templateRiding);
+            float desiredInaccuracyFactor = ComputeMountedWeaponInaccuracyFactor(desiredRiding);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponInaccuracy, baseInaccuracyFactor, desiredInaccuracyFactor);
+
+            return applied;
+        }
+
+        private static int TryGetCombatProfileSkillValue(MaterializedCombatProfileRuntimeState profile, SkillObject skillObject, int fallback)
+        {
+            if (profile == null || skillObject == null)
+                return fallback;
+
+            string skillId = skillObject.StringId;
+            if (string.IsNullOrWhiteSpace(skillId))
+                return fallback;
+
+            switch (skillId)
+            {
+                case "OneHanded":
+                    return profile.SkillOneHanded > 0 ? profile.SkillOneHanded : fallback;
+                case "TwoHanded":
+                    return profile.SkillTwoHanded > 0 ? profile.SkillTwoHanded : fallback;
+                case "Polearm":
+                    return profile.SkillPolearm > 0 ? profile.SkillPolearm : fallback;
+                case "Bow":
+                    return profile.SkillBow > 0 ? profile.SkillBow : fallback;
+                case "Crossbow":
+                    return profile.SkillCrossbow > 0 ? profile.SkillCrossbow : fallback;
+                case "Throwing":
+                    return profile.SkillThrowing > 0 ? profile.SkillThrowing : fallback;
+                case "Riding":
+                    return profile.SkillRiding > 0 ? profile.SkillRiding : fallback;
+                case "Athletics":
+                    return profile.SkillAthletics > 0 ? profile.SkillAthletics : fallback;
+                default:
+                    return fallback;
+            }
+        }
+
+        private static int TryGetCharacterSkillValue(BasicCharacterObject character, SkillObject skillObject)
+        {
+            if (character == null || skillObject == null)
+                return 0;
+
+            try
+            {
+                return character.GetSkillValue(skillObject);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static float ComputeWeaponInaccuracy(WeaponComponentData weapon, int skillValue)
+        {
+            if (weapon == null)
+                return 0f;
+
+            float inaccuracy = (100f - weapon.Accuracy) * (1f - 0.002f * skillValue) * 0.001f;
+            if (weapon.WeaponClass == WeaponClass.ThrowingAxe)
+                inaccuracy *= 2f;
+
+            return Math.Max(0.0001f, inaccuracy);
+        }
+
+        private static float ComputeMountedWeaponSpeedFactor(int ridingSkill)
+        {
+            float penalty = 0.3f - ridingSkill * 0.003f;
+            return penalty > 0f ? Math.Max(0.0001f, 1f - penalty) : 1f;
+        }
+
+        private static float ComputeMountedWeaponAccuracyWaitFactor(int ridingSkill)
+        {
+            float penalty = 0.3f - ridingSkill * 0.003f;
+            return penalty > 0f ? 1f + penalty : 1f;
+        }
+
+        private static float ComputeMountedWeaponInaccuracyFactor(int ridingSkill)
+        {
+            float penalty = 15f - ridingSkill * 0.15f;
+            return penalty > 0f ? 1f + penalty : 1f;
+        }
+
+        private static float ComputeAttributeOffenseFactor(int attributeValue)
+        {
+            int normalized = Math.Max(0, Math.Min(10, attributeValue));
+            return Math.Max(0.75f, 0.92f + normalized * 0.02f);
+        }
+
+        private static float ComputeAccuracyPenaltyFactor(int attributeValue)
+        {
+            int normalized = Math.Max(0, Math.Min(10, attributeValue));
+            return Math.Max(0.6f, 1.12f - normalized * 0.03f);
+        }
+
+        private static float ComputeSpeedReachDurationFactor(int attributeValue)
+        {
+            int normalized = Math.Max(0, Math.Min(10, attributeValue));
+            return Math.Max(0.65f, 1.1f - normalized * 0.025f);
+        }
+
+        private static int DeriveCharacterVigorAttribute(BasicCharacterObject character)
+        {
+            return DeriveCombatAttributeFromSkills(
+                TryGetCharacterSkillValue(character, DefaultSkills.OneHanded),
+                TryGetCharacterSkillValue(character, DefaultSkills.TwoHanded),
+                TryGetCharacterSkillValue(character, DefaultSkills.Polearm));
+        }
+
+        private static int DeriveCharacterControlAttribute(BasicCharacterObject character)
+        {
+            return DeriveCombatAttributeFromSkills(
+                TryGetCharacterSkillValue(character, DefaultSkills.Bow),
+                TryGetCharacterSkillValue(character, DefaultSkills.Crossbow),
+                TryGetCharacterSkillValue(character, DefaultSkills.Throwing));
+        }
+
+        private static int DeriveCharacterEnduranceAttribute(BasicCharacterObject character)
+        {
+            return DeriveCombatAttributeFromSkills(
+                TryGetCharacterSkillValue(character, DefaultSkills.Riding),
+                TryGetCharacterSkillValue(character, DefaultSkills.Athletics));
+        }
+
+        private static int DeriveCombatAttributeFromSkills(params int[] skillValues)
+        {
+            if (skillValues == null || skillValues.Length == 0)
+                return 0;
+
+            int maxSkill = 0;
+            for (int i = 0; i < skillValues.Length; i++)
+                maxSkill = Math.Max(maxSkill, skillValues[i]);
+
+            if (maxSkill <= 0)
+                return 0;
+
+            return Math.Max(1, Math.Min(10, 1 + (int)Math.Round(maxSkill / 40f, MidpointRounding.AwayFromZero)));
+        }
+
+        private static bool TryScaleDrivenProperty(AgentDrivenProperties agentDrivenProperties, DrivenProperty drivenProperty, float baseFactor, float desiredFactor)
+        {
+            if (agentDrivenProperties == null)
+                return false;
+
+            float currentValue = agentDrivenProperties.GetStat(drivenProperty);
+            if (!TryScaleStat(ref currentValue, baseFactor, desiredFactor))
+                return false;
+
+            agentDrivenProperties.SetStat(drivenProperty, currentValue);
+            return true;
+        }
+
+        private static bool TrySetDrivenProperty(AgentDrivenProperties agentDrivenProperties, DrivenProperty drivenProperty, float desiredValue, float epsilon = 0.001f)
+        {
+            if (agentDrivenProperties == null)
+                return false;
+
+            float currentValue = agentDrivenProperties.GetStat(drivenProperty);
+            if (Math.Abs(currentValue - desiredValue) <= epsilon)
+                return false;
+
+            agentDrivenProperties.SetStat(drivenProperty, desiredValue);
+            return true;
+        }
+
+        private static bool TryScaleStat(ref float currentValue, float baseFactor, float desiredFactor)
+        {
+            if (baseFactor <= 0f || desiredFactor <= 0f)
+                return false;
+
+            float scale = desiredFactor / baseFactor;
+            if (float.IsNaN(scale) || float.IsInfinity(scale) || Math.Abs(scale - 1f) < 0.001f)
+                return false;
+
+            currentValue = Math.Max(0f, currentValue * scale);
+            return true;
+        }
+
+        private static void CountMaterializedCombatProfileApply(MaterializedCombatProfileRuntimeState profile, string counterKey, ref bool countedFlag)
+        {
+            if (profile == null || countedFlag)
+                return;
+
+            countedFlag = true;
+            IncrementMaterializedEquipmentCounter(MaterializedCombatProfileApplyCounts, counterKey);
         }
 
         private static string TryApplyMaterializedEquipmentOverrides(Equipment spawnEquipment, RosterEntryState entryState, List<string> missedSlots = null, bool trackCoverage = false)
@@ -5188,17 +5951,28 @@ namespace CoopSpectator.MissionBehaviors
             if (_hasLoggedMaterializedEquipmentCoverageSummary)
                 return;
 
-            _hasLoggedMaterializedEquipmentCoverageSummary = true;
             if (!IsSyntheticAllCampaignTroopsRuntime())
                 return;
+
+            bool hasCoverageData =
+                (MaterializedEquipmentResolutionSourceCounts != null && MaterializedEquipmentResolutionSourceCounts.Count > 0) ||
+                (MaterializedEquipmentMissCounts != null && MaterializedEquipmentMissCounts.Count > 0) ||
+                (MaterializedEquipmentNormalizedFallbackCounts != null && MaterializedEquipmentNormalizedFallbackCounts.Count > 0) ||
+                (MaterializedCombatProfileApplyCounts != null && MaterializedCombatProfileApplyCounts.Count > 0);
+            if (!hasCoverageData)
+                return;
+
+            _hasLoggedMaterializedEquipmentCoverageSummary = true;
 
             string resolutionCounts = FormatMaterializedEquipmentCounterSummary(MaterializedEquipmentResolutionSourceCounts, 8);
             string topMisses = FormatMaterializedEquipmentCounterSummary(MaterializedEquipmentMissCounts, 20);
             string topNormalizedFallbacks = FormatMaterializedEquipmentCounterSummary(MaterializedEquipmentNormalizedFallbackCounts, 20);
+            string combatProfileCounts = FormatMaterializedEquipmentCounterSummary(MaterializedCombatProfileApplyCounts, 12);
 
             ModLogger.Info(
                 "CoopMissionSpawnLogic: synthetic equipment coverage summary. " +
                 "ResolutionCounts=[" + resolutionCounts + "] " +
+                "CombatProfileCounts=[" + combatProfileCounts + "] " +
                 "TopMisses=[" + topMisses + "] " +
                 "TopNormalizedFallbacks=[" + topNormalizedFallbacks + "]");
         }
@@ -6375,6 +7149,7 @@ namespace CoopSpectator.MissionBehaviors
                     " Shield=" + entry.HasShield +
                     " Thrown=" + entry.HasThrown +
                     FormatEntryHeroIdentitySummary(entry) +
+                    FormatEntryCombatProfileSummary(entry) +
                     FormatEntryCombatEquipmentSummary(entry) +
                     " Count=" + entry.Count +
                     " Wounded=" + entry.WoundedCount +
@@ -6407,6 +7182,59 @@ namespace CoopSpectator.MissionBehaviors
             return parts.Count == 0
                 ? " Equip=[]"
                 : " Equip=[" + string.Join(", ", parts) + "]";
+        }
+
+        private static string FormatEntryCombatProfileSummary(RosterEntryState entry)
+        {
+            if (entry == null)
+                return string.Empty;
+
+            bool hasCombatProfile =
+                entry.AttributeVigor > 0 ||
+                entry.AttributeControl > 0 ||
+                entry.AttributeEndurance > 0 ||
+                entry.SkillOneHanded > 0 ||
+                entry.SkillTwoHanded > 0 ||
+                entry.SkillPolearm > 0 ||
+                entry.SkillBow > 0 ||
+                entry.SkillCrossbow > 0 ||
+                entry.SkillThrowing > 0 ||
+                entry.SkillRiding > 0 ||
+                entry.SkillAthletics > 0 ||
+                entry.BaseHitPoints > 0 ||
+                (entry.PerkIds != null && entry.PerkIds.Count > 0);
+
+            if (!hasCombatProfile)
+                return string.Empty;
+
+            var parts = new List<string>
+            {
+                "Attr=" + entry.AttributeVigor + "/" + entry.AttributeControl + "/" + entry.AttributeEndurance,
+                "Skills=" + string.Join("/",
+                    entry.SkillOneHanded,
+                    entry.SkillTwoHanded,
+                    entry.SkillPolearm,
+                    entry.SkillBow,
+                    entry.SkillCrossbow,
+                    entry.SkillThrowing,
+                    entry.SkillRiding,
+                    entry.SkillAthletics),
+                "Hp=" + entry.BaseHitPoints
+            };
+
+            if (entry.PerkIds != null && entry.PerkIds.Count > 0)
+            {
+                IEnumerable<string> samplePerks = entry.PerkIds
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Take(3);
+                string perkSample = string.Join(",", samplePerks);
+                if (entry.PerkIds.Count > 3)
+                    perkSample += ",...";
+
+                parts.Add("Perks=" + entry.PerkIds.Count + (string.IsNullOrWhiteSpace(perkSample) ? string.Empty : "[" + perkSample + "]"));
+            }
+
+            return " Profile=[" + string.Join(" ", parts) + "]";
         }
 
         private static string FormatEntryHeroIdentitySummary(RosterEntryState entry)

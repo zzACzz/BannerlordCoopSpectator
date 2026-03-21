@@ -25,6 +25,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private bool _wasInMissionLastTick; // Пам'ятаємо стан попереднього тіку: чи вже була активна місія
         private bool _hasSentBattleStartForThisMission; // Прапорець, щоб не відправляти BATTLE_START багато разів за одну місію
         private static bool _useSyntheticAllCampaignTroopsRoster;
+        private static readonly Dictionary<string, object> CachedDefaultSkillObjects = new Dictionary<string, object>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, object> CachedDefaultCharacterAttributeObjects = new Dictionary<string, object>(StringComparer.Ordinal);
+        private static List<object> _cachedPerkObjects;
+
+        private static void ResetCombatProfileLookupCaches()
+        {
+            CachedDefaultSkillObjects.Clear();
+            CachedDefaultCharacterAttributeObjects.Clear();
+            _cachedPerkObjects = null;
+        }
 
         public static bool IsSyntheticAllCampaignTroopsRosterEnabled()
         {
@@ -191,6 +201,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
         private static BattleStartMessage BuildBattleStartPayload() // Будуємо мінімальні дані про старт битви/місії
         { // Починаємо блок методу
+            // Mission entry/load can recreate the underlying MBObject instances for skills/attributes.
+            // Re-resolve them for each payload build so synthetic snapshots do not keep stale references
+            // and collapse all combat-profile values to zero on the second build.
+            ResetCombatProfileLookupCaches();
+
             BattleStartMessage message = new BattleStartMessage(); // Створюємо DTO
 
             // 1) Map scene name (best-effort) // Пояснюємо блок
@@ -314,6 +329,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         WoundedCount = 0
                     };
                     ApplyCombatEquipmentSnapshot(troop, character);
+                    ApplyCombatProfileSnapshot(troop, character);
                     partySnapshot.Troops.Add(troop);
                     targetSide.Troops.Add(troop);
                 }
@@ -533,6 +549,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     stack.HasShield = TryGetCharacterHasShield(element.Character);
                     stack.HasThrown = TryGetCharacterHasThrown(element.Character);
                     ApplyCombatEquipmentSnapshot(stack, element.Character);
+                    ApplyCombatProfileSnapshot(stack, element.Character);
                     ApplyHeroIdentitySnapshot(stack, element.Character);
                     stack.IsRanged = TryGetCharacterIsRanged(element.Character);
                     stack.TroopName = element.Character.Name != null ? element.Character.Name.ToString() : element.Character.StringId; // Беремо ім'я або fallback на id
@@ -881,6 +898,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         WoundedCount = TryGetIntProperty(element, "WoundedNumber")
                     };
                     ApplyCombatEquipmentSnapshot(stack, character);
+                    ApplyCombatProfileSnapshot(stack, character);
                     ApplyHeroIdentitySnapshot(stack, character);
                     troops.Add(stack);
                 }
@@ -913,6 +931,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     " shield=" + troop.HasShield +
                     " thrown=" + troop.HasThrown +
                     FormatHeroIdentitySummary(troop) +
+                    FormatCombatProfileSummary(troop) +
                     FormatCombatEquipmentSummary(troop));
 
             ModLogger.Info(
@@ -943,6 +962,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     " shield=" + troop.HasShield +
                     " thrown=" + troop.HasThrown +
                     FormatHeroIdentitySummary(troop) +
+                    FormatCombatProfileSummary(troop) +
                     FormatCombatEquipmentSummary(troop));
 
             ModLogger.Info(
@@ -1054,6 +1074,33 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
+        private static Type TryGetKnownGameType(params string[] fullNames)
+        {
+            if (fullNames == null || fullNames.Length == 0)
+                return null;
+
+            foreach (string fullName in fullNames)
+            {
+                if (string.IsNullOrWhiteSpace(fullName))
+                    continue;
+
+                foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    try
+                    {
+                        Type resolvedType = assembly.GetType(fullName, false);
+                        if (resolvedType != null)
+                            return resolvedType;
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return null;
+        }
+
         private static object TryInvokeMethod(object instance, string methodName)
         {
             if (instance == null || string.IsNullOrWhiteSpace(methodName))
@@ -1067,6 +1114,82 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             catch
             {
                 return null;
+            }
+        }
+
+        private static object TryInvokeMethod(object instance, string methodName, object argument)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(methodName))
+                return null;
+
+            try
+            {
+                Type argumentType = argument?.GetType();
+                MethodInfo method = instance.GetType()
+                    .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    .FirstOrDefault(candidate =>
+                    {
+                        if (!string.Equals(candidate.Name, methodName, StringComparison.Ordinal))
+                            return false;
+
+                        ParameterInfo[] parameters = candidate.GetParameters();
+                        if (parameters.Length != 1)
+                            return false;
+
+                        if (argument == null)
+                            return !parameters[0].ParameterType.IsValueType ||
+                                   Nullable.GetUnderlyingType(parameters[0].ParameterType) != null;
+
+                        return parameters[0].ParameterType.IsInstanceOfType(argument) ||
+                               parameters[0].ParameterType.IsAssignableFrom(argumentType);
+                    });
+
+                return method?.Invoke(instance, new[] { argument });
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int TryConvertToInt(object value)
+        {
+            if (value == null)
+                return 0;
+
+            try
+            {
+                switch (value)
+                {
+                    case int intValue:
+                        return intValue;
+                    case short shortValue:
+                        return shortValue;
+                    case long longValue:
+                        return longValue > int.MaxValue ? int.MaxValue : (int)longValue;
+                    case float floatValue:
+                        return (int)Math.Round(floatValue);
+                    case double doubleValue:
+                        return (int)Math.Round(doubleValue);
+                    case decimal decimalValue:
+                        return (int)Math.Round(decimalValue);
+                    case byte byteValue:
+                        return byteValue;
+                    case sbyte sbyteValue:
+                        return sbyteValue;
+                    case uint uintValue:
+                        return uintValue > int.MaxValue ? int.MaxValue : (int)uintValue;
+                    case ushort ushortValue:
+                        return ushortValue;
+                    case ulong ulongValue:
+                        return ulongValue > int.MaxValue ? int.MaxValue : (int)ulongValue;
+                    default:
+                        return Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture);
+                }
+            }
+            catch
+            {
+                return 0;
             }
         }
 
@@ -1739,6 +1862,69 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return TryGetStringId(culture);
         }
 
+        private static void ApplyCombatProfileSnapshot(TroopStackInfo troop, object characterObject)
+        {
+            if (troop == null || characterObject == null)
+                return;
+
+            troop.AttributeVigor = TryGetCharacterAttributeValue(characterObject, "Vigor");
+            troop.AttributeControl = TryGetCharacterAttributeValue(characterObject, "Control");
+            troop.AttributeEndurance = TryGetCharacterAttributeValue(characterObject, "Endurance");
+            troop.SkillOneHanded = TryGetCharacterSkillValue(characterObject, "OneHanded");
+            troop.SkillTwoHanded = TryGetCharacterSkillValue(characterObject, "TwoHanded");
+            troop.SkillPolearm = TryGetCharacterSkillValue(characterObject, "Polearm");
+            troop.SkillBow = TryGetCharacterSkillValue(characterObject, "Bow");
+            troop.SkillCrossbow = TryGetCharacterSkillValue(characterObject, "Crossbow");
+            troop.SkillThrowing = TryGetCharacterSkillValue(characterObject, "Throwing");
+            troop.SkillRiding = TryGetCharacterSkillValue(characterObject, "Riding");
+            troop.SkillAthletics = TryGetCharacterSkillValue(characterObject, "Athletics");
+            BackfillDerivedCombatAttributes(troop);
+            troop.BaseHitPoints = TryGetCharacterBaseHitPoints(characterObject);
+            troop.PerkIds = TryGetCharacterPerkIds(characterObject);
+        }
+
+        private static void BackfillDerivedCombatAttributes(TroopStackInfo troop)
+        {
+            if (troop == null)
+                return;
+
+            if (troop.AttributeVigor <= 0)
+            {
+                troop.AttributeVigor = DeriveCombatAttributeFromSkills(
+                    troop.SkillOneHanded,
+                    troop.SkillTwoHanded,
+                    troop.SkillPolearm);
+            }
+
+            if (troop.AttributeControl <= 0)
+            {
+                troop.AttributeControl = DeriveCombatAttributeFromSkills(
+                    troop.SkillBow,
+                    troop.SkillCrossbow,
+                    troop.SkillThrowing);
+            }
+
+            if (troop.AttributeEndurance <= 0)
+            {
+                troop.AttributeEndurance = DeriveCombatAttributeFromSkills(
+                    troop.SkillRiding,
+                    troop.SkillAthletics);
+            }
+        }
+
+        private static int DeriveCombatAttributeFromSkills(params int[] skillValues)
+        {
+            if (skillValues == null || skillValues.Length == 0)
+                return 0;
+
+            int maxSkill = skillValues.Max();
+            if (maxSkill <= 0)
+                return 0;
+
+            int derivedValue = 1 + (int)Math.Round(maxSkill / 40f, MidpointRounding.AwayFromZero);
+            return Math.Max(1, Math.Min(10, derivedValue));
+        }
+
         private static void ApplyHeroIdentitySnapshot(TroopStackInfo troop, object characterObject)
         {
             if (troop == null || characterObject == null)
@@ -1752,6 +1938,217 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             troop.HeroLevel = TryGetHeroLevel(characterObject);
             troop.HeroAge = TryGetHeroAge(characterObject);
             troop.HeroIsFemale = TryGetHeroIsFemale(characterObject);
+        }
+
+        private static int TryGetCharacterAttributeValue(object instance, string attributeName)
+        {
+            object attributeObject = TryGetDefaultCharacterAttributeObject(attributeName);
+            if (attributeObject == null)
+                return 0;
+
+            foreach (object source in EnumerateCombatProfileSources(instance))
+            {
+                int value = TryConvertToInt(TryInvokeMethod(source, "GetAttributeValue", attributeObject));
+                if (value > 0)
+                    return value;
+            }
+
+            return 0;
+        }
+
+        private static int TryGetCharacterSkillValue(object instance, string skillName)
+        {
+            object skillObject = TryGetDefaultSkillObject(skillName);
+            if (skillObject == null)
+                return 0;
+
+            foreach (object source in EnumerateCombatProfileSources(instance))
+            {
+                int value = TryConvertToInt(TryInvokeMethod(source, "GetSkillValue", skillObject));
+                if (value > 0)
+                    return value;
+            }
+
+            return 0;
+        }
+
+        private static int TryGetCharacterBaseHitPoints(object instance)
+        {
+            foreach (object source in EnumerateCombatProfileSources(instance))
+            {
+                int maxHitPoints = TryGetIntProperty(source, "MaxHitPoints");
+                if (maxHitPoints > 0)
+                    return maxHitPoints;
+
+                maxHitPoints = TryConvertToInt(TryInvokeMethod(source, "MaxHitPoints"));
+                if (maxHitPoints > 0)
+                    return maxHitPoints;
+
+                int hitPoints = TryGetIntProperty(source, "HitPoints");
+                if (hitPoints > 0)
+                    return hitPoints;
+            }
+
+            return 0;
+        }
+
+        private static List<string> TryGetCharacterPerkIds(object instance)
+        {
+            Hero hero = TryResolveHeroObject(instance);
+            if (hero == null)
+                return new List<string>();
+
+            List<object> perkObjects = GetCachedPerkObjects();
+            if (perkObjects.Count == 0)
+                return new List<string>();
+
+            var perkIds = new List<string>();
+            foreach (object perkObject in perkObjects)
+            {
+                if (!TryHeroHasPerk(hero, perkObject))
+                    continue;
+
+                string perkId = TryGetStringId(perkObject);
+                if (!string.IsNullOrWhiteSpace(perkId))
+                    perkIds.Add(perkId);
+            }
+
+            return perkIds;
+        }
+
+        private static List<object> GetCachedPerkObjects()
+        {
+            if (_cachedPerkObjects != null)
+                return _cachedPerkObjects;
+
+            var perkObjects = new List<object>();
+            try
+            {
+                Type perkObjectType = TryGetKnownGameType("TaleWorlds.CampaignSystem.CharacterDevelopment.PerkObject");
+                if (perkObjectType != null && MBObjectManager.Instance != null)
+                {
+                    object allPerks = TryGetStaticPropertyValue(perkObjectType, "All");
+                    if (allPerks is System.Collections.IEnumerable allPerksEnumerable)
+                    {
+                        foreach (object perkObject in allPerksEnumerable)
+                        {
+                            if (perkObject != null)
+                                perkObjects.Add(perkObject);
+                        }
+                    }
+
+                    MethodInfo getObjectTypeListMethod = MBObjectManager.Instance.GetType()
+                        .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                        .FirstOrDefault(method =>
+                            string.Equals(method.Name, "GetObjectTypeList", StringComparison.Ordinal) &&
+                            method.IsGenericMethodDefinition &&
+                            method.GetParameters().Length == 0);
+                    if (perkObjects.Count == 0 && getObjectTypeListMethod != null)
+                    {
+                        object result = getObjectTypeListMethod.MakeGenericMethod(perkObjectType).Invoke(MBObjectManager.Instance, null);
+                        if (result is System.Collections.IEnumerable enumerable)
+                        {
+                            foreach (object perkObject in enumerable)
+                            {
+                                if (perkObject != null)
+                                    perkObjects.Add(perkObject);
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            _cachedPerkObjects = perkObjects;
+            return _cachedPerkObjects;
+        }
+
+        private static bool TryHeroHasPerk(Hero hero, object perkObject)
+        {
+            if (hero == null || perkObject == null)
+                return false;
+
+            foreach (object source in new object[]
+                     {
+                         hero,
+                         TryGetPropertyValue(hero, "HeroDeveloper") ?? TryGetPropertyValue(hero, "Developer"),
+                         hero.CharacterObject
+                     })
+            {
+                if (source == null)
+                    continue;
+
+                object result = TryInvokeMethod(source, "GetPerkValue", perkObject);
+                if (result is bool hasPerk)
+                    return hasPerk;
+            }
+
+            return false;
+        }
+
+        private static IEnumerable<object> EnumerateCombatProfileSources(object instance)
+        {
+            if (instance == null)
+                yield break;
+
+            var yielded = new HashSet<object>();
+            foreach (object source in new object[]
+                     {
+                         instance,
+                         TryGetPropertyValue(instance, "CharacterObject"),
+                         TryGetPropertyValue(instance, "OriginalCharacter")
+                     })
+            {
+                if (source != null && yielded.Add(source))
+                    yield return source;
+            }
+
+            Hero hero = TryResolveHeroObject(instance);
+            if (hero != null)
+            {
+                if (yielded.Add(hero))
+                    yield return hero;
+
+                if (hero.CharacterObject != null && yielded.Add(hero.CharacterObject))
+                    yield return hero.CharacterObject;
+
+                if (hero.CharacterObject?.OriginalCharacter != null && yielded.Add(hero.CharacterObject.OriginalCharacter))
+                    yield return hero.CharacterObject.OriginalCharacter;
+            }
+        }
+
+        private static object TryGetDefaultSkillObject(string skillName)
+        {
+            if (string.IsNullOrWhiteSpace(skillName))
+                return null;
+
+            if (CachedDefaultSkillObjects.TryGetValue(skillName, out object cached))
+                return cached;
+
+            Type defaultSkillsType = TryGetKnownGameType(
+                "TaleWorlds.Core.DefaultSkills",
+                "TaleWorlds.CampaignSystem.CharacterDevelopment.DefaultSkills");
+            object skillObject = TryGetStaticPropertyValue(defaultSkillsType, skillName);
+            CachedDefaultSkillObjects[skillName] = skillObject;
+            return skillObject;
+        }
+
+        private static object TryGetDefaultCharacterAttributeObject(string attributeName)
+        {
+            if (string.IsNullOrWhiteSpace(attributeName))
+                return null;
+
+            if (CachedDefaultCharacterAttributeObjects.TryGetValue(attributeName, out object cached))
+                return cached;
+
+            Type defaultCharacterAttributesType = TryGetKnownGameType(
+                "TaleWorlds.CampaignSystem.CharacterDevelopment.DefaultCharacterAttributes",
+                "TaleWorlds.Core.DefaultCharacterAttributes");
+            object attributeObject = TryGetStaticPropertyValue(defaultCharacterAttributesType, attributeName);
+            CachedDefaultCharacterAttributeObjects[attributeName] = attributeObject;
+            return attributeObject;
         }
 
         private static Hero TryResolveHeroObject(object instance)
@@ -2143,6 +2540,59 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return parts.Count == 0
                 ? string.Empty
                 : " " + string.Join(" ", parts);
+        }
+
+        private static string FormatCombatProfileSummary(TroopStackInfo troop)
+        {
+            if (troop == null)
+                return string.Empty;
+
+            bool hasCombatProfile =
+                troop.AttributeVigor > 0 ||
+                troop.AttributeControl > 0 ||
+                troop.AttributeEndurance > 0 ||
+                troop.SkillOneHanded > 0 ||
+                troop.SkillTwoHanded > 0 ||
+                troop.SkillPolearm > 0 ||
+                troop.SkillBow > 0 ||
+                troop.SkillCrossbow > 0 ||
+                troop.SkillThrowing > 0 ||
+                troop.SkillRiding > 0 ||
+                troop.SkillAthletics > 0 ||
+                troop.BaseHitPoints > 0 ||
+                (troop.PerkIds != null && troop.PerkIds.Count > 0);
+
+            if (!hasCombatProfile)
+                return string.Empty;
+
+            var parts = new List<string>
+            {
+                "attr=" + troop.AttributeVigor + "/" + troop.AttributeControl + "/" + troop.AttributeEndurance,
+                "skills=" + string.Join("/",
+                    troop.SkillOneHanded,
+                    troop.SkillTwoHanded,
+                    troop.SkillPolearm,
+                    troop.SkillBow,
+                    troop.SkillCrossbow,
+                    troop.SkillThrowing,
+                    troop.SkillRiding,
+                    troop.SkillAthletics),
+                "hp=" + troop.BaseHitPoints
+            };
+
+            if (troop.PerkIds != null && troop.PerkIds.Count > 0)
+            {
+                IEnumerable<string> samplePerks = troop.PerkIds
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Take(3);
+                string perkSample = string.Join(",", samplePerks);
+                if (troop.PerkIds.Count > 3)
+                    perkSample += ",...";
+
+                parts.Add("perks=" + troop.PerkIds.Count + (string.IsNullOrWhiteSpace(perkSample) ? string.Empty : "[" + perkSample + "]"));
+            }
+
+            return " profile=[" + string.Join(" ", parts) + "]";
         }
 
         private static void AddCombatEquipmentSummaryPart(List<string> parts, string label, string itemId)
