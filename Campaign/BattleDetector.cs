@@ -22,12 +22,22 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
     public sealed class BattleDetector // Оголошуємо sealed сервіс-клас (стан + простий tick)
     { // Починаємо блок класу
         private const string SyntheticAllCampaignTroopsBattleId = "synthetic_all_campaign_troops";
+        private const string SyntheticLiveHeroesBattleId = "synthetic_live_heroes";
+        private const int SyntheticHeroCompanionLimit = 12;
+        private const int SyntheticHeroLordLimit = 12;
         private bool _wasInMissionLastTick; // Пам'ятаємо стан попереднього тіку: чи вже була активна місія
         private bool _hasSentBattleStartForThisMission; // Прапорець, щоб не відправляти BATTLE_START багато разів за одну місію
-        private static bool _useSyntheticAllCampaignTroopsRoster;
+        private static SyntheticRosterMode _syntheticRosterMode;
         private static readonly Dictionary<string, object> CachedDefaultSkillObjects = new Dictionary<string, object>(StringComparer.Ordinal);
         private static readonly Dictionary<string, object> CachedDefaultCharacterAttributeObjects = new Dictionary<string, object>(StringComparer.Ordinal);
         private static List<object> _cachedPerkObjects;
+
+        private enum SyntheticRosterMode
+        {
+            None = 0,
+            AllCampaignTroops = 1,
+            LiveHeroes = 2
+        }
 
         private static void ResetCombatProfileLookupCaches()
         {
@@ -38,12 +48,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
         public static bool IsSyntheticAllCampaignTroopsRosterEnabled()
         {
-            return _useSyntheticAllCampaignTroopsRoster;
+            return _syntheticRosterMode == SyntheticRosterMode.AllCampaignTroops;
         }
 
         public static string SetSyntheticAllCampaignTroopsRosterEnabled(bool enabled)
         {
-            _useSyntheticAllCampaignTroopsRoster = enabled;
+            _syntheticRosterMode = enabled ? SyntheticRosterMode.AllCampaignTroops : SyntheticRosterMode.None;
             string summary = enabled
                 ? BuildSyntheticAllCampaignTroopsPreviewSummary()
                 : "disabled";
@@ -52,6 +62,37 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 (enabled ? "enabled" : "disabled") +
                 ". Summary=" + summary + ".");
             return summary;
+        }
+
+        public static bool IsSyntheticLiveHeroesRosterEnabled()
+        {
+            return _syntheticRosterMode == SyntheticRosterMode.LiveHeroes;
+        }
+
+        public static string SetSyntheticLiveHeroesRosterEnabled(bool enabled)
+        {
+            _syntheticRosterMode = enabled ? SyntheticRosterMode.LiveHeroes : SyntheticRosterMode.None;
+            string summary = enabled
+                ? BuildSyntheticLiveHeroesPreviewSummary()
+                : "disabled";
+            ModLogger.Info(
+                "BattleDetector: synthetic live-heroes test roster " +
+                (enabled ? "enabled" : "disabled") +
+                ". Summary=" + summary + ".");
+            return summary;
+        }
+
+        public static string GetSyntheticRosterStatusSummary()
+        {
+            switch (_syntheticRosterMode)
+            {
+                case SyntheticRosterMode.AllCampaignTroops:
+                    return "ALL_CAMPAIGN_TROOPS";
+                case SyntheticRosterMode.LiveHeroes:
+                    return "LIVE_HEROES";
+                default:
+                    return "OFF";
+            }
         }
 
         public void Tick() // Метод, який треба викликати кожен кадр з головного потоку (наприклад з SubModule.OnApplicationTick)
@@ -232,9 +273,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             message.PlayerSide = TryGetPlayerSideTextSafe(); // Пишемо "Attacker/Defender/Unknown" як текст
 
             // 4) Extended battle snapshot (best-effort) // Пояснюємо блок
-            message.Snapshot = _useSyntheticAllCampaignTroopsRoster
-                ? BuildSyntheticAllCampaignTroopsSnapshot(message.MapScene, message.PlayerSide)
-                : BuildBattleSnapshotSafe(message.MapScene, message.PlayerSide);
+            message.Snapshot =
+                _syntheticRosterMode == SyntheticRosterMode.AllCampaignTroops
+                    ? BuildSyntheticAllCampaignTroopsSnapshot(message.MapScene, message.PlayerSide)
+                    : _syntheticRosterMode == SyntheticRosterMode.LiveHeroes
+                        ? BuildSyntheticLiveHeroesSnapshot(message.MapScene, message.PlayerSide)
+                        : BuildBattleSnapshotSafe(message.MapScene, message.PlayerSide);
             BattleSnapshotRuntimeState.SetCurrent(message.Snapshot, "host-battle-detector");
 
             // 5) Legacy fields for transitional clients/runtime // Пояснюємо блок
@@ -360,6 +404,178 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " DefenderEntries=" + defenderSide.Troops.Count + ".");
             LogSnapshotMappings("synthetic-all-campaign-troops", snapshot);
             return snapshot;
+        }
+
+        private static BattleSnapshotMessage BuildSyntheticLiveHeroesSnapshot(string mapScene, string playerSideText)
+        {
+            List<Hero> attackerHeroes = CollectSyntheticPlayerHeroes();
+            List<Hero> defenderLords = CollectSyntheticLordHeroes();
+            if (attackerHeroes.Count == 0 || defenderLords.Count == 0)
+            {
+                ModLogger.Info("BattleDetector: synthetic live-heroes snapshot had no eligible heroes, falling back to live snapshot.");
+                return BuildBattleSnapshotSafe(mapScene, playerSideText);
+            }
+
+            var snapshot = new BattleSnapshotMessage
+            {
+                BattleId = SyntheticLiveHeroesBattleId,
+                BattleType = "SyntheticLiveHeroes",
+                MapScene = mapScene,
+                PlayerSide = playerSideText
+            };
+
+            var attackerSide = new BattleSideSnapshotMessage
+            {
+                SideId = "attacker",
+                SideText = nameof(BattleSideEnum.Attacker),
+                IsPlayerSide = string.Equals(playerSideText, nameof(BattleSideEnum.Attacker), StringComparison.OrdinalIgnoreCase)
+            };
+            var defenderSide = new BattleSideSnapshotMessage
+            {
+                SideId = "defender",
+                SideText = nameof(BattleSideEnum.Defender),
+                IsPlayerSide = string.Equals(playerSideText, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase)
+            };
+
+            List<object> rosterCharacters = attackerHeroes.Select(hero => (object)hero.CharacterObject)
+                .Concat(defenderLords.Select(hero => (object)hero.CharacterObject))
+                .Where(character => character != null)
+                .ToList();
+
+            AddSyntheticHeroParty(attackerSide, "synthetic_attacker_player_heroes", "Synthetic player heroes", attackerHeroes, rosterCharacters);
+            AddSyntheticHeroParty(defenderSide, "synthetic_defender_lords", "Synthetic lords", defenderLords, rosterCharacters);
+
+            attackerSide.TotalManCount = attackerSide.Troops.Count;
+            defenderSide.TotalManCount = defenderSide.Troops.Count;
+
+            if (attackerSide.Parties.Count > 0)
+                snapshot.Sides.Add(attackerSide);
+            if (defenderSide.Parties.Count > 0)
+                snapshot.Sides.Add(defenderSide);
+
+            ModLogger.Info(
+                "BattleDetector: using synthetic live-heroes snapshot. " +
+                "AttackerEntries=" + attackerSide.Troops.Count +
+                " DefenderEntries=" + defenderSide.Troops.Count + ".");
+            LogSnapshotMappings("synthetic-live-heroes", snapshot);
+            return snapshot;
+        }
+
+        private static void AddSyntheticHeroParty(
+            BattleSideSnapshotMessage targetSide,
+            string partyId,
+            string partyName,
+            List<Hero> heroes,
+            List<object> rosterCharacters)
+        {
+            if (targetSide == null || heroes == null || heroes.Count == 0)
+                return;
+
+            var partySnapshot = new BattlePartySnapshotMessage
+            {
+                PartyId = partyId,
+                PartyName = partyName,
+                IsMainParty = false
+            };
+
+            foreach (Hero hero in heroes)
+            {
+                TaleWorlds.CampaignSystem.CharacterObject character = hero?.CharacterObject;
+                if (character == null || string.IsNullOrWhiteSpace(character.StringId))
+                    continue;
+
+                string originalCharacterId = character.StringId;
+                string spawnTemplateId = GetMissionSafeCharacterId(character, rosterCharacters);
+                var troop = new TroopStackInfo
+                {
+                    EntryId = targetSide.SideId + "|" + partyId + "|" + originalCharacterId,
+                    SideId = targetSide.SideId,
+                    PartyId = partyId,
+                    CharacterId = spawnTemplateId,
+                    OriginalCharacterId = originalCharacterId,
+                    SpawnTemplateId = spawnTemplateId,
+                    TroopName = character.Name?.ToString() ?? originalCharacterId,
+                    CultureId = TryGetCultureId(character),
+                    Tier = TryGetIntProperty(character, "Tier"),
+                    IsMounted = TryGetBoolProperty(character, "IsMounted"),
+                    IsRanged = TryGetCharacterIsRanged(character),
+                    HasShield = TryGetCharacterHasShield(character),
+                    HasThrown = TryGetCharacterHasThrown(character),
+                    IsHero = true,
+                    Count = 1,
+                    WoundedCount = 0
+                };
+                ApplyCombatEquipmentSnapshot(troop, character);
+                ApplyCombatProfileSnapshot(troop, character);
+                ApplyHeroIdentitySnapshot(troop, character);
+                partySnapshot.Troops.Add(troop);
+                targetSide.Troops.Add(troop);
+            }
+
+            if (partySnapshot.Troops.Count <= 0)
+                return;
+
+            partySnapshot.TotalManCount = partySnapshot.Troops.Count;
+            targetSide.Parties.Add(partySnapshot);
+        }
+
+        private static string BuildSyntheticLiveHeroesPreviewSummary()
+        {
+            List<Hero> playerHeroes = CollectSyntheticPlayerHeroes();
+            List<Hero> lords = CollectSyntheticLordHeroes();
+            int companionCount = Math.Max(0, playerHeroes.Count - (Hero.MainHero != null ? 1 : 0));
+            return "main_hero=" + (Hero.MainHero != null ? 1 : 0) +
+                   " companions=" + companionCount +
+                   " lords=" + lords.Count;
+        }
+
+        private static List<Hero> CollectSyntheticPlayerHeroes()
+        {
+            var results = new List<Hero>();
+            var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void TryAdd(Hero hero)
+            {
+                if (hero == null || !hero.IsAlive || hero.CharacterObject == null || string.IsNullOrWhiteSpace(hero.StringId))
+                    return;
+                if (!seenIds.Add(hero.StringId))
+                    return;
+                results.Add(hero);
+            }
+
+            TryAdd(Hero.MainHero);
+
+            Clan playerClan = Hero.MainHero?.Clan ?? Clan.PlayerClan;
+            IEnumerable<Hero> companions = playerClan?.Companions ?? Enumerable.Empty<Hero>();
+            foreach (Hero companion in companions
+                         .Where(hero => hero != null && hero.IsAlive)
+                         .OrderBy(hero => hero.StringId, StringComparer.OrdinalIgnoreCase)
+                         .Take(SyntheticHeroCompanionLimit))
+            {
+                TryAdd(companion);
+            }
+
+            return results;
+        }
+
+        private static List<Hero> CollectSyntheticLordHeroes()
+        {
+            IEnumerable<Hero> source = Hero.AllAliveHeroes ?? Enumerable.Empty<Hero>();
+            string mainHeroId = Hero.MainHero?.StringId;
+            string playerClanId = Hero.MainHero?.Clan?.StringId;
+
+            return source
+                .Where(hero =>
+                    hero != null &&
+                    hero.IsAlive &&
+                    hero.CharacterObject != null &&
+                    hero.IsLord &&
+                    !string.Equals(hero.StringId, mainHeroId, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(hero.Clan?.StringId, playerClanId, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(hero => hero.Clan?.StringId ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(hero => hero.StringId, StringComparer.OrdinalIgnoreCase)
+                .Take(SyntheticHeroLordLimit)
+                .ToList();
         }
 
         private static List<BasicCharacterObject> CollectSyntheticAllCampaignTroops()
@@ -1414,9 +1630,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 if (string.Equals(cultureToken, "empire", StringComparison.Ordinal) && tier >= 4)
                     return "mp_coop_heavy_infantry_empire_troop";
 
-                return tier >= 4
-                    ? "mp_heavy_infantry_" + cultureToken + "_troop"
-                    : "mp_light_infantry_" + cultureToken + "_troop";
+                return NormalizeKnownMissionSafeTemplateId(
+                    tier >= 4
+                        ? "mp_heavy_infantry_" + cultureToken + "_troop"
+                        : "mp_light_infantry_" + cultureToken + "_troop");
             }
 
             return tier >= 4
@@ -1710,6 +1927,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 case "mp_light_infantry_empire_troop":
                     return "mp_coop_light_infantry_empire_troop";
+                case "mp_heavy_infantry_aserai_troop":
+                    return "mp_shock_infantry_aserai_troop";
                 default:
                     return candidate;
             }
@@ -2710,6 +2929,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return 0f;
             }
         }
+
     } // Завершуємо блок класу
 } // Завершуємо блок простору імен
 

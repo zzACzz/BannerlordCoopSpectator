@@ -3416,6 +3416,7 @@ namespace CoopSpectator.MissionBehaviors
         private static Agent _diagnosticAllowedAgent;
         private const bool EnableFixedMissionCulturesExperiment = true;
         private const string SyntheticAllCampaignTroopsBattleId = "synthetic_all_campaign_troops";
+        private const string SyntheticLiveHeroesBattleId = "synthetic_live_heroes";
         private const int MaxMaterializedArmyAgentsPerSide = 24;
         private const int MaxMaterializedAgentsPerEntry = 12;
         private const int FallbackMaterializedAgentsPerTroop = 4;
@@ -3544,6 +3545,8 @@ namespace CoopSpectator.MissionBehaviors
                 ["sumpter_horse"] = "mp_battania_pony",
                 ["tournament_arrows"] = "mp_arrows_barbed",
                 ["tribal_bow"] = "mp_hunting_bow"
+                ,
+                ["southern_moccasins"] = "mp_strapped_shoes"
             };
         private static readonly Dictionary<string, int> MaterializedEquipmentResolutionSourceCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> MaterializedEquipmentMissCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -3574,6 +3577,10 @@ namespace CoopSpectator.MissionBehaviors
             public int SkillAthletics { get; set; }
             public int BaseHitPoints { get; set; }
             public List<string> PerkIds { get; set; } = new List<string>();
+            public int PerkMeleeCount { get; set; }
+            public int PerkRangedCount { get; set; }
+            public int PerkAthleticsCount { get; set; }
+            public int PerkRidingCount { get; set; }
             public bool CountedPerkRegistration;
             public bool CountedWeaponSkillAdjustment;
             public bool CountedWeaponInaccuracyAdjustment;
@@ -3583,6 +3590,11 @@ namespace CoopSpectator.MissionBehaviors
             public bool CountedRidingAttributeAdjustment;
             public bool CountedMountedPenaltyAdjustment;
             public bool CountedMountStatAdjustment;
+            public bool CountedPerkMeleeAdjustment;
+            public bool CountedPerkRangedAdjustment;
+            public bool CountedPerkAthleticsAdjustment;
+            public bool CountedPerkRidingAdjustment;
+            public bool CountedPerkMountAdjustment;
         }
 
         private static readonly FormationClass[] RestrictableFormationClasses =
@@ -4519,9 +4531,20 @@ namespace CoopSpectator.MissionBehaviors
             return string.Equals(snapshot?.BattleId, SyntheticAllCampaignTroopsBattleId, StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsSyntheticLiveHeroesRuntime()
+        {
+            BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            return string.Equals(snapshot?.BattleId, SyntheticLiveHeroesBattleId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSyntheticRuntime()
+        {
+            return IsSyntheticAllCampaignTroopsRuntime() || IsSyntheticLiveHeroesRuntime();
+        }
+
         private static int GetMaterializedArmyAgentsPerSideCap(int requestedEntryCount)
         {
-            if (!IsSyntheticAllCampaignTroopsRuntime())
+            if (!IsSyntheticRuntime())
                 return MaxMaterializedArmyAgentsPerSide;
 
             return Math.Max(MaxMaterializedArmyAgentsPerSide, Math.Max(0, requestedEntryCount));
@@ -4529,12 +4552,12 @@ namespace CoopSpectator.MissionBehaviors
 
         private static int GetMaterializedAgentsPerEntryCap()
         {
-            return IsSyntheticAllCampaignTroopsRuntime() ? 1 : MaxMaterializedAgentsPerEntry;
+            return IsSyntheticRuntime() ? 1 : MaxMaterializedAgentsPerEntry;
         }
 
         private static int GetFallbackMaterializedAgentsPerTroopCap()
         {
-            return IsSyntheticAllCampaignTroopsRuntime() ? 1 : FallbackMaterializedAgentsPerTroop;
+            return IsSyntheticRuntime() ? 1 : FallbackMaterializedAgentsPerTroop;
         }
 
         private static BasicCharacterObject ResolveMaterializedArmyCharacter(
@@ -4859,9 +4882,41 @@ namespace CoopSpectator.MissionBehaviors
                     : new List<string>()
             };
             MaterializedCombatProfileRuntimeState profile = _materializedCombatProfilesByAgentIndex[agent.Index];
+            profile.PerkMeleeCount = CountCombatProfilePerksByPrefix(profile.PerkIds, "OneHanded", "TwoHanded", "Polearm");
+            profile.PerkRangedCount = CountCombatProfilePerksByPrefix(profile.PerkIds, "Bow", "Crossbow", "Throwing");
+            profile.PerkAthleticsCount = CountCombatProfilePerksByPrefix(profile.PerkIds, "Athletics");
+            profile.PerkRidingCount = CountCombatProfilePerksByPrefix(profile.PerkIds, "Riding");
             IncrementMaterializedEquipmentCounter(MaterializedCombatProfileApplyCounts, "registered");
             if (profile.PerkIds.Count > 0)
                 CountMaterializedCombatProfileApply(profile, "perks", ref profile.CountedPerkRegistration);
+        }
+
+        private static int CountCombatProfilePerksByPrefix(IEnumerable<string> perkIds, params string[] prefixes)
+        {
+            if (perkIds == null || prefixes == null || prefixes.Length == 0)
+                return 0;
+
+            int count = 0;
+            foreach (string perkId in perkIds)
+            {
+                if (string.IsNullOrWhiteSpace(perkId))
+                    continue;
+
+                for (int i = 0; i < prefixes.Length; i++)
+                {
+                    string prefix = prefixes[i];
+                    if (string.IsNullOrWhiteSpace(prefix))
+                        continue;
+
+                    if (!perkId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    count++;
+                    break;
+                }
+            }
+
+            return count;
         }
 
         private static void TryRefreshMaterializedCombatProfileDrivenStats(Mission mission, string source)
@@ -4989,6 +5044,9 @@ namespace CoopSpectator.MissionBehaviors
             if (TryApplyEnduranceDrivenStats(agent, profile, agentDrivenProperties))
                 applied = true;
 
+            if (TryApplyPerkDrivenStats(agent, profile, agentDrivenProperties))
+                applied = true;
+
             if (agent.HasMount || agent.MountAgent != null)
             {
                 int templateRiding = TryGetCharacterSkillValue(agent.Character, DefaultSkills.Riding);
@@ -5034,6 +5092,55 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     applied = true;
                     CountMaterializedCombatProfileApply(profile, "attribute-control", ref profile.CountedControlAttributeAdjustment);
+                }
+            }
+
+            return applied;
+        }
+
+        private static bool TryApplyPerkDrivenStats(
+            Agent agent,
+            MaterializedCombatProfileRuntimeState profile,
+            AgentDrivenProperties agentDrivenProperties)
+        {
+            if (agent == null || profile == null || agentDrivenProperties == null || profile.PerkIds == null || profile.PerkIds.Count == 0)
+                return false;
+
+            bool applied = false;
+
+            if (profile.PerkMeleeCount > 0 && AgentLoadoutContainsRelevantSkill(agent, "OneHanded", "TwoHanded", "Polearm"))
+            {
+                if (TryApplyMeleePerkDrivenStats(agentDrivenProperties, profile.PerkMeleeCount))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "perk-melee", ref profile.CountedPerkMeleeAdjustment);
+                }
+            }
+
+            if (profile.PerkRangedCount > 0 && AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing"))
+            {
+                if (TryApplyRangedPerkDrivenStats(agentDrivenProperties, profile.PerkRangedCount))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "perk-ranged", ref profile.CountedPerkRangedAdjustment);
+                }
+            }
+
+            if (profile.PerkAthleticsCount > 0 && !agent.IsMount && !(agent.HasMount || agent.MountAgent != null))
+            {
+                if (TryApplyAthleticsPerkDrivenStats(agentDrivenProperties, profile.PerkAthleticsCount))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "perk-athletics", ref profile.CountedPerkAthleticsAdjustment);
+                }
+            }
+
+            if (profile.PerkRidingCount > 0 && (agent.HasMount || agent.MountAgent != null))
+            {
+                if (TryApplyRidingPerkDrivenStats(agentDrivenProperties, profile.PerkRidingCount))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "perk-riding", ref profile.CountedPerkRidingAdjustment);
                 }
             }
 
@@ -5172,6 +5279,26 @@ namespace CoopSpectator.MissionBehaviors
             if (applied)
                 CountMaterializedCombatProfileApply(profile, "mount", ref profile.CountedMountStatAdjustment);
 
+            if (TryApplyMountPerkDrivenStats(profile, agentDrivenProperties))
+            {
+                applied = true;
+                CountMaterializedCombatProfileApply(profile, "perk-mount", ref profile.CountedPerkMountAdjustment);
+            }
+
+            return applied;
+        }
+
+        private static bool TryApplyMountPerkDrivenStats(
+            MaterializedCombatProfileRuntimeState profile,
+            AgentDrivenProperties agentDrivenProperties)
+        {
+            if (profile == null || agentDrivenProperties == null || profile.PerkRidingCount <= 0)
+                return false;
+
+            float factor = ComputePerkPositiveFactor(profile.PerkRidingCount, 0.005f, 0.08f);
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MountSpeed, 1f, factor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MountManeuver, 1f, factor);
             return applied;
         }
 
@@ -5190,6 +5317,21 @@ namespace CoopSpectator.MissionBehaviors
             applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.SwingSpeedMultiplier, baseFactor, desiredFactor);
             applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, baseFactor, desiredFactor);
             applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, baseFactor, desiredFactor);
+            return applied;
+        }
+
+        private static bool TryApplyMeleePerkDrivenStats(
+            AgentDrivenProperties agentDrivenProperties,
+            int perkCount)
+        {
+            if (agentDrivenProperties == null || perkCount <= 0)
+                return false;
+
+            float factor = ComputePerkPositiveFactor(perkCount, 0.004f, 0.08f);
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.SwingSpeedMultiplier, 1f, factor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, 1f, factor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.HandlingMultiplier, 1f, factor);
             return applied;
         }
 
@@ -5236,6 +5378,24 @@ namespace CoopSpectator.MissionBehaviors
             return applied;
         }
 
+        private static bool TryApplyRangedPerkDrivenStats(
+            AgentDrivenProperties agentDrivenProperties,
+            int perkCount)
+        {
+            if (agentDrivenProperties == null || perkCount <= 0)
+                return false;
+
+            float speedFactor = ComputePerkPositiveFactor(perkCount, 0.0045f, 0.08f);
+            float accuracyFactor = ComputePerkPenaltyReductionFactor(perkCount, 0.0075f, 0.15f, 0.8f);
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, 1f, speedFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, 1f, speedFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MissileSpeedMultiplier, 1f, speedFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponInaccuracy, 1f, accuracyFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponBestAccuracyWaitTime, 1f, accuracyFactor);
+            return applied;
+        }
+
         private static bool TryApplyEnduranceDrivenProperties(
             AgentDrivenProperties agentDrivenProperties,
             int templateEndurance,
@@ -5255,6 +5415,21 @@ namespace CoopSpectator.MissionBehaviors
                 DrivenProperty.TopSpeedReachDuration,
                 ComputeSpeedReachDurationFactor(templateEndurance),
                 ComputeSpeedReachDurationFactor(desiredEndurance));
+            return applied;
+        }
+
+        private static bool TryApplyAthleticsPerkDrivenStats(
+            AgentDrivenProperties agentDrivenProperties,
+            int perkCount)
+        {
+            if (agentDrivenProperties == null || perkCount <= 0)
+                return false;
+
+            float speedFactor = ComputePerkPositiveFactor(perkCount, 0.0035f, 0.05f);
+            float reachFactor = ComputePerkPenaltyReductionFactor(perkCount, 0.004f, 0.07f, 0.85f);
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.CombatMaxSpeedMultiplier, 1f, speedFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.TopSpeedReachDuration, 1f, reachFactor);
             return applied;
         }
 
@@ -5301,6 +5476,24 @@ namespace CoopSpectator.MissionBehaviors
             float desiredInaccuracyFactor = ComputeMountedWeaponInaccuracyFactor(desiredRiding);
             applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponInaccuracy, baseInaccuracyFactor, desiredInaccuracyFactor);
 
+            return applied;
+        }
+
+        private static bool TryApplyRidingPerkDrivenStats(
+            AgentDrivenProperties agentDrivenProperties,
+            int perkCount)
+        {
+            if (agentDrivenProperties == null || perkCount <= 0)
+                return false;
+
+            float speedFactor = ComputePerkPositiveFactor(perkCount, 0.004f, 0.06f);
+            float accuracyFactor = ComputePerkPenaltyReductionFactor(perkCount, 0.006f, 0.12f, 0.82f);
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.SwingSpeedMultiplier, 1f, speedFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, 1f, speedFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, 1f, speedFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponBestAccuracyWaitTime, 1f, accuracyFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponInaccuracy, 1f, accuracyFactor);
             return applied;
         }
 
@@ -5397,6 +5590,24 @@ namespace CoopSpectator.MissionBehaviors
         {
             int normalized = Math.Max(0, Math.Min(10, attributeValue));
             return Math.Max(0.65f, 1.1f - normalized * 0.025f);
+        }
+
+        private static float ComputePerkPositiveFactor(int perkCount, float perPerkBonus, float maxBonus)
+        {
+            if (perkCount <= 0)
+                return 1f;
+
+            float bonus = Math.Min(maxBonus, perkCount * perPerkBonus);
+            return 1f + Math.Max(0f, bonus);
+        }
+
+        private static float ComputePerkPenaltyReductionFactor(int perkCount, float perPerkReduction, float maxReduction, float floor)
+        {
+            if (perkCount <= 0)
+                return 1f;
+
+            float reduction = Math.Min(maxReduction, perkCount * perPerkReduction);
+            return Math.Max(floor, 1f - Math.Max(0f, reduction));
         }
 
         private static int DeriveCharacterVigorAttribute(BasicCharacterObject character)
@@ -5951,7 +6162,7 @@ namespace CoopSpectator.MissionBehaviors
             if (_hasLoggedMaterializedEquipmentCoverageSummary)
                 return;
 
-            if (!IsSyntheticAllCampaignTroopsRuntime())
+            if (!IsSyntheticRuntime())
                 return;
 
             bool hasCoverageData =
@@ -5967,7 +6178,7 @@ namespace CoopSpectator.MissionBehaviors
             string resolutionCounts = FormatMaterializedEquipmentCounterSummary(MaterializedEquipmentResolutionSourceCounts, 8);
             string topMisses = FormatMaterializedEquipmentCounterSummary(MaterializedEquipmentMissCounts, 20);
             string topNormalizedFallbacks = FormatMaterializedEquipmentCounterSummary(MaterializedEquipmentNormalizedFallbackCounts, 20);
-            string combatProfileCounts = FormatMaterializedEquipmentCounterSummary(MaterializedCombatProfileApplyCounts, 12);
+            string combatProfileCounts = FormatMaterializedEquipmentCounterSummary(MaterializedCombatProfileApplyCounts, 20);
 
             ModLogger.Info(
                 "CoopMissionSpawnLogic: synthetic equipment coverage summary. " +
