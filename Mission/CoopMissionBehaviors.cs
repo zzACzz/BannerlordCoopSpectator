@@ -3456,6 +3456,95 @@ namespace CoopSpectator.MissionBehaviors
             "tournament_arrows",
             "tribal_bow"
         };
+        private static readonly IReadOnlyDictionary<string, string> ExactEquipmentCompatibilityAliasIds =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["pointed_skullcap_over_mail_coif"] = "cs_exact_pointed_skullcap_over_mail_coif",
+                ["sling_braided"] = "cs_exact_sling_braided",
+                ["lordly_padded_mitten"] = "cs_exact_lordly_padded_mitten",
+                ["ladys_shoe"] = "cs_exact_ladys_shoe",
+                ["steel_druzhinnik_kite_shield"] = "cs_exact_steel_druzhinnik_kite_shield",
+                ["northern_spear_4_t5"] = "cs_exact_northern_spear_4_t5",
+                ["nordic_sloven"] = "cs_exact_nordic_sloven",
+                ["sturgia_infantry_shield_a"] = "cs_exact_sturgia_infantry_shield_a",
+                ["storm_charger"] = "cs_exact_storm_charger",
+                ["nomad_cap"] = "cs_exact_nomad_cap",
+                ["studded_leather_waistcoat"] = "cs_exact_studded_leather_waistcoat",
+                ["southern_spear_4_t3"] = "cs_exact_southern_spear_4_t3",
+                ["large_adarga"] = "cs_exact_large_adarga",
+                ["studded_adarga"] = "cs_exact_studded_adarga",
+                ["southern_throwing_axe_1_t4"] = "cs_exact_southern_throwing_axe_1_t4",
+                ["small_heater_shield"] = "cs_exact_small_heater_shield",
+                ["scale_shoulder_armor"] = "cs_exact_scale_shoulder_armor",
+                ["peasant_hammer_1_t1"] = "cs_exact_peasant_hammer_1_t1",
+                ["peasant_maul_t1_2"] = "cs_exact_peasant_maul_t1_2",
+                ["northern_2hsword_t4"] = "cs_exact_northern_2hsword_t4",
+                ["peasant_pitchfork_2_t1"] = "cs_exact_peasant_pitchfork_2_t1",
+                ["peasant_hammer_2_t1"] = "cs_exact_peasant_hammer_2_t1",
+                ["western_javelin_2_t3"] = "cs_exact_western_javelin_2_t3",
+                ["bolted_leather_strips"] = "cs_exact_bolted_leather_strips",
+                ["bolt_c"] = "cs_exact_bolt_c",
+                ["bolt_d"] = "cs_exact_bolt_d",
+                ["bolt_e"] = "cs_exact_bolt_e",
+                ["crossbow_c"] = "cs_exact_crossbow_c",
+                ["nordic_shortbow"] = "cs_exact_nordic_shortbow",
+                ["southern_spear_3_t3"] = "cs_exact_southern_spear_3_t3",
+                ["southern_spear_3_t4"] = "cs_exact_southern_spear_3_t4",
+                ["sumpter_horse"] = "cs_exact_sumpter_horse",
+                ["tournament_arrows"] = "cs_exact_tournament_arrows",
+                ["tribal_bow"] = "cs_exact_tribal_bow"
+            };
+        private static readonly IReadOnlyDictionary<string, string> ExactEquipmentCompatibilityStandInItemIds =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["pointed_skullcap_over_mail_coif"] = "mp_pointed_skullcap_over_laced_coif",
+                ["sling_braided"] = "mp_throwing_stone",
+                ["lordly_padded_mitten"] = "mp_guarded_padded_vambrace",
+                ["ladys_shoe"] = "mp_strapped_shoes",
+                ["steel_druzhinnik_kite_shield"] = "mp_ironrim_riders_kite_shield",
+                ["northern_spear_4_t5"] = "sturgia_lance_1_t4",
+                ["nordic_sloven"] = "mp_sturgian_lamellar_gambeson_heavy",
+                ["sturgia_infantry_shield_a"] = "mp_western_riders_kite_shield",
+                ["storm_charger"] = "mp_khuzait_horse",
+                ["nomad_cap"] = "mp_fur_hat",
+                ["studded_leather_waistcoat"] = "mp_stitched_leather_over_mail",
+                ["southern_spear_4_t3"] = "eastern_spear_1_t2",
+                ["large_adarga"] = "adarga",
+                ["studded_adarga"] = "adarga",
+                ["southern_throwing_axe_1_t4"] = "highland_throwing_axe_1_t2",
+                ["small_heater_shield"] = "mp_heavy_heater_shield",
+                ["scale_shoulder_armor"] = "fur_cloak_a",
+                ["peasant_hammer_1_t1"] = "light_mace_t3",
+                ["peasant_maul_t1_2"] = "light_mace_t3",
+                ["northern_2hsword_t4"] = "kaskara_2hsword_t3",
+                ["sturgia_infantry_shield_b"] = "mp_western_riders_kite_shield",
+                ["sturgia_mace_1_t3"] = "light_mace_t3",
+                ["sturgia_mace_2_t4"] = "khuzait_mace_2_t4",
+                ["t3_aserai_horse"] = "t2_aserai_horse",
+                ["varangian_bra_mail"] = "mp_mail_shoulders",
+                ["vlandia_2haxe_1_t4"] = "battania_axe_2_t4",
+                ["vlandia_infantry_shield_a"] = "mp_heavy_heater_shield",
+                ["vlandia_lance_1_t3"] = "vlandia_lance_2_t4",
+                ["vlandia_pike_1_t5"] = "vlandia_polearm_1_t5",
+                ["western_2hsword_t3"] = "kaskara_2hsword_t3",
+                ["western_2hsword_t4"] = "battania_2hsword_5_t4",
+                ["western_spear_4_t3"] = "western_spear_3_t3",
+                ["western_throwing_axe_1_t1"] = "highland_throwing_axe_1_t2",
+                ["wooden_2hsword_t1"] = "kaskara_2hsword_t3",
+                ["peasant_pitchfork_2_t1"] = "western_spear_2_t2",
+                ["western_javelin_2_t3"] = "mp_javelin",
+                ["bolted_leather_strips"] = "fur_cloak_a",
+                ["bolt_c"] = "bolt_a",
+                ["bolt_d"] = "bolt_a",
+                ["bolt_e"] = "bolt_a",
+                ["crossbow_c"] = "crossbow_b",
+                ["nordic_shortbow"] = "mp_nordic_short_bow",
+                ["southern_spear_3_t3"] = "eastern_spear_1_t2",
+                ["southern_spear_3_t4"] = "eastern_spear_1_t2",
+                ["sumpter_horse"] = "mp_battania_pony",
+                ["tournament_arrows"] = "mp_arrows_barbed",
+                ["tribal_bow"] = "mp_hunting_bow"
+            };
         private static readonly Dictionary<string, int> MaterializedEquipmentResolutionSourceCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> MaterializedEquipmentMissCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> MaterializedEquipmentNormalizedFallbackCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -4932,6 +5021,33 @@ namespace CoopSpectator.MissionBehaviors
                 return directItem;
             }
 
+            string compatibilityAliasItemId = null;
+            if (ExactEquipmentCompatibilityAliasIds.TryGetValue(itemId, out compatibilityAliasItemId) &&
+                !string.IsNullOrWhiteSpace(compatibilityAliasItemId))
+            {
+                ItemObject compatibilityAliasItem = TryGetMaterializedEquipmentItem(compatibilityAliasItemId);
+                if (compatibilityAliasItem != null)
+                {
+                    resolvedItemId = compatibilityAliasItem.StringId;
+                    resolutionSource = "compat-alias";
+                    RecordMaterializedEquipmentResolution(itemId, resolutionSource, trackCoverage);
+                    return compatibilityAliasItem;
+                }
+            }
+
+            if (ExactEquipmentCompatibilityStandInItemIds.TryGetValue(itemId, out string compatibilityStandInItemId) &&
+                !string.IsNullOrWhiteSpace(compatibilityStandInItemId))
+            {
+                ItemObject compatibilityStandInItem = TryGetMaterializedEquipmentItem(compatibilityStandInItemId);
+                if (compatibilityStandInItem != null)
+                {
+                    resolvedItemId = compatibilityStandInItem.StringId;
+                    resolutionSource = "compat-standin";
+                    RecordMaterializedEquipmentResolution(itemId, resolutionSource, trackCoverage);
+                    return compatibilityStandInItem;
+                }
+            }
+
             if (!itemId.StartsWith("mp_", StringComparison.Ordinal))
             {
                 string mpPrefixedItemId = "mp_" + itemId;
@@ -4962,6 +5078,7 @@ namespace CoopSpectator.MissionBehaviors
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: exact imported item lookup still unresolved. " +
                     "ItemId=" + itemId +
+                    " AliasId=" + (compatibilityAliasItemId ?? "(none)") +
                     " Slot=" + (slotLabel ?? "(null)") +
                     " SpawnTemplate=" + (entryState?.SpawnTemplateId ?? "(null)") +
                     " Culture=" + (entryState?.CultureId ?? "(null)"));
@@ -5003,6 +5120,31 @@ namespace CoopSpectator.MissionBehaviors
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: imported equipment probe missing direct ItemObject ids = [" +
                     string.Join(", ", missing) +
+                    "].");
+            }
+
+            string[] aliasIds = ExactEquipmentCompatibilityAliasIds.Values
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var missingAliases = new List<string>();
+            foreach (string aliasId in aliasIds)
+            {
+                if (TryGetMaterializedEquipmentItem(aliasId) == null)
+                    missingAliases.Add(aliasId);
+            }
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: compatibility alias availability diagnostics. " +
+                "ProbeCount=" + aliasIds.Length +
+                " Missing=" + missingAliases.Count +
+                " Loaded=" + (aliasIds.Length - missingAliases.Count));
+
+            if (missingAliases.Count > 0)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: compatibility alias probe missing ItemObject ids = [" +
+                    string.Join(", ", missingAliases) +
                     "].");
             }
         }
