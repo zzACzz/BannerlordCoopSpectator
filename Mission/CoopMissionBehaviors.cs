@@ -3412,6 +3412,7 @@ namespace CoopSpectator.MissionBehaviors
         private static CoopBattlePhase? _lastAppliedFormationHoldPhase;
         private static bool _hasMaterializedBattlefieldArmies;
         private static bool _hasLoggedImportedEquipmentAvailabilityDiagnostics;
+        private static bool _hasLoggedMaterializedEquipmentCoverageSummary;
         private static Agent _diagnosticAllowedAgent;
         private const bool EnableFixedMissionCulturesExperiment = true;
         private const string SyntheticAllCampaignTroopsBattleId = "synthetic_all_campaign_troops";
@@ -3427,8 +3428,37 @@ namespace CoopSpectator.MissionBehaviors
             "eastern_spear_3_t3",
             "aserai_sword_3_t3",
             "noble_horse_southern",
-            "mail_and_plate_barding"
+            "mail_and_plate_barding",
+            "ladys_shoe",
+            "large_adarga",
+            "lordly_padded_mitten",
+            "nomad_cap",
+            "nordic_sloven",
+            "northern_2hsword_t4",
+            "northern_spear_4_t5",
+            "peasant_hammer_1_t1",
+            "peasant_maul_t1_2",
+            "pointed_skullcap_over_mail_coif",
+            "scale_shoulder_armor",
+            "sling_braided",
+            "small_heater_shield",
+            "southern_spear_4_t3",
+            "southern_throwing_axe_1_t4",
+            "steel_druzhinnik_kite_shield",
+            "storm_charger",
+            "studded_adarga",
+            "studded_leather_waistcoat",
+            "sturgia_infantry_shield_a",
+            "peasant_pitchfork_2_t1",
+            "western_javelin_2_t3",
+            "crossbow_c",
+            "sumpter_horse",
+            "tournament_arrows",
+            "tribal_bow"
         };
+        private static readonly Dictionary<string, int> MaterializedEquipmentResolutionSourceCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, int> MaterializedEquipmentMissCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, int> MaterializedEquipmentNormalizedFallbackCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly FormationClass[] RestrictableFormationClasses =
         {
             FormationClass.Infantry,
@@ -4209,9 +4239,13 @@ namespace CoopSpectator.MissionBehaviors
             {
                 _lastMaterializedArmyMission = mission;
                 _hasMaterializedBattlefieldArmies = false;
+                _hasLoggedMaterializedEquipmentCoverageSummary = false;
                 _lastAlignedControlledAgentIndexByPeer.Clear();
                 _materializedArmyEntryIdByAgentIndex.Clear();
                 _materializedArmySideByAgentIndex.Clear();
+                MaterializedEquipmentResolutionSourceCounts.Clear();
+                MaterializedEquipmentMissCounts.Clear();
+                MaterializedEquipmentNormalizedFallbackCounts.Clear();
             }
 
             if (_hasMaterializedBattlefieldArmies)
@@ -4233,6 +4267,7 @@ namespace CoopSpectator.MissionBehaviors
                 "AttackerAgents=" + attackerCount +
                 " DefenderAgents=" + defenderCount +
                 " Source=" + (source ?? "unknown"));
+            LogMaterializedEquipmentCoverageSummaryIfNeeded();
         }
 
         private static int MaterializeArmyForSide(Mission mission, Team team, BattleSideEnum side, string source)
@@ -4552,7 +4587,7 @@ namespace CoopSpectator.MissionBehaviors
                 var origin = new BasicBattleAgentOrigin(troop);
                 AgentBuildData buildData = new AgentBuildData(troop);
                 Equipment spawnEquipment = troop.Equipment?.Clone(false);
-                appliedArmorOverrides = TryApplyMaterializedEquipmentOverrides(spawnEquipment, entryState);
+                appliedArmorOverrides = TryApplyMaterializedEquipmentOverrides(spawnEquipment, entryState, null, trackCoverage: true);
                 buildData.Team(team);
                 buildData.Controller(AgentControllerType.AI);
                 buildData.TroopOrigin(origin);
@@ -4598,7 +4633,7 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static string TryApplyMaterializedEquipmentOverrides(Equipment spawnEquipment, RosterEntryState entryState, List<string> missedSlots = null)
+        private static string TryApplyMaterializedEquipmentOverrides(Equipment spawnEquipment, RosterEntryState entryState, List<string> missedSlots = null, bool trackCoverage = false)
         {
             if (spawnEquipment == null || entryState == null)
                 return "(none)";
@@ -4606,22 +4641,22 @@ namespace CoopSpectator.MissionBehaviors
             var appliedSlots = new List<string>();
             if (entryState.IsMounted)
             {
-                TryApplyMountedMaterializedWeaponOverrides(spawnEquipment, entryState, appliedSlots, missedSlots);
+                TryApplyMountedMaterializedWeaponOverrides(spawnEquipment, entryState, appliedSlots, missedSlots, trackCoverage);
             }
             else
             {
-                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon0, entryState.CombatItem0Id, "Item0", entryState, appliedSlots, missedSlots);
-                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon1, entryState.CombatItem1Id, "Item1", entryState, appliedSlots, missedSlots);
-                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon2, entryState.CombatItem2Id, "Item2", entryState, appliedSlots, missedSlots);
-                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon3, entryState.CombatItem3Id, "Item3", entryState, appliedSlots, missedSlots);
+                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon0, entryState.CombatItem0Id, "Item0", entryState, appliedSlots, missedSlots, trackCoverage);
+                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon1, entryState.CombatItem1Id, "Item1", entryState, appliedSlots, missedSlots, trackCoverage);
+                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon2, entryState.CombatItem2Id, "Item2", entryState, appliedSlots, missedSlots, trackCoverage);
+                TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon3, entryState.CombatItem3Id, "Item3", entryState, appliedSlots, missedSlots, trackCoverage);
             }
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Head, entryState.CombatHeadId, "Head", entryState, appliedSlots, missedSlots);
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Body, entryState.CombatBodyId, "Body", entryState, appliedSlots, missedSlots);
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Leg, entryState.CombatLegId, "Leg", entryState, appliedSlots, missedSlots);
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Gloves, entryState.CombatGlovesId, "Gloves", entryState, appliedSlots, missedSlots);
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Cape, entryState.CombatCapeId, "Cape", entryState, appliedSlots, missedSlots);
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Horse, entryState.CombatHorseId, "Horse", entryState, appliedSlots, missedSlots);
-            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.HorseHarness, entryState.CombatHorseHarnessId, "HorseHarness", entryState, appliedSlots, missedSlots);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Head, entryState.CombatHeadId, "Head", entryState, appliedSlots, missedSlots, trackCoverage);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Body, entryState.CombatBodyId, "Body", entryState, appliedSlots, missedSlots, trackCoverage);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Leg, entryState.CombatLegId, "Leg", entryState, appliedSlots, missedSlots, trackCoverage);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Gloves, entryState.CombatGlovesId, "Gloves", entryState, appliedSlots, missedSlots, trackCoverage);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Cape, entryState.CombatCapeId, "Cape", entryState, appliedSlots, missedSlots, trackCoverage);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Horse, entryState.CombatHorseId, "Horse", entryState, appliedSlots, missedSlots, trackCoverage);
+            TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.HorseHarness, entryState.CombatHorseHarnessId, "HorseHarness", entryState, appliedSlots, missedSlots, trackCoverage);
             return appliedSlots.Count > 0 ? string.Join(", ", appliedSlots) : "(none)";
         }
 
@@ -4648,13 +4683,14 @@ namespace CoopSpectator.MissionBehaviors
             Equipment spawnEquipment,
             RosterEntryState entryState,
             List<string> appliedSlots,
-            List<string> missedSlots)
+            List<string> missedSlots,
+            bool trackCoverage)
         {
             var resolvedItems = new List<ResolvedMaterializedEquipmentOverride>();
-            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem0Id, "Item0", entryState, resolvedItems, missedSlots);
-            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem1Id, "Item1", entryState, resolvedItems, missedSlots);
-            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem2Id, "Item2", entryState, resolvedItems, missedSlots);
-            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem3Id, "Item3", entryState, resolvedItems, missedSlots);
+            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem0Id, "Item0", entryState, resolvedItems, missedSlots, trackCoverage);
+            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem1Id, "Item1", entryState, resolvedItems, missedSlots, trackCoverage);
+            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem2Id, "Item2", entryState, resolvedItems, missedSlots, trackCoverage);
+            TryAddResolvedMaterializedEquipmentOverride(entryState.CombatItem3Id, "Item3", entryState, resolvedItems, missedSlots, trackCoverage);
             if (resolvedItems.Count == 0)
                 return;
 
@@ -4676,14 +4712,15 @@ namespace CoopSpectator.MissionBehaviors
             string sourceSlotLabel,
             RosterEntryState entryState,
             List<ResolvedMaterializedEquipmentOverride> resolvedItems,
-            List<string> missedSlots)
+            List<string> missedSlots,
+            bool trackCoverage)
         {
             if (string.IsNullOrWhiteSpace(itemId))
                 return;
 
             string resolvedItemId;
             string resolutionSource;
-            ItemObject item = ResolveMaterializedEquipmentItem(itemId, entryState, sourceSlotLabel, out resolvedItemId, out resolutionSource);
+            ItemObject item = ResolveMaterializedEquipmentItem(itemId, entryState, sourceSlotLabel, out resolvedItemId, out resolutionSource, trackCoverage);
             if (item == null)
             {
                 missedSlots?.Add(sourceSlotLabel + "=" + itemId);
@@ -4845,14 +4882,15 @@ namespace CoopSpectator.MissionBehaviors
             string slotLabel,
             RosterEntryState entryState,
             List<string> appliedSlots,
-            List<string> missedSlots)
+            List<string> missedSlots,
+            bool trackCoverage)
         {
             if (spawnEquipment == null || string.IsNullOrWhiteSpace(itemId))
                 return;
 
             string resolvedItemId;
             string resolutionSource;
-            ItemObject item = ResolveMaterializedEquipmentItem(itemId, entryState, slotLabel, out resolvedItemId, out resolutionSource);
+            ItemObject item = ResolveMaterializedEquipmentItem(itemId, entryState, slotLabel, out resolvedItemId, out resolutionSource, trackCoverage);
             if (item == null)
             {
                 missedSlots?.Add(slotLabel + "=" + itemId);
@@ -4877,7 +4915,8 @@ namespace CoopSpectator.MissionBehaviors
             RosterEntryState entryState,
             string slotLabel,
             out string resolvedItemId,
-            out string resolutionSource)
+            out string resolutionSource,
+            bool trackCoverage)
         {
             resolvedItemId = itemId;
             resolutionSource = "direct";
@@ -4889,6 +4928,7 @@ namespace CoopSpectator.MissionBehaviors
             {
                 resolvedItemId = directItem.StringId;
                 resolutionSource = "direct";
+                RecordMaterializedEquipmentResolution(itemId, resolutionSource, trackCoverage);
                 return directItem;
             }
 
@@ -4900,6 +4940,7 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     resolvedItemId = prefixedItem.StringId;
                     resolutionSource = "mp-prefix";
+                    RecordMaterializedEquipmentResolution(itemId, resolutionSource, trackCoverage);
                     return prefixedItem;
                 }
             }
@@ -4911,6 +4952,7 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     resolvedItemId = normalizedItem.StringId;
                     resolutionSource = "normalized";
+                    RecordMaterializedEquipmentResolution(itemId, resolutionSource, trackCoverage);
                     return normalizedItem;
                 }
             }
@@ -4925,6 +4967,7 @@ namespace CoopSpectator.MissionBehaviors
                     " Culture=" + (entryState?.CultureId ?? "(null)"));
             }
 
+            RecordMaterializedEquipmentMiss(itemId, trackCoverage);
             return null;
         }
 
@@ -4935,12 +4978,14 @@ namespace CoopSpectator.MissionBehaviors
 
             _hasLoggedImportedEquipmentAvailabilityDiagnostics = true;
             var diagnostics = new List<string>();
+            var missing = new List<string>();
             foreach (string itemId in ImportedEquipmentProbeIds)
             {
                 ItemObject item = TryGetMaterializedEquipmentItem(itemId);
                 if (item == null)
                 {
                     diagnostics.Add(itemId + "=missing");
+                    missing.Add(itemId);
                     continue;
                 }
 
@@ -4948,9 +4993,86 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             ModLogger.Info(
-                "CoopMissionSpawnLogic: imported equipment availability diagnostics = [" +
-                string.Join(", ", diagnostics) +
-                "].");
+                "CoopMissionSpawnLogic: imported equipment availability diagnostics. " +
+                "ProbeCount=" + ImportedEquipmentProbeIds.Length +
+                " Missing=" + missing.Count +
+                " Loaded=" + (ImportedEquipmentProbeIds.Length - missing.Count));
+
+            if (missing.Count > 0)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: imported equipment probe missing direct ItemObject ids = [" +
+                    string.Join(", ", missing) +
+                    "].");
+            }
+        }
+
+        private static void RecordMaterializedEquipmentResolution(string sourceItemId, string resolutionSource, bool trackCoverage)
+        {
+            if (!trackCoverage || string.IsNullOrWhiteSpace(resolutionSource))
+                return;
+
+            IncrementMaterializedEquipmentCounter(MaterializedEquipmentResolutionSourceCounts, resolutionSource);
+            if (string.Equals(resolutionSource, "normalized", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(sourceItemId))
+            {
+                IncrementMaterializedEquipmentCounter(MaterializedEquipmentNormalizedFallbackCounts, sourceItemId);
+            }
+        }
+
+        private static void RecordMaterializedEquipmentMiss(string sourceItemId, bool trackCoverage)
+        {
+            if (!trackCoverage)
+                return;
+
+            IncrementMaterializedEquipmentCounter(MaterializedEquipmentResolutionSourceCounts, "miss");
+            if (!string.IsNullOrWhiteSpace(sourceItemId))
+                IncrementMaterializedEquipmentCounter(MaterializedEquipmentMissCounts, sourceItemId);
+        }
+
+        private static void IncrementMaterializedEquipmentCounter(Dictionary<string, int> counters, string key)
+        {
+            if (counters == null || string.IsNullOrWhiteSpace(key))
+                return;
+
+            if (counters.TryGetValue(key, out int currentCount))
+                counters[key] = currentCount + 1;
+            else
+                counters[key] = 1;
+        }
+
+        private static void LogMaterializedEquipmentCoverageSummaryIfNeeded()
+        {
+            if (_hasLoggedMaterializedEquipmentCoverageSummary)
+                return;
+
+            _hasLoggedMaterializedEquipmentCoverageSummary = true;
+            if (!IsSyntheticAllCampaignTroopsRuntime())
+                return;
+
+            string resolutionCounts = FormatMaterializedEquipmentCounterSummary(MaterializedEquipmentResolutionSourceCounts, 8);
+            string topMisses = FormatMaterializedEquipmentCounterSummary(MaterializedEquipmentMissCounts, 20);
+            string topNormalizedFallbacks = FormatMaterializedEquipmentCounterSummary(MaterializedEquipmentNormalizedFallbackCounts, 20);
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: synthetic equipment coverage summary. " +
+                "ResolutionCounts=[" + resolutionCounts + "] " +
+                "TopMisses=[" + topMisses + "] " +
+                "TopNormalizedFallbacks=[" + topNormalizedFallbacks + "]");
+        }
+
+        private static string FormatMaterializedEquipmentCounterSummary(Dictionary<string, int> counters, int take)
+        {
+            if (counters == null || counters.Count == 0)
+                return "(none)";
+
+            return string.Join(
+                ", ",
+                counters
+                    .OrderByDescending(pair => pair.Value)
+                    .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                    .Take(Math.Max(1, take))
+                    .Select(pair => pair.Key + "=" + pair.Value));
         }
 
         private static ItemObject TryGetMaterializedEquipmentItem(string itemId)
@@ -5302,7 +5424,7 @@ namespace CoopSpectator.MissionBehaviors
         {
             Equipment spawnEquipment = troop?.Equipment?.Clone(false);
             var missedSlots = new List<string>();
-            string applied = TryApplyMaterializedEquipmentOverrides(spawnEquipment, entryState, missedSlots);
+            string applied = TryApplyMaterializedEquipmentOverrides(spawnEquipment, entryState, missedSlots, trackCoverage: false);
             string misses = missedSlots.Count > 0 ? string.Join(", ", missedSlots) : "(none)";
             return "AppliedEquipmentOverrides=" + applied + " EquipmentOverrideMisses=" + misses;
         }
