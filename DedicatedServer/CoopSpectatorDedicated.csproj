@@ -57,6 +57,7 @@
   <Compile Include="..\Infrastructure\CoopBattleAuthorityState.cs" Link="Infrastructure\CoopBattleAuthorityState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleEntryPolicy.cs" Link="Infrastructure\CoopBattleEntryPolicy.cs" />
     <Compile Include="..\Infrastructure\CoopBattleEntryStatusBridgeFile.cs" Link="Infrastructure\CoopBattleEntryStatusBridgeFile.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleResultBridgeFile.cs" Link="Infrastructure\CoopBattleResultBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSelectionBridgeFile.cs" Link="Infrastructure\CoopBattleSelectionBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSelectionIntentState.cs" Link="Infrastructure\CoopBattleSelectionIntentState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSpawnBridgeFile.cs" Link="Infrastructure\CoopBattleSpawnBridgeFile.cs" />

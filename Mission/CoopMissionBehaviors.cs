@@ -61,6 +61,8 @@ namespace CoopSpectator.MissionBehaviors
         private string _lastShownOwnEntryMenuKey;
         private string _lastAnnouncedBattlePhaseKey;
         private bool _battleActiveAnnouncementShown;
+        private bool _hasObservedBattleActivePhaseThisMission;
+        private bool _battleEndExitRequested;
         private float _legacyOverlayAutoRequestCooldownRemaining;
         private float _timeUntilNextOwnEntryHotkey;
         private float _timeUntilNextOwnEntryMenuRefresh;
@@ -93,6 +95,8 @@ namespace CoopSpectator.MissionBehaviors
             _showOwnEntryMenu = true;
             _lastAnnouncedBattlePhaseKey = null;
             _battleActiveAnnouncementShown = false;
+            _hasObservedBattleActivePhaseThisMission = false;
+            _battleEndExitRequested = false;
             if (EnableVisualSpawnAutoConfirmExperiment)
                 TryHookVisualSpawnAutoConfirm(mission);
             LogClassLoadoutDiagnosticsOnce(mission);
@@ -270,13 +274,48 @@ namespace CoopSpectator.MissionBehaviors
 
             string battlePhase = snapshot.BattlePhase ?? string.Empty;
             bool isBattleActive = string.Equals(battlePhase, CoopBattlePhase.BattleActive.ToString(), StringComparison.OrdinalIgnoreCase);
+            bool isBattleEnded = string.Equals(battlePhase, CoopBattlePhase.BattleEnded.ToString(), StringComparison.OrdinalIgnoreCase);
+            if (isBattleActive)
+                _hasObservedBattleActivePhaseThisMission = true;
             if (!isBattleActive)
                 _battleActiveAnnouncementShown = false;
+
+            if (isBattleEnded && !_hasObservedBattleActivePhaseThisMission)
+                return;
 
             if (string.Equals(_lastAnnouncedBattlePhaseKey, battlePhase, StringComparison.Ordinal))
                 return;
 
             _lastAnnouncedBattlePhaseKey = battlePhase;
+            if (isBattleEnded)
+            {
+                _showOwnEntryMenu = false;
+                _timeUntilNextOwnEntryMenuRefresh = 0f;
+                _lastShownOwnEntryMenuKey = null;
+
+                string winnerSide = snapshot.WinnerSide ?? string.Empty;
+                string completionReason = snapshot.BattleCompletionReason ?? string.Empty;
+                bool exitRequested = false;
+                if (!_battleEndExitRequested)
+                {
+                    _battleEndExitRequested = true;
+                    exitRequested = TryRequestClientMissionExit(Mission, "battle-ended bridge phase");
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: observed BattleEnded phase. " +
+                        "WinnerSide=" + (string.IsNullOrWhiteSpace(winnerSide) ? "none" : winnerSide) +
+                        " Reason=" + (string.IsNullOrWhiteSpace(completionReason) ? "unknown" : completionReason) +
+                        " ExitRequested=" + exitRequested + ".");
+                }
+
+                string endMessage = "Coop Battle: ended";
+                if (!string.IsNullOrWhiteSpace(winnerSide))
+                    endMessage += " | winner=" + winnerSide;
+                if (!string.IsNullOrWhiteSpace(completionReason))
+                    endMessage += " | " + completionReason;
+                OnOwnEntryHotkeyHandled(endMessage);
+                return;
+            }
+
             if (!isBattleActive || _battleActiveAnnouncementShown)
                 return;
 
@@ -285,6 +324,44 @@ namespace CoopSpectator.MissionBehaviors
             _timeUntilNextOwnEntryMenuRefresh = 0f;
             _lastShownOwnEntryMenuKey = null;
             OnOwnEntryHotkeyHandled("Coop Battle: started");
+        }
+
+        private static bool TryRequestClientMissionExit(Mission mission, string source)
+        {
+            if (mission == null)
+                return false;
+
+            foreach (string methodName in new[] { "EndMission", "OnEndMissionRequest", "OnEndMissionInternal" })
+            {
+                try
+                {
+                    MethodInfo method = mission.GetType().GetMethod(
+                        methodName,
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                        null,
+                        Type.EmptyTypes,
+                        null);
+                    if (method == null)
+                        continue;
+
+                    method.Invoke(mission, null);
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: requested local mission exit via reflection. " +
+                        "Method=" + methodName +
+                        " Source=" + (source ?? "unknown") + ".");
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionClientLogic: local mission exit method failed. " +
+                        "Method=" + methodName +
+                        " Source=" + (source ?? "unknown") +
+                        " Error=" + ex.Message);
+                }
+            }
+
+            return false;
         }
 
         private void TryHandleOwnEntryHotkeys(Mission mission, float dt)
@@ -2293,6 +2370,14 @@ namespace CoopSpectator.MissionBehaviors
                 string wieldedItemId = wieldedWeapon.Item?.StringId ?? "null";
                 string wieldedUsage = wieldedWeapon.CurrentUsageItem?.ItemUsage ?? "null";
 
+                Agent currentMount = currentMain.MountAgent;
+                string mountHealth = currentMount != null
+                    ? currentMount.Health.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                    : "n/a";
+                string mountHealthLimit = currentMount != null
+                    ? currentMount.HealthLimit.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                    : "n/a";
+
                 ModLogger.Info(
                     "CoopMissionClientLogic: post-control agent diagnostics. " +
                     "AgentIndex=" + currentMain.Index +
@@ -2307,6 +2392,8 @@ namespace CoopSpectator.MissionBehaviors
                     " RiderAgent=" + DescribeDiagnosticValue(currentMain.RiderAgent) +
                     " Health=" + currentMain.Health +
                     " HealthLimit=" + currentMain.HealthLimit +
+                    " MountHealth=" + mountHealth +
+                    " MountHealthLimit=" + mountHealthLimit +
                     " Team=" + (currentMain.Team?.TeamIndex ?? -1) +
                     " Side=" + (currentMain.Team?.Side ?? BattleSideEnum.None) +
                     " MovementFlags=" + currentMain.MovementFlags +
@@ -3413,6 +3500,10 @@ namespace CoopSpectator.MissionBehaviors
         private static bool _hasMaterializedBattlefieldArmies;
         private static bool _hasLoggedImportedEquipmentAvailabilityDiagnostics;
         private static bool _hasLoggedMaterializedEquipmentCoverageSummary;
+        private static bool _hasTriggeredAuthoritativeBattleCompletion;
+        private static string _authoritativeBattleWinnerSide = string.Empty;
+        private static string _authoritativeBattleCompletionReason = string.Empty;
+        private static string _lastLoggedBattleCompletionAuditKey = string.Empty;
         private static Agent _diagnosticAllowedAgent;
         private const bool EnableFixedMissionCulturesExperiment = true;
         private const string SyntheticAllCampaignTroopsBattleId = "synthetic_all_campaign_troops";
@@ -3553,17 +3644,28 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<string, int> MaterializedEquipmentNormalizedFallbackCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> MaterializedCombatProfileApplyCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<int, MaterializedCombatProfileRuntimeState> _materializedCombatProfilesByAgentIndex = new Dictionary<int, MaterializedCombatProfileRuntimeState>();
+        private static readonly Dictionary<string, MaterializedBattleResultEntryRuntimeState> _materializedBattleResultEntriesByEntryId = new Dictionary<string, MaterializedBattleResultEntryRuntimeState>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<int> _materializedBattleResultRemovedAgentIndices = new HashSet<int>();
+        private static readonly List<CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot> _materializedBattleResultCombatEvents = new List<CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot>();
         private static Mission _lastMaterializedCombatProfileMission;
+        private static Mission _lastMaterializedBattleResultMission;
         private static Mission _lastCombatProfileDrivenRefreshMission;
         private static float _lastCombatProfileDrivenRefreshMissionTime = -1f;
         private static bool _hasLoggedManualCombatProfileRefreshForMission;
+        private static bool _hasWrittenBattleResultSnapshotForMission;
+        private static int _droppedMaterializedBattleResultCombatEventCount;
         private static PropertyInfo _agentDrivenPropertiesProperty;
         private static bool _agentDrivenPropertiesPropertyResolved;
         private static bool _loggedMissingAgentDrivenPropertiesAccessor;
+        private static MaterializedCombatProfileRuntimeState _drivenPropertyBaselineProfileContext;
+        private static Agent _drivenPropertyBaselineAgentContext;
+        private static bool _drivenPropertyBaselineMountContext;
+        private const int MaxRecordedBattleResultCombatEvents = 16384;
 
         private sealed class MaterializedCombatProfileRuntimeState
         {
             public string EntryId { get; set; }
+            public string PartyId { get; set; }
             public int AttributeVigor { get; set; }
             public int AttributeControl { get; set; }
             public int AttributeEndurance { get; set; }
@@ -3581,6 +3683,21 @@ namespace CoopSpectator.MissionBehaviors
             public int PerkRangedCount { get; set; }
             public int PerkAthleticsCount { get; set; }
             public int PerkRidingCount { get; set; }
+            public float SideMorale { get; set; }
+            public float PartyMorale { get; set; }
+            public int LeaderLeadershipSkill { get; set; }
+            public int LeaderTacticsSkill { get; set; }
+            public int ScoutScoutingSkill { get; set; }
+            public int QuartermasterStewardSkill { get; set; }
+            public int EngineerEngineeringSkill { get; set; }
+            public int SurgeonMedicineSkill { get; set; }
+            public int PartyLeaderPerkCount { get; set; }
+            public int ArmyCommanderPerkCount { get; set; }
+            public int CaptainPerkCount { get; set; }
+            public int ScoutRolePerkCount { get; set; }
+            public int QuartermasterRolePerkCount { get; set; }
+            public int EngineerRolePerkCount { get; set; }
+            public int SurgeonRolePerkCount { get; set; }
             public bool CountedPerkRegistration;
             public bool CountedWeaponSkillAdjustment;
             public bool CountedWeaponInaccuracyAdjustment;
@@ -3595,6 +3712,50 @@ namespace CoopSpectator.MissionBehaviors
             public bool CountedPerkAthleticsAdjustment;
             public bool CountedPerkRidingAdjustment;
             public bool CountedPerkMountAdjustment;
+            public bool CountedPartyMoraleAdjustment;
+            public bool CountedPartyTacticsAdjustment;
+            public bool CountedPartyCaptainAdjustment;
+            public bool CountedPartyScoutAdjustment;
+            public bool CountedPartyQuartermasterAdjustment;
+            public bool CountedPartyEngineerAdjustment;
+            public bool CountedPartySurgeonAdjustment;
+            public string HumanDrivenPropertyBaselineSignature { get; set; }
+            public string MountDrivenPropertyBaselineSignature { get; set; }
+            public Dictionary<DrivenProperty, float> HumanDrivenPropertyBaselines { get; } = new Dictionary<DrivenProperty, float>();
+            public Dictionary<DrivenProperty, float> MountDrivenPropertyBaselines { get; } = new Dictionary<DrivenProperty, float>();
+            public Dictionary<DrivenProperty, float> HumanDrivenPropertyAccumulatedScales { get; } = new Dictionary<DrivenProperty, float>();
+            public Dictionary<DrivenProperty, float> MountDrivenPropertyAccumulatedScales { get; } = new Dictionary<DrivenProperty, float>();
+        }
+
+        private sealed class MaterializedBattleResultEntryRuntimeState
+        {
+            public string EntryId { get; set; }
+            public string SideId { get; set; }
+            public string PartyId { get; set; }
+            public string CharacterId { get; set; }
+            public string OriginalCharacterId { get; set; }
+            public string SpawnTemplateId { get; set; }
+            public string TroopName { get; set; }
+            public string HeroId { get; set; }
+            public string HeroRole { get; set; }
+            public bool IsHero { get; set; }
+            public int SnapshotCount { get; set; }
+            public int SnapshotWoundedCount { get; set; }
+            public int MaterializedSpawnCount { get; set; }
+            public int ActiveCount { get; set; }
+            public int RemovedCount { get; set; }
+            public int KilledCount { get; set; }
+            public int UnconsciousCount { get; set; }
+            public int RoutedCount { get; set; }
+            public int OtherRemovedCount { get; set; }
+            public int ScoreHitCount { get; set; }
+            public int HitsTakenCount { get; set; }
+            public int FatalHitCount { get; set; }
+            public int KillsInflictedCount { get; set; }
+            public int UnconsciousInflictedCount { get; set; }
+            public int RoutedInflictedCount { get; set; }
+            public float DamageDealt { get; set; }
+            public float DamageTaken { get; set; }
         }
 
         private static readonly FormationClass[] RestrictableFormationClasses =
@@ -3641,14 +3802,21 @@ namespace CoopSpectator.MissionBehaviors
             _lastAppliedFormationHoldPhase = null;
             _lastMaterializedArmyMission = null;
             ResetMaterializedCombatProfileRuntimeState();
+            ResetMaterializedBattleResultRuntimeState();
             _hasMaterializedBattlefieldArmies = false;
             _hasLoggedImportedEquipmentAvailabilityDiagnostics = false;
+            _hasTriggeredAuthoritativeBattleCompletion = false;
+            _authoritativeBattleWinnerSide = string.Empty;
+            _authoritativeBattleCompletionReason = string.Empty;
+            _lastLoggedBattleCompletionAuditKey = string.Empty;
             CoopBattleSelectionIntentState.Reset();
             CoopBattleSelectionRequestState.Reset();
             CoopBattleSpawnIntentState.Reset();
             CoopBattleSpawnRequestState.Reset();
             CoopBattleSpawnRuntimeState.Reset();
             CoopBattlePeerLifecycleRuntimeState.Reset();
+            CoopBattlePhaseRuntimeState.Clear("CoopMissionSpawnLogic.AfterStart");
+            CoopBattleResultBridgeFile.ClearResult("CoopMissionSpawnLogic.AfterStart");
 
             ModLogger.Info("CoopMissionSpawnLogic: server mission entered.");
             try
@@ -3710,12 +3878,57 @@ namespace CoopSpectator.MissionBehaviors
             TryApplyBattlePhaseAiHold(Mission, "server behavior tick");
             TryApplyBattlePhaseFormationHold(Mission, "server behavior tick");
             TryRefreshMaterializedCombatProfileDrivenStats(Mission, "server behavior tick");
+            TryCompleteBattleIfResolved(Mission, "server behavior tick");
             LogMaterializedEquipmentCoverageSummaryIfNeeded();
             TryWriteEntryStatusSnapshot(Mission, "server behavior tick");
         }
 
+        public override void OnScoreHit(
+            Agent affectedAgent,
+            Agent affectorAgent,
+            WeaponComponentData attackerWeapon,
+            bool isBlocked,
+            bool isSiegeEngineHit,
+            in Blow blow,
+            in AttackCollisionData collisionData,
+            float damagedHp,
+            float hitDistance,
+            float shotDifficulty)
+        {
+            TryTrackMaterializedBattleResultScoreHit(
+                affectedAgent,
+                affectorAgent,
+                attackerWeapon,
+                isBlocked,
+                isSiegeEngineHit,
+                damagedHp,
+                hitDistance,
+                shotDifficulty);
+            base.OnScoreHit(affectedAgent, affectorAgent, attackerWeapon, isBlocked, isSiegeEngineHit, blow, collisionData, damagedHp, hitDistance, shotDifficulty);
+        }
+
+        public override void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, AgentState agentState, KillingBlow blow)
+        {
+            TryTrackMaterializedBattleResultRemoval(affectedAgent, affectorAgent, agentState);
+            TryCompleteBattleIfResolved(Mission, "server behavior agent-removed");
+            base.OnAgentRemoved(affectedAgent, affectorAgent, agentState, blow);
+        }
+
+        public override void OnMissionResultReady(MissionResult missionResult)
+        {
+            CoopBattlePhaseRuntimeState.SetPhase(CoopBattlePhase.BattleEnded, "CoopMissionSpawnLogic.OnMissionResultReady", Mission, allowRegression: true);
+            TryWriteBattleResultSnapshot(Mission, "server behavior mission-result-ready");
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: mission result ready. " +
+                "HasResult=" + (missionResult != null) +
+                " Mission=" + (Mission?.SceneName ?? "null") + ".");
+            base.OnMissionResultReady(missionResult);
+        }
+
         protected override void OnEndMission()
         {
+            CoopBattlePhaseRuntimeState.SetPhase(CoopBattlePhase.BattleEnded, "CoopMissionSpawnLogic.OnEndMission", Mission, allowRegression: true);
+            TryWriteBattleResultSnapshot(Mission, "server behavior end-mission");
             CoopBattleSelectionIntentState.Reset();
             CoopBattleSelectionRequestState.Reset();
             CoopBattleSpawnIntentState.Reset();
@@ -3731,8 +3944,9 @@ namespace CoopSpectator.MissionBehaviors
             _lastAppliedFormationHoldPhase = null;
             _lastMaterializedArmyMission = null;
             ResetMaterializedCombatProfileRuntimeState();
+            ResetMaterializedBattleResultRuntimeState();
             _hasMaterializedBattlefieldArmies = false;
-            CoopBattlePhaseRuntimeState.SetPhase(CoopBattlePhase.BattleEnded, "CoopMissionSpawnLogic.OnEndMission", Mission, allowRegression: true);
+            _lastLoggedBattleCompletionAuditKey = string.Empty;
             TryWriteEntryStatusSnapshot(Mission, "server behavior end-mission");
             base.OnEndMission();
         }
@@ -4004,13 +4218,20 @@ namespace CoopSpectator.MissionBehaviors
                 _lastAppliedFormationHoldPhase = null;
                 _lastMaterializedArmyMission = null;
                 ResetMaterializedCombatProfileRuntimeState();
+                ResetMaterializedBattleResultRuntimeState();
                 _hasMaterializedBattlefieldArmies = false;
+                _hasTriggeredAuthoritativeBattleCompletion = false;
+                _authoritativeBattleWinnerSide = string.Empty;
+                _authoritativeBattleCompletionReason = string.Empty;
+                _lastLoggedBattleCompletionAuditKey = string.Empty;
                 CoopBattleSelectionIntentState.Reset();
                 CoopBattleSelectionRequestState.Reset();
                 CoopBattleSpawnIntentState.Reset();
                 CoopBattleSpawnRequestState.Reset();
                 CoopBattleSpawnRuntimeState.Reset();
                 CoopBattlePeerLifecycleRuntimeState.Reset();
+                CoopBattlePhaseRuntimeState.Clear("CoopMissionSpawnLogic.TryRunDedicatedMissionObserver new mission");
+                CoopBattleResultBridgeFile.ClearResult("CoopMissionSpawnLogic.TryRunDedicatedMissionObserver new mission");
                 _diagnosticAllowedAgent = null;
 
                 ModLogger.Info("CoopMissionSpawnLogic: dedicated observer detected active mission.");
@@ -4057,6 +4278,7 @@ namespace CoopSpectator.MissionBehaviors
             TryApplyBattlePhaseAiHold(mission, "dedicated observer");
             TryApplyBattlePhaseFormationHold(mission, "dedicated observer");
             TryRefreshMaterializedCombatProfileDrivenStats(mission, "dedicated observer");
+            TryCompleteBattleIfResolved(mission, "dedicated observer");
             LogMaterializedEquipmentCoverageSummaryIfNeeded();
             TryWriteEntryStatusSnapshot(mission, "dedicated observer");
         }
@@ -4208,6 +4430,55 @@ namespace CoopSpectator.MissionBehaviors
                 "Phase=" + currentPhase +
                 " PauseAITick=" + shouldPauseAi +
                 " Source=" + (source ?? "unknown"));
+        }
+
+        private static void TryCompleteBattleIfResolved(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer)
+                return;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase < CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
+                return;
+
+            if (_hasTriggeredAuthoritativeBattleCompletion)
+                return;
+
+            ResolveActiveBattleSideCounts(mission, out int attackerActive, out int defenderActive, out string countSource);
+            TryLogBattleCompletionAudit(attackerActive, defenderActive, countSource, source);
+            if (attackerActive > 0 && defenderActive > 0)
+                return;
+
+            _hasTriggeredAuthoritativeBattleCompletion = true;
+            _authoritativeBattleCompletionReason =
+                attackerActive <= 0 && defenderActive <= 0 ? "mutual-elimination" :
+                attackerActive <= 0 ? "attacker-eliminated" :
+                "defender-eliminated";
+            _authoritativeBattleWinnerSide =
+                attackerActive > 0 && defenderActive <= 0 ? BattleSideEnum.Attacker.ToString() :
+                defenderActive > 0 && attackerActive <= 0 ? BattleSideEnum.Defender.ToString() :
+                string.Empty;
+
+            CoopBattlePhaseRuntimeState.SetPhase(
+                CoopBattlePhase.BattleEnded,
+                "authoritative battle completion from " + (source ?? "unknown"),
+                mission,
+                allowRegression: false);
+
+            TryWriteBattleResultSnapshot(
+                mission,
+                "authoritative battle completion | " +
+                (_authoritativeBattleCompletionReason ?? "unknown") +
+                " | " + (source ?? "unknown"));
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: authoritative battle completion detected. " +
+                "WinnerSide=" + (string.IsNullOrWhiteSpace(_authoritativeBattleWinnerSide) ? "none" : _authoritativeBattleWinnerSide) +
+                " Reason=" + (_authoritativeBattleCompletionReason ?? "unknown") +
+                " AttackerActive=" + attackerActive +
+                " DefenderActive=" + defenderActive +
+                " CountSource=" + (countSource ?? "unknown") +
+                " Source=" + (source ?? "unknown") + ".");
         }
 
         private static void TryApplyBattlePhaseFormationHold(Mission mission, string source)
@@ -4661,6 +4932,7 @@ namespace CoopSpectator.MissionBehaviors
 
                 _materializedArmyEntryIdByAgentIndex[agent.Index] = entryId ?? string.Empty;
                 _materializedArmySideByAgentIndex[agent.Index] = side;
+                RegisterMaterializedBattleResultEntry(agent, entryState, side);
                 combatProfileDiagnostics = appliedCombatProfile;
                 spawnedCount++;
             }
@@ -4828,6 +5100,21 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
+            Agent mountAgent = agent.MountAgent;
+            if (mountAgent != null && mountAgent.IsActive())
+            {
+                try
+                {
+                    float targetMountHitPoints = Math.Max(1f, mountAgent.HealthLimit);
+                    mountAgent.Health = targetMountHitPoints;
+                    parts.Add("MountHp=" + targetMountHitPoints.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+                }
+                catch (Exception ex)
+                {
+                    parts.Add("MountHpApplyFailed=" + ex.GetType().Name);
+                }
+            }
+
             return parts.Count == 0
                 ? "AppliedCombatProfile=(none)"
                 : "AppliedCombatProfile=" + string.Join(", ", parts);
@@ -4843,6 +5130,16 @@ namespace CoopSpectator.MissionBehaviors
             _hasLoggedManualCombatProfileRefreshForMission = false;
         }
 
+        private static void ResetMaterializedBattleResultRuntimeState()
+        {
+            _materializedBattleResultEntriesByEntryId.Clear();
+            _materializedBattleResultRemovedAgentIndices.Clear();
+            _materializedBattleResultCombatEvents.Clear();
+            _lastMaterializedBattleResultMission = null;
+            _hasWrittenBattleResultSnapshotForMission = false;
+            _droppedMaterializedBattleResultCombatEventCount = 0;
+        }
+
         private static void EnsureMaterializedCombatProfileMission(Mission mission)
         {
             if (ReferenceEquals(_lastMaterializedCombatProfileMission, mission))
@@ -4856,15 +5153,39 @@ namespace CoopSpectator.MissionBehaviors
             _hasLoggedManualCombatProfileRefreshForMission = false;
         }
 
+        private static void EnsureMaterializedBattleResultMission(Mission mission)
+        {
+            if (ReferenceEquals(_lastMaterializedBattleResultMission, mission))
+                return;
+
+            _materializedBattleResultEntriesByEntryId.Clear();
+            _materializedBattleResultRemovedAgentIndices.Clear();
+            _materializedBattleResultCombatEvents.Clear();
+            _lastMaterializedBattleResultMission = mission;
+            _hasWrittenBattleResultSnapshotForMission = false;
+            _droppedMaterializedBattleResultCombatEventCount = 0;
+        }
+
         private static void RegisterMaterializedCombatProfile(Agent agent, RosterEntryState entryState)
         {
             if (agent?.Mission == null || entryState == null)
                 return;
 
             EnsureMaterializedCombatProfileMission(agent.Mission);
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            BattlePartyState partyState = null;
+            BattleSideState sideState = null;
+            if (runtimeState?.PartiesById != null && !string.IsNullOrWhiteSpace(entryState.PartyId))
+            {
+                runtimeState.PartiesById.TryGetValue(entryState.PartyId, out partyState);
+                if (partyState != null && runtimeState.SidesByKey != null && !string.IsNullOrWhiteSpace(partyState.SideId))
+                    runtimeState.SidesByKey.TryGetValue(partyState.SideId, out sideState);
+            }
+
             _materializedCombatProfilesByAgentIndex[agent.Index] = new MaterializedCombatProfileRuntimeState
             {
                 EntryId = entryState.EntryId,
+                PartyId = entryState.PartyId,
                 AttributeVigor = entryState.AttributeVigor,
                 AttributeControl = entryState.AttributeControl,
                 AttributeEndurance = entryState.AttributeEndurance,
@@ -4877,6 +5198,21 @@ namespace CoopSpectator.MissionBehaviors
                 SkillRiding = entryState.SkillRiding,
                 SkillAthletics = entryState.SkillAthletics,
                 BaseHitPoints = entryState.BaseHitPoints,
+                SideMorale = sideState?.SideMorale ?? 0f,
+                PartyMorale = partyState?.Modifiers?.Morale ?? 0f,
+                LeaderLeadershipSkill = partyState?.Modifiers?.LeaderLeadershipSkill ?? 0,
+                LeaderTacticsSkill = partyState?.Modifiers?.LeaderTacticsSkill ?? 0,
+                ScoutScoutingSkill = partyState?.Modifiers?.ScoutScoutingSkill ?? 0,
+                QuartermasterStewardSkill = partyState?.Modifiers?.QuartermasterStewardSkill ?? 0,
+                EngineerEngineeringSkill = partyState?.Modifiers?.EngineerEngineeringSkill ?? 0,
+                SurgeonMedicineSkill = partyState?.Modifiers?.SurgeonMedicineSkill ?? 0,
+                PartyLeaderPerkCount = partyState?.Modifiers?.PartyLeaderPerkIds?.Count ?? 0,
+                ArmyCommanderPerkCount = partyState?.Modifiers?.ArmyCommanderPerkIds?.Count ?? 0,
+                CaptainPerkCount = partyState?.Modifiers?.CaptainPerkIds?.Count ?? 0,
+                ScoutRolePerkCount = partyState?.Modifiers?.ScoutPerkIds?.Count ?? 0,
+                QuartermasterRolePerkCount = partyState?.Modifiers?.QuartermasterPerkIds?.Count ?? 0,
+                EngineerRolePerkCount = partyState?.Modifiers?.EngineerPerkIds?.Count ?? 0,
+                SurgeonRolePerkCount = partyState?.Modifiers?.SurgeonPerkIds?.Count ?? 0,
                 PerkIds = entryState.PerkIds != null
                     ? entryState.PerkIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
                     : new List<string>()
@@ -4889,6 +5225,499 @@ namespace CoopSpectator.MissionBehaviors
             IncrementMaterializedEquipmentCounter(MaterializedCombatProfileApplyCounts, "registered");
             if (profile.PerkIds.Count > 0)
                 CountMaterializedCombatProfileApply(profile, "perks", ref profile.CountedPerkRegistration);
+        }
+
+        private static void RegisterMaterializedBattleResultEntry(Agent agent, RosterEntryState entryState, BattleSideEnum side)
+        {
+            if (agent?.Mission == null || entryState == null || string.IsNullOrWhiteSpace(entryState.EntryId))
+                return;
+
+            EnsureMaterializedBattleResultMission(agent.Mission);
+
+            if (!_materializedBattleResultEntriesByEntryId.TryGetValue(entryState.EntryId, out MaterializedBattleResultEntryRuntimeState state))
+            {
+                state = new MaterializedBattleResultEntryRuntimeState
+                {
+                    EntryId = entryState.EntryId,
+                    SideId = entryState.SideId,
+                    PartyId = entryState.PartyId,
+                    CharacterId = entryState.CharacterId,
+                    OriginalCharacterId = entryState.OriginalCharacterId,
+                    SpawnTemplateId = ResolveEntrySpawnTemplateId(entryState),
+                    TroopName = entryState.TroopName,
+                    HeroId = entryState.HeroId,
+                    HeroRole = entryState.HeroRole,
+                    IsHero = entryState.IsHero,
+                    SnapshotCount = entryState.Count,
+                    SnapshotWoundedCount = entryState.WoundedCount
+                };
+                if (string.IsNullOrWhiteSpace(state.SideId))
+                    state.SideId = side == BattleSideEnum.None ? string.Empty : side.ToString();
+                _materializedBattleResultEntriesByEntryId[entryState.EntryId] = state;
+            }
+
+            state.MaterializedSpawnCount++;
+            state.ActiveCount++;
+        }
+
+        private static void TryTrackMaterializedBattleResultScoreHit(
+            Agent affectedAgent,
+            Agent affectorAgent,
+            WeaponComponentData attackerWeapon,
+            bool isBlocked,
+            bool isSiegeEngineHit,
+            float damagedHp,
+            float hitDistance,
+            float shotDifficulty)
+        {
+            if (affectorAgent == null || affectedAgent == null || affectorAgent.Mission == null || damagedHp <= 0.01f)
+                return;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase < CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
+                return;
+
+            MaterializedBattleResultEntryRuntimeState attackerEntry = TryGetMaterializedBattleResultEntryByAgent(affectorAgent, out string attackerEntryId);
+            MaterializedBattleResultEntryRuntimeState victimEntry = TryGetMaterializedBattleResultEntryByAgent(affectedAgent, out string victimEntryId);
+            if (attackerEntry == null && victimEntry == null)
+                return;
+
+            if (attackerEntry != null)
+            {
+                attackerEntry.ScoreHitCount++;
+                attackerEntry.DamageDealt += Math.Max(0f, damagedHp);
+            }
+
+            if (victimEntry != null)
+            {
+                victimEntry.HitsTakenCount++;
+                victimEntry.DamageTaken += Math.Max(0f, damagedHp);
+            }
+
+            if (_materializedBattleResultCombatEvents.Count >= MaxRecordedBattleResultCombatEvents)
+            {
+                _droppedMaterializedBattleResultCombatEventCount++;
+                return;
+            }
+
+            string attackerCharacterId;
+            string attackerOriginalCharacterId;
+            ResolveBattleResultCharacterIds(affectorAgent, attackerEntry, out attackerCharacterId, out attackerOriginalCharacterId);
+            string victimCharacterId;
+            string victimOriginalCharacterId;
+            ResolveBattleResultCharacterIds(affectedAgent, victimEntry, out victimCharacterId, out victimOriginalCharacterId);
+
+            _materializedBattleResultCombatEvents.Add(new CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot
+            {
+                AttackerEntryId = attackerEntryId,
+                AttackerSideId = attackerEntry?.SideId,
+                AttackerPartyId = attackerEntry?.PartyId,
+                AttackerCharacterId = attackerCharacterId,
+                AttackerOriginalCharacterId = attackerOriginalCharacterId,
+                VictimEntryId = victimEntryId,
+                VictimSideId = victimEntry?.SideId,
+                VictimPartyId = victimEntry?.PartyId,
+                VictimCharacterId = victimCharacterId,
+                VictimOriginalCharacterId = victimOriginalCharacterId,
+                WeaponSkillHint = ResolveCombatEventSkillHint(attackerWeapon, affectorAgent, isSiegeEngineHit),
+                WeaponClassHint = ResolveCombatEventWeaponClassHint(attackerWeapon),
+                IsBlocked = isBlocked,
+                IsSiegeEngineHit = isSiegeEngineHit,
+                IsFatal = false,
+                Damage = Math.Max(0f, damagedHp),
+                HitDistance = Math.Max(0f, hitDistance),
+                ShotDifficulty = Math.Max(0f, shotDifficulty),
+                MissionTime = affectorAgent.Mission.CurrentTime
+            });
+        }
+
+        private static void TryTrackMaterializedBattleResultRemoval(Agent affectedAgent, Agent affectorAgent, AgentState agentState)
+        {
+            if (affectedAgent == null || affectedAgent.IsMount || affectedAgent.Mission == null)
+                return;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase < CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
+                return;
+
+            if (!_materializedBattleResultRemovedAgentIndices.Add(affectedAgent.Index))
+                return;
+
+            if (!_materializedArmyEntryIdByAgentIndex.TryGetValue(affectedAgent.Index, out string entryId) || string.IsNullOrWhiteSpace(entryId))
+                return;
+
+            if (!_materializedBattleResultEntriesByEntryId.TryGetValue(entryId, out MaterializedBattleResultEntryRuntimeState state) || state == null)
+                return;
+
+            state.ActiveCount = Math.Max(0, state.ActiveCount - 1);
+            state.RemovedCount++;
+
+            string removedState = agentState.ToString();
+            if (string.Equals(removedState, "Killed", StringComparison.OrdinalIgnoreCase))
+                state.KilledCount++;
+            else if (string.Equals(removedState, "Unconscious", StringComparison.OrdinalIgnoreCase))
+                state.UnconsciousCount++;
+            else if (string.Equals(removedState, "Routed", StringComparison.OrdinalIgnoreCase))
+                state.RoutedCount++;
+            else
+                state.OtherRemovedCount++;
+
+            MaterializedBattleResultEntryRuntimeState attackerState = TryGetMaterializedBattleResultEntryByAgent(affectorAgent, out _);
+            if (attackerState != null)
+            {
+                if (string.Equals(removedState, "Killed", StringComparison.OrdinalIgnoreCase))
+                {
+                    attackerState.KillsInflictedCount++;
+                    attackerState.FatalHitCount++;
+                }
+                else if (string.Equals(removedState, "Unconscious", StringComparison.OrdinalIgnoreCase))
+                    attackerState.UnconsciousInflictedCount++;
+                else if (string.Equals(removedState, "Routed", StringComparison.OrdinalIgnoreCase))
+                    attackerState.RoutedInflictedCount++;
+            }
+
+            if (_materializedBattleResultCombatEvents.Count > 0)
+            {
+                for (int i = _materializedBattleResultCombatEvents.Count - 1; i >= 0; i--)
+                {
+                    CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot combatEvent = _materializedBattleResultCombatEvents[i];
+                    if (combatEvent == null)
+                        continue;
+
+                    if (!string.Equals(combatEvent.VictimEntryId, entryId, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    if (combatEvent.IsFatal)
+                        break;
+
+                    combatEvent.IsFatal = string.Equals(removedState, "Killed", StringComparison.OrdinalIgnoreCase);
+                    break;
+                }
+            }
+        }
+
+        private static MaterializedBattleResultEntryRuntimeState TryGetMaterializedBattleResultEntryByAgent(Agent agent, out string entryId)
+        {
+            entryId = null;
+            if (agent == null)
+                return null;
+
+            if (!_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out entryId) || string.IsNullOrWhiteSpace(entryId))
+                return null;
+
+            if (!_materializedBattleResultEntriesByEntryId.TryGetValue(entryId, out MaterializedBattleResultEntryRuntimeState state))
+                return null;
+
+            return state;
+        }
+
+        private static void ResolveBattleResultCharacterIds(
+            Agent agent,
+            MaterializedBattleResultEntryRuntimeState entryState,
+            out string characterId,
+            out string originalCharacterId)
+        {
+            characterId = entryState?.CharacterId;
+            originalCharacterId = entryState?.OriginalCharacterId;
+
+            BasicCharacterObject character = agent?.Character as BasicCharacterObject;
+            if (string.IsNullOrWhiteSpace(characterId))
+                characterId = character?.StringId ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(originalCharacterId))
+                originalCharacterId = character?.StringId ?? string.Empty;
+        }
+
+        private static string ResolveCombatEventSkillHint(WeaponComponentData attackerWeapon, Agent affectorAgent, bool isSiegeEngineHit)
+        {
+            try
+            {
+                SkillObject relevantSkill = attackerWeapon?.RelevantSkill;
+                if (!string.IsNullOrWhiteSpace(relevantSkill?.StringId))
+                    return relevantSkill.StringId;
+            }
+            catch
+            {
+            }
+
+            if (attackerWeapon != null)
+            {
+                string byWeaponClass = MapCombatEventWeaponClassToSkillHint(attackerWeapon.WeaponClass.ToString(), isSiegeEngineHit);
+                if (!string.IsNullOrWhiteSpace(byWeaponClass))
+                    return byWeaponClass;
+            }
+
+            MissionEquipment affectorEquipment = affectorAgent?.Equipment;
+            ItemObject primaryItem = TryResolveAgentPrimaryCombatItem(affectorAgent, affectorEquipment, out WeaponComponentData primaryWeapon, out SkillObject relevantSkillObject);
+            if (primaryItem != null)
+            {
+                if (!string.IsNullOrWhiteSpace(relevantSkillObject?.StringId))
+                    return relevantSkillObject.StringId;
+
+                if (primaryWeapon != null)
+                {
+                    string byPrimaryWeaponClass = MapCombatEventWeaponClassToSkillHint(primaryWeapon.WeaponClass.ToString(), isSiegeEngineHit);
+                    if (!string.IsNullOrWhiteSpace(byPrimaryWeaponClass))
+                        return byPrimaryWeaponClass;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string ResolveCombatEventWeaponClassHint(WeaponComponentData attackerWeapon)
+        {
+            try
+            {
+                return attackerWeapon?.WeaponClass.ToString() ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string MapCombatEventWeaponClassToSkillHint(string weaponClass, bool isSiegeEngineHit)
+        {
+            if (isSiegeEngineHit)
+                return "SiegeEngine";
+
+            string normalized = weaponClass ?? string.Empty;
+            if (normalized.IndexOf("Crossbow", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Crossbow";
+            if (normalized.IndexOf("Bow", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Bow";
+            if (normalized.IndexOf("Throw", StringComparison.OrdinalIgnoreCase) >= 0 || normalized.IndexOf("Javelin", StringComparison.OrdinalIgnoreCase) >= 0 || normalized.IndexOf("Stone", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Throwing";
+            if (normalized.IndexOf("Polearm", StringComparison.OrdinalIgnoreCase) >= 0 || normalized.IndexOf("Spear", StringComparison.OrdinalIgnoreCase) >= 0 || normalized.IndexOf("Lance", StringComparison.OrdinalIgnoreCase) >= 0 || normalized.IndexOf("Pike", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Polearm";
+            if (normalized.IndexOf("TwoHanded", StringComparison.OrdinalIgnoreCase) >= 0 || normalized.IndexOf("TwoHand", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "TwoHanded";
+            if (normalized.IndexOf("OneHanded", StringComparison.OrdinalIgnoreCase) >= 0 || normalized.IndexOf("OneHand", StringComparison.OrdinalIgnoreCase) >= 0 || normalized.IndexOf("Mace", StringComparison.OrdinalIgnoreCase) >= 0 || normalized.IndexOf("Axe", StringComparison.OrdinalIgnoreCase) >= 0 || normalized.IndexOf("Sword", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "OneHanded";
+            return string.Empty;
+        }
+
+        private static void TryWriteBattleResultSnapshot(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer)
+                return;
+
+            EnsureMaterializedBattleResultMission(mission);
+            if (_hasWrittenBattleResultSnapshotForMission)
+                return;
+
+            CoopBattleResultBridgeFile.BattleResultSnapshot snapshot = BuildBattleResultSnapshot(mission, source);
+            if (snapshot == null)
+                return;
+
+            if (!CoopBattleResultBridgeFile.WriteResult(snapshot))
+                return;
+
+            _hasWrittenBattleResultSnapshotForMission = true;
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: battle result snapshot written. " +
+                "BattleId=" + (snapshot.BattleId ?? "null") +
+                " WinnerSide=" + (snapshot.WinnerSide ?? "none") +
+                " Entries=" + snapshot.Entries.Count +
+                " Summary=[" + BuildBattleResultEntryAuditSummary(snapshot) + "].");
+        }
+
+        private static CoopBattleResultBridgeFile.BattleResultSnapshot BuildBattleResultSnapshot(Mission mission, string source)
+        {
+            BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            if (runtimeState?.EntriesById == null || runtimeState.EntriesById.Count == 0)
+                return null;
+
+            var result = new CoopBattleResultBridgeFile.BattleResultSnapshot
+            {
+                BattleId = snapshot?.BattleId,
+                BattleType = snapshot?.BattleType,
+                MapScene = mission.SceneName ?? snapshot?.MapScene ?? string.Empty,
+                Source = source ?? "unknown",
+                WinnerSide = ResolveBattleResultWinnerSide(mission),
+                PlayerSide = snapshot?.PlayerSide,
+                IsSynthetic = IsSyntheticRuntime(),
+                UpdatedUtc = DateTime.UtcNow,
+                DroppedCombatEventCount = _droppedMaterializedBattleResultCombatEventCount
+            };
+
+            foreach (RosterEntryState entryState in runtimeState.EntriesById.Values
+                .Where(entry => entry != null)
+                .OrderBy(entry => entry.SideId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(entry => entry.PartyId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(entry => entry.EntryId, StringComparer.OrdinalIgnoreCase))
+            {
+                _materializedBattleResultEntriesByEntryId.TryGetValue(entryState.EntryId ?? string.Empty, out MaterializedBattleResultEntryRuntimeState runtimeEntry);
+
+                result.Entries.Add(new CoopBattleResultBridgeFile.BattleResultEntrySnapshot
+                {
+                    EntryId = entryState.EntryId,
+                    SideId = entryState.SideId,
+                    PartyId = entryState.PartyId,
+                    CharacterId = entryState.CharacterId,
+                    OriginalCharacterId = entryState.OriginalCharacterId,
+                    SpawnTemplateId = ResolveEntrySpawnTemplateId(entryState),
+                    TroopName = entryState.TroopName,
+                    HeroId = entryState.HeroId,
+                    HeroRole = entryState.HeroRole,
+                    IsHero = entryState.IsHero,
+                    SnapshotCount = entryState.Count,
+                    SnapshotWoundedCount = entryState.WoundedCount,
+                    MaterializedSpawnCount = runtimeEntry?.MaterializedSpawnCount ?? 0,
+                    ActiveCount = runtimeEntry?.ActiveCount ?? 0,
+                    RemovedCount = runtimeEntry?.RemovedCount ?? 0,
+                    KilledCount = runtimeEntry?.KilledCount ?? 0,
+                    UnconsciousCount = runtimeEntry?.UnconsciousCount ?? 0,
+                    RoutedCount = runtimeEntry?.RoutedCount ?? 0,
+                    OtherRemovedCount = runtimeEntry?.OtherRemovedCount ?? 0,
+                    ScoreHitCount = runtimeEntry?.ScoreHitCount ?? 0,
+                    HitsTakenCount = runtimeEntry?.HitsTakenCount ?? 0,
+                    FatalHitCount = runtimeEntry?.FatalHitCount ?? 0,
+                    KillsInflictedCount = runtimeEntry?.KillsInflictedCount ?? 0,
+                    UnconsciousInflictedCount = runtimeEntry?.UnconsciousInflictedCount ?? 0,
+                    RoutedInflictedCount = runtimeEntry?.RoutedInflictedCount ?? 0,
+                    DamageDealt = runtimeEntry?.DamageDealt ?? 0f,
+                    DamageTaken = runtimeEntry?.DamageTaken ?? 0f
+                });
+            }
+
+            if (_materializedBattleResultCombatEvents.Count > 0)
+                result.CombatEvents.AddRange(_materializedBattleResultCombatEvents);
+
+            return result;
+        }
+
+        private static string ResolveBattleResultWinnerSide(Mission mission)
+        {
+            if (!string.IsNullOrWhiteSpace(_authoritativeBattleWinnerSide))
+                return _authoritativeBattleWinnerSide;
+
+            if (mission == null)
+                return string.Empty;
+
+            ResolveActiveBattleSideCounts(mission, out int attackerActive, out int defenderActive, out _);
+            if (attackerActive > 0 && defenderActive <= 0)
+                return BattleSideEnum.Attacker.ToString();
+            if (defenderActive > 0 && attackerActive <= 0)
+                return BattleSideEnum.Defender.ToString();
+            if (attackerActive > defenderActive)
+                return BattleSideEnum.Attacker.ToString();
+            if (defenderActive > attackerActive)
+                return BattleSideEnum.Defender.ToString();
+            return string.Empty;
+        }
+
+        private static void ResolveActiveBattleSideCounts(Mission mission, out int attackerActive, out int defenderActive, out string countSource)
+        {
+            attackerActive = CountActiveTeamAgents(mission, BattleSideEnum.Attacker);
+            defenderActive = CountActiveTeamAgents(mission, BattleSideEnum.Defender);
+
+            if (TryResolveMaterializedActiveBattleSideCounts(out int materializedAttackerActive, out int materializedDefenderActive))
+            {
+                countSource =
+                    "mission-teams" +
+                    " | materialized-runtime Attacker=" + materializedAttackerActive +
+                    " Defender=" + materializedDefenderActive;
+                return;
+            }
+
+            countSource = "mission-teams";
+        }
+
+        private static void TryLogBattleCompletionAudit(int attackerActive, int defenderActive, string countSource, string source)
+        {
+            if (attackerActive > 2 && defenderActive > 2)
+                return;
+
+            string auditKey =
+                attackerActive + "|" +
+                defenderActive + "|" +
+                (countSource ?? string.Empty);
+            if (string.Equals(_lastLoggedBattleCompletionAuditKey, auditKey, StringComparison.Ordinal))
+                return;
+
+            _lastLoggedBattleCompletionAuditKey = auditKey;
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: battle completion audit. " +
+                "AttackerActive=" + attackerActive +
+                " DefenderActive=" + defenderActive +
+                " CountSource=" + (countSource ?? "unknown") +
+                " Source=" + (source ?? "unknown") + ".");
+        }
+
+        private static bool TryResolveMaterializedActiveBattleSideCounts(out int attackerActive, out int defenderActive)
+        {
+            attackerActive = 0;
+            defenderActive = 0;
+
+            int attackerSpawned = 0;
+            int defenderSpawned = 0;
+
+            foreach (MaterializedBattleResultEntryRuntimeState state in _materializedBattleResultEntriesByEntryId.Values)
+            {
+                if (state == null || state.MaterializedSpawnCount <= 0 || string.IsNullOrWhiteSpace(state.SideId))
+                    continue;
+
+                if (string.Equals(state.SideId, BattleSideEnum.Attacker.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    attackerSpawned += state.MaterializedSpawnCount;
+                    attackerActive += Math.Max(0, state.ActiveCount);
+                }
+                else if (string.Equals(state.SideId, BattleSideEnum.Defender.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    defenderSpawned += state.MaterializedSpawnCount;
+                    defenderActive += Math.Max(0, state.ActiveCount);
+                }
+            }
+
+            return attackerSpawned > 0 && defenderSpawned > 0;
+        }
+
+        private static int CountActiveTeamAgents(Mission mission, BattleSideEnum side)
+        {
+            if (mission?.Teams == null)
+                return 0;
+
+            int count = 0;
+            foreach (Team team in mission.Teams)
+            {
+                if (team == null || team.Side != side || ReferenceEquals(team, mission.SpectatorTeam))
+                    continue;
+
+                foreach (Agent agent in team.ActiveAgents)
+                {
+                    if (agent != null && agent.IsActive() && !agent.IsMount)
+                        count++;
+                }
+            }
+
+            return count;
+        }
+
+        private static string BuildBattleResultEntryAuditSummary(CoopBattleResultBridgeFile.BattleResultSnapshot snapshot)
+        {
+            if (snapshot?.Entries == null || snapshot.Entries.Count == 0)
+                return "(none)";
+
+            IEnumerable<string> entries = snapshot.Entries
+                .Where(entry => entry != null && (entry.MaterializedSpawnCount > 0 || entry.RemovedCount > 0 || entry.ActiveCount > 0))
+                .Take(24)
+                .Select(entry =>
+                    (entry.SideId ?? "side") + "/" +
+                    (entry.EntryId ?? "entry") +
+                    " Spawned=" + entry.MaterializedSpawnCount +
+                    " Active=" + entry.ActiveCount +
+                    " Removed=" + entry.RemovedCount +
+                    " Killed=" + entry.KilledCount +
+                    " Unconscious=" + entry.UnconsciousCount +
+                    " Routed=" + entry.RoutedCount +
+                    " Hits=" + entry.ScoreHitCount +
+                    " Dmg=" + entry.DamageDealt.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
+                    " KillsBy=" + entry.KillsInflictedCount);
+
+            string summary = string.Join("; ", entries);
+            return string.IsNullOrWhiteSpace(summary) ? "(none)" : summary;
         }
 
         private static int CountCombatProfilePerksByPrefix(IEnumerable<string> perkIds, params string[] prefixes)
@@ -5019,47 +5848,117 @@ namespace CoopSpectator.MissionBehaviors
             bool applied = false;
 
             var equipment = agent.Equipment;
-            EquipmentIndex primaryWieldedItemIndex = agent.GetPrimaryWieldedItemIndex();
-            ItemObject primaryItem = primaryWieldedItemIndex != EquipmentIndex.None ? equipment[primaryWieldedItemIndex].Item : null;
-            WeaponComponentData primaryWeapon = primaryItem?.PrimaryWeapon;
-            SkillObject relevantSkill = primaryItem?.RelevantSkill ?? DefaultSkills.Athletics;
+            WeaponComponentData primaryWeapon;
+            SkillObject relevantSkill;
+            ItemObject primaryItem = TryResolveAgentPrimaryCombatItem(agent, equipment, out primaryWeapon, out relevantSkill);
+            if (primaryItem == null)
+                return false;
+
+            relevantSkill = relevantSkill ?? primaryItem?.RelevantSkill ?? DefaultSkills.Athletics;
             int templateRelevantSkill = TryGetCharacterSkillValue(agent.Character, relevantSkill);
             int desiredRelevantSkill = TryGetCombatProfileSkillValue(profile, relevantSkill, templateRelevantSkill);
 
-            if (TryApplyPrimaryWeaponSkillDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill))
+            SetDrivenPropertyBaselineContext(profile, agent, isMountContext: false);
+            try
             {
-                applied = true;
-                CountMaterializedCombatProfileApply(profile, "weapon-skill", ref profile.CountedWeaponSkillAdjustment);
-            }
-
-            if (TryApplyPrimaryWeaponInaccuracyDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill))
-            {
-                applied = true;
-                CountMaterializedCombatProfileApply(profile, "weapon-inaccuracy", ref profile.CountedWeaponInaccuracyAdjustment);
-            }
-
-            if (TryApplyLoadoutAttributeDrivenStats(agent, profile, agentDrivenProperties))
-                applied = true;
-
-            if (TryApplyEnduranceDrivenStats(agent, profile, agentDrivenProperties))
-                applied = true;
-
-            if (TryApplyPerkDrivenStats(agent, profile, agentDrivenProperties))
-                applied = true;
-
-            if (agent.HasMount || agent.MountAgent != null)
-            {
-                int templateRiding = TryGetCharacterSkillValue(agent.Character, DefaultSkills.Riding);
-                int desiredRiding = profile.SkillRiding > 0 ? profile.SkillRiding : templateRiding;
-                if (TryApplyMountedHumanRidingDrivenStats(agent, agentDrivenProperties, templateRiding, desiredRiding))
+                if (TryApplyPrimaryWeaponSkillDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill))
                 {
                     applied = true;
-                    CountMaterializedCombatProfileApply(profile, "riding", ref profile.CountedRidingAttributeAdjustment);
-                    CountMaterializedCombatProfileApply(profile, "mounted-penalty", ref profile.CountedMountedPenaltyAdjustment);
+                    CountMaterializedCombatProfileApply(profile, "weapon-skill", ref profile.CountedWeaponSkillAdjustment);
+                }
+
+                if (TryApplyPrimaryWeaponInaccuracyDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "weapon-inaccuracy", ref profile.CountedWeaponInaccuracyAdjustment);
+                }
+
+                if (TryApplyLoadoutAttributeDrivenStats(agent, profile, agentDrivenProperties))
+                    applied = true;
+
+                if (TryApplyEnduranceDrivenStats(agent, profile, agentDrivenProperties))
+                    applied = true;
+
+                if (TryApplyPerkDrivenStats(agent, profile, agentDrivenProperties))
+                    applied = true;
+
+                if (TryApplyPartyModifierDrivenStats(agent, profile, agentDrivenProperties))
+                    applied = true;
+
+                if (agent.HasMount || agent.MountAgent != null)
+                {
+                    int templateRiding = TryGetCharacterSkillValue(agent.Character, DefaultSkills.Riding);
+                    int desiredRiding = profile.SkillRiding > 0 ? profile.SkillRiding : templateRiding;
+                    if (TryApplyMountedHumanRidingDrivenStats(agent, agentDrivenProperties, templateRiding, desiredRiding))
+                    {
+                        applied = true;
+                        CountMaterializedCombatProfileApply(profile, "riding", ref profile.CountedRidingAttributeAdjustment);
+                        CountMaterializedCombatProfileApply(profile, "mounted-penalty", ref profile.CountedMountedPenaltyAdjustment);
+                    }
+                }
+
+                return applied;
+            }
+            finally
+            {
+                ClearDrivenPropertyBaselineContext();
+            }
+        }
+
+        private static ItemObject TryResolveAgentPrimaryCombatItem(
+            Agent agent,
+            MissionEquipment equipment,
+            out WeaponComponentData primaryWeapon,
+            out SkillObject relevantSkill)
+        {
+            primaryWeapon = null;
+            relevantSkill = null;
+
+            if (agent == null || equipment == null)
+                return null;
+
+            EquipmentIndex primaryWieldedItemIndex = agent.GetPrimaryWieldedItemIndex();
+            if (primaryWieldedItemIndex != EquipmentIndex.None)
+            {
+                MissionWeapon wieldedMissionWeapon = equipment[primaryWieldedItemIndex];
+                ItemObject wieldedItem = wieldedMissionWeapon.Item;
+                if (wieldedItem != null)
+                {
+                    primaryWeapon = wieldedMissionWeapon.CurrentUsageItem ?? wieldedItem.PrimaryWeapon;
+                    relevantSkill = wieldedItem.RelevantSkill;
+                    return wieldedItem;
                 }
             }
 
-            return applied;
+            for (EquipmentIndex index = EquipmentIndex.Weapon0; index <= EquipmentIndex.Weapon3; index++)
+            {
+                MissionWeapon missionWeapon = equipment[index];
+                ItemObject item = missionWeapon.Item;
+                if (item == null)
+                    continue;
+
+                WeaponComponentData usageItem = missionWeapon.CurrentUsageItem ?? item.PrimaryWeapon;
+                if (usageItem == null || usageItem.IsAmmo || usageItem.IsShield)
+                    continue;
+
+                primaryWeapon = usageItem;
+                relevantSkill = item.RelevantSkill;
+                return item;
+            }
+
+            for (EquipmentIndex index = EquipmentIndex.Weapon0; index <= EquipmentIndex.Weapon3; index++)
+            {
+                MissionWeapon missionWeapon = equipment[index];
+                ItemObject item = missionWeapon.Item;
+                if (item == null)
+                    continue;
+
+                primaryWeapon = missionWeapon.CurrentUsageItem ?? item.PrimaryWeapon;
+                relevantSkill = item.RelevantSkill;
+                return item;
+            }
+
+            return null;
         }
 
         private static bool TryApplyLoadoutAttributeDrivenStats(
@@ -5141,6 +6040,67 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     applied = true;
                     CountMaterializedCombatProfileApply(profile, "perk-riding", ref profile.CountedPerkRidingAdjustment);
+                }
+            }
+
+            return applied;
+        }
+
+        private static bool TryApplyPartyModifierDrivenStats(
+            Agent agent,
+            MaterializedCombatProfileRuntimeState profile,
+            AgentDrivenProperties agentDrivenProperties)
+        {
+            if (agent == null || profile == null || agentDrivenProperties == null)
+                return false;
+
+            bool applied = false;
+
+            if (TryApplyPartyMoraleDrivenStats(agentDrivenProperties, profile))
+            {
+                applied = true;
+                CountMaterializedCombatProfileApply(profile, "party-morale", ref profile.CountedPartyMoraleAdjustment);
+            }
+
+            if (TryApplyPartyTacticsDrivenStats(agent, agentDrivenProperties, profile))
+            {
+                applied = true;
+                CountMaterializedCombatProfileApply(profile, "party-tactics", ref profile.CountedPartyTacticsAdjustment);
+            }
+
+            if (TryApplyPartyCaptainDrivenStats(agent, agentDrivenProperties, profile))
+            {
+                applied = true;
+                CountMaterializedCombatProfileApply(profile, "party-captain", ref profile.CountedPartyCaptainAdjustment);
+            }
+
+            if (AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing"))
+            {
+                if (TryApplyPartyScoutDrivenStats(agentDrivenProperties, profile))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "party-scout", ref profile.CountedPartyScoutAdjustment);
+                }
+            }
+
+            if (!agent.IsMount)
+            {
+                if (TryApplyPartyQuartermasterDrivenStats(agentDrivenProperties, profile))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "party-quartermaster", ref profile.CountedPartyQuartermasterAdjustment);
+                }
+
+                if (TryApplyPartyEngineerDrivenStats(agent, agentDrivenProperties, profile))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "party-engineer", ref profile.CountedPartyEngineerAdjustment);
+                }
+
+                if (TryApplyPartySurgeonDrivenStats(agentDrivenProperties, profile))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "party-surgeon", ref profile.CountedPartySurgeonAdjustment);
                 }
             }
 
@@ -5274,18 +6234,26 @@ namespace CoopSpectator.MissionBehaviors
             float mountManeuverBaseFactor = 1f + templateRiding * 0.0035f;
             float mountManeuverDesiredFactor = 1f + desiredRiding * 0.0035f;
 
-            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MountSpeed, mountSpeedBaseFactor, mountSpeedDesiredFactor);
-            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MountManeuver, mountManeuverBaseFactor, mountManeuverDesiredFactor);
-            if (applied)
-                CountMaterializedCombatProfileApply(profile, "mount", ref profile.CountedMountStatAdjustment);
-
-            if (TryApplyMountPerkDrivenStats(profile, agentDrivenProperties))
+            SetDrivenPropertyBaselineContext(profile, mountAgent, isMountContext: true);
+            try
             {
-                applied = true;
-                CountMaterializedCombatProfileApply(profile, "perk-mount", ref profile.CountedPerkMountAdjustment);
-            }
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MountSpeed, mountSpeedBaseFactor, mountSpeedDesiredFactor);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MountManeuver, mountManeuverBaseFactor, mountManeuverDesiredFactor);
+                if (applied)
+                    CountMaterializedCombatProfileApply(profile, "mount", ref profile.CountedMountStatAdjustment);
 
-            return applied;
+                if (TryApplyMountPerkDrivenStats(profile, agentDrivenProperties))
+                {
+                    applied = true;
+                    CountMaterializedCombatProfileApply(profile, "perk-mount", ref profile.CountedPerkMountAdjustment);
+                }
+
+                return applied;
+            }
+            finally
+            {
+                ClearDrivenPropertyBaselineContext();
+            }
         }
 
         private static bool TryApplyMountPerkDrivenStats(
@@ -5431,6 +6399,190 @@ namespace CoopSpectator.MissionBehaviors
             applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.CombatMaxSpeedMultiplier, 1f, speedFactor);
             applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.TopSpeedReachDuration, 1f, reachFactor);
             return applied;
+        }
+
+        private static bool TryApplyPartyMoraleDrivenStats(
+            AgentDrivenProperties agentDrivenProperties,
+            MaterializedCombatProfileRuntimeState profile)
+        {
+            if (agentDrivenProperties == null || profile == null)
+                return false;
+
+            float morale = profile.PartyMorale > 0.01f ? profile.PartyMorale : profile.SideMorale;
+            int commandPerkCount = profile.PartyLeaderPerkCount + profile.ArmyCommanderPerkCount;
+            if (morale <= 50.01f && profile.LeaderLeadershipSkill <= 0 && commandPerkCount <= 0)
+                return false;
+
+            float moraleBonus = Math.Max(0f, morale - 50f) * 0.0012f;
+            float leadershipBonus = Math.Min(0.08f, Math.Max(0, profile.LeaderLeadershipSkill) * 0.00025f);
+            float perkBonus = Math.Min(0.06f, commandPerkCount * 0.002f);
+            float desiredFactor = 1f + moraleBonus + leadershipBonus + perkBonus;
+
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.AttributeCourage, 1f, desiredFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.AIAttackOnDecideChance, 1f, Math.Min(1.08f, desiredFactor));
+            return applied;
+        }
+
+        private static bool TryApplyPartyTacticsDrivenStats(
+            Agent agent,
+            AgentDrivenProperties agentDrivenProperties,
+            MaterializedCombatProfileRuntimeState profile)
+        {
+            if (agent == null || agentDrivenProperties == null || profile == null)
+                return false;
+
+            int commandPerkCount = profile.ArmyCommanderPerkCount;
+            if (profile.LeaderTacticsSkill <= 0 && commandPerkCount <= 0)
+                return false;
+
+            float decisionFactor = ComputePartySkillPositiveFactor(profile.LeaderTacticsSkill, 0.00016f, 0.05f);
+            decisionFactor *= ComputePerkPositiveFactor(commandPerkCount, 0.0025f, 0.04f);
+            decisionFactor = Math.Min(1.09f, decisionFactor);
+
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.AIAttackOnDecideChance, 1f, decisionFactor);
+
+            if (AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing"))
+            {
+                float rangedFactor = ComputePartySkillPositiveFactor(profile.LeaderTacticsSkill, 0.00012f, 0.035f);
+                rangedFactor *= ComputePerkPositiveFactor(commandPerkCount, 0.002f, 0.03f);
+                rangedFactor = Math.Min(1.07f, rangedFactor);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MissileSpeedMultiplier, 1f, rangedFactor);
+            }
+            else if (AgentLoadoutContainsRelevantSkill(agent, "OneHanded", "TwoHanded", "Polearm"))
+            {
+                float handlingFactor = ComputePartySkillPositiveFactor(profile.LeaderTacticsSkill, 0.0001f, 0.03f);
+                handlingFactor *= ComputePerkPositiveFactor(commandPerkCount, 0.0018f, 0.025f);
+                handlingFactor = Math.Min(1.06f, handlingFactor);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.HandlingMultiplier, 1f, handlingFactor);
+            }
+
+            return applied;
+        }
+
+        private static bool TryApplyPartyScoutDrivenStats(
+            AgentDrivenProperties agentDrivenProperties,
+            MaterializedCombatProfileRuntimeState profile)
+        {
+            if (agentDrivenProperties == null || profile == null)
+                return false;
+
+            int scoutPerkCount = profile.ScoutRolePerkCount;
+            if (profile.ScoutScoutingSkill <= 0 && scoutPerkCount <= 0)
+                return false;
+
+            float skillAccuracyFactor = ComputePartySkillPenaltyReductionFactor(profile.ScoutScoutingSkill, 0.00022f, 0.08f, 0.9f);
+            float perkAccuracyFactor = ComputePerkPenaltyReductionFactor(scoutPerkCount, 0.006f, 0.06f, 0.9f);
+            float desiredAccuracyFactor = Math.Max(0.82f, skillAccuracyFactor * perkAccuracyFactor);
+
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponInaccuracy, 1f, desiredAccuracyFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponBestAccuracyWaitTime, 1f, desiredAccuracyFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.AiShooterError, 1f, desiredAccuracyFactor);
+            return applied;
+        }
+
+        private static bool TryApplyPartyCaptainDrivenStats(
+            Agent agent,
+            AgentDrivenProperties agentDrivenProperties,
+            MaterializedCombatProfileRuntimeState profile)
+        {
+            if (agent == null || agentDrivenProperties == null || profile == null || profile.CaptainPerkCount <= 0)
+                return false;
+
+            bool applied = false;
+
+            if (AgentLoadoutContainsRelevantSkill(agent, "OneHanded", "TwoHanded", "Polearm"))
+            {
+                float damageFactor = ComputePerkPositiveFactor(profile.CaptainPerkCount, 0.0035f, 0.05f);
+                float handlingFactor = ComputePerkPositiveFactor(profile.CaptainPerkCount, 0.0025f, 0.04f);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MeleeWeaponDamageMultiplierBonus, 1f, damageFactor);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.HandlingMultiplier, 1f, handlingFactor);
+            }
+
+            if (AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing"))
+            {
+                float speedFactor = ComputePerkPositiveFactor(profile.CaptainPerkCount, 0.003f, 0.045f);
+                float accuracyFactor = ComputePerkPenaltyReductionFactor(profile.CaptainPerkCount, 0.005f, 0.08f, 0.88f);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MissileSpeedMultiplier, 1f, speedFactor);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponInaccuracy, 1f, accuracyFactor);
+            }
+
+            return applied;
+        }
+
+        private static bool TryApplyPartyQuartermasterDrivenStats(
+            AgentDrivenProperties agentDrivenProperties,
+            MaterializedCombatProfileRuntimeState profile)
+        {
+            if (agentDrivenProperties == null || profile == null)
+                return false;
+
+            int quartermasterPerkCount = profile.QuartermasterRolePerkCount;
+            if (profile.QuartermasterStewardSkill <= 0 && quartermasterPerkCount <= 0)
+                return false;
+
+            float encumbranceFactor = ComputePartySkillPenaltyReductionFactor(profile.QuartermasterStewardSkill, 0.00018f, 0.07f, 0.9f);
+            encumbranceFactor *= ComputePerkPenaltyReductionFactor(quartermasterPerkCount, 0.005f, 0.05f, 0.9f);
+            encumbranceFactor = Math.Max(0.82f, encumbranceFactor);
+
+            float speedFactor = ComputePartySkillPositiveFactor(profile.QuartermasterStewardSkill, 0.00012f, 0.04f);
+            speedFactor *= ComputePerkPositiveFactor(quartermasterPerkCount, 0.003f, 0.04f);
+            speedFactor = Math.Min(1.08f, speedFactor);
+
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ArmorEncumbrance, 1f, encumbranceFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponsEncumbrance, 1f, encumbranceFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.CombatMaxSpeedMultiplier, 1f, speedFactor);
+            return applied;
+        }
+
+        private static bool TryApplyPartyEngineerDrivenStats(
+            Agent agent,
+            AgentDrivenProperties agentDrivenProperties,
+            MaterializedCombatProfileRuntimeState profile)
+        {
+            if (agent == null || agentDrivenProperties == null || profile == null)
+                return false;
+
+            int engineerPerkCount = profile.EngineerRolePerkCount;
+            if ((profile.EngineerEngineeringSkill <= 0 && engineerPerkCount <= 0) ||
+                !AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing"))
+            {
+                return false;
+            }
+
+            float reloadFactor = ComputePartySkillPositiveFactor(profile.EngineerEngineeringSkill, 0.00018f, 0.05f);
+            reloadFactor *= ComputePerkPositiveFactor(engineerPerkCount, 0.0035f, 0.05f);
+            reloadFactor = Math.Min(1.1f, reloadFactor);
+
+            float readinessFactor = ComputePartySkillPositiveFactor(profile.EngineerEngineeringSkill, 0.00012f, 0.035f);
+            readinessFactor *= ComputePerkPositiveFactor(engineerPerkCount, 0.0025f, 0.03f);
+            readinessFactor = Math.Min(1.07f, readinessFactor);
+
+            bool applied = false;
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, 1f, reloadFactor);
+            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, 1f, readinessFactor);
+            return applied;
+        }
+
+        private static bool TryApplyPartySurgeonDrivenStats(
+            AgentDrivenProperties agentDrivenProperties,
+            MaterializedCombatProfileRuntimeState profile)
+        {
+            if (agentDrivenProperties == null || profile == null)
+                return false;
+
+            int surgeonPerkCount = profile.SurgeonRolePerkCount;
+            if (profile.SurgeonMedicineSkill <= 0 && surgeonPerkCount <= 0)
+                return false;
+
+            float courageFactor = ComputePartySkillPositiveFactor(profile.SurgeonMedicineSkill, 0.0001f, 0.025f);
+            courageFactor *= ComputePerkPositiveFactor(surgeonPerkCount, 0.002f, 0.03f);
+            courageFactor = Math.Min(1.06f, courageFactor);
+
+            return TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.AttributeCourage, 1f, courageFactor);
         }
 
         private static bool TryApplyPrimaryWeaponInaccuracyDrivenStats(
@@ -5580,6 +6732,24 @@ namespace CoopSpectator.MissionBehaviors
             return Math.Max(0.75f, 0.92f + normalized * 0.02f);
         }
 
+        private static float ComputePartySkillPositiveFactor(int skillValue, float perSkillBonus, float maxBonus)
+        {
+            if (skillValue <= 0)
+                return 1f;
+
+            float bonus = Math.Min(maxBonus, skillValue * perSkillBonus);
+            return 1f + Math.Max(0f, bonus);
+        }
+
+        private static float ComputePartySkillPenaltyReductionFactor(int skillValue, float perSkillReduction, float maxReduction, float floor)
+        {
+            if (skillValue <= 0)
+                return 1f;
+
+            float reduction = Math.Min(maxReduction, skillValue * perSkillReduction);
+            return Math.Max(floor, 1f - Math.Max(0f, reduction));
+        }
+
         private static float ComputeAccuracyPenaltyFactor(int attributeValue)
         {
             int normalized = Math.Max(0, Math.Min(10, attributeValue));
@@ -5648,10 +6818,115 @@ namespace CoopSpectator.MissionBehaviors
             return Math.Max(1, Math.Min(10, 1 + (int)Math.Round(maxSkill / 40f, MidpointRounding.AwayFromZero)));
         }
 
+        private static void SetDrivenPropertyBaselineContext(MaterializedCombatProfileRuntimeState profile, Agent agent, bool isMountContext)
+        {
+            _drivenPropertyBaselineProfileContext = profile;
+            _drivenPropertyBaselineAgentContext = agent;
+            _drivenPropertyBaselineMountContext = isMountContext;
+
+            if (profile == null)
+                return;
+
+            Dictionary<DrivenProperty, float> accumulatedScales = isMountContext
+                ? profile.MountDrivenPropertyAccumulatedScales
+                : profile.HumanDrivenPropertyAccumulatedScales;
+            accumulatedScales.Clear();
+        }
+
+        private static void ClearDrivenPropertyBaselineContext()
+        {
+            _drivenPropertyBaselineProfileContext = null;
+            _drivenPropertyBaselineAgentContext = null;
+            _drivenPropertyBaselineMountContext = false;
+        }
+
+        private static string GetDrivenPropertyBaselineSignature(Agent agent, bool isMountContext)
+        {
+            if (agent == null)
+                return "null";
+
+            if (isMountContext)
+            {
+                string mountCharacterId = agent.Character?.StringId ?? "null";
+                int riderIndex = agent.RiderAgent?.Index ?? -1;
+                return "mount|" + mountCharacterId + "|rider=" + riderIndex;
+            }
+
+            EquipmentIndex primaryWieldedItemIndex = agent.GetPrimaryWieldedItemIndex();
+            ItemObject primaryItem = primaryWieldedItemIndex != EquipmentIndex.None ? agent.Equipment[primaryWieldedItemIndex].Item : null;
+            string primaryItemId = primaryItem?.StringId ?? "none";
+            bool isMounted = agent.HasMount || agent.MountAgent != null;
+            return "human|" + primaryItemId + "|mounted=" + isMounted;
+        }
+
+        private static bool TryScaleDrivenPropertyFromBaselineContext(
+            AgentDrivenProperties agentDrivenProperties,
+            DrivenProperty drivenProperty,
+            float baseFactor,
+            float desiredFactor)
+        {
+            MaterializedCombatProfileRuntimeState profile = _drivenPropertyBaselineProfileContext;
+            Agent agent = _drivenPropertyBaselineAgentContext;
+            if (profile == null || agent == null || agentDrivenProperties == null || baseFactor <= 0f || desiredFactor <= 0f)
+                return false;
+
+            float scale = desiredFactor / baseFactor;
+            if (float.IsNaN(scale) || float.IsInfinity(scale) || Math.Abs(scale - 1f) < 0.001f)
+                return false;
+
+            bool isMountContext = _drivenPropertyBaselineMountContext;
+            Dictionary<DrivenProperty, float> baselines = isMountContext
+                ? profile.MountDrivenPropertyBaselines
+                : profile.HumanDrivenPropertyBaselines;
+            Dictionary<DrivenProperty, float> accumulatedScales = isMountContext
+                ? profile.MountDrivenPropertyAccumulatedScales
+                : profile.HumanDrivenPropertyAccumulatedScales;
+            string signature = GetDrivenPropertyBaselineSignature(agent, isMountContext);
+
+            if (isMountContext)
+            {
+                if (!string.Equals(profile.MountDrivenPropertyBaselineSignature, signature, StringComparison.Ordinal))
+                {
+                    profile.MountDrivenPropertyBaselineSignature = signature;
+                    baselines.Clear();
+                    accumulatedScales.Clear();
+                }
+            }
+            else
+            {
+                if (!string.Equals(profile.HumanDrivenPropertyBaselineSignature, signature, StringComparison.Ordinal))
+                {
+                    profile.HumanDrivenPropertyBaselineSignature = signature;
+                    baselines.Clear();
+                    accumulatedScales.Clear();
+                }
+            }
+
+            if (!baselines.TryGetValue(drivenProperty, out float baselineValue))
+            {
+                baselineValue = agentDrivenProperties.GetStat(drivenProperty);
+                baselines[drivenProperty] = baselineValue;
+            }
+
+            float accumulatedScale = 1f;
+            accumulatedScales.TryGetValue(drivenProperty, out accumulatedScale);
+            if (accumulatedScale <= 0f)
+                accumulatedScale = 1f;
+
+            accumulatedScale *= scale;
+            accumulatedScales[drivenProperty] = accumulatedScale;
+
+            float desiredValue = Math.Max(0f, baselineValue * accumulatedScale);
+            return TrySetDrivenProperty(agentDrivenProperties, drivenProperty, desiredValue);
+        }
+
         private static bool TryScaleDrivenProperty(AgentDrivenProperties agentDrivenProperties, DrivenProperty drivenProperty, float baseFactor, float desiredFactor)
         {
             if (agentDrivenProperties == null)
                 return false;
+
+            if (TryScaleDrivenPropertyFromBaselineContext(agentDrivenProperties, drivenProperty, baseFactor, desiredFactor))
+                return true;
 
             float currentValue = agentDrivenProperties.GetStat(drivenProperty);
             if (!TryScaleStat(ref currentValue, baseFactor, desiredFactor))
@@ -6162,7 +7437,7 @@ namespace CoopSpectator.MissionBehaviors
             if (_hasLoggedMaterializedEquipmentCoverageSummary)
                 return;
 
-            if (!IsSyntheticRuntime())
+            if (!IsSyntheticRuntime() && !HasLiveCombatProfileCoverageSignal())
                 return;
 
             bool hasCoverageData =
@@ -6179,13 +7454,36 @@ namespace CoopSpectator.MissionBehaviors
             string topMisses = FormatMaterializedEquipmentCounterSummary(MaterializedEquipmentMissCounts, 20);
             string topNormalizedFallbacks = FormatMaterializedEquipmentCounterSummary(MaterializedEquipmentNormalizedFallbackCounts, 20);
             string combatProfileCounts = FormatMaterializedEquipmentCounterSummary(MaterializedCombatProfileApplyCounts, 20);
+            string modeLabel = IsSyntheticRuntime() ? "synthetic" : "live";
 
             ModLogger.Info(
-                "CoopMissionSpawnLogic: synthetic equipment coverage summary. " +
+                "CoopMissionSpawnLogic: " + modeLabel + " equipment coverage summary. " +
                 "ResolutionCounts=[" + resolutionCounts + "] " +
                 "CombatProfileCounts=[" + combatProfileCounts + "] " +
                 "TopMisses=[" + topMisses + "] " +
                 "TopNormalizedFallbacks=[" + topNormalizedFallbacks + "]");
+        }
+
+        private static bool HasLiveCombatProfileCoverageSignal()
+        {
+            if (MaterializedCombatProfileApplyCounts == null || MaterializedCombatProfileApplyCounts.Count == 0)
+                return false;
+
+            foreach (KeyValuePair<string, int> entry in MaterializedCombatProfileApplyCounts)
+            {
+                if (entry.Value <= 0 || string.IsNullOrWhiteSpace(entry.Key))
+                    continue;
+
+                if (!string.Equals(entry.Key, "registered", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(entry.Key, "perks", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(entry.Key, "mount", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(entry.Key, "perk-mount", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static string FormatMaterializedEquipmentCounterSummary(Dictionary<string, int> counters, int take)
@@ -6827,6 +8125,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (!ReferenceEquals(missionPeer.ControlledAgent, replacedAgent))
                     missionPeer.ControlledAgent = replacedAgent;
                 missionPeer.FollowedAgent = replacedAgent;
+                TransferMaterializedAgentRuntimeState(targetAgent, replacedAgent);
 
                 TryApplyVanillaSpawnGoldDeduction(gameMode, peer, missionPeer, source + " replace-bot");
                 bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
@@ -6850,6 +8149,33 @@ namespace CoopSpectator.MissionBehaviors
                 ModLogger.Info("CoopMissionSpawnLogic: materialized army replace-bot failed (" + source + "): " + ex.Message);
                 return false;
             }
+        }
+
+        private static void TransferMaterializedAgentRuntimeState(Agent sourceAgent, Agent targetAgent)
+        {
+            if (sourceAgent == null || targetAgent == null || sourceAgent.Index == targetAgent.Index)
+                return;
+
+            if (_materializedArmyEntryIdByAgentIndex.TryGetValue(sourceAgent.Index, out string entryId))
+            {
+                _materializedArmyEntryIdByAgentIndex[targetAgent.Index] = entryId;
+                _materializedArmyEntryIdByAgentIndex.Remove(sourceAgent.Index);
+            }
+
+            if (_materializedArmySideByAgentIndex.TryGetValue(sourceAgent.Index, out BattleSideEnum side))
+            {
+                _materializedArmySideByAgentIndex[targetAgent.Index] = side;
+                _materializedArmySideByAgentIndex.Remove(sourceAgent.Index);
+            }
+
+            if (_materializedCombatProfilesByAgentIndex.TryGetValue(sourceAgent.Index, out MaterializedCombatProfileRuntimeState combatProfile))
+            {
+                _materializedCombatProfilesByAgentIndex[targetAgent.Index] = combatProfile;
+                _materializedCombatProfilesByAgentIndex.Remove(sourceAgent.Index);
+            }
+
+            if (_materializedBattleResultRemovedAgentIndices.Remove(sourceAgent.Index))
+                _materializedBattleResultRemovedAgentIndices.Add(targetAgent.Index);
         }
 
         private static void TrySetBotsUnderControlTotal(MissionPeer missionPeer, int value)
@@ -7212,6 +8538,7 @@ namespace CoopSpectator.MissionBehaviors
                     " parties = " + rosterState.PartiesById.Count +
                     " sides = " + rosterState.Sides.Count);
                 LogAllowedEntryStateMappings(source, rosterState);
+                LogPartyModifierStateMappings(source, rosterState);
                 LogAllowedControlTroops(source, "battle-snapshot", attackerRoster, defenderRoster);
                 return;
             }
@@ -7370,6 +8697,155 @@ namespace CoopSpectator.MissionBehaviors
                 "CoopMissionSpawnLogic: snapshot entry mapping summary (" + (source ?? "unknown") + ") = [" +
                 string.Join("; ", mappings) +
                 "].");
+        }
+
+        private static void LogPartyModifierStateMappings(string source, BattleRuntimeState rosterState)
+        {
+            if (rosterState?.PartiesById == null || rosterState.PartiesById.Count == 0)
+                return;
+
+            IEnumerable<string> summaries = rosterState.PartiesById.Values
+                .Where(party => party != null)
+                .Select(party => FormatPartyModifierStateSummary(rosterState, party))
+                .Where(summary => !string.IsNullOrWhiteSpace(summary))
+                .Take(24);
+            if (!summaries.Any())
+                return;
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: snapshot party modifier summary (" + (source ?? "unknown") + ") = [" +
+                string.Join("; ", summaries) +
+                "].");
+        }
+
+        private static string FormatPartyModifierStateSummary(BattleRuntimeState rosterState, BattlePartyState party)
+        {
+            if (rosterState == null || party == null)
+                return null;
+
+            BattlePartyModifierState modifiers = party.Modifiers;
+            BattleSideState sideState = null;
+            if (!string.IsNullOrWhiteSpace(party.SideId))
+                rosterState.SidesByKey?.TryGetValue(party.SideId, out sideState);
+
+            bool hasAnyData =
+                (!string.IsNullOrWhiteSpace(sideState?.LeaderPartyId) || Math.Abs(sideState?.SideMorale ?? 0f) > 0.01f) ||
+                HasPartyModifierData(modifiers);
+            if (!hasAnyData)
+                return null;
+
+            var parts = new List<string>
+            {
+                (party.SideId ?? "side") + "/" + (party.PartyId ?? "party")
+            };
+
+            if (!string.IsNullOrWhiteSpace(sideState?.LeaderPartyId) &&
+                string.Equals(sideState.LeaderPartyId, party.PartyId, StringComparison.OrdinalIgnoreCase))
+            {
+                parts.Add("LeaderParty=True");
+            }
+
+            if (Math.Abs(sideState?.SideMorale ?? 0f) > 0.01f)
+                parts.Add("SideMorale=" + sideState.SideMorale.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+
+            if (modifiers != null)
+            {
+                AddPartyModifierSummaryPart(parts, "Leader", modifiers.LeaderHeroId);
+                AddPartyModifierSummaryPart(parts, "Owner", modifiers.OwnerHeroId);
+                AddPartyModifierSummaryPart(parts, "Scout", modifiers.ScoutHeroId);
+                AddPartyModifierSummaryPart(parts, "QM", modifiers.QuartermasterHeroId);
+                AddPartyModifierSummaryPart(parts, "Eng", modifiers.EngineerHeroId);
+                AddPartyModifierSummaryPart(parts, "Surg", modifiers.SurgeonHeroId);
+
+                if (Math.Abs(modifiers.Morale) > 0.01f)
+                    parts.Add("Morale=" + modifiers.Morale.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+                if (Math.Abs(modifiers.RecentEventsMorale) > 0.01f)
+                    parts.Add("Recent=" + modifiers.RecentEventsMorale.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+                if (Math.Abs(modifiers.MoraleChange) > 0.01f)
+                    parts.Add("MoraleChange=" + modifiers.MoraleChange.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+                if (modifiers.ContributionToBattle > 0)
+                    parts.Add("Contribution=" + modifiers.ContributionToBattle);
+
+                if (modifiers.LeaderLeadershipSkill > 0 || modifiers.LeaderTacticsSkill > 0)
+                    parts.Add("LeaderSkills=" + modifiers.LeaderLeadershipSkill + "/" + modifiers.LeaderTacticsSkill);
+                if (modifiers.ScoutScoutingSkill > 0)
+                    parts.Add("ScoutSkill=" + modifiers.ScoutScoutingSkill);
+                if (modifiers.QuartermasterStewardSkill > 0)
+                    parts.Add("QMSkill=" + modifiers.QuartermasterStewardSkill);
+                if (modifiers.EngineerEngineeringSkill > 0)
+                    parts.Add("EngSkill=" + modifiers.EngineerEngineeringSkill);
+                if (modifiers.SurgeonMedicineSkill > 0)
+                    parts.Add("SurgSkill=" + modifiers.SurgeonMedicineSkill);
+
+                string rolePerks = FormatRolePerkCountSummary(modifiers);
+                if (!string.IsNullOrWhiteSpace(rolePerks))
+                    parts.Add("RolePerks[" + rolePerks + "]");
+            }
+
+            return string.Join(" ", parts);
+        }
+
+        private static string FormatRolePerkCountSummary(BattlePartyModifierState modifiers)
+        {
+            if (modifiers == null)
+                return string.Empty;
+
+            var parts = new List<string>();
+            AddRolePerkCountSummaryPart(parts, "PL", modifiers.PartyLeaderPerkIds);
+            AddRolePerkCountSummaryPart(parts, "AC", modifiers.ArmyCommanderPerkIds);
+            AddRolePerkCountSummaryPart(parts, "Cap", modifiers.CaptainPerkIds);
+            AddRolePerkCountSummaryPart(parts, "Sc", modifiers.ScoutPerkIds);
+            AddRolePerkCountSummaryPart(parts, "QM", modifiers.QuartermasterPerkIds);
+            AddRolePerkCountSummaryPart(parts, "Eng", modifiers.EngineerPerkIds);
+            AddRolePerkCountSummaryPart(parts, "Surg", modifiers.SurgeonPerkIds);
+            return string.Join(",", parts);
+        }
+
+        private static void AddRolePerkCountSummaryPart(List<string> parts, string label, List<string> perkIds)
+        {
+            if (parts == null || string.IsNullOrWhiteSpace(label) || perkIds == null || perkIds.Count <= 0)
+                return;
+
+            parts.Add(label + "=" + perkIds.Count);
+        }
+
+        private static void AddPartyModifierSummaryPart(List<string> parts, string label, string value)
+        {
+            if (parts == null || string.IsNullOrWhiteSpace(label) || string.IsNullOrWhiteSpace(value))
+                return;
+
+            parts.Add(label + "=" + value);
+        }
+
+        private static bool HasPartyModifierData(BattlePartyModifierState modifiers)
+        {
+            if (modifiers == null)
+                return false;
+
+            return
+                !string.IsNullOrWhiteSpace(modifiers.LeaderHeroId) ||
+                !string.IsNullOrWhiteSpace(modifiers.OwnerHeroId) ||
+                !string.IsNullOrWhiteSpace(modifiers.ScoutHeroId) ||
+                !string.IsNullOrWhiteSpace(modifiers.QuartermasterHeroId) ||
+                !string.IsNullOrWhiteSpace(modifiers.EngineerHeroId) ||
+                !string.IsNullOrWhiteSpace(modifiers.SurgeonHeroId) ||
+                Math.Abs(modifiers.Morale) > 0.01f ||
+                Math.Abs(modifiers.RecentEventsMorale) > 0.01f ||
+                Math.Abs(modifiers.MoraleChange) > 0.01f ||
+                modifiers.ContributionToBattle > 0 ||
+                modifiers.LeaderLeadershipSkill > 0 ||
+                modifiers.LeaderTacticsSkill > 0 ||
+                modifiers.ScoutScoutingSkill > 0 ||
+                modifiers.QuartermasterStewardSkill > 0 ||
+                modifiers.EngineerEngineeringSkill > 0 ||
+                modifiers.SurgeonMedicineSkill > 0 ||
+                (modifiers.PartyLeaderPerkIds?.Count ?? 0) > 0 ||
+                (modifiers.ArmyCommanderPerkIds?.Count ?? 0) > 0 ||
+                (modifiers.CaptainPerkIds?.Count ?? 0) > 0 ||
+                (modifiers.ScoutPerkIds?.Count ?? 0) > 0 ||
+                (modifiers.QuartermasterPerkIds?.Count ?? 0) > 0 ||
+                (modifiers.EngineerPerkIds?.Count ?? 0) > 0 ||
+                (modifiers.SurgeonPerkIds?.Count ?? 0) > 0;
         }
 
         private static string FormatEntryCombatEquipmentSummary(RosterEntryState entry)
@@ -8263,6 +9739,8 @@ namespace CoopSpectator.MissionBehaviors
                 Source = source,
                 BattlePhase = currentPhase.ToString(),
                 BattlePhaseSource = phaseSnapshot?.Source ?? string.Empty,
+                WinnerSide = ResolveBattleResultWinnerSide(mission),
+                BattleCompletionReason = _authoritativeBattleCompletionReason ?? string.Empty,
                 PeerName = missionPeer?.Name?.ToString() ?? missionPeer?.GetNetworkPeer()?.UserName ?? string.Empty,
                 PeerIndex = missionPeer?.GetNetworkPeer()?.Index ?? -1,
                 HasPeer = missionPeer != null,

@@ -26,6 +26,8 @@ namespace CoopSpectator.Network.Messages
     {
         public string SideId { get; set; }
         public string SideText { get; set; }
+        public string LeaderPartyId { get; set; }
+        public float SideMorale { get; set; }
         public bool IsPlayerSide { get; set; }
         public int TotalManCount { get; set; }
         public List<BattlePartySnapshotMessage> Parties { get; set; } = new List<BattlePartySnapshotMessage>();
@@ -38,7 +40,35 @@ namespace CoopSpectator.Network.Messages
         public string PartyName { get; set; }
         public bool IsMainParty { get; set; }
         public int TotalManCount { get; set; }
+        public BattlePartyModifierSnapshotMessage Modifiers { get; set; } = new BattlePartyModifierSnapshotMessage();
         public List<TroopStackInfo> Troops { get; set; } = new List<TroopStackInfo>();
+    }
+
+    public sealed class BattlePartyModifierSnapshotMessage
+    {
+        public string LeaderHeroId { get; set; }
+        public string OwnerHeroId { get; set; }
+        public string ScoutHeroId { get; set; }
+        public string QuartermasterHeroId { get; set; }
+        public string EngineerHeroId { get; set; }
+        public string SurgeonHeroId { get; set; }
+        public float Morale { get; set; }
+        public float RecentEventsMorale { get; set; }
+        public float MoraleChange { get; set; }
+        public int ContributionToBattle { get; set; }
+        public int LeaderLeadershipSkill { get; set; }
+        public int LeaderTacticsSkill { get; set; }
+        public int ScoutScoutingSkill { get; set; }
+        public int QuartermasterStewardSkill { get; set; }
+        public int EngineerEngineeringSkill { get; set; }
+        public int SurgeonMedicineSkill { get; set; }
+        public List<string> PartyLeaderPerkIds { get; set; } = new List<string>();
+        public List<string> ArmyCommanderPerkIds { get; set; } = new List<string>();
+        public List<string> CaptainPerkIds { get; set; } = new List<string>();
+        public List<string> ScoutPerkIds { get; set; } = new List<string>();
+        public List<string> QuartermasterPerkIds { get; set; } = new List<string>();
+        public List<string> EngineerPerkIds { get; set; } = new List<string>();
+        public List<string> SurgeonPerkIds { get; set; } = new List<string>();
     }
 
     public sealed class TroopStackInfo

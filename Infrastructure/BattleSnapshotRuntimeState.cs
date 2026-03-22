@@ -32,6 +32,8 @@ namespace CoopSpectator.Infrastructure
         public string SideId { get; set; }
         public string SideText { get; set; }
         public string CanonicalSideKey { get; set; }
+        public string LeaderPartyId { get; set; }
+        public float SideMorale { get; set; }
         public bool IsPlayerSide { get; set; }
         public int TotalManCount { get; set; }
         public List<BattlePartyState> Parties { get; set; } = new List<BattlePartyState>();
@@ -46,8 +48,36 @@ namespace CoopSpectator.Infrastructure
         public string SideId { get; set; }
         public bool IsMainParty { get; set; }
         public int TotalManCount { get; set; }
+        public BattlePartyModifierState Modifiers { get; set; } = new BattlePartyModifierState();
         public List<RosterEntryState> Entries { get; set; } = new List<RosterEntryState>();
         public List<string> TroopIds { get; set; } = new List<string>();
+    }
+
+    public sealed class BattlePartyModifierState
+    {
+        public string LeaderHeroId { get; set; }
+        public string OwnerHeroId { get; set; }
+        public string ScoutHeroId { get; set; }
+        public string QuartermasterHeroId { get; set; }
+        public string EngineerHeroId { get; set; }
+        public string SurgeonHeroId { get; set; }
+        public float Morale { get; set; }
+        public float RecentEventsMorale { get; set; }
+        public float MoraleChange { get; set; }
+        public int ContributionToBattle { get; set; }
+        public int LeaderLeadershipSkill { get; set; }
+        public int LeaderTacticsSkill { get; set; }
+        public int ScoutScoutingSkill { get; set; }
+        public int QuartermasterStewardSkill { get; set; }
+        public int EngineerEngineeringSkill { get; set; }
+        public int SurgeonMedicineSkill { get; set; }
+        public List<string> PartyLeaderPerkIds { get; set; } = new List<string>();
+        public List<string> ArmyCommanderPerkIds { get; set; } = new List<string>();
+        public List<string> CaptainPerkIds { get; set; } = new List<string>();
+        public List<string> ScoutPerkIds { get; set; } = new List<string>();
+        public List<string> QuartermasterPerkIds { get; set; } = new List<string>();
+        public List<string> EngineerPerkIds { get; set; } = new List<string>();
+        public List<string> SurgeonPerkIds { get; set; } = new List<string>();
     }
 
     public sealed class RosterEntryState
@@ -107,6 +137,8 @@ namespace CoopSpectator.Infrastructure
         public string SideId { get; set; }
         public string SideText { get; set; }
         public string CanonicalSideKey { get; set; }
+        public string LeaderPartyId { get; set; }
+        public float SideMorale { get; set; }
         public bool IsPlayerSide { get; set; }
         public int TotalManCount { get; set; }
         public List<BattlePartyProjectionState> Parties { get; set; } = new List<BattlePartyProjectionState>();
@@ -121,8 +153,36 @@ namespace CoopSpectator.Infrastructure
         public string SideId { get; set; }
         public bool IsMainParty { get; set; }
         public int TotalManCount { get; set; }
+        public BattlePartyModifierProjectionState Modifiers { get; set; } = new BattlePartyModifierProjectionState();
         public List<BattleRosterEntryProjectionState> Entries { get; set; } = new List<BattleRosterEntryProjectionState>();
         public List<string> TroopIds { get; set; } = new List<string>();
+    }
+
+    public sealed class BattlePartyModifierProjectionState
+    {
+        public string LeaderHeroId { get; set; }
+        public string OwnerHeroId { get; set; }
+        public string ScoutHeroId { get; set; }
+        public string QuartermasterHeroId { get; set; }
+        public string EngineerHeroId { get; set; }
+        public string SurgeonHeroId { get; set; }
+        public float Morale { get; set; }
+        public float RecentEventsMorale { get; set; }
+        public float MoraleChange { get; set; }
+        public int ContributionToBattle { get; set; }
+        public int LeaderLeadershipSkill { get; set; }
+        public int LeaderTacticsSkill { get; set; }
+        public int ScoutScoutingSkill { get; set; }
+        public int QuartermasterStewardSkill { get; set; }
+        public int EngineerEngineeringSkill { get; set; }
+        public int SurgeonMedicineSkill { get; set; }
+        public List<string> PartyLeaderPerkIds { get; set; } = new List<string>();
+        public List<string> ArmyCommanderPerkIds { get; set; } = new List<string>();
+        public List<string> CaptainPerkIds { get; set; } = new List<string>();
+        public List<string> ScoutPerkIds { get; set; } = new List<string>();
+        public List<string> QuartermasterPerkIds { get; set; } = new List<string>();
+        public List<string> EngineerPerkIds { get; set; } = new List<string>();
+        public List<string> SurgeonPerkIds { get; set; } = new List<string>();
     }
 
     public sealed class BattleRosterEntryProjectionState
@@ -376,6 +436,8 @@ namespace CoopSpectator.Infrastructure
                     SideId = sideSnapshot.SideId,
                     SideText = sideSnapshot.SideText,
                     CanonicalSideKey = NormalizeSideKey(sideSnapshot.SideText ?? sideSnapshot.SideId),
+                    LeaderPartyId = sideSnapshot.LeaderPartyId,
+                    SideMorale = sideSnapshot.SideMorale,
                     IsPlayerSide = sideSnapshot.IsPlayerSide,
                     TotalManCount = sideSnapshot.TotalManCount
                 };
@@ -393,7 +455,8 @@ namespace CoopSpectator.Infrastructure
                         PartyName = partySnapshot.PartyName,
                         SideId = sideProjection.CanonicalSideKey,
                         IsMainParty = partySnapshot.IsMainParty,
-                        TotalManCount = partySnapshot.TotalManCount
+                        TotalManCount = partySnapshot.TotalManCount,
+                        Modifiers = BuildPartyModifierProjection(partySnapshot.Modifiers)
                     };
                     sideProjection.Parties.Add(partyProjection);
                     projection.PartiesById[partyProjection.PartyId] = partyProjection;
@@ -462,6 +525,8 @@ namespace CoopSpectator.Infrastructure
                     SideId = sideProjection.SideId,
                     SideText = sideProjection.SideText,
                     CanonicalSideKey = sideProjection.CanonicalSideKey,
+                    LeaderPartyId = sideProjection.LeaderPartyId,
+                    SideMorale = sideProjection.SideMorale,
                     IsPlayerSide = sideProjection.IsPlayerSide,
                     TotalManCount = sideProjection.TotalManCount
                 };
@@ -476,7 +541,8 @@ namespace CoopSpectator.Infrastructure
                         PartyName = partyProjection.PartyName,
                         SideId = partyProjection.SideId,
                         IsMainParty = partyProjection.IsMainParty,
-                        TotalManCount = partyProjection.TotalManCount
+                        TotalManCount = partyProjection.TotalManCount,
+                        Modifiers = BuildPartyModifierState(partyProjection.Modifiers)
                     };
                     sideState.Parties.Add(partyState);
                     state.PartiesById[partyState.PartyId] = partyState;
@@ -625,6 +691,72 @@ namespace CoopSpectator.Infrastructure
                 CombatHorseId = troop.CombatHorseId,
                 CombatHorseHarnessId = troop.CombatHorseHarnessId,
                 Tier = troop.Tier
+            };
+        }
+
+        private static BattlePartyModifierProjectionState BuildPartyModifierProjection(BattlePartyModifierSnapshotMessage modifierSnapshot)
+        {
+            if (modifierSnapshot == null)
+                return new BattlePartyModifierProjectionState();
+
+            return new BattlePartyModifierProjectionState
+            {
+                LeaderHeroId = modifierSnapshot.LeaderHeroId,
+                OwnerHeroId = modifierSnapshot.OwnerHeroId,
+                ScoutHeroId = modifierSnapshot.ScoutHeroId,
+                QuartermasterHeroId = modifierSnapshot.QuartermasterHeroId,
+                EngineerHeroId = modifierSnapshot.EngineerHeroId,
+                SurgeonHeroId = modifierSnapshot.SurgeonHeroId,
+                Morale = modifierSnapshot.Morale,
+                RecentEventsMorale = modifierSnapshot.RecentEventsMorale,
+                MoraleChange = modifierSnapshot.MoraleChange,
+                ContributionToBattle = modifierSnapshot.ContributionToBattle,
+                LeaderLeadershipSkill = modifierSnapshot.LeaderLeadershipSkill,
+                LeaderTacticsSkill = modifierSnapshot.LeaderTacticsSkill,
+                ScoutScoutingSkill = modifierSnapshot.ScoutScoutingSkill,
+                QuartermasterStewardSkill = modifierSnapshot.QuartermasterStewardSkill,
+                EngineerEngineeringSkill = modifierSnapshot.EngineerEngineeringSkill,
+                SurgeonMedicineSkill = modifierSnapshot.SurgeonMedicineSkill,
+                PartyLeaderPerkIds = modifierSnapshot.PartyLeaderPerkIds != null ? new List<string>(modifierSnapshot.PartyLeaderPerkIds) : new List<string>(),
+                ArmyCommanderPerkIds = modifierSnapshot.ArmyCommanderPerkIds != null ? new List<string>(modifierSnapshot.ArmyCommanderPerkIds) : new List<string>(),
+                CaptainPerkIds = modifierSnapshot.CaptainPerkIds != null ? new List<string>(modifierSnapshot.CaptainPerkIds) : new List<string>(),
+                ScoutPerkIds = modifierSnapshot.ScoutPerkIds != null ? new List<string>(modifierSnapshot.ScoutPerkIds) : new List<string>(),
+                QuartermasterPerkIds = modifierSnapshot.QuartermasterPerkIds != null ? new List<string>(modifierSnapshot.QuartermasterPerkIds) : new List<string>(),
+                EngineerPerkIds = modifierSnapshot.EngineerPerkIds != null ? new List<string>(modifierSnapshot.EngineerPerkIds) : new List<string>(),
+                SurgeonPerkIds = modifierSnapshot.SurgeonPerkIds != null ? new List<string>(modifierSnapshot.SurgeonPerkIds) : new List<string>()
+            };
+        }
+
+        private static BattlePartyModifierState BuildPartyModifierState(BattlePartyModifierProjectionState modifierProjection)
+        {
+            if (modifierProjection == null)
+                return new BattlePartyModifierState();
+
+            return new BattlePartyModifierState
+            {
+                LeaderHeroId = modifierProjection.LeaderHeroId,
+                OwnerHeroId = modifierProjection.OwnerHeroId,
+                ScoutHeroId = modifierProjection.ScoutHeroId,
+                QuartermasterHeroId = modifierProjection.QuartermasterHeroId,
+                EngineerHeroId = modifierProjection.EngineerHeroId,
+                SurgeonHeroId = modifierProjection.SurgeonHeroId,
+                Morale = modifierProjection.Morale,
+                RecentEventsMorale = modifierProjection.RecentEventsMorale,
+                MoraleChange = modifierProjection.MoraleChange,
+                ContributionToBattle = modifierProjection.ContributionToBattle,
+                LeaderLeadershipSkill = modifierProjection.LeaderLeadershipSkill,
+                LeaderTacticsSkill = modifierProjection.LeaderTacticsSkill,
+                ScoutScoutingSkill = modifierProjection.ScoutScoutingSkill,
+                QuartermasterStewardSkill = modifierProjection.QuartermasterStewardSkill,
+                EngineerEngineeringSkill = modifierProjection.EngineerEngineeringSkill,
+                SurgeonMedicineSkill = modifierProjection.SurgeonMedicineSkill,
+                PartyLeaderPerkIds = modifierProjection.PartyLeaderPerkIds != null ? new List<string>(modifierProjection.PartyLeaderPerkIds) : new List<string>(),
+                ArmyCommanderPerkIds = modifierProjection.ArmyCommanderPerkIds != null ? new List<string>(modifierProjection.ArmyCommanderPerkIds) : new List<string>(),
+                CaptainPerkIds = modifierProjection.CaptainPerkIds != null ? new List<string>(modifierProjection.CaptainPerkIds) : new List<string>(),
+                ScoutPerkIds = modifierProjection.ScoutPerkIds != null ? new List<string>(modifierProjection.ScoutPerkIds) : new List<string>(),
+                QuartermasterPerkIds = modifierProjection.QuartermasterPerkIds != null ? new List<string>(modifierProjection.QuartermasterPerkIds) : new List<string>(),
+                EngineerPerkIds = modifierProjection.EngineerPerkIds != null ? new List<string>(modifierProjection.EngineerPerkIds) : new List<string>(),
+                SurgeonPerkIds = modifierProjection.SurgeonPerkIds != null ? new List<string>(modifierProjection.SurgeonPerkIds) : new List<string>()
             };
         }
 

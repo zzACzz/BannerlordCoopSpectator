@@ -15,6 +15,8 @@ namespace CoopSpectator.Infrastructure
             public string Source { get; set; }
             public string BattlePhase { get; set; }
             public string BattlePhaseSource { get; set; }
+            public string WinnerSide { get; set; }
+            public string BattleCompletionReason { get; set; }
             public string PeerName { get; set; }
             public int PeerIndex { get; set; }
             public bool HasPeer { get; set; }
@@ -61,6 +63,8 @@ namespace CoopSpectator.Infrastructure
                     "Source=" + (snapshot.Source ?? string.Empty),
                     "BattlePhase=" + (snapshot.BattlePhase ?? string.Empty),
                     "BattlePhaseSource=" + (snapshot.BattlePhaseSource ?? string.Empty),
+                    "WinnerSide=" + (snapshot.WinnerSide ?? string.Empty),
+                    "BattleCompletionReason=" + (snapshot.BattleCompletionReason ?? string.Empty),
                     "PeerName=" + (snapshot.PeerName ?? string.Empty),
                     "PeerIndex=" + snapshot.PeerIndex,
                     "HasPeer=" + snapshot.HasPeer,
@@ -129,6 +133,8 @@ namespace CoopSpectator.Infrastructure
                     Source = string.Empty,
                     BattlePhase = string.Empty,
                     BattlePhaseSource = string.Empty,
+                    WinnerSide = string.Empty,
+                    BattleCompletionReason = string.Empty,
                     PeerName = string.Empty,
                     PeerIndex = -1,
                     HasPeer = false,
@@ -185,6 +191,12 @@ namespace CoopSpectator.Infrastructure
                             break;
                         case "BattlePhaseSource":
                             snapshot.BattlePhaseSource = value;
+                            break;
+                        case "WinnerSide":
+                            snapshot.WinnerSide = value;
+                            break;
+                        case "BattleCompletionReason":
+                            snapshot.BattleCompletionReason = value;
                             break;
                         case "PeerName":
                             snapshot.PeerName = value;

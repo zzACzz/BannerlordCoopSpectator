@@ -9,6 +9,7 @@ using TaleWorlds.CampaignSystem.Party; // Підключаємо MobileParty (п
 using TaleWorlds.MountAndBlade; // Підключаємо Mission (детекція входу в місію/битву)
 using System.Reflection; // Reflection для mission-safe fallback ids героїв/лордів із кампанії.
 using System.Linq;
+using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.Core;
 using TaleWorlds.ObjectSystem;
 
@@ -27,6 +28,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private const int SyntheticHeroLordLimit = 12;
         private bool _wasInMissionLastTick; // Пам'ятаємо стан попереднього тіку: чи вже була активна місія
         private bool _hasSentBattleStartForThisMission; // Прапорець, щоб не відправляти BATTLE_START багато разів за одну місію
+        private string _lastConsumedBattleResultKey;
+        private string _lastMissionExitRequestedBattleResultKey;
+        private string _lastMissionExitFailedBattleResultKey;
+        private DateTime _missionEnteredUtc;
+        private DateTime _nextMissionBattleResultPollUtc;
         private static SyntheticRosterMode _syntheticRosterMode;
         private static readonly Dictionary<string, object> CachedDefaultSkillObjects = new Dictionary<string, object>(StringComparer.Ordinal);
         private static readonly Dictionary<string, object> CachedDefaultCharacterAttributeObjects = new Dictionary<string, object>(StringComparer.Ordinal);
@@ -102,14 +108,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 bool isInMissionForClient = Mission.Current != null;
                 _wasInMissionLastTick = isInMissionForClient;
                 if (!isInMissionForClient)
+                {
                     _hasSentBattleStartForThisMission = false;
+                    ResetMissionExitState();
+                }
                 return;
             }
+            if (Mission.Current != null && _wasInMissionLastTick)
+                TryHandleBattleResultMissionExit();
 
             bool isInMissionNow = Mission.Current != null; // Визначаємо чи зараз є активна місія (битва/сцена)
 
             if (!isInMissionNow) // Якщо місії немає, значить ми не в битві (або вже вийшли з неї)
             { // Починаємо блок if
+                TryConsumeBattleResultWritebackAudit();
+                ResetMissionExitState();
                 if (_wasInMissionLastTick && ShouldNotifyDedicatedHelper()) // Щойно вийшли з місії — сказати Dedicated Helper end_mission (якщо ми не спектатор-клієнт)
                 { // Починаємо блок if
                     try { DedicatedServerCommands.SendEndMission(); } catch (Exception ex) { ModLogger.Info("DedicatedServerCommands.SendEndMission: " + ex.Message); }
@@ -127,6 +140,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             _wasInMissionLastTick = true; // Фіксуємо, що ми щойно увійшли в місію
             // Діагностика: лог при вході в місію (битва в кампанії або інша сцена), щоб перевірити чи Tick бачить Mission.Current
+            _missionEnteredUtc = DateTime.UtcNow;
+            _lastMissionExitRequestedBattleResultKey = null;
+            _lastMissionExitFailedBattleResultKey = null;
+            _nextMissionBattleResultPollUtc = DateTime.MinValue;
             ModLogger.Info("BattleDetector: mission entered (Mission.Current set). Notifying dedicated if applicable.");
             if (ShouldSendBattleStart()) // Якщо ми TCP-хост — відправляємо BATTLE_START клієнтам і start_mission дедику
             { // Починаємо блок if
@@ -137,6 +154,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 ModLogger.Info("BattleDetector: not TCP host — sending start_mission to dedicated (campaign host path).");
                 try
                 {
+                    CoopBattleResultBridgeFile.ClearResult("BattleDetector.Tick campaign-host start_mission");
                     TryWriteBattleRosterFile(BuildBattleStartPayload()); // Для host-only campaign path теж пишемо battle_roster.json перед start_mission.
                     bool sent = DedicatedServerCommands.SendStartMission();
                     ModLogger.Info("BattleDetector: SendStartMission() returned " + sent + ".");
@@ -187,6 +205,263 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _hasSentBattleStartForThisMission = false; // Дозволяємо наступній місії знову відправити BATTLE_START
         } // Завершуємо блок методу
 
+        private void TryConsumeBattleResultWritebackAudit()
+        {
+            try
+            {
+                CoopBattleResultBridgeFile.BattleResultSnapshot result = CoopBattleResultBridgeFile.ReadResult(logRead: false);
+                if (result == null)
+                    return;
+
+                string resultKey = BuildBattleResultKey(result);
+                if (string.Equals(_lastConsumedBattleResultKey, resultKey, StringComparison.Ordinal))
+                    return;
+
+                _lastConsumedBattleResultKey = resultKey;
+
+                int removedTotal = result.Entries?.Sum(entry => entry?.RemovedCount ?? 0) ?? 0;
+                int killedTotal = result.Entries?.Sum(entry => entry?.KilledCount ?? 0) ?? 0;
+                int unconsciousTotal = result.Entries?.Sum(entry => entry?.UnconsciousCount ?? 0) ?? 0;
+                int activeTotal = result.Entries?.Sum(entry => entry?.ActiveCount ?? 0) ?? 0;
+                int combatEventCount = result.CombatEvents?.Count ?? 0;
+                int droppedCombatEventCount = result.DroppedCombatEventCount;
+                float damageTotal = result.Entries?.Sum(entry => entry?.DamageDealt ?? 0f) ?? 0f;
+                int hitTotal = result.Entries?.Sum(entry => entry?.ScoreHitCount ?? 0) ?? 0;
+                IEnumerable<string> entrySummary = (result.Entries ?? new List<CoopBattleResultBridgeFile.BattleResultEntrySnapshot>())
+                    .Where(entry => entry != null && (entry.RemovedCount > 0 || entry.ActiveCount > 0 || entry.MaterializedSpawnCount > 0 || entry.ScoreHitCount > 0 || entry.DamageDealt > 0.01f))
+                    .OrderByDescending(entry => entry.RemovedCount)
+                    .ThenByDescending(entry => entry.KillsInflictedCount)
+                    .ThenByDescending(entry => entry.DamageDealt)
+                    .ThenByDescending(entry => entry.MaterializedSpawnCount)
+                    .Take(24)
+                    .Select(entry =>
+                        (entry.SideId ?? "side") + "/" +
+                        (entry.EntryId ?? "entry") +
+                        ": Spawned=" + entry.MaterializedSpawnCount +
+                        " Active=" + entry.ActiveCount +
+                        " Removed=" + entry.RemovedCount +
+                        " Killed=" + entry.KilledCount +
+                        " Unconscious=" + entry.UnconsciousCount +
+                        " Hits=" + entry.ScoreHitCount +
+                        " Damage=" + entry.DamageDealt.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
+                        " KillsBy=" + entry.KillsInflictedCount +
+                        (entry.IsHero ? " Hero=True" : string.Empty));
+
+                ModLogger.Info(
+                    "BattleDetector: consumed battle_result writeback audit. " +
+                    "BattleId=" + (result.BattleId ?? "null") +
+                    " WinnerSide=" + (result.WinnerSide ?? "none") +
+                    " Entries=" + (result.Entries?.Count ?? 0) +
+                    " Removed=" + removedTotal +
+                    " Killed=" + killedTotal +
+                    " Unconscious=" + unconsciousTotal +
+                    " Active=" + activeTotal +
+                    " Hits=" + hitTotal +
+                    " Damage=" + damageTotal.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
+                    " CombatEvents=" + combatEventCount +
+                    " DroppedCombatEvents=" + droppedCombatEventCount +
+                    " Summary=[" + string.Join("; ", entrySummary) + "].");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to consume battle_result audit: " + ex.Message);
+            }
+        }
+
+        private void TryHandleBattleResultMissionExit()
+        {
+            Mission mission = Mission.Current;
+            if (mission == null || GameNetwork.IsClient || TaleWorlds.CampaignSystem.Campaign.Current == null)
+                return;
+
+            if (DateTime.UtcNow < _nextMissionBattleResultPollUtc)
+                return;
+
+            _nextMissionBattleResultPollUtc = DateTime.UtcNow.AddMilliseconds(250);
+
+            CoopBattleResultBridgeFile.BattleResultSnapshot result = CoopBattleResultBridgeFile.ReadResult(logRead: false);
+            if (result == null)
+                return;
+
+            string resultKey = BuildBattleResultKey(result);
+            if (string.IsNullOrEmpty(resultKey))
+                return;
+
+            if (result.UpdatedUtc <= _missionEnteredUtc)
+                return;
+
+            if (string.Equals(_lastMissionExitRequestedBattleResultKey, resultKey, StringComparison.Ordinal))
+                return;
+
+            bool encounterPrepared = TryPrepareAuthoritativeEncounterResultBridge(result);
+            bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
+            if (exitRequested)
+            {
+                _lastMissionExitRequestedBattleResultKey = resultKey;
+                _lastMissionExitFailedBattleResultKey = null;
+                ModLogger.Info(
+                    "BattleDetector: battle_result detected during active campaign mission. " +
+                    "Requested local mission exit. " +
+                    "EncounterPrepared=" + encounterPrepared + " " +
+                    "BattleId=" + (result.BattleId ?? "null") +
+                    " WinnerSide=" + (result.WinnerSide ?? "none") +
+                    " MissionScene=" + SafeMissionSceneName(mission) + ".");
+                return;
+            }
+
+            if (string.Equals(_lastMissionExitFailedBattleResultKey, resultKey, StringComparison.Ordinal))
+                return;
+
+            _lastMissionExitFailedBattleResultKey = resultKey;
+            ModLogger.Info(
+                "BattleDetector: battle_result detected during active campaign mission, but local mission exit request failed. " +
+                "BattleId=" + (result.BattleId ?? "null") +
+                " WinnerSide=" + (result.WinnerSide ?? "none") +
+                " MissionScene=" + SafeMissionSceneName(mission) + ".");
+        }
+
+        private static bool TryPrepareAuthoritativeEncounterResultBridge(CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        {
+            if (result == null)
+                return false;
+
+            try
+            {
+                PlayerEncounter encounter = PlayerEncounter.Current;
+                if (encounter == null || PlayerEncounter.Battle == null)
+                {
+                    ModLogger.Info(
+                        "BattleDetector: authoritative encounter result bridge skipped because PlayerEncounter/Battle is null. " +
+                        "BattleId=" + (result.BattleId ?? "null") +
+                        " WinnerSide=" + (result.WinnerSide ?? "none") + ".");
+                    return false;
+                }
+
+                BattleState winnerBattleState = TryResolveWinnerBattleState(result.WinnerSide);
+                if (winnerBattleState == BattleState.None)
+                {
+                    ModLogger.Info(
+                        "BattleDetector: authoritative encounter result bridge skipped because WinnerSide could not be resolved. " +
+                        "BattleId=" + (result.BattleId ?? "null") +
+                        " WinnerSide=" + (result.WinnerSide ?? "none") + ".");
+                    return false;
+                }
+
+                CampaignBattleResult campaignBattleResult = CampaignBattleResult.GetResult(winnerBattleState, enemyRetreated: true);
+                if (campaignBattleResult == null)
+                {
+                    ModLogger.Info(
+                        "BattleDetector: authoritative encounter result bridge skipped because CampaignBattleResult.GetResult returned null. " +
+                        "BattleId=" + (result.BattleId ?? "null") +
+                        " WinnerSide=" + (result.WinnerSide ?? "none") + ".");
+                    return false;
+                }
+
+                PlayerEncounter.CampaignBattleResult = campaignBattleResult;
+                bool continueReset = TrySetMemberValue(encounter, "_doesBattleContinue", false);
+
+                ModLogger.Info(
+                    "BattleDetector: prepared authoritative encounter result bridge. " +
+                    "BattleId=" + (result.BattleId ?? "null") +
+                    " WinnerSide=" + (result.WinnerSide ?? "none") +
+                    " PlayerSide=" + PlayerEncounter.Current.PlayerSide +
+                    " CampaignResult[Victory=" + campaignBattleResult.PlayerVictory +
+                    " Defeat=" + campaignBattleResult.PlayerDefeat +
+                    " EnemyPulledBack=" + campaignBattleResult.EnemyPulledBack +
+                    " EnemyRetreated=" + campaignBattleResult.EnemyRetreated + "] " +
+                    "ContinueReset=" + continueReset + ".");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to prepare authoritative encounter result bridge: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static BattleState TryResolveWinnerBattleState(string winnerSide)
+        {
+            if (string.IsNullOrWhiteSpace(winnerSide))
+                return BattleState.None;
+
+            if (string.Equals(winnerSide, nameof(BattleSideEnum.Attacker), StringComparison.OrdinalIgnoreCase))
+                return BattleState.AttackerVictory;
+
+            if (string.Equals(winnerSide, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase))
+                return BattleState.DefenderVictory;
+
+            return BattleState.None;
+        }
+
+        private static bool TryRequestLocalMissionExit(Mission mission, string source)
+        {
+            if (mission == null)
+                return false;
+
+            foreach (string methodName in new[] { "EndMission", "OnEndMissionRequest", "OnEndMissionInternal" })
+            {
+                try
+                {
+                    MethodInfo method = mission.GetType().GetMethod(
+                        methodName,
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                        null,
+                        Type.EmptyTypes,
+                        null);
+                    if (method == null)
+                        continue;
+
+                    method.Invoke(mission, null);
+                    ModLogger.Info(
+                        "BattleDetector: requested local mission exit via reflection. " +
+                        "Method=" + methodName +
+                        " Source=" + (source ?? "unknown") + ".");
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "BattleDetector: local mission exit method failed. " +
+                        "Method=" + methodName +
+                        " Source=" + (source ?? "unknown") +
+                        " Error=" + ex.Message);
+                }
+            }
+
+            return false;
+        }
+
+        private static string BuildBattleResultKey(CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        {
+            if (result == null)
+                return null;
+
+            return (result.BattleId ?? "null") + "|" + result.UpdatedUtc.ToString("O");
+        }
+
+        private static string SafeMissionSceneName(Mission mission)
+        {
+            if (mission == null)
+                return string.Empty;
+
+            try
+            {
+                return mission.SceneName ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private void ResetMissionExitState()
+        {
+            _missionEnteredUtc = DateTime.MinValue;
+            _lastMissionExitRequestedBattleResultKey = null;
+            _lastMissionExitFailedBattleResultKey = null;
+            _nextMissionBattleResultPollUtc = DateTime.MinValue;
+        }
+
         private void TrySendBattleStart() // Формуємо повідомлення та надсилаємо клієнтам (best-effort)
         { // Починаємо блок методу
             if (_hasSentBattleStartForThisMission) // Перевіряємо guard-прапорець
@@ -198,6 +473,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             try // Захищаємо збір даних від винятків, щоб мод не крашив гру
             { // Починаємо блок try
+                CoopBattleResultBridgeFile.ClearResult("BattleDetector.TrySendBattleStart");
                 BattleStartMessage payload = BuildBattleStartPayload(); // Будуємо DTO з даними про битву/місію
                 TryWriteBattleRosterFile(payload); // Варіант A: зберігаємо roster у спільний файл для dedicated на цьому ж ПК.
                 string wireMessage = BattleStartMessageCodec.BuildBattleStartMessage(payload); // Серіалізуємо DTO в `BATTLE_START:{json}`
@@ -868,6 +1144,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 SideText = string.Equals(playerSideText, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase)
                     ? nameof(BattleSideEnum.Defender)
                     : nameof(BattleSideEnum.Attacker),
+                LeaderPartyId = MobileParty.MainParty?.StringId ?? "main_party",
+                SideMorale = TryGetFloatProperty(MobileParty.MainParty, "Morale"),
                 IsPlayerSide = true
             };
 
@@ -876,6 +1154,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 PartyId = MobileParty.MainParty?.StringId ?? "main_party",
                 PartyName = MobileParty.MainParty?.Name?.ToString() ?? "Main Party",
                 IsMainParty = true,
+                Modifiers = TryBuildPartyModifierSnapshot(MobileParty.MainParty, MobileParty.MainParty?.Party),
                 Troops = BuildPartyTroopStacksSafe()
             };
             mainParty.TotalManCount = mainParty.Troops?.Sum(t => t?.Count ?? 0) ?? 0;
@@ -905,6 +1184,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 SideId = sideId,
                 SideText = sideText,
+                LeaderPartyId = TryResolveSideLeaderPartyId(sideObject),
+                SideMorale = TryGetSideMorale(sideObject),
                 IsPlayerSide = string.Equals(playerSideText, sideText, StringComparison.OrdinalIgnoreCase)
             };
 
@@ -972,8 +1253,82 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 PartyName = partyName,
                 IsMainParty = isMainParty,
                 TotalManCount = troops.Sum(t => t?.Count ?? 0),
+                Modifiers = TryBuildPartyModifierSnapshot(partyObject, partyBase),
                 Troops = troops
             };
+        }
+
+        private static string TryResolveSideLeaderPartyId(object sideObject)
+        {
+            object leaderParty = TryGetPropertyValue(sideObject, "LeaderParty");
+            return TryGetStringId(leaderParty) ?? TryGetStringId(TryGetPropertyValue(leaderParty, "MobileParty"));
+        }
+
+        private static float TryGetSideMorale(object sideObject)
+        {
+            float directValue = TryGetFloatProperty(sideObject, "SideMorale");
+            if (directValue > 0.01f)
+                return directValue;
+
+            return TryConvertToFloat(TryInvokeMethod(sideObject, "GetSideMorale"));
+        }
+
+        private static BattlePartyModifierSnapshotMessage TryBuildPartyModifierSnapshot(object partyObject, object partyBase)
+        {
+            object mobileParty = TryResolveMobileParty(partyObject, partyBase);
+            object leaderHeroObject = TryGetPropertyValue(mobileParty, "LeaderHero");
+            object ownerHeroObject = TryGetPropertyValue(mobileParty, "Owner");
+            object scoutHeroObject = TryGetPropertyValue(mobileParty, "EffectiveScout");
+            object quartermasterHeroObject = TryGetPropertyValue(mobileParty, "EffectiveQuartermaster");
+            object engineerHeroObject = TryGetPropertyValue(mobileParty, "EffectiveEngineer");
+            object surgeonHeroObject = TryGetPropertyValue(mobileParty, "EffectiveSurgeon");
+
+            Hero leaderHero = TryResolveHeroObject(leaderHeroObject);
+            Hero ownerHero = TryResolveHeroObject(ownerHeroObject);
+            Hero scoutHero = TryResolveHeroObject(scoutHeroObject);
+            Hero quartermasterHero = TryResolveHeroObject(quartermasterHeroObject);
+            Hero engineerHero = TryResolveHeroObject(engineerHeroObject);
+            Hero surgeonHero = TryResolveHeroObject(surgeonHeroObject);
+
+            var modifiers = new BattlePartyModifierSnapshotMessage
+            {
+                LeaderHeroId = TryGetHeroId(leaderHeroObject),
+                OwnerHeroId = TryGetHeroId(ownerHeroObject),
+                ScoutHeroId = TryGetHeroId(scoutHeroObject),
+                QuartermasterHeroId = TryGetHeroId(quartermasterHeroObject),
+                EngineerHeroId = TryGetHeroId(engineerHeroObject),
+                SurgeonHeroId = TryGetHeroId(surgeonHeroObject),
+                Morale = TryGetFloatProperty(mobileParty, "Morale"),
+                RecentEventsMorale = TryGetFloatProperty(mobileParty, "RecentEventsMorale"),
+                MoraleChange = TryGetFloatProperty(partyObject, "MoraleChange"),
+                ContributionToBattle = TryGetIntProperty(partyObject, "ContributionToBattle"),
+                LeaderLeadershipSkill = TryGetCharacterSkillValue(leaderHero, "Leadership"),
+                LeaderTacticsSkill = TryGetCharacterSkillValue(leaderHero, "Tactics"),
+                ScoutScoutingSkill = TryGetCharacterSkillValue(scoutHero, "Scouting"),
+                QuartermasterStewardSkill = TryGetCharacterSkillValue(quartermasterHero, "Steward"),
+                EngineerEngineeringSkill = TryGetCharacterSkillValue(engineerHero, "Engineering"),
+                SurgeonMedicineSkill = TryGetCharacterSkillValue(surgeonHero, "Medicine"),
+                PartyLeaderPerkIds = TryGetHeroPerkIdsByPartyRoles(leaderHero, "PartyLeader"),
+                ArmyCommanderPerkIds = TryGetHeroPerkIdsByPartyRoles(leaderHero, "ArmyCommander"),
+                CaptainPerkIds = TryGetHeroPerkIdsByPartyRoles(leaderHero, "Captain"),
+                ScoutPerkIds = TryGetHeroPerkIdsByPartyRoles(scoutHero, "Scout"),
+                QuartermasterPerkIds = TryGetHeroPerkIdsByPartyRoles(quartermasterHero, "Quartermaster"),
+                EngineerPerkIds = TryGetHeroPerkIdsByPartyRoles(engineerHero, "Engineer"),
+                SurgeonPerkIds = TryGetHeroPerkIdsByPartyRoles(surgeonHero, "Surgeon")
+            };
+
+            return HasPartyModifierData(modifiers) ? modifiers : null;
+        }
+
+        private static object TryResolveMobileParty(object partyObject, object partyBase)
+        {
+            if (partyBase is MobileParty directMobileParty)
+                return directMobileParty;
+
+            return TryGetPropertyValue(partyBase, "MobileParty")
+                ?? TryGetPropertyValue(partyObject, "MobileParty")
+                ?? TryGetPropertyValue(TryGetPropertyValue(partyObject, "Party"), "MobileParty")
+                ?? TryGetPropertyValue(TryGetPropertyValue(partyObject, "PartyBase"), "MobileParty");
         }
 
         private static IEnumerable<object> EnumerateBattleParties(object sideObject)
@@ -1185,6 +1540,146 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 "BattleDetector: snapshot mapping summary (" + (source ?? "unknown") + ") = [" +
                 string.Join("; ", mappings) +
                 "].");
+
+            IEnumerable<string> partyModifierMappings = snapshot.Sides
+                .Where(side => side?.Parties != null)
+                .SelectMany(side => side.Parties.Select(party => FormatPartyModifierSummary(side, party)))
+                .Where(summary => !string.IsNullOrWhiteSpace(summary))
+                .Take(24);
+            if (partyModifierMappings.Any())
+            {
+                ModLogger.Info(
+                    "BattleDetector: party modifier summary (" + (source ?? "unknown") + ") = [" +
+                    string.Join("; ", partyModifierMappings) +
+                    "].");
+            }
+        }
+
+        private static string FormatPartyModifierSummary(BattleSideSnapshotMessage side, BattlePartySnapshotMessage party)
+        {
+            if (side == null || party == null)
+                return null;
+
+            BattlePartyModifierSnapshotMessage modifiers = party.Modifiers;
+            bool hasAnyData =
+                !string.IsNullOrWhiteSpace(side.LeaderPartyId) ||
+                Math.Abs(side.SideMorale) > 0.01f ||
+                HasPartyModifierData(modifiers);
+            if (!hasAnyData)
+                return null;
+
+            var parts = new List<string>
+            {
+                (side.SideId ?? "side") + "/" + (party.PartyId ?? "party")
+            };
+
+            if (!string.IsNullOrWhiteSpace(side.LeaderPartyId) &&
+                string.Equals(side.LeaderPartyId, party.PartyId, StringComparison.OrdinalIgnoreCase))
+            {
+                parts.Add("LeaderParty=True");
+            }
+
+            if (Math.Abs(side.SideMorale) > 0.01f)
+                parts.Add("SideMorale=" + side.SideMorale.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+
+            if (modifiers != null)
+            {
+                AddPartyModifierSummaryPart(parts, "Leader", modifiers.LeaderHeroId);
+                AddPartyModifierSummaryPart(parts, "Owner", modifiers.OwnerHeroId);
+                AddPartyModifierSummaryPart(parts, "Scout", modifiers.ScoutHeroId);
+                AddPartyModifierSummaryPart(parts, "QM", modifiers.QuartermasterHeroId);
+                AddPartyModifierSummaryPart(parts, "Eng", modifiers.EngineerHeroId);
+                AddPartyModifierSummaryPart(parts, "Surg", modifiers.SurgeonHeroId);
+
+                if (Math.Abs(modifiers.Morale) > 0.01f)
+                    parts.Add("Morale=" + modifiers.Morale.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+                if (Math.Abs(modifiers.RecentEventsMorale) > 0.01f)
+                    parts.Add("Recent=" + modifiers.RecentEventsMorale.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+                if (Math.Abs(modifiers.MoraleChange) > 0.01f)
+                    parts.Add("MoraleChange=" + modifiers.MoraleChange.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+                if (modifiers.ContributionToBattle > 0)
+                    parts.Add("Contribution=" + modifiers.ContributionToBattle);
+
+                if (modifiers.LeaderLeadershipSkill > 0 || modifiers.LeaderTacticsSkill > 0)
+                    parts.Add("LeaderSkills=" + modifiers.LeaderLeadershipSkill + "/" + modifiers.LeaderTacticsSkill);
+                if (modifiers.ScoutScoutingSkill > 0)
+                    parts.Add("ScoutSkill=" + modifiers.ScoutScoutingSkill);
+                if (modifiers.QuartermasterStewardSkill > 0)
+                    parts.Add("QMSkill=" + modifiers.QuartermasterStewardSkill);
+                if (modifiers.EngineerEngineeringSkill > 0)
+                    parts.Add("EngSkill=" + modifiers.EngineerEngineeringSkill);
+                if (modifiers.SurgeonMedicineSkill > 0)
+                    parts.Add("SurgSkill=" + modifiers.SurgeonMedicineSkill);
+
+                string rolePerks = FormatRolePerkCountSummary(modifiers);
+                if (!string.IsNullOrWhiteSpace(rolePerks))
+                    parts.Add("RolePerks[" + rolePerks + "]");
+            }
+
+            return string.Join(" ", parts);
+        }
+
+        private static void AddPartyModifierSummaryPart(List<string> parts, string label, string value)
+        {
+            if (parts == null || string.IsNullOrWhiteSpace(label) || string.IsNullOrWhiteSpace(value))
+                return;
+
+            parts.Add(label + "=" + value);
+        }
+
+        private static string FormatRolePerkCountSummary(BattlePartyModifierSnapshotMessage modifiers)
+        {
+            if (modifiers == null)
+                return string.Empty;
+
+            var parts = new List<string>();
+            AddRolePerkCountSummaryPart(parts, "PL", modifiers.PartyLeaderPerkIds);
+            AddRolePerkCountSummaryPart(parts, "AC", modifiers.ArmyCommanderPerkIds);
+            AddRolePerkCountSummaryPart(parts, "Cap", modifiers.CaptainPerkIds);
+            AddRolePerkCountSummaryPart(parts, "Sc", modifiers.ScoutPerkIds);
+            AddRolePerkCountSummaryPart(parts, "QM", modifiers.QuartermasterPerkIds);
+            AddRolePerkCountSummaryPart(parts, "Eng", modifiers.EngineerPerkIds);
+            AddRolePerkCountSummaryPart(parts, "Surg", modifiers.SurgeonPerkIds);
+            return string.Join(",", parts);
+        }
+
+        private static void AddRolePerkCountSummaryPart(List<string> parts, string label, List<string> perkIds)
+        {
+            if (parts == null || string.IsNullOrWhiteSpace(label) || perkIds == null || perkIds.Count <= 0)
+                return;
+
+            parts.Add(label + "=" + perkIds.Count);
+        }
+
+        private static bool HasPartyModifierData(BattlePartyModifierSnapshotMessage modifiers)
+        {
+            if (modifiers == null)
+                return false;
+
+            return
+                !string.IsNullOrWhiteSpace(modifiers.LeaderHeroId) ||
+                !string.IsNullOrWhiteSpace(modifiers.OwnerHeroId) ||
+                !string.IsNullOrWhiteSpace(modifiers.ScoutHeroId) ||
+                !string.IsNullOrWhiteSpace(modifiers.QuartermasterHeroId) ||
+                !string.IsNullOrWhiteSpace(modifiers.EngineerHeroId) ||
+                !string.IsNullOrWhiteSpace(modifiers.SurgeonHeroId) ||
+                Math.Abs(modifiers.Morale) > 0.01f ||
+                Math.Abs(modifiers.RecentEventsMorale) > 0.01f ||
+                Math.Abs(modifiers.MoraleChange) > 0.01f ||
+                modifiers.ContributionToBattle > 0 ||
+                modifiers.LeaderLeadershipSkill > 0 ||
+                modifiers.LeaderTacticsSkill > 0 ||
+                modifiers.ScoutScoutingSkill > 0 ||
+                modifiers.QuartermasterStewardSkill > 0 ||
+                modifiers.EngineerEngineeringSkill > 0 ||
+                modifiers.SurgeonMedicineSkill > 0 ||
+                (modifiers.PartyLeaderPerkIds?.Count ?? 0) > 0 ||
+                (modifiers.ArmyCommanderPerkIds?.Count ?? 0) > 0 ||
+                (modifiers.CaptainPerkIds?.Count ?? 0) > 0 ||
+                (modifiers.ScoutPerkIds?.Count ?? 0) > 0 ||
+                (modifiers.QuartermasterPerkIds?.Count ?? 0) > 0 ||
+                (modifiers.EngineerPerkIds?.Count ?? 0) > 0 ||
+                (modifiers.SurgeonPerkIds?.Count ?? 0) > 0;
         }
 
         private static List<TroopStackInfo> BuildLegacyTroopsFromSnapshot(BattleSnapshotMessage snapshot)
@@ -1406,6 +1901,35 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             catch
             {
                 return 0;
+            }
+        }
+
+        private static float TryConvertToFloat(object value)
+        {
+            if (value == null)
+                return 0f;
+
+            try
+            {
+                switch (value)
+                {
+                    case float floatValue:
+                        return floatValue;
+                    case double doubleValue:
+                        return (float)doubleValue;
+                    case decimal decimalValue:
+                        return (float)decimalValue;
+                    case int intValue:
+                        return intValue;
+                    case long longValue:
+                        return longValue;
+                    default:
+                        return Convert.ToSingle(value, System.Globalization.CultureInfo.InvariantCulture);
+                }
+            }
+            catch
+            {
+                return 0f;
             }
         }
 
@@ -2057,6 +2581,34 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
+        private static bool TrySetMemberValue(object instance, string memberName, object value)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(memberName))
+                return false;
+
+            try
+            {
+                PropertyInfo property = instance.GetType().GetProperty(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (property != null && property.CanWrite)
+                {
+                    property.SetValue(instance, value, null);
+                    return true;
+                }
+
+                FieldInfo field = instance.GetType().GetField(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (field != null)
+                {
+                    field.SetValue(instance, value);
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
         private static string TryGetStringId(object instance)
         {
             if (instance is TaleWorlds.ObjectSystem.MBObjectBase mbObject)
@@ -2233,6 +2785,52 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             return perkIds;
+        }
+
+        private static List<string> TryGetHeroPerkIdsByPartyRoles(Hero hero, params string[] roleNames)
+        {
+            if (hero == null || roleNames == null || roleNames.Length == 0)
+                return new List<string>();
+
+            List<object> perkObjects = GetCachedPerkObjects();
+            if (perkObjects.Count == 0)
+                return new List<string>();
+
+            var perkIds = new List<string>();
+            foreach (object perkObject in perkObjects)
+            {
+                if (!PerkMatchesAnyPartyRole(perkObject, roleNames) || !TryHeroHasPerk(hero, perkObject))
+                    continue;
+
+                string perkId = TryGetStringId(perkObject);
+                if (!string.IsNullOrWhiteSpace(perkId))
+                    perkIds.Add(perkId);
+            }
+
+            return perkIds;
+        }
+
+        private static bool PerkMatchesAnyPartyRole(object perkObject, params string[] roleNames)
+        {
+            if (perkObject == null || roleNames == null || roleNames.Length == 0)
+                return false;
+
+            string primaryRole = TryGetPropertyValue(perkObject, "PrimaryRole")?.ToString();
+            string secondaryRole = TryGetPropertyValue(perkObject, "SecondaryRole")?.ToString();
+            for (int i = 0; i < roleNames.Length; i++)
+            {
+                string roleName = roleNames[i];
+                if (string.IsNullOrWhiteSpace(roleName))
+                    continue;
+
+                if (string.Equals(primaryRole, roleName, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(secondaryRole, roleName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static List<object> GetCachedPerkObjects()
