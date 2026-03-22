@@ -9,7 +9,10 @@ using TaleWorlds.CampaignSystem.Party; // Підключаємо MobileParty (п
 using TaleWorlds.MountAndBlade; // Підключаємо Mission (детекція входу в місію/битву)
 using System.Reflection; // Reflection для mission-safe fallback ids героїв/лордів із кампанії.
 using System.Linq;
+using TaleWorlds.CampaignSystem.Actions;
+using TaleWorlds.CampaignSystem.ComponentInterfaces;
 using TaleWorlds.CampaignSystem.Encounters;
+using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.Core;
 using TaleWorlds.ObjectSystem;
 
@@ -45,6 +48,65 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             None = 0,
             AllCampaignTroops = 1,
             LiveHeroes = 2
+        }
+
+        private sealed class EncounterPartyWritebackState
+        {
+            public string PartyId { get; set; }
+            public PartyBase PartyBase { get; set; }
+            public MobileParty MobileParty { get; set; }
+            public TroopRoster MemberRoster { get; set; }
+            public CharacterObject CaptainCharacter { get; set; }
+            public bool IsMainParty { get; set; }
+        }
+
+        private sealed class BattleResultCharacterAggregate
+        {
+            public string PartyId { get; set; }
+            public string IdentityKey { get; set; }
+            public string HeroId { get; set; }
+            public string OriginalCharacterId { get; set; }
+            public string CharacterId { get; set; }
+            public string TroopName { get; set; }
+            public bool IsHero { get; set; }
+            public int SnapshotCount { get; set; }
+            public int SnapshotWoundedCount { get; set; }
+            public int RemovedCount { get; set; }
+            public int KilledCount { get; set; }
+            public int UnconsciousCount { get; set; }
+            public int RoutedCount { get; set; }
+            public int OtherRemovedCount { get; set; }
+            public int ScoreHitCount { get; set; }
+            public float DamageDealt { get; set; }
+            public float DamageTaken { get; set; }
+
+            public int DesiredCount => IsHero
+                ? Math.Max(0, SnapshotCount)
+                : Math.Max(0, SnapshotCount - Math.Max(0, KilledCount + OtherRemovedCount));
+
+            public int DesiredWoundedCount => IsHero
+                ? Math.Max(0, SnapshotWoundedCount)
+                : Math.Max(0, Math.Min(DesiredCount, SnapshotWoundedCount + Math.Max(0, UnconsciousCount)));
+
+            public bool HeroShouldBeWounded => IsHero && (KilledCount > 0 || UnconsciousCount > 0 || OtherRemovedCount > 0);
+        }
+
+        private sealed class BattleResultWritebackSummary
+        {
+            public int Aggregates { get; set; }
+            public int EncounterParties { get; set; }
+            public int ResolvedPartyAggregates { get; set; }
+            public int RegularTroopsAdjusted { get; set; }
+            public int HeroWoundsApplied { get; set; }
+            public int HeroHitPointsAdjusted { get; set; }
+            public int HeroHitPointLossApplied { get; set; }
+            public int TroopXpApplied { get; set; }
+            public float HeroSkillXpApplied { get; set; }
+            public float HeroRawXpApplied { get; set; }
+            public int UnresolvedPartyAggregates { get; set; }
+            public int UnresolvedCombatEvents { get; set; }
+            public List<string> AdjustedSamples { get; } = new List<string>();
+            public List<string> UnresolvedSamples { get; } = new List<string>();
         }
 
         private static void ResetCombatProfileLookupCaches()
@@ -238,6 +300,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                 _lastConsumedBattleResultKey = resultKey;
 
+                BattleResultWritebackSummary writebackSummary = ApplyBattleResultWriteback(result);
+
                 int removedTotal = result.Entries?.Sum(entry => entry?.RemovedCount ?? 0) ?? 0;
                 int killedTotal = result.Entries?.Sum(entry => entry?.KilledCount ?? 0) ?? 0;
                 int unconsciousTotal = result.Entries?.Sum(entry => entry?.UnconsciousCount ?? 0) ?? 0;
@@ -278,13 +342,566 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     " Hits=" + hitTotal +
                     " Damage=" + damageTotal.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
                     " CombatEvents=" + combatEventCount +
-                    " DroppedCombatEvents=" + droppedCombatEventCount +
+                " DroppedCombatEvents=" + droppedCombatEventCount +
+                " Writeback[Aggregates=" + writebackSummary.Aggregates +
+                " EncounterParties=" + writebackSummary.EncounterParties +
+                " Resolved=" + writebackSummary.ResolvedPartyAggregates +
+                " TroopsAdjusted=" + writebackSummary.RegularTroopsAdjusted +
+                " HeroWounds=" + writebackSummary.HeroWoundsApplied +
+                " HeroHpAdjusted=" + writebackSummary.HeroHitPointsAdjusted +
+                " HeroHpLoss=" + writebackSummary.HeroHitPointLossApplied +
+                " TroopXp=" + writebackSummary.TroopXpApplied +
+                " HeroSkillXp=" + writebackSummary.HeroSkillXpApplied.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
+                " HeroRawXp=" + writebackSummary.HeroRawXpApplied.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
+                " UnresolvedAggregates=" + writebackSummary.UnresolvedPartyAggregates +
+                " UnresolvedEvents=" + writebackSummary.UnresolvedCombatEvents +
+                    " AdjustedSamples=[" + string.Join("; ", writebackSummary.AdjustedSamples) + "]" +
+                    " UnresolvedSamples=[" + string.Join("; ", writebackSummary.UnresolvedSamples) + "]]" +
                     " Summary=[" + string.Join("; ", entrySummary) + "].");
             }
             catch (Exception ex)
             {
                 ModLogger.Info("BattleDetector: failed to consume battle_result audit: " + ex.Message);
             }
+        }
+
+        private static BattleResultWritebackSummary ApplyBattleResultWriteback(CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        {
+            var summary = new BattleResultWritebackSummary();
+            if (result?.Entries == null || result.Entries.Count == 0 || TaleWorlds.CampaignSystem.Campaign.Current == null)
+                return summary;
+
+            Dictionary<string, EncounterPartyWritebackState> encounterParties = ResolveEncounterPartyWritebackStates();
+            summary.EncounterParties = encounterParties.Count;
+
+            Dictionary<string, BattleResultCharacterAggregate> aggregates = BuildBattleResultCharacterAggregates(result);
+            summary.Aggregates = aggregates.Count;
+
+            foreach (BattleResultCharacterAggregate aggregate in aggregates.Values
+                         .OrderBy(group => group.PartyId, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(group => group.HeroId, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(group => group.OriginalCharacterId, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(group => group.CharacterId, StringComparer.OrdinalIgnoreCase))
+            {
+                if (aggregate == null)
+                    continue;
+
+                if (!encounterParties.TryGetValue(aggregate.PartyId ?? string.Empty, out EncounterPartyWritebackState partyState) ||
+                    partyState?.MemberRoster == null)
+                {
+                    summary.UnresolvedPartyAggregates++;
+                    AddWritebackSample(
+                        summary.UnresolvedSamples,
+                        "MissingParty:" + (aggregate.PartyId ?? "null") + "/" + (aggregate.TroopName ?? aggregate.IdentityKey ?? "entry"));
+                    continue;
+                }
+
+                summary.ResolvedPartyAggregates++;
+                TryApplyAggregateToPartyRoster(partyState, aggregate, summary);
+            }
+
+            TryApplyMainPartyCombatXpWriteback(result, encounterParties, summary);
+            return summary;
+        }
+
+        private static Dictionary<string, EncounterPartyWritebackState> ResolveEncounterPartyWritebackStates()
+        {
+            var states = new Dictionary<string, EncounterPartyWritebackState>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                object battle = TryGetCurrentBattleObject();
+                foreach (object sideObject in new[] { TryGetPropertyValue(battle, "AttackerSide"), TryGetPropertyValue(battle, "DefenderSide") })
+                {
+                    foreach (object partyObject in EnumerateBattleParties(sideObject))
+                    {
+                        object partyBaseLike = UnwrapPartyBase(partyObject);
+                        TryRegisterEncounterPartyWritebackState(states, partyBaseLike);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to enumerate encounter parties for writeback: " + ex.Message);
+            }
+
+            TryRegisterEncounterPartyWritebackState(states, MobileParty.MainParty?.Party ?? (object)MobileParty.MainParty);
+            return states;
+        }
+
+        private static void TryRegisterEncounterPartyWritebackState(
+            IDictionary<string, EncounterPartyWritebackState> states,
+            object partyBaseLike)
+        {
+            if (states == null || partyBaseLike == null)
+                return;
+
+            object unwrapped = UnwrapPartyBase(partyBaseLike) ?? partyBaseLike;
+            PartyBase partyBase = unwrapped as PartyBase;
+            MobileParty mobileParty = TryGetPropertyValue(unwrapped, "MobileParty") as MobileParty;
+            if (mobileParty == null && partyBase != null)
+                mobileParty = partyBase.MobileParty;
+
+            string partyId =
+                TryGetStringId(unwrapped) ??
+                TryGetStringId(partyBase) ??
+                TryGetStringId(mobileParty);
+            if (string.IsNullOrWhiteSpace(partyId))
+                return;
+
+            TroopRoster memberRoster = TryGetPropertyValue(unwrapped, "MemberRoster") as TroopRoster;
+            if (memberRoster == null && partyBase != null)
+                memberRoster = partyBase.MemberRoster;
+            if (memberRoster == null)
+                return;
+
+            Hero captainHero =
+                TryResolveHeroObject(TryGetPropertyValue(mobileParty, "LeaderHero")) ??
+                TryResolveHeroObject(TryGetPropertyValue(partyBase, "LeaderHero"));
+
+            states[partyId] = new EncounterPartyWritebackState
+            {
+                PartyId = partyId,
+                PartyBase = partyBase ?? mobileParty?.Party,
+                MobileParty = mobileParty,
+                MemberRoster = memberRoster,
+                CaptainCharacter = captainHero?.CharacterObject,
+                IsMainParty =
+                    string.Equals(partyId, MobileParty.MainParty?.StringId, StringComparison.OrdinalIgnoreCase) ||
+                    ReferenceEquals(mobileParty, MobileParty.MainParty) ||
+                    ReferenceEquals(partyBase, MobileParty.MainParty?.Party)
+            };
+        }
+
+        private static Dictionary<string, BattleResultCharacterAggregate> BuildBattleResultCharacterAggregates(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        {
+            var aggregates = new Dictionary<string, BattleResultCharacterAggregate>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry in result.Entries.Where(entry => entry != null))
+            {
+                string identityKey = BuildBattleResultIdentityKey(entry.PartyId, entry.HeroId, entry.OriginalCharacterId, entry.CharacterId);
+                if (string.IsNullOrWhiteSpace(identityKey))
+                    continue;
+
+                if (!aggregates.TryGetValue(identityKey, out BattleResultCharacterAggregate aggregate))
+                {
+                    aggregate = new BattleResultCharacterAggregate
+                    {
+                        PartyId = entry.PartyId ?? string.Empty,
+                        IdentityKey = identityKey,
+                        HeroId = entry.HeroId,
+                        OriginalCharacterId = entry.OriginalCharacterId,
+                        CharacterId = entry.CharacterId,
+                        TroopName = entry.TroopName,
+                        IsHero = entry.IsHero
+                    };
+                    aggregates[identityKey] = aggregate;
+                }
+
+                aggregate.SnapshotCount += Math.Max(0, entry.SnapshotCount);
+                aggregate.SnapshotWoundedCount += Math.Max(0, entry.SnapshotWoundedCount);
+                aggregate.RemovedCount += Math.Max(0, entry.RemovedCount);
+                aggregate.KilledCount += Math.Max(0, entry.KilledCount);
+                aggregate.UnconsciousCount += Math.Max(0, entry.UnconsciousCount);
+                aggregate.RoutedCount += Math.Max(0, entry.RoutedCount);
+                aggregate.OtherRemovedCount += Math.Max(0, entry.OtherRemovedCount);
+                aggregate.ScoreHitCount += Math.Max(0, entry.ScoreHitCount);
+                aggregate.DamageDealt += Math.Max(0f, entry.DamageDealt);
+                aggregate.DamageTaken += Math.Max(0f, entry.DamageTaken);
+            }
+
+            return aggregates;
+        }
+
+        private static string BuildBattleResultIdentityKey(string partyId, string heroId, string originalCharacterId, string characterId)
+        {
+            string identity =
+                !string.IsNullOrWhiteSpace(heroId) ? "hero:" + heroId :
+                !string.IsNullOrWhiteSpace(originalCharacterId) ? "orig:" + originalCharacterId :
+                !string.IsNullOrWhiteSpace(characterId) ? "char:" + characterId :
+                null;
+            return identity == null ? null : (partyId ?? string.Empty) + "|" + identity;
+        }
+
+        private static void TryApplyAggregateToPartyRoster(
+            EncounterPartyWritebackState partyState,
+            BattleResultCharacterAggregate aggregate,
+            BattleResultWritebackSummary summary)
+        {
+            if (partyState?.MemberRoster == null || aggregate == null)
+                return;
+
+            if (!TryResolvePartyRosterCharacter(
+                    partyState.MemberRoster,
+                    aggregate.HeroId,
+                    aggregate.OriginalCharacterId,
+                    aggregate.CharacterId,
+                    out CharacterObject rosterCharacter,
+                    out Hero rosterHero,
+                    out int rosterIndex,
+                    out int currentCount,
+                    out int currentWounded))
+            {
+                summary.UnresolvedPartyAggregates++;
+                AddWritebackSample(
+                    summary.UnresolvedSamples,
+                    "MissingTroop:" + (partyState.PartyId ?? "null") + "/" + (aggregate.TroopName ?? aggregate.IdentityKey ?? "entry"));
+                return;
+            }
+
+            if (aggregate.IsHero)
+            {
+                if (aggregate.HeroShouldBeWounded && TryApplyHeroWoundWriteback(rosterHero, summary))
+                {
+                    AddWritebackSample(
+                        summary.AdjustedSamples,
+                        "HeroWounded:" + (rosterHero?.StringId ?? aggregate.HeroId ?? rosterCharacter?.StringId ?? "hero"));
+                }
+                else if (TryApplyHeroHitPointsWriteback(rosterHero, aggregate, summary, out string heroHitPointSample))
+                {
+                    AddWritebackSample(summary.AdjustedSamples, heroHitPointSample);
+                }
+
+                return;
+            }
+
+            int desiredCount = Math.Max(0, aggregate.DesiredCount);
+            int desiredWounded = Math.Max(0, Math.Min(desiredCount, aggregate.DesiredWoundedCount));
+            bool changed = false;
+
+            if (currentCount != desiredCount)
+            {
+                partyState.MemberRoster.AddToCounts(rosterCharacter, desiredCount - currentCount, false, 0, 0, true, -1);
+                changed = true;
+            }
+
+            int updatedIndex = partyState.MemberRoster.FindIndexOfTroop(rosterCharacter);
+            if (updatedIndex >= 0)
+            {
+                int updatedWounded = partyState.MemberRoster.GetElementWoundedNumber(updatedIndex);
+                if (updatedWounded != desiredWounded)
+                {
+                    partyState.MemberRoster.SetElementWoundedNumber(updatedIndex, desiredWounded);
+                    changed = true;
+                }
+            }
+
+            if (!changed)
+                return;
+
+            summary.RegularTroopsAdjusted++;
+            AddWritebackSample(
+                summary.AdjustedSamples,
+                (partyState.PartyId ?? "party") + "/" +
+                (aggregate.TroopName ?? rosterCharacter?.StringId ?? aggregate.IdentityKey ?? "troop") +
+                " Current=" + currentCount + "/" + currentWounded +
+                " -> Desired=" + desiredCount + "/" + desiredWounded +
+                " Killed=" + aggregate.KilledCount +
+                " Wounded=" + aggregate.UnconsciousCount);
+        }
+
+        private static bool TryResolvePartyRosterCharacter(
+            TroopRoster roster,
+            string heroId,
+            string originalCharacterId,
+            string characterId,
+            out CharacterObject rosterCharacter,
+            out Hero rosterHero,
+            out int rosterIndex,
+            out int currentCount,
+            out int currentWounded)
+        {
+            rosterCharacter = null;
+            rosterHero = null;
+            rosterIndex = -1;
+            currentCount = 0;
+            currentWounded = 0;
+
+            if (roster == null)
+                return false;
+
+            var troopRoster = roster.GetTroopRoster();
+            if (troopRoster == null)
+                return false;
+
+            for (int i = 0; i < troopRoster.Count; i++)
+            {
+                TroopRosterElement element = troopRoster[i];
+                CharacterObject candidate = element.Character;
+                if (candidate == null)
+                    continue;
+
+                Hero candidateHero = candidate.HeroObject;
+                bool matchesHero =
+                    !string.IsNullOrWhiteSpace(heroId) &&
+                    string.Equals(candidateHero?.StringId, heroId, StringComparison.OrdinalIgnoreCase);
+                bool matchesOriginal =
+                    !string.IsNullOrWhiteSpace(originalCharacterId) &&
+                    (string.Equals(candidate.OriginalCharacter?.StringId, originalCharacterId, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(candidate.StringId, originalCharacterId, StringComparison.OrdinalIgnoreCase));
+                bool matchesCharacter =
+                    !string.IsNullOrWhiteSpace(characterId) &&
+                    string.Equals(candidate.StringId, characterId, StringComparison.OrdinalIgnoreCase);
+
+                if (!matchesHero && !matchesOriginal && !matchesCharacter)
+                    continue;
+
+                rosterCharacter = candidate;
+                rosterHero = candidateHero;
+                rosterIndex = i;
+                currentCount = element.Number;
+                currentWounded = element.WoundedNumber;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryApplyHeroWoundWriteback(Hero hero, BattleResultWritebackSummary summary)
+        {
+            if (hero == null || !hero.IsAlive || hero.IsWounded)
+                return false;
+
+            try
+            {
+                hero.MakeWounded(hero, KillCharacterAction.KillCharacterActionDetail.WoundedInBattle);
+                summary.HeroWoundsApplied++;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "HeroWoundFailed:" + (hero.StringId ?? "hero") + "/" + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool TryApplyHeroHitPointsWriteback(
+            Hero hero,
+            BattleResultCharacterAggregate aggregate,
+            BattleResultWritebackSummary summary,
+            out string adjustedSample)
+        {
+            adjustedSample = null;
+            if (hero == null || aggregate == null || !hero.IsAlive || hero.IsWounded)
+                return false;
+
+            int hitPointLoss = Math.Max(0, (int)Math.Round(aggregate.DamageTaken, MidpointRounding.AwayFromZero));
+            if (hitPointLoss <= 0)
+                return false;
+
+            try
+            {
+                int currentHitPoints = Math.Max(0, hero.HitPoints);
+                int maxHitPoints = Math.Max(1, hero.MaxHitPoints);
+                int desiredHitPoints = Math.Max(1, Math.Min(maxHitPoints, currentHitPoints - hitPointLoss));
+                if (desiredHitPoints >= currentHitPoints)
+                    return false;
+
+                hero.HitPoints = desiredHitPoints;
+                summary.HeroHitPointsAdjusted++;
+                summary.HeroHitPointLossApplied += currentHitPoints - desiredHitPoints;
+                adjustedSample =
+                    "HeroHp:" +
+                    (hero.StringId ?? aggregate.HeroId ?? aggregate.CharacterId ?? "hero") +
+                    " " + currentHitPoints + "->" + desiredHitPoints +
+                    " Loss=" + (currentHitPoints - desiredHitPoints);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "HeroHpFailed:" + (hero.StringId ?? "hero") + "/" + ex.Message);
+                return false;
+            }
+        }
+
+        private static void TryApplyMainPartyCombatXpWriteback(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            IDictionary<string, EncounterPartyWritebackState> encounterParties,
+            BattleResultWritebackSummary summary)
+        {
+            if (result?.CombatEvents == null || result.CombatEvents.Count == 0 || encounterParties == null)
+                return;
+
+            string mainPartyId = MobileParty.MainParty?.StringId;
+            if (string.IsNullOrWhiteSpace(mainPartyId) ||
+                !encounterParties.TryGetValue(mainPartyId, out EncounterPartyWritebackState mainPartyState) ||
+                mainPartyState?.MemberRoster == null ||
+                mainPartyState.PartyBase == null)
+            {
+                return;
+            }
+
+            CombatXpModel combatXpModel = TaleWorlds.CampaignSystem.Campaign.Current?.Models?.CombatXpModel;
+            if (combatXpModel == null)
+                return;
+
+            Dictionary<string, CoopBattleResultBridgeFile.BattleResultEntrySnapshot> entriesById =
+                (result.Entries ?? new List<CoopBattleResultBridgeFile.BattleResultEntrySnapshot>())
+                .Where(entry => entry != null && !string.IsNullOrWhiteSpace(entry.EntryId))
+                .GroupBy(entry => entry.EntryId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot combatEvent in result.CombatEvents.Where(item => item != null))
+            {
+                if (!string.Equals(combatEvent.AttackerPartyId, mainPartyId, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (!entriesById.TryGetValue(combatEvent.AttackerEntryId ?? string.Empty, out CoopBattleResultBridgeFile.BattleResultEntrySnapshot attackerEntry) ||
+                    attackerEntry == null)
+                {
+                    summary.UnresolvedCombatEvents++;
+                    continue;
+                }
+
+                if (!TryResolvePartyRosterCharacter(
+                        mainPartyState.MemberRoster,
+                        attackerEntry.HeroId,
+                        attackerEntry.OriginalCharacterId,
+                        attackerEntry.CharacterId,
+                        out CharacterObject attackerCharacter,
+                        out Hero attackerHero,
+                        out _,
+                        out _,
+                        out _))
+                {
+                    summary.UnresolvedCombatEvents++;
+                    continue;
+                }
+
+                CharacterObject attackedCharacter = TryResolveCharacterObjectFromIds(
+                    combatEvent.VictimOriginalCharacterId,
+                    combatEvent.VictimCharacterId);
+                if (attackedCharacter == null)
+                {
+                    summary.UnresolvedCombatEvents++;
+                    continue;
+                }
+
+                int damage = Math.Max(0, (int)Math.Round(combatEvent.Damage, MidpointRounding.AwayFromZero));
+                if (damage <= 0)
+                    continue;
+
+                float xpFromHit;
+                try
+                {
+                    ExplainedNumber explained = combatXpModel.GetXpFromHit(
+                        attackerCharacter,
+                        mainPartyState.CaptainCharacter,
+                        attackedCharacter,
+                        mainPartyState.PartyBase,
+                        damage,
+                        combatEvent.IsFatal,
+                        CombatXpModel.MissionTypeEnum.Battle);
+                    xpFromHit = Math.Max(0f, explained.ResultNumber);
+                }
+                catch (Exception ex)
+                {
+                    summary.UnresolvedCombatEvents++;
+                    AddWritebackSample(summary.UnresolvedSamples, "CombatXpFailed:" + ex.Message);
+                    continue;
+                }
+
+                if (xpFromHit <= 0.01f)
+                    continue;
+
+                if (attackerHero != null)
+                {
+                    SkillObject hintedSkill = TryResolveSkillObject(combatEvent.WeaponSkillHint);
+                    try
+                    {
+                        if (hintedSkill != null)
+                        {
+                            attackerHero.HeroDeveloper?.AddSkillXp(hintedSkill, xpFromHit, true, false);
+                            if (attackerHero.HeroDeveloper == null)
+                                attackerHero.AddSkillXp(hintedSkill, xpFromHit);
+                            summary.HeroSkillXpApplied += xpFromHit;
+                        }
+                        else
+                        {
+                            summary.UnresolvedCombatEvents++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        summary.UnresolvedCombatEvents++;
+                        AddWritebackSample(summary.UnresolvedSamples, "HeroXpFailed:" + (attackerHero.StringId ?? "hero") + "/" + ex.Message);
+                    }
+
+                    continue;
+                }
+
+                int troopXp = Math.Max(0, (int)Math.Round(xpFromHit, MidpointRounding.AwayFromZero));
+                if (troopXp <= 0)
+                    continue;
+
+                try
+                {
+                    mainPartyState.MemberRoster.AddXpToTroop(attackerCharacter, troopXp);
+                    summary.TroopXpApplied += troopXp;
+                }
+                catch (Exception ex)
+                {
+                    summary.UnresolvedCombatEvents++;
+                    AddWritebackSample(summary.UnresolvedSamples, "TroopXpFailed:" + (attackerCharacter.StringId ?? "troop") + "/" + ex.Message);
+                }
+            }
+        }
+
+        private static CharacterObject TryResolveCharacterObjectFromIds(params string[] ids)
+        {
+            if (ids == null)
+                return null;
+
+            foreach (string id in ids)
+            {
+                CharacterObject resolved = TryResolveCharacterObjectById(id);
+                if (resolved != null)
+                    return resolved;
+            }
+
+            return null;
+        }
+
+        private static CharacterObject TryResolveCharacterObjectById(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id) || MBObjectManager.Instance == null)
+                return null;
+
+            try
+            {
+                return MBObjectManager.Instance.GetObject<BasicCharacterObject>(id) as CharacterObject;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static SkillObject TryResolveSkillObject(string skillHint)
+        {
+            if (string.IsNullOrWhiteSpace(skillHint))
+                return null;
+
+            if (TryGetDefaultSkillObject(skillHint) is SkillObject directSkill)
+                return directSkill;
+
+            try
+            {
+                return MBObjectManager.Instance?.GetObject<SkillObject>(skillHint);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void AddWritebackSample(ICollection<string> samples, string sample, int maxCount = 12)
+        {
+            if (samples == null || string.IsNullOrWhiteSpace(sample) || samples.Count >= maxCount)
+                return;
+
+            samples.Add(sample);
         }
 
         private void TryHandleBattleResultMissionExit()

@@ -3809,6 +3809,16 @@ namespace CoopSpectator.MissionBehaviors
             public float DamageTaken { get; set; }
         }
 
+        private sealed class MaterializedBattleResultReconciledCounts
+        {
+            public int ActiveCount { get; set; }
+            public int KilledCount { get; set; }
+            public int UnconsciousCount { get; set; }
+            public int RoutedCount { get; set; }
+            public int OtherRemovedCount { get; set; }
+            public float ObservedDamageTaken { get; set; }
+        }
+
         private static readonly FormationClass[] RestrictableFormationClasses =
         {
             FormationClass.Infantry,
@@ -5889,12 +5899,133 @@ namespace CoopSpectator.MissionBehaviors
                 " Summary=[" + BuildBattleResultEntryAuditSummary(snapshot) + "].");
         }
 
+        private static void ReconcileMaterializedBattleResultStateFromMission(Mission mission, string source)
+        {
+            if (mission == null || _materializedBattleResultEntriesByEntryId.Count == 0)
+                return;
+
+            var countsByEntryId = new Dictionary<string, MaterializedBattleResultReconciledCounts>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, MaterializedBattleResultEntryRuntimeState> pair in _materializedBattleResultEntriesByEntryId)
+            {
+                if (pair.Value == null || string.IsNullOrWhiteSpace(pair.Key))
+                    continue;
+
+                countsByEntryId[pair.Key] = new MaterializedBattleResultReconciledCounts();
+            }
+
+            int trackedAgents = 0;
+            int activeTotal = 0;
+            int removedTotal = 0;
+            int killedTotal = 0;
+            int unconsciousTotal = 0;
+            int routedTotal = 0;
+            int otherRemovedTotal = 0;
+
+            for (int i = 0; i < mission.AllAgents.Count; i++)
+            {
+                Agent agent = mission.AllAgents[i];
+                if (agent == null || agent.IsMount)
+                    continue;
+
+                if (!_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string entryId) ||
+                    string.IsNullOrWhiteSpace(entryId) ||
+                    !countsByEntryId.TryGetValue(entryId, out MaterializedBattleResultReconciledCounts counts))
+                {
+                    continue;
+                }
+
+                trackedAgents++;
+                counts.ObservedDamageTaken += Math.Max(0f, agent.HealthLimit - agent.Health);
+                if (agent.IsActive())
+                {
+                    counts.ActiveCount++;
+                    activeTotal++;
+                    continue;
+                }
+
+                string stateText = agent.State.ToString();
+                if (string.Equals(stateText, "Killed", StringComparison.OrdinalIgnoreCase))
+                {
+                    counts.KilledCount++;
+                    killedTotal++;
+                }
+                else if (string.Equals(stateText, "Unconscious", StringComparison.OrdinalIgnoreCase))
+                {
+                    counts.UnconsciousCount++;
+                    unconsciousTotal++;
+                }
+                else if (string.Equals(stateText, "Routed", StringComparison.OrdinalIgnoreCase))
+                {
+                    counts.RoutedCount++;
+                    routedTotal++;
+                }
+                else
+                {
+                    counts.OtherRemovedCount++;
+                    otherRemovedTotal++;
+                }
+
+                removedTotal++;
+            }
+
+            foreach (KeyValuePair<string, MaterializedBattleResultEntryRuntimeState> pair in _materializedBattleResultEntriesByEntryId)
+            {
+                string entryId = pair.Key;
+                MaterializedBattleResultEntryRuntimeState runtimeState = pair.Value;
+                if (runtimeState == null || string.IsNullOrWhiteSpace(entryId))
+                    continue;
+
+                if (!countsByEntryId.TryGetValue(entryId, out MaterializedBattleResultReconciledCounts counts))
+                    counts = new MaterializedBattleResultReconciledCounts();
+
+                int accountedCount =
+                    counts.ActiveCount +
+                    counts.KilledCount +
+                    counts.UnconsciousCount +
+                    counts.RoutedCount +
+                    counts.OtherRemovedCount;
+                int missingCount = Math.Max(0, runtimeState.MaterializedSpawnCount - accountedCount);
+                if (missingCount > 0)
+                {
+                    counts.OtherRemovedCount += missingCount;
+                    removedTotal += missingCount;
+                    otherRemovedTotal += missingCount;
+                }
+
+                runtimeState.ActiveCount = counts.ActiveCount;
+                runtimeState.KilledCount = counts.KilledCount;
+                runtimeState.UnconsciousCount = counts.UnconsciousCount;
+                runtimeState.RoutedCount = counts.RoutedCount;
+                runtimeState.OtherRemovedCount = counts.OtherRemovedCount;
+                runtimeState.RemovedCount =
+                    counts.KilledCount +
+                    counts.UnconsciousCount +
+                    counts.RoutedCount +
+                    counts.OtherRemovedCount;
+                runtimeState.DamageTaken = Math.Max(runtimeState.DamageTaken, Math.Max(0f, counts.ObservedDamageTaken));
+            }
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: reconciled battle result state from mission. " +
+                "Entries=" + _materializedBattleResultEntriesByEntryId.Count +
+                " TrackedAgents=" + trackedAgents +
+                " Active=" + activeTotal +
+                " Removed=" + removedTotal +
+                " Killed=" + killedTotal +
+                " Unconscious=" + unconsciousTotal +
+                " Routed=" + routedTotal +
+                " OtherRemoved=" + otherRemovedTotal +
+                " Source=" + (source ?? "unknown") + ".");
+        }
+
         private static CoopBattleResultBridgeFile.BattleResultSnapshot BuildBattleResultSnapshot(Mission mission, string source)
         {
             BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
             BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
             if (runtimeState?.EntriesById == null || runtimeState.EntriesById.Count == 0)
                 return null;
+
+            ReconcileMaterializedBattleResultStateFromMission(mission, source);
 
             var result = new CoopBattleResultBridgeFile.BattleResultSnapshot
             {
