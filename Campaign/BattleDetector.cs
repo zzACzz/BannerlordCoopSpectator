@@ -33,6 +33,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private string _lastMissionExitFailedBattleResultKey;
         private DateTime _missionEnteredUtc;
         private DateTime _nextMissionBattleResultPollUtc;
+        private DateTime _nextBattleStartAttemptUtc;
+        private DateTime _nextBattleStartWaitLogUtc;
         private static SyntheticRosterMode _syntheticRosterMode;
         private static readonly Dictionary<string, object> CachedDefaultSkillObjects = new Dictionary<string, object>(StringComparer.Ordinal);
         private static readonly Dictionary<string, object> CachedDefaultCharacterAttributeObjects = new Dictionary<string, object>(StringComparer.Ordinal);
@@ -111,6 +113,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 {
                     _hasSentBattleStartForThisMission = false;
                     ResetMissionExitState();
+                    _nextBattleStartAttemptUtc = DateTime.MinValue;
+                    _nextBattleStartWaitLogUtc = DateTime.MinValue;
                 }
                 return;
             }
@@ -129,12 +133,15 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 } // Завершуємо блок if
                 _wasInMissionLastTick = false; // Оновлюємо стан "було в місії" на false
                 _hasSentBattleStartForThisMission = false; // Скидаємо прапорець, щоб наступна місія могла знову надіслати BATTLE_START
+                _nextBattleStartAttemptUtc = DateTime.MinValue;
+                _nextBattleStartWaitLogUtc = DateTime.MinValue;
                 ResetIfMissionEnded(); // Тримаємо стан консистентним
                 return; // Виходимо, бо поки що нема старту битви для відправки
             } // Завершуємо блок if
 
             if (_wasInMissionLastTick) // Якщо ми вже були в місії на попередньому тіку, значить "старт" вже минув
             { // Починаємо блок if
+                TryStartMissionForCurrentRole();
                 return; // Виходимо, щоб не відправляти повторно
             } // Завершуємо блок if
 
@@ -144,26 +151,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _lastMissionExitRequestedBattleResultKey = null;
             _lastMissionExitFailedBattleResultKey = null;
             _nextMissionBattleResultPollUtc = DateTime.MinValue;
+            _nextBattleStartAttemptUtc = DateTime.MinValue;
+            _nextBattleStartWaitLogUtc = DateTime.MinValue;
             ModLogger.Info("BattleDetector: mission entered (Mission.Current set). Notifying dedicated if applicable.");
-            if (ShouldSendBattleStart()) // Якщо ми TCP-хост — відправляємо BATTLE_START клієнтам і start_mission дедику
-            { // Починаємо блок if
-                TrySendBattleStart(); // Пробуємо сформувати DTO і відправити клієнтам + SendStartMission
-            } // Завершуємо блок if
-            else if (ShouldNotifyDedicatedHelper()) // Інакше якщо ми не спектатор (кампанія без TCP або TCP-сервер) — лише start_mission дедику
-            { // Починаємо блок else if
-                ModLogger.Info("BattleDetector: not TCP host — sending start_mission to dedicated (campaign host path).");
-                try
-                {
-                    CoopBattleResultBridgeFile.ClearResult("BattleDetector.Tick campaign-host start_mission");
-                    TryWriteBattleRosterFile(BuildBattleStartPayload()); // Для host-only campaign path теж пишемо battle_roster.json перед start_mission.
-                    bool sent = DedicatedServerCommands.SendStartMission();
-                    ModLogger.Info("BattleDetector: SendStartMission() returned " + sent + ".");
-                }
-                catch (Exception ex)
-                {
-                    ModLogger.Info("DedicatedServerCommands.SendStartMission: " + ex.Message);
-                }
-            } // Завершуємо блок else if
+            TryStartMissionForCurrentRole();
         } // Завершуємо блок методу
 
         private static bool ShouldSendBattleStart() // Перевіряємо чи поточний інстанс гри має право надсилати BATTLE_START
@@ -203,7 +194,35 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             _wasInMissionLastTick = false; // Скидаємо "було в місії" — ми вже не в місії
             _hasSentBattleStartForThisMission = false; // Дозволяємо наступній місії знову відправити BATTLE_START
+            _nextBattleStartAttemptUtc = DateTime.MinValue;
+            _nextBattleStartWaitLogUtc = DateTime.MinValue;
         } // Завершуємо блок методу
+
+        private void TryStartMissionForCurrentRole()
+        {
+            if (_hasSentBattleStartForThisMission)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (_nextBattleStartAttemptUtc != DateTime.MinValue && nowUtc < _nextBattleStartAttemptUtc)
+                return;
+
+            bool started = false;
+            if (ShouldSendBattleStart())
+                started = TrySendBattleStart();
+            else if (ShouldNotifyDedicatedHelper())
+                started = TryStartDedicatedMissionForCampaignHost();
+
+            if (started)
+            {
+                _nextBattleStartAttemptUtc = DateTime.MinValue;
+                _nextBattleStartWaitLogUtc = DateTime.MinValue;
+            }
+            else
+            {
+                _nextBattleStartAttemptUtc = nowUtc.AddMilliseconds(750);
+            }
+        }
 
         private void TryConsumeBattleResultWritebackAudit()
         {
@@ -476,32 +495,58 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _nextMissionBattleResultPollUtc = DateTime.MinValue;
         }
 
-        private void TrySendBattleStart() // Формуємо повідомлення та надсилаємо клієнтам (best-effort)
+        private bool TrySendBattleStart() // Формуємо повідомлення та надсилаємо клієнтам (best-effort)
         { // Починаємо блок методу
             if (_hasSentBattleStartForThisMission) // Перевіряємо guard-прапорець
             { // Починаємо блок if
-                return; // Виходимо, бо вже відправили для цієї місії
+                return true; // Виходимо, бо вже відправили для цієї місії
             } // Завершуємо блок if
-
-            _hasSentBattleStartForThisMission = true; // Ставимо прапорець одразу, щоб навіть при винятку не спамити повторними відправками
 
             try // Захищаємо збір даних від винятків, щоб мод не крашив гру
             { // Починаємо блок try
-                CoopBattleResultBridgeFile.ClearResult("BattleDetector.TrySendBattleStart");
                 BattleStartMessage payload = BuildBattleStartPayload(); // Будуємо DTO з даними про битву/місію
+                if (!IsBattleStartPayloadReady(payload, "network-host", out _))
+                    return false;
+
+                CoopBattleResultBridgeFile.ClearResult("BattleDetector.TrySendBattleStart");
                 TryWriteBattleRosterFile(payload); // Варіант A: зберігаємо roster у спільний файл для dedicated на цьому ж ПК.
                 string wireMessage = BattleStartMessageCodec.BuildBattleStartMessage(payload); // Серіалізуємо DTO в `BATTLE_START:{json}`
                 CoopRuntime.Network.BroadcastToClients(wireMessage); // Відправляємо повідомлення всім підключеним клієнтам
-
+                _hasSentBattleStartForThisMission = true;
                 UiFeedback.ShowMessageDeferred("Host: BATTLE_START sent to clients."); // Даємо короткий UI-індикатор для дебагу/перевірки
                 ModLogger.Info("BATTLE_START broadcasted."); // Логуємо факт відправки в лог гри
                 try { DedicatedServerCommands.SendStartMission(); } catch (Exception ex) { ModLogger.Info("DedicatedServerCommands.SendStartMission: " + ex.Message); } // Етап 3b: Dedicated Helper переводить у mission mode (поки stub)
+                return true;
             } // Завершуємо блок try
             catch (Exception ex) // Ловимо будь-які винятки (API changes/null, тощо)
             { // Починаємо блок catch
                 ModLogger.Error("Failed to send BATTLE_START.", ex); // Логуємо помилку, щоб її можна було діагностувати
+                return false;
             } // Завершуємо блок catch
         } // Завершуємо блок методу
+
+        private bool TryStartDedicatedMissionForCampaignHost()
+        {
+            try
+            {
+                BattleStartMessage payload = BuildBattleStartPayload();
+                if (!IsBattleStartPayloadReady(payload, "campaign-host", out _))
+                    return false;
+
+                ModLogger.Info("BattleDetector: not TCP host — sending start_mission to dedicated (campaign host path).");
+                CoopBattleResultBridgeFile.ClearResult("BattleDetector.Tick campaign-host start_mission");
+                TryWriteBattleRosterFile(payload); // Для host-only campaign path теж пишемо battle_roster.json перед start_mission.
+                bool sent = DedicatedServerCommands.SendStartMission();
+                _hasSentBattleStartForThisMission = true;
+                ModLogger.Info("BattleDetector: SendStartMission() returned " + sent + ".");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("DedicatedServerCommands.SendStartMission: " + ex.Message);
+                return false;
+            }
+        }
 
         private static void TryWriteBattleRosterFile(BattleStartMessage payload)
         {
@@ -528,6 +573,56 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 ModLogger.Error("BattleDetector: failed to write battle_roster.json.", ex);
             }
+        }
+
+        private bool IsBattleStartPayloadReady(BattleStartMessage payload, string source, out string readinessSummary)
+        {
+            BattleSnapshotMessage snapshot = payload?.Snapshot;
+            List<BattleSideSnapshotMessage> sides = snapshot?.Sides?
+                .Where(side => side != null)
+                .ToList() ?? new List<BattleSideSnapshotMessage>();
+            int populatedSideCount = 0;
+            bool hasAttacker = false;
+            bool hasDefender = false;
+
+            foreach (BattleSideSnapshotMessage side in sides)
+            {
+                int troopCount = side?.Troops?.Count ?? 0;
+                if (troopCount <= 0)
+                    continue;
+
+                populatedSideCount++;
+                if (string.Equals(side.SideId, "attacker", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(side.SideText, nameof(BattleSideEnum.Attacker), StringComparison.OrdinalIgnoreCase))
+                {
+                    hasAttacker = true;
+                }
+                else if (string.Equals(side.SideId, "defender", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(side.SideText, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase))
+                {
+                    hasDefender = true;
+                }
+            }
+
+            readinessSummary =
+                "BattleId=" + (snapshot?.BattleId ?? "null") +
+                " SnapshotSides=" + sides.Count +
+                " PopulatedSides=" + populatedSideCount +
+                " HasAttacker=" + hasAttacker +
+                " HasDefender=" + hasDefender +
+                " Troops=" + (payload?.Troops?.Count ?? 0);
+
+            bool ready = sides.Count >= 2 && populatedSideCount >= 2 && hasAttacker && hasDefender;
+            if (!ready && DateTime.UtcNow >= _nextBattleStartWaitLogUtc)
+            {
+                _nextBattleStartWaitLogUtc = DateTime.UtcNow.AddSeconds(2);
+                ModLogger.Info(
+                    "BattleDetector: delaying battle start until authoritative snapshot is ready. " +
+                    "Source=" + (source ?? "unknown") + " " +
+                    readinessSummary + ".");
+            }
+
+            return ready;
         }
 
         private static BattleStartMessage BuildBattleStartPayload() // Будуємо мінімальні дані про старт битви/місії
@@ -1031,6 +1126,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             { // Починаємо блок try
                 var rosterElements = new List<TaleWorlds.CampaignSystem.Roster.TroopRosterElement>();
                 var rosterCharacters = new List<object>();
+                string partyId = MobileParty.MainParty?.StringId ?? "main_party";
                 foreach (var rosterElement in MobileParty.MainParty.MemberRoster.GetTroopRoster())
                 {
                     rosterElements.Add(rosterElement);
@@ -1045,40 +1141,23 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         continue; // Пропускаємо некоректні елементи
                     } // Завершуємо блок if
 
-                    TroopStackInfo stack = new TroopStackInfo(); // Створюємо DTO стеку
-                    string originalCharacterId = TryGetStringId(element.Character);
-                    string spawnTemplateId = GetMissionSafeCharacterId(element.Character, rosterCharacters);
-                    stack.CharacterId = spawnTemplateId; // Back-compat alias for older runtime readers.
-                    stack.OriginalCharacterId = originalCharacterId;
-                    stack.SpawnTemplateId = spawnTemplateId;
-                    stack.CultureId = TryGetCultureId(element.Character);
-                    stack.HasShield = TryGetCharacterHasShield(element.Character);
-                    stack.HasThrown = TryGetCharacterHasThrown(element.Character);
-                    ApplyCombatEquipmentSnapshot(stack, element.Character);
-                    ApplyCombatProfileSnapshot(stack, element.Character);
-                    ApplyHeroIdentitySnapshot(stack, element.Character);
-                    stack.IsRanged = TryGetCharacterIsRanged(element.Character);
-                    stack.TroopName = element.Character.Name != null ? element.Character.Name.ToString() : element.Character.StringId; // Беремо ім'я або fallback на id
-                    stack.Tier = element.Character.Tier; // Записуємо tier
-                    stack.IsMounted = element.Character.IsMounted; // Записуємо чи верховий
-                    stack.IsHero = element.Character.IsHero; // Записуємо чи герой
-                    stack.Count = element.Number; // Записуємо кількість у стеку
+                    int expandedWounded = 0;
+                    try
+                    {
+                        expandedWounded = element.WoundedNumber;
+                    }
+                    catch (Exception)
+                    {
+                    }
 
-                    // WoundedNumber може бути відсутній в деяких версіях; // Пояснюємо чому try/catch
-                    // тому беремо його best-effort через try/catch. // Пояснюємо підхід
-                    int wounded = 0; // Дефолт
-
-                    try // Пробуємо взяти wounded count
-                    { // Починаємо блок try
-                        wounded = element.WoundedNumber; // Беремо кількість поранених у стеку (якщо API має цю властивість)
-                    } // Завершуємо блок try
-                    catch (Exception) // Якщо властивості нема — лишаємо 0
-                    { // Починаємо блок catch
-                    } // Завершуємо блок catch
-
-                    stack.WoundedCount = wounded; // Записуємо wounded count
-
-                    troops.Add(stack); // Додаємо стек до списку
+                    troops.AddRange(BuildTroopStacksForCharacterVariants(
+                        element.Character,
+                        null,
+                        partyId,
+                        element.Number,
+                        expandedWounded,
+                        rosterCharacters,
+                        assignExplicitEntryIds: false));
                 } // Завершуємо блок foreach
             } // Завершуємо блок try
             catch (Exception ex) // Якщо ростер недоступний — лог і повертаємо те, що є
@@ -1461,31 +1540,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     if (character == null)
                         continue;
 
-                    string originalCharacterId = TryGetStringId(character);
-                    string spawnTemplateId = GetMissionSafeCharacterId(character, rosterCharacters);
-                    var stack = new TroopStackInfo
-                    {
-                        EntryId = sideId + "|" + (partyId ?? "party") + "|" + (spawnTemplateId ?? "unknown"),
-                        SideId = sideId,
-                        PartyId = partyId,
-                        CharacterId = spawnTemplateId,
-                        OriginalCharacterId = originalCharacterId,
-                        SpawnTemplateId = spawnTemplateId,
-                        HasShield = TryGetCharacterHasShield(character),
-                        HasThrown = TryGetCharacterHasThrown(character),
-                        TroopName = TryGetPropertyValue(character, "Name")?.ToString() ?? TryGetStringId(character),
-                        CultureId = TryGetCultureId(character),
-                        Tier = TryGetIntProperty(character, "Tier"),
-                        IsMounted = TryGetBoolProperty(character, "IsMounted"),
-                        IsRanged = TryGetCharacterIsRanged(character),
-                        IsHero = TryGetBoolProperty(character, "IsHero"),
-                        Count = TryGetIntProperty(element, "Number"),
-                        WoundedCount = TryGetIntProperty(element, "WoundedNumber")
-                    };
-                    ApplyCombatEquipmentSnapshot(stack, character);
-                    ApplyCombatProfileSnapshot(stack, character);
-                    ApplyHeroIdentitySnapshot(stack, character);
-                    troops.Add(stack);
+                    troops.AddRange(BuildTroopStacksForCharacterVariants(
+                        character,
+                        sideId,
+                        partyId,
+                        TryGetIntProperty(element, "Number"),
+                        TryGetIntProperty(element, "WoundedNumber"),
+                        rosterCharacters,
+                        assignExplicitEntryIds: true));
                 }
             }
             catch (Exception ex)
@@ -1496,6 +1558,253 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             string partyIdForLog = TryGetStringId(partyBase) ?? TryGetStringId(TryGetPropertyValue(partyBase, "MobileParty")) ?? "party";
             LogTroopStackMappings("side-party " + (sideId ?? "unknown") + "/" + partyIdForLog, troops);
             return troops;
+        }
+
+        private sealed class CombatEquipmentVariantSnapshot
+        {
+            public string Signature { get; set; }
+            public int SampledCount { get; set; }
+            public string CombatItem0Id { get; set; }
+            public string CombatItem1Id { get; set; }
+            public string CombatItem2Id { get; set; }
+            public string CombatItem3Id { get; set; }
+            public string CombatHeadId { get; set; }
+            public string CombatBodyId { get; set; }
+            public string CombatLegId { get; set; }
+            public string CombatGlovesId { get; set; }
+            public string CombatCapeId { get; set; }
+            public string CombatHorseId { get; set; }
+            public string CombatHorseHarnessId { get; set; }
+        }
+
+        private static List<TroopStackInfo> BuildTroopStacksForCharacterVariants(
+            object characterObject,
+            string sideId,
+            string partyId,
+            int totalCount,
+            int woundedCount,
+            List<object> rosterCharacters,
+            bool assignExplicitEntryIds)
+        {
+            var troops = new List<TroopStackInfo>();
+            if (characterObject == null || totalCount <= 0)
+                return troops;
+
+            string originalCharacterId = TryGetStringId(characterObject);
+            string spawnTemplateId = GetMissionSafeCharacterId(characterObject, rosterCharacters);
+            List<CombatEquipmentVariantSnapshot> equipmentVariants = BuildCombatEquipmentVariants(characterObject, totalCount);
+            bool hasSampledVariantCounts = equipmentVariants.Any(variant => variant != null && variant.SampledCount > 0);
+            int activeVariantCount = Math.Max(1, Math.Min(totalCount, equipmentVariants.Count > 0 ? equipmentVariants.Count : 1));
+            int clampedWoundedCount = Math.Max(0, Math.Min(totalCount, woundedCount));
+            int assignedTroops = 0;
+            int assignedWounded = 0;
+
+            for (int variantIndex = 0; variantIndex < activeVariantCount; variantIndex++)
+            {
+                CombatEquipmentVariantSnapshot variant =
+                    equipmentVariants.Count > variantIndex ? equipmentVariants[variantIndex] : null;
+                int variantTroopCount = hasSampledVariantCounts && variant != null && variant.SampledCount > 0
+                    ? variant.SampledCount
+                    : GetDistributedVariantCount(totalCount, activeVariantCount, variantIndex);
+                if (variantTroopCount <= 0)
+                    continue;
+
+                int variantWoundedCount = hasSampledVariantCounts
+                    ? GetDistributedVariantWoundedCount(
+                        clampedWoundedCount,
+                        totalCount,
+                        variantTroopCount,
+                        assignedTroops,
+                        assignedWounded)
+                    : Math.Min(
+                        variantTroopCount,
+                        GetDistributedVariantCount(clampedWoundedCount, activeVariantCount, variantIndex));
+
+                var stack = new TroopStackInfo
+                {
+                    SideId = sideId,
+                    PartyId = partyId,
+                    CharacterId = spawnTemplateId,
+                    OriginalCharacterId = originalCharacterId,
+                    SpawnTemplateId = spawnTemplateId,
+                    CultureId = TryGetCultureId(characterObject),
+                    HasShield = TryGetCharacterHasShield(characterObject),
+                    HasThrown = TryGetCharacterHasThrown(characterObject),
+                    IsRanged = TryGetCharacterIsRanged(characterObject),
+                    TroopName = TryGetPropertyValue(characterObject, "Name")?.ToString() ?? TryGetStringId(characterObject),
+                    Tier = TryGetIntProperty(characterObject, "Tier"),
+                    IsMounted = TryGetBoolProperty(characterObject, "IsMounted"),
+                    IsHero = TryGetBoolProperty(characterObject, "IsHero"),
+                    Count = variantTroopCount,
+                    WoundedCount = variantWoundedCount
+                };
+
+                if (assignExplicitEntryIds)
+                    stack.EntryId = BuildVariantAwareEntryId(sideId, partyId, spawnTemplateId, variantIndex, activeVariantCount);
+
+                if (variant != null)
+                    ApplyCombatEquipmentSnapshot(stack, variant);
+                else
+                    ApplyCombatEquipmentSnapshot(stack, characterObject);
+
+                ApplyCombatProfileSnapshot(stack, characterObject);
+                ApplyHeroIdentitySnapshot(stack, characterObject);
+                troops.Add(stack);
+                assignedTroops += variantTroopCount;
+                assignedWounded += variantWoundedCount;
+            }
+
+            return troops;
+        }
+
+        private static int GetDistributedVariantCount(int total, int bucketCount, int bucketIndex)
+        {
+            if (total <= 0 || bucketCount <= 0 || bucketIndex < 0 || bucketIndex >= bucketCount)
+                return 0;
+
+            int baseCount = total / bucketCount;
+            int remainder = total % bucketCount;
+            return baseCount + (bucketIndex < remainder ? 1 : 0);
+        }
+
+        private static int GetDistributedVariantWoundedCount(
+            int totalWounded,
+            int totalCount,
+            int variantTroopCount,
+            int assignedTroops,
+            int assignedWounded)
+        {
+            if (totalWounded <= 0 || totalCount <= 0 || variantTroopCount <= 0)
+                return 0;
+
+            int remainingWounded = Math.Max(0, totalWounded - assignedWounded);
+            int remainingTroops = Math.Max(0, totalCount - assignedTroops);
+            if (remainingWounded == 0 || remainingTroops == 0)
+                return 0;
+
+            if (assignedTroops + variantTroopCount >= totalCount)
+                return Math.Min(variantTroopCount, remainingWounded);
+
+            int distributed = (int)Math.Round(
+                (double)remainingWounded * variantTroopCount / remainingTroops,
+                MidpointRounding.AwayFromZero);
+            return Math.Max(0, Math.Min(variantTroopCount, Math.Min(remainingWounded, distributed)));
+        }
+
+        private static string BuildVariantAwareEntryId(string sideId, string partyId, string spawnTemplateId, int variantIndex, int variantCount)
+        {
+            string canonicalSideId = string.IsNullOrWhiteSpace(sideId) ? "unknown" : sideId;
+            string canonicalPartyId = string.IsNullOrWhiteSpace(partyId) ? "party" : partyId;
+            string canonicalCharacterId = string.IsNullOrWhiteSpace(spawnTemplateId) ? "unknown" : spawnTemplateId;
+            if (variantCount <= 1)
+                return canonicalSideId + "|" + canonicalPartyId + "|" + canonicalCharacterId;
+
+            return canonicalSideId + "|" + canonicalPartyId + "|" + canonicalCharacterId + "|variant-" + (variantIndex + 1);
+        }
+
+        private static List<CombatEquipmentVariantSnapshot> BuildCombatEquipmentVariants(object characterObject, int totalCount)
+        {
+            List<CombatEquipmentVariantSnapshot> sampledVariants = BuildRandomBattleEquipmentVariants(characterObject, totalCount);
+            if (sampledVariants.Count > 0)
+                return sampledVariants;
+
+            var allEquipments = EnumerateCharacterEquipments(characterObject)
+                .Where(equipment => equipment != null)
+                .ToList();
+            if (allEquipments.Count == 0)
+                return new List<CombatEquipmentVariantSnapshot>();
+
+            List<object> preferredEquipments = allEquipments
+                .Where(equipment => !TryGetBoolProperty(equipment, "IsCivilian"))
+                .ToList();
+            if (preferredEquipments.Count == 0)
+                preferredEquipments = allEquipments;
+
+            var variants = new List<CombatEquipmentVariantSnapshot>();
+            var seenSignatures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (object equipment in preferredEquipments)
+            {
+                CombatEquipmentVariantSnapshot variant = BuildCombatEquipmentVariantSnapshot(equipment);
+                string signature = variant?.Signature ?? string.Empty;
+                if (!seenSignatures.Add(signature))
+                    continue;
+
+                variants.Add(variant);
+            }
+
+            return variants;
+        }
+
+        private static List<CombatEquipmentVariantSnapshot> BuildRandomBattleEquipmentVariants(object characterObject, int totalCount)
+        {
+            var variants = new List<CombatEquipmentVariantSnapshot>();
+            if (characterObject == null || totalCount <= 0)
+                return variants;
+
+            var bySignature = new Dictionary<string, CombatEquipmentVariantSnapshot>(StringComparer.OrdinalIgnoreCase);
+            for (int sampleIndex = 0; sampleIndex < totalCount; sampleIndex++)
+            {
+                object equipment = TryResolveRandomBattleEquipment(characterObject);
+                if (equipment == null)
+                    break;
+
+                CombatEquipmentVariantSnapshot variant = BuildCombatEquipmentVariantSnapshot(equipment);
+                if (variant == null)
+                    continue;
+
+                string signature = variant.Signature ?? string.Empty;
+                if (bySignature.TryGetValue(signature, out CombatEquipmentVariantSnapshot existing))
+                {
+                    existing.SampledCount++;
+                    continue;
+                }
+
+                variant.SampledCount = 1;
+                bySignature[signature] = variant;
+                variants.Add(variant);
+            }
+
+            if (variants.Sum(variant => variant?.SampledCount ?? 0) != totalCount)
+                return new List<CombatEquipmentVariantSnapshot>();
+
+            return variants;
+        }
+
+        private static CombatEquipmentVariantSnapshot BuildCombatEquipmentVariantSnapshot(object equipment)
+        {
+            if (equipment == null)
+                return null;
+
+            var variant = new CombatEquipmentVariantSnapshot
+            {
+                CombatItem0Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon0),
+                CombatItem1Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon1),
+                CombatItem2Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon2),
+                CombatItem3Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon3),
+                CombatHeadId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Head),
+                CombatBodyId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Body),
+                CombatLegId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Leg),
+                CombatGlovesId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Gloves),
+                CombatCapeId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Cape),
+                CombatHorseId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Horse),
+                CombatHorseHarnessId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.HorseHarness)
+            };
+
+            variant.Signature = string.Join("|", new[]
+            {
+                variant.CombatItem0Id ?? string.Empty,
+                variant.CombatItem1Id ?? string.Empty,
+                variant.CombatItem2Id ?? string.Empty,
+                variant.CombatItem3Id ?? string.Empty,
+                variant.CombatHeadId ?? string.Empty,
+                variant.CombatBodyId ?? string.Empty,
+                variant.CombatLegId ?? string.Empty,
+                variant.CombatGlovesId ?? string.Empty,
+                variant.CombatCapeId ?? string.Empty,
+                variant.CombatHorseId ?? string.Empty,
+                variant.CombatHorseHarnessId ?? string.Empty
+            });
+            return variant;
         }
 
         private static void LogTroopStackMappings(string source, List<TroopStackInfo> troops)
@@ -2111,7 +2420,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             string normalized = originalId.Trim().ToLowerInvariant();
             if (normalized.Contains("looter"))
-                return "mp_skirmisher_empire_troop";
+                return "mp_coop_looter_troop";
             if (normalized.Contains("sea_raider"))
                 return "mp_heavy_infantry_sturgia_troop";
             if (normalized.Contains("forest_bandit"))
@@ -2458,6 +2767,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             switch (candidate)
             {
+                case "mp_light_infantry_empire_troop":
+                    return "mp_coop_light_infantry_empire_troop";
                 case "mp_heavy_infantry_aserai_troop":
                     return "mp_shock_infantry_aserai_troop";
                 default:
@@ -2713,6 +3024,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             troop.HeroOccupationId = TryGetHeroOccupationId(characterObject);
             troop.HeroClanId = TryGetHeroClanId(characterObject);
             troop.HeroTemplateId = TryGetHeroTemplateId(characterObject);
+            troop.HeroBodyProperties = TryGetHeroBodyProperties(characterObject);
             troop.HeroLevel = TryGetHeroLevel(characterObject);
             troop.HeroAge = TryGetHeroAge(characterObject);
             troop.HeroIsFemale = TryGetHeroIsFemale(characterObject);
@@ -3120,6 +3432,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return TryGetIntProperty(heroObject, "Level");
         }
 
+        private static string TryGetHeroBodyProperties(object instance)
+        {
+            Hero hero = TryResolveHeroObject(instance);
+            if (hero != null)
+            {
+                object heroBodyProperties = TryGetPropertyValue(hero, "BodyProperties");
+                if (heroBodyProperties is BodyProperties bodyProperties)
+                    return bodyProperties.ToString();
+            }
+
+            object heroObject = TryGetPropertyValue(instance, "HeroObject") ?? TryGetPropertyValue(instance, "Hero");
+            object reflectedBodyProperties = TryGetPropertyValue(heroObject, "BodyProperties");
+            return reflectedBodyProperties?.ToString();
+        }
+
         private static float TryGetHeroAge(object instance)
         {
             Hero hero = TryResolveHeroObject(instance);
@@ -3186,17 +3513,25 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (equipment == null)
                 return;
 
-            troop.CombatItem0Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon0);
-            troop.CombatItem1Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon1);
-            troop.CombatItem2Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon2);
-            troop.CombatItem3Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon3);
-            troop.CombatHeadId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Head);
-            troop.CombatBodyId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Body);
-            troop.CombatLegId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Leg);
-            troop.CombatGlovesId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Gloves);
-            troop.CombatCapeId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Cape);
-            troop.CombatHorseId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Horse);
-            troop.CombatHorseHarnessId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.HorseHarness);
+            ApplyCombatEquipmentSnapshot(troop, BuildCombatEquipmentVariantSnapshot(equipment));
+        }
+
+        private static void ApplyCombatEquipmentSnapshot(TroopStackInfo troop, CombatEquipmentVariantSnapshot equipment)
+        {
+            if (troop == null || equipment == null)
+                return;
+
+            troop.CombatItem0Id = equipment.CombatItem0Id;
+            troop.CombatItem1Id = equipment.CombatItem1Id;
+            troop.CombatItem2Id = equipment.CombatItem2Id;
+            troop.CombatItem3Id = equipment.CombatItem3Id;
+            troop.CombatHeadId = equipment.CombatHeadId;
+            troop.CombatBodyId = equipment.CombatBodyId;
+            troop.CombatLegId = equipment.CombatLegId;
+            troop.CombatGlovesId = equipment.CombatGlovesId;
+            troop.CombatCapeId = equipment.CombatCapeId;
+            troop.CombatHorseId = equipment.CombatHorseId;
+            troop.CombatHorseHarnessId = equipment.CombatHorseHarnessId;
         }
 
         private static object TryResolvePrimaryCombatEquipment(object instance)
@@ -3222,6 +3557,25 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 if (equipment != null)
                     return equipment;
             }
+
+            return null;
+        }
+
+        private static object TryResolveRandomBattleEquipment(object instance)
+        {
+            if (instance == null)
+                return null;
+
+            foreach (string propertyName in new[] { "RandomBattleEquipment", "GetRandomEquipment" })
+            {
+                object equipment = TryGetPropertyValue(instance, propertyName);
+                if (equipment != null && !TryGetBoolProperty(equipment, "IsCivilian"))
+                    return equipment;
+            }
+
+            object invokedEquipment = TryInvokeMethod(instance, "GetRandomEquipment");
+            if (invokedEquipment != null && !TryGetBoolProperty(invokedEquipment, "IsCivilian"))
+                return invokedEquipment;
 
             return null;
         }
@@ -3355,6 +3709,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 parts.Add("clan=" + troop.HeroClanId);
             if (!string.IsNullOrWhiteSpace(troop.HeroTemplateId))
                 parts.Add("template=" + troop.HeroTemplateId);
+            if (!string.IsNullOrWhiteSpace(troop.HeroBodyProperties))
+                parts.Add("body=present");
             if (troop.HeroLevel > 0)
                 parts.Add("level=" + troop.HeroLevel);
             if (troop.HeroAge > 0.01f)

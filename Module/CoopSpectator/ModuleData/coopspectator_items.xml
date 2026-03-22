@@ -1454,6 +1454,12 @@
 		</ItemComponent>
 		<Flags Civilian="true" DoesNotHideChest="true" />
 	</Item>
+	<Item multiplayer_item="true" id="torn_bandit_clothes" name="{=qhbOjHRI}Torn Padded Garments" mesh="torn_bandit_clothes" culture="Culture.looters" weight="0.5" difficulty="0" appearance="0.1" Type="BodyArmor">
+		<ItemComponent>
+			<Armor body_armor="6" leg_armor="2" arm_armor="1" has_gender_variations="true" covers_body="false" body_mesh_type="shoulders" modifier_group="cloth_unarmoured" material_type="Cloth" />
+		</ItemComponent>
+		<Flags UseTeamColor="true" Civilian="true" />
+	</Item>
 	<CraftedItem id="tzkurion_axe_t3" name="{=POhLMyat}Broad Tzikourion" crafting_template="OneHandedAxe" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_26_head" Type="Blade" scale_factor="100" />
@@ -2717,6 +2723,14 @@
 		<Pieces>
 			<Piece id="spear_blade_29" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_1" Type="Handle" scale_factor="100" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem id="seax" name="{=3Pv0SlYj}Seax" crafting_template="Dagger" culture="Culture.sturgia" modifier_group="sword">
+		<Pieces>
+			<Piece id="dagger_blade_3" Type="Blade" scale_factor="93" />
+			<Piece id="sturgian_dagger_guard_8" Type="Guard" scale_factor="90" />
+			<Piece id="aserai_grip_3" Type="Handle" scale_factor="110" />
+			<Piece id="khuzait_pommel_2" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
 	<CraftedItem id="cs_exact_peasant_hammer_2_t1" name="{=beVFwINO}Wooden Hammer" crafting_template="Mace" modifier_group="cheap_weapon">

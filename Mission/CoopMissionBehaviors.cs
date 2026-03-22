@@ -11,6 +11,7 @@ using TaleWorlds.Core; // BasicCharacterObject, MBObjectManager (для спав
 using TaleWorlds.Engine;
 using TaleWorlds.InputSystem; // Input, InputKey
 using TaleWorlds.Library; // Vec2, Vec3
+using TaleWorlds.Localization;
 using TaleWorlds.MountAndBlade; // Mission, MissionLogic, GameNetwork, Agent, Team, MissionMode
 using TaleWorlds.MountAndBlade.Multiplayer;
 using TaleWorlds.ObjectSystem; // MBObjectManager
@@ -3546,6 +3547,8 @@ namespace CoopSpectator.MissionBehaviors
         private static string _authoritativeBattleWinnerSide = string.Empty;
         private static string _authoritativeBattleCompletionReason = string.Empty;
         private static string _lastLoggedBattleCompletionAuditKey = string.Empty;
+        private static DateTime _nextIncompleteBattleSnapshotRefreshUtc;
+        private static DateTime _nextIncompleteBattleSnapshotLogUtc;
         private static Agent _diagnosticAllowedAgent;
         private const bool EnableFixedMissionCulturesExperiment = true;
         private const string SyntheticAllCampaignTroopsBattleId = "synthetic_all_campaign_troops";
@@ -3584,6 +3587,8 @@ namespace CoopSpectator.MissionBehaviors
             "studded_leather_waistcoat",
             "sturgia_infantry_shield_a",
             "peasant_pitchfork_2_t1",
+            "seax",
+            "torn_bandit_clothes",
             "western_javelin_2_t3",
             "crossbow_c",
             "sumpter_horse",
@@ -3613,7 +3618,9 @@ namespace CoopSpectator.MissionBehaviors
                 ["peasant_hammer_1_t1"] = "cs_exact_peasant_hammer_1_t1",
                 ["peasant_maul_t1_2"] = "cs_exact_peasant_maul_t1_2",
                 ["northern_2hsword_t4"] = "cs_exact_northern_2hsword_t4",
-                ["peasant_pitchfork_2_t1"] = "cs_exact_peasant_pitchfork_2_t1",
+                ["peasant_pitchfork_2_t1"] = "mp_western_pitchfork_wood",
+                ["seax"] = "mp_default_dagger",
+                ["torn_bandit_clothes"] = "mp_vlandia_bandit_c",
                 ["peasant_hammer_2_t1"] = "cs_exact_peasant_hammer_2_t1",
                 ["western_javelin_2_t3"] = "cs_exact_western_javelin_2_t3",
                 ["bolted_leather_strips"] = "cs_exact_bolted_leather_strips",
@@ -3665,7 +3672,9 @@ namespace CoopSpectator.MissionBehaviors
                 ["western_spear_4_t3"] = "western_spear_3_t3",
                 ["western_throwing_axe_1_t1"] = "highland_throwing_axe_1_t2",
                 ["wooden_2hsword_t1"] = "kaskara_2hsword_t3",
-                ["peasant_pitchfork_2_t1"] = "western_spear_2_t2",
+                ["peasant_pitchfork_2_t1"] = "mp_western_pitchfork_wood",
+                ["seax"] = "mp_default_dagger",
+                ["torn_bandit_clothes"] = "mp_vlandia_bandit_c",
                 ["western_javelin_2_t3"] = "mp_javelin",
                 ["bolted_leather_strips"] = "fur_cloak_a",
                 ["bolt_c"] = "bolt_a",
@@ -3851,6 +3860,8 @@ namespace CoopSpectator.MissionBehaviors
             _authoritativeBattleWinnerSide = string.Empty;
             _authoritativeBattleCompletionReason = string.Empty;
             _lastLoggedBattleCompletionAuditKey = string.Empty;
+            _nextIncompleteBattleSnapshotRefreshUtc = DateTime.MinValue;
+            _nextIncompleteBattleSnapshotLogUtc = DateTime.MinValue;
             CoopBattleSelectionIntentState.Reset();
             CoopBattleSelectionRequestState.Reset();
             CoopBattleSpawnIntentState.Reset();
@@ -3989,6 +4000,8 @@ namespace CoopSpectator.MissionBehaviors
             ResetMaterializedBattleResultRuntimeState();
             _hasMaterializedBattlefieldArmies = false;
             _lastLoggedBattleCompletionAuditKey = string.Empty;
+            _nextIncompleteBattleSnapshotRefreshUtc = DateTime.MinValue;
+            _nextIncompleteBattleSnapshotLogUtc = DateTime.MinValue;
             TryWriteEntryStatusSnapshot(Mission, "server behavior end-mission");
             base.OnEndMission();
         }
@@ -4054,6 +4067,10 @@ namespace CoopSpectator.MissionBehaviors
                 return "mp_light_cavalry_aserai_troop";
             if (string.Equals(normalized, "mp_coop_light_cavalry_khuzait_troop", StringComparison.Ordinal))
                 return "mp_light_cavalry_khuzait_troop";
+            if (string.Equals(normalized, "mp_light_infantry_empire_troop", StringComparison.Ordinal))
+                return "mp_coop_light_infantry_empire_troop";
+            if (string.Equals(normalized, "mp_light_infantry_empire_hero", StringComparison.Ordinal))
+                return "mp_coop_light_infantry_empire_hero";
             if (string.Equals(normalized, "mp_coop_light_infantry_empire_troop", StringComparison.Ordinal))
                 return "mp_light_infantry_empire_troop";
             if (string.Equals(normalized, "mp_coop_heavy_infantry_empire_troop", StringComparison.Ordinal))
@@ -4061,7 +4078,7 @@ namespace CoopSpectator.MissionBehaviors
             if (string.Equals(normalized, "mp_coop_heavy_infantry_vlandia_troop", StringComparison.Ordinal))
                 return "mp_heavy_infantry_vlandia_troop";
             if (normalized.StartsWith("imperial_"))
-                return "imperial_infantryman";
+                return "mp_coop_light_infantry_empire_troop";
             if (normalized.StartsWith("sturgian_"))
                 return "imperial_infantryman";
             if (normalized.StartsWith("battanian_"))
@@ -4268,6 +4285,8 @@ namespace CoopSpectator.MissionBehaviors
                 _authoritativeBattleWinnerSide = string.Empty;
                 _authoritativeBattleCompletionReason = string.Empty;
                 _lastLoggedBattleCompletionAuditKey = string.Empty;
+                _nextIncompleteBattleSnapshotRefreshUtc = DateTime.MinValue;
+                _nextIncompleteBattleSnapshotLogUtc = DateTime.MinValue;
                 CoopBattleSelectionIntentState.Reset();
                 CoopBattleSelectionRequestState.Reset();
                 CoopBattleSpawnIntentState.Reset();
@@ -4708,6 +4727,8 @@ namespace CoopSpectator.MissionBehaviors
                 MaterializedEquipmentMissCounts.Clear();
                 MaterializedEquipmentNormalizedFallbackCounts.Clear();
                 ResetMaterializedCombatProfileRuntimeState();
+                _nextIncompleteBattleSnapshotRefreshUtc = DateTime.MinValue;
+                _nextIncompleteBattleSnapshotLogUtc = DateTime.MinValue;
             }
 
             if (_hasMaterializedBattlefieldArmies)
@@ -4717,6 +4738,31 @@ namespace CoopSpectator.MissionBehaviors
             Team defenderTeam = mission.Teams?.Defender;
             if (attackerTeam == null || defenderTeam == null)
                 return;
+
+            if (!IsBattleSnapshotReadyForMaterialization(out string readinessSummary))
+            {
+                DateTime nowUtc = DateTime.UtcNow;
+                if (nowUtc >= _nextIncompleteBattleSnapshotRefreshUtc)
+                {
+                    _nextIncompleteBattleSnapshotRefreshUtc = nowUtc.AddMilliseconds(750);
+                    RefreshAllowedTroopsFromRoster(source + " awaiting snapshot");
+                }
+
+                if (!IsBattleSnapshotReadyForMaterialization(out readinessSummary))
+                {
+                    if (nowUtc >= _nextIncompleteBattleSnapshotLogUtc)
+                    {
+                        _nextIncompleteBattleSnapshotLogUtc = nowUtc.AddSeconds(2);
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: delaying battlefield materialization because battle snapshot is incomplete. " +
+                            readinessSummary +
+                            " Source=" + (source ?? "unknown"));
+                    }
+                    return;
+                }
+
+                _nextIncompleteBattleSnapshotLogUtc = DateTime.MinValue;
+            }
 
             int attackerCount = MaterializeArmyForSide(mission, attackerTeam, BattleSideEnum.Attacker, source);
             int defenderCount = MaterializeArmyForSide(mission, defenderTeam, BattleSideEnum.Defender, source);
@@ -4729,6 +4775,61 @@ namespace CoopSpectator.MissionBehaviors
                 "AttackerAgents=" + attackerCount +
                 " DefenderAgents=" + defenderCount +
                 " Source=" + (source ?? "unknown"));
+        }
+
+        private static bool IsBattleSnapshotReadyForMaterialization(out string readinessSummary)
+        {
+            BattleRuntimeState rosterState = BattleSnapshotRuntimeState.GetState();
+            BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            int sideCount = 0;
+            int populatedSideCount = 0;
+            bool hasAttacker = false;
+            bool hasDefender = false;
+
+            if (rosterState?.Sides != null && rosterState.Sides.Count > 0)
+            {
+                sideCount = rosterState.Sides.Count;
+                foreach (BattleSideState sideState in rosterState.Sides)
+                {
+                    BattleSideEnum side = ResolveBattleSideFromState(sideState);
+                    int entryCount = sideState?.Entries?.Count ?? 0;
+                    if (entryCount <= 0)
+                        continue;
+
+                    populatedSideCount++;
+                    if (side == BattleSideEnum.Attacker)
+                        hasAttacker = true;
+                    else if (side == BattleSideEnum.Defender)
+                        hasDefender = true;
+                }
+            }
+            else if (snapshot?.Sides != null && snapshot.Sides.Count > 0)
+            {
+                sideCount = snapshot.Sides.Count;
+                foreach (BattleSideSnapshotMessage sideSnapshot in snapshot.Sides)
+                {
+                    BattleSideEnum side = ResolveBattleSideFromSnapshot(sideSnapshot);
+                    int troopCount = sideSnapshot?.Troops?.Count ?? 0;
+                    if (troopCount <= 0)
+                        continue;
+
+                    populatedSideCount++;
+                    if (side == BattleSideEnum.Attacker)
+                        hasAttacker = true;
+                    else if (side == BattleSideEnum.Defender)
+                        hasDefender = true;
+                }
+            }
+
+            readinessSummary =
+                "BattleId=" + (snapshot?.BattleId ?? "null") +
+                " SnapshotSource=" + (BattleSnapshotRuntimeState.GetSource() ?? "unknown") +
+                " Sides=" + sideCount +
+                " PopulatedSides=" + populatedSideCount +
+                " HasAttacker=" + hasAttacker +
+                " HasDefender=" + hasDefender;
+
+            return sideCount >= 2 && populatedSideCount >= 2 && hasAttacker && hasDefender;
         }
 
         private static int MaterializeArmyForSide(Mission mission, Team team, BattleSideEnum side, string source)
@@ -4950,6 +5051,7 @@ namespace CoopSpectator.MissionBehaviors
 
             string equipmentOverrideDiagnostics = BuildMaterializedEquipmentOverrideDiagnostics(entryState, troop);
             string combatProfileDiagnostics = "AppliedCombatProfile=(none)";
+            string identityDiagnostics = "AppliedIdentity=(none)";
             int spawnedCount = 0;
             for (int i = 0; i < spawnCount; i++)
             {
@@ -4962,6 +5064,7 @@ namespace CoopSpectator.MissionBehaviors
 
                 string appliedArmorOverrides;
                 string appliedCombatProfile;
+                string appliedIdentity;
                 Agent agent = SpawnBattlefieldArmyAgent(
                     mission,
                     team,
@@ -4971,7 +5074,8 @@ namespace CoopSpectator.MissionBehaviors
                     spawnPosition,
                     formationDirection,
                     out appliedArmorOverrides,
-                    out appliedCombatProfile);
+                    out appliedCombatProfile,
+                    out appliedIdentity);
                 if (agent == null)
                     continue;
 
@@ -4979,6 +5083,7 @@ namespace CoopSpectator.MissionBehaviors
                 _materializedArmySideByAgentIndex[agent.Index] = side;
                 RegisterMaterializedBattleResultEntry(agent, entryState, side);
                 combatProfileDiagnostics = appliedCombatProfile;
+                identityDiagnostics = appliedIdentity;
                 spawnedCount++;
             }
 
@@ -4992,6 +5097,7 @@ namespace CoopSpectator.MissionBehaviors
                     " Spawned=" + spawnedCount +
                     " SpawnFrameSource=" + spawnFrameSource +
                     " " + equipmentOverrideDiagnostics +
+                    " " + identityDiagnostics +
                     " " + combatProfileDiagnostics +
                     " Source=" + (source ?? "unknown"));
             }
@@ -5063,10 +5169,12 @@ namespace CoopSpectator.MissionBehaviors
             Vec3 spawnPosition,
             Vec2 direction,
             out string appliedArmorOverrides,
-            out string appliedCombatProfile)
+            out string appliedCombatProfile,
+            out string appliedIdentity)
         {
             appliedArmorOverrides = "(none)";
             appliedCombatProfile = "AppliedCombatProfile=(none)";
+            appliedIdentity = "AppliedIdentity=(none)";
             if (mission == null || team == null || troop == null)
                 return null;
 
@@ -5076,49 +5184,263 @@ namespace CoopSpectator.MissionBehaviors
                 AgentBuildData buildData = new AgentBuildData(troop);
                 Equipment spawnEquipment = troop.Equipment?.Clone(false);
                 appliedArmorOverrides = TryApplyMaterializedEquipmentOverrides(spawnEquipment, entryState, null, trackCoverage: true);
-                buildData.Team(team);
-                buildData.Controller(AgentControllerType.AI);
-                buildData.TroopOrigin(origin);
-                buildData.InitialPosition(in spawnPosition);
-                buildData.InitialDirection(in direction);
-                buildData.SpawnsIntoOwnFormation(true);
-                buildData.SpawnsUsingOwnTroopClass(true);
-                if (spawnEquipment != null)
-                    buildData.Equipment(spawnEquipment);
-
-                Agent agent = mission.SpawnAgent(buildData, spawnFromAgentVisuals: false);
-                if (agent != null)
+                bool hasTemporaryNameOverride = TryApplyEntryNameToSpawnCharacter(troop, entryState, out TextObject originalTroopName);
+                try
                 {
-                    FormationClass resolvedFormationClass = formationClass;
-                    if ((int)resolvedFormationClass < 0 || (int)resolvedFormationClass >= team.FormationsIncludingSpecialAndEmpty.Count())
-                        resolvedFormationClass = FormationClass.Infantry;
+                    buildData.Team(team);
+                    buildData.Controller(AgentControllerType.AI);
+                    buildData.TroopOrigin(origin);
+                    buildData.InitialPosition(in spawnPosition);
+                    buildData.InitialDirection(in direction);
+                    buildData.SpawnsIntoOwnFormation(true);
+                    buildData.SpawnsUsingOwnTroopClass(true);
+                    if (spawnEquipment != null)
+                        buildData.Equipment(spawnEquipment);
 
-                    Formation targetFormation = team.GetFormation(resolvedFormationClass);
-                    if (targetFormation != null && !ReferenceEquals(agent.Formation, targetFormation))
+                    appliedIdentity = TryApplyEntryIdentityToBuildData(buildData, entryState);
+                    Agent agent = mission.SpawnAgent(buildData, spawnFromAgentVisuals: false);
+                    if (agent != null)
                     {
-                        agent.Formation = targetFormation;
-                        agent.ForceUpdateCachedAndFormationValues(updateOnlyMovement: false, arrangementChangeAllowed: false);
+                        TryApplyEntryIdentityToAgent(agent, entryState);
+
+                        FormationClass resolvedFormationClass = formationClass;
+                        if ((int)resolvedFormationClass < 0 || (int)resolvedFormationClass >= team.FormationsIncludingSpecialAndEmpty.Count())
+                            resolvedFormationClass = FormationClass.Infantry;
+
+                        Formation targetFormation = team.GetFormation(resolvedFormationClass);
+                        if (targetFormation != null && !ReferenceEquals(agent.Formation, targetFormation))
+                        {
+                            agent.Formation = targetFormation;
+                            agent.ForceUpdateCachedAndFormationValues(updateOnlyMovement: false, arrangementChangeAllowed: false);
+                        }
+
+                        agent.SetAutomaticTargetSelection(true);
+                        agent.SetFiringOrder(FiringOrder.RangedWeaponUsageOrderEnum.FireAtWill);
+                        appliedCombatProfile = TryApplyMaterializedCombatProfile(agent, entryState);
+                    }
+                    else
+                    {
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: SpawnBattlefieldArmyAgent returned null. " +
+                            "TroopId=" + troop.StringId +
+                            " TeamSide=" + team.Side +
+                            " TeamIndex=" + team.TeamIndex);
                     }
 
-                    agent.SetAutomaticTargetSelection(true);
-                    agent.SetFiringOrder(FiringOrder.RangedWeaponUsageOrderEnum.FireAtWill);
-                    appliedCombatProfile = TryApplyMaterializedCombatProfile(agent, entryState);
+                    return agent;
                 }
-                else
+                finally
                 {
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: SpawnBattlefieldArmyAgent returned null. " +
-                        "TroopId=" + troop.StringId +
-                        " TeamSide=" + team.Side +
-                        " TeamIndex=" + team.TeamIndex);
+                    RestoreSpawnCharacterName(troop, hasTemporaryNameOverride, originalTroopName);
                 }
-
-                return agent;
             }
             catch (Exception ex)
             {
-                ModLogger.Info("CoopMissionSpawnLogic: SpawnBattlefieldArmyAgent failed: " + ex.Message);
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: SpawnBattlefieldArmyAgent failed. " +
+                    "TroopId=" + (troop?.StringId ?? "null") +
+                    " EntryId=" + (entryState?.EntryId ?? "null") +
+                    " TeamSide=" + team?.Side +
+                    " TeamIndex=" + (team != null ? team.TeamIndex.ToString() : "null") +
+                    " FormationClass=" + formationClass +
+                    " SpawnPosition=" + spawnPosition +
+                    " Direction=" + direction +
+                    " Message=" + ex.Message);
                 return null;
+            }
+        }
+
+        private static string TryApplyEntryIdentityToBuildData(AgentBuildData buildData, RosterEntryState entryState)
+        {
+            if (buildData == null || !HasEntryHeroIdentity(entryState))
+                return "AppliedIdentity=(none)";
+
+            var parts = new List<string>();
+            try
+            {
+                buildData.IsFemale(entryState.HeroIsFemale);
+                parts.Add("Female=" + entryState.HeroIsFemale);
+            }
+            catch (Exception ex)
+            {
+                parts.Add("FemaleApplyFailed=" + ex.GetType().Name);
+            }
+
+            if (entryState.HeroAge > 0.01f)
+            {
+                try
+                {
+                    int roundedAge = Math.Max(1, Math.Min(120, (int)Math.Round(entryState.HeroAge)));
+                    buildData.Age(roundedAge);
+                    parts.Add("Age=" + entryState.HeroAge.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+                }
+                catch (Exception ex)
+                {
+                    parts.Add("AgeApplyFailed=" + ex.GetType().Name);
+                }
+            }
+
+            if (TryResolveEntryBodyProperties(entryState, out BodyProperties bodyProperties))
+            {
+                try
+                {
+                    buildData.BodyProperties(bodyProperties);
+                    parts.Add("Body=applied");
+                }
+                catch (Exception ex)
+                {
+                    parts.Add("BodyApplyFailed=" + ex.GetType().Name);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(entryState.TroopName))
+                parts.Add("Name=" + entryState.TroopName.Replace('\r', ' ').Replace('\n', ' '));
+
+            return parts.Count == 0
+                ? "AppliedIdentity=(none)"
+                : "AppliedIdentity=" + string.Join(", ", parts);
+        }
+
+        private static void TryApplyEntryIdentityToAgent(Agent agent, RosterEntryState entryState)
+        {
+            if (agent == null || !HasEntryHeroIdentity(entryState))
+                return;
+
+            try
+            {
+                agent.IsFemale = entryState.HeroIsFemale;
+            }
+            catch
+            {
+            }
+
+            if (entryState.HeroAge > 0.01f)
+            {
+                try
+                {
+                    agent.Age = entryState.HeroAge;
+                }
+                catch
+                {
+                }
+            }
+
+            if (TryResolveEntryBodyProperties(entryState, out BodyProperties bodyProperties))
+            {
+                try
+                {
+                    agent.UpdateBodyProperties(bodyProperties);
+                }
+                catch
+                {
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(entryState.TroopName))
+                return;
+
+            try
+            {
+                FieldInfo agentNameField = typeof(Agent).GetField("_name", BindingFlags.Instance | BindingFlags.NonPublic);
+                if (agentNameField != null)
+                    agentNameField.SetValue(agent, new TextObject(entryState.TroopName));
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool TryApplyEntryNameToSpawnCharacter(BasicCharacterObject troop, RosterEntryState entryState, out TextObject originalName)
+        {
+            originalName = null;
+            if (troop == null || !HasEntryHeroIdentity(entryState) || string.IsNullOrWhiteSpace(entryState.TroopName))
+                return false;
+
+            string currentName = troop.Name?.ToString() ?? string.Empty;
+            if (string.Equals(currentName, entryState.TroopName, StringComparison.Ordinal))
+                return false;
+
+            try
+            {
+                originalName = new TextObject(string.IsNullOrWhiteSpace(currentName) ? troop.StringId ?? string.Empty : currentName);
+                if (!TrySetCharacterName(troop, new TextObject(entryState.TroopName)))
+                    return false;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: failed to apply temporary spawn-character name override. " +
+                    "TroopId=" + troop.StringId +
+                    " EntryId=" + (entryState?.EntryId ?? "null") +
+                    " Name=" + (entryState?.TroopName ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ') +
+                    " Message=" + ex.Message);
+                return false;
+            }
+        }
+
+        private static void RestoreSpawnCharacterName(BasicCharacterObject troop, bool restore, TextObject originalName)
+        {
+            if (!restore || troop == null || originalName == null)
+                return;
+
+            try
+            {
+                TrySetCharacterName(troop, originalName);
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool TrySetCharacterName(BasicCharacterObject troop, TextObject name)
+        {
+            if (troop == null || name == null)
+                return false;
+
+            try
+            {
+                MethodInfo setNameMethod = troop.GetType().GetMethod(
+                    "SetName",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(TextObject) },
+                    null);
+                if (setNameMethod == null)
+                    return false;
+
+                setNameMethod.Invoke(troop, new object[] { name });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool HasEntryHeroIdentity(RosterEntryState entryState)
+        {
+            return entryState != null &&
+                   (entryState.IsHero ||
+                    !string.IsNullOrWhiteSpace(entryState.HeroId) ||
+                    !string.IsNullOrWhiteSpace(entryState.HeroRole) ||
+                    !string.IsNullOrWhiteSpace(entryState.HeroTemplateId) ||
+                    !string.IsNullOrWhiteSpace(entryState.HeroBodyProperties));
+        }
+
+        private static bool TryResolveEntryBodyProperties(RosterEntryState entryState, out BodyProperties bodyProperties)
+        {
+            bodyProperties = default;
+            if (string.IsNullOrWhiteSpace(entryState?.HeroBodyProperties))
+                return false;
+
+            try
+            {
+                return BodyProperties.FromString(entryState.HeroBodyProperties, out bodyProperties);
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -7094,6 +7416,8 @@ namespace CoopSpectator.MissionBehaviors
             if (spawnEquipment == null || entryState == null)
                 return "(none)";
 
+            ClearTemplateEquipmentForUnspecifiedSnapshotSlots(spawnEquipment, entryState);
+
             var appliedSlots = new List<string>();
             if (entryState.IsMounted)
             {
@@ -7114,6 +7438,32 @@ namespace CoopSpectator.MissionBehaviors
             TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Horse, entryState.CombatHorseId, "Horse", entryState, appliedSlots, missedSlots, trackCoverage);
             TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.HorseHarness, entryState.CombatHorseHarnessId, "HorseHarness", entryState, appliedSlots, missedSlots, trackCoverage);
             return appliedSlots.Count > 0 ? string.Join(", ", appliedSlots) : "(none)";
+        }
+
+        private static void ClearTemplateEquipmentForUnspecifiedSnapshotSlots(Equipment spawnEquipment, RosterEntryState entryState)
+        {
+            if (spawnEquipment == null || entryState == null)
+                return;
+
+            ClearTemplateEquipmentSlotIfMissing(spawnEquipment, EquipmentIndex.Weapon0, entryState.CombatItem0Id);
+            ClearTemplateEquipmentSlotIfMissing(spawnEquipment, EquipmentIndex.Weapon1, entryState.CombatItem1Id);
+            ClearTemplateEquipmentSlotIfMissing(spawnEquipment, EquipmentIndex.Weapon2, entryState.CombatItem2Id);
+            ClearTemplateEquipmentSlotIfMissing(spawnEquipment, EquipmentIndex.Weapon3, entryState.CombatItem3Id);
+            ClearTemplateEquipmentSlotIfMissing(spawnEquipment, EquipmentIndex.Head, entryState.CombatHeadId);
+            ClearTemplateEquipmentSlotIfMissing(spawnEquipment, EquipmentIndex.Body, entryState.CombatBodyId);
+            ClearTemplateEquipmentSlotIfMissing(spawnEquipment, EquipmentIndex.Leg, entryState.CombatLegId);
+            ClearTemplateEquipmentSlotIfMissing(spawnEquipment, EquipmentIndex.Gloves, entryState.CombatGlovesId);
+            ClearTemplateEquipmentSlotIfMissing(spawnEquipment, EquipmentIndex.Cape, entryState.CombatCapeId);
+            ClearTemplateEquipmentSlotIfMissing(spawnEquipment, EquipmentIndex.Horse, entryState.CombatHorseId);
+            ClearTemplateEquipmentSlotIfMissing(spawnEquipment, EquipmentIndex.HorseHarness, entryState.CombatHorseHarnessId);
+        }
+
+        private static void ClearTemplateEquipmentSlotIfMissing(Equipment spawnEquipment, EquipmentIndex slot, string snapshotItemId)
+        {
+            if (spawnEquipment == null || !string.IsNullOrWhiteSpace(snapshotItemId))
+                return;
+
+            spawnEquipment[slot] = default(EquipmentElement);
         }
 
         private sealed class ResolvedMaterializedEquipmentOverride
@@ -7676,7 +8026,13 @@ namespace CoopSpectator.MissionBehaviors
                     normalizedItemId = "mp_worn_kite_shield";
                     return true;
                 case "peasant_pitchfork_2_t1":
-                    normalizedItemId = "mp_western_short_spear";
+                    normalizedItemId = "mp_western_pitchfork_wood";
+                    return true;
+                case "seax":
+                    normalizedItemId = "mp_default_dagger";
+                    return true;
+                case "torn_bandit_clothes":
+                    normalizedItemId = "mp_vlandia_bandit_c";
                     return true;
                 case "peasant_2haxe_1_t1":
                     normalizedItemId = "mp_hatchet_axe";
@@ -8204,6 +8560,7 @@ namespace CoopSpectator.MissionBehaviors
 
             try
             {
+                RosterEntryState targetEntryState = ResolveMaterializedEntryStateForPossessedAgent(targetAgent, pendingRequest);
                 Team peerTeam = missionPeer.Team ?? targetAgent.Team;
                 if (peerTeam != null && !ReferenceEquals(targetAgent.Team, peerTeam))
                 {
@@ -8244,6 +8601,7 @@ namespace CoopSpectator.MissionBehaviors
                     missionPeer.ControlledAgent = replacedAgent;
                 missionPeer.FollowedAgent = replacedAgent;
                 TransferMaterializedAgentRuntimeState(targetAgent, replacedAgent);
+                string reappliedAgentState = ReapplyMaterializedAgentStateAfterReplaceBot(replacedAgent, targetEntryState);
 
                 TryApplyVanillaSpawnGoldDeduction(gameMode, peer, missionPeer, source + " replace-bot");
                 bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
@@ -8258,6 +8616,7 @@ namespace CoopSpectator.MissionBehaviors
                     " ActiveAiUnitsInFormation=" + activeAiUnitsInFormation +
                     " PendingTroopId=" + (pendingRequest.TroopId ?? "null") +
                     " PendingEntryId=" + (pendingRequest.EntryId ?? "null") +
+                    " " + reappliedAgentState +
                     " RemovedPendingVisuals=" + removedPendingVisuals +
                     " Source=" + (source ?? "unknown"));
                 return true;
@@ -8266,6 +8625,82 @@ namespace CoopSpectator.MissionBehaviors
             {
                 ModLogger.Info("CoopMissionSpawnLogic: materialized army replace-bot failed (" + source + "): " + ex.Message);
                 return false;
+            }
+        }
+
+        private static RosterEntryState ResolveMaterializedEntryStateForPossessedAgent(
+            Agent targetAgent,
+            CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest)
+        {
+            string entryId = pendingRequest.EntryId;
+            if (string.IsNullOrWhiteSpace(entryId) &&
+                targetAgent != null &&
+                _materializedArmyEntryIdByAgentIndex.TryGetValue(targetAgent.Index, out string mappedEntryId))
+            {
+                entryId = mappedEntryId;
+            }
+
+            if (string.IsNullOrWhiteSpace(entryId))
+                return null;
+
+            return BattleSnapshotRuntimeState.GetEntryState(entryId);
+        }
+
+        private static string ReapplyMaterializedAgentStateAfterReplaceBot(
+            Agent replacedAgent,
+            RosterEntryState entryState)
+        {
+            if (replacedAgent == null)
+                return "ReappliedState=(none)";
+
+            string appliedEquipment = "(none)";
+            string equipmentMisses = "(none)";
+            Equipment spawnEquipment = BuildSnapshotEquipmentForReplaceBot(entryState);
+            if (spawnEquipment != null)
+            {
+                var missedSlots = new List<string>();
+                appliedEquipment = TryApplyMaterializedEquipmentOverrides(spawnEquipment, entryState, missedSlots, trackCoverage: false);
+                equipmentMisses = missedSlots.Count > 0 ? string.Join(", ", missedSlots) : "(none)";
+
+                try
+                {
+                    replacedAgent.UpdateSpawnEquipmentAndRefreshVisuals(spawnEquipment);
+                    replacedAgent.WieldInitialWeapons(
+                        Agent.WeaponWieldActionType.Instant,
+                        Equipment.InitialWeaponEquipPreference.Any);
+                    replacedAgent.MountAgent?.UpdateAgentProperties();
+                }
+                catch (Exception ex)
+                {
+                    equipmentMisses =
+                        equipmentMisses == "(none)"
+                            ? "visual-refresh-failed:" + ex.GetType().Name
+                            : equipmentMisses + ", visual-refresh-failed:" + ex.GetType().Name;
+                }
+            }
+
+            TryApplyEntryIdentityToAgent(replacedAgent, entryState);
+            string appliedCombatProfile = TryApplyMaterializedCombatProfile(replacedAgent, entryState);
+            return
+                "ReappliedEquipment=" + appliedEquipment +
+                " ReapplyMisses=" + equipmentMisses +
+                " " + appliedCombatProfile;
+        }
+
+        private static Equipment BuildSnapshotEquipmentForReplaceBot(RosterEntryState entryState)
+        {
+            if (entryState == null)
+                return null;
+
+            try
+            {
+                var equipment = new Equipment();
+                TryApplyMaterializedEquipmentOverrides(equipment, entryState, null, trackCoverage: false);
+                return equipment;
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -9067,6 +9502,8 @@ namespace CoopSpectator.MissionBehaviors
                 parts.Add("Clan=" + entry.HeroClanId);
             if (!string.IsNullOrWhiteSpace(entry.HeroTemplateId))
                 parts.Add("Template=" + entry.HeroTemplateId);
+            if (!string.IsNullOrWhiteSpace(entry.HeroBodyProperties))
+                parts.Add("Body=present");
             if (entry.HeroLevel > 0)
                 parts.Add("Level=" + entry.HeroLevel);
             if (entry.HeroAge > 0.01f)
@@ -10069,7 +10506,10 @@ namespace CoopSpectator.MissionBehaviors
                     }
                 }
 
-                Agent spawnedAgent = SpawnCoopControlledAgent(mission, missionPeer, peer, selectedCharacter, source);
+                RosterEntryState selectedEntryState = !string.IsNullOrWhiteSpace(selectedEntryId)
+                    ? BattleSnapshotRuntimeState.GetEntryState(selectedEntryId)
+                    : null;
+                Agent spawnedAgent = SpawnCoopControlledAgent(mission, missionPeer, peer, selectedCharacter, selectedEntryState, source);
                 if (spawnedAgent == null)
                     continue;
 
@@ -10352,6 +10792,7 @@ namespace CoopSpectator.MissionBehaviors
             MissionPeer missionPeer,
             NetworkCommunicator peer,
             BasicCharacterObject troop,
+            RosterEntryState entryState,
             string source)
         {
             if (mission == null || missionPeer == null || peer == null || troop == null)
@@ -10369,69 +10810,80 @@ namespace CoopSpectator.MissionBehaviors
                 Equipment spawnEquipment = troop.Equipment?.Clone(false);
                 var origin = new BasicBattleAgentOrigin(troop);
 
+                bool hasTemporaryNameOverride = TryApplyEntryNameToSpawnCharacter(troop, entryState, out TextObject originalTroopName);
                 AgentBuildData buildData = new AgentBuildData(troop);
-                buildData.MissionPeer(missionPeer);
-                buildData.Team(team);
-                buildData.TroopOrigin(origin);
-                buildData.Controller(AgentControllerType.Player);
-                buildData.InitialPosition(in spawnPosition);
-                buildData.InitialDirection(in spawnDirection);
-                buildData.SpawnsIntoOwnFormation(false);
-                buildData.SpawnsUsingOwnTroopClass(false);
-                if (spawnEquipment != null)
-                    buildData.Equipment(spawnEquipment);
-
-                bool spawnFromAgentVisuals = missionPeer.HasSpawnedAgentVisuals;
-                Agent spawnedAgent = mission.SpawnAgent(buildData, spawnFromAgentVisuals: spawnFromAgentVisuals);
-                if (spawnedAgent == null)
-                    return null;
-
-                spawnedAgent.AddComponent(new MPPerksAgentComponent(spawnedAgent));
-                spawnedAgent.MountAgent?.UpdateAgentProperties();
-
-                MPPerkObject.MPOnSpawnPerkHandler onSpawnPerkHandler = MPPerkObject.GetOnSpawnPerkHandler(missionPeer);
-                float extraHitpoints = onSpawnPerkHandler?.GetHitpoints(true) ?? 0f;
-                if (extraHitpoints > 0f)
+                try
                 {
-                    spawnedAgent.HealthLimit += extraHitpoints;
-                    spawnedAgent.Health = spawnedAgent.HealthLimit;
+                    buildData.MissionPeer(missionPeer);
+                    buildData.Team(team);
+                    buildData.TroopOrigin(origin);
+                    buildData.Controller(AgentControllerType.Player);
+                    buildData.InitialPosition(in spawnPosition);
+                    buildData.InitialDirection(in spawnDirection);
+                    buildData.SpawnsIntoOwnFormation(false);
+                    buildData.SpawnsUsingOwnTroopClass(false);
+                    if (spawnEquipment != null)
+                        buildData.Equipment(spawnEquipment);
+
+                    string appliedIdentity = TryApplyEntryIdentityToBuildData(buildData, entryState);
+                    bool spawnFromAgentVisuals = missionPeer.HasSpawnedAgentVisuals;
+                    Agent spawnedAgent = mission.SpawnAgent(buildData, spawnFromAgentVisuals: spawnFromAgentVisuals);
+                    if (spawnedAgent == null)
+                        return null;
+
+                    TryApplyEntryIdentityToAgent(spawnedAgent, entryState);
+                    spawnedAgent.AddComponent(new MPPerksAgentComponent(spawnedAgent));
+                    spawnedAgent.MountAgent?.UpdateAgentProperties();
+
+                    MPPerkObject.MPOnSpawnPerkHandler onSpawnPerkHandler = MPPerkObject.GetOnSpawnPerkHandler(missionPeer);
+                    float extraHitpoints = onSpawnPerkHandler?.GetHitpoints(true) ?? 0f;
+                    if (extraHitpoints > 0f)
+                    {
+                        spawnedAgent.HealthLimit += extraHitpoints;
+                        spawnedAgent.Health = spawnedAgent.HealthLimit;
+                    }
+
+                    mission.TakeControlOfAgent(spawnedAgent);
+                    missionPeer.ControlledAgent = spawnedAgent;
+                    missionPeer.FollowedAgent = spawnedAgent;
+                    peer.ControlledAgent = spawnedAgent;
+                    spawnedAgent.MissionPeer = missionPeer;
+                    if (spawnedAgent.SpawnEquipment != null)
+                        spawnedAgent.UpdateSpawnEquipmentAndRefreshVisuals(spawnedAgent.SpawnEquipment);
+                    spawnedAgent.WieldInitialWeapons(
+                        Agent.WeaponWieldActionType.Instant,
+                        Equipment.InitialWeaponEquipPreference.Any);
+
+                    GameNetwork.BeginModuleEventAsServer(peer.VirtualPlayer);
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetAgentOwningMissionPeer(spawnedAgent.Index, peer.VirtualPlayer));
+                    GameNetwork.EndModuleEventAsServer();
+
+                    missionPeer.SpawnCountThisRound++;
+
+                    bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
+
+                    missionPeer.HasSpawnedAgentVisuals = false;
+                    MPPerkObject.GetPerkHandler(missionPeer)?.OnEvent(MPPerkCondition.PerkEventFlags.SpawnEnd);
+
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: spawn agent ownership finalized. " +
+                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                        " Agent=" + spawnedAgent.Index +
+                        " SpawnFromVisuals=" + spawnFromAgentVisuals +
+                        " HadVisuals=" + missionPeer.HasSpawnedAgentVisuals +
+                        " RefreshedSpawnEquipment=" + (spawnedAgent.SpawnEquipment != null) +
+                        " AddedPerksComponent=True" +
+                        " SpawnCountThisRound=" + missionPeer.SpawnCountThisRound +
+                        " ExtraHitpoints=" + extraHitpoints +
+                        " VisualsRemoved=" + removedPendingVisuals +
+                        " " + appliedIdentity);
+
+                    return spawnedAgent;
                 }
-
-                mission.TakeControlOfAgent(spawnedAgent);
-                missionPeer.ControlledAgent = spawnedAgent;
-                missionPeer.FollowedAgent = spawnedAgent;
-                peer.ControlledAgent = spawnedAgent;
-                spawnedAgent.MissionPeer = missionPeer;
-                if (spawnedAgent.SpawnEquipment != null)
-                    spawnedAgent.UpdateSpawnEquipmentAndRefreshVisuals(spawnedAgent.SpawnEquipment);
-                spawnedAgent.WieldInitialWeapons(
-                    Agent.WeaponWieldActionType.Instant,
-                    Equipment.InitialWeaponEquipPreference.Any);
-
-                GameNetwork.BeginModuleEventAsServer(peer.VirtualPlayer);
-                GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetAgentOwningMissionPeer(spawnedAgent.Index, peer.VirtualPlayer));
-                GameNetwork.EndModuleEventAsServer();
-
-                missionPeer.SpawnCountThisRound++;
-
-                bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
-
-                missionPeer.HasSpawnedAgentVisuals = false;
-                MPPerkObject.GetPerkHandler(missionPeer)?.OnEvent(MPPerkCondition.PerkEventFlags.SpawnEnd);
-
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: spawn agent ownership finalized. " +
-                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                    " Agent=" + spawnedAgent.Index +
-                    " SpawnFromVisuals=" + spawnFromAgentVisuals +
-                    " HadVisuals=" + missionPeer.HasSpawnedAgentVisuals +
-                    " RefreshedSpawnEquipment=" + (spawnedAgent.SpawnEquipment != null) +
-                    " AddedPerksComponent=True" +
-                    " SpawnCountThisRound=" + missionPeer.SpawnCountThisRound +
-                    " ExtraHitpoints=" + extraHitpoints +
-                    " VisualsRemoved=" + removedPendingVisuals);
-
-                return spawnedAgent;
+                finally
+                {
+                    RestoreSpawnCharacterName(troop, hasTemporaryNameOverride, originalTroopName);
+                }
             }
             catch (Exception ex)
             {

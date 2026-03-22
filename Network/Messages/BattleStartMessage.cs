@@ -86,6 +86,7 @@ namespace CoopSpectator.Network.Messages
         public string HeroOccupationId { get; set; }
         public string HeroClanId { get; set; }
         public string HeroTemplateId { get; set; }
+        public string HeroBodyProperties { get; set; }
         public int HeroLevel { get; set; }
         public float HeroAge { get; set; }
         public bool HeroIsFemale { get; set; }

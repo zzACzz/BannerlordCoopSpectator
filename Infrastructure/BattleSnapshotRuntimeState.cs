@@ -95,6 +95,7 @@ namespace CoopSpectator.Infrastructure
         public string HeroOccupationId { get; set; }
         public string HeroClanId { get; set; }
         public string HeroTemplateId { get; set; }
+        public string HeroBodyProperties { get; set; }
         public int HeroLevel { get; set; }
         public float HeroAge { get; set; }
         public bool HeroIsFemale { get; set; }
@@ -200,6 +201,7 @@ namespace CoopSpectator.Infrastructure
         public string HeroOccupationId { get; set; }
         public string HeroClanId { get; set; }
         public string HeroTemplateId { get; set; }
+        public string HeroBodyProperties { get; set; }
         public int HeroLevel { get; set; }
         public float HeroAge { get; set; }
         public bool HeroIsFemale { get; set; }
@@ -591,6 +593,7 @@ namespace CoopSpectator.Infrastructure
                         HeroOccupationId = entryProjection.HeroOccupationId,
                         HeroClanId = entryProjection.HeroClanId,
                         HeroTemplateId = entryProjection.HeroTemplateId,
+                        HeroBodyProperties = entryProjection.HeroBodyProperties,
                         HeroLevel = entryProjection.HeroLevel,
                         HeroAge = entryProjection.HeroAge,
                         HeroIsFemale = entryProjection.HeroIsFemale,
@@ -682,6 +685,7 @@ namespace CoopSpectator.Infrastructure
                 HeroOccupationId = troop.HeroOccupationId,
                 HeroClanId = troop.HeroClanId,
                 HeroTemplateId = troop.HeroTemplateId,
+                HeroBodyProperties = troop.HeroBodyProperties,
                 HeroLevel = troop.HeroLevel,
                 HeroAge = troop.HeroAge,
                 HeroIsFemale = troop.HeroIsFemale,
