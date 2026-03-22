@@ -405,6 +405,32 @@ namespace CoopSpectator.Infrastructure
         public static BasicCharacterObject TryResolveCharacterObject(string entryId)
         {
             BattleRosterEntryProjectionState entry = GetEntry(entryId);
+            if (!string.IsNullOrWhiteSpace(entry?.OriginalCharacterId))
+            {
+                try
+                {
+                    BasicCharacterObject originalCharacter = MBObjectManager.Instance.GetObject<BasicCharacterObject>(entry.OriginalCharacterId);
+                    if (originalCharacter != null)
+                        return originalCharacter;
+                }
+                catch
+                {
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(entry?.HeroTemplateId))
+            {
+                try
+                {
+                    BasicCharacterObject heroTemplateCharacter = MBObjectManager.Instance.GetObject<BasicCharacterObject>(entry.HeroTemplateId);
+                    if (heroTemplateCharacter != null)
+                        return heroTemplateCharacter;
+                }
+                catch
+                {
+                }
+            }
+
             string spawnTemplateId = ResolveSpawnTemplateId(entry);
             if (string.IsNullOrWhiteSpace(spawnTemplateId))
                 return null;

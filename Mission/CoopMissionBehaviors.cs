@@ -62,7 +62,6 @@ namespace CoopSpectator.MissionBehaviors
         private string _lastAnnouncedBattlePhaseKey;
         private bool _battleActiveAnnouncementShown;
         private bool _hasObservedBattleActivePhaseThisMission;
-        private bool _battleEndExitRequested;
         private float _legacyOverlayAutoRequestCooldownRemaining;
         private float _timeUntilNextOwnEntryHotkey;
         private float _timeUntilNextOwnEntryMenuRefresh;
@@ -96,7 +95,6 @@ namespace CoopSpectator.MissionBehaviors
             _lastAnnouncedBattlePhaseKey = null;
             _battleActiveAnnouncementShown = false;
             _hasObservedBattleActivePhaseThisMission = false;
-            _battleEndExitRequested = false;
             if (EnableVisualSpawnAutoConfirmExperiment)
                 TryHookVisualSpawnAutoConfirm(mission);
             LogClassLoadoutDiagnosticsOnce(mission);
@@ -231,16 +229,17 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             string side = snapshot.AssignedSide ?? snapshot.RequestedSide ?? snapshot.IntentSide ?? "none";
-            string troop = snapshot.SelectedTroopId ?? snapshot.IntentTroopOrEntryId ?? "none";
+            string selectionId = ResolveStatusSelectionId(snapshot);
+            string selectionLabel = ResolveSelectionDisplayLabel(selectionId);
             string spawn = snapshot.SpawnStatus ?? string.Empty;
             BattleSideEnum resolvedSide = ResolveStatusSide(snapshot);
-            string[] sideTroops = GetAllowedTroopIdsForSide(snapshot, resolvedSide);
-            int troopIndex = Array.FindIndex(sideTroops, troopId => string.Equals(troopId, troop, StringComparison.OrdinalIgnoreCase));
-            string troopOrderText = troopIndex >= 0
-                ? " [" + (troopIndex + 1) + "/" + sideTroops.Length + "]"
-                : (sideTroops.Length > 0 ? " [0/" + sideTroops.Length + "]" : string.Empty);
+            string[] sideSelections = GetAllowedSelectionIdsForSide(snapshot, resolvedSide);
+            int selectionIndex = Array.FindIndex(sideSelections, candidate => string.Equals(candidate, selectionId, StringComparison.OrdinalIgnoreCase));
+            string selectionOrderText = selectionIndex >= 0
+                ? " [" + (selectionIndex + 1) + "/" + sideSelections.Length + "]"
+                : (sideSelections.Length > 0 ? " [0/" + sideSelections.Length + "]" : string.Empty);
             string battlePhase = snapshot.BattlePhase ?? string.Empty;
-            string hintKey = side + "|" + troop + "|" + spawn + "|" + battlePhase + "|" + lifecycle + "|" + snapshot.CanRespawn + "|" + snapshot.CanStartBattle + "|" + snapshot.HasAgent;
+            string hintKey = side + "|" + (selectionId ?? string.Empty) + "|" + spawn + "|" + battlePhase + "|" + lifecycle + "|" + snapshot.CanRespawn + "|" + snapshot.CanStartBattle + "|" + snapshot.HasAgent;
 
             if (_timeUntilNextEntryHint > 0f && string.Equals(_lastShownOwnEntryHintKey, hintKey, StringComparison.Ordinal))
                 return;
@@ -250,8 +249,8 @@ namespace CoopSpectator.MissionBehaviors
 
             string message =
                 "Coop Entry: side=" + side +
-                " troop=" + troop +
-                troopOrderText +
+                " unit=" + selectionLabel +
+                selectionOrderText +
                 " phase=" + battlePhase +
                 " state=" + lifecycle +
                 " spawn=" + spawn +
@@ -295,17 +294,11 @@ namespace CoopSpectator.MissionBehaviors
 
                 string winnerSide = snapshot.WinnerSide ?? string.Empty;
                 string completionReason = snapshot.BattleCompletionReason ?? string.Empty;
-                bool exitRequested = false;
-                if (!_battleEndExitRequested)
-                {
-                    _battleEndExitRequested = true;
-                    exitRequested = TryRequestClientMissionExit(Mission, "battle-ended bridge phase");
-                    ModLogger.Info(
-                        "CoopMissionClientLogic: observed BattleEnded phase. " +
-                        "WinnerSide=" + (string.IsNullOrWhiteSpace(winnerSide) ? "none" : winnerSide) +
-                        " Reason=" + (string.IsNullOrWhiteSpace(completionReason) ? "unknown" : completionReason) +
-                        " ExitRequested=" + exitRequested + ".");
-                }
+                ModLogger.Info(
+                    "CoopMissionClientLogic: observed BattleEnded phase. " +
+                    "WinnerSide=" + (string.IsNullOrWhiteSpace(winnerSide) ? "none" : winnerSide) +
+                    " Reason=" + (string.IsNullOrWhiteSpace(completionReason) ? "unknown" : completionReason) +
+                    " Action=wait-for-dedicated-lobby-transition.");
 
                 string endMessage = "Coop Battle: ended";
                 if (!string.IsNullOrWhiteSpace(winnerSide))
@@ -324,44 +317,6 @@ namespace CoopSpectator.MissionBehaviors
             _timeUntilNextOwnEntryMenuRefresh = 0f;
             _lastShownOwnEntryMenuKey = null;
             OnOwnEntryHotkeyHandled("Coop Battle: started");
-        }
-
-        private static bool TryRequestClientMissionExit(Mission mission, string source)
-        {
-            if (mission == null)
-                return false;
-
-            foreach (string methodName in new[] { "EndMission", "OnEndMissionRequest", "OnEndMissionInternal" })
-            {
-                try
-                {
-                    MethodInfo method = mission.GetType().GetMethod(
-                        methodName,
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                        null,
-                        Type.EmptyTypes,
-                        null);
-                    if (method == null)
-                        continue;
-
-                    method.Invoke(mission, null);
-                    ModLogger.Info(
-                        "CoopMissionClientLogic: requested local mission exit via reflection. " +
-                        "Method=" + methodName +
-                        " Source=" + (source ?? "unknown") + ".");
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    ModLogger.Info(
-                        "CoopMissionClientLogic: local mission exit method failed. " +
-                        "Method=" + methodName +
-                        " Source=" + (source ?? "unknown") +
-                        " Error=" + ex.Message);
-                }
-            }
-
-            return false;
         }
 
         private void TryHandleOwnEntryHotkeys(Mission mission, float dt)
@@ -452,15 +407,15 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             BattleSideEnum side = ResolveStatusSide(snapshot);
-            string troopId = ResolveStatusTroopId(snapshot);
-            string mirrorKey = side + "|" + (troopId ?? string.Empty);
+            string selectionId = ResolveStatusSelectionId(snapshot);
+            string mirrorKey = side + "|" + (selectionId ?? string.Empty);
             if (string.Equals(_lastMirroredAuthoritativeStatusKey, mirrorKey, StringComparison.Ordinal))
                 return;
 
             bool wroteSide = side != BattleSideEnum.None &&
                              CoopBattleSelectionBridgeFile.WriteSelectSideRequest(side.ToString(), "MP client authoritative status");
-            bool wroteTroop = !string.IsNullOrWhiteSpace(troopId) &&
-                              CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(troopId, "MP client authoritative status");
+            bool wroteTroop = !string.IsNullOrWhiteSpace(selectionId) &&
+                              CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(selectionId, "MP client authoritative status");
             if (!wroteSide && !wroteTroop)
                 return;
 
@@ -474,7 +429,7 @@ namespace CoopSpectator.MissionBehaviors
             ModLogger.Info(
                 "CoopMissionClientLogic: mirrored authoritative entry status into coop bridge. " +
                 "Side=" + side +
-                " TroopId=" + (troopId ?? "null"));
+                " SelectionId=" + (selectionId ?? "null"));
         }
 
         private void TryRequestVanillaSpawnFromAuthoritativeStatus(Mission mission)
@@ -647,32 +602,33 @@ namespace CoopSpectator.MissionBehaviors
 
             BattleSideEnum side = ResolveStatusSide(snapshot);
             string sideLabel = side == BattleSideEnum.None ? "none" : side.ToString();
-            string troop = ResolveStatusTroopId(snapshot);
+            string selectionId = ResolveStatusSelectionId(snapshot);
+            string unitLabel = ResolveSelectionDisplayLabel(selectionId);
             string lifecycle = snapshot.LifecycleState ?? string.Empty;
             string lifecycleSource = snapshot.LifecycleSource ?? string.Empty;
             string battlePhase = string.IsNullOrWhiteSpace(snapshot.BattlePhase) ? "unknown" : snapshot.BattlePhase;
             string spawn = snapshot.SpawnStatus ?? string.Empty;
-            string[] troopIds = GetAllowedTroopIdsForSide(snapshot, side);
-            int troopIndex = Array.FindIndex(troopIds, troopId => string.Equals(troopId, troop, StringComparison.OrdinalIgnoreCase));
-            string troopOrderText = troopIndex >= 0
-                ? "[" + (troopIndex + 1) + "/" + troopIds.Length + "]"
-                : (troopIds.Length > 0 ? "[0/" + troopIds.Length + "]" : "[0/0]");
-            string troopOptionsText = troopIds.Length == 0
+            string[] selectionIds = GetAllowedSelectionIdsForSide(snapshot, side);
+            int selectionIndex = Array.FindIndex(selectionIds, candidate => string.Equals(candidate, selectionId, StringComparison.OrdinalIgnoreCase));
+            string selectionOrderText = selectionIndex >= 0
+                ? "[" + (selectionIndex + 1) + "/" + selectionIds.Length + "]"
+                : (selectionIds.Length > 0 ? "[0/" + selectionIds.Length + "]" : "[0/0]");
+            string selectionOptionsText = selectionIds.Length == 0
                 ? "none"
-                : string.Join(" | ", troopIds.Select((troopId, index) =>
-                    (index + 1) + "=" + troopId + (string.Equals(troopId, troop, StringComparison.OrdinalIgnoreCase) ? "*" : string.Empty)));
+                : string.Join(" | ", selectionIds.Select((candidate, index) =>
+                    (index + 1) + "=" + ResolveSelectionDisplayLabel(candidate) + (string.Equals(candidate, selectionId, StringComparison.OrdinalIgnoreCase) ? "*" : string.Empty)));
 
             string menuKey =
                 sideLabel + "|" +
-                troop + "|" +
-                troopOrderText + "|" +
+                (selectionId ?? string.Empty) + "|" +
+                selectionOrderText + "|" +
                 battlePhase + "|" +
                 lifecycle + "|" +
                 spawn + "|" +
                 snapshot.CanRespawn + "|" +
                 snapshot.CanStartBattle + "|" +
                 snapshot.HasAgent + "|" +
-                troopOptionsText;
+                selectionOptionsText;
 
             if (_timeUntilNextOwnEntryMenuRefresh > 0f &&
                 string.Equals(_lastShownOwnEntryMenuKey, menuKey, StringComparison.Ordinal))
@@ -687,11 +643,11 @@ namespace CoopSpectator.MissionBehaviors
                 "Coop Entry Menu\n" +
                 "Phase: " + battlePhase + (snapshot.CanStartBattle ? " | host can start" : string.Empty) + "\n" +
                 "Side: " + sideLabel + "\n" +
-                "Troop: " + troop + " " + troopOrderText + "\n" +
+                "Unit: " + unitLabel + " " + selectionOrderText + "\n" +
                 "State: " + lifecycle + " | Deaths: " + snapshot.DeathCount + "\n" +
                 "Source: " + lifecycleSource + "\n" +
                 "Spawn: " + spawn + (snapshot.CanRespawn ? " | respawn ready" : string.Empty) + "\n" +
-                "Options: " + troopOptionsText + "\n" +
+                "Options: " + selectionOptionsText + "\n" +
                 "Keys: Ctrl+1/2 side | Ctrl+Q/E troop | Ctrl+R spawn | Ctrl+T reset | Ctrl+B start | Ctrl+M menu";
 #if !COOPSPECTATOR_DEDICATED
             UiFeedback.ShowMessageDeferred(message);
@@ -707,13 +663,15 @@ namespace CoopSpectator.MissionBehaviors
             if (!CoopBattleSelectionBridgeFile.WriteSelectSideRequest(sideToken, "MP client hotkey"))
                 return;
 
-            string[] troopIds = GetAllowedTroopIdsForSide(snapshot, side);
-            string currentTroopId = ResolveStatusTroopId(snapshot);
-            if (troopIds.Length > 0 && !troopIds.Contains(currentTroopId, StringComparer.OrdinalIgnoreCase))
-                CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(troopIds[0], "MP client hotkey side default troop");
+            string[] selectionIds = GetAllowedSelectionIdsForSide(snapshot, side);
+            string currentSelectionId = ResolveStatusSelectionId(snapshot);
+            if (selectionIds.Length > 0 && !selectionIds.Contains(currentSelectionId, StringComparer.OrdinalIgnoreCase))
+                CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(selectionIds[0], "MP client hotkey side default troop");
 
-            string currentTroopLabel = troopIds.Length > 0 ? troopIds[0] + " [1/" + troopIds.Length + "]" : "none";
-            OnOwnEntryHotkeyHandled("Coop Entry: side -> " + sideToken + " troop=" + currentTroopLabel);
+            string currentSelectionLabel = selectionIds.Length > 0
+                ? ResolveSelectionDisplayLabel(selectionIds[0]) + " [1/" + selectionIds.Length + "]"
+                : "none";
+            OnOwnEntryHotkeyHandled("Coop Entry: side -> " + sideToken + " unit=" + currentSelectionLabel);
         }
 
         private void TryCycleOwnTroopSelection(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot, bool moveNext)
@@ -722,28 +680,28 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             BattleSideEnum side = ResolveStatusSide(snapshot);
-            string[] troopIds = GetAllowedTroopIdsForSide(snapshot, side);
-            if (troopIds.Length == 0)
+            string[] selectionIds = GetAllowedSelectionIdsForSide(snapshot, side);
+            if (selectionIds.Length == 0)
                 return;
 
-            string currentTroopId = ResolveStatusTroopId(snapshot);
-            int currentIndex = Array.FindIndex(troopIds, troopId => string.Equals(troopId, currentTroopId, StringComparison.OrdinalIgnoreCase));
+            string currentSelectionId = ResolveStatusSelectionId(snapshot);
+            int currentIndex = Array.FindIndex(selectionIds, candidate => string.Equals(candidate, currentSelectionId, StringComparison.OrdinalIgnoreCase));
             int nextIndex;
             if (currentIndex < 0)
             {
-                nextIndex = moveNext ? 0 : troopIds.Length - 1;
+                nextIndex = moveNext ? 0 : selectionIds.Length - 1;
             }
             else
             {
                 int delta = moveNext ? 1 : -1;
-                nextIndex = (currentIndex + delta + troopIds.Length) % troopIds.Length;
+                nextIndex = (currentIndex + delta + selectionIds.Length) % selectionIds.Length;
             }
 
-            string nextTroopId = troopIds[nextIndex];
-            if (!CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(nextTroopId, "MP client hotkey troop cycle"))
+            string nextSelectionId = selectionIds[nextIndex];
+            if (!CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(nextSelectionId, "MP client hotkey troop cycle"))
                 return;
 
-            OnOwnEntryHotkeyHandled("Coop Entry: troop -> " + nextTroopId + " [" + (nextIndex + 1) + "/" + troopIds.Length + "] side=" + side);
+            OnOwnEntryHotkeyHandled("Coop Entry: unit -> " + ResolveSelectionDisplayLabel(nextSelectionId) + " [" + (nextIndex + 1) + "/" + selectionIds.Length + "] side=" + side);
         }
 
         private void OnOwnEntryHotkeyHandled(string message)
@@ -806,10 +764,46 @@ namespace CoopSpectator.MissionBehaviors
             if (snapshot == null)
                 return string.Empty;
 
+            string selectedEntryId = ResolveStatusEntryId(snapshot);
+            if (!string.IsNullOrWhiteSpace(selectedEntryId))
+            {
+                RosterEntryState selectedEntry = BattleSnapshotRuntimeState.GetEntryState(selectedEntryId);
+                if (!string.IsNullOrWhiteSpace(selectedEntry?.CharacterId))
+                    return selectedEntry.CharacterId;
+            }
+
             return snapshot.SelectedTroopId ??
                    snapshot.IntentTroopOrEntryId ??
                    snapshot.SelectionRequestTroopId ??
                    string.Empty;
+        }
+
+        private static string ResolveStatusEntryId(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(snapshot.SelectedEntryId))
+                return snapshot.SelectedEntryId;
+            if (!string.IsNullOrWhiteSpace(snapshot.SpawnRequestEntryId))
+                return snapshot.SpawnRequestEntryId;
+            if (!string.IsNullOrWhiteSpace(snapshot.SelectionRequestEntryId))
+                return snapshot.SelectionRequestEntryId;
+            if (!string.IsNullOrWhiteSpace(snapshot.IntentTroopOrEntryId) &&
+                BattleSnapshotRuntimeState.GetEntryState(snapshot.IntentTroopOrEntryId) != null)
+            {
+                return snapshot.IntentTroopOrEntryId;
+            }
+
+            return string.Empty;
+        }
+
+        private static string ResolveStatusSelectionId(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot)
+        {
+            string entryId = ResolveStatusEntryId(snapshot);
+            return !string.IsNullOrWhiteSpace(entryId)
+                ? entryId
+                : ResolveStatusTroopId(snapshot);
         }
 
         private static string[] GetAllowedTroopIdsForSide(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot, BattleSideEnum side)
@@ -831,6 +825,54 @@ namespace CoopSpectator.MissionBehaviors
                 .Where(troopId => !string.IsNullOrWhiteSpace(troopId))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+        }
+
+        private static string[] GetAllowedEntryIdsForSide(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot, BattleSideEnum side)
+        {
+            if (snapshot == null)
+                return Array.Empty<string>();
+
+            string rawEntryIds =
+                side == BattleSideEnum.Attacker ? snapshot.AttackerAllowedEntryIds :
+                side == BattleSideEnum.Defender ? snapshot.DefenderAllowedEntryIds :
+                snapshot.AllowedEntryIds;
+
+            if (string.IsNullOrWhiteSpace(rawEntryIds))
+                return Array.Empty<string>();
+
+            return rawEntryIds
+                .Split(new[] { '|', ',' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(entryId => entryId.Trim())
+                .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        private static string[] GetAllowedSelectionIdsForSide(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot, BattleSideEnum side)
+        {
+            string[] entryIds = GetAllowedEntryIdsForSide(snapshot, side);
+            return entryIds.Length > 0
+                ? entryIds
+                : GetAllowedTroopIdsForSide(snapshot, side);
+        }
+
+        private static string ResolveSelectionDisplayLabel(string selectionId)
+        {
+            if (string.IsNullOrWhiteSpace(selectionId))
+                return "none";
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(selectionId);
+            if (entryState != null)
+            {
+                if (!string.IsNullOrWhiteSpace(entryState.TroopName))
+                    return entryState.TroopName;
+                if (!string.IsNullOrWhiteSpace(entryState.OriginalCharacterId))
+                    return entryState.OriginalCharacterId;
+                if (!string.IsNullOrWhiteSpace(entryState.CharacterId))
+                    return entryState.CharacterId;
+            }
+
+            return selectionId;
         }
 
         protected override void OnEndMission()
@@ -4012,6 +4054,8 @@ namespace CoopSpectator.MissionBehaviors
                 return "mp_light_cavalry_aserai_troop";
             if (string.Equals(normalized, "mp_coop_light_cavalry_khuzait_troop", StringComparison.Ordinal))
                 return "mp_light_cavalry_khuzait_troop";
+            if (string.Equals(normalized, "mp_coop_light_infantry_empire_troop", StringComparison.Ordinal))
+                return "mp_light_infantry_empire_troop";
             if (string.Equals(normalized, "mp_coop_heavy_infantry_empire_troop", StringComparison.Ordinal))
                 return "mp_heavy_infantry_empire_troop";
             if (string.Equals(normalized, "mp_coop_heavy_infantry_vlandia_troop", StringComparison.Ordinal))
@@ -4478,7 +4522,8 @@ namespace CoopSpectator.MissionBehaviors
                 " AttackerActive=" + attackerActive +
                 " DefenderActive=" + defenderActive +
                 " CountSource=" + (countSource ?? "unknown") +
-                " Source=" + (source ?? "unknown") + ".");
+                " Source=" + (source ?? "unknown") +
+                " AwaitingHostEndMission=True.");
         }
 
         private static void TryApplyBattlePhaseFormationHold(Mission mission, string source)
@@ -5610,8 +5655,37 @@ namespace CoopSpectator.MissionBehaviors
 
         private static void ResolveActiveBattleSideCounts(Mission mission, out int attackerActive, out int defenderActive, out string countSource)
         {
-            attackerActive = CountActiveTeamAgents(mission, BattleSideEnum.Attacker);
-            defenderActive = CountActiveTeamAgents(mission, BattleSideEnum.Defender);
+            int missionTeamAttackerActive = CountActiveTeamAgents(mission, BattleSideEnum.Attacker);
+            int missionTeamDefenderActive = CountActiveTeamAgents(mission, BattleSideEnum.Defender);
+
+            if (TryResolveLiveMaterializedActiveBattleSideCounts(
+                mission,
+                out int materializedLiveAttackerActive,
+                out int materializedLiveDefenderActive,
+                out int trackedAttackerAgents,
+                out int trackedDefenderAgents))
+            {
+                attackerActive = materializedLiveAttackerActive;
+                defenderActive = materializedLiveDefenderActive;
+                countSource =
+                    "materialized-live-agents" +
+                    " AttackerTracked=" + trackedAttackerAgents +
+                    " DefenderTracked=" + trackedDefenderAgents +
+                    " | mission-teams Attacker=" + missionTeamAttackerActive +
+                    " Defender=" + missionTeamDefenderActive;
+
+                if (TryResolveMaterializedActiveBattleSideCounts(out int materializedRuntimeAttackerActive, out int materializedRuntimeDefenderActive))
+                {
+                    countSource +=
+                        " | materialized-runtime Attacker=" + materializedRuntimeAttackerActive +
+                        " Defender=" + materializedRuntimeDefenderActive;
+                }
+
+                return;
+            }
+
+            attackerActive = missionTeamAttackerActive;
+            defenderActive = missionTeamDefenderActive;
 
             if (TryResolveMaterializedActiveBattleSideCounts(out int materializedAttackerActive, out int materializedDefenderActive))
             {
@@ -5672,6 +5746,50 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return attackerSpawned > 0 && defenderSpawned > 0;
+        }
+
+        private static bool TryResolveLiveMaterializedActiveBattleSideCounts(
+            Mission mission,
+            out int attackerActive,
+            out int defenderActive,
+            out int trackedAttackerAgents,
+            out int trackedDefenderAgents)
+        {
+            attackerActive = 0;
+            defenderActive = 0;
+            trackedAttackerAgents = 0;
+            trackedDefenderAgents = 0;
+
+            if (mission?.AllAgents == null || !_hasMaterializedBattlefieldArmies || _materializedArmySideByAgentIndex.Count == 0)
+                return false;
+
+            foreach (BattleSideEnum trackedSide in _materializedArmySideByAgentIndex.Values)
+            {
+                if (trackedSide == BattleSideEnum.Attacker)
+                    trackedAttackerAgents++;
+                else if (trackedSide == BattleSideEnum.Defender)
+                    trackedDefenderAgents++;
+            }
+
+            if (trackedAttackerAgents <= 0 || trackedDefenderAgents <= 0)
+                return false;
+
+            for (int i = 0; i < mission.AllAgents.Count; i++)
+            {
+                Agent agent = mission.AllAgents[i];
+                if (agent == null || !agent.IsActive() || agent.IsMount)
+                    continue;
+
+                if (!_materializedArmySideByAgentIndex.TryGetValue(agent.Index, out BattleSideEnum trackedSide))
+                    continue;
+
+                if (trackedSide == BattleSideEnum.Attacker)
+                    attackerActive++;
+                else if (trackedSide == BattleSideEnum.Defender)
+                    defenderActive++;
+            }
+
+            return true;
         }
 
         private static int CountActiveTeamAgents(Mission mission, BattleSideEnum side)
@@ -8464,16 +8582,16 @@ namespace CoopSpectator.MissionBehaviors
 
         private static void RefreshAllowedTroopsFromRoster(string source)
         {
+            BattleSnapshotMessage rosterSnapshot = BattleRosterFileHelper.ReadSnapshot();
+            if (rosterSnapshot == null)
+                rosterSnapshot = BattleSnapshotRuntimeState.GetCurrent();
+
             BattleRuntimeState rosterState = BattleSnapshotRuntimeState.GetState();
             BattleSnapshotProjectionState rosterProjection = BattleSnapshotRuntimeState.GetProjection();
-            if (rosterState == null || rosterProjection == null)
+            if ((rosterState == null || rosterProjection == null) && rosterSnapshot != null)
             {
-                BattleSnapshotMessage rosterSnapshot = BattleSnapshotRuntimeState.GetCurrent() ?? BattleRosterFileHelper.ReadSnapshot();
-                if (rosterSnapshot != null)
-                {
-                    rosterState = BattleSnapshotRuntimeState.GetState();
-                    rosterProjection = BattleSnapshotRuntimeState.GetProjection();
-                }
+                rosterState = BattleSnapshotRuntimeState.GetState();
+                rosterProjection = BattleSnapshotRuntimeState.GetProjection();
             }
 
             List<string> roster = BattleRosterFileHelper.ReadRoster();
@@ -8526,7 +8644,7 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     SelectedAllowedEntryId = preferredEntries[0].EntryId;
                     SelectedAllowedTroopId = ResolveEntrySpawnTemplateId(preferredEntries[0]);
-                    SelectedAllowedCharacter = ResolveAllowedCharacter(SelectedAllowedTroopId);
+                    SelectedAllowedCharacter = TryResolveEntryPreferredCharacter(SelectedAllowedEntryId, SelectedAllowedTroopId);
                     if (SelectedAllowedCharacter != null)
                         TryAddAllowedControlEntryState(BattleSideEnum.None, preferredEntries[0], rosterProjection, preferAsSelected: true);
                 }
@@ -9051,7 +9169,7 @@ namespace CoopSpectator.MissionBehaviors
             if (entryProjection == null || string.IsNullOrWhiteSpace(entryProjection.EntryId) || string.IsNullOrWhiteSpace(spawnTemplateId))
                 return false;
 
-            BasicCharacterObject resolvedCharacter = ResolveAllowedCharacter(spawnTemplateId);
+            BasicCharacterObject resolvedCharacter = TryResolveEntryPreferredCharacter(entryProjection.EntryId, spawnTemplateId);
             if (resolvedCharacter == null)
                 return false;
 
@@ -9148,6 +9266,12 @@ namespace CoopSpectator.MissionBehaviors
             return !string.IsNullOrWhiteSpace(entryProjection.SpawnTemplateId)
                 ? entryProjection.SpawnTemplateId
                 : entryProjection.CharacterId;
+        }
+
+        private static BasicCharacterObject TryResolveEntryPreferredCharacter(string entryId, string spawnTemplateId)
+        {
+            BasicCharacterObject entryCharacter = BattleSnapshotRuntimeState.TryResolveCharacterObject(entryId);
+            return entryCharacter ?? ResolveAllowedCharacter(spawnTemplateId);
         }
 
         public static IReadOnlyList<string> GetAllowedControlTroopIdsSnapshot()

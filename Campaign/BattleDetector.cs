@@ -125,7 +125,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 ResetMissionExitState();
                 if (_wasInMissionLastTick && ShouldNotifyDedicatedHelper()) // Щойно вийшли з місії — сказати Dedicated Helper end_mission (якщо ми не спектатор-клієнт)
                 { // Починаємо блок if
-                    try { DedicatedServerCommands.SendEndMission(); } catch (Exception ex) { ModLogger.Info("DedicatedServerCommands.SendEndMission: " + ex.Message); }
+                    // Dedicated mission teardown is now driven by the dedicated process after authoritative battle completion.
                 } // Завершуємо блок if
                 _wasInMissionLastTick = false; // Оновлюємо стан "було в місії" на false
                 _hasSentBattleStartForThisMission = false; // Скидаємо прапорець, щоб наступна місія могла знову надіслати BATTLE_START
@@ -297,11 +297,25 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
             if (exitRequested)
             {
+                bool dedicatedEndMissionRequested = false;
+                if (ShouldNotifyDedicatedHelper())
+                {
+                    try
+                    {
+                        dedicatedEndMissionRequested = DedicatedServerCommands.SendEndMission();
+                    }
+                    catch (Exception ex)
+                    {
+                        ModLogger.Info("DedicatedServerCommands.SendEndMission: " + ex.Message);
+                    }
+                }
+
                 _lastMissionExitRequestedBattleResultKey = resultKey;
                 _lastMissionExitFailedBattleResultKey = null;
                 ModLogger.Info(
                     "BattleDetector: battle_result detected during active campaign mission. " +
                     "Requested local mission exit. " +
+                    "DedicatedEndMissionRequested=" + dedicatedEndMissionRequested + " " +
                     "EncounterPrepared=" + encounterPrepared + " " +
                     "BattleId=" + (result.BattleId ?? "null") +
                     " WinnerSide=" + (result.WinnerSide ?? "none") +
@@ -2145,9 +2159,6 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             if (!string.IsNullOrWhiteSpace(cultureToken))
             {
-                if (string.Equals(cultureToken, "empire", StringComparison.Ordinal) && tier < 4 && hasShield)
-                    return "mp_coop_light_infantry_empire_troop";
-
                 if (string.Equals(cultureToken, "empire", StringComparison.Ordinal) && tier < 4 && hasThrown)
                     return "mp_skirmisher_empire_troop";
 
@@ -2391,8 +2402,6 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             if (!isMounted && !isRanged && string.Equals(cultureToken, "empire", StringComparison.Ordinal) && tier < 4)
             {
-                if (hasShield)
-                    return "mp_coop_light_infantry_empire_troop";
                 if (hasThrown)
                     return "mp_skirmisher_empire_troop";
             }
@@ -2449,8 +2458,6 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             switch (candidate)
             {
-                case "mp_light_infantry_empire_troop":
-                    return "mp_coop_light_infantry_empire_troop";
                 case "mp_heavy_infantry_aserai_troop":
                     return "mp_shock_infantry_aserai_troop";
                 default:
