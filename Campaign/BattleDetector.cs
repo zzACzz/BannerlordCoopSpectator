@@ -12,6 +12,7 @@ using System.Linq;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.ComponentInterfaces;
 using TaleWorlds.CampaignSystem.Encounters;
+using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.Core;
 using TaleWorlds.ObjectSystem;
@@ -34,6 +35,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private string _lastConsumedBattleResultKey;
         private string _lastMissionExitRequestedBattleResultKey;
         private string _lastMissionExitFailedBattleResultKey;
+        private string _cachedHostAftermathRewardResultKey;
+        private BattleResultWritebackSummary.RewardProjectionSummary _cachedHostAftermathRewardProjection;
         private DateTime _missionEnteredUtc;
         private DateTime _nextMissionBattleResultPollUtc;
         private DateTime _nextBattleStartAttemptUtc;
@@ -93,6 +96,43 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
         private sealed class BattleResultWritebackSummary
         {
+            public sealed class RewardProjectionSummary
+            {
+                public bool Ready { get; set; }
+                public bool UsedCommittedMapEventResults { get; set; }
+                public bool UsedMapEventContribution { get; set; }
+                public bool MainPartyOnWinnerSide { get; set; }
+                public bool UsedSnapshotContribution { get; set; }
+                public string Source { get; set; }
+                public string WinnerSide { get; set; }
+                public string MainPartySide { get; set; }
+                public float WinnerRenownValue { get; set; }
+                public float WinnerInfluenceValue { get; set; }
+                public float ContributionShare { get; set; }
+                public float ProjectedRenown { get; set; }
+                public float ProjectedInfluence { get; set; }
+                public float ProjectedMoraleChange { get; set; }
+                public int ProjectedGoldGain { get; set; }
+                public int ProjectedGoldLoss { get; set; }
+                public int ProjectedGoldDelta => ProjectedGoldGain - ProjectedGoldLoss;
+            }
+
+            public sealed class RewardApplySummary
+            {
+                public bool Attempted { get; set; }
+                public bool Applied { get; set; }
+                public bool SkippedCommittedResults { get; set; }
+                public bool AppliedGold { get; set; }
+                public bool AppliedMorale { get; set; }
+                public bool AppliedRenown { get; set; }
+                public bool AppliedInfluence { get; set; }
+                public int GoldDeltaApplied { get; set; }
+                public float MoraleApplied { get; set; }
+                public float RenownApplied { get; set; }
+                public float InfluenceApplied { get; set; }
+                public string Source { get; set; }
+            }
+
             public int Aggregates { get; set; }
             public int EncounterParties { get; set; }
             public int ResolvedPartyAggregates { get; set; }
@@ -105,8 +145,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public float HeroRawXpApplied { get; set; }
             public int UnresolvedPartyAggregates { get; set; }
             public int UnresolvedCombatEvents { get; set; }
+            public RewardProjectionSummary RewardProjection { get; } = new RewardProjectionSummary();
+            public RewardApplySummary RewardApply { get; } = new RewardApplySummary();
             public List<string> AdjustedSamples { get; } = new List<string>();
             public List<string> UnresolvedSamples { get; } = new List<string>();
+        }
+
+        private sealed class FallbackCombatXpParticipant
+        {
+            public CharacterObject Character { get; set; }
+            public Hero Hero { get; set; }
+            public int Weight { get; set; }
         }
 
         private static void ResetCombatProfileLookupCaches()
@@ -212,6 +261,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _missionEnteredUtc = DateTime.UtcNow;
             _lastMissionExitRequestedBattleResultKey = null;
             _lastMissionExitFailedBattleResultKey = null;
+            _cachedHostAftermathRewardResultKey = null;
+            _cachedHostAftermathRewardProjection = null;
             _nextMissionBattleResultPollUtc = DateTime.MinValue;
             _nextBattleStartAttemptUtc = DateTime.MinValue;
             _nextBattleStartWaitLogUtc = DateTime.MinValue;
@@ -300,7 +351,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                 _lastConsumedBattleResultKey = resultKey;
 
-                BattleResultWritebackSummary writebackSummary = ApplyBattleResultWriteback(result);
+                BattleResultWritebackSummary writebackSummary = ApplyBattleResultWriteback(
+                    result,
+                    string.Equals(_cachedHostAftermathRewardResultKey, resultKey, StringComparison.Ordinal)
+                        ? CloneRewardProjectionSummary(_cachedHostAftermathRewardProjection)
+                        : null);
 
                 int removedTotal = result.Entries?.Sum(entry => entry?.RemovedCount ?? 0) ?? 0;
                 int killedTotal = result.Entries?.Sum(entry => entry?.KilledCount ?? 0) ?? 0;
@@ -353,6 +408,29 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " TroopXp=" + writebackSummary.TroopXpApplied +
                 " HeroSkillXp=" + writebackSummary.HeroSkillXpApplied.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
                 " HeroRawXp=" + writebackSummary.HeroRawXpApplied.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
+                " RewardProjection[Ready=" + writebackSummary.RewardProjection.Ready +
+                " Source=" + (writebackSummary.RewardProjection.Source ?? "none") +
+                " Committed=" + writebackSummary.RewardProjection.UsedCommittedMapEventResults +
+                " MapEventContribution=" + writebackSummary.RewardProjection.UsedMapEventContribution +
+                " MainPartyOnWinnerSide=" + writebackSummary.RewardProjection.MainPartyOnWinnerSide +
+                " WinnerSide=" + (writebackSummary.RewardProjection.WinnerSide ?? "none") +
+                " MainPartySide=" + (writebackSummary.RewardProjection.MainPartySide ?? "none") +
+                " Share=" + writebackSummary.RewardProjection.ContributionShare.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " Renown=" + writebackSummary.RewardProjection.ProjectedRenown.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " Influence=" + writebackSummary.RewardProjection.ProjectedInfluence.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " Morale=" + writebackSummary.RewardProjection.ProjectedMoraleChange.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " GoldDelta=" + writebackSummary.RewardProjection.ProjectedGoldDelta +
+                " Gain=" + writebackSummary.RewardProjection.ProjectedGoldGain +
+                " Loss=" + writebackSummary.RewardProjection.ProjectedGoldLoss +
+                " SnapshotContribution=" + writebackSummary.RewardProjection.UsedSnapshotContribution + "]" +
+                " RewardApply[Attempted=" + writebackSummary.RewardApply.Attempted +
+                " Applied=" + writebackSummary.RewardApply.Applied +
+                " SkippedCommitted=" + writebackSummary.RewardApply.SkippedCommittedResults +
+                " Source=" + (writebackSummary.RewardApply.Source ?? "none") +
+                " Gold=" + writebackSummary.RewardApply.GoldDeltaApplied +
+                " Morale=" + writebackSummary.RewardApply.MoraleApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " Renown=" + writebackSummary.RewardApply.RenownApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " Influence=" + writebackSummary.RewardApply.InfluenceApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "]" +
                 " UnresolvedAggregates=" + writebackSummary.UnresolvedPartyAggregates +
                 " UnresolvedEvents=" + writebackSummary.UnresolvedCombatEvents +
                     " AdjustedSamples=[" + string.Join("; ", writebackSummary.AdjustedSamples) + "]" +
@@ -365,7 +443,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
-        private static BattleResultWritebackSummary ApplyBattleResultWriteback(CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        private static BattleResultWritebackSummary ApplyBattleResultWriteback(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            BattleResultWritebackSummary.RewardProjectionSummary cachedRewardProjection = null)
         {
             var summary = new BattleResultWritebackSummary();
             if (result?.Entries == null || result.Entries.Count == 0 || TaleWorlds.CampaignSystem.Campaign.Current == null)
@@ -401,6 +481,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             TryApplyMainPartyCombatXpWriteback(result, encounterParties, summary);
+            TryBuildMainPartyRewardProjection(result, encounterParties, summary, cachedRewardProjection);
+            TryApplyMainPartyRewardWriteback(encounterParties, summary);
             return summary;
         }
 
@@ -720,7 +802,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             IDictionary<string, EncounterPartyWritebackState> encounterParties,
             BattleResultWritebackSummary summary)
         {
-            if (result?.CombatEvents == null || result.CombatEvents.Count == 0 || encounterParties == null)
+            if (result == null || encounterParties == null)
                 return;
 
             string mainPartyId = MobileParty.MainParty?.StringId;
@@ -735,6 +817,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             CombatXpModel combatXpModel = TaleWorlds.CampaignSystem.Campaign.Current?.Models?.CombatXpModel;
             if (combatXpModel == null)
                 return;
+
+            if (result.CombatEvents == null || result.CombatEvents.Count == 0)
+            {
+                TryApplyMainPartyFallbackCombatXpWriteback(result, mainPartyState, combatXpModel, summary);
+                return;
+            }
 
             Dictionary<string, CoopBattleResultBridgeFile.BattleResultEntrySnapshot> entriesById =
                 (result.Entries ?? new List<CoopBattleResultBridgeFile.BattleResultEntrySnapshot>())
@@ -848,6 +936,613 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
+        private static void TryApplyMainPartyFallbackCombatXpWriteback(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            EncounterPartyWritebackState mainPartyState,
+            CombatXpModel combatXpModel,
+            BattleResultWritebackSummary summary)
+        {
+            if (result?.Entries == null || mainPartyState?.MemberRoster == null || mainPartyState.PartyBase == null)
+                return;
+
+            string mainPartyId = mainPartyState.PartyId;
+            if (string.IsNullOrWhiteSpace(mainPartyId))
+                return;
+
+            var participants = new List<FallbackCombatXpParticipant>();
+            int totalWeight = 0;
+            foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry in result.Entries.Where(item =>
+                         item != null &&
+                         string.Equals(item.PartyId, mainPartyId, StringComparison.OrdinalIgnoreCase) &&
+                         Math.Max(0, item.SnapshotCount) > 0))
+            {
+                if (!TryResolvePartyRosterCharacter(
+                        mainPartyState.MemberRoster,
+                        entry.HeroId,
+                        entry.OriginalCharacterId,
+                        entry.CharacterId,
+                        out CharacterObject participantCharacter,
+                        out Hero participantHero,
+                        out _,
+                        out _,
+                        out _))
+                {
+                    continue;
+                }
+
+                int weight = Math.Max(1, entry.SnapshotCount);
+                participants.Add(new FallbackCombatXpParticipant
+                {
+                    Character = participantCharacter,
+                    Hero = participantHero,
+                    Weight = weight
+                });
+                totalWeight += weight;
+            }
+
+            if (participants.Count == 0 || totalWeight <= 0)
+                return;
+
+            bool anyApplied = false;
+            foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot enemyEntry in result.Entries.Where(item =>
+                         item != null &&
+                         !string.Equals(item.PartyId, mainPartyId, StringComparison.OrdinalIgnoreCase)))
+            {
+                int casualtyCount = Math.Max(0, enemyEntry.KilledCount + enemyEntry.UnconsciousCount + enemyEntry.OtherRemovedCount);
+                if (casualtyCount <= 0)
+                    continue;
+
+                CharacterObject attackedCharacter = TryResolveCharacterObjectFromIds(
+                    enemyEntry.OriginalCharacterId,
+                    enemyEntry.CharacterId,
+                    enemyEntry.SpawnTemplateId);
+                if (attackedCharacter == null)
+                {
+                    AddWritebackSample(summary.UnresolvedSamples, "FallbackXpMissingVictim:" + (enemyEntry.TroopName ?? enemyEntry.CharacterId ?? "enemy"));
+                    continue;
+                }
+
+                int damage = Math.Max(1, TryGetCharacterBaseHitPoints(attackedCharacter));
+                foreach (FallbackCombatXpParticipant participant in participants)
+                {
+                    if (participant?.Character == null)
+                        continue;
+
+                    float xpFromCasualty;
+                    try
+                    {
+                        ExplainedNumber explained = combatXpModel.GetXpFromHit(
+                            participant.Character,
+                            mainPartyState.CaptainCharacter,
+                            attackedCharacter,
+                            mainPartyState.PartyBase,
+                            damage,
+                            true,
+                            CombatXpModel.MissionTypeEnum.Battle);
+                        xpFromCasualty = Math.Max(0f, explained.ResultNumber);
+                    }
+                    catch (Exception ex)
+                    {
+                        AddWritebackSample(summary.UnresolvedSamples, "FallbackCombatXpFailed:" + ex.Message);
+                        continue;
+                    }
+
+                    if (xpFromCasualty <= 0.01f)
+                        continue;
+
+                    float weightedXp = xpFromCasualty * casualtyCount * (participant.Weight / (float)totalWeight);
+                    if (weightedXp <= 0.01f)
+                        continue;
+
+                    if (participant.Hero != null)
+                    {
+                        SkillObject bestSkill = TryResolveBestCombatSkillObject(participant.Character);
+                        if (bestSkill == null)
+                        {
+                            summary.UnresolvedCombatEvents++;
+                            continue;
+                        }
+
+                        try
+                        {
+                            participant.Hero.HeroDeveloper?.AddSkillXp(bestSkill, weightedXp, true, false);
+                            if (participant.Hero.HeroDeveloper == null)
+                                participant.Hero.AddSkillXp(bestSkill, weightedXp);
+                            summary.HeroSkillXpApplied += weightedXp;
+                            anyApplied = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            summary.UnresolvedCombatEvents++;
+                            AddWritebackSample(summary.UnresolvedSamples, "FallbackHeroXpFailed:" + (participant.Hero.StringId ?? "hero") + "/" + ex.Message);
+                        }
+
+                        continue;
+                    }
+
+                    int troopXp = Math.Max(0, (int)Math.Round(weightedXp, MidpointRounding.AwayFromZero));
+                    if (troopXp <= 0)
+                        continue;
+
+                    try
+                    {
+                        mainPartyState.MemberRoster.AddXpToTroop(participant.Character, troopXp);
+                        summary.TroopXpApplied += troopXp;
+                        anyApplied = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        summary.UnresolvedCombatEvents++;
+                        AddWritebackSample(summary.UnresolvedSamples, "FallbackTroopXpFailed:" + (participant.Character.StringId ?? "troop") + "/" + ex.Message);
+                    }
+                }
+            }
+
+            if (anyApplied)
+                AddWritebackSample(summary.AdjustedSamples, "FallbackCombatXp:main-party-casualty-pool");
+        }
+
+        private static void TryBuildMainPartyRewardProjection(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            IDictionary<string, EncounterPartyWritebackState> encounterParties,
+            BattleResultWritebackSummary summary,
+            BattleResultWritebackSummary.RewardProjectionSummary cachedRewardProjection = null)
+        {
+            BattleResultWritebackSummary.RewardProjectionSummary projection = summary?.RewardProjection;
+            if (projection == null || result == null || encounterParties == null)
+                return;
+
+            projection.WinnerSide = result.WinnerSide ?? string.Empty;
+
+            string mainPartyId = MobileParty.MainParty?.StringId;
+            if (string.IsNullOrWhiteSpace(mainPartyId) ||
+                !encounterParties.TryGetValue(mainPartyId, out EncounterPartyWritebackState mainPartyState) ||
+                mainPartyState?.PartyBase == null)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "RewardProjectionMissingMainParty");
+                return;
+            }
+
+            BattleSideEnum winnerSide = TryResolveWinnerSideEnum(result.WinnerSide);
+            if (winnerSide == BattleSideEnum.None)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "RewardProjectionMissingWinnerSide");
+                return;
+            }
+
+            MapEvent battle = PlayerEncounter.Battle;
+            if (battle == null)
+            {
+                if (TryPopulateRewardProjectionFromCachedSnapshot(cachedRewardProjection, projection))
+                {
+                    projection.Ready = true;
+                    AddWritebackSample(
+                        summary.AdjustedSamples,
+                        "RewardProjection:cached Share=" + projection.ContributionShare.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                        " Gold=" + projection.ProjectedGoldDelta);
+                    return;
+                }
+
+                AddWritebackSample(summary.UnresolvedSamples, "RewardProjectionMissingBattle");
+                return;
+            }
+
+            MapEventSide winnerMapSide = battle.GetMapEventSide(winnerSide);
+            MapEventSide defeatedMapSide = battle.GetMapEventSide(winnerSide.GetOppositeSide());
+            BattleRewardModel battleRewardModel = TaleWorlds.CampaignSystem.Campaign.Current?.Models?.BattleRewardModel;
+            PartyMoraleModel partyMoraleModel = TaleWorlds.CampaignSystem.Campaign.Current?.Models?.PartyMoraleModel;
+            if (winnerMapSide == null || defeatedMapSide == null || battleRewardModel == null || partyMoraleModel == null)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "RewardProjectionMissingModels");
+                return;
+            }
+
+            BattleSideEnum mainPartySide = mainPartyState.PartyBase.Side;
+            projection.MainPartySide = mainPartySide.ToString();
+            projection.MainPartyOnWinnerSide = mainPartySide == winnerSide;
+            projection.WinnerRenownValue = Math.Max(0f, winnerMapSide.RenownValue);
+            projection.WinnerInfluenceValue = Math.Max(0f, winnerMapSide.InfluenceValue);
+            MapEventParty mainPartyMapEventParty = TryFindMapEventParty(
+                projection.MainPartyOnWinnerSide ? winnerMapSide : defeatedMapSide,
+                mainPartyState.PartyBase);
+            projection.ContributionShare = TryResolveRewardContributionShare(
+                winnerMapSide,
+                mainPartyState.PartyBase,
+                projection);
+
+            if (TryPopulateRewardProjectionFromCommittedMapEventParty(mainPartyMapEventParty, projection))
+            {
+                projection.Ready = true;
+                AddWritebackSample(
+                    summary.AdjustedSamples,
+                    "RewardProjection:" +
+                    (projection.MainPartyOnWinnerSide ? "winner" : "loser") +
+                    "/committed Share=" + projection.ContributionShare.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                    " Gold=" + projection.ProjectedGoldDelta);
+                return;
+            }
+
+            if (projection.MainPartyOnWinnerSide)
+            {
+                try
+                {
+                    projection.Source = "reward-model-fallback";
+                    float victoryFactor = TryCalculateWinnerAftermathScale(battle, defeatedMapSide);
+                    projection.ProjectedRenown = Math.Max(
+                        0f,
+                        battleRewardModel.CalculateRenownGain(
+                            mainPartyState.PartyBase,
+                            projection.WinnerRenownValue,
+                            projection.ContributionShare).ResultNumber * victoryFactor);
+
+                    projection.ProjectedInfluence = Math.Max(
+                        0f,
+                        battleRewardModel.CalculateInfluenceGain(
+                            mainPartyState.PartyBase,
+                            projection.WinnerInfluenceValue,
+                            projection.ContributionShare).ResultNumber * victoryFactor);
+
+                    projection.ProjectedMoraleChange = battleRewardModel.CalculateMoraleGainVictory(
+                        mainPartyState.PartyBase,
+                        projection.WinnerRenownValue,
+                        projection.ContributionShare,
+                        battle).ResultNumber;
+
+                    float goldShare = 0f;
+                    foreach (KeyValuePair<MapEventParty, float> chance in battleRewardModel.GetLootGoldChances(winnerMapSide.Parties))
+                    {
+                        if (chance.Key?.Party == mainPartyState.PartyBase)
+                        {
+                            goldShare = Math.Max(0f, chance.Value);
+                            break;
+                        }
+                    }
+
+                    int totalPlunderedGold = 0;
+                    bool usedCommittedGoldLoss = false;
+                    foreach (MapEventParty defeatedParty in defeatedMapSide.Parties)
+                    {
+                        if (defeatedParty == null)
+                            continue;
+
+                        if (defeatedParty.GoldLost > 0)
+                        {
+                            totalPlunderedGold += Math.Max(0, defeatedParty.GoldLost);
+                            usedCommittedGoldLoss = true;
+                            continue;
+                        }
+
+                        if (defeatedParty.Party == null)
+                            continue;
+
+                        totalPlunderedGold += Math.Max(
+                            0,
+                            battleRewardModel.CalculatePlunderedGoldAmountFromDefeatedParty(defeatedParty.Party));
+                    }
+
+                    if (usedCommittedGoldLoss)
+                        projection.Source = "reward-model-fallback/committed-gold-loss";
+
+                    projection.ProjectedGoldGain = Math.Max(
+                        0,
+                        (int)Math.Round(totalPlunderedGold * goldShare, MidpointRounding.AwayFromZero));
+                }
+                catch (Exception ex)
+                {
+                    AddWritebackSample(summary.UnresolvedSamples, "RewardProjectionWinnerFailed:" + ex.Message);
+                    return;
+                }
+            }
+            else
+            {
+                try
+                {
+                    projection.Source = "reward-model-fallback";
+                    projection.ProjectedMoraleChange = partyMoraleModel.GetDefeatMoraleChange(mainPartyState.PartyBase);
+                    projection.ProjectedGoldLoss = Math.Max(
+                        0,
+                        battleRewardModel.CalculatePlunderedGoldAmountFromDefeatedParty(mainPartyState.PartyBase));
+                }
+                catch (Exception ex)
+                {
+                    AddWritebackSample(summary.UnresolvedSamples, "RewardProjectionDefeatFailed:" + ex.Message);
+                    return;
+                }
+            }
+
+            projection.Ready = true;
+            AddWritebackSample(
+                summary.AdjustedSamples,
+                "RewardProjection:" +
+                (projection.MainPartyOnWinnerSide ? "winner" : "loser") +
+                " Share=" + projection.ContributionShare.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " Gold=" + projection.ProjectedGoldDelta);
+        }
+
+        private static float TryResolveRewardContributionShare(
+            MapEventSide winnerMapSide,
+            PartyBase targetParty,
+            BattleResultWritebackSummary.RewardProjectionSummary projection)
+        {
+            if (winnerMapSide == null || targetParty == null)
+                return 0f;
+
+            BattleRuntimeState snapshotState = BattleSnapshotRuntimeState.GetState();
+            float targetWeight = 0f;
+            float totalWeight = 0f;
+            bool usedMapEventContribution = false;
+            bool usedSnapshotContribution = false;
+
+            foreach (MapEventParty winnerParty in winnerMapSide.Parties)
+            {
+                PartyBase partyBase = winnerParty?.Party;
+                if (partyBase == null)
+                    continue;
+
+                float weight = 0f;
+                int mapEventContribution = Math.Max(0, winnerParty.ContributionToBattle);
+                if (mapEventContribution > 0)
+                {
+                    weight = mapEventContribution;
+                    usedMapEventContribution = true;
+                }
+                else
+                {
+                    string partyId = TryGetStringId(partyBase) ?? TryGetStringId(partyBase.MobileParty);
+                    if (snapshotState?.PartiesById != null &&
+                        !string.IsNullOrWhiteSpace(partyId) &&
+                        snapshotState.PartiesById.TryGetValue(partyId, out BattlePartyState snapshotParty) &&
+                        snapshotParty != null)
+                    {
+                        int contribution = Math.Max(0, snapshotParty.Modifiers?.ContributionToBattle ?? 0);
+                        if (contribution > 0)
+                        {
+                            weight = contribution;
+                            usedSnapshotContribution = true;
+                        }
+                        else
+                        {
+                            weight = Math.Max(1, snapshotParty.TotalManCount);
+                        }
+                    }
+                }
+
+                if (weight <= 0.01f)
+                    weight = Math.Max(1, partyBase.MemberRoster?.TotalManCount ?? 0);
+
+                totalWeight += weight;
+                if (partyBase == targetParty)
+                    targetWeight = weight;
+            }
+
+            if (projection != null)
+                projection.UsedMapEventContribution = usedMapEventContribution;
+
+            if (projection != null)
+                projection.UsedSnapshotContribution = usedSnapshotContribution;
+
+            if (totalWeight <= 0.01f || targetWeight <= 0.01f)
+                return 0f;
+
+            return Math.Max(0f, Math.Min(1f, targetWeight / totalWeight));
+        }
+
+        private static void TryApplyMainPartyRewardWriteback(
+            IDictionary<string, EncounterPartyWritebackState> encounterParties,
+            BattleResultWritebackSummary summary)
+        {
+            BattleResultWritebackSummary.RewardProjectionSummary projection = summary?.RewardProjection;
+            BattleResultWritebackSummary.RewardApplySummary rewardApply = summary?.RewardApply;
+            if (projection == null || rewardApply == null || encounterParties == null)
+                return;
+
+            rewardApply.Attempted = true;
+            rewardApply.Source = projection.Source;
+
+            string mainPartyId = MobileParty.MainParty?.StringId;
+            if (string.IsNullOrWhiteSpace(mainPartyId) ||
+                !encounterParties.TryGetValue(mainPartyId, out EncounterPartyWritebackState mainPartyState) ||
+                mainPartyState?.PartyBase == null)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "RewardApplyMissingMainParty");
+                return;
+            }
+
+            if (!projection.Ready)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "RewardApplyProjectionNotReady");
+                return;
+            }
+
+            if (projection.UsedCommittedMapEventResults)
+            {
+                rewardApply.SkippedCommittedResults = true;
+                AddWritebackSample(summary.AdjustedSamples, "RewardApply:skipped-committed");
+                return;
+            }
+
+            Hero leaderHero = mainPartyState.PartyBase.LeaderHero;
+            MobileParty mobileParty = mainPartyState.MobileParty ?? mainPartyState.PartyBase.MobileParty;
+
+            try
+            {
+                if (projection.ProjectedGoldGain > 0)
+                {
+                    if (leaderHero != null)
+                    {
+                        GiveGoldAction.ApplyBetweenCharacters(null, leaderHero, projection.ProjectedGoldGain, disableNotification: true);
+                        rewardApply.AppliedGold = true;
+                    }
+                    else if (mobileParty != null && mobileParty.IsPartyTradeActive)
+                    {
+                        mobileParty.PartyTradeGold += projection.ProjectedGoldGain;
+                        rewardApply.AppliedGold = true;
+                    }
+                }
+
+                if (projection.ProjectedGoldLoss > 0)
+                {
+                    if (leaderHero != null)
+                    {
+                        GiveGoldAction.ApplyBetweenCharacters(leaderHero, null, projection.ProjectedGoldLoss, disableNotification: true);
+                        rewardApply.AppliedGold = true;
+                    }
+                    else if (mobileParty != null && mobileParty.IsPartyTradeActive)
+                    {
+                        mobileParty.PartyTradeGold -= projection.ProjectedGoldLoss;
+                        rewardApply.AppliedGold = true;
+                    }
+                }
+
+                rewardApply.GoldDeltaApplied = rewardApply.AppliedGold ? projection.ProjectedGoldDelta : 0;
+
+                if (mobileParty != null && Math.Abs(projection.ProjectedMoraleChange) > 0.001f)
+                {
+                    mobileParty.RecentEventsMorale += projection.ProjectedMoraleChange;
+                    rewardApply.AppliedMorale = true;
+                    rewardApply.MoraleApplied = projection.ProjectedMoraleChange;
+                }
+
+                if (leaderHero != null && projection.ProjectedRenown > 0.001f)
+                {
+                    GainRenownAction.Apply(leaderHero, projection.ProjectedRenown, doNotNotify: true);
+                    rewardApply.AppliedRenown = true;
+                    rewardApply.RenownApplied = projection.ProjectedRenown;
+                }
+
+                if (leaderHero != null && projection.ProjectedInfluence > 0.001f)
+                {
+                    GainKingdomInfluenceAction.ApplyForBattle(leaderHero, projection.ProjectedInfluence);
+                    rewardApply.AppliedInfluence = true;
+                    rewardApply.InfluenceApplied = projection.ProjectedInfluence;
+                }
+            }
+            catch (Exception ex)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "RewardApplyFailed:" + ex.Message);
+                return;
+            }
+
+            rewardApply.Applied =
+                rewardApply.AppliedGold ||
+                rewardApply.AppliedMorale ||
+                rewardApply.AppliedRenown ||
+                rewardApply.AppliedInfluence;
+
+            AddWritebackSample(
+                summary.AdjustedSamples,
+                "RewardApply:" +
+                (rewardApply.Applied ? "applied" : "no-op") +
+                " Gold=" + rewardApply.GoldDeltaApplied +
+                " Morale=" + rewardApply.MoraleApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " Renown=" + rewardApply.RenownApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " Influence=" + rewardApply.InfluenceApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        private static MapEventParty TryFindMapEventParty(MapEventSide side, PartyBase targetParty)
+        {
+            if (side == null || targetParty == null)
+                return null;
+
+            foreach (MapEventParty party in side.Parties)
+            {
+                if (party?.Party == targetParty)
+                    return party;
+            }
+
+            return null;
+        }
+
+        private static bool TryPopulateRewardProjectionFromCachedSnapshot(
+            BattleResultWritebackSummary.RewardProjectionSummary cachedProjection,
+            BattleResultWritebackSummary.RewardProjectionSummary targetProjection)
+        {
+            if (cachedProjection == null || targetProjection == null || !cachedProjection.Ready)
+                return false;
+
+            targetProjection.Ready = true;
+            targetProjection.UsedCommittedMapEventResults = cachedProjection.UsedCommittedMapEventResults;
+            targetProjection.UsedMapEventContribution = cachedProjection.UsedMapEventContribution;
+            targetProjection.MainPartyOnWinnerSide = cachedProjection.MainPartyOnWinnerSide;
+            targetProjection.UsedSnapshotContribution = cachedProjection.UsedSnapshotContribution;
+            targetProjection.Source = "cached-host-aftermath/" + (cachedProjection.Source ?? "unknown");
+            targetProjection.WinnerSide = cachedProjection.WinnerSide;
+            targetProjection.MainPartySide = cachedProjection.MainPartySide;
+            targetProjection.WinnerRenownValue = cachedProjection.WinnerRenownValue;
+            targetProjection.WinnerInfluenceValue = cachedProjection.WinnerInfluenceValue;
+            targetProjection.ContributionShare = cachedProjection.ContributionShare;
+            targetProjection.ProjectedRenown = cachedProjection.ProjectedRenown;
+            targetProjection.ProjectedInfluence = cachedProjection.ProjectedInfluence;
+            targetProjection.ProjectedMoraleChange = cachedProjection.ProjectedMoraleChange;
+            targetProjection.ProjectedGoldGain = cachedProjection.ProjectedGoldGain;
+            targetProjection.ProjectedGoldLoss = cachedProjection.ProjectedGoldLoss;
+            return true;
+        }
+
+        private static bool TryPopulateRewardProjectionFromCommittedMapEventParty(
+            MapEventParty mainPartyMapEventParty,
+            BattleResultWritebackSummary.RewardProjectionSummary projection)
+        {
+            if (mainPartyMapEventParty == null || projection == null)
+                return false;
+
+            bool hasCommittedWinnerRewards =
+                mainPartyMapEventParty.GainedRenown > 0.001f ||
+                mainPartyMapEventParty.GainedInfluence > 0.001f ||
+                mainPartyMapEventParty.PlunderedGold > 0 ||
+                Math.Abs(mainPartyMapEventParty.MoraleChange) > 0.001f;
+
+            bool hasCommittedLoserRewards =
+                mainPartyMapEventParty.GoldLost > 0 ||
+                Math.Abs(mainPartyMapEventParty.MoraleChange) > 0.001f;
+
+            bool hasCommittedAftermath = projection.MainPartyOnWinnerSide
+                ? hasCommittedWinnerRewards
+                : hasCommittedLoserRewards;
+            if (!hasCommittedAftermath)
+                return false;
+
+            projection.UsedCommittedMapEventResults = true;
+            projection.Source = "committed-map-event-party";
+            projection.ProjectedRenown = Math.Max(0f, mainPartyMapEventParty.GainedRenown);
+            projection.ProjectedInfluence = Math.Max(0f, mainPartyMapEventParty.GainedInfluence);
+            projection.ProjectedMoraleChange = mainPartyMapEventParty.MoraleChange;
+            projection.ProjectedGoldGain = Math.Max(0, mainPartyMapEventParty.PlunderedGold);
+            projection.ProjectedGoldLoss = Math.Max(0, mainPartyMapEventParty.GoldLost);
+            return true;
+        }
+
+        private static float TryCalculateWinnerAftermathScale(MapEvent battle, MapEventSide defeatedMapSide)
+        {
+            if (battle == null || defeatedMapSide == null)
+                return 1f;
+
+            try
+            {
+                float defeatedSideStartingStrength = battle.StrengthOfSide[(int)defeatedMapSide.MissionSide];
+                if (defeatedSideStartingStrength <= 0.01f)
+                    return 1f;
+
+                float defeatedSideRemainingStrength = 0f;
+                foreach (MapEventParty defeatedParty in defeatedMapSide.Parties)
+                {
+                    if (defeatedParty?.Party == null)
+                        continue;
+
+                    defeatedSideRemainingStrength += defeatedParty.Party.GetCustomStrength(
+                        defeatedParty.Party.Side,
+                        MapEvent.PowerCalculationContext.PlainBattle);
+                }
+
+                float aftermathScale = Math.Max(0f, defeatedSideStartingStrength - defeatedSideRemainingStrength) / defeatedSideStartingStrength;
+                return Math.Max(0f, Math.Min(1f, aftermathScale));
+            }
+            catch
+            {
+                return 1f;
+            }
+        }
+
         private static CharacterObject TryResolveCharacterObjectFromIds(params string[] ids)
         {
             if (ids == null)
@@ -896,12 +1591,60 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
+        private static SkillObject TryResolveBestCombatSkillObject(CharacterObject character)
+        {
+            if (character == null)
+                return null;
+
+            string[] candidateSkills = { "OneHanded", "TwoHanded", "Polearm", "Bow", "Crossbow", "Throwing" };
+            string bestSkillName = null;
+            int bestSkillValue = -1;
+            foreach (string candidateSkill in candidateSkills)
+            {
+                int candidateValue = TryGetCharacterSkillValue(character, candidateSkill);
+                if (candidateValue <= bestSkillValue)
+                    continue;
+
+                bestSkillValue = candidateValue;
+                bestSkillName = candidateSkill;
+            }
+
+            return TryResolveSkillObject(bestSkillName);
+        }
+
         private static void AddWritebackSample(ICollection<string> samples, string sample, int maxCount = 12)
         {
             if (samples == null || string.IsNullOrWhiteSpace(sample) || samples.Count >= maxCount)
                 return;
 
             samples.Add(sample);
+        }
+
+        private static BattleResultWritebackSummary.RewardProjectionSummary CloneRewardProjectionSummary(
+            BattleResultWritebackSummary.RewardProjectionSummary source)
+        {
+            if (source == null)
+                return null;
+
+            return new BattleResultWritebackSummary.RewardProjectionSummary
+            {
+                Ready = source.Ready,
+                UsedCommittedMapEventResults = source.UsedCommittedMapEventResults,
+                UsedMapEventContribution = source.UsedMapEventContribution,
+                MainPartyOnWinnerSide = source.MainPartyOnWinnerSide,
+                UsedSnapshotContribution = source.UsedSnapshotContribution,
+                Source = source.Source,
+                WinnerSide = source.WinnerSide,
+                MainPartySide = source.MainPartySide,
+                WinnerRenownValue = source.WinnerRenownValue,
+                WinnerInfluenceValue = source.WinnerInfluenceValue,
+                ContributionShare = source.ContributionShare,
+                ProjectedRenown = source.ProjectedRenown,
+                ProjectedInfluence = source.ProjectedInfluence,
+                ProjectedMoraleChange = source.ProjectedMoraleChange,
+                ProjectedGoldGain = source.ProjectedGoldGain,
+                ProjectedGoldLoss = source.ProjectedGoldLoss
+            };
         }
 
         private void TryHandleBattleResultMissionExit()
@@ -928,6 +1671,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             if (string.Equals(_lastMissionExitRequestedBattleResultKey, resultKey, StringComparison.Ordinal))
                 return;
+
+            TryCacheHostAftermathRewardProjection(result, resultKey);
 
             bool encounterPrepared = TryPrepareAuthoritativeEncounterResultBridge(result);
             bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
@@ -968,6 +1713,40 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 "BattleId=" + (result.BattleId ?? "null") +
                 " WinnerSide=" + (result.WinnerSide ?? "none") +
                 " MissionScene=" + SafeMissionSceneName(mission) + ".");
+        }
+
+        private void TryCacheHostAftermathRewardProjection(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            string resultKey)
+        {
+            if (result == null || string.IsNullOrWhiteSpace(resultKey))
+                return;
+
+            try
+            {
+                Dictionary<string, EncounterPartyWritebackState> encounterParties = ResolveEncounterPartyWritebackStates();
+                var summary = new BattleResultWritebackSummary();
+                TryBuildMainPartyRewardProjection(result, encounterParties, summary);
+                if (!summary.RewardProjection.Ready)
+                    return;
+
+                _cachedHostAftermathRewardResultKey = resultKey;
+                _cachedHostAftermathRewardProjection = CloneRewardProjectionSummary(summary.RewardProjection);
+
+                ModLogger.Info(
+                    "BattleDetector: cached host aftermath reward projection before mission exit. " +
+                    "BattleId=" + (result.BattleId ?? "null") +
+                    " WinnerSide=" + (result.WinnerSide ?? "none") +
+                    " Source=" + (summary.RewardProjection.Source ?? "none") +
+                    " GoldDelta=" + summary.RewardProjection.ProjectedGoldDelta +
+                    " Renown=" + summary.RewardProjection.ProjectedRenown.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                    " Influence=" + summary.RewardProjection.ProjectedInfluence.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                    " Morale=" + summary.RewardProjection.ProjectedMoraleChange.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to cache host aftermath reward projection: " + ex.Message);
+            }
         }
 
         private static bool TryPrepareAuthoritativeEncounterResultBridge(CoopBattleResultBridgeFile.BattleResultSnapshot result)
@@ -1043,6 +1822,20 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return BattleState.None;
         }
 
+        private static BattleSideEnum TryResolveWinnerSideEnum(string winnerSide)
+        {
+            if (string.IsNullOrWhiteSpace(winnerSide))
+                return BattleSideEnum.None;
+
+            if (string.Equals(winnerSide, nameof(BattleSideEnum.Attacker), StringComparison.OrdinalIgnoreCase))
+                return BattleSideEnum.Attacker;
+
+            if (string.Equals(winnerSide, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase))
+                return BattleSideEnum.Defender;
+
+            return BattleSideEnum.None;
+        }
+
         private static bool TryRequestLocalMissionExit(Mission mission, string source)
         {
             if (mission == null)
@@ -1109,6 +1902,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _missionEnteredUtc = DateTime.MinValue;
             _lastMissionExitRequestedBattleResultKey = null;
             _lastMissionExitFailedBattleResultKey = null;
+            _cachedHostAftermathRewardResultKey = null;
+            _cachedHostAftermathRewardProjection = null;
             _nextMissionBattleResultPollUtc = DateTime.MinValue;
         }
 

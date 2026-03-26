@@ -5753,6 +5753,7 @@ namespace CoopSpectator.MissionBehaviors
                     attackerState.RoutedInflictedCount++;
             }
 
+            bool matchedExistingCombatEvent = false;
             if (_materializedBattleResultCombatEvents.Count > 0)
             {
                 for (int i = _materializedBattleResultCombatEvents.Count - 1; i >= 0; i--)
@@ -5764,6 +5765,7 @@ namespace CoopSpectator.MissionBehaviors
                     if (!string.Equals(combatEvent.VictimEntryId, entryId, StringComparison.OrdinalIgnoreCase))
                         continue;
 
+                    matchedExistingCombatEvent = true;
                     if (combatEvent.IsFatal)
                         break;
 
@@ -5771,6 +5773,15 @@ namespace CoopSpectator.MissionBehaviors
                     break;
                 }
             }
+
+            TryTrackSyntheticRemovalCombatEvent(
+                affectedAgent,
+                affectorAgent,
+                removedState,
+                entryId,
+                state,
+                attackerState,
+                matchedExistingCombatEvent);
         }
 
         private static MaterializedBattleResultEntryRuntimeState TryGetMaterializedBattleResultEntryByAgent(Agent agent, out string entryId)
@@ -5850,6 +5861,79 @@ namespace CoopSpectator.MissionBehaviors
             catch
             {
                 return string.Empty;
+            }
+        }
+
+        private static void TryTrackSyntheticRemovalCombatEvent(
+            Agent affectedAgent,
+            Agent affectorAgent,
+            string removedState,
+            string victimEntryId,
+            MaterializedBattleResultEntryRuntimeState victimEntry,
+            MaterializedBattleResultEntryRuntimeState attackerEntry,
+            bool matchedExistingCombatEvent)
+        {
+            if (matchedExistingCombatEvent ||
+                affectedAgent == null ||
+                victimEntry == null ||
+                affectorAgent == null ||
+                attackerEntry == null ||
+                _materializedBattleResultCombatEvents.Count >= MaxRecordedBattleResultCombatEvents)
+            {
+                return;
+            }
+
+            bool isFatal = string.Equals(removedState, "Killed", StringComparison.OrdinalIgnoreCase);
+            bool isUnconscious = string.Equals(removedState, "Unconscious", StringComparison.OrdinalIgnoreCase);
+            if (!isFatal && !isUnconscious)
+                return;
+
+            WeaponComponentData attackerWeapon = TryResolveCurrentWeaponComponent(affectorAgent);
+            float syntheticDamage = Math.Max(1f, affectedAgent.HealthLimit);
+            attackerEntry.ScoreHitCount++;
+            attackerEntry.DamageDealt += syntheticDamage;
+            victimEntry.HitsTakenCount++;
+            victimEntry.DamageTaken += syntheticDamage;
+
+            string attackerEntryId;
+            TryGetMaterializedBattleResultEntryByAgent(affectorAgent, out attackerEntryId);
+            ResolveBattleResultCharacterIds(affectorAgent, attackerEntry, out string attackerCharacterId, out string attackerOriginalCharacterId);
+            ResolveBattleResultCharacterIds(affectedAgent, victimEntry, out string victimCharacterId, out string victimOriginalCharacterId);
+
+            _materializedBattleResultCombatEvents.Add(new CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot
+            {
+                AttackerEntryId = attackerEntryId,
+                AttackerSideId = attackerEntry.SideId,
+                AttackerPartyId = attackerEntry.PartyId,
+                AttackerCharacterId = attackerCharacterId,
+                AttackerOriginalCharacterId = attackerOriginalCharacterId,
+                VictimEntryId = victimEntryId,
+                VictimSideId = victimEntry.SideId,
+                VictimPartyId = victimEntry.PartyId,
+                VictimCharacterId = victimCharacterId,
+                VictimOriginalCharacterId = victimOriginalCharacterId,
+                WeaponSkillHint = ResolveCombatEventSkillHint(attackerWeapon, affectorAgent, false),
+                WeaponClassHint = ResolveCombatEventWeaponClassHint(attackerWeapon),
+                IsBlocked = false,
+                IsSiegeEngineHit = false,
+                IsFatal = isFatal,
+                Damage = syntheticDamage,
+                HitDistance = 0f,
+                ShotDifficulty = 0f,
+                MissionTime = affectedAgent.Mission?.CurrentTime ?? 0f
+            });
+        }
+
+        private static WeaponComponentData TryResolveCurrentWeaponComponent(Agent agent)
+        {
+            try
+            {
+                MissionWeapon wieldedWeapon = agent?.WieldedWeapon ?? MissionWeapon.Invalid;
+                return wieldedWeapon.CurrentUsageItem;
+            }
+            catch
+            {
+                return null;
             }
         }
 
