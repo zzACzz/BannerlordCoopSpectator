@@ -16,6 +16,7 @@ namespace CoopSpectator.DedicatedServer.MissionOverrides
         private static MissionGameModels _installedModels;
         private static AgentDecideKilledOrUnconsciousModel _originalModel;
         private static OverrideAgentDecideKilledOrUnconsciousModel _overrideModel;
+        private static string _lastUpdateDiagnosticKey = string.Empty;
 
         public static void UpdateForMission(TaleWorlds.MountAndBlade.Mission mission)
         {
@@ -23,20 +24,43 @@ namespace CoopSpectator.DedicatedServer.MissionOverrides
             {
                 if (!ShouldBeActive(mission))
                 {
+                    LogUpdateDiagnosticOnce(
+                        mission,
+                        "inactive",
+                        "Reason=" + GetInactiveReason(mission));
                     RestoreIfNeeded();
                     return;
                 }
 
                 MissionGameModels missionGameModels = MissionGameModels.Current;
                 if (missionGameModels == null)
+                {
+                    LogUpdateDiagnosticOnce(mission, "models-null", "MissionGameModels.Current=null");
                     return;
+                }
 
                 AgentDecideKilledOrUnconsciousModel currentModel = missionGameModels.AgentDecideKilledOrUnconsciousModel;
                 if (currentModel == null)
+                {
+                    LogUpdateDiagnosticOnce(mission, "model-null", "CurrentModel=null");
                     return;
+                }
 
                 if (ReferenceEquals(_installedModels, missionGameModels) && ReferenceEquals(currentModel, _overrideModel))
+                {
+                    LogUpdateDiagnosticOnce(
+                        mission,
+                        "already-installed",
+                        "Model=" + currentModel.GetType().FullName);
                     return;
+                }
+
+                LogUpdateDiagnosticOnce(
+                    mission,
+                    "install-attempt",
+                    "MissionGameModels=" + missionGameModels.GetType().FullName +
+                    " CurrentModel=" + currentModel.GetType().FullName +
+                    " BackingFieldFound=" + (AgentDecideField != null));
 
                 RestoreIfNeeded();
 
@@ -83,10 +107,45 @@ namespace CoopSpectator.DedicatedServer.MissionOverrides
             if (mission == null || !GameNetwork.IsServer)
                 return false;
 
-            if (mission.GetMissionBehavior<CoopMissionSpawnLogic>() == null)
+            string missionMode = mission.Mode.ToString();
+            if (string.Equals(missionMode, "StartUp", StringComparison.OrdinalIgnoreCase))
                 return false;
 
-            return BattleSnapshotRuntimeState.GetCurrent() != null;
+            return true;
+        }
+
+        private static string GetInactiveReason(TaleWorlds.MountAndBlade.Mission mission)
+        {
+            if (mission == null)
+                return "Mission=null";
+
+            if (!GameNetwork.IsServer)
+                return "GameNetwork.IsServer=false";
+
+            string missionMode = mission.Mode.ToString();
+            if (string.Equals(missionMode, "StartUp", StringComparison.OrdinalIgnoreCase))
+                return "MissionMode=StartUp";
+
+            return "unknown";
+        }
+
+        private static void LogUpdateDiagnosticOnce(TaleWorlds.MountAndBlade.Mission mission, string stage, string details)
+        {
+            string key =
+                (mission?.GetHashCode().ToString() ?? "null") + "|" +
+                (mission?.SceneName ?? "null") + "|" +
+                (stage ?? "none") + "|" +
+                (details ?? string.Empty);
+            if (string.Equals(_lastUpdateDiagnosticKey, key, StringComparison.Ordinal))
+                return;
+
+            _lastUpdateDiagnosticKey = key;
+            ModLogger.Info(
+                "DedicatedKnockoutOutcomeModelOverride: update diagnostics. " +
+                "Mission=" + (mission?.SceneName ?? "null") +
+                " Mode=" + (mission?.Mode.ToString() ?? "null") +
+                " Stage=" + (stage ?? "none") +
+                " Details=" + (details ?? string.Empty) + ".");
         }
 
         private static AgentDecideKilledOrUnconsciousModel GetCurrentModel(MissionGameModels missionGameModels)

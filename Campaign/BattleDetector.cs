@@ -146,6 +146,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 public bool Ready { get; set; }
                 public string Source { get; set; }
+                public string PrisonerSource { get; set; }
                 public int LootMemberCount { get; set; }
                 public int LootPrisonerCount { get; set; }
                 public int LootItemStacks { get; set; }
@@ -153,7 +154,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 public string LootMemberSample { get; set; }
                 public string LootPrisonerSample { get; set; }
                 public string LootItemSample { get; set; }
+                public List<LootTroopEntrySummary> PrisonerEntries { get; } = new List<LootTroopEntrySummary>();
                 public List<LootItemEntrySummary> ItemEntries { get; } = new List<LootItemEntrySummary>();
+            }
+
+            public sealed class LootTroopEntrySummary
+            {
+                public string CharacterId { get; set; }
+                public int Amount { get; set; }
             }
 
             public sealed class LootApplySummary
@@ -162,6 +170,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 public bool Applied { get; set; }
                 public bool SkippedCommittedResults { get; set; }
                 public string Source { get; set; }
+                public int PrisonerStacksApplied { get; set; }
+                public int PrisonerUnitsApplied { get; set; }
                 public int ItemStacksApplied { get; set; }
                 public int ItemUnitsApplied { get; set; }
             }
@@ -473,6 +483,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " Influence=" + writebackSummary.RewardApply.InfluenceApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "]" +
                 " LootAftermath[Ready=" + writebackSummary.LootAftermath.Ready +
                 " Source=" + (writebackSummary.LootAftermath.Source ?? "none") +
+                " PrisonerSource=" + (writebackSummary.LootAftermath.PrisonerSource ?? "none") +
                 " Members=" + writebackSummary.LootAftermath.LootMemberCount +
                 " Prisoners=" + writebackSummary.LootAftermath.LootPrisonerCount +
                 " ItemStacks=" + writebackSummary.LootAftermath.LootItemStacks +
@@ -484,6 +495,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " Applied=" + writebackSummary.LootApply.Applied +
                 " SkippedCommitted=" + writebackSummary.LootApply.SkippedCommittedResults +
                 " Source=" + (writebackSummary.LootApply.Source ?? "none") +
+                " PrisonerStacks=" + writebackSummary.LootApply.PrisonerStacksApplied +
+                " PrisonerUnits=" + writebackSummary.LootApply.PrisonerUnitsApplied +
                 " ItemStacks=" + writebackSummary.LootApply.ItemStacksApplied +
                 " ItemUnits=" + writebackSummary.LootApply.ItemUnitsApplied + "]" +
                 " UnresolvedAggregates=" + writebackSummary.UnresolvedPartyAggregates +
@@ -540,6 +553,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             TryBuildMainPartyRewardProjection(result, encounterParties, summary, cachedRewardProjection);
             TryApplyMainPartyRewardWriteback(encounterParties, summary);
             TryBuildMainPartyLootAftermathAudit(summary, cachedLootAftermath);
+            TryBuildMainPartyPrisonerFallbackFromBattleResult(result, encounterParties, summary);
+            TryApplyMainPartyPrisonerLootWriteback(encounterParties, summary);
             TryApplyMainPartyItemLootWriteback(encounterParties, summary);
             return summary;
         }
@@ -1528,8 +1543,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     return;
 
                 lootSummary.Source = "map-event-party-loot-rosters";
+                lootSummary.PrisonerSource = lootSummary.Source;
                 lootSummary.LootMemberCount = TryCountTroopRosterMembers(mainPartyMapEventParty.RosterToReceiveLootMembers, out string memberSample);
-                lootSummary.LootPrisonerCount = TryCountTroopRosterMembers(mainPartyMapEventParty.RosterToReceiveLootPrisoners, out string prisonerSample);
+                lootSummary.LootPrisonerCount = TryCountTroopRosterMembers(mainPartyMapEventParty.RosterToReceiveLootPrisoners, lootSummary.PrisonerEntries, out string prisonerSample);
                 TryCountItemRoster(mainPartyMapEventParty.RosterToReceiveLootItems, lootSummary.ItemEntries, out int itemStacks, out int itemUnits, out string itemSample);
                 lootSummary.LootItemStacks = itemStacks;
                 lootSummary.LootItemUnits = itemUnits;
@@ -1556,9 +1572,200 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
+        private static void TryBuildMainPartyPrisonerFallbackFromBattleResult(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            IDictionary<string, EncounterPartyWritebackState> encounterParties,
+            BattleResultWritebackSummary summary)
+        {
+            BattleResultWritebackSummary.LootAftermathSummary lootSummary = summary?.LootAftermath;
+            if (result?.Entries == null || lootSummary == null || encounterParties == null)
+                return;
+
+            if (lootSummary.LootPrisonerCount > 0 && lootSummary.PrisonerEntries.Count > 0)
+            {
+                if (string.IsNullOrWhiteSpace(lootSummary.PrisonerSource))
+                    lootSummary.PrisonerSource = lootSummary.Source;
+                return;
+            }
+
+            string mainPartyId = MobileParty.MainParty?.StringId;
+            if (string.IsNullOrWhiteSpace(mainPartyId) ||
+                !encounterParties.TryGetValue(mainPartyId, out EncounterPartyWritebackState mainPartyState) ||
+                mainPartyState?.PartyBase == null)
+            {
+                return;
+            }
+
+            BattleSideEnum winnerSide = TryResolveBattleSideEnumLoose(result.WinnerSide);
+            bool mainPartyOnWinnerSide = false;
+            if (summary?.RewardProjection != null && summary.RewardProjection.Ready)
+            {
+                mainPartyOnWinnerSide = summary.RewardProjection.MainPartyOnWinnerSide;
+            }
+            else
+            {
+                BattleSideEnum playerSide = TryResolveBattleSideEnumLoose(result.PlayerSide);
+                if (winnerSide != BattleSideEnum.None && playerSide != BattleSideEnum.None)
+                {
+                    mainPartyOnWinnerSide = playerSide == winnerSide;
+                }
+                else
+                {
+                    mainPartyOnWinnerSide = mainPartyState.PartyBase.Side == winnerSide;
+                }
+            }
+
+            if (winnerSide == BattleSideEnum.None || !mainPartyOnWinnerSide)
+                return;
+
+            BattleSideEnum defeatedSide = winnerSide.GetOppositeSide();
+            float contributionShare = 1f;
+            if (summary.RewardProjection != null &&
+                summary.RewardProjection.Ready &&
+                summary.RewardProjection.MainPartyOnWinnerSide)
+            {
+                contributionShare = Math.Max(0f, Math.Min(1f, summary.RewardProjection.ContributionShare));
+            }
+
+            var prisonerCountsByCharacterId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var prisonerNamesByCharacterId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            int totalUnconscious = 0;
+
+            foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry in result.Entries.Where(item => item != null && item.UnconsciousCount > 0))
+            {
+                if (TryResolveBattleSideEnumLoose(entry.SideId) != defeatedSide)
+                    continue;
+
+                CharacterObject characterObject = TryResolveCharacterObjectFromIds(
+                    entry.OriginalCharacterId,
+                    entry.CharacterId,
+                    entry.SpawnTemplateId);
+                if (characterObject == null)
+                {
+                    AddWritebackSample(
+                        summary.UnresolvedSamples,
+                        "MissingPrisonerCharacter:" + (entry.OriginalCharacterId ?? entry.CharacterId ?? entry.TroopName ?? "entry"));
+                    continue;
+                }
+
+                if (characterObject.IsHero || string.IsNullOrWhiteSpace(characterObject.StringId))
+                    continue;
+
+                prisonerCountsByCharacterId[characterObject.StringId] =
+                    prisonerCountsByCharacterId.TryGetValue(characterObject.StringId, out int existingCount)
+                        ? existingCount + entry.UnconsciousCount
+                        : entry.UnconsciousCount;
+                prisonerNamesByCharacterId[characterObject.StringId] = characterObject.Name?.ToString() ?? entry.TroopName ?? characterObject.StringId;
+                totalUnconscious += entry.UnconsciousCount;
+            }
+
+            if (prisonerCountsByCharacterId.Count == 0 || totalUnconscious <= 0)
+                return;
+
+            int targetPrisonerCount = totalUnconscious;
+            if (contributionShare < 0.999f)
+            {
+                targetPrisonerCount = Math.Max(
+                    0,
+                    Math.Min(
+                        totalUnconscious,
+                        (int)Math.Round(totalUnconscious * contributionShare, MidpointRounding.AwayFromZero)));
+            }
+
+            if (targetPrisonerCount <= 0)
+                return;
+
+            var allocatedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            int allocatedTotal = 0;
+
+            if (contributionShare >= 0.999f)
+            {
+                foreach (KeyValuePair<string, int> pair in prisonerCountsByCharacterId)
+                {
+                    allocatedCounts[pair.Key] = pair.Value;
+                    allocatedTotal += pair.Value;
+                }
+            }
+            else
+            {
+                var remainders = new List<(string CharacterId, float Remainder, int Count)>();
+                foreach (KeyValuePair<string, int> pair in prisonerCountsByCharacterId)
+                {
+                    float exact = pair.Value * contributionShare;
+                    int baseCount = Math.Max(0, (int)Math.Floor(exact));
+                    if (baseCount > 0)
+                    {
+                        allocatedCounts[pair.Key] = baseCount;
+                        allocatedTotal += baseCount;
+                    }
+
+                    remainders.Add((pair.Key, exact - baseCount, pair.Value));
+                }
+
+                int remainingToAllocate = Math.Max(0, targetPrisonerCount - allocatedTotal);
+                foreach ((string characterId, float _, int count) in remainders
+                             .OrderByDescending(item => item.Remainder)
+                             .ThenByDescending(item => item.Count)
+                             .ThenBy(item => item.CharacterId, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (remainingToAllocate <= 0)
+                        break;
+
+                    int currentAllocated = allocatedCounts.TryGetValue(characterId, out int existingCount) ? existingCount : 0;
+                    if (currentAllocated >= count)
+                        continue;
+
+                    allocatedCounts[characterId] = currentAllocated + 1;
+                    allocatedTotal++;
+                    remainingToAllocate--;
+                }
+            }
+
+            if (allocatedTotal <= 0)
+                return;
+
+            lootSummary.PrisonerEntries.Clear();
+            foreach (KeyValuePair<string, int> pair in allocatedCounts.OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                if (pair.Value <= 0)
+                    continue;
+
+                lootSummary.PrisonerEntries.Add(new BattleResultWritebackSummary.LootTroopEntrySummary
+                {
+                    CharacterId = pair.Key,
+                    Amount = pair.Value
+                });
+            }
+
+            lootSummary.LootPrisonerCount = allocatedTotal;
+            lootSummary.PrisonerSource = "battle-result-unconscious-fallback";
+            lootSummary.Ready = lootSummary.Ready || allocatedTotal > 0;
+            lootSummary.LootPrisonerSample = string.Join(
+                ",",
+                lootSummary.PrisonerEntries.Take(3).Select(entry =>
+                {
+                    prisonerNamesByCharacterId.TryGetValue(entry.CharacterId, out string sampleName);
+                    return (sampleName ?? entry.CharacterId) + "x" + entry.Amount;
+                }));
+
+            AddWritebackSample(
+                summary.AdjustedSamples,
+                "LootAftermath:prisoner-fallback P=" + allocatedTotal +
+                " Share=" + contributionShare.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
         private static int TryCountTroopRosterMembers(TroopRoster roster, out string sample)
         {
+            return TryCountTroopRosterMembers(roster, null, out sample);
+        }
+
+        private static int TryCountTroopRosterMembers(
+            TroopRoster roster,
+            ICollection<BattleResultWritebackSummary.LootTroopEntrySummary> troopEntries,
+            out string sample)
+        {
             sample = null;
+            troopEntries?.Clear();
             if (roster == null)
                 return 0;
 
@@ -1574,6 +1781,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         continue;
 
                     total += number;
+                    troopEntries?.Add(new BattleResultWritebackSummary.LootTroopEntrySummary
+                    {
+                        CharacterId = character.StringId,
+                        Amount = number
+                    });
                     if (parts.Count < 3)
                         parts.Add((character.StringId ?? character.Name?.ToString() ?? "troop") + "x" + number);
                 }
@@ -1724,7 +1936,88 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 summary.AdjustedSamples,
                 "LootApply:" +
                 (lootApply.Applied ? "applied" : "no-op") +
+                " Prisoners=" + lootApply.PrisonerStacksApplied + "/" + lootApply.PrisonerUnitsApplied +
                 " Items=" + lootApply.ItemStacksApplied + "/" + lootApply.ItemUnitsApplied);
+        }
+
+        private static void TryApplyMainPartyPrisonerLootWriteback(
+            IDictionary<string, EncounterPartyWritebackState> encounterParties,
+            BattleResultWritebackSummary summary)
+        {
+            BattleResultWritebackSummary.LootAftermathSummary lootSummary = summary?.LootAftermath;
+            BattleResultWritebackSummary.LootApplySummary lootApply = summary?.LootApply;
+            if (lootSummary == null || lootApply == null || encounterParties == null)
+                return;
+
+            lootApply.Attempted = true;
+            string prisonerSource = !string.IsNullOrWhiteSpace(lootSummary.PrisonerSource)
+                ? lootSummary.PrisonerSource
+                : lootSummary.Source;
+            lootApply.Source = prisonerSource;
+
+            if (!lootSummary.Ready || lootSummary.PrisonerEntries == null || lootSummary.PrisonerEntries.Count == 0 || lootSummary.LootPrisonerCount <= 0)
+                return;
+
+            if (!string.IsNullOrWhiteSpace(prisonerSource) &&
+                !prisonerSource.StartsWith("cached-host-aftermath/", StringComparison.OrdinalIgnoreCase) &&
+                !prisonerSource.StartsWith("battle-result-unconscious-fallback", StringComparison.OrdinalIgnoreCase))
+            {
+                lootApply.SkippedCommittedResults = true;
+                AddWritebackSample(summary.AdjustedSamples, "LootApply:skipped-live-prisoners");
+                return;
+            }
+
+            string mainPartyId = MobileParty.MainParty?.StringId;
+            if (string.IsNullOrWhiteSpace(mainPartyId) ||
+                !encounterParties.TryGetValue(mainPartyId, out EncounterPartyWritebackState mainPartyState))
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "LootApplyMissingMainPartyPrisoners");
+                return;
+            }
+
+            MobileParty targetParty = mainPartyState.MobileParty ?? MobileParty.MainParty;
+            TroopRoster prisonRoster = targetParty?.PrisonRoster;
+            if (prisonRoster == null)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "LootApplyMissingPrisonRoster");
+                return;
+            }
+
+            try
+            {
+                foreach (BattleResultWritebackSummary.LootTroopEntrySummary entry in lootSummary.PrisonerEntries)
+                {
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.CharacterId) || entry.Amount <= 0)
+                        continue;
+
+                    CharacterObject characterObject = null;
+                    try
+                    {
+                        characterObject = MBObjectManager.Instance?.GetObject<CharacterObject>(entry.CharacterId);
+                    }
+                    catch
+                    {
+                        characterObject = null;
+                    }
+
+                    if (characterObject == null)
+                    {
+                        AddWritebackSample(summary.UnresolvedSamples, "MissingLootPrisoner:" + entry.CharacterId);
+                        continue;
+                    }
+
+                    prisonRoster.AddToCounts(characterObject, entry.Amount, false, 0, 0, true, -1);
+                    lootApply.PrisonerStacksApplied++;
+                    lootApply.PrisonerUnitsApplied += entry.Amount;
+                }
+            }
+            catch (Exception ex)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "LootPrisonerApplyFailed:" + ex.Message);
+                return;
+            }
+
+            lootApply.Applied = lootApply.Applied || lootApply.PrisonerUnitsApplied > 0;
         }
 
         private static bool TryPopulateLootAftermathFromCachedSnapshot(
@@ -1736,6 +2029,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             targetLootAftermath.Ready = true;
             targetLootAftermath.Source = "cached-host-aftermath/" + (cachedLootAftermath.Source ?? "unknown");
+            targetLootAftermath.PrisonerSource = string.IsNullOrWhiteSpace(cachedLootAftermath.PrisonerSource)
+                ? targetLootAftermath.Source
+                : "cached-host-aftermath/" + cachedLootAftermath.PrisonerSource;
             targetLootAftermath.LootMemberCount = cachedLootAftermath.LootMemberCount;
             targetLootAftermath.LootPrisonerCount = cachedLootAftermath.LootPrisonerCount;
             targetLootAftermath.LootItemStacks = cachedLootAftermath.LootItemStacks;
@@ -1743,6 +2039,18 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             targetLootAftermath.LootMemberSample = cachedLootAftermath.LootMemberSample;
             targetLootAftermath.LootPrisonerSample = cachedLootAftermath.LootPrisonerSample;
             targetLootAftermath.LootItemSample = cachedLootAftermath.LootItemSample;
+            targetLootAftermath.PrisonerEntries.Clear();
+            foreach (BattleResultWritebackSummary.LootTroopEntrySummary entry in cachedLootAftermath.PrisonerEntries)
+            {
+                if (entry == null || string.IsNullOrWhiteSpace(entry.CharacterId) || entry.Amount <= 0)
+                    continue;
+
+                targetLootAftermath.PrisonerEntries.Add(new BattleResultWritebackSummary.LootTroopEntrySummary
+                {
+                    CharacterId = entry.CharacterId,
+                    Amount = entry.Amount
+                });
+            }
             targetLootAftermath.ItemEntries.Clear();
             foreach (BattleResultWritebackSummary.LootItemEntrySummary entry in cachedLootAftermath.ItemEntries)
             {
@@ -1976,6 +2284,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 Ready = source.Ready,
                 Source = source.Source,
+                PrisonerSource = source.PrisonerSource,
                 LootMemberCount = source.LootMemberCount,
                 LootPrisonerCount = source.LootPrisonerCount,
                 LootItemStacks = source.LootItemStacks,
@@ -1984,6 +2293,18 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 LootPrisonerSample = source.LootPrisonerSample,
                 LootItemSample = source.LootItemSample
             };
+
+            foreach (BattleResultWritebackSummary.LootTroopEntrySummary entry in source.PrisonerEntries)
+            {
+                if (entry == null || string.IsNullOrWhiteSpace(entry.CharacterId) || entry.Amount <= 0)
+                    continue;
+
+                clone.PrisonerEntries.Add(new BattleResultWritebackSummary.LootTroopEntrySummary
+                {
+                    CharacterId = entry.CharacterId,
+                    Amount = entry.Amount
+                });
+            }
 
             foreach (BattleResultWritebackSummary.LootItemEntrySummary entry in source.ItemEntries)
             {
@@ -2027,6 +2348,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             TryCacheHostAftermathRewardProjection(result, resultKey);
             TryCacheHostAftermathLootSummary(result, resultKey);
+            TryInjectMainPartyPrisonerAftermathIntoLiveMapEvent(result);
 
             bool encounterPrepared = TryPrepareAuthoritativeEncounterResultBridge(result);
             bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
@@ -2136,6 +2458,95 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
+        private void TryInjectMainPartyPrisonerAftermathIntoLiveMapEvent(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        {
+            if (result == null)
+                return;
+
+            try
+            {
+                MapEvent battle = PlayerEncounter.Battle;
+                PartyBase mainParty = MobileParty.MainParty?.Party;
+                if (battle == null || mainParty == null)
+                    return;
+
+                MapEventSide mainPartySide = battle.GetMapEventSide(mainParty.Side);
+                MapEventParty mainPartyMapEventParty = TryFindMapEventParty(mainPartySide, mainParty);
+                if (mainPartyMapEventParty == null)
+                    return;
+
+                TroopRoster livePrisonerRoster = mainPartyMapEventParty.RosterToReceiveLootPrisoners;
+                int existingPrisonerCount = TryCountTroopRosterMembers(livePrisonerRoster, out _);
+                if (existingPrisonerCount > 0)
+                {
+                    ModLogger.Info(
+                        "BattleDetector: live prisoner aftermath injection skipped because MapEventParty already has prisoners. " +
+                        "BattleId=" + (result.BattleId ?? "null") +
+                        " Existing=" + existingPrisonerCount + ".");
+                    return;
+                }
+
+                if (livePrisonerRoster == null)
+                {
+                    ModLogger.Info(
+                        "BattleDetector: live prisoner aftermath injection skipped because RosterToReceiveLootPrisoners is null. " +
+                        "BattleId=" + (result.BattleId ?? "null") + ".");
+                    return;
+                }
+
+                Dictionary<string, EncounterPartyWritebackState> encounterParties = ResolveEncounterPartyWritebackStates();
+                var summary = new BattleResultWritebackSummary();
+                TryBuildMainPartyRewardProjection(result, encounterParties, summary);
+                TryBuildMainPartyLootAftermathAudit(summary);
+                TryBuildMainPartyPrisonerFallbackFromBattleResult(result, encounterParties, summary);
+
+                if (summary.LootAftermath.LootPrisonerCount <= 0 ||
+                    summary.LootAftermath.PrisonerEntries == null ||
+                    summary.LootAftermath.PrisonerEntries.Count == 0 ||
+                    !string.Equals(summary.LootAftermath.PrisonerSource, "battle-result-unconscious-fallback", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                int injectedUnits = 0;
+                int injectedStacks = 0;
+                foreach (BattleResultWritebackSummary.LootTroopEntrySummary entry in summary.LootAftermath.PrisonerEntries)
+                {
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.CharacterId) || entry.Amount <= 0)
+                        continue;
+
+                    CharacterObject characterObject = TryResolveCharacterObjectById(entry.CharacterId);
+                    if (characterObject == null)
+                    {
+                        ModLogger.Info(
+                            "BattleDetector: live prisoner aftermath injection missing character. " +
+                            "CharacterId=" + entry.CharacterId + ".");
+                        continue;
+                    }
+
+                    livePrisonerRoster.AddToCounts(characterObject, entry.Amount, false, 0, 0, true, -1);
+                    injectedStacks++;
+                    injectedUnits += entry.Amount;
+                }
+
+                if (injectedUnits <= 0)
+                    return;
+
+                ModLogger.Info(
+                    "BattleDetector: injected live prisoner aftermath into MapEventParty before mission exit. " +
+                    "BattleId=" + (result.BattleId ?? "null") +
+                    " WinnerSide=" + (result.WinnerSide ?? "none") +
+                    " PrisonerStacks=" + injectedStacks +
+                    " PrisonerUnits=" + injectedUnits +
+                    " Sample=" + (summary.LootAftermath.LootPrisonerSample ?? "none") + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to inject live prisoner aftermath: " + ex.Message);
+            }
+        }
+
         private static bool TryPrepareAuthoritativeEncounterResultBridge(CoopBattleResultBridgeFile.BattleResultSnapshot result)
         {
             if (result == null)
@@ -2219,6 +2630,26 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             if (string.Equals(winnerSide, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase))
                 return BattleSideEnum.Defender;
+
+            return BattleSideEnum.None;
+        }
+
+        private static BattleSideEnum TryResolveBattleSideEnumLoose(string sideText)
+        {
+            if (string.IsNullOrWhiteSpace(sideText))
+                return BattleSideEnum.None;
+
+            if (string.Equals(sideText, "attacker", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(sideText, nameof(BattleSideEnum.Attacker), StringComparison.OrdinalIgnoreCase))
+            {
+                return BattleSideEnum.Attacker;
+            }
+
+            if (string.Equals(sideText, "defender", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(sideText, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase))
+            {
+                return BattleSideEnum.Defender;
+            }
 
             return BattleSideEnum.None;
         }
