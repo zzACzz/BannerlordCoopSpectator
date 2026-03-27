@@ -1,0 +1,119 @@
+<Prefab>
+  <Window>
+    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" IsVisible="@IsVisible">
+      <Children>
+        <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="BlankWhiteSquare_9" Color="#000000B0" />
+
+        <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="1120" SuggestedHeight="760" HorizontalAlignment="Center" VerticalAlignment="Center" Sprite="BlankWhiteSquare_9" Color="#111111F2">
+          <Children>
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="28" MarginRight="28" MarginTop="24" MarginBottom="24">
+              <Children>
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPLobby.PlayButton.Text" Brush.FontSize="34" Text="@PanelTitle" />
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="12" Brush="MPEndOfRound.Description" Brush.FontSize="20" Text="@PanelSubtitle" />
+
+                <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="2" MarginTop="20" Sprite="BlankWhiteSquare_9" Color="#7A6A58FF" />
+
+                <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="96" MarginTop="18" Sprite="BlankWhiteSquare_9" Color="#191919F0">
+                  <Children>
+                    <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="18" MarginRight="18" MarginTop="14" MarginBottom="14" StackLayout.LayoutMethod="VerticalBottomToTop">
+                      <Children>
+                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPIntermission.Value.Text" Brush.FontSize="18" Text="@BattlePhaseText" />
+                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="4" Brush="MPIntermission.Value.Text" Brush.FontSize="18" Text="@LifecycleText" />
+                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="4" Brush="MPIntermission.Value.Text" Brush.FontSize="18" Text="@SelectionText" />
+                      </Children>
+                    </ListPanel>
+                  </Children>
+                </Widget>
+
+                <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="300" SuggestedHeight="420" HorizontalAlignment="Left" MarginTop="136" Sprite="BlankWhiteSquare_9" Color="#181818F5">
+                  <Children>
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="18" MarginRight="18" MarginTop="16" Brush="MPLobby.PlayButton.Text" Brush.FontSize="24" Text="Sides" />
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="18" MarginRight="18" MarginTop="48" Brush="MPEndOfRound.Description" Brush.FontSize="16" Text="Choose the battle side first." />
+
+                    <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="18" MarginRight="18" MarginTop="88" DataSource="{Sides}" StackLayout.LayoutMethod="VerticalBottomToTop">
+                      <ItemTemplate>
+                        <ButtonWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="92" MarginBottom="12" DoNotPassEventsToChildren="true" UpdateChildrenStates="true" Command.Click="ExecuteSelect" IsEnabled="@IsEnabled">
+                          <Children>
+                            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="BlankWhiteSquare_9" Color="#232323FF" />
+                            <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="14" MarginRight="14" MarginTop="12" MarginBottom="12" StackLayout.LayoutMethod="VerticalBottomToTop">
+                              <Children>
+                                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPLobby.PlayButton.Text" Brush.FontSize="20" Text="@TitleText" />
+                                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="6" Brush="MPEndOfRound.Description" Brush.FontSize="16" Text="@DetailText" />
+                              </Children>
+                            </ListPanel>
+                          </Children>
+                        </ButtonWidget>
+                      </ItemTemplate>
+                    </ListPanel>
+                  </Children>
+                </Widget>
+
+                <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="736" SuggestedHeight="420" HorizontalAlignment="Right" MarginTop="136" Sprite="BlankWhiteSquare_9" Color="#181818F5">
+                  <Children>
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="18" MarginRight="18" MarginTop="16" Brush="MPLobby.PlayButton.Text" Brush.FontSize="24" Text="Units" />
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="18" MarginRight="18" MarginTop="48" Brush="MPEndOfRound.Description" Brush.FontSize="16" Text="@EmptyUnitsText" IsVisible="@ShowEmptyUnitsText" />
+
+                    <ScrollablePanel WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="328" MarginLeft="18" MarginRight="30" MarginTop="80" ClipRect="UnitClipRect" InnerPanel="UnitClipRect\UnitsPanel" VerticalScrollbar="..\UnitScrollbar" AutoHideScrollBars="true">
+                      <Children>
+                        <Widget Id="UnitClipRect" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" ClipContents="true">
+                          <Children>
+                            <ListPanel Id="UnitsPanel" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" DataSource="{Units}" StackLayout.LayoutMethod="VerticalBottomToTop">
+                              <ItemTemplate>
+                                <ButtonWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="96" MarginBottom="10" DoNotPassEventsToChildren="true" UpdateChildrenStates="true" Command.Click="ExecuteSelect">
+                                  <Children>
+                                    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="BlankWhiteSquare_9" Color="#232323FF" />
+                                    <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="72" HorizontalAlignment="Right" MarginRight="16" MarginTop="18" Brush="MPLobby.PlayButton.Text" Brush.FontSize="20" Text="@CountText" />
+                                    <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="16" MarginRight="96" MarginTop="12" MarginBottom="12" StackLayout.LayoutMethod="VerticalBottomToTop">
+                                      <Children>
+                                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPLobby.PlayButton.Text" Brush.FontSize="20" Text="@TitleText" />
+                                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="6" Brush="MPEndOfRound.Description" Brush.FontSize="16" Text="@DetailText" />
+                                      </Children>
+                                    </ListPanel>
+                                  </Children>
+                                </ButtonWidget>
+                              </ItemTemplate>
+                            </ListPanel>
+                          </Children>
+                        </Widget>
+                      </Children>
+                    </ScrollablePanel>
+
+                    <ScrollbarWidget Id="UnitScrollbar" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="8" SuggestedHeight="328" HorizontalAlignment="Right" MarginRight="18" MarginTop="80" AlignmentAxis="Vertical" Handle="UnitScrollbarHandle" MaxValue="100" MinValue="0">
+                      <Children>
+                        <Widget WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="4" HorizontalAlignment="Center" Sprite="BlankWhiteSquare_9" Color="#5A4033FF" AlphaFactor="0.2" />
+                        <ImageWidget Id="UnitScrollbarHandle" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedHeight="20" SuggestedWidth="8" HorizontalAlignment="Center" Brush="FaceGen.Scrollbar.Handle" />
+                      </Children>
+                    </ScrollbarWidget>
+                  </Children>
+                </Widget>
+
+                <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="84" VerticalAlignment="Bottom" MarginBottom="72">
+                  <Children>
+                    <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="220" SuggestedHeight="58" HorizontalAlignment="Center" PositionXOffset="-120" Brush="WideButton.Flat" DoNotPassEventsToChildren="true" UpdateChildrenStates="true" Command.Click="ExecuteSpawn" IsEnabled="@CanSpawn">
+                      <Children>
+                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" HorizontalAlignment="Center" VerticalAlignment="Center" Brush="MPLobby.PlayButton.Text" Brush.FontSize="20" Text="Spawn" />
+                      </Children>
+                    </ButtonWidget>
+
+                    <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="220" SuggestedHeight="58" HorizontalAlignment="Center" PositionXOffset="120" Brush="WideButton.Flat" DoNotPassEventsToChildren="true" UpdateChildrenStates="true" Command.Click="ExecuteReset" IsEnabled="@CanReset">
+                      <Children>
+                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" HorizontalAlignment="Center" VerticalAlignment="Center" Brush="MPLobby.PlayButton.Text" Brush.FontSize="20" Text="Reset To Selection" />
+                      </Children>
+                    </ButtonWidget>
+                  </Children>
+                </Widget>
+
+                <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="58" VerticalAlignment="Bottom">
+                  <Children>
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPEndOfRound.Description" Brush.FontSize="16" Text="@HintText" />
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="24" Brush="MPEndOfRound.Description" Brush.FontSize="16" Text="@StatusText" />
+                  </Children>
+                </Widget>
+              </Children>
+            </Widget>
+          </Children>
+        </Widget>
+      </Children>
+    </Widget>
+  </Window>
+</Prefab>

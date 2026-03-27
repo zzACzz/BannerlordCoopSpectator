@@ -121,6 +121,12 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static void ClearPendingRequests(string source)
+        {
+            TryDeleteFile(GetSpawnNowRequestFilePath(), source, "spawn-now request");
+            TryDeleteFile(GetForceRespawnableRequestFilePath(), source, "force-respawnable request");
+        }
+
         private static string GetSpawnNowRequestFilePath()
         {
             return Path.Combine(GetCoopFolderPath(), SpawnNowRequestFileName);
@@ -129,6 +135,26 @@ namespace CoopSpectator.Infrastructure
         private static string GetForceRespawnableRequestFilePath()
         {
             return Path.Combine(GetCoopFolderPath(), ForceRespawnableRequestFileName);
+        }
+
+        private static void TryDeleteFile(string path, string source, string label)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                    return;
+
+                File.Delete(path);
+                ModLogger.Info(
+                    "CoopBattleSpawnBridgeFile: cleared " + label + ". " +
+                    "Source=" + (source ?? "unknown"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopBattleSpawnBridgeFile: failed to clear " + label + ": " +
+                    ex.Message);
+            }
         }
 
         private static string GetCoopFolderPath()

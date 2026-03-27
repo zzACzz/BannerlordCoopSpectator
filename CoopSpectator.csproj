@@ -25,6 +25,8 @@
     <BannerlordRootDir Condition="'$(BannerlordRootDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\Mount &amp; Blade II Bannerlord</BannerlordRootDir>
     <!-- Шлях до Win64_Shipping_Client, де лежать DLL гри для компіляції -->
     <BannerlordBinDir>$(BannerlordRootDir)\bin\Win64_Shipping_Client</BannerlordBinDir>
+    <DedicatedServerRootDir Condition="'$(DedicatedServerRootDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\Mount &amp; Blade II Dedicated Server</DedicatedServerRootDir>
+    <BuildDedicatedServerModule Condition="'$(BuildDedicatedServerModule)'==''">true</BuildDedicatedServerModule>
     <!-- Прапорець: чи існує DLL з папки гри (як маркер, що шлях правильний) -->
     <UseGameDlls Condition="Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.dll')">true</UseGameDlls>
     <!-- Якщо маркер не знайдено, використовуємо локальні DLL з репозиторію -->
@@ -32,6 +34,7 @@
 
     <!-- Шлях до клієнтської Multiplayer DLL: спочатку root bin, інакше модуль Multiplayer (Steam-інсталяція має DLL у Modules\Multiplayer\bin\Win64_Shipping_Client). -->
     <BannerlordMultiplayerModuleBinDir>$(BannerlordRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Client</BannerlordMultiplayerModuleBinDir>
+    <BannerlordNativeModuleBinDir>$(BannerlordRootDir)\Modules\Native\bin\Win64_Shipping_Client</BannerlordNativeModuleBinDir>
     <!-- Є саме Multiplayer DLL: root bin, модуль Multiplayer, або копія в корені проєкту — тоді компілюємо GameMode і HAS_GAMEMODE для TdmClone. -->
     <HasGameModeDll Condition="'$(UseGameDlls)'=='true' and Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">true</HasGameModeDll>
     <HasGameModeDll Condition="'$(UseGameDlls)'=='true' and Exists('$(BannerlordMultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">true</HasGameModeDll>
@@ -93,6 +96,18 @@
       <Private>false</Private>
     </Reference>
     <!-- Основний геймплейний API (MBSubModuleBase, Mission, Agent, тощо) -->
+    <Reference Include="TaleWorlds.ScreenSystem">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.ScreenSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.GauntletUI">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.GauntletUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Engine.GauntletUI">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.Engine.GauntletUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="TaleWorlds.MountAndBlade">
       <HintPath>$(BannerlordBinDir)\TaleWorlds.MountAndBlade.dll</HintPath>
       <Private>false</Private>
@@ -109,6 +124,10 @@
     </Reference>
     <Reference Include="TaleWorlds.MountAndBlade.Multiplayer" Condition="!Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll') and Exists('$(BannerlordMultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">
       <HintPath>$(BannerlordMultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade.View" Condition="Exists('$(BannerlordNativeModuleBinDir)\TaleWorlds.MountAndBlade.View.dll')">
+      <HintPath>$(BannerlordNativeModuleBinDir)\TaleWorlds.MountAndBlade.View.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <!-- Campaign API (Campaign, MobileParty, тощо) -->
@@ -166,6 +185,18 @@
       <Private>false</Private>
     </Reference>
     <!-- Основний геймплейний API (MBSubModuleBase, Mission, Agent, тощо) -->
+    <Reference Include="TaleWorlds.ScreenSystem" Condition="Exists('TaleWorlds.ScreenSystem.dll')">
+      <HintPath>TaleWorlds.ScreenSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.GauntletUI" Condition="Exists('TaleWorlds.GauntletUI.dll')">
+      <HintPath>TaleWorlds.GauntletUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Engine.GauntletUI" Condition="Exists('TaleWorlds.Engine.GauntletUI.dll')">
+      <HintPath>TaleWorlds.Engine.GauntletUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="TaleWorlds.MountAndBlade">
       <HintPath>TaleWorlds.MountAndBlade.dll</HintPath>
       <Private>false</Private>
@@ -178,6 +209,10 @@
     <!-- Multiplayer API (fallback: копія з гри bin\Win64_Shipping_Client у корінь проєкту — для збірки з GameMode/TdmClone) -->
     <Reference Include="TaleWorlds.MountAndBlade.Multiplayer" Condition="Exists('TaleWorlds.MountAndBlade.Multiplayer.dll')">
       <HintPath>TaleWorlds.MountAndBlade.Multiplayer.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade.View" Condition="Exists('..\Modules\Native\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.View.dll')">
+      <HintPath>..\Modules\Native\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.View.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <!-- Campaign API (Campaign, MobileParty, тощо) -->
@@ -224,8 +259,20 @@
     <ItemGroup Condition="Exists('$(ProjectDir)Module\CoopSpectator\ModuleData')">
       <_ModuleDataFiles Include="$(ProjectDir)Module\CoopSpectator\ModuleData\**\*" />
     </ItemGroup>
+    <ItemGroup Condition="Exists('$(ProjectDir)Module\CoopSpectator\GUI')">
+      <_GuiFiles Include="$(ProjectDir)Module\CoopSpectator\GUI\**\*" />
+    </ItemGroup>
     <Copy SourceFiles="@(_ModuleDataFiles)" DestinationFolder="$(GameModulesDir)\ModuleData\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('$(ProjectDir)Module\CoopSpectator\ModuleData')" />
+    <Copy SourceFiles="@(_GuiFiles)" DestinationFolder="$(GameModulesDir)\GUI\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('$(ProjectDir)Module\CoopSpectator\GUI')" />
     <Warning Text="[CoopSpectator] Deploy done: CoopSpectator + CoopSpectatorMP (incl. ModuleData) → $(BannerlordRootDir)\Modules. Restart launcher if open." />
+  </Target>
+
+  <Target Name="BuildAndDeployDedicatedModule" AfterTargets="DeployModToGame" Condition="'$(BuildDedicatedServerModule)'=='true' and Exists('$(ProjectDir)DedicatedServer\CoopSpectatorDedicated.csproj')">
+    <MSBuild
+      Projects="$(ProjectDir)DedicatedServer\CoopSpectatorDedicated.csproj"
+      Targets="Build"
+      Properties="Configuration=$(Configuration);Platform=$(Platform);UseDedicatedServerRefs=true;DedicatedServerRootDir=$(DedicatedServerRootDir);BannerlordRootDir=$(BannerlordRootDir)" />
+    <Warning Text="[CoopSpectator] Dedicated deploy done → $(DedicatedServerRootDir)\Modules\CoopSpectatorDedicated. Restart dedicated if running." Condition="Exists('$(DedicatedServerRootDir)')" />
   </Target>
 </Project>
 

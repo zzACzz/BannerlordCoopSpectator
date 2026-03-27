@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using HarmonyLib;
+using CoopSpectator.DedicatedServer.MissionOverrides;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
@@ -43,12 +44,14 @@ namespace CoopSpectator
                 Mission currentMission = Mission.Current;
                 if (currentMission == null)
                 {
+                    DedicatedKnockoutOutcomeModelOverride.RestoreIfNeeded();
                     TryApplyFixedTestCulturesForNextMission();
                     return;
                 }
 
                 _hasAppliedFixedTestCultures = false;
 
+                DedicatedKnockoutOutcomeModelOverride.UpdateForMission(currentMission);
                 CoopMissionSpawnLogic.TryRunDedicatedMissionObserver(currentMission);
             }
             catch (Exception ex)
@@ -137,6 +140,7 @@ namespace CoopSpectator
                 }
                 else
                 {
+                    TryConfigureDedicatedHarmonyRuntimeCompat();
                     TryApplyGameModeOverridePatch();
                     TryApplyMissionStateOpenNewPatches();
                     TryApplyMultiplayerHeroClassOverridePatch();
@@ -193,6 +197,58 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: MissionStateOpenNew patches apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryConfigureDedicatedHarmonyRuntimeCompat()
+        {
+            try
+            {
+                Harmony.DEBUG = false;
+                Harmony.SetSwitch("DMDDebug", false);
+                Harmony.ClearSwitch("DMDDumpTo");
+
+                string[] preferredGeneratorTypes =
+                {
+                    "MonoMod.Utils.DMDEmitMethodBuilderGenerator",
+                    "MonoMod.Utils.DMDEmitDynamicMethodGenerator",
+                    "MonoMod.Utils.DMDCecilGenerator"
+                };
+
+                Type selectedGeneratorType = null;
+                foreach (string generatorTypeName in preferredGeneratorTypes)
+                {
+                    selectedGeneratorType = typeof(Harmony).Assembly.GetType(generatorTypeName, throwOnError: false);
+                    if (selectedGeneratorType != null)
+                    {
+                        Harmony.SetSwitch("DMDType", selectedGeneratorType);
+                        ModLogger.Info("CoopSpectatorDedicated: configured Harmony runtime compat. DMDType=" + generatorTypeName + " DMDDebug=false.");
+                        break;
+                    }
+                }
+
+                if (selectedGeneratorType == null)
+                {
+                    ModLogger.Info("CoopSpectatorDedicated: configured Harmony runtime compat. DMDDebug=false, no preferred DMD generator type was found.");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: Harmony runtime compat configuration failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyDedicatedKnockoutOutcomePatches()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                DedicatedKnockoutOutcomePatches.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: dedicated knockout outcome patch apply failed: " + ex.Message);
             }
         }
 

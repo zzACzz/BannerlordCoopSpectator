@@ -35,35 +35,37 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
         private static IEnumerable<MissionBehavior> CreateBehaviorsForMission(Mission mission)
         {
-            var list = new List<MissionBehavior>();
             bool isServer = GameNetwork.IsServer;
             bool isDedicated = IsDedicatedServerProcess();
+            List<MissionBehavior> list = isServer
+                ? BuildServerMissionBehaviorsForCoopBattle(mission, isDedicated)
+                : BuildClientMissionBehaviorsForCoopBattle(mission, isDedicated);
 
-            list.Add(MissionLobbyComponent.CreateBehavior());
             if (isServer)
-                list.Add(new MissionMultiplayerCoopBattle());
-            list.Add(new MissionMultiplayerCoopBattleClient());
+                ValidateServerStackSanity(list);
+            else
+                ValidateClientStackSanity(list);
 
+            try
+            {
+                ModLogger.Info("CoopBattle CreateBehaviorsForMission count=" + list.Count + ", IsServer=" + isServer + ", isDedicated=" + isDedicated);
+                for (int i = 0; i < list.Count; i++)
+                    ModLogger.Info("  [" + i + "] " + list[i].GetType().FullName);
+            }
+            catch (Exception ex) { ModLogger.Info("CoopBattle behavior list log failed: " + ex.Message); }
+
+            return list;
+        }
+
+        private static List<MissionBehavior> BuildServerMissionBehaviorsForCoopBattle(Mission mission, bool isDedicated)
+        {
+            var list = new List<MissionBehavior>();
+            list.Add(MissionLobbyComponent.CreateBehavior());
+            list.Add(new MissionMultiplayerCoopBattle());
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerAchievementComponent"));
             list.Add(new MultiplayerTimerComponent());
-            MissionBehavior visualSpawnBattle = null;
-            if (isServer)
-                ModLogger.Info("CoopBattle: MultiplayerMissionAgentVisualSpawnComponent skipped on server (client-only type).");
-            else
-                visualSpawnBattle = MissionBehaviorHelpers.TryCreateMissionAgentVisualSpawnComponent();
-            if (isServer || visualSpawnBattle != null)
-            {
-                if (visualSpawnBattle != null)
-                    list.Add(visualSpawnBattle);
-                list.Add(new MissionLobbyEquipmentNetworkComponent());
-            }
-            else
-                ModLogger.Info("CoopBattle client: skip MissionLobbyEquipmentNetworkComponent (MultiplayerMissionAgentVisualSpawnComponent unavailable).");
-            // CoopBattle now uses its own side/troop/spawn contract. Leaving the vanilla
-            // TDM team-select component in the stack keeps the Team Selection/Class Loadout
-            // shell alive as an active overlay over an already spawned player.
-            if (isServer)
-                ModLogger.Info("CoopBattle: MultiplayerTeamSelectComponent skipped (own coop entry flow).");
+            ModLogger.Info("CoopBattle server: MultiplayerMissionAgentVisualSpawnComponent and MissionLobbyEquipmentNetworkComponent skipped (client-only).");
+            ModLogger.Info("CoopBattle server: skipped MultiplayerTeamSelectComponent; custom coop selection overlay owns side/unit selection.");
             AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
@@ -78,26 +80,117 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.EquipmentControllerLeaveLogic"));
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionRecentPlayersComponent"));
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerPreloadHelper"));
-            if (isServer)
+            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionAgentPanicHandler"));
+            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.AgentHumanAILogic"));
+            list.Add(new MissionBehaviorDiagnostic());
+            list.Add(new CoopMissionSpawnLogic());
+            return list;
+        }
+
+        private static List<MissionBehavior> BuildClientMissionBehaviorsForCoopBattle(Mission mission, bool isDedicated)
+        {
+            var list = new List<MissionBehavior>();
+            list.Add(MissionLobbyComponent.CreateBehavior());
+            list.Add(new MissionMultiplayerCoopBattleClient());
+            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerAchievementComponent"));
+            list.Add(new MultiplayerTimerComponent());
+
+            MissionBehavior visualSpawn = MissionBehaviorHelpers.TryCreateMissionAgentVisualSpawnComponent();
+            if (visualSpawn != null)
             {
-                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionAgentPanicHandler"));
-                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.AgentHumanAILogic"));
+                list.Add(visualSpawn);
+                list.Add(new MissionLobbyEquipmentNetworkComponent());
+            }
+            else
+            {
+                ModLogger.Info("CoopBattle client: skip MissionLobbyEquipmentNetworkComponent (MultiplayerMissionAgentVisualSpawnComponent unavailable).");
             }
 
+            ModLogger.Info("CoopBattle client: skipped MultiplayerTeamSelectComponent; custom coop selection overlay will be used instead.");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
+            list.Add(new MultiplayerPollComponent());
+            list.Add(new MultiplayerAdminComponent());
+            if (!isDedicated)
+                list.Add(new MultiplayerGameNotificationsComponent());
+            AddOptional(list, MissionBehaviorHelpers.TryCreateMissionOptionsComponent(mission), "MissionOptionsComponent");
+            if (!isDedicated)
+                list.Add(new MissionScoreboardComponent(new TDMScoreboardData()));
+            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionMatchHistoryComponent"));
+            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.EquipmentControllerLeaveLogic"));
+            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionRecentPlayersComponent"));
+            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerPreloadHelper"));
             list.Add(new MissionBehaviorDiagnostic());
             list.Add(new CoopMissionClientLogic());
-            if (isServer)
-                list.Add(new CoopMissionSpawnLogic());
-
-            try
-            {
-                ModLogger.Info("CoopBattle CreateBehaviorsForMission count=" + list.Count + ", IsServer=" + isServer + ", isDedicated=" + isDedicated);
-                for (int i = 0; i < list.Count; i++)
-                    ModLogger.Info("  [" + i + "] " + list[i].GetType().FullName);
-            }
-            catch (Exception ex) { ModLogger.Info("CoopBattle behavior list log failed: " + ex.Message); }
-
+#if !COOPSPECTATOR_DEDICATED
+            if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
+                list.Add(new CoopSpectator.UI.CoopMissionSelectionView());
+#endif
             return list;
+        }
+
+        private static void ValidateServerStackSanity(List<MissionBehavior> list)
+        {
+            if (list == null)
+                return;
+
+            string[] clientOnlyNames =
+            {
+                nameof(MissionMultiplayerCoopBattleClient),
+                nameof(CoopMissionClientLogic),
+                nameof(MissionLobbyEquipmentNetworkComponent),
+                "MultiplayerMissionAgentVisualSpawnComponent"
+            };
+
+            int removed = 0;
+            for (int i = list.Count - 1; i >= 0; i--)
+            {
+                MissionBehavior behavior = list[i];
+                if (behavior == null)
+                    continue;
+
+                string typeName = behavior.GetType().Name;
+                for (int j = 0; j < clientOnlyNames.Length; j++)
+                {
+                    if (!string.Equals(typeName, clientOnlyNames[j], StringComparison.Ordinal))
+                        continue;
+
+                    list.RemoveAt(i);
+                    removed++;
+                    ModLogger.Info("CoopBattle server validation: removed client-only behavior " + typeName + ".");
+                    break;
+                }
+            }
+
+            if (removed == 0)
+                ModLogger.Info("CoopBattle server validation passed.");
+        }
+
+        private static void ValidateClientStackSanity(List<MissionBehavior> list)
+        {
+            if (list == null)
+                return;
+
+            bool hasVisualSpawn = MissionBehaviorHelpers.ListContainsBehaviorType(list, "MultiplayerMissionAgentVisualSpawnComponent");
+            int removed = 0;
+            for (int i = list.Count - 1; i >= 0; i--)
+            {
+                MissionBehavior behavior = list[i];
+                if (behavior == null)
+                    continue;
+
+                string typeName = behavior.GetType().Name;
+                if (string.Equals(typeName, nameof(MissionLobbyEquipmentNetworkComponent), StringComparison.Ordinal) && !hasVisualSpawn)
+                {
+                    list.RemoveAt(i);
+                    removed++;
+                    ModLogger.Info("CoopBattle client validation: removed MissionLobbyEquipmentNetworkComponent because MultiplayerMissionAgentVisualSpawnComponent is missing.");
+                }
+            }
+
+            if (removed == 0)
+                ModLogger.Info("CoopBattle client validation passed.");
         }
 
         private static void AddIfNotNull(List<MissionBehavior> list, MissionBehavior behavior)

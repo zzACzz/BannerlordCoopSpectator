@@ -48,6 +48,7 @@
     <Compile Include="..\GameMode\MissionBehaviorHelpers.cs" Link="GameMode\MissionBehaviorHelpers.cs" />
     <Compile Include="..\GameMode\MissionBehaviorDiagnostic.cs" Link="GameMode\MissionBehaviorDiagnostic.cs" />
     <Compile Include="..\Mission\CoopMissionBehaviors.cs" Link="Mission\CoopMissionBehaviors.cs" />
+    <Compile Include="Mission\DedicatedKnockoutOutcomeModelOverride.cs" Link="Mission\DedicatedKnockoutOutcomeModelOverride.cs" />
     <Compile Include="..\Campaign\BattleRosterFile.cs" Link="Campaign\BattleRosterFile.cs" />
     <Compile Include="..\Network\Messages\BattleStartMessage.cs" Link="Network\Messages\BattleStartMessage.cs" />
     <Compile Include="..\Infrastructure\ModLogger.cs" Link="Infrastructure\ModLogger.cs" />
@@ -70,6 +71,7 @@
     <Compile Include="..\Infrastructure\ExperimentalFeatures.cs" Link="Infrastructure\ExperimentalFeatures.cs" />
     <Compile Include="..\Infrastructure\CoopGameModeIds.cs" Link="Infrastructure\CoopGameModeIds.cs" />
     <Compile Include="Patches\DedicatedWebPanelPatches.cs" Link="Patches\DedicatedWebPanelPatches.cs" />
+    <Compile Include="Patches\DedicatedKnockoutOutcomePatches.cs" Link="Patches\DedicatedKnockoutOutcomePatches.cs" />
     <Compile Include="Patches\GameModeOverridePatches.cs" Link="Patches\GameModeOverridePatches.cs" />
     <Compile Include="..\Patches\MultiplayerHeroClassOverridePatch.cs" Link="Patches\MultiplayerHeroClassOverridePatch.cs" />
     <Compile Include="..\Patches\MissionStateOpenNewPatches.cs" Link="Patches\MissionStateOpenNewPatches.cs" />

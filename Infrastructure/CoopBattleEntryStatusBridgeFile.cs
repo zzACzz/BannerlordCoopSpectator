@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace CoopSpectator.Infrastructure
 {
@@ -8,6 +9,7 @@ namespace CoopSpectator.Infrastructure
     {
         private const string CoopSpectatorSubFolder = "CoopSpectator";
         private const string StatusFileName = "battle_entry_status.txt";
+        private const char EncodedListSeparator = '|';
 
         public sealed class EntryStatusSnapshot
         {
@@ -47,6 +49,56 @@ namespace CoopSpectator.Infrastructure
             public string DefenderAllowedTroopIds { get; set; }
             public string DefenderAllowedEntryIds { get; set; }
             public DateTime UpdatedUtc { get; set; }
+        }
+
+        public static string SerializeIdList(IEnumerable<string> values)
+        {
+            if (values == null)
+                return string.Empty;
+
+            List<string> encodedValues = values
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => Uri.EscapeDataString(value.Trim()))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            return encodedValues.Count == 0
+                ? string.Empty
+                : string.Join(EncodedListSeparator.ToString(), encodedValues);
+        }
+
+        public static string[] DeserializeIdList(string rawValue)
+        {
+            if (string.IsNullOrWhiteSpace(rawValue))
+                return Array.Empty<string>();
+
+            char[] separators = rawValue.IndexOf(EncodedListSeparator) >= 0
+                ? new[] { EncodedListSeparator }
+                : new[] { ',', ';' };
+
+            List<string> decodedValues = new List<string>();
+            foreach (string rawToken in rawValue.Split(separators, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string token = rawToken?.Trim();
+                if (string.IsNullOrWhiteSpace(token))
+                    continue;
+
+                string decodedToken;
+                try
+                {
+                    decodedToken = Uri.UnescapeDataString(token);
+                }
+                catch
+                {
+                    decodedToken = token;
+                }
+
+                if (!string.IsNullOrWhiteSpace(decodedToken))
+                    decodedValues.Add(decodedToken.Trim());
+            }
+
+            return decodedValues
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
         }
 
         public static void WriteStatus(EntryStatusSnapshot snapshot)

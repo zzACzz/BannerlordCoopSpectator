@@ -1,4 +1,5 @@
 using CoopSpectator.Infrastructure;
+using CoopSpectator.MissionBehaviors;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Multiplayer;
@@ -29,20 +30,38 @@ namespace CoopSpectator.GameMode
         {
             base.OnMissionTick(dt);
 
-            if (_hasInitialized || Mission?.Teams == null)
+            Mission mission = Mission;
+            if (mission?.Teams == null)
                 return;
 
-            _hasInitialized = true;
             if (!GameNetwork.IsServer)
                 return;
 
+            if (!_hasInitialized)
+            {
+                _hasInitialized = true;
+                try
+                {
+                    InitializeTeamsAndMinimalSpawn();
+                    CoopMissionSpawnLogic.RunCoopBattleSpawnOwnerTick(mission, "CoopBattle.OnMissionTick initialize");
+                    CoopMissionSpawnLogic.RunCoopBattlePhaseOwnerTick(mission, "CoopBattle.OnMissionTick initialize");
+                }
+                catch (System.Exception ex)
+                {
+                    ModLogger.Error("CoopBattle server: InitializeTeamsAndMinimalSpawn failed.", ex);
+                }
+
+                return;
+            }
+
             try
             {
-                InitializeTeamsAndMinimalSpawn();
+                CoopMissionSpawnLogic.RunCoopBattleSpawnOwnerTick(mission, "CoopBattle.OnMissionTick");
+                CoopMissionSpawnLogic.RunCoopBattlePhaseOwnerTick(mission, "CoopBattle.OnMissionTick");
             }
             catch (System.Exception ex)
             {
-                ModLogger.Error("CoopBattle server: InitializeTeamsAndMinimalSpawn failed.", ex);
+                ModLogger.Error("CoopBattle server: phase owner tick failed.", ex);
             }
         }
 

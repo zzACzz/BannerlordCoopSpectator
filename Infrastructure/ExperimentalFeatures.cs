@@ -17,5 +17,18 @@ namespace CoopSpectator.Infrastructure
         /// mode, but allow passive diagnostic behaviors to be appended at mission open.
         /// </summary>
         public const bool EnableVanillaTeamDeathmatchDiagnosticsInjection = true;
+
+        /// <summary>
+        /// Replaces the native TDM team/class picker with a custom coop overlay
+        /// that reads and writes the authoritative bridge files directly.
+        /// </summary>
+        public const bool EnableCustomCoopSelectionOverlay = true;
+
+        /// <summary>
+        /// Temporary crash-isolation flag: create the custom mission gauntlet layer
+        /// without loading the CoopSelection movie. This lets us prove whether the
+        /// hard crash is inside LoadMovie/prefab binding or earlier in mission view startup.
+        /// </summary>
+        public const bool EnableCustomCoopSelectionMovieLoad = true;
     }
 }

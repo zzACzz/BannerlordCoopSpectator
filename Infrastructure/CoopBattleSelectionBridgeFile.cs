@@ -104,6 +104,13 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static void ClearAll(string source)
+        {
+            TryDeleteFile(GetSelectSideRequestFilePath(), source, "select-side request");
+            TryDeleteFile(GetSelectTroopRequestFilePath(), source, "select-troop request");
+            TryDeleteFile(GetCurrentSelectionFilePath(), source, "current selection");
+        }
+
         private static bool WriteRequest(string path, string side, string troopOrEntryId, string source)
         {
             try
@@ -180,6 +187,26 @@ namespace CoopSpectator.Infrastructure
         private static string GetCurrentSelectionFilePath()
         {
             return Path.Combine(GetCoopFolderPath(), CurrentSelectionFileName);
+        }
+
+        private static void TryDeleteFile(string path, string source, string label)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                    return;
+
+                File.Delete(path);
+                ModLogger.Info(
+                    "CoopBattleSelectionBridgeFile: cleared " + label + ". " +
+                    "Source=" + (source ?? "unknown"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopBattleSelectionBridgeFile: failed to clear " + label + ": " +
+                    ex.Message);
+            }
         }
 
         private static void UpdateCurrentSelection(string side, string troopOrEntryId, string source)

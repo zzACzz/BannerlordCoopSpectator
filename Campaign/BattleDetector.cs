@@ -1,4 +1,5 @@
 using System; // Підключаємо базові типи .NET (Exception)
+using System.Collections;
 using System.Collections.Generic; // Підключаємо List<> для списків у DTO
 using CoopSpectator.DedicatedHelper; // SendStartMission / SendEndMission до Dedicated Helper (Етап 3b)
 using CoopSpectator.Infrastructure; // Підключаємо логер і UI feedback
@@ -37,6 +38,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private string _lastMissionExitFailedBattleResultKey;
         private string _cachedHostAftermathRewardResultKey;
         private BattleResultWritebackSummary.RewardProjectionSummary _cachedHostAftermathRewardProjection;
+        private string _cachedHostAftermathLootResultKey;
+        private BattleResultWritebackSummary.LootAftermathSummary _cachedHostAftermathLootSummary;
         private DateTime _missionEnteredUtc;
         private DateTime _nextMissionBattleResultPollUtc;
         private DateTime _nextBattleStartAttemptUtc;
@@ -96,6 +99,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
         private sealed class BattleResultWritebackSummary
         {
+            public sealed class LootItemEntrySummary
+            {
+                public string ItemId { get; set; }
+                public int Amount { get; set; }
+            }
+
             public sealed class RewardProjectionSummary
             {
                 public bool Ready { get; set; }
@@ -133,6 +142,30 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 public string Source { get; set; }
             }
 
+            public sealed class LootAftermathSummary
+            {
+                public bool Ready { get; set; }
+                public string Source { get; set; }
+                public int LootMemberCount { get; set; }
+                public int LootPrisonerCount { get; set; }
+                public int LootItemStacks { get; set; }
+                public int LootItemUnits { get; set; }
+                public string LootMemberSample { get; set; }
+                public string LootPrisonerSample { get; set; }
+                public string LootItemSample { get; set; }
+                public List<LootItemEntrySummary> ItemEntries { get; } = new List<LootItemEntrySummary>();
+            }
+
+            public sealed class LootApplySummary
+            {
+                public bool Attempted { get; set; }
+                public bool Applied { get; set; }
+                public bool SkippedCommittedResults { get; set; }
+                public string Source { get; set; }
+                public int ItemStacksApplied { get; set; }
+                public int ItemUnitsApplied { get; set; }
+            }
+
             public int Aggregates { get; set; }
             public int EncounterParties { get; set; }
             public int ResolvedPartyAggregates { get; set; }
@@ -147,6 +180,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public int UnresolvedCombatEvents { get; set; }
             public RewardProjectionSummary RewardProjection { get; } = new RewardProjectionSummary();
             public RewardApplySummary RewardApply { get; } = new RewardApplySummary();
+            public LootAftermathSummary LootAftermath { get; } = new LootAftermathSummary();
+            public LootApplySummary LootApply { get; } = new LootApplySummary();
             public List<string> AdjustedSamples { get; } = new List<string>();
             public List<string> UnresolvedSamples { get; } = new List<string>();
         }
@@ -263,6 +298,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _lastMissionExitFailedBattleResultKey = null;
             _cachedHostAftermathRewardResultKey = null;
             _cachedHostAftermathRewardProjection = null;
+            _cachedHostAftermathLootResultKey = null;
+            _cachedHostAftermathLootSummary = null;
             _nextMissionBattleResultPollUtc = DateTime.MinValue;
             _nextBattleStartAttemptUtc = DateTime.MinValue;
             _nextBattleStartWaitLogUtc = DateTime.MinValue;
@@ -355,6 +392,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     result,
                     string.Equals(_cachedHostAftermathRewardResultKey, resultKey, StringComparison.Ordinal)
                         ? CloneRewardProjectionSummary(_cachedHostAftermathRewardProjection)
+                        : null,
+                    string.Equals(_cachedHostAftermathLootResultKey, resultKey, StringComparison.Ordinal)
+                        ? CloneLootAftermathSummary(_cachedHostAftermathLootSummary)
                         : null);
 
                 int removedTotal = result.Entries?.Sum(entry => entry?.RemovedCount ?? 0) ?? 0;
@@ -431,6 +471,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " Morale=" + writebackSummary.RewardApply.MoraleApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
                 " Renown=" + writebackSummary.RewardApply.RenownApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
                 " Influence=" + writebackSummary.RewardApply.InfluenceApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "]" +
+                " LootAftermath[Ready=" + writebackSummary.LootAftermath.Ready +
+                " Source=" + (writebackSummary.LootAftermath.Source ?? "none") +
+                " Members=" + writebackSummary.LootAftermath.LootMemberCount +
+                " Prisoners=" + writebackSummary.LootAftermath.LootPrisonerCount +
+                " ItemStacks=" + writebackSummary.LootAftermath.LootItemStacks +
+                " ItemUnits=" + writebackSummary.LootAftermath.LootItemUnits +
+                " MemberSample=" + (writebackSummary.LootAftermath.LootMemberSample ?? "none") +
+                " PrisonerSample=" + (writebackSummary.LootAftermath.LootPrisonerSample ?? "none") +
+                " ItemSample=" + (writebackSummary.LootAftermath.LootItemSample ?? "none") + "]" +
+                " LootApply[Attempted=" + writebackSummary.LootApply.Attempted +
+                " Applied=" + writebackSummary.LootApply.Applied +
+                " SkippedCommitted=" + writebackSummary.LootApply.SkippedCommittedResults +
+                " Source=" + (writebackSummary.LootApply.Source ?? "none") +
+                " ItemStacks=" + writebackSummary.LootApply.ItemStacksApplied +
+                " ItemUnits=" + writebackSummary.LootApply.ItemUnitsApplied + "]" +
                 " UnresolvedAggregates=" + writebackSummary.UnresolvedPartyAggregates +
                 " UnresolvedEvents=" + writebackSummary.UnresolvedCombatEvents +
                     " AdjustedSamples=[" + string.Join("; ", writebackSummary.AdjustedSamples) + "]" +
@@ -445,7 +500,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
         private static BattleResultWritebackSummary ApplyBattleResultWriteback(
             CoopBattleResultBridgeFile.BattleResultSnapshot result,
-            BattleResultWritebackSummary.RewardProjectionSummary cachedRewardProjection = null)
+            BattleResultWritebackSummary.RewardProjectionSummary cachedRewardProjection = null,
+            BattleResultWritebackSummary.LootAftermathSummary cachedLootAftermath = null)
         {
             var summary = new BattleResultWritebackSummary();
             if (result?.Entries == null || result.Entries.Count == 0 || TaleWorlds.CampaignSystem.Campaign.Current == null)
@@ -483,6 +539,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             TryApplyMainPartyCombatXpWriteback(result, encounterParties, summary);
             TryBuildMainPartyRewardProjection(result, encounterParties, summary, cachedRewardProjection);
             TryApplyMainPartyRewardWriteback(encounterParties, summary);
+            TryBuildMainPartyLootAftermathAudit(summary, cachedLootAftermath);
+            TryApplyMainPartyItemLootWriteback(encounterParties, summary);
             return summary;
         }
 
@@ -1439,6 +1497,267 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " Influence=" + rewardApply.InfluenceApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
         }
 
+        private static void TryBuildMainPartyLootAftermathAudit(
+            BattleResultWritebackSummary summary,
+            BattleResultWritebackSummary.LootAftermathSummary cachedLootAftermath = null)
+        {
+            BattleResultWritebackSummary.LootAftermathSummary lootSummary = summary?.LootAftermath;
+            if (lootSummary == null)
+                return;
+
+            try
+            {
+                MapEvent battle = PlayerEncounter.Battle;
+                PartyBase mainParty = MobileParty.MainParty?.Party;
+                if (battle == null || mainParty == null)
+                {
+                    if (TryPopulateLootAftermathFromCachedSnapshot(cachedLootAftermath, lootSummary))
+                    {
+                        AddWritebackSample(
+                            summary.AdjustedSamples,
+                            "LootAftermath:cached M=" + lootSummary.LootMemberCount +
+                            " P=" + lootSummary.LootPrisonerCount +
+                            " I=" + lootSummary.LootItemStacks + "/" + lootSummary.LootItemUnits);
+                    }
+                    return;
+                }
+
+                MapEventSide mainPartySide = battle.GetMapEventSide(mainParty.Side);
+                MapEventParty mainPartyMapEventParty = TryFindMapEventParty(mainPartySide, mainParty);
+                if (mainPartyMapEventParty == null)
+                    return;
+
+                lootSummary.Source = "map-event-party-loot-rosters";
+                lootSummary.LootMemberCount = TryCountTroopRosterMembers(mainPartyMapEventParty.RosterToReceiveLootMembers, out string memberSample);
+                lootSummary.LootPrisonerCount = TryCountTroopRosterMembers(mainPartyMapEventParty.RosterToReceiveLootPrisoners, out string prisonerSample);
+                TryCountItemRoster(mainPartyMapEventParty.RosterToReceiveLootItems, lootSummary.ItemEntries, out int itemStacks, out int itemUnits, out string itemSample);
+                lootSummary.LootItemStacks = itemStacks;
+                lootSummary.LootItemUnits = itemUnits;
+                lootSummary.LootMemberSample = memberSample;
+                lootSummary.LootPrisonerSample = prisonerSample;
+                lootSummary.LootItemSample = itemSample;
+                lootSummary.Ready =
+                    lootSummary.LootMemberCount > 0 ||
+                    lootSummary.LootPrisonerCount > 0 ||
+                    lootSummary.LootItemStacks > 0;
+
+                if (lootSummary.Ready)
+                {
+                    AddWritebackSample(
+                        summary.AdjustedSamples,
+                        "LootAftermath:M=" + lootSummary.LootMemberCount +
+                        " P=" + lootSummary.LootPrisonerCount +
+                        " I=" + lootSummary.LootItemStacks + "/" + lootSummary.LootItemUnits);
+                }
+            }
+            catch (Exception ex)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "LootAftermathAuditFailed:" + ex.Message);
+            }
+        }
+
+        private static int TryCountTroopRosterMembers(TroopRoster roster, out string sample)
+        {
+            sample = null;
+            if (roster == null)
+                return 0;
+
+            int total = 0;
+            try
+            {
+                var parts = new List<string>();
+                foreach (TroopRosterElement element in roster.GetTroopRoster())
+                {
+                    CharacterObject character = element.Character;
+                    int number = Math.Max(0, element.Number);
+                    if (character == null || number <= 0)
+                        continue;
+
+                    total += number;
+                    if (parts.Count < 3)
+                        parts.Add((character.StringId ?? character.Name?.ToString() ?? "troop") + "x" + number);
+                }
+
+                if (parts.Count > 0)
+                    sample = string.Join(",", parts);
+            }
+            catch
+            {
+                return total;
+            }
+
+            return total;
+        }
+
+        private static void TryCountItemRoster(
+            object itemRoster,
+            ICollection<BattleResultWritebackSummary.LootItemEntrySummary> itemEntries,
+            out int stackCount,
+            out int unitCount,
+            out string sample)
+        {
+            stackCount = 0;
+            unitCount = 0;
+            sample = null;
+            itemEntries?.Clear();
+
+            IEnumerable enumerable = itemRoster as IEnumerable;
+            if (enumerable == null)
+                return;
+
+            var parts = new List<string>();
+            foreach (object element in enumerable)
+            {
+                if (element == null)
+                    continue;
+
+                int amount = Math.Max(0, TryGetIntProperty(element, "Amount"));
+                if (amount <= 0)
+                    continue;
+
+                object equipmentElement = TryGetPropertyValue(element, "EquipmentElement");
+                string itemId = TryGetEquipmentElementItemId(equipmentElement);
+                if (string.IsNullOrWhiteSpace(itemId))
+                    itemId = TryGetStringId(TryGetPropertyValue(equipmentElement, "Item"));
+                if (string.IsNullOrWhiteSpace(itemId))
+                    itemId = "item";
+
+                stackCount++;
+                unitCount += amount;
+                itemEntries?.Add(new BattleResultWritebackSummary.LootItemEntrySummary
+                {
+                    ItemId = itemId,
+                    Amount = amount
+                });
+                if (parts.Count < 3)
+                    parts.Add(itemId + "x" + amount);
+            }
+
+            if (parts.Count > 0)
+                sample = string.Join(",", parts);
+        }
+
+        private static void TryApplyMainPartyItemLootWriteback(
+            IDictionary<string, EncounterPartyWritebackState> encounterParties,
+            BattleResultWritebackSummary summary)
+        {
+            BattleResultWritebackSummary.LootAftermathSummary lootSummary = summary?.LootAftermath;
+            BattleResultWritebackSummary.LootApplySummary lootApply = summary?.LootApply;
+            if (lootSummary == null || lootApply == null || encounterParties == null)
+                return;
+
+            lootApply.Attempted = true;
+            lootApply.Source = lootSummary.Source;
+
+            string mainPartyId = MobileParty.MainParty?.StringId;
+            if (string.IsNullOrWhiteSpace(mainPartyId) ||
+                !encounterParties.TryGetValue(mainPartyId, out EncounterPartyWritebackState mainPartyState))
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "LootApplyMissingMainParty");
+                return;
+            }
+
+            if (!lootSummary.Ready)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "LootApplyAftermathNotReady");
+                return;
+            }
+
+            if (lootSummary.ItemEntries == null || lootSummary.ItemEntries.Count == 0 || lootSummary.LootItemUnits <= 0)
+            {
+                AddWritebackSample(summary.AdjustedSamples, "LootApply:no-items");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(lootSummary.Source) &&
+                !lootSummary.Source.StartsWith("cached-host-aftermath/", StringComparison.OrdinalIgnoreCase))
+            {
+                lootApply.SkippedCommittedResults = true;
+                AddWritebackSample(summary.AdjustedSamples, "LootApply:skipped-live-map-event");
+                return;
+            }
+
+            MobileParty targetParty = mainPartyState.MobileParty ?? MobileParty.MainParty;
+            ItemRoster itemRoster = targetParty?.ItemRoster;
+            if (itemRoster == null)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "LootApplyMissingItemRoster");
+                return;
+            }
+
+            try
+            {
+                foreach (BattleResultWritebackSummary.LootItemEntrySummary entry in lootSummary.ItemEntries)
+                {
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.ItemId) || entry.Amount <= 0)
+                        continue;
+
+                    ItemObject itemObject = null;
+                    try
+                    {
+                        itemObject = MBObjectManager.Instance?.GetObject<ItemObject>(entry.ItemId);
+                    }
+                    catch
+                    {
+                        itemObject = null;
+                    }
+
+                    if (itemObject == null)
+                    {
+                        AddWritebackSample(summary.UnresolvedSamples, "MissingLootItem:" + entry.ItemId);
+                        continue;
+                    }
+
+                    itemRoster.AddToCounts(itemObject, entry.Amount);
+                    lootApply.ItemStacksApplied++;
+                    lootApply.ItemUnitsApplied += entry.Amount;
+                }
+            }
+            catch (Exception ex)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "LootApplyFailed:" + ex.Message);
+                return;
+            }
+
+            lootApply.Applied = lootApply.ItemUnitsApplied > 0;
+            AddWritebackSample(
+                summary.AdjustedSamples,
+                "LootApply:" +
+                (lootApply.Applied ? "applied" : "no-op") +
+                " Items=" + lootApply.ItemStacksApplied + "/" + lootApply.ItemUnitsApplied);
+        }
+
+        private static bool TryPopulateLootAftermathFromCachedSnapshot(
+            BattleResultWritebackSummary.LootAftermathSummary cachedLootAftermath,
+            BattleResultWritebackSummary.LootAftermathSummary targetLootAftermath)
+        {
+            if (cachedLootAftermath == null || targetLootAftermath == null || !cachedLootAftermath.Ready)
+                return false;
+
+            targetLootAftermath.Ready = true;
+            targetLootAftermath.Source = "cached-host-aftermath/" + (cachedLootAftermath.Source ?? "unknown");
+            targetLootAftermath.LootMemberCount = cachedLootAftermath.LootMemberCount;
+            targetLootAftermath.LootPrisonerCount = cachedLootAftermath.LootPrisonerCount;
+            targetLootAftermath.LootItemStacks = cachedLootAftermath.LootItemStacks;
+            targetLootAftermath.LootItemUnits = cachedLootAftermath.LootItemUnits;
+            targetLootAftermath.LootMemberSample = cachedLootAftermath.LootMemberSample;
+            targetLootAftermath.LootPrisonerSample = cachedLootAftermath.LootPrisonerSample;
+            targetLootAftermath.LootItemSample = cachedLootAftermath.LootItemSample;
+            targetLootAftermath.ItemEntries.Clear();
+            foreach (BattleResultWritebackSummary.LootItemEntrySummary entry in cachedLootAftermath.ItemEntries)
+            {
+                if (entry == null || string.IsNullOrWhiteSpace(entry.ItemId) || entry.Amount <= 0)
+                    continue;
+
+                targetLootAftermath.ItemEntries.Add(new BattleResultWritebackSummary.LootItemEntrySummary
+                {
+                    ItemId = entry.ItemId,
+                    Amount = entry.Amount
+                });
+            }
+            return true;
+        }
+
         private static MapEventParty TryFindMapEventParty(MapEventSide side, PartyBase targetParty)
         {
             if (side == null || targetParty == null)
@@ -1647,6 +1966,40 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             };
         }
 
+        private static BattleResultWritebackSummary.LootAftermathSummary CloneLootAftermathSummary(
+            BattleResultWritebackSummary.LootAftermathSummary source)
+        {
+            if (source == null)
+                return null;
+
+            var clone = new BattleResultWritebackSummary.LootAftermathSummary
+            {
+                Ready = source.Ready,
+                Source = source.Source,
+                LootMemberCount = source.LootMemberCount,
+                LootPrisonerCount = source.LootPrisonerCount,
+                LootItemStacks = source.LootItemStacks,
+                LootItemUnits = source.LootItemUnits,
+                LootMemberSample = source.LootMemberSample,
+                LootPrisonerSample = source.LootPrisonerSample,
+                LootItemSample = source.LootItemSample
+            };
+
+            foreach (BattleResultWritebackSummary.LootItemEntrySummary entry in source.ItemEntries)
+            {
+                if (entry == null || string.IsNullOrWhiteSpace(entry.ItemId) || entry.Amount <= 0)
+                    continue;
+
+                clone.ItemEntries.Add(new BattleResultWritebackSummary.LootItemEntrySummary
+                {
+                    ItemId = entry.ItemId,
+                    Amount = entry.Amount
+                });
+            }
+
+            return clone;
+        }
+
         private void TryHandleBattleResultMissionExit()
         {
             Mission mission = Mission.Current;
@@ -1673,6 +2026,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return;
 
             TryCacheHostAftermathRewardProjection(result, resultKey);
+            TryCacheHostAftermathLootSummary(result, resultKey);
 
             bool encounterPrepared = TryPrepareAuthoritativeEncounterResultBridge(result);
             bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
@@ -1746,6 +2100,39 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             catch (Exception ex)
             {
                 ModLogger.Info("BattleDetector: failed to cache host aftermath reward projection: " + ex.Message);
+            }
+        }
+
+        private void TryCacheHostAftermathLootSummary(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            string resultKey)
+        {
+            if (result == null || string.IsNullOrWhiteSpace(resultKey))
+                return;
+
+            try
+            {
+                var summary = new BattleResultWritebackSummary();
+                TryBuildMainPartyLootAftermathAudit(summary);
+                if (!summary.LootAftermath.Ready)
+                    return;
+
+                _cachedHostAftermathLootResultKey = resultKey;
+                _cachedHostAftermathLootSummary = CloneLootAftermathSummary(summary.LootAftermath);
+
+                ModLogger.Info(
+                    "BattleDetector: cached host aftermath loot summary before mission exit. " +
+                    "BattleId=" + (result.BattleId ?? "null") +
+                    " WinnerSide=" + (result.WinnerSide ?? "none") +
+                    " Source=" + (summary.LootAftermath.Source ?? "none") +
+                    " Members=" + summary.LootAftermath.LootMemberCount +
+                    " Prisoners=" + summary.LootAftermath.LootPrisonerCount +
+                    " ItemStacks=" + summary.LootAftermath.LootItemStacks +
+                    " ItemUnits=" + summary.LootAftermath.LootItemUnits + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to cache host aftermath loot summary: " + ex.Message);
             }
         }
 
@@ -1904,6 +2291,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _lastMissionExitFailedBattleResultKey = null;
             _cachedHostAftermathRewardResultKey = null;
             _cachedHostAftermathRewardProjection = null;
+            _cachedHostAftermathLootResultKey = null;
+            _cachedHostAftermathLootSummary = null;
             _nextMissionBattleResultPollUtc = DateTime.MinValue;
         }
 

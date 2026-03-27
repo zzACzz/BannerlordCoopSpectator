@@ -154,6 +154,13 @@ namespace CoopSpectator.Patches
             {
                 list.Add(new MissionMinimalClientDiagnosticMode());
                 list.Add(new CoopMissionClientLogic());
+#if !COOPSPECTATOR_DEDICATED
+                if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
+                {
+                    list.Add(new CoopSpectator.UI.CoopMissionSelectionView());
+                    ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionSelectionView to wrapped TeamDeathmatch client stack.");
+                }
+#endif
                 ModLogger.Info("MissionStateOpenNewPatches: appended MissionMinimalClientDiagnosticMode to vanilla TeamDeathmatch.");
                 ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionClientLogic to vanilla TeamDeathmatch.");
             }

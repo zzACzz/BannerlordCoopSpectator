@@ -1,6 +1,8 @@
 using System;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.MissionBehaviors;
+using CoopSpectator.UI;
 using HarmonyLib;
 using TaleWorlds.MountAndBlade;
 
@@ -12,6 +14,7 @@ namespace CoopSpectator.Patches
     /// </summary>
     public static class VanillaEntryUiSuppressionPatch
     {
+        private const bool EnableSuppression = true;
         private static string _lastBlockedTeamSelectionKey;
         private static string _lastBlockedClassLoadoutKey;
 
@@ -122,12 +125,25 @@ namespace CoopSpectator.Patches
             out CoopBattleEntryPolicy.ClientSnapshot entryPolicy)
         {
             entryPolicy = null;
+            if (!EnableSuppression)
+                return false;
+
             if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
                 return false;
 
             Mission mission = (instance as MissionBehavior)?.Mission ?? Mission.Current;
             if (mission == null)
                 return false;
+
+            if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay &&
+                (mission.GetMissionBehavior<CoopMissionClientLogic>() != null ||
+                 mission.GetMissionBehavior<CoopMissionSelectionView>() != null))
+            {
+                entryPolicy = CoopBattleEntryPolicy.BuildClientSnapshot(
+                    mission,
+                    CoopBattleSelectionBridgeFile.ReadCurrentSelection());
+                return true;
+            }
 
             CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot selectionBridge = CoopBattleSelectionBridgeFile.ReadCurrentSelection();
             entryPolicy = CoopBattleEntryPolicy.BuildClientSnapshot(mission, selectionBridge);
