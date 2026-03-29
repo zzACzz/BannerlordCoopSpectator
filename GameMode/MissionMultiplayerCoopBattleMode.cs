@@ -1,4 +1,5 @@
 using System;
+using CoopSpectator.Campaign;
 using System.Collections.Generic;
 using CoopSpectator.Infrastructure; // Підключаємо ModLogger для діагностики
 using CoopSpectator.MissionBehaviors; // Етап 3.3: логування spectator/agent/spawn
@@ -14,6 +15,9 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
     /// </summary>
     public sealed class MissionMultiplayerCoopBattleMode : MissionBasedMultiplayerGameMode
     {
+        private static string _lastRequestedRuntimeSceneName;
+        private const string TeamDeathmatchMissionShell = "MultiplayerTeamDeathmatch";
+        private const string BattleMissionShell = "MultiplayerBattle";
         /// <summary>Ідентифікатор режиму (збігається з ім'ям у AddMultiplayerGameMode).</summary>
         public const string GameModeId = "CoopBattle";
 
@@ -25,18 +29,26 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
         /// <summary>Викликається грою при старті MP-місії (і на сервері, і на клієнті). Відкриває місію з ванільною назвою TDM, щоб рушій не падав при create_mission.</summary>
         public override void StartMultiplayerGame(string scene)
         {
+            _lastRequestedRuntimeSceneName = scene ?? string.Empty;
+            bool battleMapRuntime = IsBattleMapSceneName(scene);
+            string missionShell = battleMapRuntime ? BattleMissionShell : TeamDeathmatchMissionShell;
             ModLogger.Info("StartMultiplayerGame CoopBattle called, scene=" + (scene ?? ""));
             if (GameNetwork.IsServer)
                 ModLogger.Info("[CoopSpectator] Server starting mission, GameType=" + GameModeId + " (must match client GetMultiplayerGameMode and multiplayer_strings).");
-            ModLogger.Info("Opening mission CoopBattle, scene=" + (scene ?? "") + ", timestamp=" + DateTime.UtcNow.ToString("o"));
+            ModLogger.Info(
+                "Opening mission CoopBattle, scene=" + (scene ?? "") +
+                ", shell=" + missionShell +
+                ", battleMapRuntime=" + battleMapRuntime +
+                ", timestamp=" + DateTime.UtcNow.ToString("o"));
             MissionInitializerRecord record = new MissionInitializerRecord(scene);
-            MissionState.OpenNew("MultiplayerTeamDeathmatch", record, CreateBehaviorsForMission);
+            MissionState.OpenNew(missionShell, record, CreateBehaviorsForMission);
         }
 
         private static IEnumerable<MissionBehavior> CreateBehaviorsForMission(Mission mission)
         {
             bool isServer = GameNetwork.IsServer;
             bool isDedicated = IsDedicatedServerProcess();
+            string resolvedRuntimeScene = ResolveRuntimeSceneName(mission);
             List<MissionBehavior> list = isServer
                 ? BuildServerMissionBehaviorsForCoopBattle(mission, isDedicated)
                 : BuildClientMissionBehaviorsForCoopBattle(mission, isDedicated);
@@ -48,7 +60,11 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
             try
             {
-                ModLogger.Info("CoopBattle CreateBehaviorsForMission count=" + list.Count + ", IsServer=" + isServer + ", isDedicated=" + isDedicated);
+                ModLogger.Info(
+                    "CoopBattle CreateBehaviorsForMission count=" + list.Count +
+                    ", IsServer=" + isServer +
+                    ", isDedicated=" + isDedicated +
+                    ", ResolvedRuntimeScene=" + (resolvedRuntimeScene ?? "null"));
                 for (int i = 0; i < list.Count; i++)
                     ModLogger.Info("  [" + i + "] " + list[i].GetType().FullName);
             }
@@ -59,29 +75,100 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
         private static List<MissionBehavior> BuildServerMissionBehaviorsForCoopBattle(Mission mission, bool isDedicated)
         {
+            bool minimalBattleMapRuntime = IsSceneAwareBattleMap(mission);
             var list = new List<MissionBehavior>();
-            list.Add(MissionLobbyComponent.CreateBehavior());
+            if (!minimalBattleMapRuntime)
+                list.Add(MissionLobbyComponent.CreateBehavior());
+            else
+            {
+                list.Add(MissionLobbyComponent.CreateBehavior());
+                ModLogger.Info("CoopBattle server: retained MissionLobbyComponent for battle-map runtime while isolating post-AfterStart native crash without MissionScoreboardComponent.");
+            }
+
             list.Add(new MissionMultiplayerCoopBattle());
-            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerAchievementComponent"));
+            if (!minimalBattleMapRuntime)
+                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerAchievementComponent"));
+            else
+                ModLogger.Info("CoopBattle server: skipped MultiplayerAchievementComponent for minimal battle-map runtime.");
+
             list.Add(new MultiplayerTimerComponent());
             ModLogger.Info("CoopBattle server: MultiplayerMissionAgentVisualSpawnComponent and MissionLobbyEquipmentNetworkComponent skipped (client-only).");
-            ModLogger.Info("CoopBattle server: skipped MultiplayerTeamSelectComponent; custom coop selection overlay owns side/unit selection.");
-            AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
-            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
-            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
-            list.Add(new MultiplayerPollComponent());
-            list.Add(new MultiplayerAdminComponent());
-            if (!isDedicated)
+            if (!minimalBattleMapRuntime)
+            {
+                list.Add(new MultiplayerTeamSelectComponent());
+            }
+            else
+            {
+                list.Add(new MultiplayerTeamSelectComponent());
+                ModLogger.Info("CoopBattle server: retained MultiplayerTeamSelectComponent for battle-map native peer-sync compatibility.");
+            }
+
+            if (!minimalBattleMapRuntime)
+            {
+                AddBoundaryBehaviorsForRuntime(list, mission, "server");
+            }
+            else
+            {
+                AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
+                AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
+                AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
+                ModLogger.Info("CoopBattle server: retained boundary behaviors for battle-map native peer-sync compatibility.");
+            }
+
+            if (!minimalBattleMapRuntime)
+            {
+                list.Add(new MultiplayerPollComponent());
+                list.Add(new MultiplayerAdminComponent());
+            }
+            else
+            {
+                list.Add(new MultiplayerPollComponent());
+                list.Add(new MultiplayerAdminComponent());
+                ModLogger.Info("CoopBattle server: retained MultiplayerPollComponent and MultiplayerAdminComponent for battle-map native peer-sync compatibility.");
+            }
+
+            if (!isDedicated && !minimalBattleMapRuntime)
                 list.Add(new MultiplayerGameNotificationsComponent());
+            else if (minimalBattleMapRuntime)
+                ModLogger.Info("CoopBattle server: skipped MultiplayerGameNotificationsComponent for minimal battle-map runtime.");
+
             AddOptional(list, MissionBehaviorHelpers.TryCreateMissionOptionsComponent(mission), "MissionOptionsComponent");
-            if (!isDedicated)
+            if (minimalBattleMapRuntime)
+                ModLogger.Info("CoopBattle server: retained MissionOptionsComponent for battle-map mission-entry bootstrap.");
+
+            if (!isDedicated && !minimalBattleMapRuntime)
+            {
                 list.Add(new MissionScoreboardComponent(new TDMScoreboardData()));
-            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionMatchHistoryComponent"));
-            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.EquipmentControllerLeaveLogic"));
+            }
+            else if (minimalBattleMapRuntime)
+            {
+                MissionBehavior serverScoreboard = MissionBehaviorHelpers.TryCreateMissionScoreboardComponent();
+                AddOptional(list, serverScoreboard, "MissionScoreboardComponent");
+                if (serverScoreboard != null)
+                    ModLogger.Info("CoopBattle server: retained MissionScoreboardComponent for battle-map MissionCustomGameServerComponent.AfterStart compatibility.");
+                else
+                    ModLogger.Info("CoopBattle server: MissionScoreboardComponent unavailable for battle-map runtime; continuing with known crash risk.");
+            }
+
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionRecentPlayersComponent"));
-            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerPreloadHelper"));
-            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionAgentPanicHandler"));
-            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.AgentHumanAILogic"));
+            if (!minimalBattleMapRuntime)
+            {
+                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionMatchHistoryComponent"));
+                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.EquipmentControllerLeaveLogic"));
+                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerPreloadHelper"));
+                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionAgentPanicHandler"));
+                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.AgentHumanAILogic"));
+            }
+            else
+            {
+                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionMatchHistoryComponent"));
+                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.EquipmentControllerLeaveLogic"));
+                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerPreloadHelper"));
+                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionAgentPanicHandler"));
+                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.AgentHumanAILogic"));
+                ModLogger.Info("CoopBattle server: retained recent players, match history, equipment leave logic, preload helper, panic handler, and human AI for battle-map native peer-sync compatibility.");
+            }
+
             list.Add(new MissionBehaviorDiagnostic());
             list.Add(new CoopMissionSpawnLogic());
             return list;
@@ -89,10 +176,17 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
         private static List<MissionBehavior> BuildClientMissionBehaviorsForCoopBattle(Mission mission, bool isDedicated)
         {
+            bool minimalBattleMapRuntime = IsSceneAwareBattleMap(mission);
             var list = new List<MissionBehavior>();
             list.Add(MissionLobbyComponent.CreateBehavior());
+            if (minimalBattleMapRuntime)
+                ModLogger.Info("CoopBattle client: retained MissionLobbyComponent for battle-map mission-entry bootstrap.");
+
             list.Add(new MissionMultiplayerCoopBattleClient());
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerAchievementComponent"));
+            if (minimalBattleMapRuntime)
+                ModLogger.Info("CoopBattle client: retained MultiplayerAchievementComponent for battle-map native bootstrap compatibility.");
+
             list.Add(new MultiplayerTimerComponent());
 
             MissionBehavior visualSpawn = MissionBehaviorHelpers.TryCreateMissionAgentVisualSpawnComponent();
@@ -100,32 +194,88 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             {
                 list.Add(visualSpawn);
                 list.Add(new MissionLobbyEquipmentNetworkComponent());
+                if (minimalBattleMapRuntime)
+                    ModLogger.Info("CoopBattle client: retained visual spawn chain for battle-map native bootstrap compatibility.");
             }
             else
             {
                 ModLogger.Info("CoopBattle client: skip MissionLobbyEquipmentNetworkComponent (MultiplayerMissionAgentVisualSpawnComponent unavailable).");
             }
 
-            ModLogger.Info("CoopBattle client: skipped MultiplayerTeamSelectComponent; custom coop selection overlay will be used instead.");
-            AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
-            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
-            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
-            list.Add(new MultiplayerPollComponent());
-            list.Add(new MultiplayerAdminComponent());
+            if (!minimalBattleMapRuntime)
+            {
+                ModLogger.Info("CoopBattle client: skipped MultiplayerTeamSelectComponent; custom coop selection overlay will be used instead.");
+                AddBoundaryBehaviorsForRuntime(list, mission, "client");
+            }
+            else
+            {
+                list.Add(new MultiplayerTeamSelectComponent());
+                ModLogger.Info("CoopBattle client: retained MultiplayerTeamSelectComponent for battle-map native bootstrap compatibility.");
+                AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
+                AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
+                AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
+                ModLogger.Info("CoopBattle client: retained boundary behaviors for battle-map native bootstrap compatibility.");
+            }
+
+            if (!minimalBattleMapRuntime)
+            {
+                list.Add(new MultiplayerPollComponent());
+                list.Add(new MultiplayerAdminComponent());
+            }
+            else
+            {
+                list.Add(new MultiplayerPollComponent());
+                list.Add(new MultiplayerAdminComponent());
+                ModLogger.Info("CoopBattle client: retained MultiplayerPollComponent and MultiplayerAdminComponent for battle-map native bootstrap compatibility.");
+            }
+
             if (!isDedicated)
                 list.Add(new MultiplayerGameNotificationsComponent());
+            else if (minimalBattleMapRuntime)
+                ModLogger.Info("CoopBattle client: skipped MultiplayerGameNotificationsComponent for minimal battle-map runtime.");
+            if (minimalBattleMapRuntime && !isDedicated)
+                ModLogger.Info("CoopBattle client: retained MultiplayerGameNotificationsComponent for battle-map native bootstrap compatibility.");
+
             AddOptional(list, MissionBehaviorHelpers.TryCreateMissionOptionsComponent(mission), "MissionOptionsComponent");
+            if (minimalBattleMapRuntime)
+                ModLogger.Info("CoopBattle client: retained MissionOptionsComponent for battle-map mission-entry bootstrap.");
+
             if (!isDedicated)
-                list.Add(new MissionScoreboardComponent(new TDMScoreboardData()));
-            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionMatchHistoryComponent"));
-            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.EquipmentControllerLeaveLogic"));
+            {
+                MissionBehavior clientScoreboard = MissionBehaviorHelpers.TryCreateMissionScoreboardComponent();
+                if (clientScoreboard != null)
+                {
+                    list.Add(clientScoreboard);
+                    if (minimalBattleMapRuntime)
+                        ModLogger.Info("CoopBattle client: retained MissionScoreboardComponent for battle-map native bootstrap compatibility.");
+                }
+                else if (minimalBattleMapRuntime)
+                {
+                    ModLogger.Info("CoopBattle client: MissionScoreboardComponent unavailable for battle-map bootstrap; continuing without it.");
+                }
+            }
+
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionRecentPlayersComponent"));
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerPreloadHelper"));
+            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionMatchHistoryComponent"));
+            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.EquipmentControllerLeaveLogic"));
+            if (minimalBattleMapRuntime)
+                ModLogger.Info("CoopBattle client: retained recent players, preload, match history, and equipment leave logic for battle-map native bootstrap compatibility.");
+
             list.Add(new MissionBehaviorDiagnostic());
-            list.Add(new CoopMissionClientLogic());
+            if (!minimalBattleMapRuntime)
+            {
+                list.Add(new CoopMissionClientLogic());
+            }
+            else
+            {
+                ModLogger.Info("CoopBattle client: skipped CoopMissionClientLogic for battle-map crash isolation.");
+            }
 #if !COOPSPECTATOR_DEDICATED
-            if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
+            if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay && !minimalBattleMapRuntime)
                 list.Add(new CoopSpectator.UI.CoopMissionSelectionView());
+            else if (minimalBattleMapRuntime && ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
+                ModLogger.Info("CoopBattle client: skipped custom coop selection overlay for battle-map crash isolation.");
 #endif
             return list;
         }
@@ -165,6 +315,22 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
             if (removed == 0)
                 ModLogger.Info("CoopBattle server validation passed.");
+
+            bool hasCustomServer = MissionBehaviorHelpers.ListContainsBehaviorType(list, "MissionCustomGameServerComponent");
+            bool hasScoreboard = MissionBehaviorHelpers.ListContainsBehaviorType(list, "MissionScoreboardComponent");
+            if (hasCustomServer && !hasScoreboard)
+            {
+                MissionBehavior scoreboard = MissionBehaviorHelpers.TryCreateMissionScoreboardComponent();
+                if (scoreboard != null)
+                {
+                    list.Add(scoreboard);
+                    ModLogger.Error("CoopBattle server validation: MissionScoreboardComponent was missing; added it because MissionCustomGameServerComponent.AfterStart may crash without it.", null);
+                }
+                else
+                {
+                    ModLogger.Error("CoopBattle server validation: MissionScoreboardComponent missing and could not be created. MissionCustomGameServerComponent.AfterStart may crash.", null);
+                }
+            }
         }
 
         private static void ValidateClientStackSanity(List<MissionBehavior> list)
@@ -196,6 +362,66 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
         private static void AddIfNotNull(List<MissionBehavior> list, MissionBehavior behavior)
         {
             if (behavior != null) list.Add(behavior);
+        }
+
+        private static void AddBoundaryBehaviorsForRuntime(List<MissionBehavior> list, Mission mission, string runtimeSide)
+        {
+            if (IsSceneAwareBattleMap(mission))
+            {
+                ModLogger.Info(
+                    "CoopBattle " + (runtimeSide ?? "runtime") +
+                    ": skipped boundary placers for scene-aware battle map runtime. ResolvedScene=" +
+                    (ResolveRuntimeSceneName(mission) ?? "null"));
+                return;
+            }
+
+            AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
+        }
+
+        internal static bool IsBattleMapSceneName(string sceneName)
+        {
+            return !string.IsNullOrWhiteSpace(sceneName)
+                && sceneName.StartsWith("mp_battle_map_", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSceneAwareBattleMap(Mission mission)
+        {
+            string sceneName = ResolveRuntimeSceneName(mission);
+            return sceneName.StartsWith("mp_battle_map_", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ResolveRuntimeSceneName(Mission mission)
+        {
+            string missionSceneName = mission?.SceneName ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(missionSceneName))
+                return missionSceneName;
+
+            if (!string.IsNullOrWhiteSpace(_lastRequestedRuntimeSceneName))
+                return _lastRequestedRuntimeSceneName;
+
+            try
+            {
+                string snapshotSceneName = BattleSnapshotRuntimeState.GetCurrent()?.MultiplayerScene ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(snapshotSceneName))
+                    return snapshotSceneName;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                string rosterSceneName = BattleRosterFileHelper.ReadSnapshot()?.MultiplayerScene ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(rosterSceneName))
+                    return rosterSceneName;
+            }
+            catch
+            {
+            }
+
+            return string.Empty;
         }
 
         /// <summary>Додає опційний behavior; якщо null — лише лог warning, місія продовжує без нього (без винятку).</summary>

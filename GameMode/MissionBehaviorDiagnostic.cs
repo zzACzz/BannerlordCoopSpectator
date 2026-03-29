@@ -34,6 +34,7 @@ namespace CoopSpectator.GameMode
             {
                 ModLogger.Info("MissionBehaviorDiagnostic: " + ex.Message);
             }
+            ModLogger.Info("MissionBehaviorDiagnostic AfterStart EXIT");
         }
     }
 }

@@ -14,11 +14,19 @@ namespace CoopSpectator.Patches
     {
         /// <summary>Наш режим, який повертаємо замість ванільного TDM при запиті "TeamDeathmatch".</summary>
         private static object _teamDeathmatchOverride;
+        /// <summary>Наш режим, який повертаємо замість ванільного Battle при запиті "Battle".</summary>
+        private static object _battleOverride;
 
         /// <summary>Встановити режим для підміни (викликати з SubModule перед/після AddMultiplayerGameMode).</summary>
         public static void SetTeamDeathmatchOverride(object gameMode)
         {
             _teamDeathmatchOverride = gameMode;
+        }
+
+        /// <summary>Встановити режим для підміни офіційного Battle.</summary>
+        public static void SetBattleOverride(object gameMode)
+        {
+            _battleOverride = gameMode;
         }
 
         public static void Apply(Harmony harmony)
@@ -41,7 +49,7 @@ namespace CoopSpectator.Patches
                 }
 
                 harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-                ModLogger.Info("GameModeOverridePatches: GetMultiplayerGameMode postfix applied (TeamDeathmatch -> TdmClone 3+3).");
+                ModLogger.Info("GameModeOverridePatches: GetMultiplayerGameMode postfix applied (TeamDeathmatch/Battle overrides active).");
             }
             catch (System.Exception ex)
             {
@@ -53,11 +61,19 @@ namespace CoopSpectator.Patches
         /// <summary>Після виклику оригіналу: якщо запитували "TeamDeathmatch" і є наш override — повертаємо його.</summary>
         public static void GetMultiplayerGameMode_Postfix(string gameType, ref object __result)
         {
-            if (_teamDeathmatchOverride == null) return;
             if (string.IsNullOrEmpty(gameType)) return;
-            if (!string.Equals(gameType, CoopGameModeIds.OfficialTeamDeathmatch, System.StringComparison.Ordinal)) return;
+            if (string.Equals(gameType, CoopGameModeIds.OfficialTeamDeathmatch, System.StringComparison.Ordinal))
+            {
+                if (_teamDeathmatchOverride != null)
+                    __result = _teamDeathmatchOverride;
+                return;
+            }
 
-            __result = _teamDeathmatchOverride;
+            if (string.Equals(gameType, CoopGameModeIds.OfficialBattle, System.StringComparison.Ordinal))
+            {
+                if (_battleOverride != null)
+                    __result = _battleOverride;
+            }
         }
     }
 }

@@ -5,6 +5,13 @@ namespace CoopSpectator.Network.Messages
     public sealed class BattleStartMessage
     {
         public string MapScene { get; set; }
+        public string WorldMapScene { get; set; }
+        public int MapPatchSceneIndex { get; set; } = -1;
+        public float MapPatchNormalizedX { get; set; }
+        public float MapPatchNormalizedY { get; set; }
+        public string MultiplayerScene { get; set; }
+        public string MultiplayerGameType { get; set; }
+        public string MultiplayerSceneResolverSource { get; set; }
         public float MapX { get; set; }
         public float MapY { get; set; }
         public string PlayerSide { get; set; }
@@ -18,6 +25,13 @@ namespace CoopSpectator.Network.Messages
         public string BattleId { get; set; }
         public string BattleType { get; set; }
         public string MapScene { get; set; }
+        public string WorldMapScene { get; set; }
+        public int MapPatchSceneIndex { get; set; } = -1;
+        public float MapPatchNormalizedX { get; set; }
+        public float MapPatchNormalizedY { get; set; }
+        public string MultiplayerScene { get; set; }
+        public string MultiplayerGameType { get; set; }
+        public string MultiplayerSceneResolverSource { get; set; }
         public string PlayerSide { get; set; }
         public List<BattleSideSnapshotMessage> Sides { get; set; } = new List<BattleSideSnapshotMessage>();
     }

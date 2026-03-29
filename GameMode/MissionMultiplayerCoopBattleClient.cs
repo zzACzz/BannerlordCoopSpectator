@@ -1,30 +1,60 @@
-using TaleWorlds.MountAndBlade; // Підключаємо GameNetwork
-using TaleWorlds.MountAndBlade.Multiplayer; // Підключаємо MissionMultiplayerGameModeBaseClient, MissionRepresentativeBase, MultiplayerGameType
+using CoopSpectator.Infrastructure;
+using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Multiplayer;
 
 namespace CoopSpectator.GameMode
 {
-    /// <summary>
-    /// Клієнтська логіка режиму CoopBattle: обробка мережевих повідомлень і синхронізація з сервером.
-    /// Зараз мінімальний — реалізовані лише обов'язкові abstract-члени; далі додамо хендлери.
-    /// </summary>
     public sealed class MissionMultiplayerCoopBattleClient : MissionMultiplayerGameModeBaseClient
     {
-        /// <summary>Режим не використовує round countdown (простий бій до кінця).</summary>
+        private bool _hasLoggedFirstMissionTick;
+
+        public override void OnBehaviorInitialize()
+        {
+            _hasLoggedFirstMissionTick = false;
+            ModLogger.Info("MissionMultiplayerCoopBattleClient OnBehaviorInitialize. Scene=" + (Mission?.SceneName ?? "null"));
+            base.OnBehaviorInitialize();
+        }
+
+        public override void AfterStart()
+        {
+            ModLogger.Info("MissionMultiplayerCoopBattleClient AfterStart ENTER. Scene=" + (Mission?.SceneName ?? "null") + " GameType=" + GameType);
+            base.AfterStart();
+            ModLogger.Info("MissionMultiplayerCoopBattleClient AfterStart EXIT. Scene=" + (Mission?.SceneName ?? "null") + " GameType=" + GameType);
+        }
+
         public override bool IsGameModeUsingRoundCountdown => false;
 
-        /// <summary>Тип гри — Custom (наш CoopBattle).</summary>
-        public override MultiplayerGameType GameType => MultiplayerGameType.TeamDeathmatch; // Відповідає серверному GetMissionType()
+        public override MultiplayerGameType GameType
+        {
+            get
+            {
+                return MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(Mission?.SceneName)
+                    ? MultiplayerGameType.Battle
+                    : MultiplayerGameType.TeamDeathmatch;
+            }
+        }
 
-        /// <summary>Золото в цьому режимі не використовується.</summary>
         public override bool IsGameModeUsingGold => false;
 
-        /// <summary>Режим не тактичний (звичайний бій, не командирський).</summary>
         public override bool IsGameModeTactical => false;
 
-        /// <summary>Повертає поточну кількість золота (у нас не використовується — 0).</summary>
         public override int GetGoldAmount() => 0;
 
-        /// <summary>Викликається при зміні золота у представника (у нашому режимі нічого не робимо).</summary>
+        public override void OnMissionTick(float dt)
+        {
+            base.OnMissionTick(dt);
+
+            if (_hasLoggedFirstMissionTick)
+                return;
+
+            _hasLoggedFirstMissionTick = true;
+            ModLogger.Info(
+                "MissionMultiplayerCoopBattleClient first mission tick entered. " +
+                "Scene=" + (Mission?.SceneName ?? "null") +
+                " GameType=" + GameType +
+                " Mode=" + (Mission?.Mode.ToString() ?? "null"));
+        }
+
         public override void OnGoldAmountChangedForRepresentative(MissionRepresentativeBase representative, int newAmount)
         {
         }

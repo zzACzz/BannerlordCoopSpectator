@@ -168,17 +168,13 @@ namespace CoopSpectator
 
         private static void TryApplyGameModeOverridePatch()
         {
-            if (!ExperimentalFeatures.EnableTdmCloneExperiment)
-            {
-                ModLogger.Info("[GameModeReg] Stable baseline active: skip TeamDeathmatch override patch.");
-                return;
-            }
-
             try
             {
                 if (_harmony == null)
                     _harmony = new Harmony("com.coopspectator.dedicated");
                 GameModeOverridePatches.Apply(_harmony);
+                if (!ExperimentalFeatures.EnableTdmCloneExperiment)
+                    ModLogger.Info("[GameModeReg] Stable baseline active: TeamDeathmatch override disabled, Battle override remains available.");
             }
             catch (Exception ex)
             {
@@ -305,6 +301,9 @@ namespace CoopSpectator
             {
                 ModLogger.Info("[GameModeReg] add CoopBattle id=" + MissionMultiplayerCoopBattleMode.GameModeId);
                 TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(new MissionMultiplayerCoopBattleMode(MissionMultiplayerCoopBattleMode.GameModeId));
+                var battleOverride = new MissionMultiplayerCoopBattleMode(CoopGameModeIds.OfficialBattle);
+                GameModeOverridePatches.SetBattleOverride(battleOverride);
+                ModLogger.Info("[GameModeReg] Battle override armed via Harmony. GetMultiplayerGameMode(Battle) will return CoopBattle runtime.");
                 ModLogger.Info("[GameModeReg] add CoopTdm id=" + MissionMultiplayerCoopTdmMode.GameModeId);
                 TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(new MissionMultiplayerCoopTdmMode(MissionMultiplayerCoopTdmMode.GameModeId));
                 if (ExperimentalFeatures.EnableTdmCloneExperiment)

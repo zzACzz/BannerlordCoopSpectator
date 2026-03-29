@@ -9,6 +9,9 @@ namespace CoopSpectator.Infrastructure
     /// </summary>
     public static class CoopGameModeIds
     {
+        /// <summary>Чистий coop battle runtime поверх MP bootstrap.</summary>
+        public const string CoopBattle = "CoopBattle";
+
         /// <summary>Поточний робочий режим TDM (клон ванільного TDM).</summary>
         public const string CoopTdm = "CoopTdm";
 
@@ -17,6 +20,9 @@ namespace CoopSpectator.Infrastructure
 
         /// <summary>Офіційне ім'я TDM у конфігу дедика (Captain, TeamDeathmatch, Skirmish, …). Під це ім'я реєструємо нашу логіку (3+3 спавн), щоб GameType TeamDeathmatch у конфігу запускав нашу місію.</summary>
         public const string OfficialTeamDeathmatch = "TeamDeathmatch";
+
+        /// <summary>Офіційне ім'я Battle у конфігу дедика. Для battle-map runtime треба підміняти саме його, а не жити на окремому CoopBattle ID.</summary>
+        public const string OfficialBattle = "Battle";
     }
 
     /// <summary>

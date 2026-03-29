@@ -13,6 +13,7 @@ using System.Linq;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.ComponentInterfaces;
 using TaleWorlds.CampaignSystem.Encounters;
+using TaleWorlds.CampaignSystem.Map;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.Core;
@@ -54,6 +55,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             None = 0,
             AllCampaignTroops = 1,
             LiveHeroes = 2
+        }
+
+        private sealed class CampaignSceneSelectionContext
+        {
+            public string BattleSceneName { get; set; }
+            public string WorldMapSceneName { get; set; }
+            public int MapPatchSceneIndex { get; set; } = -1;
+            public float MapPatchNormalizedX { get; set; }
+            public float MapPatchNormalizedY { get; set; }
+            public string Source { get; set; }
         }
 
         private sealed class EncounterPartyWritebackState
@@ -2866,8 +2877,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             BattleStartMessage message = new BattleStartMessage(); // Створюємо DTO
 
-            // 1) Map scene name (best-effort) // Пояснюємо блок
-            message.MapScene = TryGetMapSceneNameSafe(); // Пишемо назву сцени мапи (або "unknown")
+            // 1) Scene selection context (campaign battle scene + world map wrapper) // Пояснюємо блок
+            CampaignSceneSelectionContext sceneContext = TryBuildCampaignSceneSelectionContextSafe();
+            message.MapScene = sceneContext?.BattleSceneName ?? "unknown";
+            message.WorldMapScene = sceneContext?.WorldMapSceneName ?? "unknown";
+            message.MapPatchSceneIndex = sceneContext?.MapPatchSceneIndex ?? -1;
+            message.MapPatchNormalizedX = sceneContext?.MapPatchNormalizedX ?? 0f;
+            message.MapPatchNormalizedY = sceneContext?.MapPatchNormalizedY ?? 0f;
+            MultiplayerSceneResolution multiplayerSceneResolution = CampaignToMultiplayerSceneResolver.Resolve(message.MapScene);
+            message.MultiplayerScene = multiplayerSceneResolution?.RuntimeScene ?? string.Empty;
+            message.MultiplayerGameType = multiplayerSceneResolution?.RuntimeGameType ?? string.Empty;
+            message.MultiplayerSceneResolverSource = multiplayerSceneResolution?.Source ?? string.Empty;
 
             // 2) Map position (campaign world) // Пояснюємо блок
             float x = 0f; // Дефолтне значення X
@@ -2896,6 +2916,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     : _syntheticRosterMode == SyntheticRosterMode.LiveHeroes
                         ? BuildSyntheticLiveHeroesSnapshot(message.MapScene, message.PlayerSide)
                         : BuildBattleSnapshotSafe(message.MapScene, message.PlayerSide);
+            if (message.Snapshot != null)
+            {
+                message.Snapshot.WorldMapScene = message.WorldMapScene;
+                message.Snapshot.MapPatchSceneIndex = message.MapPatchSceneIndex;
+                message.Snapshot.MapPatchNormalizedX = message.MapPatchNormalizedX;
+                message.Snapshot.MapPatchNormalizedY = message.MapPatchNormalizedY;
+                message.Snapshot.MultiplayerScene = message.MultiplayerScene;
+                message.Snapshot.MultiplayerGameType = message.MultiplayerGameType;
+                message.Snapshot.MultiplayerSceneResolverSource = message.MultiplayerSceneResolverSource;
+            }
             BattleSnapshotRuntimeState.SetCurrent(message.Snapshot, "host-battle-detector");
 
             // 5) Legacy fields for transitional clients/runtime // Пояснюємо блок
@@ -2903,6 +2933,23 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             message.ArmySize = BuildLegacyArmySizeFromSnapshot(message.Snapshot);
             if (message.ArmySize <= 0)
                 message.ArmySize = TryGetArmySizeSafe(); // Записуємо сумарну кількість людей (для UI і тестів)
+
+            ModLogger.Info(
+                "BattleDetector: campaign scene context resolved. " +
+                "BattleScene=" + (message.MapScene ?? "unknown") +
+                " WorldMapScene=" + (message.WorldMapScene ?? "unknown") +
+                " MapPatchSceneIndex=" + message.MapPatchSceneIndex +
+                " MapPatchNormalized=(" + message.MapPatchNormalizedX.ToString("0.###") + ", " + message.MapPatchNormalizedY.ToString("0.###") + ")" +
+                " Source=" + (sceneContext?.Source ?? "unknown") + ".");
+            ModLogger.Info(
+                "BattleDetector: multiplayer runtime scene candidate resolved. " +
+                "CampaignBattleScene=" + (message.MapScene ?? "unknown") +
+                " RuntimeScene=" + (message.MultiplayerScene ?? "unknown") +
+                " RuntimeGameType=" + (message.MultiplayerGameType ?? "unknown") +
+                " Terrain=" + (multiplayerSceneResolution?.Terrain ?? "Unknown") +
+                " ForestDensity=" + (multiplayerSceneResolution?.ForestDensity ?? "Unknown") +
+                " IsNaval=" + (multiplayerSceneResolution?.IsNaval ?? false) +
+                " Source=" + (message.MultiplayerSceneResolverSource ?? "unknown") + ".");
 
             return message; // Повертаємо сформований DTO
         } // Завершуємо блок методу
@@ -4552,6 +4599,136 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return "Unknown"; // Fallback
             } // Завершуємо блок catch
         } // Завершуємо блок методу
+
+        private static CampaignSceneSelectionContext TryBuildCampaignSceneSelectionContextSafe()
+        {
+            var context = new CampaignSceneSelectionContext
+            {
+                BattleSceneName = "unknown",
+                WorldMapSceneName = TryGetMapSceneNameSafe(),
+                Source = "world-map-wrapper-fallback"
+            };
+
+            try
+            {
+                TaleWorlds.CampaignSystem.Campaign campaign = TaleWorlds.CampaignSystem.Campaign.Current;
+                MobileParty mainParty = MobileParty.MainParty;
+                object mapSceneWrapper = campaign?.MapSceneWrapper;
+                SceneModel sceneModel = campaign?.Models?.SceneModel;
+
+                if (campaign == null || mainParty == null)
+                {
+                    context.BattleSceneName = string.IsNullOrWhiteSpace(context.WorldMapSceneName) ? "unknown" : context.WorldMapSceneName;
+                    context.Source = "campaign-or-main-party-missing";
+                    return context;
+                }
+
+                if (mapSceneWrapper == null)
+                {
+                    context.BattleSceneName = string.IsNullOrWhiteSpace(context.WorldMapSceneName) ? "unknown" : context.WorldMapSceneName;
+                    context.Source = "map-scene-wrapper-missing";
+                    return context;
+                }
+
+                MethodInfo getMapPatchAtPosition = mapSceneWrapper.GetType().GetMethod("GetMapPatchAtPosition", BindingFlags.Public | BindingFlags.Instance);
+                if (getMapPatchAtPosition == null)
+                {
+                    context.BattleSceneName = string.IsNullOrWhiteSpace(context.WorldMapSceneName) ? "unknown" : context.WorldMapSceneName;
+                    context.Source = "map-patch-method-missing";
+                    return context;
+                }
+
+                var campaignPosition = new CampaignVec2(mainParty.GetPosition2D, true);
+                object[] mapPatchArgs = { campaignPosition };
+                object mapPatch = getMapPatchAtPosition.Invoke(mapSceneWrapper, mapPatchArgs);
+                if (mapPatch == null)
+                {
+                    context.BattleSceneName = string.IsNullOrWhiteSpace(context.WorldMapSceneName) ? "unknown" : context.WorldMapSceneName;
+                    context.Source = "map-patch-null";
+                    return context;
+                }
+
+                FieldInfo sceneIndexField = mapPatch.GetType().GetField("sceneIndex", BindingFlags.Public | BindingFlags.Instance);
+                if (sceneIndexField != null && sceneIndexField.GetValue(mapPatch) is int mapPatchSceneIndex)
+                    context.MapPatchSceneIndex = mapPatchSceneIndex;
+
+                FieldInfo normalizedCoordinatesField = mapPatch.GetType().GetField("normalizedCoordinates", BindingFlags.Public | BindingFlags.Instance);
+                object normalizedCoordinates = normalizedCoordinatesField != null ? normalizedCoordinatesField.GetValue(mapPatch) : null;
+                float mapPatchNormalizedX;
+                float mapPatchNormalizedY;
+                if (TryReadVec2Components(normalizedCoordinates, out mapPatchNormalizedX, out mapPatchNormalizedY))
+                {
+                    context.MapPatchNormalizedX = mapPatchNormalizedX;
+                    context.MapPatchNormalizedY = mapPatchNormalizedY;
+                }
+
+                if (sceneModel == null)
+                {
+                    context.BattleSceneName = string.IsNullOrWhiteSpace(context.WorldMapSceneName) ? "unknown" : context.WorldMapSceneName;
+                    context.Source = "scene-model-missing";
+                    return context;
+                }
+
+                MethodInfo getBattleSceneForMapPatch = sceneModel.GetType().GetMethod("GetBattleSceneForMapPatch", BindingFlags.Public | BindingFlags.Instance);
+                if (getBattleSceneForMapPatch == null)
+                {
+                    context.BattleSceneName = string.IsNullOrWhiteSpace(context.WorldMapSceneName) ? "unknown" : context.WorldMapSceneName;
+                    context.Source = "scene-model-method-missing";
+                    return context;
+                }
+
+                string battleSceneName = getBattleSceneForMapPatch.Invoke(sceneModel, new[] { mapPatch, (object)false }) as string;
+                if (!string.IsNullOrWhiteSpace(battleSceneName))
+                {
+                    context.BattleSceneName = battleSceneName;
+                    context.Source = "scene-model-map-patch";
+                    return context;
+                }
+
+                context.BattleSceneName = string.IsNullOrWhiteSpace(context.WorldMapSceneName) ? "unknown" : context.WorldMapSceneName;
+                context.Source = "scene-model-empty-fallback";
+                return context;
+            }
+            catch (Exception ex)
+            {
+                context.BattleSceneName = string.IsNullOrWhiteSpace(context.WorldMapSceneName) ? "unknown" : context.WorldMapSceneName;
+                context.Source = "scene-selection-exception";
+                ModLogger.Info("BattleDetector: failed to resolve campaign battle scene via map patch, falling back. " + ex.Message);
+                return context;
+            }
+        }
+
+        private static bool TryReadVec2Components(object vec2Like, out float x, out float y)
+        {
+            x = 0f;
+            y = 0f;
+            if (vec2Like == null)
+                return false;
+
+            try
+            {
+                Type vec2Type = vec2Like.GetType();
+                object rawX = (object)(vec2Type.GetField("x", BindingFlags.Public | BindingFlags.Instance)?.GetValue(vec2Like)
+                    ?? vec2Type.GetProperty("x", BindingFlags.Public | BindingFlags.Instance)?.GetValue(vec2Like, null)
+                    ?? vec2Type.GetProperty("X", BindingFlags.Public | BindingFlags.Instance)?.GetValue(vec2Like, null));
+                object rawY = (object)(vec2Type.GetField("y", BindingFlags.Public | BindingFlags.Instance)?.GetValue(vec2Like)
+                    ?? vec2Type.GetProperty("y", BindingFlags.Public | BindingFlags.Instance)?.GetValue(vec2Like, null)
+                    ?? vec2Type.GetProperty("Y", BindingFlags.Public | BindingFlags.Instance)?.GetValue(vec2Like, null));
+
+                if (rawX == null || rawY == null)
+                    return false;
+
+                x = Convert.ToSingle(rawX);
+                y = Convert.ToSingle(rawY);
+                return true;
+            }
+            catch
+            {
+                x = 0f;
+                y = 0f;
+                return false;
+            }
+        }
 
         private static string GetMissionSafeCharacterId(object characterObject, List<object> rosterCharacters)
         {

@@ -55,6 +55,7 @@
   <Target Name="IncludeGameModeWhenHasMultiplayerDll" BeforeTargets="CoreCompile" Condition="'$(HasGameModeDll)'=='true'">
     <ItemGroup>
       <Compile Include="GameMode\**\*.cs" />
+      <Compile Include="DedicatedServer\Patches\GameModeOverridePatches.cs" />
     </ItemGroup>
   </Target>
 

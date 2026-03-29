@@ -3593,6 +3593,7 @@ namespace CoopSpectator.MissionBehaviors
         private static string _lastLoggedBattleCompletionAuditKey = string.Empty;
         private static DateTime _nextIncompleteBattleSnapshotRefreshUtc;
         private static DateTime _nextIncompleteBattleSnapshotLogUtc;
+        private static DateTime _nextBattleMapStartupDeferLogUtc;
         private static Agent _diagnosticAllowedAgent;
         private const bool EnableFixedMissionCulturesExperiment = true;
         private const string SyntheticAllCampaignTroopsBattleId = "synthetic_all_campaign_troops";
@@ -3914,6 +3915,7 @@ namespace CoopSpectator.MissionBehaviors
         public static string SelectedAllowedEntryId { get; private set; }
         /// <summary>Резолвлений character object для першого дозволеного troop ID. Поки тільки для діагностики.</summary>
         public static BasicCharacterObject SelectedAllowedCharacter { get; private set; }
+        private const string BattleMapStartupBuildMarker = "battle-map-startup-deferral-v1";
 
         public override void AfterStart()
         {
@@ -3923,6 +3925,15 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null) return;
             if (_hasLoggedStart) return;
             _hasLoggedStart = true;
+
+            if (MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                ModLogger.Info("CoopMissionSpawnLogic: battle-map AfterStart using minimal deferred startup path. BuildMarker=" + BattleMapStartupBuildMarker);
+                _timeUntilNextPeerLog = ServerLogIntervalSeconds;
+                ModLogger.Info("CoopMissionSpawnLogic AfterStart EXIT (battle-map deferred). BuildMarker=" + BattleMapStartupBuildMarker);
+                return;
+            }
+
             TryInitializeServerMissionRuntimeState(mission, "CoopMissionSpawnLogic.AfterStart", forceReinitialize: false);
 
             ModLogger.Info("CoopMissionSpawnLogic: server mission entered.");
@@ -3949,6 +3960,7 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, "CoopMissionSpawnLogic.AfterStart", mission);
 
             _timeUntilNextPeerLog = ServerLogIntervalSeconds;
+            ModLogger.Info("CoopMissionSpawnLogic AfterStart EXIT.");
         }
 
         public override void OnMissionTick(float dt)
@@ -4045,6 +4057,7 @@ namespace CoopSpectator.MissionBehaviors
             _lastLoggedBattleCompletionAuditKey = string.Empty;
             _nextIncompleteBattleSnapshotRefreshUtc = DateTime.MinValue;
             _nextIncompleteBattleSnapshotLogUtc = DateTime.MinValue;
+            _nextBattleMapStartupDeferLogUtc = DateTime.MinValue;
             if (ReferenceEquals(_lastServerRuntimeInitializedMission, Mission))
             {
                 _lastServerRuntimeInitializedMission = null;
@@ -4393,6 +4406,7 @@ namespace CoopSpectator.MissionBehaviors
             _lastLoggedBattleCompletionAuditKey = string.Empty;
             _nextIncompleteBattleSnapshotRefreshUtc = DateTime.MinValue;
             _nextIncompleteBattleSnapshotLogUtc = DateTime.MinValue;
+            _nextBattleMapStartupDeferLogUtc = DateTime.MinValue;
             CoopBattleSelectionIntentState.Reset();
             CoopBattleSelectionRequestState.Reset();
             CoopBattleSpawnIntentState.Reset();
@@ -4430,6 +4444,18 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || !GameNetwork.IsServer)
                 return;
 
+            if (ShouldDeferBattleMapStartupRuntime(mission, out string deferReason))
+            {
+                TryConsumeSelectionRequests(mission);
+                TryApplySelectionIntentToPrimaryPeer(mission, source + " deferred-startup");
+                if (applyPreMaterializationPeerNudges)
+                    TryForceAuthoritativePeerTeams(mission, source + " deferred-startup");
+
+                TryWriteEntryStatusSnapshot(mission, source + " deferred-startup");
+                LogBattleMapStartupDeferralIfNeeded(mission, source, deferReason);
+                return;
+            }
+
             if (applyPreMaterializationPeerNudges)
             {
                 TryConsumeSelectionRequests(mission);
@@ -4456,6 +4482,71 @@ namespace CoopSpectator.MissionBehaviors
             TryRefreshMaterializedCombatProfileDrivenStats(mission, source + " tick");
             LogMaterializedEquipmentCoverageSummaryIfNeeded();
             TryWriteEntryStatusSnapshot(mission, source + " tick");
+        }
+
+        private static bool ShouldDeferBattleMapStartupRuntime(Mission mission, out string reason)
+        {
+            reason = string.Empty;
+            if (mission == null || !IsSceneAwareBattleMapRuntime(mission))
+                return false;
+
+            string missionMode = "unknown";
+            float missionTime = -1f;
+            int synchronizedPeerCount = 0;
+
+            try { missionMode = mission.Mode.ToString(); } catch { }
+            try { missionTime = mission.CurrentTime; } catch { }
+
+            if (GameNetwork.NetworkPeers != null)
+            {
+                foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+                {
+                    if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                        continue;
+
+                    synchronizedPeerCount++;
+                }
+            }
+
+            if (string.Equals(missionMode, "StartUp", StringComparison.OrdinalIgnoreCase))
+            {
+                reason =
+                    "MissionMode=" + missionMode +
+                    " MissionTime=" + missionTime.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) +
+                    " SynchronizedPeers=" + synchronizedPeerCount;
+                return true;
+            }
+
+            if (missionTime >= 0f && missionTime < 1.5f)
+            {
+                reason =
+                    "MissionMode=" + missionMode +
+                    " MissionTime=" + missionTime.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) +
+                    " SynchronizedPeers=" + synchronizedPeerCount;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsSceneAwareBattleMapRuntime(Mission mission)
+        {
+            string sceneName = mission?.SceneName ?? string.Empty;
+            return sceneName.StartsWith("mp_battle_map_", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void LogBattleMapStartupDeferralIfNeeded(Mission mission, string source, string reason)
+        {
+            DateTime nowUtc = DateTime.UtcNow;
+            if (nowUtc < _nextBattleMapStartupDeferLogUtc)
+                return;
+
+            _nextBattleMapStartupDeferLogUtc = nowUtc.AddSeconds(2);
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: deferred risky battle-map startup runtime. " +
+                "Mission=" + (mission?.SceneName ?? "null") +
+                " Source=" + (source ?? "unknown") +
+                " Reason=" + (reason ?? "unknown"));
         }
 
         public static void RunCoopBattleSpawnOwnerTick(Mission mission, string source)

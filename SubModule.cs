@@ -41,6 +41,7 @@ namespace CoopSpectator // Використовуємо кореневий names
             TryApplyHarmonyPatches(); // Пробуємо застосувати Harmony патчі (навіть якщо Bannerlord.Harmony мод не встановлений/не увімкнений)
 #if HAS_GAMEMODE
             ModLogger.Info("[CoopSpectator] HAS_GAMEMODE=true (build with TdmClone support).");
+            TryRegisterCoopBattleForClient();
             if (ExperimentalFeatures.EnableTdmCloneExperiment)
                 TryRegisterTdmCloneForClient(); // Реєструємо TdmClone лише коли експериментальний path явно увімкнено.
             else
@@ -52,6 +53,30 @@ namespace CoopSpectator // Використовуємо кореневий names
         } // Завершуємо блок методу
 
 #if HAS_GAMEMODE
+        /// <summary>Реєструємо CoopBattle на звичайному клієнті, щоб InitializeCustomGameMessage з mission=CoopBattle мав локальний game-mode bootstrap.</summary>
+        private static void TryRegisterCoopBattleForClient()
+        {
+            ModLogger.Info("[CoopSpectator] CoopBattle client registration start.");
+            try
+            {
+                if (TaleWorlds.MountAndBlade.Module.CurrentModule != null)
+                {
+                    TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(new MissionMultiplayerCoopBattleMode(MissionMultiplayerCoopBattleMode.GameModeId));
+                    GameModeOverridePatches.SetBattleOverride(new MissionMultiplayerCoopBattleMode(CoopGameModeIds.OfficialBattle));
+                    ModLogger.Info("[CoopSpectator] CoopBattle client registration success (ready for joining CoopBattle custom games).");
+                    ModLogger.Info("[CoopSpectator] Battle override armed on client. GetMultiplayerGameMode(Battle) will return CoopBattle runtime.");
+                }
+                else
+                {
+                    ModLogger.Info("[CoopSpectator] CoopBattle client registration fail: Module.CurrentModule is null.");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("[CoopSpectator] CoopBattle client registration fail: " + ex.Message);
+            }
+        }
+
         /// <summary>Реєструємо TdmClone на клієнті, щоб при Join до сервера з GameType TdmClone гра знайшла наш режим (multiplayer_strings.TdmClone вже є).</summary>
         private static void TryRegisterTdmCloneForClient()
         {
@@ -81,6 +106,7 @@ namespace CoopSpectator // Використовуємо кореневий names
             { // Починаємо блок try
                 var harmony = new Harmony("com.coopspectator.mod"); // Створюємо інстанс Harmony з унікальним Id моду
                 harmony.PatchAll(); // Застосовуємо всі патчі з атрибутами [HarmonyPatch] у цій збірці
+                GameModeOverridePatches.Apply(harmony);
                 // Патч на Lobby Custom Join (127.0.0.1 для тесту на одній машині) — через reflection, бо збірка Lobby може завантажитись пізніше
                 LobbyCustomGameLocalJoinPatch.Apply(harmony);
                 IntermissionVmCrashGuardPatch.Apply(harmony);
