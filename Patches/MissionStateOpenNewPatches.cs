@@ -18,11 +18,13 @@ namespace CoopSpectator.Patches
     public static class MissionStateOpenNewPatches
     {
         private const string OfficialTeamDeathmatchMissionName = "MultiplayerTeamDeathmatch";
+        private const string OfficialBattleMissionName = "MultiplayerBattle";
 
         public static void Apply(Harmony harmony)
         {
             try
             {
+                BattleMapContractDiagnostics.LogMissionStateOpenNewContract("MissionStateOpenNewPatches.Apply");
                 Type missionStateType = typeof(MissionState);
                 MethodInfo openNew = missionStateType
                     .GetMethods(BindingFlags.Public | BindingFlags.Static)
@@ -65,24 +67,42 @@ namespace CoopSpectator.Patches
 
         public static void OpenNew_Prefix(
             string missionName,
-            MissionInitializerRecord rec,
+            ref MissionInitializerRecord rec,
             ref InitializeMissionBehaviorsDelegate handler,
             bool addDefaultMissionBehaviors,
             bool needsMemoryCleanup)
         {
             ModLogger.Info("MissionState.OpenNew ENTER missionName=" + (missionName ?? "") + " (engine will create mission then call behavior factory).");
+            BattleMapContractDiagnostics.LogMissionInitializerRecordState(rec, "MissionState.OpenNew prefix");
+
+            bool isOfficialBattleMission = string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal);
+            bool isCoopBattleFactory = IsCoopBattleBehaviorFactory(handler);
+            if (isOfficialBattleMission && !isCoopBattleFactory)
+            {
+                string runtimeScene = rec.SceneName ?? string.Empty;
+                CampaignMapPatchMissionInit.TryApply(ref rec, runtimeScene, "MissionState.OpenNew Battle");
+            }
+
             if (!ShouldInjectDiagnostics(missionName))
                 return;
 
-            if (IsCoopBattleBehaviorFactory(handler))
+            if (isCoopBattleFactory)
             {
                 ModLogger.Info("MissionState.OpenNew: skip vanilla TeamDeathmatch diagnostic wrapping for CoopBattle custom behavior factory.");
                 return;
             }
 
             InitializeMissionBehaviorsDelegate originalHandler = handler;
-            handler = mission => WrapVanillaTeamDeathmatchBehaviors(mission, originalHandler);
-            ModLogger.Info("MissionState.OpenNew: wrapped TeamDeathmatch behavior handler for passive diagnostics injection.");
+            if (string.Equals(missionName, OfficialTeamDeathmatchMissionName, StringComparison.Ordinal))
+            {
+                handler = mission => WrapVanillaTeamDeathmatchBehaviors(mission, originalHandler);
+                ModLogger.Info("MissionState.OpenNew: wrapped TeamDeathmatch behavior handler for passive diagnostics injection.");
+            }
+            else if (string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal) && GameNetwork.IsClient)
+            {
+                handler = mission => WrapVanillaBattleClientBehaviors(mission, originalHandler);
+                ModLogger.Info("MissionState.OpenNew: wrapped Battle client behavior handler for coop selection overlay injection.");
+            }
         }
 
         public static void OpenNew_Postfix(
@@ -97,9 +117,11 @@ namespace CoopSpectator.Patches
 
         private static bool ShouldInjectDiagnostics(string missionName)
         {
-            return ExperimentalFeatures.EnableVanillaTeamDeathmatchDiagnosticsInjection
-                && !ExperimentalFeatures.EnableTdmCloneExperiment
-                && string.Equals(missionName, OfficialTeamDeathmatchMissionName, StringComparison.Ordinal);
+            if (!ExperimentalFeatures.EnableVanillaTeamDeathmatchDiagnosticsInjection || ExperimentalFeatures.EnableTdmCloneExperiment)
+                return false;
+
+            return string.Equals(missionName, OfficialTeamDeathmatchMissionName, StringComparison.Ordinal)
+                || (GameNetwork.IsClient && string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal));
         }
 
         private static bool IsCoopBattleBehaviorFactory(InitializeMissionBehaviorsDelegate handler)
@@ -170,6 +192,46 @@ namespace CoopSpectator.Patches
             return list;
         }
 
+        private static IEnumerable<MissionBehavior> WrapVanillaBattleClientBehaviors(
+            Mission mission,
+            InitializeMissionBehaviorsDelegate originalHandler)
+        {
+            List<MissionBehavior> list = originalHandler != null
+                ? new List<MissionBehavior>(originalHandler(mission) ?? Enumerable.Empty<MissionBehavior>())
+                : new List<MissionBehavior>();
+            bool battleMapRuntime = MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission?.SceneName ?? string.Empty);
+
+            LogWrappedBehaviorStack("battle-before-removal", list);
+
+            int removedEntryUiCount = list.RemoveAll(ShouldRemoveVanillaEntryBehavior);
+            if (removedEntryUiCount > 0)
+                ModLogger.Info("MissionStateOpenNewPatches: removed vanilla entry gauntlet behaviors from wrapped Battle client stack. RemovedCount=" + removedEntryUiCount);
+            else
+                ModLogger.Info("MissionStateOpenNewPatches: no vanilla entry gauntlet behaviors matched removal filter in wrapped Battle client stack.");
+
+            if (battleMapRuntime && !ExperimentalFeatures.EnableBattleMapClientEquipmentNetworkComponent)
+            {
+                int removedEquipmentNetworkCount = list.RemoveAll(ShouldRemoveBattleClientEquipmentNetworkBehavior);
+                if (removedEquipmentNetworkCount > 0)
+                    ModLogger.Info("MissionStateOpenNewPatches: removed MissionLobbyEquipmentNetworkComponent from wrapped Battle client stack for battle-map spawn crash isolation. RemovedCount=" + removedEquipmentNetworkCount);
+                else
+                    ModLogger.Info("MissionStateOpenNewPatches: MissionLobbyEquipmentNetworkComponent not found in wrapped Battle client stack during battle-map spawn crash isolation.");
+            }
+
+            LogWrappedBehaviorStack("battle-after-removal", list);
+
+#if !COOPSPECTATOR_DEDICATED
+            if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
+            {
+                list.Add(new CoopSpectator.UI.CoopMissionSelectionView());
+                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionSelectionView to wrapped Battle client stack.");
+            }
+#endif
+            list.Add(new MissionBehaviorDiagnostic());
+            ModLogger.Info("MissionStateOpenNewPatches: appended MissionBehaviorDiagnostic to wrapped Battle client stack. FinalCount=" + list.Count);
+            return list;
+        }
+
         private static void LogWrappedBehaviorStack(string stage, List<MissionBehavior> list)
         {
             try
@@ -203,5 +265,15 @@ namespace CoopSpectator.Patches
             return fullName.IndexOf("MissionGauntletTeamSelection", StringComparison.OrdinalIgnoreCase) >= 0
                 || fullName.IndexOf("MissionGauntletClassLoadout", StringComparison.OrdinalIgnoreCase) >= 0;
         }
+
+        private static bool ShouldRemoveBattleClientEquipmentNetworkBehavior(MissionBehavior behavior)
+        {
+            if (behavior == null)
+                return false;
+
+            string fullName = behavior.GetType().FullName ?? string.Empty;
+            return fullName.IndexOf("MissionLobbyEquipmentNetworkComponent", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
     }
 }

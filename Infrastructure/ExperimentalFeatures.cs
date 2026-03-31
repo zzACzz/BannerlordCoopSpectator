@@ -30,5 +30,49 @@ namespace CoopSpectator.Infrastructure
         /// hard crash is inside LoadMovie/prefab binding or earlier in mission view startup.
         /// </summary>
         public const bool EnableCustomCoopSelectionMovieLoad = true;
+
+        /// <summary>
+        /// Preferred runtime path for campaign encounters: open the exact
+        /// singleplayer battle scene in MP Battle shell instead of remapping it
+        /// to a coarse official mp_battle_map bucket.
+        /// Re-enabled after dedicated exact-scene bootstrap staging proved that
+        /// `SandBox`/`SandBoxCore` assets and `battle_terrain_*` path resolution
+        /// are now available in the modded dedicated runtime.
+        /// </summary>
+        public const bool EnableDirectCampaignBattleSceneRuntime = true;
+
+        /// <summary>
+        /// Dedicated-only runtime probe for early scene resolution facts:
+        /// loaded modules, owned scenes, full-path resolution, and unique-scene-id
+        /// resolution for control `mp_battle_map_*` scenes and target `battle_terrain_*`
+        /// scenes. Safe because it only logs and does not alter scene pairing.
+        /// </summary>
+        public const bool EnableDedicatedSceneContractProbe = true;
+
+        /// <summary>
+        /// Dedicated-only exact campaign scene bootstrap probe. Extends the base
+        /// scene-resolution probe with runtime file availability checks,
+        /// `sp_battle_scenes.xml` registry inspection, `TaleWorlds.CampaignSystem`
+        /// availability checks, and a controlled pre/post
+        /// `PairSceneNameToModuleName(..., "SandBoxCore")` test for `battle_terrain_*`.
+        /// Intended to gather hard facts for exact-scene hosting, not to alter
+        /// mission startup behavior.
+        /// </summary>
+        public const bool EnableDedicatedExactCampaignSceneBootstrapProbe = true;
+
+        /// <summary>
+        /// Full contract diagnostics for battle-map runtime: MissionState.OpenNew overloads,
+        /// mission initializer patch state, live mission map-patch/spawn-path facts, and
+        /// deployment-plan / formation-plan / scene-spawn-entry summaries.
+        /// This is intentionally log-heavy and meant for diagnosis, not steady-state play.
+        /// </summary>
+        public const bool EnableBattleMapFullContractDiagnostics = true;
+
+        /// <summary>
+        /// Battle-map client safety switch: keep MissionLobbyEquipmentNetworkComponent
+        /// enabled because native gauntlet class-loadout initialization dereferences
+        /// it unconditionally during mission-screen startup.
+        /// </summary>
+        public const bool EnableBattleMapClientEquipmentNetworkComponent = true;
     }
 }

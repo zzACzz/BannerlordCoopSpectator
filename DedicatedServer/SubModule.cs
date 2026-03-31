@@ -133,6 +133,8 @@ namespace CoopSpectator
 
                 base.OnSubModuleLoad();
 
+                try { DedicatedSceneContractProbe.RunStartupProbe(); } catch (Exception ex) { ModLogger.Info("CoopSpectatorDedicated: scene contract startup probe failed: " + ex.Message); }
+
                 if (CleanModuleLoadOnly)
                 {
                     try { ModLogger.Info("CoopSpectatorDedicated minimal mode active (no Harmony, no game mode registration)."); } catch (Exception) { }
@@ -143,6 +145,7 @@ namespace CoopSpectator
                     TryConfigureDedicatedHarmonyRuntimeCompat();
                     TryApplyGameModeOverridePatch();
                     TryApplyMissionStateOpenNewPatches();
+                    TryApplyBattleShellSuppressionPatch();
                     TryApplyMultiplayerHeroClassOverridePatch();
                     TryApplyServerChangeCultureCanonicalizationPatch();
                     TryApplyCampaignCombatProfileAgentStatsPatch();
@@ -193,6 +196,20 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: MissionStateOpenNew patches apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyBattleShellSuppressionPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                BattleShellSuppressionPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: BattleShellSuppression patch apply failed: " + ex.Message);
             }
         }
 

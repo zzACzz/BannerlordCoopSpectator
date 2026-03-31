@@ -5,6 +5,7 @@ using System.Reflection;
 using CoopSpectator.Infrastructure;
 using TaleWorlds.Core;
 using TaleWorlds.Engine.GauntletUI;
+using TaleWorlds.InputSystem;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.View.MissionViews;
@@ -17,12 +18,14 @@ namespace CoopSpectator.UI
         private const string MovieName = "CoopSelection";
         private const float RefreshIntervalSeconds = 0.15f;
         private const float InitialOverlayDelaySeconds = 0.75f;
+        private const float StartBattleHotkeyCooldownSeconds = 0.2f;
 
         private GauntletLayer _gauntletLayer;
         private GauntletMovieIdentifier _movie;
         private CoopSelectionVM _viewModel;
         private float _refreshTimer;
         private float _overlayStartupDelay = InitialOverlayDelaySeconds;
+        private float _startBattleHotkeyCooldown;
         private bool _overlayLoadFailed;
         private bool _inputCaptured;
 
@@ -61,6 +64,8 @@ namespace CoopSpectator.UI
 
                 return;
             }
+
+            TryHandleStartBattleHotkey(dt);
 
             _refreshTimer -= dt;
             if (_refreshTimer > 0f)
@@ -251,6 +256,42 @@ namespace CoopSpectator.UI
 
             _viewModel?.OnFinalize();
             _viewModel = null;
+        }
+
+        private void TryHandleStartBattleHotkey(float dt)
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return;
+
+            _startBattleHotkeyCooldown -= dt;
+            if (_startBattleHotkeyCooldown > 0f)
+                return;
+
+            if (!HasLocalControlledAgent())
+                return;
+
+            if (Input.IsKeyPressed(InputKey.G))
+            {
+                CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
+                string lifecycle = snapshot?.LifecycleState ?? string.Empty;
+                bool canStartBattleNow =
+                    snapshot != null &&
+                    snapshot.CanStartBattle &&
+                    (snapshot.HasAgent || string.Equals(lifecycle, "Alive", StringComparison.OrdinalIgnoreCase));
+                if (!canStartBattleNow)
+                {
+                    _startBattleHotkeyCooldown = StartBattleHotkeyCooldownSeconds;
+                    ModLogger.Info("CoopMissionSelectionView: start battle hotkey ignored because battle is not ready.");
+                    return;
+                }
+
+                if (CoopBattlePhaseBridgeFile.WriteStartBattleRequest("Battle-map client G hotkey via CoopMissionSelectionView"))
+                {
+                    _startBattleHotkeyCooldown = StartBattleHotkeyCooldownSeconds;
+                    InformationManager.DisplayMessage(new InformationMessage("Coop Battle: start requested"));
+                    ModLogger.Info("CoopMissionSelectionView: wrote start battle request from G hotkey.");
+                }
+            }
         }
 
         private static bool HasLocalControlledAgent()
@@ -456,6 +497,7 @@ namespace CoopSpectator.UI
 
     public sealed class CoopSelectionVM : ViewModel
     {
+        private static readonly TimeSpan LocalSpawnOverlaySuppressionDuration = TimeSpan.FromSeconds(2.5);
         private MBBindingList<CoopSelectionSideItemVM> _sides = new MBBindingList<CoopSelectionSideItemVM>();
         private MBBindingList<CoopSelectionUnitItemVM> _units = new MBBindingList<CoopSelectionUnitItemVM>();
         private bool _isVisible = true;
@@ -471,6 +513,7 @@ namespace CoopSpectator.UI
         private string _selectionText = string.Empty;
         private string _statusText = string.Empty;
         private string _hintText = "Side -> Unit -> Spawn.";
+        private DateTime _localSpawnOverlaySuppressedUntilUtc = DateTime.MinValue;
         private string _emptyUnitsText = "Немає доступних юнітів.";
 
         [DataSourceProperty] public MBBindingList<CoopSelectionSideItemVM> Sides { get => _sides; private set => SetField(ref _sides, value, nameof(Sides)); }
@@ -517,6 +560,8 @@ namespace CoopSpectator.UI
                 ? "Спершу вибери сторону."
                 : "Немає доступних юнітів для сторони " + FormatSideLabel(effectiveSide) + ".";
             IsVisible = ShouldOverlayBeVisible(status, battlePhase, lifecycle, hasLocalControlledAgent);
+            if (!hasLocalControlledAgent && DateTime.UtcNow < _localSpawnOverlaySuppressedUntilUtc)
+                IsVisible = false;
             CanSpawn = (status?.CanRespawn ?? true) && !string.IsNullOrWhiteSpace(selectedSelectionId);
             CanReset = status?.HasAgent == true || string.Equals(lifecycle, "Alive", StringComparison.OrdinalIgnoreCase);
             CanStartBattle = status?.CanStartBattle == true;
@@ -536,7 +581,13 @@ namespace CoopSpectator.UI
         public void ExecuteSpawn()
         {
             if (CanSpawn)
+            {
+                _localSpawnOverlaySuppressedUntilUtc = DateTime.UtcNow + LocalSpawnOverlaySuppressionDuration;
+                IsVisible = false;
+                CanSpawn = false;
+                CoopSpectator.Patches.VanillaEntryUiSuppressionPatch.NotifyAuthoritativeSpawnRequested("CoopSelectionUI Spawn");
                 CoopBattleSpawnBridgeFile.WriteSpawnNowRequest("CoopSelectionUI Spawn");
+            }
         }
 
         public void ExecuteReset()

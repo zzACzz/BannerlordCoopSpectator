@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
+using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.UI;
@@ -18,12 +20,17 @@ namespace CoopSpectator.Patches
         private static string _lastBlockedTeamSelectionKey;
         private static string _lastBlockedClassLoadoutKey;
 
+        public static void NotifyAuthoritativeSpawnRequested(string source)
+        {
+        }
+
         public static void Apply(Harmony harmony)
         {
             try
             {
                 PatchMissionGauntletTeamSelection(harmony);
                 PatchMissionGauntletClassLoadout(harmony);
+                PatchMissionLobbyEquipmentNetworkComponent(harmony);
             }
             catch (Exception ex)
             {
@@ -40,18 +47,23 @@ namespace CoopSpectator.Patches
                 return;
             }
 
-            MethodInfo target = type.GetMethod("OnOpen", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            MethodInfo target = type.GetMethod(
+                "MissionLobbyComponentOnSelectingTeam",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(List<Team>) },
+                null);
             MethodInfo prefix = typeof(VanillaEntryUiSuppressionPatch).GetMethod(
-                nameof(MissionGauntletTeamSelection_OnOpen_Prefix),
+                nameof(MissionGauntletTeamSelection_OnSelectingTeam_Prefix),
                 BindingFlags.Static | BindingFlags.NonPublic);
             if (target == null || prefix == null)
             {
-                ModLogger.Info("VanillaEntryUiSuppressionPatch: MissionGauntletTeamSelection.OnOpen not found. Skip.");
+                ModLogger.Info("VanillaEntryUiSuppressionPatch: MissionGauntletTeamSelection.MissionLobbyComponentOnSelectingTeam(List<Team>) not found. Skip.");
                 return;
             }
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-            ModLogger.Info("VanillaEntryUiSuppressionPatch: prefix applied to MissionGauntletTeamSelection.OnOpen.");
+            ModLogger.Info("VanillaEntryUiSuppressionPatch: prefix applied to MissionGauntletTeamSelection.MissionLobbyComponentOnSelectingTeam(List<Team>).");
         }
 
         private static void PatchMissionGauntletClassLoadout(Harmony harmony)
@@ -64,58 +76,83 @@ namespace CoopSpectator.Patches
             }
 
             MethodInfo target = type.GetMethod(
-                "OnTryToggle",
+                "OnTeamChanged",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(NetworkCommunicator), typeof(Team), typeof(Team) },
+                null);
+            MethodInfo prefix = typeof(VanillaEntryUiSuppressionPatch).GetMethod(
+                nameof(MissionGauntletClassLoadout_OnTeamChanged_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("VanillaEntryUiSuppressionPatch: MissionGauntletClassLoadout.OnTeamChanged(NetworkCommunicator, Team, Team) not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("VanillaEntryUiSuppressionPatch: prefix applied to MissionGauntletClassLoadout.OnTeamChanged(NetworkCommunicator, Team, Team).");
+        }
+
+        private static void PatchMissionLobbyEquipmentNetworkComponent(Harmony harmony)
+        {
+            Type type = typeof(MissionLobbyEquipmentNetworkComponent);
+            MethodInfo target = type.GetMethod(
+                "ToggleLoadout",
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
                 null,
                 new[] { typeof(bool) },
                 null);
             MethodInfo prefix = typeof(VanillaEntryUiSuppressionPatch).GetMethod(
-                nameof(MissionGauntletClassLoadout_OnTryToggle_Prefix),
+                nameof(MissionLobbyEquipmentNetworkComponent_ToggleLoadout_Prefix),
                 BindingFlags.Static | BindingFlags.NonPublic);
             if (target == null || prefix == null)
             {
-                ModLogger.Info("VanillaEntryUiSuppressionPatch: MissionGauntletClassLoadout.OnTryToggle(bool) not found. Skip.");
+                ModLogger.Info("VanillaEntryUiSuppressionPatch: MissionLobbyEquipmentNetworkComponent.ToggleLoadout(bool) not found. Skip.");
                 return;
             }
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-            ModLogger.Info("VanillaEntryUiSuppressionPatch: prefix applied to MissionGauntletClassLoadout.OnTryToggle(bool).");
+            ModLogger.Info("VanillaEntryUiSuppressionPatch: prefix applied to MissionLobbyEquipmentNetworkComponent.ToggleLoadout(bool).");
         }
 
-        private static bool MissionGauntletTeamSelection_OnOpen_Prefix(object __instance)
+        private static bool MissionGauntletTeamSelection_OnSelectingTeam_Prefix(object __instance)
         {
             if (!ShouldSuppress(__instance, requireAuthoritativeTroopPath: false, out CoopBattleEntryPolicy.ClientSnapshot entryPolicy))
                 return true;
 
-            string blockKey = BuildPolicyLogKey(entryPolicy, "team");
-            if (!string.Equals(_lastBlockedTeamSelectionKey, blockKey, StringComparison.Ordinal))
-            {
-                _lastBlockedTeamSelectionKey = blockKey;
-                ModLogger.Info(
-                    "VanillaEntryUiSuppressionPatch: blocked MissionGauntletTeamSelection.OnOpen. " +
-                    entryPolicy.Describe());
-            }
-
+            LogBlockedTeamSelection(
+                "MissionGauntletTeamSelection.MissionLobbyComponentOnSelectingTeam",
+                entryPolicy);
             return false;
         }
 
-        private static bool MissionGauntletClassLoadout_OnTryToggle_Prefix(object __instance, bool isActive)
+        private static bool MissionGauntletClassLoadout_OnTeamChanged_Prefix(
+            object __instance,
+            NetworkCommunicator peer,
+            Team previousTeam,
+            Team newTeam)
         {
-            if (!isActive)
+            if (peer == null || !peer.IsMine || newTeam == null || (!newTeam.IsAttacker && !newTeam.IsDefender))
                 return true;
 
             if (!ShouldSuppress(__instance, requireAuthoritativeTroopPath: true, out CoopBattleEntryPolicy.ClientSnapshot entryPolicy))
                 return true;
 
-            string blockKey = BuildPolicyLogKey(entryPolicy, "class");
-            if (!string.Equals(_lastBlockedClassLoadoutKey, blockKey, StringComparison.Ordinal))
-            {
-                _lastBlockedClassLoadoutKey = blockKey;
-                ModLogger.Info(
-                    "VanillaEntryUiSuppressionPatch: blocked MissionGauntletClassLoadout.OnTryToggle(true). " +
-                    entryPolicy.Describe());
-            }
+            LogBlockedClassLoadout(
+                "MissionGauntletClassLoadout.OnTeamChanged",
+                entryPolicy);
+            return false;
+        }
 
+        private static bool MissionLobbyEquipmentNetworkComponent_ToggleLoadout_Prefix(object __instance, bool isActive)
+        {
+            if (!ShouldSuppress(__instance, requireAuthoritativeTroopPath: true, out CoopBattleEntryPolicy.ClientSnapshot entryPolicy))
+                return true;
+
+            LogBlockedClassLoadout(
+                "MissionLobbyEquipmentNetworkComponent.ToggleLoadout(" + isActive.ToString().ToLowerInvariant() + ")",
+                entryPolicy);
             return false;
         }
 
@@ -132,27 +169,48 @@ namespace CoopSpectator.Patches
                 return false;
 
             Mission mission = (instance as MissionBehavior)?.Mission ?? Mission.Current;
-            if (mission == null)
+            if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return false;
-
-            if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay &&
-                (mission.GetMissionBehavior<CoopMissionClientLogic>() != null ||
-                 mission.GetMissionBehavior<CoopMissionSelectionView>() != null))
-            {
-                entryPolicy = CoopBattleEntryPolicy.BuildClientSnapshot(
-                    mission,
-                    CoopBattleSelectionBridgeFile.ReadCurrentSelection());
-                return true;
-            }
 
             CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot selectionBridge = CoopBattleSelectionBridgeFile.ReadCurrentSelection();
             entryPolicy = CoopBattleEntryPolicy.BuildClientSnapshot(mission, selectionBridge);
             if (entryPolicy == null)
                 return false;
 
+            if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay &&
+                (mission.GetMissionBehavior<CoopMissionClientLogic>() != null ||
+                 mission.GetMissionBehavior<CoopMissionSelectionView>() != null))
+            {
+                return true;
+            }
+
             return requireAuthoritativeTroopPath
                 ? entryPolicy.UseAuthoritativeTroopPath
                 : entryPolicy.UseAuthoritativeSidePath;
+        }
+
+        private static void LogBlockedTeamSelection(string operationName, CoopBattleEntryPolicy.ClientSnapshot entryPolicy)
+        {
+            string blockKey = BuildPolicyLogKey(entryPolicy, "team");
+            if (string.Equals(_lastBlockedTeamSelectionKey, blockKey, StringComparison.Ordinal))
+                return;
+
+            _lastBlockedTeamSelectionKey = blockKey;
+            ModLogger.Info(
+                "VanillaEntryUiSuppressionPatch: suppressed " + operationName + ". " +
+                entryPolicy.Describe());
+        }
+
+        private static void LogBlockedClassLoadout(string operationName, CoopBattleEntryPolicy.ClientSnapshot entryPolicy)
+        {
+            string blockKey = BuildPolicyLogKey(entryPolicy, "class");
+            if (string.Equals(_lastBlockedClassLoadoutKey, blockKey, StringComparison.Ordinal))
+                return;
+
+            _lastBlockedClassLoadoutKey = blockKey;
+            ModLogger.Info(
+                "VanillaEntryUiSuppressionPatch: suppressed " + operationName + ". " +
+                entryPolicy.Describe());
         }
 
         private static string BuildPolicyLogKey(CoopBattleEntryPolicy.ClientSnapshot entryPolicy, string channel)

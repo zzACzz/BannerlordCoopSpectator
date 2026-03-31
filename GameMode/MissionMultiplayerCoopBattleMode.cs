@@ -1,6 +1,7 @@
 using System;
 using CoopSpectator.Campaign;
 using System.Collections.Generic;
+using CoopSpectator.Network.Messages;
 using CoopSpectator.Infrastructure; // Підключаємо ModLogger для діагностики
 using CoopSpectator.MissionBehaviors; // Етап 3.3: логування spectator/agent/spawn
 using TaleWorlds.Core; // Підключаємо MissionInitializerRecord
@@ -41,6 +42,9 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ", battleMapRuntime=" + battleMapRuntime +
                 ", timestamp=" + DateTime.UtcNow.ToString("o"));
             MissionInitializerRecord record = new MissionInitializerRecord(scene);
+            BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, "CoopBattle mission init pre-apply");
+            TryApplyCampaignMapPatchContext(ref record, scene);
+            BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, "CoopBattle mission init pre-open");
             MissionState.OpenNew(missionShell, record, CreateBehaviorsForMission);
         }
 
@@ -193,9 +197,23 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             if (visualSpawn != null)
             {
                 list.Add(visualSpawn);
-                list.Add(new MissionLobbyEquipmentNetworkComponent());
+
+                bool includeEquipmentNetworkComponent =
+                    !minimalBattleMapRuntime ||
+                    ExperimentalFeatures.EnableBattleMapClientEquipmentNetworkComponent;
+                if (includeEquipmentNetworkComponent)
+                {
+                    list.Add(new MissionLobbyEquipmentNetworkComponent());
+                    if (minimalBattleMapRuntime)
+                        ModLogger.Info("CoopBattle client: retained MissionLobbyEquipmentNetworkComponent for battle-map native bootstrap compatibility.");
+                }
+                else
+                {
+                    ModLogger.Info("CoopBattle client: skipped MissionLobbyEquipmentNetworkComponent for battle-map spawn crash isolation while retaining MultiplayerMissionAgentVisualSpawnComponent.");
+                }
+
                 if (minimalBattleMapRuntime)
-                    ModLogger.Info("CoopBattle client: retained visual spawn chain for battle-map native bootstrap compatibility.");
+                    ModLogger.Info("CoopBattle client: retained MultiplayerMissionAgentVisualSpawnComponent for battle-map native bootstrap compatibility.");
             }
             else
             {
@@ -272,10 +290,12 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ModLogger.Info("CoopBattle client: skipped CoopMissionClientLogic for battle-map crash isolation.");
             }
 #if !COOPSPECTATOR_DEDICATED
-            if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay && !minimalBattleMapRuntime)
+            if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
+            {
                 list.Add(new CoopSpectator.UI.CoopMissionSelectionView());
-            else if (minimalBattleMapRuntime && ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
-                ModLogger.Info("CoopBattle client: skipped custom coop selection overlay for battle-map crash isolation.");
+                if (minimalBattleMapRuntime)
+                    ModLogger.Info("CoopBattle client: re-enabled custom coop selection overlay for battle-map runtime while retaining native bootstrap behaviors.");
+            }
 #endif
             return list;
         }
@@ -382,14 +402,13 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
         internal static bool IsBattleMapSceneName(string sceneName)
         {
-            return !string.IsNullOrWhiteSpace(sceneName)
-                && sceneName.StartsWith("mp_battle_map_", StringComparison.OrdinalIgnoreCase);
+            return SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(sceneName);
         }
 
         private static bool IsSceneAwareBattleMap(Mission mission)
         {
             string sceneName = ResolveRuntimeSceneName(mission);
-            return sceneName.StartsWith("mp_battle_map_", StringComparison.OrdinalIgnoreCase);
+            return SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(sceneName);
         }
 
         private static string ResolveRuntimeSceneName(Mission mission)
@@ -422,6 +441,11 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             }
 
             return string.Empty;
+        }
+
+        private static void TryApplyCampaignMapPatchContext(ref MissionInitializerRecord record, string runtimeScene)
+        {
+            CampaignMapPatchMissionInit.TryApply(ref record, runtimeScene, "CoopBattle mission init");
         }
 
         /// <summary>Додає опційний behavior; якщо null — лише лог warning, місія продовжує без нього (без винятку).</summary>

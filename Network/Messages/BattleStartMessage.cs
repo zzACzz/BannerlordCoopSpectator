@@ -9,9 +9,16 @@ namespace CoopSpectator.Network.Messages
         public int MapPatchSceneIndex { get; set; } = -1;
         public float MapPatchNormalizedX { get; set; }
         public float MapPatchNormalizedY { get; set; }
+        public bool HasPatchEncounterDirection { get; set; }
+        public float PatchEncounterDirX { get; set; }
+        public float PatchEncounterDirY { get; set; }
+        public string PatchEncounterDirectionSource { get; set; }
         public string MultiplayerScene { get; set; }
         public string MultiplayerGameType { get; set; }
         public string MultiplayerSceneResolverSource { get; set; }
+        public int BattleSizeBudget { get; set; }
+        public int ReinforcementWaveCount { get; set; }
+        public string BattleSizeBudgetSource { get; set; }
         public float MapX { get; set; }
         public float MapY { get; set; }
         public string PlayerSide { get; set; }
@@ -29,9 +36,16 @@ namespace CoopSpectator.Network.Messages
         public int MapPatchSceneIndex { get; set; } = -1;
         public float MapPatchNormalizedX { get; set; }
         public float MapPatchNormalizedY { get; set; }
+        public bool HasPatchEncounterDirection { get; set; }
+        public float PatchEncounterDirX { get; set; }
+        public float PatchEncounterDirY { get; set; }
+        public string PatchEncounterDirectionSource { get; set; }
         public string MultiplayerScene { get; set; }
         public string MultiplayerGameType { get; set; }
         public string MultiplayerSceneResolverSource { get; set; }
+        public int BattleSizeBudget { get; set; }
+        public int ReinforcementWaveCount { get; set; }
+        public string BattleSizeBudgetSource { get; set; }
         public string PlayerSide { get; set; }
         public List<BattleSideSnapshotMessage> Sides { get; set; } = new List<BattleSideSnapshotMessage>();
     }

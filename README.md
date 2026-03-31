@@ -8,19 +8,20 @@
 - друзі підключаються до битв хоста через multiplayer;
 - після битви потік повертається в кампанію.
 
-## Активна документація (тільки 6 файлів)
-1. `README.md` — швидкий вхід.
-2. `PROJECT_CONTEXT.md` — архітектура і правила.
-3. `HUMAN_NOTES_MULTIPLAYER_PROGRESS.md` — поточний статус.
-4. `bannerlord_coop_plan.md` — дорожня карта.
-5. `BUILD_RUNBOOK.md` — build/deploy/run.
-6. `DEDICATED_TROUBLESHOOTING.md` — діагностика і фікси.
+## Активна документація
+1. `docs/README.md` — навігатор по актуальних `md` файлах.
+2. `PROJECT_CONTEXT.md` — короткі архітектурні правила і hard constraints.
+3. `HUMAN_NOTES_MULTIPLAYER_PROGRESS.md` — поточний робочий статус.
+4. `docs/BATTLE_MAP_STATUS_AND_HANDOFF_2026-03-30.md` — актуальний battle-map handoff.
+5. `NEW_CHAT_PROMPT_2026-03-30_BATTLE_MAP_SPAWN_STABLE.md` — готовий текст для нового вікна.
+6. `BUILD_RUNBOOK.md` — build/deploy/run.
+7. `DEDICATED_TROUBLESHOOTING.md` — діагностика і фікси.
 
 ## Поточний фокус
-- стабільний вхід клієнтів у battle mission;
-- server-authoritative spawn/control;
-- spectator fallback після смерті агента;
-- повторюваний цикл `start_mission` -> `end_mission`.
+- battle-map stabilization після успішного великого spawn-handshake;
+- server-authoritative spawn/control у великих боях;
+- spectator / respawn / repeated control cycles;
+- repeatable `start_mission` -> `battle` -> `aftermath` -> campaign loop.
 
 ## Архів
 Усі неактивні/історичні файли винесені в `docs/archive/...`.

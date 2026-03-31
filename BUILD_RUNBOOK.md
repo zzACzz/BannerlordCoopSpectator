@@ -38,12 +38,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\CoopDevLoop.ps1 -CheckLogs
 `-LaunchClient` стартує Bannerlord одразу в multiplayer з модулем `CoopSpectator`.
 `-RestartClient` спершу завершує поточний `Bannerlord.exe`, потім запускає заново.
 
-Поточні маркери для spawn-handshake:
-- `requested vanilla agent visuals before direct spawn`
-- `awaiting agent visuals`
-- `spawn agent ownership finalized`
-- `SpawnFromVisuals=True`
-- `HadVisuals=True`
+Поточні battle-map маркери для spawn-handshake:
+- `materialized army replace-bot succeeded`
+- `finalized local player agent visuals after SetAgentPeer`
+- `suppressed local AssignFormationToPlayer during battle-map spawn handshake`
+- `suppressed local MissionPeer.FollowedAgent network echo during battle-map spawn handshake`
+- `Phase=PreBattleHold`
+- `Phase=BattleActive`
 
 ## Runtime smoke test
 1. Host: campaign -> `coop.dedicated_start`.

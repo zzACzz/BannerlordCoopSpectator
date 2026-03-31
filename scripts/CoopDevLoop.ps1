@@ -16,7 +16,7 @@ param(
     [string]$DedicatedExe = "C:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Dedicated Server\bin\Win64_Shipping_Server\DedicatedCustomServer.Starter.exe",
     [string]$DedicatedArgs = "",
     [string]$ClientExe = "C:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Bannerlord\bin\Win64_Shipping_Client\Bannerlord.exe",
-    [string]$ClientArgs = "/multiplayer _MODULES_*Native*Multiplayer*Bannerlord.Harmony*CoopSpectator*_MODULES_",
+    [string]$ClientArgs = "/multiplayer _MODULES_*Native*SandBoxCore*Sandbox*Multiplayer*Bannerlord.Harmony*CoopSpectator*_MODULES_",
     [string[]]$DedicatedMarkers = @(
         "requested vanilla agent visuals before direct spawn",
         "awaiting agent visuals",

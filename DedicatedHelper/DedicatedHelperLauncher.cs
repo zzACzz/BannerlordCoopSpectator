@@ -32,8 +32,15 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         public static string GetDashboardAdminPassword() => DashboardAdminPassword;
         /// <summary>Якщо false — не передаємо конфіг при запуску (як Steam: "Command file is null"), щоб сервер не від'єднувався від Diamond. start_game тоді вводять вручну в консолі сервера.</summary>
         private const bool UseStartupConfig = false;
-        /// <summary>Явний список модулів, як у ванільному dedicated (Steam). Без цього сервер може піднятися без Multiplayer/DedicatedCustomServerHelper і від'єднатися від custom battle server manager.</summary>
+        /// <summary>Явний список модулів для vanilla-like dedicated launch. Без цього сервер може піднятися без Multiplayer/DedicatedCustomServerHelper і від'єднатися від custom battle server manager.</summary>
         private const string ModulesArg = "_MODULES_*Native*Multiplayer*DedicatedCustomServerHelper*_MODULES_";
+        /// <summary>
+        /// Exact campaign-scene bootstrap module set for modded dedicated flow.
+        /// `Sandbox` and `SandBoxCore` are included deliberately so the dedicated
+        /// runtime can see staged `sp_battle_scenes.xml` and `battle_terrain_*`
+        /// scene assets during exact-scene experiments.
+        /// </summary>
+        private const string ExactCampaignSceneModulesArg = "_MODULES_*Native*SandBoxCore*Sandbox*Multiplayer*CoopSpectatorDedicated*_MODULES_";
         /// <summary>ТЗ C2: офіційний хвіст — блок _MODULES_ та /dedicatedcustomserver ... /playerhosteddedicatedserver для guard/normalization.</summary>
         private const string OfficialModulesTail = "_MODULES_*Native*Multiplayer*_MODULES_";
         private const string PlayerHostedSuffix = "/playerhosteddedicatedserver";
@@ -42,13 +49,13 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const bool SteamLikeLaunch = true;
         /// <summary>Тимчасовий debug для ТЗ "дослідити завантаження кастомного модуля". true = додати _MODULES_ з CoopSpectatorDedicated до safe args (очікується Disconnected: Starter перезапише). Не для production.</summary>
         private const bool DebugTryAddCoopSpectatorDedicatedToModules = false;
-        /// <summary>Окремий debug launch для modded dedicated (ТЗ 1): Starter з явним _MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_, без SteamLikeLaunch. Перевірка: чи взагалі завантажується модуль (loaded.txt). Не для production.</summary>
+        /// <summary>Окремий debug launch для modded dedicated (ТЗ 1): Starter з явним exact-bootstrap _MODULES_, без SteamLikeLaunch. Перевірка: чи взагалі завантажується модуль і чи підхоплюються staged official exact-scene modules. Не для production.</summary>
         private const bool DebugModdedDedicatedLaunch = false;
         /// <summary>ТЗ B1: 0=PlainOfficialArgs, 1=ModdedMixedArgs, 2=ModdedOnly, 3=ModdedOnlyWithToken, -1=вимкнено (звичайний flow). Якщо 0..3 — запуск з відповідним preset і лог для таблиці.</summary>
         private const int LaunchPresetB1 = -1;
-        /// <summary>ТЗ C1: еталонний робочий modded launch — ModdedOfficialNoTokenArg. _MODULES_+CoopSpectatorDedicated, /LogOutputPath, official tail /dedicatedcustomserver... Без /dedicatedcustomserverauthtoken (токен лише з оточення/файлів).</summary>
+        /// <summary>ТЗ C1: еталонний робочий modded launch — ModdedOfficialNoTokenArg. Exact-bootstrap _MODULES_, /LogOutputPath, official tail /dedicatedcustomserver... Без /dedicatedcustomserverauthtoken (токен лише з оточення/файлів).</summary>
         private const bool ModdedOfficialNoTokenArg = false;
-        /// <summary>ТЗ C3: production-like запуск з кастомним server module. true = coop.dedicated_start використовує modded official flow (_MODULES_+CoopSpectatorDedicated, без token arg, токен з Documents).</summary>
+        /// <summary>ТЗ C3: production-like запуск з кастомним server module. true = coop.dedicated_start використовує modded official flow з exact-bootstrap `_MODULES_` (Sandbox/SandBoxCore/Multiplayer/CoopSpectatorDedicated), без token arg, токен з Documents.</summary>
         private const bool UseModdedDedicatedOfficialFlow = true;
         /// <summary>При SteamLikeLaunch: true = додати тільки токен+порт. ВІДОМО ЛАМАЄ manager-конект (Disconnected). Залишати false.</summary>
         private const bool AddTokenAndPortOnly = false;
@@ -521,12 +528,11 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 try { if (!Directory.Exists(logOutputDir)) Directory.CreateDirectory(logOutputDir); } catch (Exception) { }
                 string loadedPath = Path.Combine(tempDir, "CoopSpectatorDedicated_loaded.txt");
                 string errorPath = Path.Combine(tempDir, "CoopSpectatorDedicated_error.txt");
-                const string ModdedModulesArg = "_MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_";
                 string moddedArgs = NormalizeDedicatedArguments(BuildArgumentsModdedDedicatedDebug(port, token ?? "", logOutputDir));
                 ModLogger.Info("DedicatedHelper [DEBUG Modded] exe=" + exePath);
                 ModLogger.Info("DedicatedHelper [DEBUG Modded] workingDir=" + (workingDir ?? ""));
                 ModLogger.Info("DedicatedHelper [DEBUG Modded] full args=" + moddedArgs);
-                ModLogger.Info("DedicatedHelper [DEBUG Modded] _MODULES_=" + ModdedModulesArg);
+                ModLogger.Info("DedicatedHelper [DEBUG Modded] _MODULES_=" + ExactCampaignSceneModulesArg);
                 ModLogger.Info("DedicatedHelper [DEBUG Modded] Paths: loaded=" + loadedPath + " error=" + errorPath + " LogOutputPath=" + logOutputDir);
                 var moddedStartInfo = new ProcessStartInfo { FileName = exePath, WorkingDirectory = workingDir ?? "", UseShellExecute = false, CreateNoWindow = false, Arguments = moddedArgs, RedirectStandardInput = true };
                 try
@@ -811,7 +817,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             args.Add("--port " + port);
             if (!string.IsNullOrEmpty(configFileName))
                 args.Add("/dedicatedcustomserverconfigfile " + configFileName);
-            args.Add("_MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_");
+            args.Add(ExactCampaignSceneModulesArg);
             if (!string.IsNullOrEmpty(logOutputPath))
                 args.Add("/LogOutputPath \"" + logOutputPath.Trim().Replace("\"", "\"\"") + "\"");
             // Не додаємо /dedicatedcustomserver ... /playerhosteddedicatedserver — Starter додає цей блок автоматично; інакше у child Command Args був би дубль.
@@ -837,7 +843,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             var args = new System.Collections.Generic.List<string>();
             args.Add("--multihome 0.0.0.0");
             args.Add("--port " + port);
-            const string ModdedModules = "_MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_";
+            const string ModdedModules = ExactCampaignSceneModulesArg;
             const string OfficialModules = "_MODULES_*Native*Multiplayer*_MODULES_";
             switch (preset)
             {
@@ -909,7 +915,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             return s.Trim();
         }
 
-        /// <summary>Args для DEBUG Modded dedicated: _MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_, port, token (якщо є), /LogOutputPath. Не SteamLikeLaunch.</summary>
+        /// <summary>Args для DEBUG Modded dedicated: exact-bootstrap `_MODULES_`, port, token (якщо є), /LogOutputPath. Не SteamLikeLaunch.</summary>
         private static string BuildArgumentsModdedDedicatedDebug(int port, string token, string logOutputPath)
         {
             var args = new System.Collections.Generic.List<string>();
@@ -917,7 +923,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             args.Add("--port " + port);
             if (!string.IsNullOrWhiteSpace(token))
                 args.Add("/dedicatedcustomserverauthtoken \"" + token.Trim().Replace("\"", "\"\"") + "\"");
-            args.Add("_MODULES_*Native*Multiplayer*CoopSpectatorDedicated*_MODULES_");
+            args.Add(ExactCampaignSceneModulesArg);
             if (!string.IsNullOrEmpty(logOutputPath))
                 args.Add("/LogOutputPath \"" + logOutputPath.Trim().Replace("\"", "\"\"") + "\"");
             return string.Join(" ", args);

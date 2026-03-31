@@ -67,6 +67,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public string Source { get; set; }
         }
 
+        private sealed class CampaignBattleSpawnBudgetContext
+        {
+            public int BattleSizeBudget { get; set; }
+            public int ReinforcementWaveCount { get; set; }
+            public string Source { get; set; }
+        }
+
         private sealed class EncounterPartyWritebackState
         {
             public string PartyId { get; set; }
@@ -2884,6 +2891,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             message.MapPatchSceneIndex = sceneContext?.MapPatchSceneIndex ?? -1;
             message.MapPatchNormalizedX = sceneContext?.MapPatchNormalizedX ?? 0f;
             message.MapPatchNormalizedY = sceneContext?.MapPatchNormalizedY ?? 0f;
+            message.HasPatchEncounterDirection = TryResolveCampaignPatchEncounterDirectionSafe(
+                out float patchEncounterDirX,
+                out float patchEncounterDirY,
+                out string patchEncounterDirectionSource);
+            message.PatchEncounterDirX = patchEncounterDirX;
+            message.PatchEncounterDirY = patchEncounterDirY;
+            message.PatchEncounterDirectionSource = patchEncounterDirectionSource ?? string.Empty;
             MultiplayerSceneResolution multiplayerSceneResolution = CampaignToMultiplayerSceneResolver.Resolve(message.MapScene);
             message.MultiplayerScene = multiplayerSceneResolution?.RuntimeScene ?? string.Empty;
             message.MultiplayerGameType = multiplayerSceneResolution?.RuntimeGameType ?? string.Empty;
@@ -2922,11 +2936,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 message.Snapshot.MapPatchSceneIndex = message.MapPatchSceneIndex;
                 message.Snapshot.MapPatchNormalizedX = message.MapPatchNormalizedX;
                 message.Snapshot.MapPatchNormalizedY = message.MapPatchNormalizedY;
+                message.Snapshot.HasPatchEncounterDirection = message.HasPatchEncounterDirection;
+                message.Snapshot.PatchEncounterDirX = message.PatchEncounterDirX;
+                message.Snapshot.PatchEncounterDirY = message.PatchEncounterDirY;
+                message.Snapshot.PatchEncounterDirectionSource = message.PatchEncounterDirectionSource;
                 message.Snapshot.MultiplayerScene = message.MultiplayerScene;
                 message.Snapshot.MultiplayerGameType = message.MultiplayerGameType;
                 message.Snapshot.MultiplayerSceneResolverSource = message.MultiplayerSceneResolverSource;
             }
-            BattleSnapshotRuntimeState.SetCurrent(message.Snapshot, "host-battle-detector");
 
             // 5) Legacy fields for transitional clients/runtime // Пояснюємо блок
             message.Troops = BuildLegacyTroopsFromSnapshot(message.Snapshot) ?? BuildPartyTroopStacksSafe();
@@ -2934,12 +2951,31 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (message.ArmySize <= 0)
                 message.ArmySize = TryGetArmySizeSafe(); // Записуємо сумарну кількість людей (для UI і тестів)
 
+            CampaignBattleSpawnBudgetContext battleSpawnBudget = TryBuildCampaignBattleSpawnBudgetContextSafe(
+                message.MapScene,
+                multiplayerSceneResolution,
+                message.Snapshot,
+                message.ArmySize);
+            message.BattleSizeBudget = battleSpawnBudget?.BattleSizeBudget ?? 0;
+            message.ReinforcementWaveCount = battleSpawnBudget?.ReinforcementWaveCount ?? 0;
+            message.BattleSizeBudgetSource = battleSpawnBudget?.Source ?? "unknown";
+            if (message.Snapshot != null)
+            {
+                message.Snapshot.BattleSizeBudget = message.BattleSizeBudget;
+                message.Snapshot.ReinforcementWaveCount = message.ReinforcementWaveCount;
+                message.Snapshot.BattleSizeBudgetSource = message.BattleSizeBudgetSource;
+            }
+            BattleSnapshotRuntimeState.SetCurrent(message.Snapshot, "host-battle-detector");
+
             ModLogger.Info(
                 "BattleDetector: campaign scene context resolved. " +
                 "BattleScene=" + (message.MapScene ?? "unknown") +
                 " WorldMapScene=" + (message.WorldMapScene ?? "unknown") +
                 " MapPatchSceneIndex=" + message.MapPatchSceneIndex +
                 " MapPatchNormalized=(" + message.MapPatchNormalizedX.ToString("0.###") + ", " + message.MapPatchNormalizedY.ToString("0.###") + ")" +
+                " HasPatchEncounterDirection=" + message.HasPatchEncounterDirection +
+                " PatchEncounterDir=(" + message.PatchEncounterDirX.ToString("0.###") + ", " + message.PatchEncounterDirY.ToString("0.###") + ")" +
+                " PatchEncounterDirectionSource=" + (message.PatchEncounterDirectionSource ?? "unknown") +
                 " Source=" + (sceneContext?.Source ?? "unknown") + ".");
             ModLogger.Info(
                 "BattleDetector: multiplayer runtime scene candidate resolved. " +
@@ -2950,9 +2986,121 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " ForestDensity=" + (multiplayerSceneResolution?.ForestDensity ?? "Unknown") +
                 " IsNaval=" + (multiplayerSceneResolution?.IsNaval ?? false) +
                 " Source=" + (message.MultiplayerSceneResolverSource ?? "unknown") + ".");
+            ModLogger.Info(
+                "BattleDetector: campaign battle spawn budget resolved. " +
+                "BattleSizeBudget=" + message.BattleSizeBudget +
+                " ReinforcementWaveCount=" + message.ReinforcementWaveCount +
+                " TotalArmySize=" + message.ArmySize +
+                " Source=" + (message.BattleSizeBudgetSource ?? "unknown") + ".");
 
             return message; // Повертаємо сформований DTO
         } // Завершуємо блок методу
+
+        private static CampaignBattleSpawnBudgetContext TryBuildCampaignBattleSpawnBudgetContextSafe(
+            string battleScene,
+            MultiplayerSceneResolution multiplayerSceneResolution,
+            BattleSnapshotMessage snapshot,
+            int legacyArmySize)
+        {
+            int fallbackArmySize = Math.Max(0, legacyArmySize);
+            int snapshotArmySize = TryGetSnapshotTotalManCount(snapshot);
+            if (snapshotArmySize > 0)
+                fallbackArmySize = Math.Max(fallbackArmySize, snapshotArmySize);
+
+            int battleSizeBudget = 0;
+            string battleSizeSource = string.Empty;
+            try
+            {
+                if (multiplayerSceneResolution?.IsNaval == true)
+                {
+                    battleSizeBudget = BannerlordConfig.GetRealBattleSizeForNaval();
+                    battleSizeSource = "bannerlord-config-naval";
+                }
+                else if (IsLikelySiegeBattleScene(battleScene))
+                {
+                    battleSizeBudget = BannerlordConfig.GetRealBattleSizeForSiege();
+                    battleSizeSource = "bannerlord-config-siege";
+                }
+                else
+                {
+                    battleSizeBudget = BannerlordConfig.GetRealBattleSize();
+                    battleSizeSource = "bannerlord-config-field";
+                }
+            }
+            catch (Exception ex)
+            {
+                battleSizeSource = "battle-size-exception:" + ex.GetType().Name;
+                ModLogger.Info("BattleDetector: failed to read BannerlordConfig battle size: " + ex.Message);
+            }
+
+            int reinforcementWaveCount = 0;
+            string reinforcementSource = string.Empty;
+            try
+            {
+                reinforcementWaveCount = BannerlordConfig.GetReinforcementWaveCount();
+                reinforcementSource = "bannerlord-config";
+            }
+            catch (Exception ex)
+            {
+                reinforcementSource = "reinforcement-wave-exception:" + ex.GetType().Name;
+                ModLogger.Info("BattleDetector: failed to read BannerlordConfig reinforcement wave count: " + ex.Message);
+            }
+
+            if (battleSizeBudget <= 0)
+            {
+                battleSizeBudget = fallbackArmySize;
+                battleSizeSource = string.IsNullOrWhiteSpace(battleSizeSource)
+                    ? "snapshot-fallback"
+                    : battleSizeSource + "->snapshot-fallback";
+            }
+
+            if (battleSizeBudget <= 0)
+            {
+                battleSizeBudget = 48;
+                battleSizeSource = string.IsNullOrWhiteSpace(battleSizeSource)
+                    ? "legacy-default-48"
+                    : battleSizeSource + "->legacy-default-48";
+            }
+
+            if (reinforcementWaveCount <= 0)
+            {
+                reinforcementWaveCount = 1;
+                reinforcementSource = string.IsNullOrWhiteSpace(reinforcementSource)
+                    ? "fallback-1"
+                    : reinforcementSource + "->fallback-1";
+            }
+
+            return new CampaignBattleSpawnBudgetContext
+            {
+                BattleSizeBudget = Math.Max(1, battleSizeBudget),
+                ReinforcementWaveCount = Math.Max(1, reinforcementWaveCount),
+                Source = (battleSizeSource ?? "unknown") + ";reinforcement=" + (reinforcementSource ?? "unknown")
+            };
+        }
+
+        private static bool IsLikelySiegeBattleScene(string battleScene)
+        {
+            return !string.IsNullOrWhiteSpace(battleScene) &&
+                   battleScene.IndexOf("siege", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static int TryGetSnapshotTotalManCount(BattleSnapshotMessage snapshot)
+        {
+            if (snapshot?.Sides == null || snapshot.Sides.Count == 0)
+                return 0;
+
+            int totalManCount = snapshot.Sides
+                .Where(side => side != null)
+                .Sum(side => Math.Max(0, side.TotalManCount));
+            if (totalManCount > 0)
+                return totalManCount;
+
+            return snapshot.Sides
+                .Where(side => side?.Troops != null)
+                .SelectMany(side => side.Troops)
+                .Where(troop => troop != null)
+                .Sum(troop => Math.Max(0, troop.Count - troop.WoundedCount));
+        }
 
         private static BattleSnapshotMessage BuildSyntheticAllCampaignTroopsSnapshot(string mapScene, string playerSideText)
         {
@@ -4728,6 +4876,187 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 y = 0f;
                 return false;
             }
+        }
+
+        private static bool TryResolveCampaignPatchEncounterDirectionSafe(out float x, out float y, out string source)
+        {
+            x = 0f;
+            y = 0f;
+            source = "unresolved";
+
+            try
+            {
+                PlayerEncounter encounter = PlayerEncounter.Current;
+                MapEvent battle = PlayerEncounter.Battle ?? PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty?.MapEvent;
+                if (TryResolveMapEventEncounterDirection(battle, out x, out y, out source))
+                    return true;
+
+                if (encounter != null && TryResolveEncounterPartyDirection(out x, out y, out source))
+                    return true;
+
+                source = battle != null ? "map-event-direction-unavailable" : "battle-missing";
+                return false;
+            }
+            catch (Exception ex)
+            {
+                x = 0f;
+                y = 0f;
+                source = "exception";
+                ModLogger.Info("BattleDetector: failed to resolve campaign patch encounter direction. " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool TryResolveMapEventEncounterDirection(MapEvent battle, out float x, out float y, out string source)
+        {
+            x = 0f;
+            y = 0f;
+            source = "map-event-missing";
+            if (battle == null)
+                return false;
+
+            PartyBase attackerParty = ResolveRepresentativePartyForDirection(battle.AttackerSide, out string attackerSource);
+            PartyBase defenderParty = ResolveRepresentativePartyForDirection(battle.DefenderSide, out string defenderSource);
+            if (!TryResolveDirectionBetweenParties(attackerParty, defenderParty, out x, out y, out string directionSource))
+            {
+                source = "map-event-party-direction-unavailable";
+                return false;
+            }
+
+            source = "map-event:" + attackerSource + "->" + defenderSource + ":" + directionSource;
+            return true;
+        }
+
+        private static PartyBase ResolveRepresentativePartyForDirection(MapEventSide side, out string source)
+        {
+            source = "missing";
+            if (side?.LeaderParty != null)
+            {
+                source = "leader-party";
+                return side.LeaderParty;
+            }
+
+            MapEventParty firstParty = side?.Parties?.FirstOrDefault(item => item?.Party != null);
+            if (firstParty?.Party != null)
+            {
+                source = "first-side-party";
+                return firstParty.Party;
+            }
+
+            return null;
+        }
+
+        private static bool TryResolveEncounterPartyDirection(out float x, out float y, out string source)
+        {
+            x = 0f;
+            y = 0f;
+            source = "player-encounter-missing";
+            if (PlayerEncounter.Current == null)
+                return false;
+
+            PartyBase mainParty = MobileParty.MainParty?.Party;
+            PartyBase encounteredParty = PlayerEncounter.EncounteredParty;
+            if (mainParty == null || encounteredParty == null)
+            {
+                source = "player-or-encountered-party-missing";
+                return false;
+            }
+
+            BattleSideEnum playerSide = PlayerEncounter.Current.PlayerSide;
+            PartyBase attackerParty = playerSide == BattleSideEnum.Attacker ? mainParty : encounteredParty;
+            PartyBase defenderParty = playerSide == BattleSideEnum.Attacker ? encounteredParty : mainParty;
+            if (!TryResolveDirectionBetweenParties(attackerParty, defenderParty, out x, out y, out string directionSource))
+            {
+                source = "player-encounter-direction-unavailable";
+                return false;
+            }
+
+            source = "player-encounter:" + directionSource;
+            return true;
+        }
+
+        private static bool TryResolveDirectionBetweenParties(PartyBase fromParty, PartyBase toParty, out float x, out float y, out string source)
+        {
+            x = 0f;
+            y = 0f;
+            source = "party-position-missing";
+            if (!TryResolvePartyEncounterPosition(fromParty, out float fromX, out float fromY, out string fromSource) ||
+                !TryResolvePartyEncounterPosition(toParty, out float toX, out float toY, out string toSource))
+            {
+                return false;
+            }
+
+            if (!TryNormalizeDirection(fromX, fromY, toX, toY, out x, out y))
+            {
+                source = "party-position-overlap";
+                return false;
+            }
+
+            source = fromSource + "->" + toSource;
+            return true;
+        }
+
+        private static bool TryResolvePartyEncounterPosition(PartyBase party, out float x, out float y, out string source)
+        {
+            x = 0f;
+            y = 0f;
+            source = "party-missing";
+            if (party == null)
+                return false;
+
+            MobileParty mobileParty = party.MobileParty;
+            if (mobileParty != null)
+            {
+                if (TryReadVec2Components(mobileParty.GetPosition2D, out x, out y))
+                {
+                    if (TryReadVec2Components(mobileParty.EventPositionAdder, out float addX, out float addY))
+                    {
+                        x += addX;
+                        y += addY;
+                        source = "mobile-position+event-adder";
+                        return true;
+                    }
+
+                    source = "mobile-position";
+                    return true;
+                }
+
+                if (TryReadVec2Components(mobileParty.VisualPosition2DWithoutError, out x, out y))
+                {
+                    source = "visual-position";
+                    return true;
+                }
+
+                if (TryReadVec2Components(mobileParty.Position, out x, out y))
+                {
+                    source = "mobile-campaign-position";
+                    return true;
+                }
+            }
+
+            if (TryReadVec2Components(party.Position, out x, out y))
+            {
+                source = "party-position";
+                return true;
+            }
+
+            source = "position-unavailable";
+            return false;
+        }
+
+        private static bool TryNormalizeDirection(float fromX, float fromY, float toX, float toY, out float x, out float y)
+        {
+            x = 0f;
+            y = 0f;
+            float dx = toX - fromX;
+            float dy = toY - fromY;
+            double length = Math.Sqrt(dx * dx + dy * dy);
+            if (length <= 0.001d)
+                return false;
+
+            x = (float)(dx / length);
+            y = (float)(dy / length);
+            return true;
         }
 
         private static string GetMissionSafeCharacterId(object characterObject, List<object> rosterCharacters)

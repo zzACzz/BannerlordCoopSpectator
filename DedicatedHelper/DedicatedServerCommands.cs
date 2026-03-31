@@ -150,6 +150,7 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
 
                 string requestedScene = snapshot.MultiplayerScene;
                 string requestedGameType = snapshot.MultiplayerGameType;
+                bool exactCampaignScene = CampaignToMultiplayerSceneResolver.IsCampaignBattleScene(requestedScene);
                 string appliedGameType = string.Equals(requestedGameType, CoopGameModeIds.OfficialBattle, StringComparison.Ordinal)
                     ? CoopGameModeIds.OfficialBattle
                     : CoopGameModeIds.CoopBattle;
@@ -168,6 +169,16 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                         " RequestedGameType=" + (requestedGameType ?? "unknown") +
                         " AppliedGameType=" + appliedGameType + ".");
                     return;
+                }
+
+                if (exactCampaignScene)
+                {
+                    bool preRegisteredExactScene = DedicatedHelperLauncher.TrySendConsoleLine("add_map_to_usable_maps " + requestedScene + " " + appliedGameType);
+                    ModLogger.Info(
+                        "DedicatedServerCommands: pre-registered exact campaign runtime scene before start_mission. " +
+                        "RequestedScene=" + requestedScene +
+                        " AppliedGameType=" + appliedGameType +
+                        " AddMapSent=" + preRegisteredExactScene + ".");
                 }
 
                 ModLogger.Info(
@@ -227,6 +238,18 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
 
                 optionValues["GameType"] = appliedGameType;
                 optionValues["Map"] = requestedScene;
+                if (string.Equals(appliedGameType, CoopGameModeIds.OfficialBattle, StringComparison.Ordinal))
+                {
+                    // CoopBattle owns side/unit selection, deployment, and the explicit G-start flow.
+                    // Disable native Battle/TDM warmup countdown so the client does not keep showing
+                    // "Warmup Phase / Waiting for players to join" over our own pre-battle phases.
+                    // Also neutralize native round/map timeout auto-end so our authoritative
+                    // battle completion, not the Battle shell, decides when the mission ends.
+                    optionValues["WarmupTimeLimitInSeconds"] = 0;
+                    optionValues["RoundPreparationTimeLimit"] = 0;
+                    optionValues["MapTimeLimit"] = 9999;
+                    optionValues["RoundTimeLimit"] = 9999;
+                }
 
                 string setOptionsUrl = baseUrl + "/Manager/set_options";
                 string payloadJson = optionValues.ToString(Newtonsoft.Json.Formatting.None);
@@ -234,6 +257,10 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                     "DedicatedServerCommands: POST " + setOptionsUrl +
                     " (scene-aware apply). GameType=" + appliedGameType +
                     " Map=" + requestedScene +
+                    " MapTimeLimit=" + (optionValues["MapTimeLimit"]?.ToString() ?? "unchanged") +
+                    " RoundTimeLimit=" + (optionValues["RoundTimeLimit"]?.ToString() ?? "unchanged") +
+                    " WarmupTimeLimitInSeconds=" + (optionValues["WarmupTimeLimitInSeconds"]?.ToString() ?? "unchanged") +
+                    " RoundPreparationTimeLimit=" + (optionValues["RoundPreparationTimeLimit"]?.ToString() ?? "unchanged") +
                     " RequestedGameType=" + (requestedGameType ?? "unknown") + ".");
 
                 var req = (HttpWebRequest)WebRequest.Create(setOptionsUrl);
@@ -268,11 +295,52 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                 if (!string.IsNullOrWhiteSpace(summaryAfterApply))
                     ModLogger.Info("DedicatedServerCommands: get_options parsed summary after scene-aware apply = " + summaryAfterApply);
 
-                return true;
+                bool selectionVerified = TryVerifyAppliedSceneAwareMissionSelection(baseUrl, requestedScene, appliedGameType);
+                ModLogger.Info(
+                    "DedicatedServerCommands: scene-aware apply verification. " +
+                    "RequestedScene=" + requestedScene +
+                    " AppliedGameType=" + appliedGameType +
+                    " Verified=" + selectionVerified + ".");
+                return selectionVerified;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("DedicatedServerCommands: set_options scene-aware apply failed. " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool TryVerifyAppliedSceneAwareMissionSelection(string baseUrl, string requestedScene, string appliedGameType)
+        {
+            try
+            {
+                JObject payload = TryBuildOptionValuesPayload(baseUrl);
+                if (payload == null || !payload.HasValues)
+                {
+                    ModLogger.Info("DedicatedServerCommands: scene-aware apply verification failed (current options payload missing).");
+                    return false;
+                }
+
+                string currentScene = payload.Value<string>("Map") ?? string.Empty;
+                string currentGameType = payload.Value<string>("GameType") ?? string.Empty;
+                bool sceneMatches = string.Equals(currentScene, requestedScene ?? string.Empty, StringComparison.Ordinal);
+                bool gameTypeMatches = string.Equals(currentGameType, appliedGameType ?? string.Empty, StringComparison.Ordinal);
+                if (!sceneMatches || !gameTypeMatches)
+                {
+                    ModLogger.Info(
+                        "DedicatedServerCommands: scene-aware apply verification mismatch. " +
+                        "ExpectedMap=" + (requestedScene ?? string.Empty) +
+                        " ActualMap=" + currentScene +
+                        " ExpectedGameType=" + (appliedGameType ?? string.Empty) +
+                        " ActualGameType=" + currentGameType + ".");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("DedicatedServerCommands: scene-aware apply verification failed. " + ex.Message);
                 return false;
             }
         }

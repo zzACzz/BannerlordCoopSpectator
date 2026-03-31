@@ -9,14 +9,16 @@
 ## Stage 3: Battle integration (active)
 - 3.1 Battle detection: done.
 - 3.2 Dedicated/listed join bridge: done.
-- 3.3 Unit selection + spawn + spectator transitions: in progress.
-- 3.4 Server-authoritative combat loop: next.
-- 3.5 Return battle outcome to campaign: next.
+- 3.3 Unit selection + spawn + spectator transitions: mostly done.
+- 3.4 Server-authoritative combat loop: active stabilization.
+- 3.5 Return battle outcome to campaign: baseline done, needs broader validation.
 
 ## Stage 4: Stability & UX
 - Reconnect scenarios.
 - Better user-facing diagnostics.
-- Long-session reliability.
+- Large-battle repeated-cycle reliability.
+- Deployment/spawn frame quality.
+- Command/captain handoff cleanup after spawn.
 
 ## Stage 5: Playtest & release
 - 2/3/4-client matrix.

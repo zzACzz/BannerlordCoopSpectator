@@ -20,6 +20,9 @@ namespace CoopSpectator.Infrastructure
     public sealed class BattleRuntimeState
     {
         public BattleSnapshotMessage Snapshot { get; set; }
+        public int BattleSizeBudget { get; set; }
+        public int ReinforcementWaveCount { get; set; }
+        public string BattleSizeBudgetSource { get; set; }
         public List<BattleSideState> Sides { get; set; } = new List<BattleSideState>();
         public Dictionary<string, BattleSideState> SidesByKey { get; set; } = new Dictionary<string, BattleSideState>(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, BattlePartyState> PartiesById { get; set; } = new Dictionary<string, BattlePartyState>(StringComparer.OrdinalIgnoreCase);
@@ -540,7 +543,10 @@ namespace CoopSpectator.Infrastructure
         {
             var state = new BattleRuntimeState
             {
-                Snapshot = projection?.Snapshot
+                Snapshot = projection?.Snapshot,
+                BattleSizeBudget = projection?.Snapshot?.BattleSizeBudget ?? 0,
+                ReinforcementWaveCount = projection?.Snapshot?.ReinforcementWaveCount ?? 0,
+                BattleSizeBudgetSource = projection?.Snapshot?.BattleSizeBudgetSource
             };
 
             if (projection == null)

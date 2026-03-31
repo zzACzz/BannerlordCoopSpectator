@@ -20,6 +20,21 @@ namespace CoopSpectator.Infrastructure
         private const string DefaultRuntimeGameType = "Battle";
         private const string DefaultRuntimeScene = "mp_battle_map_001";
 
+        public static bool IsOfficialMultiplayerBattleScene(string sceneName)
+        {
+            return SceneRuntimeClassifier.IsOfficialMultiplayerBattleScene(sceneName);
+        }
+
+        public static bool IsCampaignBattleScene(string sceneName)
+        {
+            return SceneRuntimeClassifier.IsCampaignBattleScene(sceneName);
+        }
+
+        public static bool IsSceneAwareBattleRuntimeScene(string sceneName)
+        {
+            return SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(sceneName);
+        }
+
         public static MultiplayerSceneResolution Resolve(string campaignBattleScene)
         {
             var resolution = new MultiplayerSceneResolution
@@ -36,6 +51,13 @@ namespace CoopSpectator.Infrastructure
             if (string.IsNullOrWhiteSpace(campaignBattleScene))
                 return resolution;
 
+            if (ExperimentalFeatures.EnableDirectCampaignBattleSceneRuntime &&
+                IsCampaignBattleScene(campaignBattleScene))
+            {
+                resolution.RuntimeScene = campaignBattleScene;
+                resolution.Source = "direct-campaign-battle-scene-name";
+            }
+
             try
             {
                 GameSceneDataManager manager = GameSceneDataManager.Instance;
@@ -45,6 +67,9 @@ namespace CoopSpectator.Infrastructure
 
                 if (!sceneData.HasValue || string.IsNullOrWhiteSpace(sceneData.Value.SceneID))
                 {
+                    if (string.Equals(resolution.Source, "direct-campaign-battle-scene-name", StringComparison.Ordinal))
+                        return resolution;
+
                     resolution.Source = "metadata-missing-fallback";
                     return resolution;
                 }
@@ -54,6 +79,14 @@ namespace CoopSpectator.Infrastructure
                 resolution.Terrain = resolvedSceneData.Terrain.ToString();
                 resolution.ForestDensity = resolvedSceneData.ForestDensity.ToString();
                 resolution.IsNaval = resolvedSceneData.IsNaval;
+
+                if (ExperimentalFeatures.EnableDirectCampaignBattleSceneRuntime &&
+                    IsCampaignBattleScene(resolvedSceneData.SceneID))
+                {
+                    resolution.RuntimeScene = resolvedSceneData.SceneID;
+                    resolution.Source = "direct-campaign-battle-scene";
+                    return resolution;
+                }
 
                 if (resolvedSceneData.IsNaval)
                 {
