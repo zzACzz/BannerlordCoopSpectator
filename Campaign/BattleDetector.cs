@@ -10,6 +10,7 @@ using TaleWorlds.CampaignSystem.Party; // Підключаємо MobileParty (п
 using TaleWorlds.MountAndBlade; // Підключаємо Mission (детекція входу в місію/битву)
 using System.Reflection; // Reflection для mission-safe fallback ids героїв/лордів із кампанії.
 using System.Linq;
+using System.Globalization;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.ComponentInterfaces;
 using TaleWorlds.CampaignSystem.Encounters;
@@ -41,6 +42,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private BattleResultWritebackSummary.RewardProjectionSummary _cachedHostAftermathRewardProjection;
         private string _cachedHostAftermathLootResultKey;
         private BattleResultWritebackSummary.LootAftermathSummary _cachedHostAftermathLootSummary;
+        private string _cachedHostAftermathMainPartyPreviewResultKey;
+        private bool _cachedHostAftermathMainPartyPreviewHeroHpApplied;
+        private readonly Dictionary<string, int> _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private DateTime _missionEnteredUtc;
         private DateTime _nextMissionBattleResultPollUtc;
         private DateTime _nextBattleStartAttemptUtc;
@@ -299,6 +303,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             if (!isInMissionNow) // Якщо місії немає, значить ми не в битві (або вже вийшли з неї)
             { // Починаємо блок if
+                TryMaintainMainPartyBattleResultPreviewAfterMissionExit();
                 TryConsumeBattleResultWritebackAudit();
                 ResetMissionExitState();
                 if (_wasInMissionLastTick && ShouldNotifyDedicatedHelper()) // Щойно вийшли з місії — сказати Dedicated Helper end_mission (якщо ми не спектатор-клієнт)
@@ -328,6 +333,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _cachedHostAftermathRewardProjection = null;
             _cachedHostAftermathLootResultKey = null;
             _cachedHostAftermathLootSummary = null;
+            _cachedHostAftermathMainPartyPreviewResultKey = null;
+            _cachedHostAftermathMainPartyPreviewHeroHpApplied = false;
+            _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId.Clear();
             _nextMissionBattleResultPollUtc = DateTime.MinValue;
             _nextBattleStartAttemptUtc = DateTime.MinValue;
             _nextBattleStartWaitLogUtc = DateTime.MinValue;
@@ -423,7 +431,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         : null,
                     string.Equals(_cachedHostAftermathLootResultKey, resultKey, StringComparison.Ordinal)
                         ? CloneLootAftermathSummary(_cachedHostAftermathLootSummary)
-                        : null);
+                        : null,
+                    string.Equals(_cachedHostAftermathMainPartyPreviewResultKey, resultKey, StringComparison.Ordinal) &&
+                    _cachedHostAftermathMainPartyPreviewHeroHpApplied);
 
                 int removedTotal = result.Entries?.Sum(entry => entry?.RemovedCount ?? 0) ?? 0;
                 int killedTotal = result.Entries?.Sum(entry => entry?.KilledCount ?? 0) ?? 0;
@@ -532,7 +542,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private static BattleResultWritebackSummary ApplyBattleResultWriteback(
             CoopBattleResultBridgeFile.BattleResultSnapshot result,
             BattleResultWritebackSummary.RewardProjectionSummary cachedRewardProjection = null,
-            BattleResultWritebackSummary.LootAftermathSummary cachedLootAftermath = null)
+            BattleResultWritebackSummary.LootAftermathSummary cachedLootAftermath = null,
+            bool skipMainPartyHeroHitPointWriteback = false)
         {
             var summary = new BattleResultWritebackSummary();
             if (result?.Entries == null || result.Entries.Count == 0 || TaleWorlds.CampaignSystem.Campaign.Current == null)
@@ -564,7 +575,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 }
 
                 summary.ResolvedPartyAggregates++;
-                TryApplyAggregateToPartyRoster(partyState, aggregate, summary);
+                TryApplyAggregateToPartyRoster(
+                    partyState,
+                    aggregate,
+                    summary,
+                    skipMainPartyHeroHitPointWriteback && partyState.IsMainParty);
             }
 
             TryApplyMainPartyCombatXpWriteback(result, encounterParties, summary);
@@ -700,7 +715,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private static void TryApplyAggregateToPartyRoster(
             EncounterPartyWritebackState partyState,
             BattleResultCharacterAggregate aggregate,
-            BattleResultWritebackSummary summary)
+            BattleResultWritebackSummary summary,
+            bool skipHeroHitPointsWriteback = false)
         {
             if (partyState?.MemberRoster == null || aggregate == null)
                 return;
@@ -731,7 +747,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         summary.AdjustedSamples,
                         "HeroWounded:" + (rosterHero?.StringId ?? aggregate.HeroId ?? rosterCharacter?.StringId ?? "hero"));
                 }
-                else if (TryApplyHeroHitPointsWriteback(rosterHero, aggregate, summary, out string heroHitPointSample))
+                else if (!skipHeroHitPointsWriteback &&
+                         TryApplyHeroHitPointsWriteback(rosterHero, aggregate, summary, out string heroHitPointSample))
                 {
                     AddWritebackSample(summary.AdjustedSamples, heroHitPointSample);
                 }
@@ -2366,6 +2383,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             TryCacheHostAftermathRewardProjection(result, resultKey);
             TryCacheHostAftermathLootSummary(result, resultKey);
+            TryInjectMainPartyBattleResultPreviewIntoLiveEncounter(result, resultKey);
             TryInjectMainPartyPrisonerAftermathIntoLiveMapEvent(result);
 
             bool encounterPrepared = TryPrepareAuthoritativeEncounterResultBridge(result);
@@ -2565,6 +2583,131 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
+        private void TryInjectMainPartyBattleResultPreviewIntoLiveEncounter(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            string resultKey)
+        {
+            if (result == null || string.IsNullOrWhiteSpace(resultKey))
+                return;
+
+            if (string.Equals(_cachedHostAftermathMainPartyPreviewResultKey, resultKey, StringComparison.Ordinal))
+                return;
+
+            try
+            {
+                string mainPartyId = MobileParty.MainParty?.StringId;
+                if (string.IsNullOrWhiteSpace(mainPartyId))
+                    return;
+
+                Dictionary<string, EncounterPartyWritebackState> encounterParties = ResolveEncounterPartyWritebackStates();
+                if (!encounterParties.TryGetValue(mainPartyId, out EncounterPartyWritebackState mainPartyState) ||
+                    mainPartyState?.MemberRoster == null)
+                {
+                    return;
+                }
+
+                Dictionary<string, BattleResultCharacterAggregate> aggregates = BuildBattleResultCharacterAggregates(result);
+                if (aggregates.Count == 0)
+                    return;
+
+                var summary = new BattleResultWritebackSummary();
+                foreach (BattleResultCharacterAggregate aggregate in aggregates.Values
+                             .Where(item => item != null && string.Equals(item.PartyId, mainPartyId, StringComparison.OrdinalIgnoreCase))
+                             .OrderBy(item => item.HeroId, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(item => item.OriginalCharacterId, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(item => item.CharacterId, StringComparer.OrdinalIgnoreCase))
+                {
+                    TryApplyAggregateToPartyRoster(mainPartyState, aggregate, summary);
+                    if (aggregate.IsHero &&
+                        TryResolvePartyRosterCharacter(
+                            mainPartyState.MemberRoster,
+                            aggregate.HeroId,
+                            aggregate.OriginalCharacterId,
+                            aggregate.CharacterId,
+                            out _,
+                            out Hero rosterHero,
+                            out _,
+                            out _,
+                            out _) &&
+                        rosterHero != null &&
+                        !string.IsNullOrWhiteSpace(rosterHero.StringId))
+                    {
+                        _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId[rosterHero.StringId] = Math.Max(1, rosterHero.HitPoints);
+                    }
+                }
+
+                if (summary.RegularTroopsAdjusted <= 0 &&
+                    summary.HeroWoundsApplied <= 0 &&
+                    summary.HeroHitPointsAdjusted <= 0)
+                {
+                    return;
+                }
+
+                _cachedHostAftermathMainPartyPreviewResultKey = resultKey;
+                _cachedHostAftermathMainPartyPreviewHeroHpApplied = summary.HeroHitPointsAdjusted > 0;
+
+                ModLogger.Info(
+                    "BattleDetector: injected main-party battle_result preview into live encounter before mission exit. " +
+                    "BattleId=" + (result.BattleId ?? "null") +
+                    " WinnerSide=" + (result.WinnerSide ?? "none") +
+                    " TroopsAdjusted=" + summary.RegularTroopsAdjusted +
+                    " HeroWounds=" + summary.HeroWoundsApplied +
+                    " HeroHpAdjusted=" + summary.HeroHitPointsAdjusted +
+                    " HeroHpLoss=" + summary.HeroHitPointLossApplied +
+                    " AdjustedSamples=[" + string.Join("; ", summary.AdjustedSamples) + "].");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to inject main-party battle_result preview before mission exit: " + ex.Message);
+            }
+        }
+
+        private void TryMaintainMainPartyBattleResultPreviewAfterMissionExit()
+        {
+            if (string.IsNullOrWhiteSpace(_cachedHostAftermathMainPartyPreviewResultKey) ||
+                _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                List<string> reappliedSamples = null;
+                foreach (KeyValuePair<string, int> pair in _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId)
+                {
+                    Hero hero = TryResolveCharacterObjectFromIds(pair.Key)?.HeroObject;
+                    if (hero == null || !hero.IsAlive || hero.IsWounded)
+                        continue;
+
+                    int desiredHitPoints = Math.Max(1, pair.Value);
+                    if (hero.HitPoints == desiredHitPoints)
+                        continue;
+
+                    int previousHitPoints = hero.HitPoints;
+                    hero.HitPoints = desiredHitPoints;
+                    if (reappliedSamples == null)
+                        reappliedSamples = new List<string>();
+
+                    reappliedSamples.Add(
+                        (hero.StringId ?? pair.Key) +
+                        " " + previousHitPoints.ToString(CultureInfo.InvariantCulture) +
+                        "->" + desiredHitPoints.ToString(CultureInfo.InvariantCulture));
+                }
+
+                if (reappliedSamples == null || reappliedSamples.Count == 0)
+                    return;
+
+                ModLogger.Info(
+                    "BattleDetector: re-applied cached main-party hero HP preview after mission exit. " +
+                    "ResultKey=" + _cachedHostAftermathMainPartyPreviewResultKey +
+                    " Samples=[" + string.Join("; ", reappliedSamples) + "].");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to maintain cached main-party hero HP preview after mission exit: " + ex.Message);
+            }
+        }
+
         private static bool TryPrepareAuthoritativeEncounterResultBridge(CoopBattleResultBridgeFile.BattleResultSnapshot result)
         {
             if (result == null)
@@ -2742,6 +2885,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _cachedHostAftermathRewardProjection = null;
             _cachedHostAftermathLootResultKey = null;
             _cachedHostAftermathLootSummary = null;
+            _cachedHostAftermathMainPartyPreviewResultKey = null;
+            _cachedHostAftermathMainPartyPreviewHeroHpApplied = false;
+            _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId.Clear();
             _nextMissionBattleResultPollUtc = DateTime.MinValue;
         }
 

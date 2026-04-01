@@ -4727,6 +4727,7 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || !GameNetwork.IsServer || !IsUsingNativeExactCampaignArmyBootstrap(mission))
                 return;
 
+            EnsureMaterializedBattleResultMission(mission);
             int seededEntries = 0;
             seededEntries += EnsureExactCampaignBattleResultEntryStates(BattleSideEnum.Attacker);
             seededEntries += EnsureExactCampaignBattleResultEntryStates(BattleSideEnum.Defender);
@@ -8051,6 +8052,7 @@ namespace CoopSpectator.MissionBehaviors
             int unconsciousTotal = 0;
             int routedTotal = 0;
             int otherRemovedTotal = 0;
+            int exactOriginFallbackAgents = 0;
             _materializedBattleResultReconcileRemovedSamples.Clear();
 
             for (int i = 0; i < mission.AllAgents.Count; i++)
@@ -8059,12 +8061,36 @@ namespace CoopSpectator.MissionBehaviors
                 if (agent == null || agent.IsMount)
                     continue;
 
-                if (!_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string entryId) ||
-                    string.IsNullOrWhiteSpace(entryId) ||
+                bool usedExactOriginFallback = false;
+                if ((!_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string entryId) ||
+                     string.IsNullOrWhiteSpace(entryId)) &&
+                    !ExactCampaignArmyBootstrap.TryGetEntryId(agent, out entryId))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(entryId) ||
                     !countsByEntryId.TryGetValue(entryId, out MaterializedBattleResultReconciledCounts counts))
                 {
                     continue;
                 }
+
+                if (!_materializedArmyEntryIdByAgentIndex.ContainsKey(agent.Index))
+                {
+                    _materializedArmyEntryIdByAgentIndex[agent.Index] = entryId;
+                    usedExactOriginFallback = true;
+                }
+
+                if (!_materializedArmySideByAgentIndex.ContainsKey(agent.Index) &&
+                    ExactCampaignArmyBootstrap.TryGetSide(agent, out BattleSideEnum originSide) &&
+                    originSide != BattleSideEnum.None)
+                {
+                    _materializedArmySideByAgentIndex[agent.Index] = originSide;
+                    usedExactOriginFallback = true;
+                }
+
+                if (usedExactOriginFallback)
+                    exactOriginFallbackAgents++;
 
                 trackedAgents++;
                 counts.ObservedDamageTaken += Math.Max(0f, agent.HealthLimit - agent.Health);
@@ -8171,6 +8197,7 @@ namespace CoopSpectator.MissionBehaviors
                 " Unconscious=" + unconsciousTotal +
                 " Routed=" + routedTotal +
                 " OtherRemoved=" + otherRemovedTotal +
+                " ExactOriginFallbackAgents=" + exactOriginFallbackAgents +
                 " RawScoreHitCalls=" + _materializedBattleResultRawOnScoreHitCount +
                 " RawAgentRemovedCalls=" + _materializedBattleResultRawOnAgentRemovedCount +
                 " ScoreHits=" + _materializedBattleResultOnScoreHitCount +
