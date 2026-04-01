@@ -25,6 +25,7 @@ namespace CoopSpectator
         private static bool _hasAppliedFixedTestCultures;
         private static DateTime _fixedCultureFirstAttemptUtc = DateTime.MinValue;
         private static DateTime _nextFixedCultureAttemptUtc = DateTime.MinValue;
+        private static string _configuredHarmonyDmdGeneratorTypeName = "unconfigured";
 
         private static string GetProofFilePath(string name)
         {
@@ -145,6 +146,8 @@ namespace CoopSpectator
                     TryConfigureDedicatedHarmonyRuntimeCompat();
                     TryApplyGameModeOverridePatch();
                     TryApplyMissionStateOpenNewPatches();
+                    TryApplyExactCampaignArmyBootstrapPatch();
+                    TryApplyBattleMapSpawnHandoffPatch();
                     TryApplyBattleShellSuppressionPatch();
                     TryApplyMultiplayerHeroClassOverridePatch();
                     TryApplyServerChangeCultureCanonicalizationPatch();
@@ -199,6 +202,20 @@ namespace CoopSpectator
             }
         }
 
+        private static void TryApplyExactCampaignArmyBootstrapPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                ExactCampaignArmyBootstrapPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: ExactCampaignArmyBootstrap patch apply failed: " + ex.Message);
+            }
+        }
+
         private static void TryApplyBattleShellSuppressionPatch()
         {
             try
@@ -213,6 +230,20 @@ namespace CoopSpectator
             }
         }
 
+        private static void TryApplyBattleMapSpawnHandoffPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                BattleMapSpawnHandoffPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: BattleMapSpawnHandoff patch apply failed: " + ex.Message);
+            }
+        }
+
         private static void TryConfigureDedicatedHarmonyRuntimeCompat()
         {
             try
@@ -223,30 +254,45 @@ namespace CoopSpectator
 
                 string[] preferredGeneratorTypes =
                 {
-                    "MonoMod.Utils.DMDEmitMethodBuilderGenerator",
+                    "MonoMod.Utils.DMDCecilGenerator",
                     "MonoMod.Utils.DMDEmitDynamicMethodGenerator",
-                    "MonoMod.Utils.DMDCecilGenerator"
+                    "MonoMod.Utils.DMDEmitMethodBuilderGenerator"
                 };
 
                 Type selectedGeneratorType = null;
+                var availableGeneratorTypes = new System.Collections.Generic.List<string>();
                 foreach (string generatorTypeName in preferredGeneratorTypes)
                 {
-                    selectedGeneratorType = typeof(Harmony).Assembly.GetType(generatorTypeName, throwOnError: false);
-                    if (selectedGeneratorType != null)
+                    Type candidateType = typeof(Harmony).Assembly.GetType(generatorTypeName, throwOnError: false);
+                    if (candidateType != null)
                     {
-                        Harmony.SetSwitch("DMDType", selectedGeneratorType);
-                        ModLogger.Info("CoopSpectatorDedicated: configured Harmony runtime compat. DMDType=" + generatorTypeName + " DMDDebug=false.");
-                        break;
+                        availableGeneratorTypes.Add(generatorTypeName);
+                        if (selectedGeneratorType == null)
+                        {
+                            selectedGeneratorType = candidateType;
+                            _configuredHarmonyDmdGeneratorTypeName = generatorTypeName;
+                        }
                     }
                 }
 
                 if (selectedGeneratorType == null)
                 {
-                    ModLogger.Info("CoopSpectatorDedicated: configured Harmony runtime compat. DMDDebug=false, no preferred DMD generator type was found.");
+                    _configuredHarmonyDmdGeneratorTypeName = "not-found";
+                    ModLogger.Info(
+                        "CoopSpectatorDedicated: configured Harmony runtime compat. " +
+                        "DMDDebug=false AvailableDMDTypes=[] SelectedDMDType=none.");
+                    return;
                 }
+
+                Harmony.SetSwitch("DMDType", selectedGeneratorType);
+                ModLogger.Info(
+                    "CoopSpectatorDedicated: configured Harmony runtime compat. " +
+                    "DMDDebug=false AvailableDMDTypes=[" + string.Join(", ", availableGeneratorTypes) + "] " +
+                    "SelectedDMDType=" + _configuredHarmonyDmdGeneratorTypeName + ".");
             }
             catch (Exception ex)
             {
+                _configuredHarmonyDmdGeneratorTypeName = "config-failed";
                 ModLogger.Info("CoopSpectatorDedicated: Harmony runtime compat configuration failed: " + ex.Message);
             }
         }

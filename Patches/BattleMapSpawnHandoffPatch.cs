@@ -22,6 +22,9 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedFollowSwitchKey;
         private static string _lastLocalVisualFinalizeKey;
         private static string _lastSuppressedAssignFormationKey;
+        private static string _lastSuppressedLocalSelectAllFormationsKey;
+        private static string _lastObservedLocalSelectAllFormationsKey;
+        private static string _lastSuppressedServerSelectAllFormationsKey;
 
         public static void Apply(Harmony harmony)
         {
@@ -30,6 +33,8 @@ namespace CoopSpectator.Patches
                 PatchMissionPeerFollowedAgent(harmony);
                 PatchMissionNetworkComponentSetAgentPeer(harmony);
                 PatchMissionNetworkComponentAssignFormationToPlayer(harmony);
+                PatchOrderControllerSelectAllFormations(harmony);
+                PatchMissionNetworkComponentSelectAllFormations(harmony);
             }
             catch (Exception ex)
             {
@@ -96,6 +101,45 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventAssignFormationToPlayer.");
+        }
+
+        private static void PatchMissionNetworkComponentSelectAllFormations(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleClientEventSelectAllFormations",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleClientEventSelectAllFormations_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleClientEventSelectAllFormations not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleClientEventSelectAllFormations.");
+        }
+
+        private static void PatchOrderControllerSelectAllFormations(Harmony harmony)
+        {
+            MethodInfo target = typeof(OrderController).GetMethod(
+                "SelectAllFormations",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null,
+                types: new[] { typeof(Agent), typeof(bool) },
+                modifiers: null);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(OrderController_SelectAllFormations_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: OrderController.SelectAllFormations(Agent,bool) not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to OrderController.SelectAllFormations(Agent,bool).");
         }
 
         private static bool MissionPeer_FollowedAgent_Prefix(MissionPeer __instance, Agent value)
@@ -187,6 +231,48 @@ namespace CoopSpectator.Patches
             return false;
         }
 
+        private static bool MissionNetworkComponent_HandleClientEventSelectAllFormations_Prefix(
+            NetworkCommunicator networkPeer,
+            GameNetworkMessage baseMessage,
+            ref bool __result)
+        {
+            if (!ShouldSuppressServerSelectAllFormations(networkPeer, out string logKey, out string logDetails))
+                return true;
+
+            __result = true;
+            if (!string.Equals(_lastSuppressedServerSelectAllFormationsKey, logKey, StringComparison.Ordinal))
+            {
+                _lastSuppressedServerSelectAllFormationsKey = logKey;
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: suppressed server-side SelectAllFormations during exact-scene spawn handshake. " +
+                    logDetails);
+            }
+
+            return false;
+        }
+
+        private static bool OrderController_SelectAllFormations_Prefix(
+            OrderController __instance,
+            Agent selectorAgent,
+            bool uiFeedback)
+        {
+            if (!ShouldSuppressLocalSelectAllFormations(__instance, selectorAgent, out string logKey, out string logDetails))
+            {
+                LogObservedLocalSelectAllFormations(__instance, selectorAgent);
+                return true;
+            }
+
+            if (!string.Equals(_lastSuppressedLocalSelectAllFormationsKey, logKey, StringComparison.Ordinal))
+            {
+                _lastSuppressedLocalSelectAllFormationsKey = logKey;
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: suppressed local OrderController.SelectAllFormations during exact-scene spawn handshake. " +
+                    logDetails);
+            }
+
+            return false;
+        }
+
         private static bool ShouldSuppressLocalFollowSwitch(
             MissionPeer missionPeer,
             Agent followedAgent,
@@ -253,6 +339,71 @@ namespace CoopSpectator.Patches
             return true;
         }
 
+        private static void LogObservedLocalSelectAllFormations(OrderController orderController, Agent selectorAgent)
+        {
+            try
+            {
+                if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive || orderController == null)
+                    return;
+
+                NetworkCommunicator myPeer = GameNetwork.MyPeer;
+                if (myPeer == null || myPeer.IsServerPeer)
+                    return;
+
+                MissionPeer myMissionPeer = myPeer.GetComponent<MissionPeer>();
+                Mission mission = Mission.Current ?? selectorAgent?.Mission ?? myMissionPeer?.ControlledAgent?.Mission;
+                if (myMissionPeer == null || mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return;
+
+                if (!SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+                    return;
+
+                CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot selectionBridge =
+                    CoopBattleSelectionBridgeFile.ReadCurrentSelection();
+                CoopBattleEntryPolicy.ClientSnapshot entryPolicy =
+                    CoopBattleEntryPolicy.BuildClientSnapshot(mission, selectionBridge);
+                if (entryPolicy == null || !entryPolicy.UseAuthoritativeTroopPath)
+                    return;
+
+                Agent controlledAgent = myMissionPeer.ControlledAgent;
+                Agent orderOwner = orderController.Owner;
+                bool hasSpawnState =
+                    CoopBattleSpawnRuntimeState.TryGetState(myMissionPeer, out PeerSpawnRuntimeState spawnState);
+                bool hasLifecycleState =
+                    CoopBattlePeerLifecycleRuntimeState.TryGetState(myMissionPeer, out PeerLifecycleRuntimeState lifecycleState);
+
+                string logKey =
+                    myPeer.Index + "|" +
+                    (controlledAgent?.Index.ToString() ?? "null") + "|" +
+                    (orderOwner?.Index.ToString() ?? "null") + "|" +
+                    myMissionPeer.BotsUnderControlTotal + "|" +
+                    myMissionPeer.BotsUnderControlAlive + "|" +
+                    (hasSpawnState ? spawnState.Status.ToString() : "none") + "|" +
+                    (hasLifecycleState ? lifecycleState.Status.ToString() : "none");
+                if (string.Equals(_lastObservedLocalSelectAllFormationsKey, logKey, StringComparison.Ordinal))
+                    return;
+
+                _lastObservedLocalSelectAllFormationsKey = logKey;
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: observed local OrderController.SelectAllFormations without suppression on exact-scene spawn handshake candidate. " +
+                    "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
+                    " ControlledAgentIndex=" + (controlledAgent?.Index.ToString() ?? "null") +
+                    " OrderOwnerIndex=" + (orderOwner?.Index.ToString() ?? "null") +
+                    " SelectorAgentIndex=" + (selectorAgent?.Index.ToString() ?? "null") +
+                    " ControlledFormationIndex=" + (myMissionPeer.ControlledFormation?.FormationIndex.ToString() ?? "null") +
+                    " BotsUnderControlTotal=" + myMissionPeer.BotsUnderControlTotal +
+                    " BotsUnderControlAlive=" + myMissionPeer.BotsUnderControlAlive +
+                    " SpawnStatus=" + (hasSpawnState ? spawnState.Status.ToString() : "null") +
+                    " LifecycleState=" + (hasLifecycleState ? lifecycleState.Status.ToString() : "null") +
+                    " BridgeTroop=" + (entryPolicy.BridgeTroopOrEntryId ?? "null") +
+                    " Mission=" + (mission.SceneName ?? "null"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: local SelectAllFormations observation failed: " + ex.Message);
+            }
+        }
+
         private static bool ShouldSuppressLocalAssignFormationToPlayer(
             AssignFormationToPlayer assignFormationToPlayer,
             out string logKey,
@@ -313,6 +464,152 @@ namespace CoopSpectator.Patches
                 " SpawnStatus=" + (status?.SpawnStatus ?? "null") +
                 " LifecycleState=" + (status?.LifecycleState ?? "null") +
                 " BridgeTroop=" + (entryPolicy.BridgeTroopOrEntryId ?? "null") +
+                " Mission=" + (mission.SceneName ?? "null");
+            return true;
+        }
+
+        private static bool ShouldSuppressServerSelectAllFormations(
+            NetworkCommunicator networkPeer,
+            out string logKey,
+            out string logDetails)
+        {
+            logKey = null;
+            logDetails = null;
+
+            if (!GameNetwork.IsServer || networkPeer == null || networkPeer.IsServerPeer)
+                return false;
+
+            Mission mission = Mission.Current;
+            if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                return false;
+
+            if (!SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            MissionPeer missionPeer = networkPeer.GetComponent<MissionPeer>();
+            if (missionPeer == null || !missionPeer.IsControlledAgentActive)
+                return false;
+
+            if (!CoopBattleSpawnRuntimeState.TryGetState(missionPeer, out PeerSpawnRuntimeState spawnState) ||
+                spawnState.Status != CoopBattleSpawnStatus.Spawned)
+            {
+                return false;
+            }
+
+            if (!CoopBattlePeerLifecycleRuntimeState.TryGetState(missionPeer, out PeerLifecycleRuntimeState lifecycleState) ||
+                lifecycleState.Status != CoopBattlePeerLifecycleStatus.Alive)
+            {
+                return false;
+            }
+
+            if (missionPeer.BotsUnderControlTotal > 1 || missionPeer.BotsUnderControlAlive > 0)
+                return false;
+
+            logKey =
+                networkPeer.Index + "|" +
+                missionPeer.ControlledAgent?.Index + "|" +
+                missionPeer.BotsUnderControlTotal + "|" +
+                missionPeer.BotsUnderControlAlive + "|" +
+                (spawnState.TroopId ?? "none") + "|" +
+                (spawnState.EntryId ?? "none");
+            logDetails =
+                "Peer=" + (networkPeer.UserName ?? networkPeer.Index.ToString()) +
+                " ControlledAgentIndex=" + (missionPeer.ControlledAgent?.Index.ToString() ?? "null") +
+                " ControlledFormationIndex=" + (missionPeer.ControlledFormation?.FormationIndex.ToString() ?? "null") +
+                " BotsUnderControlTotal=" + missionPeer.BotsUnderControlTotal +
+                " BotsUnderControlAlive=" + missionPeer.BotsUnderControlAlive +
+                " SpawnStatus=" + spawnState.Status +
+                " LifecycleState=" + lifecycleState.Status +
+                " TroopId=" + (spawnState.TroopId ?? "null") +
+                " EntryId=" + (spawnState.EntryId ?? "null") +
+                " Mission=" + (mission.SceneName ?? "null");
+            return true;
+        }
+
+        private static bool ShouldSuppressLocalSelectAllFormations(
+            OrderController orderController,
+            Agent selectorAgent,
+            out string logKey,
+            out string logDetails)
+        {
+            logKey = null;
+            logDetails = null;
+
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive || orderController == null)
+                return false;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            if (myPeer == null || myPeer.IsServerPeer)
+                return false;
+
+            MissionPeer myMissionPeer = myPeer.GetComponent<MissionPeer>();
+            Mission mission = Mission.Current ?? selectorAgent?.Mission ?? myMissionPeer?.ControlledAgent?.Mission;
+            if (myMissionPeer == null || mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                return false;
+
+            if (!SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot selectionBridge =
+                CoopBattleSelectionBridgeFile.ReadCurrentSelection();
+            CoopBattleEntryPolicy.ClientSnapshot entryPolicy =
+                CoopBattleEntryPolicy.BuildClientSnapshot(mission, selectionBridge);
+            if (entryPolicy == null || !entryPolicy.UseAuthoritativeTroopPath)
+                return false;
+
+            Agent controlledAgent = myMissionPeer.ControlledAgent;
+            if (controlledAgent == null || !controlledAgent.IsActive())
+                return false;
+
+            Agent orderOwner = orderController.Owner;
+            if (orderOwner != null && !ReferenceEquals(orderOwner, controlledAgent))
+                return false;
+
+            if (selectorAgent != null && !ReferenceEquals(selectorAgent, controlledAgent))
+                return false;
+
+            bool hasSpawnState = CoopBattleSpawnRuntimeState.TryGetState(myMissionPeer, out PeerSpawnRuntimeState spawnState);
+            bool hasLifecycleState = CoopBattlePeerLifecycleRuntimeState.TryGetState(myMissionPeer, out PeerLifecycleRuntimeState lifecycleState);
+            bool hasControlledFormation = myMissionPeer.ControlledFormation != null;
+            bool hasLiveControlledBots = myMissionPeer.BotsUnderControlAlive > 0;
+            bool hasMaterializedControlledFormation = myMissionPeer.BotsUnderControlTotal > 1;
+            bool isEarlyExactSceneSpawnHandshake =
+                !hasControlledFormation &&
+                !hasLiveControlledBots &&
+                !hasMaterializedControlledFormation;
+            bool isLateExactSceneSpawnHandshake =
+                hasSpawnState &&
+                spawnState.Status == CoopBattleSpawnStatus.Spawned &&
+                hasLifecycleState &&
+                lifecycleState.Status == CoopBattlePeerLifecycleStatus.Alive &&
+                !hasControlledFormation &&
+                !hasLiveControlledBots &&
+                !hasMaterializedControlledFormation;
+
+            if (!isEarlyExactSceneSpawnHandshake && !isLateExactSceneSpawnHandshake)
+                return false;
+
+            logKey =
+                myPeer.Index + "|" +
+                controlledAgent.Index + "|" +
+                myMissionPeer.BotsUnderControlTotal + "|" +
+                myMissionPeer.BotsUnderControlAlive + "|" +
+                (hasSpawnState ? (spawnState.TroopId ?? "none") : "none") + "|" +
+                (hasSpawnState ? (spawnState.EntryId ?? "none") : "none") + "|" +
+                (isEarlyExactSceneSpawnHandshake ? "early-preformation" : "late-spawned-alive");
+            logDetails =
+                "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
+                " ControlledAgentIndex=" + controlledAgent.Index +
+                " OrderOwnerIndex=" + (orderOwner?.Index.ToString() ?? "null") +
+                " SelectorAgentIndex=" + (selectorAgent?.Index.ToString() ?? "null") +
+                " ControlledFormationIndex=" + (myMissionPeer.ControlledFormation?.FormationIndex.ToString() ?? "null") +
+                " BotsUnderControlTotal=" + myMissionPeer.BotsUnderControlTotal +
+                " BotsUnderControlAlive=" + myMissionPeer.BotsUnderControlAlive +
+                " SuppressionPhase=" + (isEarlyExactSceneSpawnHandshake ? "early-preformation" : "late-spawned-alive") +
+                " SpawnStatus=" + (hasSpawnState ? spawnState.Status.ToString() : "null") +
+                " LifecycleState=" + (hasLifecycleState ? lifecycleState.Status.ToString() : "null") +
+                " TroopId=" + (hasSpawnState ? (spawnState.TroopId ?? "null") : "null") +
+                " EntryId=" + (hasSpawnState ? (spawnState.EntryId ?? "null") : "null") +
                 " Mission=" + (mission.SceneName ?? "null");
             return true;
         }

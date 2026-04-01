@@ -26,6 +26,10 @@ Read in this order when opening a new window:
   Dedicated-specific analysis of map ownership, archive creation, scene assets, and why stock dedicated is biased toward MP-owned scenes.
 - `docs/EXACT_CAMPAIGN_SCENE_BOOTSTRAP_ANALYSIS_2026-03-31.md`
   Vanilla exact-scene bootstrap path for `battle_terrain_*`, from `MapPatchData` to `MissionInitializerRecord` to SP `Battle` mission shell.
+- `docs/EXACT_CAMPAIGN_ARMY_SPAWN_AND_SPAWN_ZONE_ANALYSIS_2026-04-01.md`
+  Native campaign army spawn contract and spawn-zone contract: `MissionAgentSpawnLogic`, `PartyGroupTroopSupplier`, `BattleSpawnPathSelector`, and field-battle formation tags.
+- `docs/EXACT_CAMPAIGN_POST_SPAWN_ARMY_BOOTSTRAP_ANALYSIS_2026-04-01.md`
+  Exact-scene runtime evidence after `SelectAllFormations` suppression. Shows the blocker has moved beyond early captain handoff into post-possession army bootstrap and maps the native campaign deployment lifecycle that should replace the current hybrid path.
 - `docs/DEDICATED_EXACT_CAMPAIGN_SCENE_BOOTSTRAP_PROBE_2026-03-31.md`
   Dedicated-only exact-scene probe for runtime files, `sp_battle_scenes.xml`, campaign assembly availability, and manual `PairSceneNameToModuleName(..., "SandBoxCore")`.
 - `docs/BATTLE_MAP_FULL_CONTRACT_DIAGNOSTICS_2026-03-31.md`
@@ -49,6 +53,8 @@ Read in this order when opening a new window:
 - `docs/CAMPAIGN_TO_MP_RUNTIME_CONTRACT_ANALYSIS_2026-03-31.md`
 - `docs/DEDICATED_MAP_SERVER_AND_SCENE_CONTRACT_ANALYSIS_2026-03-31.md`
 - `docs/EXACT_CAMPAIGN_SCENE_BOOTSTRAP_ANALYSIS_2026-03-31.md`
+- `docs/EXACT_CAMPAIGN_ARMY_SPAWN_AND_SPAWN_ZONE_ANALYSIS_2026-04-01.md`
+- `docs/EXACT_CAMPAIGN_POST_SPAWN_ARMY_BOOTSTRAP_ANALYSIS_2026-04-01.md`
 - `docs/DEDICATED_EXACT_CAMPAIGN_SCENE_BOOTSTRAP_PROBE_2026-03-31.md`
 - `docs/DEDICATED_SCENE_RESOLUTION_PROBE_2026-03-31.md`
 - `docs/BATTLE_MAP_FULL_CONTRACT_DIAGNOSTICS_2026-03-31.md`

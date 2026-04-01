@@ -69,6 +69,13 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableBattleMapFullContractDiagnostics = true;
 
         /// <summary>
+        /// Exact campaign scene bootstrap path: replace the hybrid delayed
+        /// materialization layer with a native-like `MissionAgentSpawnLogic`
+        /// flow backed by snapshot-driven custom troop suppliers.
+        /// </summary>
+        public const bool EnableExactCampaignNativeArmyBootstrap = true;
+
+        /// <summary>
         /// Battle-map client safety switch: keep MissionLobbyEquipmentNetworkComponent
         /// enabled because native gauntlet class-loadout initialization dereferences
         /// it unconditionally during mission-screen startup.
