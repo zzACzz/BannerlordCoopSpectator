@@ -3208,18 +3208,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     : battleSizeSource + "->legacy-default-48";
             }
 
-            if (reinforcementWaveCount <= 0)
-            {
-                reinforcementWaveCount = 1;
-                reinforcementSource = string.IsNullOrWhiteSpace(reinforcementSource)
-                    ? "fallback-1"
-                    : reinforcementSource + "->fallback-1";
-            }
-
             return new CampaignBattleSpawnBudgetContext
             {
                 BattleSizeBudget = Math.Max(1, battleSizeBudget),
-                ReinforcementWaveCount = Math.Max(1, reinforcementWaveCount),
+                ReinforcementWaveCount = Math.Max(0, reinforcementWaveCount),
                 Source = (battleSizeSource ?? "unknown") + ";reinforcement=" + (reinforcementSource ?? "unknown")
             };
         }

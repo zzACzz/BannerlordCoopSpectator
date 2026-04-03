@@ -17,6 +17,8 @@ namespace CoopSpectator.Infrastructure
         private static BattleSideEnum _activePlayerSide = BattleSideEnum.None;
         private static bool _reinforcementsEnabled;
         private static DateTime _nextDeferredLogUtc = DateTime.MinValue;
+        private static DateTime _nextRuntimeDiagnosticsLogUtc = DateTime.MinValue;
+        private static string _lastRuntimeDiagnosticsSummary = string.Empty;
         private static Mission _spawnLogicInitSideOverrideMission;
         private static BattleSideEnum _spawnLogicInitSideOverride = BattleSideEnum.None;
         private static int _spawnLogicInitSideOverrideDepth;
@@ -32,12 +34,18 @@ namespace CoopSpectator.Infrastructure
             typeof(MissionAgentSpawnLogic).GetField("_phases", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionAgentSpawnLogicNumberOfTroopsInTotalField =
             typeof(MissionAgentSpawnLogic).GetField("_numberOfTroopsInTotal", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo MissionAgentSpawnLogicBattleSizeField =
+            typeof(MissionAgentSpawnLogic).GetField("_battleSize", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionAgentSpawnLogicDeploymentPlanField =
             typeof(MissionAgentSpawnLogic).GetField("_deploymentPlan", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionAgentSpawnLogicPlayerSideField =
             typeof(MissionAgentSpawnLogic).GetField("_playerSide", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo DefaultMissionDeploymentPlanFormationSceneSpawnEntriesField =
             typeof(DefaultMissionDeploymentPlan).GetField("_formationSceneSpawnEntries", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo MissionSideTroopSupplierField =
+            typeof(MissionAgentSpawnLogic)
+                .GetNestedType("MissionSide", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                ?.GetField("_troopSupplier", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private readonly struct TeamSideOverrideState
         {
@@ -93,11 +101,19 @@ namespace CoopSpectator.Infrastructure
             if (ReferenceEquals(_activeMission, mission))
                 return;
 
+            if (_activeMission != null)
+                _activeMission.OnBeforeAgentRemoved -= OnMissionBeforeAgentRemoved;
+
+            if (_activeSpawnLogic != null)
+                _activeSpawnLogic.OnReinforcementsSpawned -= OnNativeReinforcementsSpawned;
+
             _activeMission = mission;
             _activeSpawnLogic = null;
             _activePlayerSide = BattleSideEnum.None;
             _reinforcementsEnabled = false;
             _nextDeferredLogUtc = DateTime.MinValue;
+            _nextRuntimeDiagnosticsLogUtc = DateTime.MinValue;
+            _lastRuntimeDiagnosticsSummary = string.Empty;
         }
 
         public static bool TryInitialize(
@@ -194,16 +210,25 @@ namespace CoopSpectator.Infrastructure
                     spawnLogic.AfterStart();
                 }
 
-                initializationStep = "build-spawn-settings";
-                MissionSpawnSettings spawnSettings = new MissionSpawnSettings(
-                    MissionSpawnSettings.InitialSpawnMethod.FreeAllocation,
-                    MissionSpawnSettings.ReinforcementTimingMethod.GlobalTimer,
-                    MissionSpawnSettings.ReinforcementSpawnMethod.Balanced,
-                    globalReinforcementInterval: 10f,
-                    reinforcementBatchPercentage: 0.05f,
-                    desiredReinforcementPercentage: 0.166f);
-                initializationStep = "compute-initial-counts";
-                ComputeInitialSpawnCounts(defenderTotal, attackerTotal, out int defenderInitial, out int attackerInitial, out int battleSizeBudget);
+                initializationStep = "resolve-battle-reinforcements-controller";
+                MissionBehavior existingBattleReinforcementsSpawnController = mission.GetMissionBehavior<BattleReinforcementsSpawnController>();
+                if (existingBattleReinforcementsSpawnController == null)
+                {
+                    initializationStep = "create-battle-reinforcements-controller";
+                    var battleReinforcementsSpawnController = new BattleReinforcementsSpawnController();
+                    mission.AddMissionBehavior(battleReinforcementsSpawnController);
+                    initializationStep = "battle-reinforcements-controller-onbehaviorinitialize";
+                    battleReinforcementsSpawnController.OnBehaviorInitialize();
+                    initializationStep = "battle-reinforcements-controller-afterstart";
+                    battleReinforcementsSpawnController.AfterStart();
+                }
+
+                initializationStep = "build-native-wave-spawn-settings";
+                MissionSpawnSettings spawnSettings = CreateNativeCampaignBattleWaveSpawnSettings();
+                int defenderInitial = defenderTotal;
+                int attackerInitial = attackerTotal;
+                int battleSizeBudget = BattleSnapshotRuntimeState.GetState()?.BattleSizeBudget ?? (defenderTotal + attackerTotal);
+                int reinforcementWaveCount = GetResolvedReinforcementWaveCount();
 
                 initializationStep = "ensure-deployment-team-plans";
                 if (!TryEnsureDeploymentPlanTeamPlans(mission, source, out string deploymentPlanDiagnostics))
@@ -211,6 +236,19 @@ namespace CoopSpectator.Infrastructure
                     reason = deploymentPlanDiagnostics ?? "deployment-team-plan-bridge-failed";
                     return false;
                 }
+
+                initializationStep = "configure-spawn-horses";
+                spawnLogic.SetSpawnHorses(BattleSideEnum.Defender, SideHasMountedTroops(suppliers, BattleSideEnum.Defender));
+                spawnLogic.SetSpawnHorses(BattleSideEnum.Attacker, SideHasMountedTroops(suppliers, BattleSideEnum.Attacker));
+
+                initializationStep = "override-native-battle-size";
+                int nativeBattleSizeBeforeOverride = GetNativeBattleSize(spawnLogic);
+                if (!TryOverrideNativeBattleSize(spawnLogic, battleSizeBudget, out string battleSizeOverrideDiagnostics))
+                {
+                    reason = battleSizeOverrideDiagnostics ?? "battle-size-override-failed";
+                    return false;
+                }
+                int nativeBattleSizeAfterOverride = GetNativeBattleSize(spawnLogic);
 
                 initializationStep = "init-with-single-phase";
                 PushSpawnLogicInitTeamSideOverride(mission, playerSide);
@@ -230,8 +268,8 @@ namespace CoopSpectator.Infrastructure
                         attackerTotal,
                         defenderInitial,
                         attackerInitial,
-                        spawnDefenders: defenderInitial > 0,
-                        spawnAttackers: attackerInitial > 0,
+                        spawnDefenders: defenderTotal > 0,
+                        spawnAttackers: attackerTotal > 0,
                         in spawnSettings);
                 }
                 finally
@@ -239,8 +277,14 @@ namespace CoopSpectator.Infrastructure
                     PopInitTeamSideSanitization(temporaryTeamSideOverrides, source);
                     PopSpawnLogicInitTeamSideOverride(mission);
                 }
+                initializationStep = "subscribe-agent-removal-events";
+                mission.OnBeforeAgentRemoved -= OnMissionBeforeAgentRemoved;
+                mission.OnBeforeAgentRemoved += OnMissionBeforeAgentRemoved;
+
                 initializationStep = "disable-reinforcements";
                 spawnLogic.SetReinforcementsSpawnEnabled(false);
+                spawnLogic.OnReinforcementsSpawned -= OnNativeReinforcementsSpawned;
+                spawnLogic.OnReinforcementsSpawned += OnNativeReinforcementsSpawned;
 
                 initializationStep = "activate-runtime";
                 _activeMission = mission;
@@ -255,9 +299,15 @@ namespace CoopSpectator.Infrastructure
                     " PlayerSide=" + playerSide +
                     " DefenderTotal=" + defenderTotal +
                     " AttackerTotal=" + attackerTotal +
-                    " DefenderInitial=" + defenderInitial +
-                    " AttackerInitial=" + attackerInitial +
+                    " DefenderInitialInput=" + defenderInitial +
+                    " AttackerInitialInput=" + attackerInitial +
                     " BattleSizeBudget=" + battleSizeBudget +
+                    " ReinforcementWaveCount=" + reinforcementWaveCount +
+                    " SpawnSettings=BattleSizeAllocating/Wave" +
+                    " NativeBattleSizeBeforeOverride=" + nativeBattleSizeBeforeOverride +
+                    " NativeBattleSizeAfterOverride=" + nativeBattleSizeAfterOverride +
+                    " DefenderSpawnHorses=" + spawnLogic.GetSpawnHorses(BattleSideEnum.Defender) +
+                    " AttackerSpawnHorses=" + spawnLogic.GetSpawnHorses(BattleSideEnum.Attacker) +
                     " SupplierDiagnostics=" + supplierDiagnostics +
                     " Source=" + (source ?? "unknown"));
                 return true;
@@ -650,6 +700,257 @@ namespace CoopSpectator.Infrastructure
             return builder.ToString();
         }
 
+        private static string BuildDetailedRuntimeSummary(MissionAgentSpawnLogic spawnLogic)
+        {
+            if (spawnLogic == null)
+                return "SpawnLogic=null";
+
+            var builder = new StringBuilder();
+            builder.Append("BattleSize=").Append(spawnLogic.BattleSize);
+            builder.Append(" NumberOfAgents=").Append(spawnLogic.NumberOfAgents);
+            builder.Append(" RemainingTroops=").Append(spawnLogic.NumberOfRemainingTroops);
+            builder.Append(" ActiveTroops=[Defender=").Append(spawnLogic.NumberOfActiveDefenderTroops);
+            builder.Append(", Attacker=").Append(spawnLogic.NumberOfActiveAttackerTroops).Append("]");
+            builder.Append(" RemovedBySide=[Defender=").Append(GetMissionSideSupplierPropertyValue<int>(spawnLogic, BattleSideEnum.Defender, "NumRemovedTroops"));
+            builder.Append(", Attacker=").Append(GetMissionSideSupplierPropertyValue<int>(spawnLogic, BattleSideEnum.Attacker, "NumRemovedTroops")).Append("]");
+            builder.Append(" RemainingBySide=[Defender=").Append(spawnLogic.NumberOfRemainingDefenderTroops);
+            builder.Append(", Attacker=").Append(spawnLogic.NumberOfRemainingAttackerTroops).Append("]");
+            builder.Append(" UnsuppliedBySide=[Defender=").Append(GetMissionSideSupplierPropertyValue<int>(spawnLogic, BattleSideEnum.Defender, "NumTroopsNotSupplied"));
+            builder.Append(", Attacker=").Append(GetMissionSideSupplierPropertyValue<int>(spawnLogic, BattleSideEnum.Attacker, "NumTroopsNotSupplied")).Append("]");
+            builder.Append(" IsSideDepleted=[Defender=").Append(SafeIsSideDepleted(spawnLogic, BattleSideEnum.Defender));
+            builder.Append(", Attacker=").Append(SafeIsSideDepleted(spawnLogic, BattleSideEnum.Attacker)).Append("]");
+            builder.Append(" PhaseState=[");
+            builder.Append(BuildPhaseRuntimeSummary(spawnLogic, BattleSideEnum.Defender));
+            builder.Append("; ");
+            builder.Append(BuildPhaseRuntimeSummary(spawnLogic, BattleSideEnum.Attacker));
+            builder.Append("]");
+            builder.Append(" MissionSideState=[");
+            builder.Append(BuildMissionSideRuntimeSummary(spawnLogic, BattleSideEnum.Defender));
+            builder.Append("; ");
+            builder.Append(BuildMissionSideRuntimeSummary(spawnLogic, BattleSideEnum.Attacker));
+            builder.Append("]");
+            return builder.ToString();
+        }
+
+        private static string BuildPhaseRuntimeSummary(MissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
+        {
+            object phase = GetActivePhaseObject(spawnLogic, side);
+            if (phase == null)
+                return side + "=null";
+
+            return side +
+                   "{Total=" + GetIntFieldValue(phase, "TotalSpawnNumber") +
+                   ",InitialPending=" + GetIntFieldValue(phase, "InitialSpawnNumber") +
+                   ",InitialSpawned=" + GetIntFieldValue(phase, "InitialSpawnedNumber") +
+                   ",Remaining=" + GetIntFieldValue(phase, "RemainingSpawnNumber") +
+                   ",Active=" + GetIntFieldValue(phase, "NumberActiveTroops") +
+                   "}";
+        }
+
+        private static string BuildMissionSideRuntimeSummary(MissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
+        {
+            object missionSide = GetMissionSideObject(spawnLogic, side);
+            if (missionSide == null)
+                return side + "=null";
+
+            return side +
+                   "{SpawnActive=" + GetPropertyValue<bool>(missionSide, "TroopSpawnActive") +
+                   ",ReinforcementActive=" + GetPropertyValue<bool>(missionSide, "ReinforcementSpawnActive") +
+                   ",HasSpawnable=" + GetPropertyValue<bool>(missionSide, "HasSpawnableReinforcements") +
+                   ",HasReserved=" + GetPropertyValue<bool>(missionSide, "HasReservedTroops") +
+                   ",Reserved=" + GetPropertyValue<int>(missionSide, "ReservedTroopsCount") +
+                   ",BatchSize=" + GetPropertyValue<float>(missionSide, "ReinforcementBatchSize").ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                   ",SpawnedLastBatch=" + GetPropertyValue<int>(missionSide, "ReinforcementsSpawnedInLastBatch") +
+                   ",Quota=" + GetPropertyValue<int>(missionSide, "ReinforcementQuotaRequirement") +
+                   ",Priority=" + GetPropertyValue<float>(missionSide, "ReinforcementBatchPriority").ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                   ",ActiveTroops=" + GetPropertyValue<int>(missionSide, "NumberOfActiveTroops") +
+                   "}";
+        }
+
+        private static object GetActivePhaseObject(MissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
+        {
+            if (spawnLogic == null || MissionAgentSpawnLogicPhasesField == null)
+                return null;
+
+            Array phases = MissionAgentSpawnLogicPhasesField.GetValue(spawnLogic) as Array;
+            int sideIndex = (int)side;
+            if (phases == null || sideIndex < 0 || sideIndex >= phases.Length)
+                return null;
+
+            object phaseList = phases.GetValue(sideIndex);
+            object countValue = phaseList?.GetType().GetProperty("Count")?.GetValue(phaseList);
+            if (!(countValue is int count) || count <= 0)
+                return null;
+
+            MethodInfo indexer = phaseList.GetType().GetMethod("get_Item", BindingFlags.Instance | BindingFlags.Public);
+            return indexer?.Invoke(phaseList, new object[] { 0 });
+        }
+
+        private static object GetMissionSideObject(MissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
+        {
+            if (spawnLogic == null || MissionAgentSpawnLogicMissionSidesField == null)
+                return null;
+
+            Array missionSides = MissionAgentSpawnLogicMissionSidesField.GetValue(spawnLogic) as Array;
+            int sideIndex = (int)side;
+            if (missionSides == null || sideIndex < 0 || sideIndex >= missionSides.Length)
+                return null;
+
+            return missionSides.GetValue(sideIndex);
+        }
+
+        private static T GetMissionSideSupplierPropertyValue<T>(
+            MissionAgentSpawnLogic spawnLogic,
+            BattleSideEnum side,
+            string propertyName)
+        {
+            object missionSide = GetMissionSideObject(spawnLogic, side);
+            if (missionSide == null || MissionSideTroopSupplierField == null)
+                return default(T);
+
+            object supplier = MissionSideTroopSupplierField.GetValue(missionSide);
+            return GetPropertyValue<T>(supplier, propertyName);
+        }
+
+        private static int GetIntFieldValue(object instance, string fieldName)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(fieldName))
+                return 0;
+
+            FieldInfo field = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            object value = field?.GetValue(instance);
+            return value is int intValue ? intValue : 0;
+        }
+
+        private static T GetPropertyValue<T>(object instance, string propertyName)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(propertyName))
+                return default;
+
+            PropertyInfo property = instance.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            object value = property?.GetValue(instance);
+            if (value is T typedValue)
+                return typedValue;
+
+            return default;
+        }
+
+        private static bool SafeIsSideDepleted(MissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
+        {
+            try
+            {
+                return spawnLogic?.IsSideDepleted(side) == true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void OnNativeReinforcementsSpawned(BattleSideEnum side, int spawnedCount)
+        {
+            Mission mission = _activeMission;
+            if (_activeSpawnLogic == null || mission == null)
+                return;
+
+            ModLogger.Info(
+                "ExactCampaignArmyBootstrap: native reinforcement batch spawned. " +
+                "Scene=" + (mission.SceneName ?? "null") +
+                " Side=" + side +
+                " SpawnedCount=" + spawnedCount +
+                " PlayerSide=" + _activePlayerSide);
+            TryLogRuntimeDiagnostics(mission, "native-reinforcements-spawned", force: true);
+        }
+
+        private static void OnMissionBeforeAgentRemoved(
+            Agent affectedAgent,
+            Agent affectorAgent,
+            AgentState agentState,
+            KillingBlow killingBlow)
+        {
+            Mission mission = affectedAgent?.Mission ?? affectorAgent?.Mission ?? _activeMission;
+            TrySyncAgentOriginRemoval(
+                mission,
+                affectedAgent,
+                affectorAgent,
+                agentState,
+                "mission-onbefore-agent-removed");
+        }
+
+        public static void TrySyncAgentOriginRemoval(
+            Mission mission,
+            Agent affectedAgent,
+            Agent affectorAgent,
+            AgentState agentState,
+            string source = null)
+        {
+            if (!IsActive(mission) ||
+                affectedAgent == null ||
+                affectedAgent.IsMount ||
+                !(affectedAgent.Origin is ExactCampaignSnapshotAgentOrigin exactOrigin) ||
+                _activeSpawnLogic == null)
+            {
+                return;
+            }
+
+            int defenderRemovedBefore = GetMissionSideSupplierPropertyValue<int>(
+                _activeSpawnLogic,
+                BattleSideEnum.Defender,
+                "NumRemovedTroops");
+            int attackerRemovedBefore = GetMissionSideSupplierPropertyValue<int>(
+                _activeSpawnLogic,
+                BattleSideEnum.Attacker,
+                "NumRemovedTroops");
+
+            switch (agentState)
+            {
+                case AgentState.Unconscious:
+                    affectedAgent.Origin.SetWounded();
+                    break;
+                case AgentState.Killed:
+                    affectedAgent.Origin.SetKilled();
+                    break;
+                default:
+                    affectedAgent.Origin.SetRouted(isOrderRetreat: false);
+                    break;
+            }
+
+            int defenderRemovedAfter = GetMissionSideSupplierPropertyValue<int>(
+                _activeSpawnLogic,
+                BattleSideEnum.Defender,
+                "NumRemovedTroops");
+            int attackerRemovedAfter = GetMissionSideSupplierPropertyValue<int>(
+                _activeSpawnLogic,
+                BattleSideEnum.Attacker,
+                "NumRemovedTroops");
+            if (defenderRemovedBefore == defenderRemovedAfter &&
+                attackerRemovedBefore == attackerRemovedAfter)
+            {
+                return;
+            }
+
+            ModLogger.Info(
+                "ExactCampaignArmyBootstrap: synced exact origin removal. " +
+                "Scene=" + (mission?.SceneName ?? "null") +
+                " Source=" + (source ?? "unknown") +
+                " Side=" + exactOrigin.Side +
+                " AgentState=" + agentState +
+                " AgentIndex=" + affectedAgent.Index +
+                " EntryId=" + exactOrigin.EntryId +
+                " TroopId=" + exactOrigin.TroopId +
+                " RemovedBySideBefore=[Defender=" + defenderRemovedBefore +
+                ",Attacker=" + attackerRemovedBefore + "]" +
+                " RemovedBySideAfter=[Defender=" + defenderRemovedAfter +
+                ",Attacker=" + attackerRemovedAfter + "]" +
+                " ActiveTroopsAfter=[Defender=" + _activeSpawnLogic.NumberOfActiveDefenderTroops +
+                ",Attacker=" + _activeSpawnLogic.NumberOfActiveAttackerTroops + "]" +
+                " PlayerSide=" + _activePlayerSide);
+            TryLogRuntimeDiagnostics(
+                mission,
+                (source ?? "unknown") + " exact-origin-removal",
+                force: true);
+        }
+
         public static void TrySyncReinforcementState(Mission mission, bool enabled, string source)
         {
             if (!IsActive(mission) || _reinforcementsEnabled == enabled)
@@ -663,6 +964,49 @@ namespace CoopSpectator.Infrastructure
                 " Enabled=" + enabled +
                 " PlayerSide=" + _activePlayerSide +
                 " Source=" + (source ?? "unknown"));
+            TryLogRuntimeDiagnostics(mission, source + " gate-change", force: true);
+        }
+
+        public static bool TryGetRemainingTroopCounts(
+            Mission mission,
+            out int attackerRemaining,
+            out int defenderRemaining)
+        {
+            attackerRemaining = 0;
+            defenderRemaining = 0;
+            if (!IsActive(mission) || _activeSpawnLogic == null)
+                return false;
+
+            attackerRemaining = Math.Max(0, _activeSpawnLogic.NumberOfRemainingAttackerTroops);
+            defenderRemaining = Math.Max(0, _activeSpawnLogic.NumberOfRemainingDefenderTroops);
+            return true;
+        }
+
+        public static void TryLogRuntimeDiagnostics(Mission mission, string source, bool force = false)
+        {
+            if (!IsActive(mission) || _activeSpawnLogic == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (!force && nowUtc < _nextRuntimeDiagnosticsLogUtc)
+                return;
+
+            string summary = BuildDetailedRuntimeSummary(_activeSpawnLogic);
+            if (!force && string.Equals(summary, _lastRuntimeDiagnosticsSummary, StringComparison.Ordinal))
+            {
+                _nextRuntimeDiagnosticsLogUtc = nowUtc.AddSeconds(2);
+                return;
+            }
+
+            _lastRuntimeDiagnosticsSummary = summary;
+            _nextRuntimeDiagnosticsLogUtc = nowUtc.AddSeconds(force ? 1 : 2);
+            ModLogger.Info(
+                "ExactCampaignArmyBootstrap: native reinforcement runtime state. " +
+                "Scene=" + (mission?.SceneName ?? "null") +
+                " ReinforcementsEnabled=" + _reinforcementsEnabled +
+                " PlayerSide=" + _activePlayerSide +
+                " Source=" + (source ?? "unknown") +
+                " " + summary);
         }
 
         public static bool TryGetEntryId(Agent agent, out string entryId)
@@ -756,6 +1100,105 @@ namespace CoopSpectator.Infrastructure
                 else if (attackerInitial > 1)
                     attackerInitial = Math.Max(1, attackerInitial - overflow);
             }
+        }
+
+        private static MissionSpawnSettings CreateNativeCampaignBattleWaveSpawnSettings()
+        {
+            return new MissionSpawnSettings(
+                MissionSpawnSettings.InitialSpawnMethod.BattleSizeAllocating,
+                MissionSpawnSettings.ReinforcementTimingMethod.GlobalTimer,
+                MissionSpawnSettings.ReinforcementSpawnMethod.Wave,
+                globalReinforcementInterval: 3f,
+                reinforcementBatchPercentage: 0f,
+                desiredReinforcementPercentage: 0f,
+                reinforcementWavePercentage: 0.5f,
+                maximumReinforcementWaveCount: GetResolvedReinforcementWaveCount(),
+                defenderReinforcementBatchPercentage: 0f,
+                attackerReinforcementBatchPercentage: 0f,
+                defenderAdvantageFactor: 1f,
+                maximumBattleSizeRatio: 0.75f);
+        }
+
+        private static int GetResolvedReinforcementWaveCount()
+        {
+            int reinforcementWaveCount = BattleSnapshotRuntimeState.GetState()?.ReinforcementWaveCount ?? 0;
+            if (reinforcementWaveCount <= 0)
+            {
+                reinforcementWaveCount = BannerlordConfig.GetReinforcementWaveCount();
+            }
+
+            return Math.Max(0, reinforcementWaveCount);
+        }
+
+        private static bool TryOverrideNativeBattleSize(
+            MissionAgentSpawnLogic spawnLogic,
+            int battleSizeBudget,
+            out string diagnostics)
+        {
+            if (spawnLogic == null)
+            {
+                diagnostics = "spawn-logic-null";
+                return false;
+            }
+
+            if (battleSizeBudget <= 0)
+            {
+                diagnostics = "battle-size-budget-invalid";
+                return false;
+            }
+
+            if (MissionAgentSpawnLogicBattleSizeField == null)
+            {
+                diagnostics = "battle-size-field-metadata-missing";
+                return false;
+            }
+
+            try
+            {
+                MissionAgentSpawnLogicBattleSizeField.SetValue(spawnLogic, battleSizeBudget);
+                diagnostics = "ok";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                diagnostics = ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        private static int GetNativeBattleSize(MissionAgentSpawnLogic spawnLogic)
+        {
+            if (spawnLogic == null || MissionAgentSpawnLogicBattleSizeField == null)
+                return -1;
+
+            object value = MissionAgentSpawnLogicBattleSizeField.GetValue(spawnLogic);
+            return value is int battleSize ? battleSize : -1;
+        }
+
+        private static bool SideHasMountedTroops(IMissionTroopSupplier[] suppliers, BattleSideEnum side)
+        {
+            if (suppliers == null)
+                return false;
+
+            int sideIndex = (int)side;
+            if (sideIndex < 0 || sideIndex >= suppliers.Length)
+                return false;
+
+            IMissionTroopSupplier supplier = suppliers[sideIndex];
+            if (supplier == null)
+                return false;
+
+            IEnumerable<IAgentOriginBase> troops = supplier.GetAllTroops();
+            if (troops == null)
+                return false;
+
+            foreach (IAgentOriginBase troop in troops)
+            {
+                if (troop?.Troop?.IsMounted == true)
+                    return true;
+            }
+
+            return false;
         }
 
         private static bool TryBuildSuppliers(

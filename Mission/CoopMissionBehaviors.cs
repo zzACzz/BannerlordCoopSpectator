@@ -4049,6 +4049,7 @@ namespace CoopSpectator.MissionBehaviors
         public override void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, AgentState agentState, KillingBlow blow)
         {
             _materializedBattleResultRawOnAgentRemovedCount++;
+            TrySyncExactCampaignNativeOriginRemoval(Mission, affectedAgent, affectorAgent, agentState);
             TryTrackMaterializedBattleResultRemoval(affectedAgent, affectorAgent, agentState);
             TryLogMaterializedBattleResultRemovalDebug(affectedAgent, affectorAgent, agentState, blow);
             TryCompleteBattleIfResolved(Mission, "server behavior agent-removed");
@@ -4720,6 +4721,19 @@ namespace CoopSpectator.MissionBehaviors
                 mission,
                 shouldEnableReinforcements,
                 source + " exact-native-bootstrap");
+            ExactCampaignArmyBootstrap.TryLogRuntimeDiagnostics(
+                mission,
+                source + " exact-native-bootstrap");
+        }
+
+        private static void TrySyncExactCampaignNativeOriginRemoval(Mission mission, Agent affectedAgent, Agent affectorAgent, AgentState agentState)
+        {
+            ExactCampaignArmyBootstrap.TrySyncAgentOriginRemoval(
+                mission,
+                affectedAgent,
+                affectorAgent,
+                agentState,
+                "mission-behavior-onagentremoved");
         }
 
         private static void TrySyncExactCampaignBattlefieldRuntimeState(Mission mission, string source)
@@ -5298,11 +5312,36 @@ namespace CoopSpectator.MissionBehaviors
             if (attackerActive > 0 && defenderActive > 0)
                 return;
 
-            int attackerReserve = CountMaterializedUnspawnedReserveForSide(BattleSideEnum.Attacker);
-            int defenderReserve = CountMaterializedUnspawnedReserveForSide(BattleSideEnum.Defender);
+            int attackerReserve;
+            int defenderReserve;
+            string reserveSource;
+            if (IsUsingNativeExactCampaignArmyBootstrap(mission) &&
+                ExactCampaignArmyBootstrap.TryGetRemainingTroopCounts(
+                    mission,
+                    out attackerReserve,
+                    out defenderReserve))
+            {
+                reserveSource = "exact-native-bootstrap";
+            }
+            else
+            {
+                attackerReserve = CountMaterializedUnspawnedReserveForSide(BattleSideEnum.Attacker);
+                defenderReserve = CountMaterializedUnspawnedReserveForSide(BattleSideEnum.Defender);
+                reserveSource = "materialized-runtime";
+            }
+
             if ((attackerActive <= 0 && attackerReserve > 0) ||
                 (defenderActive <= 0 && defenderReserve > 0))
             {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: authoritative battle completion deferred because reserves remain. " +
+                    "AttackerActive=" + attackerActive +
+                    " DefenderActive=" + defenderActive +
+                    " AttackerReserve=" + attackerReserve +
+                    " DefenderReserve=" + defenderReserve +
+                    " ReserveSource=" + reserveSource +
+                    " CountSource=" + (countSource ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
                 return;
             }
 
@@ -5334,6 +5373,9 @@ namespace CoopSpectator.MissionBehaviors
                 " Reason=" + (_authoritativeBattleCompletionReason ?? "unknown") +
                 " AttackerActive=" + attackerActive +
                 " DefenderActive=" + defenderActive +
+                " AttackerReserve=" + attackerReserve +
+                " DefenderReserve=" + defenderReserve +
+                " ReserveSource=" + reserveSource +
                 " CountSource=" + (countSource ?? "unknown") +
                 " Source=" + (source ?? "unknown") +
                 " AwaitingHostEndMission=True.");
