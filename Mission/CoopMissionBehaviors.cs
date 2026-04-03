@@ -11268,7 +11268,7 @@ namespace CoopSpectator.MissionBehaviors
                     possessedEntryId = null;
                 }
 
-                if (!string.Equals(commanderEntry.EntryId, possessedEntryId, StringComparison.Ordinal))
+                if (!DoesPossessedEntryMatchCommanderEntry(commanderEntry.EntryId, possessedEntryId))
                     return "CommanderControl=(captain)";
 
                 Team team = missionPeer.Team ?? controlledAgent.Team;
@@ -11357,6 +11357,29 @@ namespace CoopSpectator.MissionBehaviors
                     " Error=" + ex.Message);
                 return "CommanderControl=(promotion-failed:" + ex.GetType().Name + ")";
             }
+        }
+
+        private static bool DoesPossessedEntryMatchCommanderEntry(string commanderEntryId, string possessedEntryId)
+        {
+            if (string.IsNullOrWhiteSpace(commanderEntryId) || string.IsNullOrWhiteSpace(possessedEntryId))
+                return false;
+
+            return string.Equals(
+                StripEntryVariantSuffix(commanderEntryId),
+                StripEntryVariantSuffix(possessedEntryId),
+                StringComparison.Ordinal);
+        }
+
+        private static string StripEntryVariantSuffix(string entryId)
+        {
+            if (string.IsNullOrWhiteSpace(entryId))
+                return entryId;
+
+            const string variantMarker = "|variant-";
+            int variantIndex = entryId.IndexOf(variantMarker, StringComparison.Ordinal);
+            return variantIndex >= 0
+                ? entryId.Substring(0, variantIndex)
+                : entryId;
         }
 
         private static string ReapplyMaterializedAgentStateAfterReplaceBot(
