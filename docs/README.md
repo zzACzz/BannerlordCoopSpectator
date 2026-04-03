@@ -30,12 +30,16 @@ Read in this order when opening a new window:
   Native campaign army spawn contract and spawn-zone contract: `MissionAgentSpawnLogic`, `PartyGroupTroopSupplier`, `BattleSpawnPathSelector`, and field-battle formation tags.
 - `docs/EXACT_CAMPAIGN_POST_SPAWN_ARMY_BOOTSTRAP_ANALYSIS_2026-04-01.md`
   Exact-scene runtime evidence after `SelectAllFormations` suppression. Shows the blocker has moved beyond early captain handoff into post-possession army bootstrap and maps the native campaign deployment lifecycle that should replace the current hybrid path.
+- `docs/EXACT_CAMPAIGN_COMMANDER_CONTROL_HANDOFF_2026-04-02.md`
+  Current exact-scene commander/general-control status: what already works, what remains, and how the remaining client commander handoff differs from the separate future campaign-style order UI migration.
 - `docs/DEDICATED_EXACT_CAMPAIGN_SCENE_BOOTSTRAP_PROBE_2026-03-31.md`
   Dedicated-only exact-scene probe for runtime files, `sp_battle_scenes.xml`, campaign assembly availability, and manual `PairSceneNameToModuleName(..., "SandBoxCore")`.
 - `docs/BATTLE_MAP_FULL_CONTRACT_DIAGNOSTICS_2026-03-31.md`
   Full diagnostics model for `MissionInitializerRecord -> live mission -> spawn path -> deployment plan -> formation frame`.
 - `NEW_CHAT_PROMPT_2026-03-30_BATTLE_MAP_SPAWN_STABLE.md`
   Copy-paste prompt for a fresh Codex window.
+- `NEW_CHAT_PROMPT_2026-04-02_COMMANDER_CONTROL_HANDOFF.md`
+  Copy-paste prompt for continuing exact-scene commander control work in a fresh Codex window.
 - `HUMAN_NOTES_MULTIPLAYER_PROGRESS.md`
   Short human-readable project snapshot.
 - `PROJECT_CONTEXT.md`
@@ -55,6 +59,7 @@ Read in this order when opening a new window:
 - `docs/EXACT_CAMPAIGN_SCENE_BOOTSTRAP_ANALYSIS_2026-03-31.md`
 - `docs/EXACT_CAMPAIGN_ARMY_SPAWN_AND_SPAWN_ZONE_ANALYSIS_2026-04-01.md`
 - `docs/EXACT_CAMPAIGN_POST_SPAWN_ARMY_BOOTSTRAP_ANALYSIS_2026-04-01.md`
+- `docs/EXACT_CAMPAIGN_COMMANDER_CONTROL_HANDOFF_2026-04-02.md`
 - `docs/DEDICATED_EXACT_CAMPAIGN_SCENE_BOOTSTRAP_PROBE_2026-03-31.md`
 - `docs/DEDICATED_SCENE_RESOLUTION_PROBE_2026-03-31.md`
 - `docs/BATTLE_MAP_FULL_CONTRACT_DIAGNOSTICS_2026-03-31.md`

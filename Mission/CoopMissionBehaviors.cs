@@ -4765,7 +4765,8 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (seededEntries <= 0 && newlyTrackedAgents <= 0)
+            int commanderAssignments = TryAssignExactCampaignCommanders(mission, source);
+            if (seededEntries <= 0 && newlyTrackedAgents <= 0 && commanderAssignments <= 0)
                 return;
 
             int trackedAttackerAgents = _materializedArmySideByAgentIndex.Values.Count(candidate => candidate == BattleSideEnum.Attacker);
@@ -4774,9 +4775,115 @@ namespace CoopSpectator.MissionBehaviors
                 "CoopMissionSpawnLogic: synced exact campaign bootstrap runtime state. " +
                 "SeededEntries=" + seededEntries +
                 " NewlyTrackedAgents=" + newlyTrackedAgents +
+                " CommanderAssignments=" + commanderAssignments +
                 " TrackedAttackerAgents=" + trackedAttackerAgents +
                 " TrackedDefenderAgents=" + trackedDefenderAgents +
                 " Source=" + (source ?? "unknown"));
+        }
+
+        private static int TryAssignExactCampaignCommanders(Mission mission, string source)
+        {
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            if (mission?.Teams == null || runtimeState == null)
+                return 0;
+
+            int assignments = 0;
+            assignments += TryAssignExactCampaignCommanderForSide(mission, runtimeState, BattleSideEnum.Attacker, source);
+            assignments += TryAssignExactCampaignCommanderForSide(mission, runtimeState, BattleSideEnum.Defender, source);
+            return assignments;
+        }
+
+        private static int TryAssignExactCampaignCommanderForSide(
+            Mission mission,
+            BattleRuntimeState runtimeState,
+            BattleSideEnum side,
+            string source)
+        {
+            if (mission == null || runtimeState == null || side == BattleSideEnum.None)
+                return 0;
+
+            Team team = mission.Teams?.FirstOrDefault(candidate => candidate != null && candidate.Side == side);
+            if (team == null)
+                return 0;
+
+            RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(runtimeState, side);
+            if (commanderEntry == null || string.IsNullOrWhiteSpace(commanderEntry.EntryId))
+                return 0;
+
+            Agent commanderAgent = ResolveLiveExactCampaignCommanderAgent(mission, team, commanderEntry.EntryId);
+            if (commanderAgent == null)
+                return 0;
+
+            bool changed = false;
+            if (!ReferenceEquals(team.GeneralAgent, commanderAgent))
+            {
+                commanderAgent.SetCanLeadFormationsRemotely(value: true);
+                team.GeneralAgent = commanderAgent;
+                changed = true;
+            }
+
+            Formation commanderFormation = commanderAgent.Formation;
+            if (commanderFormation != null &&
+                ReferenceEquals(commanderFormation.Team, team) &&
+                !ReferenceEquals(commanderFormation.Captain, commanderAgent))
+            {
+                commanderFormation.Captain = commanderAgent;
+                changed = true;
+            }
+
+            if (!changed)
+                return 0;
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: assigned exact campaign commander. " +
+                "Side=" + side +
+                " TeamIndex=" + team.TeamIndex +
+                " EntryId=" + commanderEntry.EntryId +
+                " TroopId=" + (commanderEntry.CharacterId ?? "null") +
+                " HeroRole=" + (commanderEntry.HeroRole ?? "none") +
+                " Tier=" + commanderEntry.Tier +
+                " AgentIndex=" + commanderAgent.Index +
+                " PlayerControlled=" + (commanderAgent.MissionPeer != null || commanderAgent.Controller == AgentControllerType.Player) +
+                " Formation=" + (commanderFormation?.FormationIndex.ToString() ?? "null") +
+                " Source=" + (source ?? "unknown"));
+            return 1;
+        }
+
+        private static Agent ResolveLiveExactCampaignCommanderAgent(Mission mission, Team team, string commanderEntryId)
+        {
+            if (mission?.AllAgents == null || team == null || string.IsNullOrWhiteSpace(commanderEntryId))
+                return null;
+
+            Agent firstMatchingAgent = null;
+            Agent existingGeneralAgent = null;
+            Agent controlledMatchingAgent = null;
+
+            for (int i = 0; i < mission.AllAgents.Count; i++)
+            {
+                Agent candidate = mission.AllAgents[i];
+                if (candidate == null ||
+                    !candidate.IsActive() ||
+                    candidate.IsMount ||
+                    !ReferenceEquals(candidate.Team, team) ||
+                    !DoesAgentMatchAuthoritativeEntryId(candidate, commanderEntryId))
+                {
+                    continue;
+                }
+
+                if (firstMatchingAgent == null)
+                    firstMatchingAgent = candidate;
+
+                if (ReferenceEquals(candidate, team.GeneralAgent))
+                    existingGeneralAgent = candidate;
+
+                if (controlledMatchingAgent == null &&
+                    (candidate.MissionPeer != null || candidate.Controller == AgentControllerType.Player))
+                {
+                    controlledMatchingAgent = candidate;
+                }
+            }
+
+            return controlledMatchingAgent ?? existingGeneralAgent ?? firstMatchingAgent;
         }
 
         private static int EnsureExactCampaignBattleResultEntryStates(BattleSideEnum side)
@@ -11068,6 +11175,14 @@ namespace CoopSpectator.MissionBehaviors
                 TransferMaterializedAgentRuntimeState(targetAgent, replacedAgent);
                 string reappliedAgentState = ReapplyMaterializedAgentStateAfterReplaceBot(replacedAgent, targetEntryState);
 
+                string commanderControlState = TryPromoteExactCampaignCommanderPeerToGeneralControl(
+                    mission,
+                    missionPeer,
+                    peer,
+                    replacedAgent,
+                    pendingRequest,
+                    source + " replace-bot");
+
                 TryApplyVanillaSpawnGoldDeduction(gameMode, peer, missionPeer, source + " replace-bot");
                 bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
                 ExpireMissionPeerVanillaSpawnVisuals(missionPeer);
@@ -11086,6 +11201,7 @@ namespace CoopSpectator.MissionBehaviors
                     " ActiveAiUnitsInFormation=" + activeAiUnitsInFormation +
                     " PendingTroopId=" + (pendingRequest.TroopId ?? "null") +
                     " PendingEntryId=" + (pendingRequest.EntryId ?? "null") +
+                    " " + commanderControlState +
                     " " + reappliedAgentState +
                     " RemovedPendingVisuals=" + removedPendingVisuals +
                     " Source=" + (source ?? "unknown"));
@@ -11114,6 +11230,133 @@ namespace CoopSpectator.MissionBehaviors
                 return null;
 
             return BattleSnapshotRuntimeState.GetEntryState(entryId);
+        }
+
+        private static string TryPromoteExactCampaignCommanderPeerToGeneralControl(
+            Mission mission,
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            Agent controlledAgent,
+            CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest,
+            string source)
+        {
+            if (mission == null ||
+                missionPeer == null ||
+                controlledAgent == null ||
+                !controlledAgent.IsActive() ||
+                !IsSceneAwareBattleMapRuntime(mission) ||
+                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+            {
+                return "CommanderControl=(captain)";
+            }
+
+            try
+            {
+                BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " general-bridge");
+                if (authoritativeSide == BattleSideEnum.None)
+                    return "CommanderControl=(captain)";
+
+                BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+                RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(runtimeState, authoritativeSide);
+                if (commanderEntry == null || string.IsNullOrWhiteSpace(commanderEntry.EntryId))
+                    return "CommanderControl=(captain)";
+
+                string possessedEntryId = pendingRequest.EntryId;
+                if (string.IsNullOrWhiteSpace(possessedEntryId) &&
+                    !ExactCampaignArmyBootstrap.TryGetEntryId(controlledAgent, out possessedEntryId))
+                {
+                    possessedEntryId = null;
+                }
+
+                if (!string.Equals(commanderEntry.EntryId, possessedEntryId, StringComparison.Ordinal))
+                    return "CommanderControl=(captain)";
+
+                Team team = missionPeer.Team ?? controlledAgent.Team;
+                if (team == null)
+                    return "CommanderControl=(captain)";
+
+                team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
+
+                OrderController commanderOrderController = team.GetOrderControllerOf(controlledAgent);
+                if (commanderOrderController != null)
+                    commanderOrderController.Owner = controlledAgent;
+
+                if (team.PlayerOrderController != null)
+                    team.PlayerOrderController.Owner = controlledAgent;
+
+                controlledAgent.SetCanLeadFormationsRemotely(value: true);
+                if (!ReferenceEquals(team.GeneralAgent, controlledAgent))
+                    team.GeneralAgent = controlledAgent;
+
+                Formation controlledFormation = controlledAgent.Formation;
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (formation == null || !ReferenceEquals(formation.Team, team))
+                        continue;
+
+                    SetServerMemberValue(formation, "PlayerOwner", controlledAgent);
+                    bool isControlledFormation = ReferenceEquals(formation, controlledFormation);
+                    SetServerMemberValue(formation, "HasPlayerControlledTroop", isControlledFormation);
+                    SetServerMemberValue(formation, "IsPlayerTroopInFormation", isControlledFormation);
+                }
+
+                int controlledBotTotal = 0;
+                int controlledBotAlive = 0;
+                if (mission.AllAgents != null)
+                {
+                    for (int i = 0; i < mission.AllAgents.Count; i++)
+                    {
+                        Agent candidate = mission.AllAgents[i];
+                        if (candidate == null ||
+                            candidate.IsMount ||
+                            !ReferenceEquals(candidate.Team, team) ||
+                            ReferenceEquals(candidate, controlledAgent) ||
+                            candidate.MissionPeer != null ||
+                            candidate.Controller == AgentControllerType.Player)
+                        {
+                            continue;
+                        }
+
+                        controlledBotTotal++;
+                        if (candidate.IsActive())
+                            controlledBotAlive++;
+                    }
+                }
+
+                TrySetBotsUnderControlTotal(missionPeer, controlledBotTotal);
+                missionPeer.BotsUnderControlAlive = controlledBotAlive;
+
+                if (peer != null && peer.IsConnectionActive)
+                {
+                    GameNetwork.BeginModuleEventAsServer(peer);
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.BotsControlledChange(peer, controlledBotAlive, controlledBotTotal));
+                    GameNetwork.EndModuleEventAsServer();
+                }
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: promoted exact campaign commander peer to general control. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " TeamIndex=" + team.TeamIndex +
+                    " EntryId=" + commanderEntry.EntryId +
+                    " AgentIndex=" + controlledAgent.Index +
+                    " ControlledFormation=" + (controlledFormation?.FormationIndex.ToString() ?? "null") +
+                    " ControlledBotsAlive=" + controlledBotAlive +
+                    " ControlledBotsTotal=" + controlledBotTotal +
+                    " Source=" + (source ?? "unknown"));
+
+                return "CommanderControl=general ControlledBotsAlive=" + controlledBotAlive + " ControlledBotsTotal=" + controlledBotTotal;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: failed to promote exact campaign commander peer to general control. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " AgentIndex=" + controlledAgent.Index +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+                return "CommanderControl=(promotion-failed:" + ex.GetType().Name + ")";
+            }
         }
 
         private static string ReapplyMaterializedAgentStateAfterReplaceBot(
@@ -13948,13 +14191,16 @@ namespace CoopSpectator.MissionBehaviors
 
             if (!string.IsNullOrWhiteSpace(selectionState.TroopId))
             {
-                RosterEntryState selectedByTroop = ResolveHighestPriorityAllowedEntry(allowedEntries.Where(entry =>
-                    string.Equals(entry?.CharacterId, selectionState.TroopId, StringComparison.OrdinalIgnoreCase)));
+                RosterEntryState selectedByTroop = ResolveHighestPriorityAllowedEntry(
+                    missionPeer,
+                    selectionState.Side,
+                    allowedEntries.Where(entry =>
+                        string.Equals(entry?.CharacterId, selectionState.TroopId, StringComparison.OrdinalIgnoreCase)));
                 if (selectedByTroop != null)
                     return selectedByTroop;
             }
 
-            return ResolveHighestPriorityAllowedEntry(allowedEntries);
+            return ResolveHighestPriorityAllowedEntry(missionPeer, selectionState.Side, allowedEntries);
         }
 
         private static RosterEntryState ResolveMatchedAllowedEntryState(
@@ -13979,25 +14225,109 @@ namespace CoopSpectator.MissionBehaviors
                 return preferredAllowedEntry;
 
             return ResolveHighestPriorityAllowedEntry(
+                missionPeer,
+                selectionState.Side,
                 CoopMissionSpawnLogic.GetAllowedControlEntryStatesSnapshot(selectionState.Side)
-                .Where(entry =>
-                    entry != null &&
-                    MatchesPreferredHeroClass(heroClass, entry.CharacterId)));
+                    .Where(entry =>
+                        entry != null &&
+                        MatchesPreferredHeroClass(heroClass, entry.CharacterId)));
         }
 
-        private static RosterEntryState ResolveHighestPriorityAllowedEntry(IEnumerable<RosterEntryState> entries)
+        private static RosterEntryState ResolveHighestPriorityAllowedEntry(
+            MissionPeer missionPeer,
+            BattleSideEnum side,
+            IEnumerable<RosterEntryState> entries)
         {
             if (entries == null)
                 return null;
 
-            return entries
+            List<RosterEntryState> candidateEntries = entries
                 .Where(entry => entry != null)
+                .ToList();
+            if (candidateEntries.Count <= 0)
+                return null;
+
+            RosterEntryState commanderEntry = ResolveCommanderPreferredAllowedEntry(missionPeer, side, candidateEntries);
+            if (commanderEntry != null)
+                return commanderEntry;
+
+            return candidateEntries
                 .OrderBy(GetAllowedEntrySelectionPriority)
                 .ThenByDescending(entry => entry.IsHero)
                 .ThenByDescending(entry => entry.HeroLevel)
                 .ThenByDescending(entry => entry.Tier)
                 .ThenBy(entry => entry.EntryId, StringComparer.Ordinal)
                 .FirstOrDefault();
+        }
+
+        private static RosterEntryState ResolveCommanderPreferredAllowedEntry(
+            MissionPeer missionPeer,
+            BattleSideEnum side,
+            IReadOnlyCollection<RosterEntryState> candidateEntries)
+        {
+            if (candidateEntries == null || candidateEntries.Count <= 0 || side == BattleSideEnum.None)
+                return null;
+
+            RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(
+                BattleSnapshotRuntimeState.GetState(),
+                side,
+                candidateEntries);
+            if (commanderEntry == null || string.IsNullOrWhiteSpace(commanderEntry.EntryId))
+                return null;
+
+            return IsCommanderEntryClaimedByAnotherPeer(commanderEntry.EntryId, missionPeer)
+                ? null
+                : commanderEntry;
+        }
+
+        private static bool IsCommanderEntryClaimedByAnotherPeer(string entryId, MissionPeer currentPeer)
+        {
+            if (string.IsNullOrWhiteSpace(entryId) || GameNetwork.NetworkPeers == null)
+                return false;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive)
+                    continue;
+
+                MissionPeer otherPeer = peer.GetComponent<MissionPeer>();
+                if (otherPeer == null || ReferenceEquals(otherPeer, currentPeer))
+                    continue;
+
+                if (DoesPeerClaimEntryId(otherPeer, entryId))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool DoesPeerClaimEntryId(MissionPeer missionPeer, string entryId)
+        {
+            if (missionPeer == null || string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            CoopBattleAuthorityState.PeerSelectionState selectionState = CoopBattleAuthorityState.GetSelectionState(missionPeer);
+            if (string.Equals(selectionState.EntryId, entryId, StringComparison.Ordinal))
+                return true;
+
+            if (CoopBattleSpawnRequestState.TryGetPendingRequest(missionPeer, out CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest) &&
+                string.Equals(pendingRequest.EntryId, entryId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            return DoesAgentMatchAuthoritativeEntryId(missionPeer.ControlledAgent, entryId);
+        }
+
+        private static bool DoesAgentMatchAuthoritativeEntryId(Agent agent, string entryId)
+        {
+            if (agent == null || string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            return (_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string candidateEntryId) &&
+                    string.Equals(candidateEntryId, entryId, StringComparison.Ordinal)) ||
+                   (ExactCampaignArmyBootstrap.TryGetEntryId(agent, out string originEntryId) &&
+                    string.Equals(originEntryId, entryId, StringComparison.Ordinal));
         }
 
         private static int GetAllowedEntrySelectionPriority(RosterEntryState entry)

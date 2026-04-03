@@ -1021,12 +1021,21 @@ namespace CoopSpectator.Infrastructure
 
             var supplier = new ExactCampaignSnapshotTroopSupplier(side, side == playerSide);
             var origins = new List<ExactCampaignSnapshotAgentOrigin>();
-            BasicCharacterObject generalCharacter = null;
+            RosterEntryState commanderEntryState = BattleCommanderResolver.ResolveCommanderEntry(runtimeState, side, sideState.Entries);
+            string commanderEntryId = commanderEntryState?.EntryId;
+            IEnumerable<RosterEntryState> orderedEntries = sideState.Entries;
+            if (!string.IsNullOrWhiteSpace(commanderEntryId))
+            {
+                orderedEntries = sideState.Entries
+                    .OrderByDescending(entry => string.Equals(entry?.EntryId, commanderEntryId, StringComparison.Ordinal));
+            }
+            BasicCharacterObject commanderCharacter = TryResolveEntryCharacter(commanderEntryState);
+            BasicCharacterObject generalCharacter = commanderCharacter;
             int unresolvedEntries = 0;
             int skippedWoundedOnlyEntries = 0;
             int seed = 1;
 
-            foreach (RosterEntryState entryState in sideState.Entries)
+            foreach (RosterEntryState entryState in orderedEntries)
             {
                 if (entryState == null)
                     continue;
@@ -1074,7 +1083,9 @@ namespace CoopSpectator.Infrastructure
                 "Entries=" + sideState.Entries.Count +
                 " Healthy=" + totalHealthyCount +
                 " UnresolvedEntries=" + unresolvedEntries +
-                " WoundedOnlyEntries=" + skippedWoundedOnlyEntries;
+                " WoundedOnlyEntries=" + skippedWoundedOnlyEntries +
+                " CommanderEntryId=" + (commanderEntryId ?? "none") +
+                " GeneralCharacter=" + (generalCharacter?.StringId ?? "null");
             return supplier;
         }
 
