@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.MissionBehaviors;
 using HarmonyLib;
 using NetworkMessages.FromServer;
 using TaleWorlds.Core;
@@ -64,6 +65,8 @@ namespace CoopSpectator.Patches
             try
             {
                 PatchMissionPeerFollowedAgent(harmony);
+                PatchMissionNetworkComponentCreateAgent(harmony);
+                PatchMissionNetworkComponentSynchronizeAgentEquipment(harmony);
                 PatchMissionNetworkComponentSetAgentPeer(harmony);
                 PatchMissionNetworkComponentAssignFormationToPlayer(harmony);
                 PatchOrderControllerSelectAllFormations(harmony);
@@ -80,6 +83,37 @@ namespace CoopSpectator.Patches
             {
                 ModLogger.Error("BattleMapSpawnHandoffPatch.Apply failed.", ex);
             }
+        }
+
+        public static void ResetRuntimeState(string source)
+        {
+            _lastSuppressedFollowSwitchKey = null;
+            _lastLocalVisualFinalizeKey = null;
+            _lastSuppressedAssignFormationKey = null;
+            _lastSuppressedLocalSelectAllFormationsKey = null;
+            _lastObservedLocalSelectAllFormationsKey = null;
+            _lastSuppressedServerSelectAllFormationsKey = null;
+            _lastPromotedLocalCommanderGeneralKey = null;
+            _lastFinalizedLocalCommanderOrderControlKey = null;
+            _lastMaintainedLocalCommanderOrderControlKey = null;
+            _lastAutoSelectedAllLocalCommanderFormationsKey = null;
+            _lastPreFormationCommanderPromotionKey = null;
+            _lastForcedCampaignCommanderOrderUiKey = null;
+            _lastExactCommanderOrderVmStateKey = null;
+            _lastRebuiltSingleplayerCommanderOrderUiKey = null;
+            _lastExactCommanderOrderHotkeyFallbackKey = null;
+            _lastExactCommanderFormationHotkeyFallbackKey = null;
+            _lastExactCommanderOrderHotkeySuppressionKey = null;
+            _lastExactCommanderDisabledAfterSetOrderUpdatesKey = null;
+            _lastExactCommanderOrderBarMovieBindingKey = null;
+            _lastForcedExactCommanderTroopSelectionInputsKey = null;
+            _lastExactCommanderOrderItemExecutionKey = null;
+            _suppressExactCommanderOrderHotkeyFallbackUntilRelease = false;
+            _activeExactCommanderMissionOrderVm = null;
+            _pendingLocalCommanderOrderControlFinalization = null;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: reset runtime state. " +
+                "Source=" + (source ?? "unknown"));
         }
 
         private static void PatchMissionPeerFollowedAgent(Harmony harmony)
@@ -123,6 +157,42 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, postfix: new HarmonyMethod(postfix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to MissionNetworkComponent.HandleServerEventSetAgentPeer.");
+        }
+
+        private static void PatchMissionNetworkComponentCreateAgent(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventCreateAgent",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventCreateAgent_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventCreateAgent not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to MissionNetworkComponent.HandleServerEventCreateAgent.");
+        }
+
+        private static void PatchMissionNetworkComponentSynchronizeAgentEquipment(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSynchronizeAgentEquipment",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSynchronizeAgentEquipment_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSynchronizeAgentEquipment not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSynchronizeAgentEquipment.");
         }
 
         private static void PatchMissionNetworkComponentAssignFormationToPlayer(Harmony harmony)
@@ -415,11 +485,13 @@ namespace CoopSpectator.Patches
                 if (string.Equals(_lastLocalVisualFinalizeKey, logKey, StringComparison.Ordinal))
                     return;
 
-                if (agent.SpawnEquipment != null)
+                bool exactVisualFinalized = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
+                    mission,
+                    agent,
+                    entryPolicy.BridgeTroopOrEntryId,
+                    "battle-map handoff SetAgentPeer");
+                if (!exactVisualFinalized && agent.SpawnEquipment != null)
                     agent.UpdateSpawnEquipmentAndRefreshVisuals(agent.SpawnEquipment);
-                agent.WieldInitialWeapons(
-                    Agent.WeaponWieldActionType.Instant,
-                    Equipment.InitialWeaponEquipPreference.Any);
                 agent.MountAgent?.UpdateAgentProperties();
 
                 _lastLocalVisualFinalizeKey = logKey;
@@ -428,12 +500,77 @@ namespace CoopSpectator.Patches
                     "AgentIndex=" + agent.Index +
                     " HasSpawnEquipment=" + (agent.SpawnEquipment != null) +
                     " MountAgentIndex=" + (agent.MountAgent?.Index.ToString() ?? "null") +
+                    " ExactVisualFinalized=" + exactVisualFinalized +
                     " BridgeTroop=" + (entryPolicy.BridgeTroopOrEntryId ?? "null") +
                     " Mission=" + (mission.SceneName ?? "null"));
             }
             catch (Exception ex)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: local SetAgentPeer visual finalization failed: " + ex.Message);
+            }
+        }
+
+        private static void MissionNetworkComponent_HandleServerEventCreateAgent_Postfix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is CreateAgent createAgent))
+                    return;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return;
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(createAgent.AgentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive() || agent.IsMount || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
+                    return;
+
+                bool exactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
+                    mission,
+                    agent,
+                    preferredEntryId: null,
+                    source: "battle-map handoff CreateAgent");
+                if (!exactVisualApplied)
+                    return;
+
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: queued delayed client exact visual finalization after CreateAgent. " +
+                    "AgentIndex=" + agent.Index +
+                    " TeamSide=" + agent.Team.Side +
+                    " TroopId=" + (agent.Character?.StringId ?? "null") +
+                    " Mission=" + (mission.SceneName ?? "null"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: local CreateAgent exact visual finalization failed: " + ex.Message);
+            }
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventSynchronizeAgentEquipment_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is SynchronizeAgentSpawnEquipment synchronizeAgentSpawnEquipment))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(synchronizeAgentSpawnEquipment.AgentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive() || agent.IsMount || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
+                    return true;
+
+                bool replaced = CoopMissionSpawnLogic.TryHandleClientExactCampaignSpawnEquipmentSync(
+                    mission,
+                    agent,
+                    "battle-map handoff SynchronizeAgentSpawnEquipment");
+                return !replaced;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SynchronizeAgentSpawnEquipment exact override failed open: " + ex.Message);
+                return true;
             }
         }
 
@@ -811,6 +948,15 @@ namespace CoopSpectator.Patches
             if (status != null && !IsRelevantBattleMapStatus(status, myPeer.Index, mission.SceneName))
                 status = null;
 
+            if (status == null)
+                return false;
+
+            bool isFullySpawned =
+                string.Equals(status.SpawnStatus, "Spawned", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(status.LifecycleState, "Alive", StringComparison.OrdinalIgnoreCase);
+            if (isFullySpawned)
+                return false;
+
             int formationIndex = TryResolveMessageInt(assignFormationToPlayer, "FormationIndex");
             logKey =
                 myPeer.Index + "|" +
@@ -1086,6 +1232,9 @@ namespace CoopSpectator.Patches
                     continue;
 
                 TrySetInstanceMemberValue(formation, "PlayerOwner", orderOwnerAgent);
+                bool isOwnedFormation = formation.CountOfUnits > 0;
+                TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
+                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
             }
 
             Formation commanderFormation = controlledAgent.Formation ?? priorControlledFormation;
@@ -1255,6 +1404,9 @@ namespace CoopSpectator.Patches
                     continue;
 
                 TrySetInstanceMemberValue(formation, "PlayerOwner", mainAgent);
+                bool isOwnedFormation = formation.CountOfUnits > 0;
+                TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
+                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
                 if (formation.CountOfUnits > 0)
                 {
                     formationsWithUnits++;
@@ -1407,6 +1559,9 @@ namespace CoopSpectator.Patches
                     continue;
 
                 TrySetInstanceMemberValue(formation, "PlayerOwner", mainAgent);
+                bool isOwnedFormation = formation.CountOfUnits > 0;
+                TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
+                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
                 if (formation.CountOfUnits <= 0)
                     continue;
 

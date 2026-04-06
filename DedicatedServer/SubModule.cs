@@ -147,9 +147,11 @@ namespace CoopSpectator
                     TryApplyGameModeOverridePatch();
                     TryApplyMissionStateOpenNewPatches();
                     TryApplyExactCampaignArmyBootstrapPatch();
+                    TryApplyExactCampaignPreSpawnLoadoutPatch();
                     TryApplyBattleMapSpawnHandoffPatch();
                     TryApplyBattleShellSuppressionPatch();
                     TryApplyMultiplayerHeroClassOverridePatch();
+                    TryApplyMultiplayerCharacterClassFallbackPatch();
                     TryApplyServerChangeCultureCanonicalizationPatch();
                     TryApplyCampaignCombatProfileAgentStatsPatch();
                     RegisterCoopBattleGameMode();
@@ -216,6 +218,20 @@ namespace CoopSpectator
             }
         }
 
+        private static void TryApplyExactCampaignPreSpawnLoadoutPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                ExactCampaignPreSpawnLoadoutPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: ExactCampaignPreSpawnLoadout patch apply failed: " + ex.Message);
+            }
+        }
+
         private static void TryApplyBattleShellSuppressionPatch()
         {
             try
@@ -241,6 +257,20 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: BattleMapSpawnHandoff patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyMultiplayerCharacterClassFallbackPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                MultiplayerCharacterClassFallbackPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: MultiplayerCharacterClassFallback patch apply failed: " + ex.Message);
             }
         }
 

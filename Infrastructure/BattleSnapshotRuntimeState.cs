@@ -256,14 +256,18 @@ namespace CoopSpectator.Infrastructure
             if (snapshot?.Sides == null || snapshot.Sides.Count == 0)
                 return;
 
+            BattleRuntimeState runtimeState;
             lock (Sync)
             {
                 _current = snapshot;
                 _projection = BuildProjection(snapshot);
                 _state = BuildState(_projection);
+                runtimeState = _state;
                 _source = source ?? "unknown";
                 _updatedUtc = DateTime.UtcNow;
             }
+
+            ExactCampaignRuntimeObjectRegistry.SyncFromState(runtimeState, _source);
 
             ModLogger.Info(
                 "BattleSnapshotRuntimeState: snapshot updated. " +
@@ -339,6 +343,8 @@ namespace CoopSpectator.Infrastructure
                 _updatedUtc = DateTime.UtcNow;
             }
 
+            ExactCampaignRuntimeObjectRegistry.Clear(reason);
+
             ModLogger.Info("BattleSnapshotRuntimeState: snapshot cleared. Reason=" + (_source ?? "unknown"));
         }
 
@@ -409,6 +415,10 @@ namespace CoopSpectator.Infrastructure
 
         public static BasicCharacterObject TryResolveCharacterObject(string entryId)
         {
+            BasicCharacterObject runtimeCharacter = ExactCampaignRuntimeObjectRegistry.TryResolveCharacter(entryId);
+            if (runtimeCharacter != null)
+                return runtimeCharacter;
+
             BattleRosterEntryProjectionState entry = GetEntry(entryId);
             if (!string.IsNullOrWhiteSpace(entry?.OriginalCharacterId))
             {
@@ -802,8 +812,9 @@ namespace CoopSpectator.Infrastructure
                 return troop.EntryId;
 
             string partyId = string.IsNullOrWhiteSpace(troop?.PartyId) ? fallbackPartyId : troop.PartyId;
+            string originalCharacterId = ResolveOriginalCharacterId(troop) ?? "unknown";
             string characterId = ResolveSpawnTemplateId(troop) ?? "unknown";
-            return (canonicalSideKey ?? "unknown") + "|" + (partyId ?? "party") + "|" + characterId + "|" + ordinal;
+            return (canonicalSideKey ?? "unknown") + "|" + (partyId ?? "party") + "|" + originalCharacterId + "|" + characterId + "|" + ordinal;
         }
 
         private static string ResolveSpawnTemplateId(TroopStackInfo troop)

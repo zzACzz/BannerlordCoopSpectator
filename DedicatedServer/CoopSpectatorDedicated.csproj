@@ -56,7 +56,10 @@
     <Compile Include="..\Infrastructure\BattleMapContractDiagnostics.cs" Link="Infrastructure\BattleMapContractDiagnostics.cs" />
     <Compile Include="..\Infrastructure\BattleCommanderResolver.cs" Link="Infrastructure\BattleCommanderResolver.cs" />
     <Compile Include="..\Infrastructure\CampaignMapPatchMissionInit.cs" Link="Infrastructure\CampaignMapPatchMissionInit.cs" />
+    <Compile Include="..\Infrastructure\CampaignMultiplayerHeroClassResolver.cs" Link="Infrastructure\CampaignMultiplayerHeroClassResolver.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignArmyBootstrap.cs" Link="Infrastructure\ExactCampaignArmyBootstrap.cs" />
+    <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
+    <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />
     <Compile Include="..\Infrastructure\SceneRuntimeClassifier.cs" Link="Infrastructure\SceneRuntimeClassifier.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePhaseBridgeFile.cs" Link="Infrastructure\CoopBattlePhaseBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePhaseRuntimeState.cs" Link="Infrastructure\CoopBattlePhaseRuntimeState.cs" />
@@ -82,8 +85,10 @@
     <Compile Include="..\Patches\MultiplayerHeroClassOverridePatch.cs" Link="Patches\MultiplayerHeroClassOverridePatch.cs" />
     <Compile Include="..\Patches\MissionStateOpenNewPatches.cs" Link="Patches\MissionStateOpenNewPatches.cs" />
     <Compile Include="..\Patches\ExactCampaignArmyBootstrapPatch.cs" Link="Patches\ExactCampaignArmyBootstrapPatch.cs" />
+    <Compile Include="..\Patches\ExactCampaignPreSpawnLoadoutPatch.cs" Link="Patches\ExactCampaignPreSpawnLoadoutPatch.cs" />
     <Compile Include="..\Patches\BattleMapSpawnHandoffPatch.cs" Link="Patches\BattleMapSpawnHandoffPatch.cs" />
     <Compile Include="..\Patches\BattleShellSuppressionPatch.cs" Link="Patches\BattleShellSuppressionPatch.cs" />
+    <Compile Include="..\Patches\MultiplayerCharacterClassFallbackPatch.cs" Link="Patches\MultiplayerCharacterClassFallbackPatch.cs" />
     <Compile Include="..\Patches\ServerChangeCultureCanonicalizationPatch.cs" Link="Patches\ServerChangeCultureCanonicalizationPatch.cs" />
     <Compile Include="..\Patches\CampaignCombatProfileAgentStatsPatch.cs" Link="Patches\CampaignCombatProfileAgentStatsPatch.cs" />
   </ItemGroup>
@@ -229,7 +234,7 @@
       <_MultiplayerClientBin Condition="Exists('$(DedicatedServerRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll')">$(DedicatedServerRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Client</_MultiplayerClientBin>
       <_MultiplayerClientBin Condition="'$(_MultiplayerClientBin)'=='' and Exists('$(DedicatedServerRootDir)\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll')">$(DedicatedServerRootDir)\bin\Win64_Shipping_Client</_MultiplayerClientBin>
     </PropertyGroup>
-    <MakeDir Directories="$(_DedicatedModuleDir);$(_DedicatedBinServer);$(_DedicatedBinClient);$(_DedicatedModuleData);$(_DedicatedSandboxDir);$(_DedicatedSandboxDir)\ModuleData;$(_DedicatedSandboxCoreDir);$(_DedicatedSandboxCoreDir)\SceneObj" Condition="Exists('$(DedicatedServerRootDir)')" />
+    <MakeDir Directories="$(_DedicatedModuleDir);$(_DedicatedBinServer);$(_DedicatedBinClient);$(_DedicatedModuleData);$(_DedicatedSandboxDir);$(_DedicatedSandboxDir)\ModuleData;$(_DedicatedSandboxCoreDir);$(_DedicatedSandboxCoreDir)\ModuleData;$(_DedicatedSandboxCoreDir)\SceneObj" Condition="Exists('$(DedicatedServerRootDir)')" />
     <Copy SourceFiles="..\Module\CoopSpectatorDedicated\SubModule.xml" DestinationFolder="$(_DedicatedModuleDir)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
     <ItemGroup>
       <_ServerBinFiles Include="$(OutputPath)*" />
@@ -239,8 +244,9 @@
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpclassdivisions.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\multiplayer_strings.xml" />
       <_DedicatedSandboxRootFiles Include="$(BannerlordRootDir)\Modules\SandBox\SubModule.xml" Condition="Exists('$(BannerlordRootDir)\Modules\SandBox\SubModule.xml')" />
-      <_DedicatedSandboxModuleDataFiles Include="$(BannerlordRootDir)\Modules\SandBox\ModuleData\sp_battle_scenes.xml" Condition="Exists('$(BannerlordRootDir)\Modules\SandBox\ModuleData\sp_battle_scenes.xml')" />
+      <_DedicatedSandboxModuleDataFiles Include="$(BannerlordRootDir)\Modules\SandBox\ModuleData\**\*.xml" Condition="Exists('$(BannerlordRootDir)\Modules\SandBox\ModuleData')" />
       <_DedicatedSandboxCoreRootFiles Include="$(BannerlordRootDir)\Modules\SandBoxCore\SubModule.xml" Condition="Exists('$(BannerlordRootDir)\Modules\SandBoxCore\SubModule.xml')" />
+      <_DedicatedSandboxCoreModuleDataFiles Include="$(BannerlordRootDir)\Modules\SandBoxCore\ModuleData\**\*.xml" Condition="Exists('$(BannerlordRootDir)\Modules\SandBoxCore\ModuleData')" />
       <_DedicatedSandboxCoreSceneFiles Include="$(BannerlordRootDir)\Modules\SandBoxCore\SceneObj\battle_terrain*\**\*" Condition="Exists('$(BannerlordRootDir)\Modules\SandBoxCore\SceneObj')" />
     </ItemGroup>
     <Delete Files="$(_DedicatedBinServer)\CoopSpectator.pdb" Condition="Exists('$(_DedicatedBinServer)\CoopSpectator.pdb')" />
@@ -251,8 +257,9 @@
     <Copy SourceFiles="..\Module\CoopSpectator\ModuleData\coopspectator_crafting_pieces.xml" DestinationFolder="$(_DedicatedModuleData)" SkipUnchangedFiles="false" Condition="Exists('$(DedicatedServerRootDir)') and Exists('..\Module\CoopSpectator\ModuleData\coopspectator_crafting_pieces.xml')" />
     <Copy SourceFiles="..\Module\CoopSpectator\ModuleData\coopspectator_items.xml" DestinationFolder="$(_DedicatedModuleData)" SkipUnchangedFiles="false" Condition="Exists('$(DedicatedServerRootDir)') and Exists('..\Module\CoopSpectator\ModuleData\coopspectator_items.xml')" />
     <Copy SourceFiles="@(_DedicatedSandboxRootFiles)" DestinationFiles="@(_DedicatedSandboxRootFiles->'$(_DedicatedSandboxDir)\%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxRootFiles)' != ''" />
-    <Copy SourceFiles="@(_DedicatedSandboxModuleDataFiles)" DestinationFiles="@(_DedicatedSandboxModuleDataFiles->'$(_DedicatedSandboxDir)\ModuleData\%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxModuleDataFiles)' != ''" />
+    <Copy SourceFiles="@(_DedicatedSandboxModuleDataFiles)" DestinationFiles="@(_DedicatedSandboxModuleDataFiles->'$(_DedicatedSandboxDir)\ModuleData\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxModuleDataFiles)' != ''" />
     <Copy SourceFiles="@(_DedicatedSandboxCoreRootFiles)" DestinationFiles="@(_DedicatedSandboxCoreRootFiles->'$(_DedicatedSandboxCoreDir)\%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxCoreRootFiles)' != ''" />
+    <Copy SourceFiles="@(_DedicatedSandboxCoreModuleDataFiles)" DestinationFiles="@(_DedicatedSandboxCoreModuleDataFiles->'$(_DedicatedSandboxCoreDir)\ModuleData\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxCoreModuleDataFiles)' != ''" />
     <Copy SourceFiles="@(_DedicatedSandboxCoreSceneFiles)" DestinationFiles="@(_DedicatedSandboxCoreSceneFiles->'$(_DedicatedSandboxCoreDir)\SceneObj\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxCoreSceneFiles)' != ''" />
     <!-- TaleWorlds.MountAndBlade.Multiplayer.dll має лежати поруч із CoopSpectator.dll у Win64_Shipping_Client, інакше модуль не завантажується → "Cannot find game type: TdmClone". -->
     <Copy SourceFiles="$(_MultiplayerServerBin)\TaleWorlds.MountAndBlade.Multiplayer.dll" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(_MultiplayerServerBin)\TaleWorlds.MountAndBlade.Multiplayer.dll')" />

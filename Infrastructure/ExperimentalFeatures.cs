@@ -76,6 +76,42 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableExactCampaignNativeArmyBootstrap = true;
 
         /// <summary>
+        /// Dedicated exact-scene runtime currently hosts multiplayer mission code
+        /// without the singleplayer campaign object catalogs loaded. This flag
+        /// enables an EditorGame-style bootstrap of `Items`,
+        /// `EquipmentRosters`, `NPCCharacters`, and `SPCultures` so exact
+        /// campaign roster entries can resolve their original troop ids instead
+        /// of falling back to `mp_*` templates.
+        /// </summary>
+        public const bool EnableExactCampaignObjectCatalogBootstrap = true;
+
+        /// <summary>
+        /// Multiplayer mission systems assume every spawned character belongs to
+        /// an `MPHeroClass`. When exact campaign agents use original
+        /// `BasicCharacterObject` ids, this flag maps them to a surrogate
+        /// `MPHeroClass` for MP-only stat/visual/mission representative code,
+        /// while keeping the spawned character itself unchanged.
+        /// </summary>
+        public const bool EnableCampaignCharacterMpHeroClassFallback = true;
+
+        /// <summary>
+        /// Pre-spawn exact roster path: snapshot entries materialize into
+        /// runtime `BasicCharacterObject` / `MPHeroClass` objects before native
+        /// agent creation, so `CreateAgent` carries the final name, body, and
+        /// loadout instead of relying on post-spawn visual overlays.
+        /// </summary>
+        public const bool EnableExactCampaignRuntimeObjectRegistry = false;
+
+        /// <summary>
+        /// Stable exact-loadout path: keep multiplayer-safe surrogate characters
+        /// for mission/network identity, but inject snapshot equipment/body into
+        /// `AgentBuildData` before native `Mission.SpawnAgent` runs. This avoids
+        /// the fragile `CreateAgent -> SynchronizeAgentSpawnEquipment` repair loop
+        /// while preserving the exact-native reinforcement/completion stack.
+        /// </summary>
+        public const bool EnableExactCampaignPreSpawnLoadoutInjection = true;
+
+        /// <summary>
         /// Battle-map client safety switch: keep MissionLobbyEquipmentNetworkComponent
         /// enabled because native gauntlet class-loadout initialization dereferences
         /// it unconditionally during mission-screen startup.

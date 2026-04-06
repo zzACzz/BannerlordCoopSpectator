@@ -4205,7 +4205,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 };
 
                 if (assignExplicitEntryIds)
-                    stack.EntryId = BuildVariantAwareEntryId(sideId, partyId, spawnTemplateId, variantIndex, activeVariantCount);
+                    stack.EntryId = BuildVariantAwareEntryId(sideId, partyId, originalCharacterId, spawnTemplateId, variantIndex, activeVariantCount);
 
                 if (variant != null)
                     ApplyCombatEquipmentSnapshot(stack, variant);
@@ -4256,15 +4256,22 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return Math.Max(0, Math.Min(variantTroopCount, Math.Min(remainingWounded, distributed)));
         }
 
-        private static string BuildVariantAwareEntryId(string sideId, string partyId, string spawnTemplateId, int variantIndex, int variantCount)
+        private static string BuildVariantAwareEntryId(
+            string sideId,
+            string partyId,
+            string originalCharacterId,
+            string spawnTemplateId,
+            int variantIndex,
+            int variantCount)
         {
             string canonicalSideId = string.IsNullOrWhiteSpace(sideId) ? "unknown" : sideId;
             string canonicalPartyId = string.IsNullOrWhiteSpace(partyId) ? "party" : partyId;
+            string canonicalOriginalCharacterId = string.IsNullOrWhiteSpace(originalCharacterId) ? "unknown" : originalCharacterId;
             string canonicalCharacterId = string.IsNullOrWhiteSpace(spawnTemplateId) ? "unknown" : spawnTemplateId;
             if (variantCount <= 1)
-                return canonicalSideId + "|" + canonicalPartyId + "|" + canonicalCharacterId;
+                return canonicalSideId + "|" + canonicalPartyId + "|" + canonicalOriginalCharacterId + "|" + canonicalCharacterId;
 
-            return canonicalSideId + "|" + canonicalPartyId + "|" + canonicalCharacterId + "|variant-" + (variantIndex + 1);
+            return canonicalSideId + "|" + canonicalPartyId + "|" + canonicalOriginalCharacterId + "|" + canonicalCharacterId + "|variant-" + (variantIndex + 1);
         }
 
         private static List<CombatEquipmentVariantSnapshot> BuildCombatEquipmentVariants(object characterObject, int totalCount)

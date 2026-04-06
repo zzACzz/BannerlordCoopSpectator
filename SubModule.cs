@@ -112,10 +112,13 @@ namespace CoopSpectator // Використовуємо кореневий names
                 IntermissionVmCrashGuardPatch.Apply(harmony);
                 MissionStateOpenNewPatches.Apply(harmony);
                 ExactCampaignArmyBootstrapPatch.Apply(harmony);
+                ExactCampaignPreSpawnLoadoutPatch.Apply(harmony);
+                ExactCampaignNetworkObjectBootstrapPatch.Apply(harmony);
                 VanillaEntryUiSuppressionPatch.Apply(harmony);
                 BattleMapSpawnHandoffPatch.Apply(harmony);
                 BattleShellSuppressionPatch.Apply(harmony);
                 ClientChangeCultureCanonicalizationPatch.Apply(harmony);
+                MultiplayerCharacterClassFallbackPatch.Apply(harmony);
                 CampaignCombatProfileAgentStatsPatch.Apply(harmony);
                 AppDomain.CurrentDomain.AssemblyLoad += (_, e) => // Коли підвантажиться нова збірка (наприклад Lobby)
                 { // Перевіряємо чи це Lobby — тоді застосуємо патч

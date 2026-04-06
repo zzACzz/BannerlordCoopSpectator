@@ -176,6 +176,9 @@ namespace CoopSpectator.Infrastructure
                     return false;
                 }
 
+                initializationStep = "ensure-campaign-object-catalogs";
+                ExactCampaignObjectCatalogBootstrap.EnsureLoaded("exact-native-bootstrap:" + (source ?? "unknown"));
+
                 initializationStep = "build-suppliers";
                 if (!TryBuildSuppliers(playerSide, out IMissionTroopSupplier[] suppliers, out int defenderTotal, out int attackerTotal, out string supplierDiagnostics))
                 {
@@ -308,6 +311,7 @@ namespace CoopSpectator.Infrastructure
                     " NativeBattleSizeAfterOverride=" + nativeBattleSizeAfterOverride +
                     " DefenderSpawnHorses=" + spawnLogic.GetSpawnHorses(BattleSideEnum.Defender) +
                     " AttackerSpawnHorses=" + spawnLogic.GetSpawnHorses(BattleSideEnum.Attacker) +
+                    " ObjectCatalog={" + ExactCampaignObjectCatalogBootstrap.LastSummary + "}" +
                     " SupplierDiagnostics=" + supplierDiagnostics +
                     " Source=" + (source ?? "unknown"));
                 return true;
@@ -1476,6 +1480,8 @@ namespace CoopSpectator.Infrastructure
             BasicCharacterObject generalCharacter = commanderCharacter;
             int unresolvedEntries = 0;
             int skippedWoundedOnlyEntries = 0;
+            int totalRawCount = 0;
+            int aggregateWoundedCount = 0;
             int seed = 1;
 
             foreach (RosterEntryState entryState in orderedEntries)
@@ -1483,6 +1489,8 @@ namespace CoopSpectator.Infrastructure
                 if (entryState == null)
                     continue;
 
+                totalRawCount += Math.Max(0, entryState.Count);
+                aggregateWoundedCount += Math.Max(0, entryState.WoundedCount);
                 int availableCount = Math.Max(0, entryState.Count - entryState.WoundedCount);
                 if (availableCount <= 0)
                 {
@@ -1524,7 +1532,9 @@ namespace CoopSpectator.Infrastructure
             supplier.Initialize(origins, generalCharacter);
             diagnostics =
                 "Entries=" + sideState.Entries.Count +
+                " RawTotal=" + totalRawCount +
                 " Healthy=" + totalHealthyCount +
+                " AggregateWounded=" + aggregateWoundedCount +
                 " UnresolvedEntries=" + unresolvedEntries +
                 " WoundedOnlyEntries=" + skippedWoundedOnlyEntries +
                 " CommanderEntryId=" + (commanderEntryId ?? "none") +
