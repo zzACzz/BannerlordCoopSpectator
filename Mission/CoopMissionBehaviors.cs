@@ -872,11 +872,23 @@ namespace CoopSpectator.MissionBehaviors
             if (snapshot == null)
                 return Array.Empty<string>();
 
-            string rawEntryIds =
+            string selectableEntrySource = GetSelectableEntrySourceForSide(snapshot, side);
+            string rawSelectableEntryIds =
+                side == BattleSideEnum.Attacker ? snapshot.AttackerSelectableEntryIds :
+                side == BattleSideEnum.Defender ? snapshot.DefenderSelectableEntryIds :
+                snapshot.SelectableEntryIds;
+            string[] selectableEntryIds = CoopBattleEntryStatusBridgeFile.DeserializeIdList(rawSelectableEntryIds)
+                .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (selectableEntryIds.Length > 0 || !string.IsNullOrWhiteSpace(selectableEntrySource))
+                return selectableEntryIds;
+
+            string rawAllowedEntryIds =
                 side == BattleSideEnum.Attacker ? snapshot.AttackerAllowedEntryIds :
                 side == BattleSideEnum.Defender ? snapshot.DefenderAllowedEntryIds :
                 snapshot.AllowedEntryIds;
-            return CoopBattleEntryStatusBridgeFile.DeserializeIdList(rawEntryIds)
+            return CoopBattleEntryStatusBridgeFile.DeserializeIdList(rawAllowedEntryIds)
                 .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -885,9 +897,26 @@ namespace CoopSpectator.MissionBehaviors
         private static string[] GetAllowedSelectionIdsForSide(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot, BattleSideEnum side)
         {
             string[] entryIds = GetAllowedEntryIdsForSide(snapshot, side);
-            return entryIds.Length > 0
-                ? entryIds
-                : GetAllowedTroopIdsForSide(snapshot, side);
+            if (entryIds.Length > 0 || HasExplicitSelectableEntrySource(snapshot, side))
+                return entryIds;
+
+            return GetAllowedTroopIdsForSide(snapshot, side);
+        }
+
+        private static bool HasExplicitSelectableEntrySource(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot, BattleSideEnum side)
+        {
+            return !string.IsNullOrWhiteSpace(GetSelectableEntrySourceForSide(snapshot, side));
+        }
+
+        private static string GetSelectableEntrySourceForSide(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot, BattleSideEnum side)
+        {
+            if (snapshot == null)
+                return string.Empty;
+
+            return
+                side == BattleSideEnum.Attacker ? snapshot.AttackerSelectableEntrySource :
+                side == BattleSideEnum.Defender ? snapshot.DefenderSelectableEntrySource :
+                snapshot.SelectableEntrySource;
         }
 
         private static string ResolveSelectionDisplayLabel(string selectionId)
@@ -3804,6 +3833,7 @@ namespace CoopSpectator.MissionBehaviors
         private static int _materializedBattleResultOnScoreHitCount;
         private static int _materializedBattleResultOnAgentRemovedCount;
         private static int _materializedBattleResultRemovalDebugLogCount;
+        private static string _lastLoggedSelectableEntryUniverseKey;
         private static readonly List<string> _materializedBattleResultOnScoreHitSamples = new List<string>();
         private static readonly List<string> _materializedBattleResultOnAgentRemovedSamples = new List<string>();
         private static readonly List<string> _materializedBattleResultReconcileRemovedSamples = new List<string>();
@@ -14551,6 +14581,232 @@ namespace CoopSpectator.MissionBehaviors
             return null;
         }
 
+        private static IReadOnlyList<string> ResolveSelectableEntryIdsForStatus(
+            Mission mission,
+            BattleSideEnum side,
+            CoopBattlePhase currentPhase,
+            out string source)
+        {
+            source = "none";
+            if (side == BattleSideEnum.None)
+                return Array.Empty<string>();
+
+            List<string> liveSelectableEntryIds = GetLiveSelectableEntryIdsSnapshot(mission, side);
+            if (liveSelectableEntryIds.Count > 0)
+            {
+                source = "live-eligible";
+                return liveSelectableEntryIds;
+            }
+
+            if (currentPhase >= CoopBattlePhase.BattleActive || HasTrackedBattlefieldEntryStateForSide(mission, side))
+            {
+                source = "live-empty";
+                return Array.Empty<string>();
+            }
+
+            source = "allowed-fallback";
+            return CoopBattleAuthorityState.GetAllowedEntryIds(side)?
+                       .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
+                       .Distinct(StringComparer.Ordinal)
+                       .ToArray()
+                   ?? Array.Empty<string>();
+        }
+
+        private static List<string> GetLiveSelectableEntryIdsSnapshot(Mission mission, BattleSideEnum side)
+        {
+            if (mission?.AllAgents == null || side == BattleSideEnum.None)
+                return new List<string>();
+
+            var liveEntryIds = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < mission.AllAgents.Count; i++)
+            {
+                Agent candidate = mission.AllAgents[i];
+                if (!IsSelectableMaterializedArmyAgent(candidate, side, out string entryId))
+                    continue;
+
+                liveEntryIds.Add(entryId);
+            }
+
+            return OrderSelectableEntryIds(side, liveEntryIds);
+        }
+
+        private static bool IsSelectableMaterializedArmyAgent(Agent candidate, BattleSideEnum side, out string entryId)
+        {
+            entryId = null;
+            if (candidate == null ||
+                !candidate.IsActive() ||
+                candidate.IsMount ||
+                candidate.MissionPeer != null ||
+                candidate.Controller == AgentControllerType.Player)
+            {
+                return false;
+            }
+
+            return DoesAgentMatchSelectableSide(candidate, side) &&
+                   TryResolveSelectableEntryId(candidate, out entryId);
+        }
+
+        private static bool DoesAgentMatchSelectableSide(Agent agent, BattleSideEnum side)
+        {
+            if (agent == null || side == BattleSideEnum.None)
+                return false;
+
+            if (_materializedArmySideByAgentIndex.TryGetValue(agent.Index, out BattleSideEnum trackedSide) &&
+                trackedSide == side)
+            {
+                return true;
+            }
+
+            if (ExactCampaignArmyBootstrap.TryGetSide(agent, out BattleSideEnum originSide) &&
+                originSide == side)
+            {
+                return true;
+            }
+
+            return agent.Team?.Side == side;
+        }
+
+        private static bool TryResolveSelectableEntryId(Agent agent, out string entryId)
+        {
+            entryId = null;
+            if (agent == null)
+                return false;
+
+            if (_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string trackedEntryId) &&
+                !string.IsNullOrWhiteSpace(trackedEntryId))
+            {
+                entryId = trackedEntryId;
+                return true;
+            }
+
+            if (ExactCampaignArmyBootstrap.TryGetEntryId(agent, out string originEntryId) &&
+                !string.IsNullOrWhiteSpace(originEntryId))
+            {
+                entryId = originEntryId;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool HasTrackedBattlefieldEntryStateForSide(Mission mission, BattleSideEnum side)
+        {
+            if (side == BattleSideEnum.None)
+                return false;
+
+            string sideId = side.ToString();
+            foreach (MaterializedBattleResultEntryRuntimeState runtimeState in _materializedBattleResultEntriesByEntryId.Values)
+            {
+                if (runtimeState == null ||
+                    runtimeState.MaterializedSpawnCount <= 0 ||
+                    !string.Equals(runtimeState.SideId, sideId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                return true;
+            }
+
+            if (mission?.AllAgents == null)
+                return false;
+
+            for (int i = 0; i < mission.AllAgents.Count; i++)
+            {
+                Agent candidate = mission.AllAgents[i];
+                if (candidate == null || candidate.IsMount || !DoesAgentMatchSelectableSide(candidate, side))
+                    continue;
+
+                if (TryResolveSelectableEntryId(candidate, out _))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static List<string> OrderSelectableEntryIds(BattleSideEnum side, IEnumerable<string> entryIds)
+        {
+            var pendingEntryIds = new HashSet<string>(
+                (entryIds ?? Enumerable.Empty<string>())
+                .Where(entryId => !string.IsNullOrWhiteSpace(entryId)),
+                StringComparer.Ordinal);
+            var orderedEntryIds = new List<string>(pendingEntryIds.Count);
+            if (pendingEntryIds.Count <= 0)
+                return orderedEntryIds;
+
+            BattleSideState sideState = BattleSnapshotRuntimeState.GetSideState(side.ToString());
+            if (sideState?.MissionReadyEntryOrder != null)
+            {
+                foreach (string missionReadyEntryId in sideState.MissionReadyEntryOrder)
+                {
+                    if (!pendingEntryIds.Remove(missionReadyEntryId))
+                        continue;
+
+                    orderedEntryIds.Add(missionReadyEntryId);
+                }
+            }
+
+            foreach (RosterEntryState entryState in GetAllowedControlEntryStatesSnapshot(side))
+            {
+                string entryId = entryState?.EntryId;
+                if (string.IsNullOrWhiteSpace(entryId) || !pendingEntryIds.Remove(entryId))
+                    continue;
+
+                orderedEntryIds.Add(entryId);
+            }
+
+            orderedEntryIds.AddRange(pendingEntryIds.OrderBy(entryId => entryId, StringComparer.Ordinal));
+            return orderedEntryIds;
+        }
+
+        private static void TryLogSelectableEntryUniverse(
+            Mission mission,
+            CoopBattlePhase currentPhase,
+            string attackerSource,
+            IReadOnlyList<string> attackerEntryIds,
+            string defenderSource,
+            IReadOnlyList<string> defenderEntryIds,
+            BattleSideEnum currentSide,
+            string currentSource,
+            IReadOnlyList<string> currentEntryIds)
+        {
+            string logKey =
+                (mission?.SceneName ?? "null") + "|" +
+                currentPhase + "|" +
+                (attackerSource ?? "unknown") + "|" +
+                string.Join(",", attackerEntryIds ?? Array.Empty<string>()) + "|" +
+                (defenderSource ?? "unknown") + "|" +
+                string.Join(",", defenderEntryIds ?? Array.Empty<string>()) + "|" +
+                currentSide + "|" +
+                (currentSource ?? "unknown") + "|" +
+                string.Join(",", currentEntryIds ?? Array.Empty<string>());
+            if (string.Equals(_lastLoggedSelectableEntryUniverseKey, logKey, StringComparison.Ordinal))
+                return;
+
+            _lastLoggedSelectableEntryUniverseKey = logKey;
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: selectable entry universe updated. " +
+                "Mission=" + (mission?.SceneName ?? "null") +
+                " Phase=" + currentPhase +
+                " AttackerSource=" + (attackerSource ?? "unknown") +
+                " AttackerCount=" + (attackerEntryIds?.Count ?? 0) +
+                " AttackerSample=[" + BuildSelectableEntrySample(attackerEntryIds) + "]" +
+                " DefenderSource=" + (defenderSource ?? "unknown") +
+                " DefenderCount=" + (defenderEntryIds?.Count ?? 0) +
+                " DefenderSample=[" + BuildSelectableEntrySample(defenderEntryIds) + "]" +
+                " CurrentSide=" + currentSide +
+                " CurrentSource=" + (currentSource ?? "unknown") +
+                " CurrentCount=" + (currentEntryIds?.Count ?? 0) +
+                " CurrentSample=[" + BuildSelectableEntrySample(currentEntryIds) + "]");
+        }
+
+        private static string BuildSelectableEntrySample(IReadOnlyList<string> entryIds)
+        {
+            if (entryIds == null || entryIds.Count <= 0)
+                return string.Empty;
+
+            return string.Join(", ", entryIds.Where(entryId => !string.IsNullOrWhiteSpace(entryId)).Take(6));
+        }
+
         private static void TryWriteEntryStatusSnapshot(Mission mission, string source)
         {
             if (mission == null || !GameNetwork.IsServer)
@@ -14564,6 +14820,16 @@ namespace CoopSpectator.MissionBehaviors
             bool canStartBattle = IsBattleStartReady(mission, out int assignedPeerCount, out int controlledPeerCount) &&
                 currentPhase >= CoopBattlePhase.PreBattleHold &&
                 currentPhase < CoopBattlePhase.BattleActive;
+            IReadOnlyList<string> attackerSelectableEntryIds = ResolveSelectableEntryIdsForStatus(
+                mission,
+                BattleSideEnum.Attacker,
+                currentPhase,
+                out string attackerSelectableSource);
+            IReadOnlyList<string> defenderSelectableEntryIds = ResolveSelectableEntryIdsForStatus(
+                mission,
+                BattleSideEnum.Defender,
+                currentPhase,
+                out string defenderSelectableSource);
 
             var snapshot = new CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot
             {
@@ -14586,8 +14852,12 @@ namespace CoopSpectator.MissionBehaviors
                 IntentTroopOrEntryId = selectionIntent.TroopOrEntryId,
                 AttackerAllowedTroopIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(CoopBattleAuthorityState.GetAllowedTroopIds(BattleSideEnum.Attacker) ?? Array.Empty<string>()),
                 AttackerAllowedEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(CoopBattleAuthorityState.GetAllowedEntryIds(BattleSideEnum.Attacker) ?? Array.Empty<string>()),
+                AttackerSelectableEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(attackerSelectableEntryIds),
+                AttackerSelectableEntrySource = attackerSelectableSource,
                 DefenderAllowedTroopIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(CoopBattleAuthorityState.GetAllowedTroopIds(BattleSideEnum.Defender) ?? Array.Empty<string>()),
                 DefenderAllowedEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(CoopBattleAuthorityState.GetAllowedEntryIds(BattleSideEnum.Defender) ?? Array.Empty<string>()),
+                DefenderSelectableEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(defenderSelectableEntryIds),
+                DefenderSelectableEntrySource = defenderSelectableSource,
                 UpdatedUtc = DateTime.UtcNow
             };
 
@@ -14651,6 +14921,38 @@ namespace CoopSpectator.MissionBehaviors
                     CoopBattleAuthorityState.GetAllowedTroopIds(statusSide) ?? Array.Empty<string>());
                 snapshot.AllowedEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(
                     CoopBattleAuthorityState.GetAllowedEntryIds(statusSide) ?? Array.Empty<string>());
+                IReadOnlyList<string> currentSelectableEntryIds = ResolveSelectableEntryIdsForStatus(
+                    mission,
+                    statusSide,
+                    currentPhase,
+                    out string currentSelectableSource);
+                snapshot.SelectableEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(currentSelectableEntryIds);
+                snapshot.SelectableEntrySource = currentSelectableSource;
+                TryLogSelectableEntryUniverse(
+                    mission,
+                    currentPhase,
+                    attackerSelectableSource,
+                    attackerSelectableEntryIds,
+                    defenderSelectableSource,
+                    defenderSelectableEntryIds,
+                    statusSide,
+                    currentSelectableSource,
+                    currentSelectableEntryIds);
+            }
+            else
+            {
+                snapshot.SelectableEntryIds = string.Empty;
+                snapshot.SelectableEntrySource = string.Empty;
+                TryLogSelectableEntryUniverse(
+                    mission,
+                    currentPhase,
+                    attackerSelectableSource,
+                    attackerSelectableEntryIds,
+                    defenderSelectableSource,
+                    defenderSelectableEntryIds,
+                    BattleSideEnum.None,
+                    "none",
+                    Array.Empty<string>());
             }
 
             TryLogBattleStartReadinessAudit(

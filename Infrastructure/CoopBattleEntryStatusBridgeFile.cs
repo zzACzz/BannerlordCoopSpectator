@@ -44,10 +44,16 @@ namespace CoopSpectator.Infrastructure
             public string SpawnReason { get; set; }
             public string AllowedTroopIds { get; set; }
             public string AllowedEntryIds { get; set; }
+            public string SelectableEntryIds { get; set; }
+            public string SelectableEntrySource { get; set; }
             public string AttackerAllowedTroopIds { get; set; }
             public string AttackerAllowedEntryIds { get; set; }
+            public string AttackerSelectableEntryIds { get; set; }
+            public string AttackerSelectableEntrySource { get; set; }
             public string DefenderAllowedTroopIds { get; set; }
             public string DefenderAllowedEntryIds { get; set; }
+            public string DefenderSelectableEntryIds { get; set; }
+            public string DefenderSelectableEntrySource { get; set; }
             public DateTime UpdatedUtc { get; set; }
         }
 
@@ -142,10 +148,16 @@ namespace CoopSpectator.Infrastructure
                     "SpawnReason=" + (snapshot.SpawnReason ?? string.Empty),
                     "AllowedTroopIds=" + (snapshot.AllowedTroopIds ?? string.Empty),
                     "AllowedEntryIds=" + (snapshot.AllowedEntryIds ?? string.Empty),
+                    "SelectableEntryIds=" + (snapshot.SelectableEntryIds ?? string.Empty),
+                    "SelectableEntrySource=" + (snapshot.SelectableEntrySource ?? string.Empty),
                     "AttackerAllowedTroopIds=" + (snapshot.AttackerAllowedTroopIds ?? string.Empty),
                     "AttackerAllowedEntryIds=" + (snapshot.AttackerAllowedEntryIds ?? string.Empty),
+                    "AttackerSelectableEntryIds=" + (snapshot.AttackerSelectableEntryIds ?? string.Empty),
+                    "AttackerSelectableEntrySource=" + (snapshot.AttackerSelectableEntrySource ?? string.Empty),
                     "DefenderAllowedTroopIds=" + (snapshot.DefenderAllowedTroopIds ?? string.Empty),
                     "DefenderAllowedEntryIds=" + (snapshot.DefenderAllowedEntryIds ?? string.Empty),
+                    "DefenderSelectableEntryIds=" + (snapshot.DefenderSelectableEntryIds ?? string.Empty),
+                    "DefenderSelectableEntrySource=" + (snapshot.DefenderSelectableEntrySource ?? string.Empty),
                     "UpdatedUtc=" + snapshot.UpdatedUtc.ToString("O")
                 };
                 string path = GetStatusFilePath();
@@ -212,10 +224,16 @@ namespace CoopSpectator.Infrastructure
                     SpawnReason = string.Empty,
                     AllowedTroopIds = string.Empty,
                     AllowedEntryIds = string.Empty,
+                    SelectableEntryIds = string.Empty,
+                    SelectableEntrySource = string.Empty,
                     AttackerAllowedTroopIds = string.Empty,
                     AttackerAllowedEntryIds = string.Empty,
+                    AttackerSelectableEntryIds = string.Empty,
+                    AttackerSelectableEntrySource = string.Empty,
                     DefenderAllowedTroopIds = string.Empty,
                     DefenderAllowedEntryIds = string.Empty,
+                    DefenderSelectableEntryIds = string.Empty,
+                    DefenderSelectableEntrySource = string.Empty,
                     UpdatedUtc = DateTime.MinValue
                 };
 
@@ -331,17 +349,35 @@ namespace CoopSpectator.Infrastructure
                         case "AllowedEntryIds":
                             snapshot.AllowedEntryIds = value;
                             break;
+                        case "SelectableEntryIds":
+                            snapshot.SelectableEntryIds = value;
+                            break;
+                        case "SelectableEntrySource":
+                            snapshot.SelectableEntrySource = value;
+                            break;
                         case "AttackerAllowedTroopIds":
                             snapshot.AttackerAllowedTroopIds = value;
                             break;
                         case "AttackerAllowedEntryIds":
                             snapshot.AttackerAllowedEntryIds = value;
                             break;
+                        case "AttackerSelectableEntryIds":
+                            snapshot.AttackerSelectableEntryIds = value;
+                            break;
+                        case "AttackerSelectableEntrySource":
+                            snapshot.AttackerSelectableEntrySource = value;
+                            break;
                         case "DefenderAllowedTroopIds":
                             snapshot.DefenderAllowedTroopIds = value;
                             break;
                         case "DefenderAllowedEntryIds":
                             snapshot.DefenderAllowedEntryIds = value;
+                            break;
+                        case "DefenderSelectableEntryIds":
+                            snapshot.DefenderSelectableEntryIds = value;
+                            break;
+                        case "DefenderSelectableEntrySource":
+                            snapshot.DefenderSelectableEntrySource = value;
                             break;
                         case "UpdatedUtc":
                             if (DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime updatedUtc))
