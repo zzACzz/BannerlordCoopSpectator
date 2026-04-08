@@ -63,6 +63,11 @@ namespace CoopSpectator.Infrastructure
             public string AttackerPartyId { get; set; }
             public string AttackerCharacterId { get; set; }
             public string AttackerOriginalCharacterId { get; set; }
+            public string WeaponItemId { get; set; }
+            public string CaptainHeroId { get; set; }
+            public string CaptainCharacterId { get; set; }
+            public string CaptainOriginalCharacterId { get; set; }
+            public string CommanderHeroId { get; set; }
             public string VictimEntryId { get; set; }
             public string VictimSideId { get; set; }
             public string VictimPartyId { get; set; }
@@ -72,9 +77,16 @@ namespace CoopSpectator.Infrastructure
             public string WeaponClassHint { get; set; }
             public bool IsBlocked { get; set; }
             public bool IsSiegeEngineHit { get; set; }
+            public bool IsTeamKill { get; set; }
             public bool IsFatal { get; set; }
+            public bool IsAttackerMounted { get; set; }
+            public bool IsAttackerUnderCommand { get; set; }
+            public bool IsHorseCharge { get; set; }
+            public bool IsSneakAttack { get; set; }
             public float Damage { get; set; }
             public float HitDistance { get; set; }
+            public float MovementSpeedBonus { get; set; }
+            public float HitPointRatio { get; set; }
             public float ShotDifficulty { get; set; }
             public float MissionTime { get; set; }
         }

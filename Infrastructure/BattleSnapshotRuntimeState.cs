@@ -39,6 +39,7 @@ namespace CoopSpectator.Infrastructure
         public float SideMorale { get; set; }
         public bool IsPlayerSide { get; set; }
         public int TotalManCount { get; set; }
+        public List<string> MissionReadyEntryOrder { get; set; } = new List<string>();
         public List<BattlePartyState> Parties { get; set; } = new List<BattlePartyState>();
         public List<RosterEntryState> Entries { get; set; } = new List<RosterEntryState>();
         public List<string> TroopIds { get; set; } = new List<string>();
@@ -145,6 +146,7 @@ namespace CoopSpectator.Infrastructure
         public float SideMorale { get; set; }
         public bool IsPlayerSide { get; set; }
         public int TotalManCount { get; set; }
+        public List<string> MissionReadyEntryOrder { get; set; } = new List<string>();
         public List<BattlePartyProjectionState> Parties { get; set; } = new List<BattlePartyProjectionState>();
         public List<BattleRosterEntryProjectionState> Entries { get; set; } = new List<BattleRosterEntryProjectionState>();
         public List<string> TroopIds { get; set; } = new List<string>();
@@ -480,7 +482,12 @@ namespace CoopSpectator.Infrastructure
                     LeaderPartyId = sideSnapshot.LeaderPartyId,
                     SideMorale = sideSnapshot.SideMorale,
                     IsPlayerSide = sideSnapshot.IsPlayerSide,
-                    TotalManCount = sideSnapshot.TotalManCount
+                    TotalManCount = sideSnapshot.TotalManCount,
+                    MissionReadyEntryOrder = sideSnapshot.MissionReadyEntryOrder != null
+                        ? sideSnapshot.MissionReadyEntryOrder
+                            .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
+                            .ToList()
+                        : new List<string>()
                 };
                 projection.Sides.Add(sideProjection);
                 projection.SidesByKey[sideProjection.CanonicalSideKey] = sideProjection;
@@ -572,7 +579,10 @@ namespace CoopSpectator.Infrastructure
                     LeaderPartyId = sideProjection.LeaderPartyId,
                     SideMorale = sideProjection.SideMorale,
                     IsPlayerSide = sideProjection.IsPlayerSide,
-                    TotalManCount = sideProjection.TotalManCount
+                    TotalManCount = sideProjection.TotalManCount,
+                    MissionReadyEntryOrder = sideProjection.MissionReadyEntryOrder != null
+                        ? new List<string>(sideProjection.MissionReadyEntryOrder)
+                        : new List<string>()
                 };
                 state.Sides.Add(sideState);
                 state.SidesByKey[sideState.CanonicalSideKey] = sideState;

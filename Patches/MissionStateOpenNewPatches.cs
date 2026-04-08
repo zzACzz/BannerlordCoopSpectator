@@ -220,6 +220,11 @@ namespace CoopSpectator.Patches
 
             LogWrappedBehaviorStack("battle-after-removal", list);
 
+            if (battleMapRuntime)
+            {
+                InjectBattleMapClientUiParityViews(mission, list);
+            }
+
 #if !COOPSPECTATOR_DEDICATED
             if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
             {
@@ -230,6 +235,83 @@ namespace CoopSpectator.Patches
             list.Add(new MissionBehaviorDiagnostic());
             ModLogger.Info("MissionStateOpenNewPatches: appended MissionBehaviorDiagnostic to wrapped Battle client stack. FinalCount=" + list.Count);
             return list;
+        }
+
+        private static void InjectBattleMapClientUiParityViews(Mission mission, List<MissionBehavior> list)
+        {
+            bool addedAgentLabel = TryAddBehaviorIfMissing(
+                list,
+                () => MissionBehaviorHelpers.TryCreateMissionAgentLabelUiParityView(mission),
+                new[] { "MissionAgentLabelUIHandler", "MissionAgentLabelView" },
+                "MissionStateOpenNewPatches: battle-map client injected agent-label mission view into wrapped Battle stack.",
+                "MissionStateOpenNewPatches: battle-map client already had agent-label mission view in wrapped Battle stack.");
+
+            bool addedFormationTargetSelection = TryAddBehaviorIfMissing(
+                list,
+                () => MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies("TaleWorlds.MountAndBlade.View.MissionViews.MissionFormationTargetSelectionHandler"),
+                new[] { "MissionFormationTargetSelectionHandler" },
+                "MissionStateOpenNewPatches: battle-map client injected MissionFormationTargetSelectionHandler into wrapped Battle stack.",
+                "MissionStateOpenNewPatches: battle-map client already had MissionFormationTargetSelectionHandler in wrapped Battle stack.");
+
+            bool addedFormationMarker = TryAddBehaviorIfMissing(
+                list,
+                () => MissionBehaviorHelpers.TryCreateMissionFormationMarkerUiParityView(mission),
+                new[] { "MissionFormationMarkerUIHandler", "MissionGauntletFormationMarker" },
+                "MissionStateOpenNewPatches: battle-map client injected formation-marker mission view into wrapped Battle stack.",
+                "MissionStateOpenNewPatches: battle-map client already had formation-marker mission view in wrapped Battle stack.");
+
+            ModLogger.Info(
+                "CoopBattle client: injected agent label and formation marker mission views for wrapped MultiplayerBattle battle-map runtime. Scene=" + (mission?.SceneName ?? "null") +
+                " AddedAgentLabel=" + addedAgentLabel +
+                " AddedFormationTargetSelection=" + addedFormationTargetSelection +
+                " AddedFormationMarker=" + addedFormationMarker);
+        }
+
+        private static bool TryAddBehaviorIfMissing(
+            List<MissionBehavior> list,
+            Func<MissionBehavior> behaviorFactory,
+            string[] expectedTypeNames,
+            string addedLogMessage,
+            string alreadyPresentLogMessage)
+        {
+            if (ListContainsBehaviorType(list, expectedTypeNames))
+            {
+                ModLogger.Info(alreadyPresentLogMessage);
+                return false;
+            }
+
+            MissionBehavior behavior = behaviorFactory?.Invoke();
+            if (behavior == null)
+                return false;
+
+            list.Add(behavior);
+            ModLogger.Info(addedLogMessage + " AddedType=" + (behavior.GetType().FullName ?? behavior.GetType().Name));
+            return true;
+        }
+
+        private static bool ListContainsBehaviorType(List<MissionBehavior> list, IEnumerable<string> expectedTypeNames)
+        {
+            if (list == null || expectedTypeNames == null)
+                return false;
+
+            HashSet<string> expected = new HashSet<string>(
+                expectedTypeNames.Where(name => !string.IsNullOrEmpty(name)),
+                StringComparer.Ordinal);
+            if (expected.Count == 0)
+                return false;
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                MissionBehavior behavior = list[i];
+                if (behavior == null)
+                    continue;
+
+                string typeName = behavior.GetType().Name ?? string.Empty;
+                if (expected.Contains(typeName))
+                    return true;
+            }
+
+            return false;
         }
 
         private static void LogWrappedBehaviorStack(string stage, List<MissionBehavior> list)

@@ -12,12 +12,14 @@ using System.Reflection; // Reflection для mission-safe fallback ids геро
 using System.Linq;
 using System.Globalization;
 using TaleWorlds.CampaignSystem.Actions;
+using TaleWorlds.CampaignSystem.CharacterDevelopment;
 using TaleWorlds.CampaignSystem.ComponentInterfaces;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.Map;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.Core;
+using Helpers;
 using TaleWorlds.ObjectSystem;
 
 namespace CoopSpectator.Campaign // Тримаємо battle/campaign логіку в одному namespace
@@ -40,6 +42,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private string _lastMissionExitFailedBattleResultKey;
         private string _cachedHostAftermathRewardResultKey;
         private BattleResultWritebackSummary.RewardProjectionSummary _cachedHostAftermathRewardProjection;
+        private string _cachedHostAftermathRewardAuditResultKey;
+        private RewardStateAuditSnapshot _cachedHostAftermathRewardAuditSnapshot;
         private string _cachedHostAftermathLootResultKey;
         private BattleResultWritebackSummary.LootAftermathSummary _cachedHostAftermathLootSummary;
         private string _cachedHostAftermathMainPartyPreviewResultKey;
@@ -153,6 +157,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 public bool Attempted { get; set; }
                 public bool Applied { get; set; }
                 public bool SkippedCommittedResults { get; set; }
+                public bool AuditReady { get; set; }
                 public bool AppliedGold { get; set; }
                 public bool AppliedMorale { get; set; }
                 public bool AppliedRenown { get; set; }
@@ -161,6 +166,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 public float MoraleApplied { get; set; }
                 public float RenownApplied { get; set; }
                 public float InfluenceApplied { get; set; }
+                public int ActualGoldDelta { get; set; }
+                public float ActualMoraleDelta { get; set; }
+                public float ActualRenownDelta { get; set; }
+                public float ActualInfluenceDelta { get; set; }
+                public string AuditSource { get; set; }
                 public string Source { get; set; }
             }
 
@@ -223,6 +233,30 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public CharacterObject Character { get; set; }
             public Hero Hero { get; set; }
             public int Weight { get; set; }
+        }
+
+        private sealed class TroopCombatXpAccumulator
+        {
+            public EncounterPartyWritebackState PartyState { get; set; }
+            public CharacterObject Character { get; set; }
+            public int RawXp { get; set; }
+        }
+
+        private sealed class HeroXpAuditSnapshot
+        {
+            public Hero Hero { get; set; }
+            public int TotalXp { get; set; }
+        }
+
+        private sealed class RewardStateAuditSnapshot
+        {
+            public string LeaderHeroId { get; set; }
+            public string ClanId { get; set; }
+            public int Gold { get; set; }
+            public float ClanRenown { get; set; }
+            public float ClanInfluence { get; set; }
+            public float RecentEventsMorale { get; set; }
+            public string Source { get; set; }
         }
 
         private static void ResetCombatProfileLookupCaches()
@@ -331,6 +365,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _lastMissionExitFailedBattleResultKey = null;
             _cachedHostAftermathRewardResultKey = null;
             _cachedHostAftermathRewardProjection = null;
+            _cachedHostAftermathRewardAuditResultKey = null;
+            _cachedHostAftermathRewardAuditSnapshot = null;
             _cachedHostAftermathLootResultKey = null;
             _cachedHostAftermathLootSummary = null;
             _cachedHostAftermathMainPartyPreviewResultKey = null;
@@ -424,6 +460,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                 _lastConsumedBattleResultKey = resultKey;
 
+                RewardStateAuditSnapshot rewardAuditBefore =
+                    string.Equals(_cachedHostAftermathRewardAuditResultKey, resultKey, StringComparison.Ordinal)
+                        ? CloneRewardStateAuditSnapshot(_cachedHostAftermathRewardAuditSnapshot)
+                        : null;
+
                 BattleResultWritebackSummary writebackSummary = ApplyBattleResultWriteback(
                     result,
                     string.Equals(_cachedHostAftermathRewardResultKey, resultKey, StringComparison.Ordinal)
@@ -434,6 +475,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         : null,
                     string.Equals(_cachedHostAftermathMainPartyPreviewResultKey, resultKey, StringComparison.Ordinal) &&
                     _cachedHostAftermathMainPartyPreviewHeroHpApplied);
+
+                ApplyRewardStateAuditDeltas(rewardAuditBefore, writebackSummary);
 
                 int removedTotal = result.Entries?.Sum(entry => entry?.RemovedCount ?? 0) ?? 0;
                 int killedTotal = result.Entries?.Sum(entry => entry?.KilledCount ?? 0) ?? 0;
@@ -504,11 +547,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " RewardApply[Attempted=" + writebackSummary.RewardApply.Attempted +
                 " Applied=" + writebackSummary.RewardApply.Applied +
                 " SkippedCommitted=" + writebackSummary.RewardApply.SkippedCommittedResults +
+                " Audit=" + writebackSummary.RewardApply.AuditReady +
                 " Source=" + (writebackSummary.RewardApply.Source ?? "none") +
                 " Gold=" + writebackSummary.RewardApply.GoldDeltaApplied +
                 " Morale=" + writebackSummary.RewardApply.MoraleApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
                 " Renown=" + writebackSummary.RewardApply.RenownApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
-                " Influence=" + writebackSummary.RewardApply.InfluenceApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "]" +
+                " Influence=" + writebackSummary.RewardApply.InfluenceApplied.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " ActualGold=" + writebackSummary.RewardApply.ActualGoldDelta +
+                " ActualMorale=" + writebackSummary.RewardApply.ActualMoraleDelta.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " ActualRenown=" + writebackSummary.RewardApply.ActualRenownDelta.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " ActualInfluence=" + writebackSummary.RewardApply.ActualInfluenceDelta.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " AuditSource=" + (writebackSummary.RewardApply.AuditSource ?? "none") + "]" +
                 " LootAftermath[Ready=" + writebackSummary.LootAftermath.Ready +
                 " Source=" + (writebackSummary.LootAftermath.Source ?? "none") +
                 " PrisonerSource=" + (writebackSummary.LootAftermath.PrisonerSource ?? "none") +
@@ -582,7 +631,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     skipMainPartyHeroHitPointWriteback && partyState.IsMainParty);
             }
 
-            TryApplyMainPartyCombatXpWriteback(result, encounterParties, summary);
+            TryApplyCombatXpWriteback(result, encounterParties, summary);
             TryBuildMainPartyRewardProjection(result, encounterParties, summary, cachedRewardProjection);
             TryApplyMainPartyRewardWriteback(encounterParties, summary);
             TryBuildMainPartyLootAftermathAudit(summary, cachedLootAftermath);
@@ -905,7 +954,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
-        private static void TryApplyMainPartyCombatXpWriteback(
+        private static void TryApplyCombatXpWriteback(
             CoopBattleResultBridgeFile.BattleResultSnapshot result,
             IDictionary<string, EncounterPartyWritebackState> encounterParties,
             BattleResultWritebackSummary summary)
@@ -913,22 +962,20 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (result == null || encounterParties == null)
                 return;
 
-            string mainPartyId = MobileParty.MainParty?.StringId;
-            if (string.IsNullOrWhiteSpace(mainPartyId) ||
-                !encounterParties.TryGetValue(mainPartyId, out EncounterPartyWritebackState mainPartyState) ||
-                mainPartyState?.MemberRoster == null ||
-                mainPartyState.PartyBase == null)
-            {
-                return;
-            }
-
             CombatXpModel combatXpModel = TaleWorlds.CampaignSystem.Campaign.Current?.Models?.CombatXpModel;
             if (combatXpModel == null)
                 return;
 
+            if (result.DroppedCombatEventCount > 0)
+            {
+                summary.UnresolvedCombatEvents += result.DroppedCombatEventCount;
+                AddWritebackSample(summary.UnresolvedSamples, "DroppedCombatEvents:" + result.DroppedCombatEventCount);
+            }
+
             if (result.CombatEvents == null || result.CombatEvents.Count == 0)
             {
-                TryApplyMainPartyFallbackCombatXpWriteback(result, mainPartyState, combatXpModel, summary);
+                foreach (EncounterPartyWritebackState partyState in encounterParties.Values.Where(state => state?.MemberRoster != null && state.PartyBase != null))
+                    TryApplyPartyFallbackCombatXpWriteback(result, partyState, combatXpModel, summary);
                 return;
             }
 
@@ -938,23 +985,29 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 .GroupBy(entry => entry.EntryId, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
 
+            var troopXpAccumulators = new Dictionary<string, TroopCombatXpAccumulator>(StringComparer.OrdinalIgnoreCase);
+
             foreach (CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot combatEvent in result.CombatEvents.Where(item => item != null))
             {
-                if (!string.Equals(combatEvent.AttackerPartyId, mainPartyId, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (!entriesById.TryGetValue(combatEvent.AttackerEntryId ?? string.Empty, out CoopBattleResultBridgeFile.BattleResultEntrySnapshot attackerEntry) ||
-                    attackerEntry == null)
+                if (string.IsNullOrWhiteSpace(combatEvent.AttackerPartyId) ||
+                    !encounterParties.TryGetValue(combatEvent.AttackerPartyId, out EncounterPartyWritebackState partyState) ||
+                    partyState?.MemberRoster == null ||
+                    partyState.PartyBase == null)
                 {
                     summary.UnresolvedCombatEvents++;
+                    AddWritebackSample(summary.UnresolvedSamples, "CombatXpMissingParty:" + (combatEvent.AttackerPartyId ?? "null"));
                     continue;
                 }
 
+                entriesById.TryGetValue(combatEvent.AttackerEntryId ?? string.Empty, out CoopBattleResultBridgeFile.BattleResultEntrySnapshot attackerEntry);
+                string attackerHeroId = attackerEntry?.HeroId;
+                string attackerOriginalCharacterId = attackerEntry?.OriginalCharacterId ?? combatEvent.AttackerOriginalCharacterId;
+                string attackerCharacterId = attackerEntry?.CharacterId ?? combatEvent.AttackerCharacterId;
                 if (!TryResolvePartyRosterCharacter(
-                        mainPartyState.MemberRoster,
-                        attackerEntry.HeroId,
-                        attackerEntry.OriginalCharacterId,
-                        attackerEntry.CharacterId,
+                        partyState.MemberRoster,
+                        attackerHeroId,
+                        attackerOriginalCharacterId,
+                        attackerCharacterId,
                         out CharacterObject attackerCharacter,
                         out Hero attackerHero,
                         out _,
@@ -962,6 +1015,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         out _))
                 {
                     summary.UnresolvedCombatEvents++;
+                    AddWritebackSample(
+                        summary.UnresolvedSamples,
+                        "CombatXpMissingAttacker:" + (partyState.PartyId ?? "party") + "/" + (attackerHeroId ?? attackerOriginalCharacterId ?? attackerCharacterId ?? "unknown"));
                     continue;
                 }
 
@@ -978,94 +1034,57 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 if (damage <= 0)
                     continue;
 
-                float xpFromHit;
+                TryReplayCombatEventHeroXp(attackerCharacter, attackedCharacter, partyState, combatEvent, summary);
+                if (attackerHero != null)
+                    continue;
+
                 try
                 {
                     ExplainedNumber explained = combatXpModel.GetXpFromHit(
                         attackerCharacter,
-                        mainPartyState.CaptainCharacter,
+                        null,
                         attackedCharacter,
-                        mainPartyState.PartyBase,
+                        partyState.PartyBase,
                         damage,
                         combatEvent.IsFatal,
                         CombatXpModel.MissionTypeEnum.Battle);
-                    xpFromHit = Math.Max(0f, explained.ResultNumber);
+                    int troopXp = Math.Max(0, (int)Math.Round(Math.Max(0f, explained.ResultNumber), MidpointRounding.AwayFromZero));
+                    if (troopXp > 0)
+                        AccumulateTroopCombatXp(troopXpAccumulators, partyState, attackerCharacter, troopXp);
                 }
                 catch (Exception ex)
                 {
                     summary.UnresolvedCombatEvents++;
-                    AddWritebackSample(summary.UnresolvedSamples, "CombatXpFailed:" + ex.Message);
+                    AddWritebackSample(summary.UnresolvedSamples, "TroopCombatXpFailed:" + ex.Message);
                     continue;
-                }
-
-                if (xpFromHit <= 0.01f)
-                    continue;
-
-                if (attackerHero != null)
-                {
-                    SkillObject hintedSkill = TryResolveSkillObject(combatEvent.WeaponSkillHint);
-                    try
-                    {
-                        if (hintedSkill != null)
-                        {
-                            attackerHero.HeroDeveloper?.AddSkillXp(hintedSkill, xpFromHit, true, false);
-                            if (attackerHero.HeroDeveloper == null)
-                                attackerHero.AddSkillXp(hintedSkill, xpFromHit);
-                            summary.HeroSkillXpApplied += xpFromHit;
-                        }
-                        else
-                        {
-                            summary.UnresolvedCombatEvents++;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        summary.UnresolvedCombatEvents++;
-                        AddWritebackSample(summary.UnresolvedSamples, "HeroXpFailed:" + (attackerHero.StringId ?? "hero") + "/" + ex.Message);
-                    }
-
-                    continue;
-                }
-
-                int troopXp = Math.Max(0, (int)Math.Round(xpFromHit, MidpointRounding.AwayFromZero));
-                if (troopXp <= 0)
-                    continue;
-
-                try
-                {
-                    mainPartyState.MemberRoster.AddXpToTroop(attackerCharacter, troopXp);
-                    summary.TroopXpApplied += troopXp;
-                }
-                catch (Exception ex)
-                {
-                    summary.UnresolvedCombatEvents++;
-                    AddWritebackSample(summary.UnresolvedSamples, "TroopXpFailed:" + (attackerCharacter.StringId ?? "troop") + "/" + ex.Message);
                 }
             }
+
+            TryApplyAccumulatedTroopCombatXpWriteback(troopXpAccumulators, summary);
         }
 
-        private static void TryApplyMainPartyFallbackCombatXpWriteback(
+        private static void TryApplyPartyFallbackCombatXpWriteback(
             CoopBattleResultBridgeFile.BattleResultSnapshot result,
-            EncounterPartyWritebackState mainPartyState,
+            EncounterPartyWritebackState partyState,
             CombatXpModel combatXpModel,
             BattleResultWritebackSummary summary)
         {
-            if (result?.Entries == null || mainPartyState?.MemberRoster == null || mainPartyState.PartyBase == null)
+            if (result?.Entries == null || partyState?.MemberRoster == null || partyState.PartyBase == null)
                 return;
 
-            string mainPartyId = mainPartyState.PartyId;
-            if (string.IsNullOrWhiteSpace(mainPartyId))
+            string partyId = partyState.PartyId;
+            if (string.IsNullOrWhiteSpace(partyId))
                 return;
 
             var participants = new List<FallbackCombatXpParticipant>();
             int totalWeight = 0;
             foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry in result.Entries.Where(item =>
                          item != null &&
-                         string.Equals(item.PartyId, mainPartyId, StringComparison.OrdinalIgnoreCase) &&
+                         string.Equals(item.PartyId, partyId, StringComparison.OrdinalIgnoreCase) &&
                          Math.Max(0, item.SnapshotCount) > 0))
             {
                 if (!TryResolvePartyRosterCharacter(
-                        mainPartyState.MemberRoster,
+                        partyState.MemberRoster,
                         entry.HeroId,
                         entry.OriginalCharacterId,
                         entry.CharacterId,
@@ -1094,7 +1113,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool anyApplied = false;
             foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot enemyEntry in result.Entries.Where(item =>
                          item != null &&
-                         !string.Equals(item.PartyId, mainPartyId, StringComparison.OrdinalIgnoreCase)))
+                         !string.Equals(item.PartyId, partyId, StringComparison.OrdinalIgnoreCase)))
             {
                 int casualtyCount = Math.Max(0, enemyEntry.KilledCount + enemyEntry.UnconsciousCount + enemyEntry.OtherRemovedCount);
                 if (casualtyCount <= 0)
@@ -1121,9 +1140,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     {
                         ExplainedNumber explained = combatXpModel.GetXpFromHit(
                             participant.Character,
-                            mainPartyState.CaptainCharacter,
+                            partyState.CaptainCharacter,
                             attackedCharacter,
-                            mainPartyState.PartyBase,
+                            partyState.PartyBase,
                             damage,
                             true,
                             CombatXpModel.MissionTypeEnum.Battle);
@@ -1157,6 +1176,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                             if (participant.Hero.HeroDeveloper == null)
                                 participant.Hero.AddSkillXp(bestSkill, weightedXp);
                             summary.HeroSkillXpApplied += weightedXp;
+                            summary.HeroRawXpApplied += Math.Max(0f, weightedXp);
                             anyApplied = true;
                         }
                         catch (Exception ex)
@@ -1174,7 +1194,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                     try
                     {
-                        mainPartyState.MemberRoster.AddXpToTroop(participant.Character, troopXp);
+                        partyState.MemberRoster.AddXpToTroop(participant.Character, troopXp);
                         summary.TroopXpApplied += troopXp;
                         anyApplied = true;
                     }
@@ -1187,7 +1207,327 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             if (anyApplied)
-                AddWritebackSample(summary.AdjustedSamples, "FallbackCombatXp:main-party-casualty-pool");
+                AddWritebackSample(summary.AdjustedSamples, "FallbackCombatXp:" + partyId + "/casualty-pool");
+        }
+
+        private static void TryReplayCombatEventHeroXp(
+            CharacterObject attackerCharacter,
+            CharacterObject attackedCharacter,
+            EncounterPartyWritebackState partyState,
+            CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot combatEvent,
+            BattleResultWritebackSummary summary)
+        {
+            Hero attackerHero = attackerCharacter?.HeroObject;
+            Hero commanderHero = ResolveCombatEventCommanderHero(combatEvent, partyState);
+            if (attackerHero == null && commanderHero == null)
+                return;
+
+            CharacterObject captainCharacter = ResolveCombatEventCaptainCharacter(combatEvent, partyState);
+            WeaponComponentData attackerWeapon = ResolveCombatEventWeaponData(combatEvent);
+            List<HeroXpAuditSnapshot> beforeSnapshots = CaptureHeroXpAuditSnapshots(attackerHero, commanderHero);
+
+            try
+            {
+                SkillLevelingManager.OnCombatHit(
+                    attackerCharacter,
+                    attackedCharacter,
+                    captainCharacter,
+                    commanderHero,
+                    Math.Max(0f, combatEvent.MovementSpeedBonus),
+                    Math.Max(0f, combatEvent.ShotDifficulty),
+                    attackerWeapon,
+                    Math.Max(0f, Math.Min(1f, combatEvent.HitPointRatio)),
+                    CombatXpModel.MissionTypeEnum.Battle,
+                    combatEvent.IsAttackerMounted,
+                    combatEvent.IsTeamKill,
+                    combatEvent.IsAttackerUnderCommand,
+                    Math.Max(0f, combatEvent.Damage),
+                    combatEvent.IsFatal,
+                    combatEvent.IsSiegeEngineHit,
+                    combatEvent.IsHorseCharge,
+                    combatEvent.IsSneakAttack);
+
+                ApplyHeroXpAuditDeltas(beforeSnapshots, summary);
+            }
+            catch (Exception ex)
+            {
+                summary.UnresolvedCombatEvents++;
+                AddWritebackSample(
+                    summary.UnresolvedSamples,
+                    "HeroCombatReplayFailed:" +
+                    (attackerHero?.StringId ?? attackerCharacter?.StringId ?? "attacker") +
+                    "/" + ex.Message);
+            }
+        }
+
+        private static void AccumulateTroopCombatXp(
+            IDictionary<string, TroopCombatXpAccumulator> accumulators,
+            EncounterPartyWritebackState partyState,
+            CharacterObject attackerCharacter,
+            int rawXp)
+        {
+            if (accumulators == null || partyState == null || attackerCharacter == null || rawXp <= 0)
+                return;
+
+            string accumulatorKey = BuildBattleResultIdentityKey(
+                partyState.PartyId,
+                attackerCharacter.HeroObject?.StringId,
+                attackerCharacter.OriginalCharacter?.StringId,
+                attackerCharacter.StringId);
+            if (string.IsNullOrWhiteSpace(accumulatorKey))
+                return;
+
+            if (!accumulators.TryGetValue(accumulatorKey, out TroopCombatXpAccumulator accumulator))
+            {
+                accumulator = new TroopCombatXpAccumulator
+                {
+                    PartyState = partyState,
+                    Character = attackerCharacter
+                };
+                accumulators[accumulatorKey] = accumulator;
+            }
+
+            accumulator.RawXp += rawXp;
+        }
+
+        private static void TryApplyAccumulatedTroopCombatXpWriteback(
+            IDictionary<string, TroopCombatXpAccumulator> accumulators,
+            BattleResultWritebackSummary summary)
+        {
+            if (accumulators == null || accumulators.Count == 0)
+                return;
+
+            PartyTrainingModel partyTrainingModel = TaleWorlds.CampaignSystem.Campaign.Current?.Models?.PartyTrainingModel;
+            if (partyTrainingModel == null)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "TroopCombatXpMissingPartyTrainingModel");
+                return;
+            }
+
+            foreach (IGrouping<string, TroopCombatXpAccumulator> partyGroup in accumulators.Values
+                         .Where(bucket => bucket?.PartyState?.PartyBase != null && bucket.Character != null && bucket.RawXp > 0)
+                         .GroupBy(bucket => bucket.PartyState.PartyId ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+            {
+                EncounterPartyWritebackState partyState = partyGroup.FirstOrDefault()?.PartyState;
+                if (partyState?.PartyBase == null || partyState.MemberRoster == null)
+                    continue;
+
+                int sharedXpToDistribute = 0;
+                foreach (TroopCombatXpAccumulator bucket in partyGroup)
+                {
+                    FlattenedTroopRosterElement rosterElement = new FlattenedTroopRosterElement(
+                        bucket.Character,
+                        RosterTroopState.Active,
+                        0,
+                        default(UniqueTroopDescriptor),
+                        bucket.RawXp);
+
+                    int battleXp;
+                    try
+                    {
+                        battleXp = Math.Max(
+                            0,
+                            (int)Math.Round(
+                                Math.Max(0f, partyTrainingModel.CalculateXpGainFromBattles(rosterElement, partyState.PartyBase).ResultNumber),
+                                MidpointRounding.AwayFromZero));
+                    }
+                    catch (Exception ex)
+                    {
+                        summary.UnresolvedCombatEvents++;
+                        AddWritebackSample(summary.UnresolvedSamples, "TroopBattleXpCalcFailed:" + ex.Message);
+                        continue;
+                    }
+
+                    if (battleXp <= 0)
+                        continue;
+
+                    MobilePartyHelper.CanTroopGainXp(partyState.PartyBase, bucket.Character, out int gainableMaxXp);
+                    gainableMaxXp = Math.Min(gainableMaxXp, battleXp);
+                    int excessXp = battleXp - gainableMaxXp;
+
+                    if (gainableMaxXp > 0)
+                    {
+                        if (partyState.MobileParty != null)
+                        {
+                            try
+                            {
+                                int sharedXp = Math.Max(0, partyTrainingModel.GenerateSharedXp(bucket.Character, gainableMaxXp, partyState.MobileParty));
+                                if (sharedXp > 0)
+                                {
+                                    sharedXpToDistribute += sharedXp;
+                                    if (excessXp > 0)
+                                    {
+                                        int overflowAbsorbedBySharedXp = Math.Min(sharedXp, excessXp);
+                                        sharedXp -= overflowAbsorbedBySharedXp;
+                                        excessXp -= overflowAbsorbedBySharedXp;
+                                    }
+
+                                    gainableMaxXp -= sharedXp;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                summary.UnresolvedCombatEvents++;
+                                AddWritebackSample(summary.UnresolvedSamples, "TroopSharedXpFailed:" + ex.Message);
+                            }
+                        }
+
+                        if (gainableMaxXp > 0)
+                        {
+                            try
+                            {
+                                partyState.MemberRoster.AddXpToTroop(bucket.Character, gainableMaxXp);
+                                summary.TroopXpApplied += gainableMaxXp;
+                            }
+                            catch (Exception ex)
+                            {
+                                summary.UnresolvedCombatEvents++;
+                                AddWritebackSample(summary.UnresolvedSamples, "TroopXpCommitFailed:" + (bucket.Character.StringId ?? "troop") + "/" + ex.Message);
+                            }
+                        }
+                    }
+
+                    if (excessXp > 0)
+                    {
+                        List<HeroXpAuditSnapshot> beforeSnapshots = CaptureHeroXpAuditSnapshots(
+                            partyState.PartyBase.LeaderHero,
+                            TryResolveHeroObject(partyState.PartyBase.Owner));
+                        try
+                        {
+                            SkillLevelingManager.OnBattleEnded(partyState.PartyBase, bucket.Character, excessXp);
+                            ApplyHeroXpAuditDeltas(beforeSnapshots, summary);
+                        }
+                        catch (Exception ex)
+                        {
+                            summary.UnresolvedCombatEvents++;
+                            AddWritebackSample(summary.UnresolvedSamples, "TroopOverflowHeroXpFailed:" + ex.Message);
+                        }
+                    }
+                }
+
+                if (sharedXpToDistribute > 0 && partyState.MobileParty != null)
+                {
+                    try
+                    {
+                        MobilePartyHelper.PartyAddSharedXp(partyState.MobileParty, sharedXpToDistribute);
+                    }
+                    catch (Exception ex)
+                    {
+                        summary.UnresolvedCombatEvents++;
+                        AddWritebackSample(summary.UnresolvedSamples, "PartySharedXpApplyFailed:" + ex.Message);
+                    }
+                }
+            }
+        }
+
+        private static CharacterObject ResolveCombatEventCaptainCharacter(
+            CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot combatEvent,
+            EncounterPartyWritebackState partyState)
+        {
+            Hero captainHero = TryResolveHeroById(combatEvent?.CaptainHeroId);
+            if (captainHero?.CharacterObject != null)
+                return captainHero.CharacterObject;
+
+            CharacterObject captainCharacter = TryResolveCharacterObjectFromIds(
+                combatEvent?.CaptainOriginalCharacterId,
+                combatEvent?.CaptainCharacterId);
+            return captainCharacter ?? partyState?.CaptainCharacter;
+        }
+
+        private static Hero ResolveCombatEventCommanderHero(
+            CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot combatEvent,
+            EncounterPartyWritebackState partyState)
+        {
+            Hero commanderHero = TryResolveHeroById(combatEvent?.CommanderHeroId);
+            return commanderHero ?? partyState?.PartyBase?.LeaderHero;
+        }
+
+        private static WeaponComponentData ResolveCombatEventWeaponData(
+            CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot combatEvent)
+        {
+            if (combatEvent == null || string.IsNullOrWhiteSpace(combatEvent.WeaponItemId))
+                return null;
+
+            try
+            {
+                ItemObject weaponItem = MBObjectManager.Instance?.GetObject<ItemObject>(combatEvent.WeaponItemId);
+                return weaponItem?.PrimaryWeapon;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Hero TryResolveHeroById(string heroId)
+        {
+            if (string.IsNullOrWhiteSpace(heroId))
+                return null;
+
+            if (string.Equals(Hero.MainHero?.StringId, heroId, StringComparison.OrdinalIgnoreCase))
+                return Hero.MainHero;
+
+            try
+            {
+                Hero objectManagerHero = MBObjectManager.Instance?.GetObject<Hero>(heroId);
+                if (objectManagerHero != null)
+                    return objectManagerHero;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                return (Hero.AllAliveHeroes ?? Enumerable.Empty<Hero>())
+                    .FirstOrDefault(hero => string.Equals(hero?.StringId, heroId, StringComparison.OrdinalIgnoreCase));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static List<HeroXpAuditSnapshot> CaptureHeroXpAuditSnapshots(params Hero[] heroes)
+        {
+            var snapshots = new List<HeroXpAuditSnapshot>();
+            var seenHeroIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (heroes == null)
+                return snapshots;
+
+            foreach (Hero hero in heroes)
+            {
+                if (hero?.HeroDeveloper == null || string.IsNullOrWhiteSpace(hero.StringId) || !seenHeroIds.Add(hero.StringId))
+                    continue;
+
+                snapshots.Add(new HeroXpAuditSnapshot
+                {
+                    Hero = hero,
+                    TotalXp = hero.HeroDeveloper.TotalXp
+                });
+            }
+
+            return snapshots;
+        }
+
+        private static void ApplyHeroXpAuditDeltas(
+            IEnumerable<HeroXpAuditSnapshot> beforeSnapshots,
+            BattleResultWritebackSummary summary)
+        {
+            if (beforeSnapshots == null || summary == null)
+                return;
+
+            foreach (HeroXpAuditSnapshot snapshot in beforeSnapshots)
+            {
+                int afterXp = snapshot?.Hero?.HeroDeveloper?.TotalXp ?? snapshot?.TotalXp ?? 0;
+                int beforeXp = snapshot?.TotalXp ?? 0;
+                int delta = Math.Max(0, afterXp - beforeXp);
+                if (delta <= 0)
+                    continue;
+
+                summary.HeroRawXpApplied += delta;
+                summary.HeroSkillXpApplied += delta;
+            }
         }
 
         private static void TryBuildMainPartyRewardProjection(
@@ -2282,6 +2622,92 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             samples.Add(sample);
         }
 
+        private static RewardStateAuditSnapshot CaptureMainPartyRewardStateAuditSnapshot(string source)
+        {
+            MobileParty mainParty = MobileParty.MainParty;
+            PartyBase mainPartyBase = mainParty?.Party;
+            Hero leaderHero = mainPartyBase?.LeaderHero ?? Hero.MainHero;
+            Clan clan = leaderHero?.Clan ?? Hero.MainHero?.Clan ?? Clan.PlayerClan;
+
+            if (mainParty == null && leaderHero == null && clan == null)
+                return null;
+
+            return new RewardStateAuditSnapshot
+            {
+                LeaderHeroId = leaderHero?.StringId,
+                ClanId = TryGetStringId(clan),
+                Gold = leaderHero != null ? TryGetIntProperty(leaderHero, "Gold") : 0,
+                ClanRenown = clan != null ? TryGetFloatProperty(clan, "Renown") : 0f,
+                ClanInfluence = clan != null ? TryGetFloatProperty(clan, "Influence") : 0f,
+                RecentEventsMorale = mainParty != null ? TryGetFloatProperty(mainParty, "RecentEventsMorale") : 0f,
+                Source = source
+            };
+        }
+
+        private static RewardStateAuditSnapshot CloneRewardStateAuditSnapshot(RewardStateAuditSnapshot source)
+        {
+            if (source == null)
+                return null;
+
+            return new RewardStateAuditSnapshot
+            {
+                LeaderHeroId = source.LeaderHeroId,
+                ClanId = source.ClanId,
+                Gold = source.Gold,
+                ClanRenown = source.ClanRenown,
+                ClanInfluence = source.ClanInfluence,
+                RecentEventsMorale = source.RecentEventsMorale,
+                Source = source.Source
+            };
+        }
+
+        private static void ApplyRewardStateAuditDeltas(
+            RewardStateAuditSnapshot beforeSnapshot,
+            BattleResultWritebackSummary summary)
+        {
+            BattleResultWritebackSummary.RewardApplySummary rewardApply = summary?.RewardApply;
+            if (beforeSnapshot == null || rewardApply == null)
+                return;
+
+            RewardStateAuditSnapshot afterSnapshot = CaptureMainPartyRewardStateAuditSnapshot("post-writeback");
+            if (afterSnapshot == null)
+            {
+                AddWritebackSample(summary.UnresolvedSamples, "RewardAuditMissingAfterSnapshot");
+                return;
+            }
+
+            rewardApply.AuditReady = true;
+            rewardApply.AuditSource = (beforeSnapshot.Source ?? "unknown") + "->" + (afterSnapshot.Source ?? "unknown");
+            rewardApply.ActualGoldDelta = afterSnapshot.Gold - beforeSnapshot.Gold;
+            rewardApply.ActualMoraleDelta = afterSnapshot.RecentEventsMorale - beforeSnapshot.RecentEventsMorale;
+            rewardApply.ActualRenownDelta = afterSnapshot.ClanRenown - beforeSnapshot.ClanRenown;
+            rewardApply.ActualInfluenceDelta = afterSnapshot.ClanInfluence - beforeSnapshot.ClanInfluence;
+
+            if (!string.IsNullOrWhiteSpace(beforeSnapshot.LeaderHeroId) &&
+                !string.Equals(beforeSnapshot.LeaderHeroId, afterSnapshot.LeaderHeroId, StringComparison.OrdinalIgnoreCase))
+            {
+                AddWritebackSample(
+                    summary.UnresolvedSamples,
+                    "RewardAuditLeaderChanged:" + beforeSnapshot.LeaderHeroId + "->" + (afterSnapshot.LeaderHeroId ?? "none"));
+            }
+
+            if (!string.IsNullOrWhiteSpace(beforeSnapshot.ClanId) &&
+                !string.Equals(beforeSnapshot.ClanId, afterSnapshot.ClanId, StringComparison.OrdinalIgnoreCase))
+            {
+                AddWritebackSample(
+                    summary.UnresolvedSamples,
+                    "RewardAuditClanChanged:" + beforeSnapshot.ClanId + "->" + (afterSnapshot.ClanId ?? "none"));
+            }
+
+            AddWritebackSample(
+                summary.AdjustedSamples,
+                "RewardAudit:" +
+                " Gold=" + rewardApply.ActualGoldDelta +
+                " Morale=" + rewardApply.ActualMoraleDelta.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " Renown=" + rewardApply.ActualRenownDelta.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " Influence=" + rewardApply.ActualInfluenceDelta.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
         private static BattleResultWritebackSummary.RewardProjectionSummary CloneRewardProjectionSummary(
             BattleResultWritebackSummary.RewardProjectionSummary source)
         {
@@ -2382,6 +2808,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return;
 
             TryCacheHostAftermathRewardProjection(result, resultKey);
+            TryCacheHostAftermathRewardAuditSnapshot(resultKey);
             TryCacheHostAftermathLootSummary(result, resultKey);
             TryInjectMainPartyBattleResultPreviewIntoLiveEncounter(result, resultKey);
             TryInjectMainPartyPrisonerAftermathIntoLiveMapEvent(result);
@@ -2458,6 +2885,35 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             catch (Exception ex)
             {
                 ModLogger.Info("BattleDetector: failed to cache host aftermath reward projection: " + ex.Message);
+            }
+        }
+
+        private void TryCacheHostAftermathRewardAuditSnapshot(string resultKey)
+        {
+            if (string.IsNullOrWhiteSpace(resultKey))
+                return;
+
+            try
+            {
+                RewardStateAuditSnapshot snapshot = CaptureMainPartyRewardStateAuditSnapshot("before-mission-exit");
+                if (snapshot == null)
+                    return;
+
+                _cachedHostAftermathRewardAuditResultKey = resultKey;
+                _cachedHostAftermathRewardAuditSnapshot = CloneRewardStateAuditSnapshot(snapshot);
+
+                ModLogger.Info(
+                    "BattleDetector: cached host aftermath reward state audit before mission exit. " +
+                    "Leader=" + (snapshot.LeaderHeroId ?? "none") +
+                    " Clan=" + (snapshot.ClanId ?? "none") +
+                    " Gold=" + snapshot.Gold +
+                    " Renown=" + snapshot.ClanRenown.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                    " Influence=" + snapshot.ClanInfluence.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                    " Morale=" + snapshot.RecentEventsMorale.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to cache host aftermath reward state audit: " + ex.Message);
             }
         }
 
@@ -2883,6 +3339,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _lastMissionExitFailedBattleResultKey = null;
             _cachedHostAftermathRewardResultKey = null;
             _cachedHostAftermathRewardProjection = null;
+            _cachedHostAftermathRewardAuditResultKey = null;
+            _cachedHostAftermathRewardAuditSnapshot = null;
             _cachedHostAftermathLootResultKey = null;
             _cachedHostAftermathLootSummary = null;
             _cachedHostAftermathMainPartyPreviewResultKey = null;
@@ -3869,13 +4327,280 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             sideSnapshot.TotalManCount = sideSnapshot.Parties.Sum(p => p?.TotalManCount ?? 0);
+            sideSnapshot.MissionReadyEntryOrder = BuildMissionReadyEntryOrder(sideObject, sideSnapshot, sideId);
             ModLogger.Info(
                 "BattleDetector: side snapshot built. " +
                 "SideId=" + (sideId ?? "unknown") +
                 " EnumeratedPartyObjects=" + enumeratedPartyCount +
                 " SnapshotParties=" + sideSnapshot.Parties.Count +
-                " TotalTroopStacks=" + sideSnapshot.Troops.Count + ".");
+                " TotalTroopStacks=" + sideSnapshot.Troops.Count +
+                " MissionReadyOrder=" + (sideSnapshot.MissionReadyEntryOrder?.Count ?? 0) + ".");
             return sideSnapshot.Parties.Count > 0 ? sideSnapshot : null;
+        }
+
+        private sealed class MissionReadyEntryBucket
+        {
+            public TroopStackInfo Troop { get; set; }
+
+            public int RemainingHealthyCount { get; set; }
+        }
+
+        private static List<string> BuildMissionReadyEntryOrder(
+            object sideObject,
+            BattleSideSnapshotMessage sideSnapshot,
+            string sideId)
+        {
+            var orderedEntryIds = new List<string>();
+            if (sideObject == null || sideSnapshot?.Troops == null || sideSnapshot.Troops.Count == 0)
+                return orderedEntryIds;
+
+            int healthyTroopTotal = sideSnapshot.Troops.Sum(troop => Math.Max(0, (troop?.Count ?? 0) - (troop?.WoundedCount ?? 0)));
+            if (healthyTroopTotal <= 0)
+                return orderedEntryIds;
+
+            try
+            {
+                TryInvokeMethod(sideObject, "MakeReadyForMission", null);
+                List<object> missionReadyDescriptors = TryGetMissionReadyTroopDescriptors(sideObject);
+                if (missionReadyDescriptors.Count == 0)
+                {
+                    ModLogger.Info(
+                        "BattleDetector: mission-ready side order unavailable because native descriptor enumeration returned 0 entries. " +
+                        "SideId=" + (sideId ?? "unknown") +
+                        " SideType=" + sideObject.GetType().FullName + ".");
+                    return orderedEntryIds;
+                }
+
+                var byPartyAndOriginal = new Dictionary<string, Queue<MissionReadyEntryBucket>>(StringComparer.OrdinalIgnoreCase);
+                var byOriginal = new Dictionary<string, Queue<MissionReadyEntryBucket>>(StringComparer.OrdinalIgnoreCase);
+                var byPartyAndSpawnTemplate = new Dictionary<string, Queue<MissionReadyEntryBucket>>(StringComparer.OrdinalIgnoreCase);
+                var bySpawnTemplate = new Dictionary<string, Queue<MissionReadyEntryBucket>>(StringComparer.OrdinalIgnoreCase);
+                int bucketCount = 0;
+
+                foreach (TroopStackInfo troop in sideSnapshot.Troops.Where(entry => entry != null))
+                {
+                    int healthyCount = Math.Max(0, troop.Count - troop.WoundedCount);
+                    if (healthyCount <= 0 || string.IsNullOrWhiteSpace(troop.EntryId))
+                        continue;
+
+                    var bucket = new MissionReadyEntryBucket
+                    {
+                        Troop = troop,
+                        RemainingHealthyCount = healthyCount
+                    };
+                    bucketCount++;
+
+                    AddMissionReadyEntryBucket(
+                        byPartyAndOriginal,
+                        BuildMissionReadyBucketKey(troop.PartyId, ResolveMissionReadyOriginalCharacterId(troop)),
+                        bucket);
+                    AddMissionReadyEntryBucket(
+                        byOriginal,
+                        BuildMissionReadyBucketKey(null, ResolveMissionReadyOriginalCharacterId(troop)),
+                        bucket);
+                    AddMissionReadyEntryBucket(
+                        byPartyAndSpawnTemplate,
+                        BuildMissionReadyBucketKey(troop.PartyId, ResolveMissionReadySpawnTemplateId(troop)),
+                        bucket);
+                    AddMissionReadyEntryBucket(
+                        bySpawnTemplate,
+                        BuildMissionReadyBucketKey(null, ResolveMissionReadySpawnTemplateId(troop)),
+                        bucket);
+                }
+
+                int matchedCount = 0;
+                int unmatchedCount = 0;
+                var unmatchedSamples = new List<string>();
+                foreach (object descriptor in missionReadyDescriptors)
+                {
+                    object readyTroop =
+                        TryInvokeMethod(sideObject, "GetReadyTroop", descriptor) ??
+                        TryInvokeMethod(sideObject, "GetAllocatedTroop", descriptor);
+                    object readyParty =
+                        TryInvokeMethod(sideObject, "GetReadyTroopParty", descriptor) ??
+                        TryInvokeMethod(sideObject, "GetAllocatedTroopParty", descriptor);
+                    string readyPartyId = TryResolveMissionReadyPartyId(readyParty);
+                    string readyTroopId = TryGetStringId(readyTroop);
+
+                    MissionReadyEntryBucket matchedBucket =
+                        TryTakeMissionReadyEntryBucket(byPartyAndOriginal, BuildMissionReadyBucketKey(readyPartyId, readyTroopId)) ??
+                        TryTakeMissionReadyEntryBucket(byOriginal, BuildMissionReadyBucketKey(null, readyTroopId)) ??
+                        TryTakeMissionReadyEntryBucket(byPartyAndSpawnTemplate, BuildMissionReadyBucketKey(readyPartyId, readyTroopId)) ??
+                        TryTakeMissionReadyEntryBucket(bySpawnTemplate, BuildMissionReadyBucketKey(null, readyTroopId));
+
+                    if (matchedBucket?.Troop != null && !string.IsNullOrWhiteSpace(matchedBucket.Troop.EntryId))
+                    {
+                        orderedEntryIds.Add(matchedBucket.Troop.EntryId);
+                        matchedCount++;
+                        continue;
+                    }
+
+                    unmatchedCount++;
+                    if (unmatchedSamples.Count < 8)
+                    {
+                        unmatchedSamples.Add(
+                            (readyPartyId ?? "party") + "/" +
+                            (readyTroopId ?? "troop"));
+                    }
+                }
+
+                int remainingHealthyCount = sideSnapshot.Troops
+                    .Where(troop => troop != null)
+                    .Sum(troop =>
+                    {
+                        string entryId = troop.EntryId;
+                        if (string.IsNullOrWhiteSpace(entryId))
+                            return 0;
+
+                        int matchedForEntry = orderedEntryIds.Count(candidate =>
+                            string.Equals(candidate, entryId, StringComparison.OrdinalIgnoreCase));
+                        int healthyForEntry = Math.Max(0, troop.Count - troop.WoundedCount);
+                        return Math.Max(0, healthyForEntry - matchedForEntry);
+                    });
+
+                ModLogger.Info(
+                    "BattleDetector: mission-ready side order built. " +
+                    "SideId=" + (sideId ?? "unknown") +
+                    " NativeDescriptors=" + missionReadyDescriptors.Count +
+                    " Buckets=" + bucketCount +
+                    " HealthyTroops=" + healthyTroopTotal +
+                    " Matched=" + matchedCount +
+                    " Unmatched=" + unmatchedCount +
+                    " RemainingHealthyAfterMatch=" + remainingHealthyCount +
+                    (unmatchedSamples.Count > 0
+                        ? " UnmatchedSamples=[" + string.Join("; ", unmatchedSamples) + "]"
+                        : string.Empty) +
+                    ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleDetector: failed to build mission-ready side order. " +
+                    "SideId=" + (sideId ?? "unknown") +
+                    " SideType=" + (sideObject?.GetType().FullName ?? "null") +
+                    " Error=" + ex.GetType().Name + ": " + ex.Message + ".");
+            }
+
+            return orderedEntryIds;
+        }
+
+        private static List<object> TryGetMissionReadyTroopDescriptors(object sideObject)
+        {
+            var descriptors = new List<object>();
+            if (sideObject == null)
+                return descriptors;
+
+            try
+            {
+                MethodInfo getAllTroopsMethod = sideObject
+                    .GetType()
+                    .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    .FirstOrDefault(method =>
+                    {
+                        if (!string.Equals(method.Name, "GetAllTroops", StringComparison.Ordinal))
+                            return false;
+
+                        ParameterInfo[] parameters = method.GetParameters();
+                        return parameters.Length == 1;
+                    });
+                if (getAllTroopsMethod == null)
+                    return descriptors;
+
+                object[] arguments = { null };
+                getAllTroopsMethod.Invoke(sideObject, arguments);
+                if (!(arguments[0] is System.Collections.IEnumerable enumerable) || arguments[0] is string)
+                    return descriptors;
+
+                foreach (object descriptor in enumerable)
+                {
+                    if (descriptor != null)
+                        descriptors.Add(descriptor);
+                }
+            }
+            catch
+            {
+            }
+
+            return descriptors;
+        }
+
+        private static string BuildMissionReadyBucketKey(string partyId, string troopId)
+        {
+            if (string.IsNullOrWhiteSpace(troopId))
+                return null;
+
+            return (partyId ?? string.Empty).Trim() + "|" + troopId.Trim();
+        }
+
+        private static string ResolveMissionReadyOriginalCharacterId(TroopStackInfo troop)
+        {
+            if (troop == null)
+                return null;
+
+            return !string.IsNullOrWhiteSpace(troop.OriginalCharacterId)
+                ? troop.OriginalCharacterId
+                : (!string.IsNullOrWhiteSpace(troop.CharacterId) ? troop.CharacterId : troop.SpawnTemplateId);
+        }
+
+        private static string ResolveMissionReadySpawnTemplateId(TroopStackInfo troop)
+        {
+            if (troop == null)
+                return null;
+
+            return !string.IsNullOrWhiteSpace(troop.SpawnTemplateId)
+                ? troop.SpawnTemplateId
+                : (!string.IsNullOrWhiteSpace(troop.CharacterId) ? troop.CharacterId : troop.OriginalCharacterId);
+        }
+
+        private static void AddMissionReadyEntryBucket(
+            Dictionary<string, Queue<MissionReadyEntryBucket>> index,
+            string key,
+            MissionReadyEntryBucket bucket)
+        {
+            if (index == null || bucket == null || string.IsNullOrWhiteSpace(key))
+                return;
+
+            if (!index.TryGetValue(key, out Queue<MissionReadyEntryBucket> queue))
+            {
+                queue = new Queue<MissionReadyEntryBucket>();
+                index[key] = queue;
+            }
+
+            queue.Enqueue(bucket);
+        }
+
+        private static MissionReadyEntryBucket TryTakeMissionReadyEntryBucket(
+            Dictionary<string, Queue<MissionReadyEntryBucket>> index,
+            string key)
+        {
+            if (index == null || string.IsNullOrWhiteSpace(key) || !index.TryGetValue(key, out Queue<MissionReadyEntryBucket> queue))
+                return null;
+
+            while (queue.Count > 0)
+            {
+                MissionReadyEntryBucket bucket = queue.Peek();
+                if (bucket?.Troop == null || bucket.RemainingHealthyCount <= 0)
+                {
+                    queue.Dequeue();
+                    continue;
+                }
+
+                bucket.RemainingHealthyCount--;
+                if (bucket.RemainingHealthyCount <= 0)
+                    queue.Dequeue();
+
+                return bucket;
+            }
+
+            return null;
+        }
+
+        private static string TryResolveMissionReadyPartyId(object partyObject)
+        {
+            return TryGetStringId(partyObject) ??
+                   TryGetStringId(TryGetPropertyValue(partyObject, "MobileParty")) ??
+                   TryGetStringId(TryGetPropertyValue(TryGetPropertyValue(partyObject, "MobileParty"), "Party")) ??
+                   TryGetStringId(TryGetPropertyValue(partyObject, "Party"));
         }
 
         private static BattlePartySnapshotMessage BuildBattlePartySnapshot(object partyObject, string sideId)

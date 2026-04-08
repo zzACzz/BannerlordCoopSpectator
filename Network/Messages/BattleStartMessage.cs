@@ -58,6 +58,7 @@ namespace CoopSpectator.Network.Messages
         public float SideMorale { get; set; }
         public bool IsPlayerSide { get; set; }
         public int TotalManCount { get; set; }
+        public List<string> MissionReadyEntryOrder { get; set; } = new List<string>();
         public List<BattlePartySnapshotMessage> Parties { get; set; } = new List<BattlePartySnapshotMessage>();
         public List<TroopStackInfo> Troops { get; set; } = new List<TroopStackInfo>();
     }

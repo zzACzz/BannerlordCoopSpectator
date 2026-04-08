@@ -179,6 +179,9 @@ namespace CoopSpectator.Infrastructure
                 initializationStep = "ensure-campaign-object-catalogs";
                 ExactCampaignObjectCatalogBootstrap.EnsureLoaded("exact-native-bootstrap:" + (source ?? "unknown"));
 
+                initializationStep = "seed-formation-banner-codes";
+                TrySeedFormationBannerCodes(mission, playerSide, source, out string formationBannerDiagnostics);
+
                 initializationStep = "build-suppliers";
                 if (!TryBuildSuppliers(playerSide, out IMissionTroopSupplier[] suppliers, out int defenderTotal, out int attackerTotal, out string supplierDiagnostics))
                 {
@@ -263,7 +266,9 @@ namespace CoopSpectator.Infrastructure
                         mission,
                         spawnLogic,
                         playerSide,
-                        supplierDiagnostics + " DeploymentPlanBridge={" + deploymentPlanDiagnostics + "}",
+                        supplierDiagnostics +
+                        " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                        " DeploymentPlanBridge={" + deploymentPlanDiagnostics + "}",
                         "pre-init-with-single-phase",
                         source);
                     spawnLogic.InitWithSinglePhase(
@@ -311,6 +316,7 @@ namespace CoopSpectator.Infrastructure
                     " NativeBattleSizeAfterOverride=" + nativeBattleSizeAfterOverride +
                     " DefenderSpawnHorses=" + spawnLogic.GetSpawnHorses(BattleSideEnum.Defender) +
                     " AttackerSpawnHorses=" + spawnLogic.GetSpawnHorses(BattleSideEnum.Attacker) +
+                    " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
                     " ObjectCatalog={" + ExactCampaignObjectCatalogBootstrap.LastSummary + "}" +
                     " SupplierDiagnostics=" + supplierDiagnostics +
                     " Source=" + (source ?? "unknown"));
@@ -1238,6 +1244,171 @@ namespace CoopSpectator.Infrastructure
             return defenderTotal > 0 || attackerTotal > 0;
         }
 
+        private static bool TrySeedFormationBannerCodes(
+            Mission mission,
+            BattleSideEnum playerSide,
+            string source,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            bool anySeeded =
+                TrySeedFormationBannerCodesForTeam(mission.AttackerTeam, BattleSideEnum.Attacker, playerSide, out string attackerDiagnostics) |
+                TrySeedFormationBannerCodesForTeam(mission.DefenderTeam, BattleSideEnum.Defender, playerSide, out string defenderDiagnostics);
+
+            diagnostics =
+                "Attacker={" + attackerDiagnostics + "} " +
+                "Defender={" + defenderDiagnostics + "}";
+
+            ModLogger.Info(
+                "ExactCampaignArmyBootstrap: formation banner-code seed for exact runtime. " +
+                "Scene=" + (mission.SceneName ?? "null") +
+                " PlayerSide=" + playerSide +
+                " AnySeeded=" + anySeeded +
+                " Details=" + diagnostics +
+                " Source=" + (source ?? "unknown"));
+
+            return anySeeded;
+        }
+
+        private static bool TrySeedFormationBannerCodesForTeam(
+            Team team,
+            BattleSideEnum side,
+            BattleSideEnum playerSide,
+            out string diagnostics)
+        {
+            diagnostics = "team-null";
+            if (team == null)
+                return false;
+
+            string bannerCode = ResolvePreferredFormationBannerCodeForTeam(team, side, playerSide, out string bannerSource);
+            if (string.IsNullOrWhiteSpace(bannerCode))
+            {
+                diagnostics =
+                    "TeamIndex=" + team.TeamIndex +
+                    " Source=" + bannerSource +
+                    " BannerCode=empty";
+                return false;
+            }
+
+            int changed = 0;
+            int unchanged = 0;
+            int formationCount = 0;
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null || !ReferenceEquals(formation.Team, team))
+                    continue;
+
+                formationCount++;
+                if (string.Equals(formation.BannerCode ?? string.Empty, bannerCode, StringComparison.Ordinal))
+                {
+                    unchanged++;
+                    continue;
+                }
+
+                formation.BannerCode = bannerCode;
+                changed++;
+            }
+
+            diagnostics =
+                "TeamIndex=" + team.TeamIndex +
+                " TeamSide=" + team.Side +
+                " Source=" + bannerSource +
+                " FormationCount=" + formationCount +
+                " Changed=" + changed +
+                " Unchanged=" + unchanged +
+                " BannerCodeLength=" + bannerCode.Length;
+            return changed > 0;
+        }
+
+        private static string ResolvePreferredFormationBannerCodeForTeam(
+            Team team,
+            BattleSideEnum side,
+            BattleSideEnum playerSide,
+            out string source)
+        {
+            source = "none";
+            if (team == null)
+                return null;
+
+            string assignedPeerBannerCode = TryResolveAssignedMissionPeerBannerCode(team);
+            if (!string.IsNullOrWhiteSpace(assignedPeerBannerCode))
+            {
+                source = "assigned-peer";
+                return assignedPeerBannerCode;
+            }
+
+            if (side == playerSide)
+            {
+                string singleActivePeerBannerCode = TryResolveSingleActivePlayerPeerBannerCode();
+                if (!string.IsNullOrWhiteSpace(singleActivePeerBannerCode))
+                {
+                    source = "single-active-peer";
+                    return singleActivePeerBannerCode;
+                }
+            }
+
+            string teamBannerCode = team.Banner?.BannerCode;
+            if (!string.IsNullOrWhiteSpace(teamBannerCode))
+            {
+                source = "team-banner";
+                return teamBannerCode;
+            }
+
+            return null;
+        }
+
+        private static string TryResolveAssignedMissionPeerBannerCode(Team team)
+        {
+            if (team == null || GameNetwork.NetworkPeers == null)
+                return null;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive)
+                    continue;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                if (missionPeer == null || !ReferenceEquals(missionPeer.Team, team))
+                    continue;
+
+                string bannerCode = missionPeer.Peer?.BannerCode;
+                if (!string.IsNullOrWhiteSpace(bannerCode))
+                    return bannerCode;
+            }
+
+            return null;
+        }
+
+        private static string TryResolveSingleActivePlayerPeerBannerCode()
+        {
+            if (GameNetwork.NetworkPeers == null)
+                return null;
+
+            string resolvedBannerCode = null;
+            int candidateCount = 0;
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive)
+                    continue;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                string bannerCode = missionPeer?.Peer?.BannerCode;
+                if (string.IsNullOrWhiteSpace(bannerCode))
+                    continue;
+
+                candidateCount++;
+                if (candidateCount > 1)
+                    return null;
+
+                resolvedBannerCode = bannerCode;
+            }
+
+            return resolvedBannerCode;
+        }
+
         private static void PushSpawnLogicInitTeamSideOverride(Mission mission, BattleSideEnum playerSide)
         {
             if (mission == null || playerSide == BattleSideEnum.None)
@@ -1471,20 +1642,30 @@ namespace CoopSpectator.Infrastructure
             RosterEntryState commanderEntryState = BattleCommanderResolver.ResolveCommanderEntry(runtimeState, side, sideState.Entries);
             string commanderEntryId = commanderEntryState?.EntryId;
             IEnumerable<RosterEntryState> orderedEntries = sideState.Entries;
-            if (!string.IsNullOrWhiteSpace(commanderEntryId))
+            List<string> missionReadyEntryOrder = sideState.MissionReadyEntryOrder?
+                .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
+                .ToList();
+            if ((missionReadyEntryOrder?.Count ?? 0) <= 0 &&
+                !string.IsNullOrWhiteSpace(commanderEntryId))
             {
                 orderedEntries = sideState.Entries
                     .OrderByDescending(entry => string.Equals(entry?.EntryId, commanderEntryId, StringComparison.Ordinal));
             }
+
             BasicCharacterObject commanderCharacter = TryResolveEntryCharacter(commanderEntryState);
             BasicCharacterObject generalCharacter = commanderCharacter;
             int unresolvedEntries = 0;
             int skippedWoundedOnlyEntries = 0;
             int totalRawCount = 0;
             int aggregateWoundedCount = 0;
+            int missionReadyMatched = 0;
+            int missionReadyMissingEntries = 0;
+            int missionReadyExhaustedEntries = 0;
+            int missionReadyUnresolvedEntries = 0;
             int seed = 1;
+            var remainingHealthyByEntryId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (RosterEntryState entryState in orderedEntries)
+            foreach (RosterEntryState entryState in sideState.Entries)
             {
                 if (entryState == null)
                     continue;
@@ -1497,6 +1678,74 @@ namespace CoopSpectator.Infrastructure
                     skippedWoundedOnlyEntries++;
                     continue;
                 }
+
+                if (!string.IsNullOrWhiteSpace(entryState.EntryId))
+                    remainingHealthyByEntryId[entryState.EntryId] = availableCount;
+            }
+
+            HashSet<string> unresolvedEntryIds = null;
+            if (missionReadyEntryOrder?.Count > 0)
+            {
+                Dictionary<string, RosterEntryState> entriesById = sideState.Entries
+                    .Where(entry => entry != null && !string.IsNullOrWhiteSpace(entry.EntryId))
+                    .GroupBy(entry => entry.EntryId, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+                unresolvedEntryIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (string entryId in missionReadyEntryOrder)
+                {
+                    if (!entriesById.TryGetValue(entryId, out RosterEntryState entryState) || entryState == null)
+                    {
+                        missionReadyMissingEntries++;
+                        continue;
+                    }
+
+                    if (!remainingHealthyByEntryId.TryGetValue(entryId, out int remainingHealthyCount) || remainingHealthyCount <= 0)
+                    {
+                        missionReadyExhaustedEntries++;
+                        continue;
+                    }
+
+                    BasicCharacterObject troop = TryResolveEntryCharacter(entryState);
+                    if (troop == null)
+                    {
+                        unresolvedEntries++;
+                        missionReadyUnresolvedEntries++;
+                        unresolvedEntryIds.Add(entryId);
+                        continue;
+                    }
+
+                    AppendOriginForEntry(origins, supplier, entryState, troop, side, playerSide, ref seed);
+                    remainingHealthyByEntryId[entryId] = remainingHealthyCount - 1;
+                    totalHealthyCount++;
+                    missionReadyMatched++;
+
+                    if (generalCharacter == null &&
+                        (entryState.IsHero || !string.IsNullOrWhiteSpace(entryState.HeroRole)))
+                    {
+                        generalCharacter = troop;
+                    }
+                }
+            }
+
+            foreach (RosterEntryState entryState in orderedEntries)
+            {
+                if (entryState == null)
+                    continue;
+
+                if (unresolvedEntryIds != null &&
+                    !string.IsNullOrWhiteSpace(entryState.EntryId) &&
+                    unresolvedEntryIds.Contains(entryState.EntryId))
+                {
+                    continue;
+                }
+
+                int availableCount = !string.IsNullOrWhiteSpace(entryState.EntryId) &&
+                                     remainingHealthyByEntryId.TryGetValue(entryState.EntryId, out int remainingHealthyCount)
+                    ? remainingHealthyCount
+                    : Math.Max(0, entryState.Count - entryState.WoundedCount);
+                if (availableCount <= 0)
+                    continue;
 
                 BasicCharacterObject troop = TryResolveEntryCharacter(entryState);
                 if (troop == null)
@@ -1511,19 +1760,14 @@ namespace CoopSpectator.Infrastructure
                     generalCharacter = troop;
                 }
 
-                string troopId = troop.StringId;
                 for (int i = 0; i < availableCount; i++)
                 {
-                    origins.Add(new ExactCampaignSnapshotAgentOrigin(
-                        supplier,
-                        troop,
-                        entryState.EntryId,
-                        troopId,
-                        side,
-                        side == playerSide,
-                        seed++));
+                    AppendOriginForEntry(origins, supplier, entryState, troop, side, playerSide, ref seed);
                     totalHealthyCount++;
                 }
+
+                if (!string.IsNullOrWhiteSpace(entryState.EntryId))
+                    remainingHealthyByEntryId[entryState.EntryId] = 0;
             }
 
             if (generalCharacter == null)
@@ -1538,8 +1782,35 @@ namespace CoopSpectator.Infrastructure
                 " UnresolvedEntries=" + unresolvedEntries +
                 " WoundedOnlyEntries=" + skippedWoundedOnlyEntries +
                 " CommanderEntryId=" + (commanderEntryId ?? "none") +
+                " MissionReadyOrder=" + (missionReadyEntryOrder?.Count ?? 0) +
+                " MissionReadyMatched=" + missionReadyMatched +
+                " MissionReadyMissing=" + missionReadyMissingEntries +
+                " MissionReadyExhausted=" + missionReadyExhaustedEntries +
+                " MissionReadyUnresolved=" + missionReadyUnresolvedEntries +
                 " GeneralCharacter=" + (generalCharacter?.StringId ?? "null");
             return supplier;
+        }
+
+        private static void AppendOriginForEntry(
+            List<ExactCampaignSnapshotAgentOrigin> origins,
+            ExactCampaignSnapshotTroopSupplier supplier,
+            RosterEntryState entryState,
+            BasicCharacterObject troop,
+            BattleSideEnum side,
+            BattleSideEnum playerSide,
+            ref int seed)
+        {
+            if (origins == null || supplier == null || entryState == null || troop == null)
+                return;
+
+            origins.Add(new ExactCampaignSnapshotAgentOrigin(
+                supplier,
+                troop,
+                entryState.EntryId,
+                troop.StringId,
+                side,
+                side == playerSide,
+                seed++));
         }
 
         private static BasicCharacterObject TryResolveEntryCharacter(RosterEntryState entryState)

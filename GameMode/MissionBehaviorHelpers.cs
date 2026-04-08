@@ -278,6 +278,132 @@ namespace CoopSpectator.GameMode
         }
 
         /// <summary>MissionOptionsComponent — потрібен Gauntlet. Smart resolver по short name; ctor(Mission) або parameterless; optional при невдачі.</summary>
+        public static MissionBehavior TryCreateMissionAgentLabelUiHandler(Mission mission)
+        {
+            return TryCreateViewCreatorBehavior(
+                "CreateMissionAgentLabelUIHandler",
+                new[] { typeof(Mission) },
+                new object[] { mission },
+                "MissionAgentLabelUIHandler");
+        }
+
+        public static MissionBehavior TryCreateMissionAgentLabelUiParityView(Mission mission)
+        {
+            MissionBehavior createdByViewCreator = TryCreateMissionAgentLabelUiHandler(mission);
+            if (createdByViewCreator != null)
+                return createdByViewCreator;
+
+            MissionBehavior directView = TryCreateBehaviorFromLoadedAssemblies("TaleWorlds.MountAndBlade.View.MissionViews.MissionAgentLabelView");
+            if (directView != null)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: MissionAgentLabelView created directly from loaded assemblies as ViewCreator fallback.");
+                return directView;
+            }
+
+            return null;
+        }
+
+        public static MissionBehavior TryCreateMissionFormationMarkerUiHandler(Mission mission)
+        {
+            return TryCreateViewCreatorBehavior(
+                "CreateMissionFormationMarkerUIHandler",
+                new[] { typeof(Mission) },
+                new object[] { mission },
+                "MissionFormationMarkerUIHandler");
+        }
+
+        public static MissionBehavior TryCreateMissionFormationMarkerUiParityView(Mission mission)
+        {
+            MissionBehavior createdByViewCreator = TryCreateMissionFormationMarkerUiHandler(mission);
+            if (createdByViewCreator != null)
+                return createdByViewCreator;
+
+            MissionBehavior directHandler = TryCreateBehaviorFromLoadedAssemblies("TaleWorlds.MountAndBlade.View.MissionViews.Singleplayer.MissionFormationMarkerUIHandler");
+            if (directHandler != null)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: MissionFormationMarkerUIHandler created directly from loaded assemblies as ViewCreator fallback.");
+                return directHandler;
+            }
+
+            MissionBehavior directGauntletView = TryCreateBehaviorFromLoadedAssemblies("TaleWorlds.MountAndBlade.GauntletUI.Mission.Singleplayer.MissionGauntletFormationMarker");
+            if (directGauntletView != null)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: MissionGauntletFormationMarker created directly from loaded assemblies as handler fallback.");
+                return directGauntletView;
+            }
+
+            return null;
+        }
+
+        private static MissionBehavior TryCreateViewCreatorBehavior(
+            string methodName,
+            Type[] parameterTypes,
+            object[] arguments,
+            string behaviorLabel)
+        {
+            try
+            {
+                Type viewCreatorType =
+                    Type.GetType("TaleWorlds.MountAndBlade.View.ViewCreator, TaleWorlds.MountAndBlade.View", throwOnError: false)
+                    ?? TryResolveTypeFromLoadedAssemblies("TaleWorlds.MountAndBlade.View.ViewCreator");
+                if (viewCreatorType == null)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: " + behaviorLabel + " creation skipped because TaleWorlds.MountAndBlade.View is unavailable in current runtime.");
+                    return null;
+                }
+
+                MethodInfo createMethod = viewCreatorType.GetMethod(
+                    methodName,
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    types: parameterTypes,
+                    modifiers: null);
+                if (createMethod == null)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: " + behaviorLabel + " creation skipped because ViewCreator." + methodName + " was not found.");
+                    return null;
+                }
+
+                if (createMethod.Invoke(null, arguments) is MissionBehavior behavior)
+                {
+                    return behavior;
+                }
+
+                ModLogger.Info("MissionBehaviorHelpers: " + behaviorLabel + " creation returned null or non-MissionBehavior.");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: " + behaviorLabel + " creation failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static Type TryResolveTypeFromLoadedAssemblies(string fullTypeName)
+        {
+            if (string.IsNullOrEmpty(fullTypeName))
+                return null;
+
+            foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.IsDynamic)
+                    continue;
+
+                try
+                {
+                    Type type = asm.GetType(fullTypeName, throwOnError: false);
+                    if (type != null)
+                        return type;
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: type scan failed for " + asm.GetName().Name + " / " + fullTypeName + ": " + ex.Message);
+                }
+            }
+
+            return null;
+        }
+
         public static MissionBehavior TryCreateMissionOptionsComponent(Mission mission)
         {
             const string shortName = "MissionOptionsComponent";

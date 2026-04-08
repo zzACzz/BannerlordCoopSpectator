@@ -281,6 +281,16 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ModLogger.Info("CoopBattle client: retained recent players, preload, match history, and equipment leave logic for battle-map native bootstrap compatibility.");
 
             list.Add(new MissionBehaviorDiagnostic());
+            if (minimalBattleMapRuntime && !isDedicated)
+            {
+                AddOptional(list, TryCreateMissionAgentLabelUiHandler(mission), "MissionAgentLabelUIHandler");
+                AddOptional(
+                    list,
+                    MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.View.MissionViews.MissionFormationTargetSelectionHandler"),
+                    "MissionFormationTargetSelectionHandler");
+                AddOptional(list, TryCreateMissionFormationMarkerUiHandler(mission), "MissionFormationMarkerUIHandler");
+                ModLogger.Info("CoopBattle client: injected agent label and formation marker mission views for battle-map runtime parity with native multiplayer battle/practice stacks.");
+            }
             if (!minimalBattleMapRuntime)
             {
                 list.Add(new CoopMissionClientLogic());
@@ -398,6 +408,70 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
+        }
+
+        private static MissionBehavior TryCreateMissionFormationMarkerUiHandler(Mission mission)
+        {
+            try
+            {
+                Type viewCreatorType = Type.GetType("TaleWorlds.MountAndBlade.View.ViewCreator, TaleWorlds.MountAndBlade.View", throwOnError: false);
+                if (viewCreatorType == null)
+                {
+                    ModLogger.Info("CoopBattle: MissionFormationMarkerUIHandler creation skipped because TaleWorlds.MountAndBlade.View is unavailable in current runtime.");
+                    return null;
+                }
+
+                var createMethod = viewCreatorType.GetMethod(
+                    "CreateMissionFormationMarkerUIHandler",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+                    binder: null,
+                    types: new[] { typeof(Mission) },
+                    modifiers: null);
+                if (createMethod == null)
+                {
+                    ModLogger.Info("CoopBattle: MissionFormationMarkerUIHandler creation skipped because ViewCreator.CreateMissionFormationMarkerUIHandler was not found.");
+                    return null;
+                }
+
+                return createMethod.Invoke(null, new object[] { mission }) as MissionBehavior;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopBattle: MissionFormationMarkerUIHandler creation failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static MissionBehavior TryCreateMissionAgentLabelUiHandler(Mission mission)
+        {
+            try
+            {
+                Type viewCreatorType = Type.GetType("TaleWorlds.MountAndBlade.View.ViewCreator, TaleWorlds.MountAndBlade.View", throwOnError: false);
+                if (viewCreatorType == null)
+                {
+                    ModLogger.Info("CoopBattle: MissionAgentLabelUIHandler creation skipped because TaleWorlds.MountAndBlade.View is unavailable in current runtime.");
+                    return null;
+                }
+
+                var createMethod = viewCreatorType.GetMethod(
+                    "CreateMissionAgentLabelUIHandler",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+                    binder: null,
+                    types: new[] { typeof(Mission) },
+                    modifiers: null);
+                if (createMethod == null)
+                {
+                    ModLogger.Info("CoopBattle: MissionAgentLabelUIHandler creation skipped because ViewCreator.CreateMissionAgentLabelUIHandler was not found.");
+                    return null;
+                }
+
+                return createMethod.Invoke(null, new object[] { mission }) as MissionBehavior;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopBattle: MissionAgentLabelUIHandler creation failed: " + ex.Message);
+                return null;
+            }
         }
 
         internal static bool IsBattleMapSceneName(string sceneName)
