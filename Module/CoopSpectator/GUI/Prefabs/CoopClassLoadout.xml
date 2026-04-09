@@ -16,11 +16,19 @@
                 <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPClassLoadout.FactionText" Brush.FontSize="30" Text="Selected Unit" />
                 <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="18" MarginTop="10" MarginBottom="10" Sprite="MPClassLoadout\stats_divider" />
                 <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPClassLoadout.ItemText" Text="@SelectedNameText" />
+                <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginTop="12" Brush="MPClassLoadout.SubclassGoldText" Text="@SelectedCommanderBadgeText" IsVisible="@ShowSelectedCommanderBadge" />
                 <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="16" Brush="MPClassLoadout.SpawnText" Text="@SelectedDetailText" />
-                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="18" Brush="MPClassLoadout.SpawnText" Text="@HintText" />
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="14" Brush="MPClassLoadout.ClassStatText" Text="@SelectedSummaryText" />
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="22" Brush="MPClassLoadout.SpawnText" Text="@HintText" />
               </Children>
             </ListPanel>
             <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="367" SuggestedHeight="5" HorizontalAlignment="Center" VerticalAlignment="Bottom" PositionYOffset="2" Sprite="MPClassLoadout\panels_frame" />
+          </Children>
+        </Widget>
+
+        <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="620" SuggestedHeight="860" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginBottom="5" DoNotAcceptEvents="true">
+          <Children>
+            <CharacterTableauWidget DataSource="{SelectedVisual}" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="560" SuggestedHeight="760" HorizontalAlignment="Center" VerticalAlignment="Bottom" BannerCodeText="@BannerCodeText" BodyProperties="@BodyProperties" CharStringId="@CharStringId" Race="@Race" EquipmentCode="@EquipmentCode" IsFemale="@IsFemale" MountCreationKey="@MountCreationKey" StanceIndex="@StanceIndex" ArmorColor1="@ArmorColor1" ArmorColor2="@ArmorColor2" DoNotUseCustomScale="false" CustomRenderScale="0.72" IsVisible="@HasVisual" />
           </Children>
         </Widget>
 
@@ -70,17 +78,17 @@
                           <Children>
                             <ListPanel Id="ClassesInnerPanel" DataSource="{Units}" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="10" MarginRight="10" StackLayout.LayoutMethod="VerticalBottomToTop">
                               <ItemTemplate>
-                                <ButtonWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="115" MarginTop="6" DoNotPassEventsToChildren="true" UpdateChildrenStates="true" Command.Click="ExecuteSelect">
+                                <ButtonWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="84" MarginTop="6" DoNotPassEventsToChildren="true" UpdateChildrenStates="true" Command.Click="ExecuteSelect">
                                   <Children>
-                                    <BrushWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="451" SuggestedHeight="115" HorizontalAlignment="Center" VerticalAlignment="Center" Brush="MPClassLoadout.TroopBanner.ItemBackground" />
+                                    <BrushWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="451" SuggestedHeight="84" HorizontalAlignment="Center" VerticalAlignment="Center" Brush="MPClassLoadout.TroopBanner.ItemBackground" />
                                     <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="6" Sprite="BlankWhiteSquare_9" Color="#F4E1C4FF" IsVisible="@IsSelected" />
-                                    <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="32" MarginRight="32" MarginTop="20" MarginBottom="18" StackLayout.LayoutMethod="VerticalBottomToTop">
+                                    <MultiplayerTroopTypeIconWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="58" SuggestedHeight="58" HorizontalAlignment="Left" VerticalAlignment="Center" MarginLeft="22" ForegroundWidget="IconForeground" IconSpriteType="@IconType" UseOriginalSize="false">
                                       <Children>
-                                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPClassLoadout.TroopBanner.SubClassText" Text="@NameText" />
-                                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="8" Brush="MPClassLoadout.SpawnText" Text="@DetailText" />
-                                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="10" Brush="MPClassLoadout.ClassStatText" Text="@SummaryText" />
+                                        <Widget Id="IconForeground" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Color="#F4E1C4FF" />
                                       </Children>
-                                    </ListPanel>
+                                    </MultiplayerTroopTypeIconWidget>
+                                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" VerticalAlignment="Center" MarginLeft="88" MarginRight="130" Brush="MPClassLoadout.TroopBanner.SubClassText" Text="@NameText" />
+                                    <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Right" VerticalAlignment="Center" MarginRight="26" Brush="MPClassLoadout.SubclassGoldText" Text="@CommanderBadgeText" IsVisible="@ShowCommanderBadge" />
                                   </Children>
                                 </ButtonWidget>
                               </ItemTemplate>

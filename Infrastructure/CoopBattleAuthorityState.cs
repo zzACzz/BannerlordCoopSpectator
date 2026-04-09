@@ -218,7 +218,10 @@ namespace CoopSpectator.Infrastructure
             if (!ContainsTroopId(allowedTroopIds, normalizedTroopId))
                 return false;
 
-            string entryId = ResolveEntryIdForSelection(side, normalizedTroopId);
+            IReadOnlyList<string> allowedEntryIds = GetAllowedEntryIds(side);
+            string entryId =
+                ResolvePreservedEntryIdForTroopSelection(networkPeer.Index, side, normalizedTroopId, allowedEntryIds) ??
+                ResolveEntryIdForSelection(side, normalizedTroopId);
             _selectedTroopIdByPeer.TryGetValue(networkPeer.Index, out string previousTroopId);
             bool hadPreviousEntry = _selectedEntryIdByPeer.TryGetValue(networkPeer.Index, out string previousEntryId);
             bool sameTroop = string.Equals(previousTroopId, normalizedTroopId, StringComparison.Ordinal);
@@ -286,6 +289,35 @@ namespace CoopSpectator.Infrastructure
                 " TroopId=" + entry.CharacterId +
                 " Source=" + source);
             return true;
+        }
+
+        public static void ClearPeerSelectionAndSide(MissionPeer missionPeer, string source)
+        {
+            NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();
+            if (networkPeer == null)
+                return;
+
+            _requestedSideByPeer.TryGetValue(networkPeer.Index, out BattleSideEnum previousRequestedSide);
+            _assignedSideByPeer.TryGetValue(networkPeer.Index, out BattleSideEnum previousAssignedSide);
+            _selectedTroopIdByPeer.TryGetValue(networkPeer.Index, out string previousTroopId);
+            _selectedEntryIdByPeer.TryGetValue(networkPeer.Index, out string previousEntryId);
+
+            bool changed = false;
+            changed |= _requestedSideByPeer.Remove(networkPeer.Index);
+            changed |= _assignedSideByPeer.Remove(networkPeer.Index);
+            changed |= _selectedTroopIdByPeer.Remove(networkPeer.Index);
+            changed |= _selectedEntryIdByPeer.Remove(networkPeer.Index);
+            if (!changed)
+                return;
+
+            ModLogger.Info(
+                "CoopBattleAuthorityState: cleared peer selection and side. " +
+                "Peer=" + (networkPeer.UserName ?? networkPeer.Index.ToString()) +
+                " PreviousRequestedSide=" + previousRequestedSide +
+                " PreviousAssignedSide=" + previousAssignedSide +
+                " PreviousTroopId=" + (previousTroopId ?? "null") +
+                " PreviousEntryId=" + (previousEntryId ?? "null") +
+                " Source=" + source);
         }
 
         private static List<string> NormalizeTroopIds(IEnumerable<string> troopIds)
@@ -427,6 +459,42 @@ namespace CoopSpectator.Infrastructure
                 return null;
 
             return BattleSnapshotRuntimeState.TryResolveEntryId(canonicalSideKey, troopId);
+        }
+
+        private static string ResolvePreservedEntryIdForTroopSelection(
+            int peerIndex,
+            BattleSideEnum side,
+            string troopId,
+            IReadOnlyList<string> allowedEntryIds)
+        {
+            if (peerIndex < 0 || side == BattleSideEnum.None || string.IsNullOrWhiteSpace(troopId))
+                return null;
+
+            if (!_selectedEntryIdByPeer.TryGetValue(peerIndex, out string existingEntryId) ||
+                string.IsNullOrWhiteSpace(existingEntryId))
+            {
+                return null;
+            }
+
+            RosterEntryState existingEntry = BattleSnapshotRuntimeState.GetEntryState(existingEntryId);
+            string canonicalSideKey = NormalizeSideKey(side);
+            if (existingEntry == null ||
+                string.IsNullOrWhiteSpace(existingEntry.CharacterId) ||
+                string.IsNullOrWhiteSpace(canonicalSideKey) ||
+                !string.Equals(existingEntry.SideId, canonicalSideKey, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(existingEntry.CharacterId, troopId, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (allowedEntryIds != null &&
+                allowedEntryIds.Count > 0 &&
+                !ContainsEntryId(allowedEntryIds, existingEntryId))
+            {
+                return null;
+            }
+
+            return existingEntryId;
         }
 
         private static string NormalizeSideKey(BattleSideEnum side)

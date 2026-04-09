@@ -31,6 +31,9 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedLocalSelectAllFormationsKey;
         private static string _lastObservedLocalSelectAllFormationsKey;
         private static string _lastSuppressedServerSelectAllFormationsKey;
+        private static string _lastSuppressedOrderTroopPlacerTickKey;
+        private static string _lastSuppressedNonCommanderOrderUiKey;
+        private static string _lastRepairedOrderTroopPlacerOwnerKey;
         private static string _lastPromotedLocalCommanderGeneralKey;
         private static string _lastFinalizedLocalCommanderOrderControlKey;
         private static string _lastMaintainedLocalCommanderOrderControlKey;
@@ -62,26 +65,32 @@ namespace CoopSpectator.Patches
 
         public static void Apply(Harmony harmony)
         {
+            TryApplyPatchStep(nameof(PatchMissionPeerFollowedAgent), () => PatchMissionPeerFollowedAgent(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateAgent), () => PatchMissionNetworkComponentCreateAgent(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSynchronizeAgentEquipment), () => PatchMissionNetworkComponentSynchronizeAgentEquipment(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentPeer), () => PatchMissionNetworkComponentSetAgentPeer(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentAssignFormationToPlayer), () => PatchMissionNetworkComponentAssignFormationToPlayer(harmony));
+            TryApplyPatchStep(nameof(PatchOrderControllerSelectAllFormations), () => PatchOrderControllerSelectAllFormations(harmony));
+            TryApplyPatchStep(nameof(PatchOrderTroopPlacerMissionScreenTick), () => PatchOrderTroopPlacerMissionScreenTick(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSelectAllFormations), () => PatchMissionNetworkComponentSelectAllFormations(harmony));
+            TryApplyPatchStep(nameof(PatchMissionMultiplayerGameModeFlagDominationClientBotsControlledChanged), () => PatchMissionMultiplayerGameModeFlagDominationClientBotsControlledChanged(harmony));
+            TryApplyPatchStep(nameof(PatchMissionGauntletMultiplayerOrderUIHandlerMissionScreenTick), () => PatchMissionGauntletMultiplayerOrderUIHandlerMissionScreenTick(harmony));
+            TryApplyPatchStep(nameof(PatchMissionOrderVmViewOrders), () => PatchMissionOrderVmViewOrders(harmony));
+            TryApplyPatchStep(nameof(PatchMissionOrderVmOpenToggleOrder), () => PatchMissionOrderVmOpenToggleOrder(harmony));
+            TryApplyPatchStep(nameof(PatchMissionOrderVmTryCloseToggleOrder), () => PatchMissionOrderVmTryCloseToggleOrder(harmony));
+            TryApplyPatchStep(nameof(PatchMissionOrderVmOnOrderExecuted), () => PatchMissionOrderVmOnOrderExecuted(harmony));
+            TryApplyPatchStep(nameof(PatchOrderItemVmOnExecuteAction), () => PatchOrderItemVmOnExecuteAction(harmony));
+        }
+
+        private static void TryApplyPatchStep(string stepName, Action applyStep)
+        {
             try
             {
-                PatchMissionPeerFollowedAgent(harmony);
-                PatchMissionNetworkComponentCreateAgent(harmony);
-                PatchMissionNetworkComponentSynchronizeAgentEquipment(harmony);
-                PatchMissionNetworkComponentSetAgentPeer(harmony);
-                PatchMissionNetworkComponentAssignFormationToPlayer(harmony);
-                PatchOrderControllerSelectAllFormations(harmony);
-                PatchMissionNetworkComponentSelectAllFormations(harmony);
-                PatchMissionMultiplayerGameModeFlagDominationClientBotsControlledChanged(harmony);
-                PatchMissionGauntletMultiplayerOrderUIHandlerMissionScreenTick(harmony);
-                PatchMissionOrderVmViewOrders(harmony);
-                PatchMissionOrderVmOpenToggleOrder(harmony);
-                PatchMissionOrderVmTryCloseToggleOrder(harmony);
-                PatchMissionOrderVmOnOrderExecuted(harmony);
-                PatchOrderItemVmOnExecuteAction(harmony);
+                applyStep?.Invoke();
             }
             catch (Exception ex)
             {
-                ModLogger.Error("BattleMapSpawnHandoffPatch.Apply failed.", ex);
+                ModLogger.Error("BattleMapSpawnHandoffPatch.Apply step failed. Step=" + (stepName ?? "unknown"), ex);
             }
         }
 
@@ -93,6 +102,9 @@ namespace CoopSpectator.Patches
             _lastSuppressedLocalSelectAllFormationsKey = null;
             _lastObservedLocalSelectAllFormationsKey = null;
             _lastSuppressedServerSelectAllFormationsKey = null;
+            _lastSuppressedOrderTroopPlacerTickKey = null;
+            _lastSuppressedNonCommanderOrderUiKey = null;
+            _lastRepairedOrderTroopPlacerOwnerKey = null;
             _lastPromotedLocalCommanderGeneralKey = null;
             _lastFinalizedLocalCommanderOrderControlKey = null;
             _lastMaintainedLocalCommanderOrderControlKey = null;
@@ -276,6 +288,29 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, postfix: new HarmonyMethod(postfix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to MissionGauntletMultiplayerOrderUIHandler.OnMissionScreenTick.");
+        }
+
+        private static void PatchOrderTroopPlacerMissionScreenTick(Harmony harmony)
+        {
+            Type targetType = AccessTools.TypeByName(
+                "TaleWorlds.MountAndBlade.View.MissionViews.Order.OrderTroopPlacer");
+            MethodInfo target = targetType?.GetMethod(
+                "OnMissionScreenTick",
+                BindingFlags.Instance | BindingFlags.Public,
+                binder: null,
+                types: new[] { typeof(float) },
+                modifiers: null);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(OrderTroopPlacer_OnMissionScreenTick_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: OrderTroopPlacer.OnMissionScreenTick not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to OrderTroopPlacer.OnMissionScreenTick.");
         }
 
         private static void PatchMissionOrderVmViewOrders(Harmony harmony)
@@ -490,9 +525,8 @@ namespace CoopSpectator.Patches
                     agent,
                     entryPolicy.BridgeTroopOrEntryId,
                     "battle-map handoff SetAgentPeer");
-                if (!exactVisualFinalized && agent.SpawnEquipment != null)
-                    agent.UpdateSpawnEquipmentAndRefreshVisuals(agent.SpawnEquipment);
-                agent.MountAgent?.UpdateAgentProperties();
+                if (exactVisualFinalized)
+                    agent.MountAgent?.UpdateAgentProperties();
 
                 _lastLocalVisualFinalizeKey = logKey;
                 ModLogger.Info(
@@ -636,6 +670,9 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                if (TrySuppressNonCommanderOrderUi(__instance))
+                    return;
+
                 TryFinalizePendingLocalCommanderOrderControl(__instance);
                 TryMaintainLocalCommanderOrderControl(__instance);
                 TryHandleExactCommanderOrderUiHotkeys(__instance);
@@ -712,6 +749,30 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool OrderTroopPlacer_OnMissionScreenTick_Prefix(object __instance, float dt)
+        {
+            try
+            {
+                if (!ShouldSuppressOrderTroopPlacerTick(__instance, out string logKey, out string logDetails))
+                    return true;
+
+                if (!string.Equals(_lastSuppressedOrderTroopPlacerTickKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedOrderTroopPlacerTickKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed OrderTroopPlacer.OnMissionScreenTick via local order-control guard. " +
+                        logDetails);
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: OrderTroopPlacer.OnMissionScreenTick prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static bool MissionNetworkComponent_HandleClientEventSelectAllFormations_Prefix(
             NetworkCommunicator networkPeer,
             GameNetworkMessage baseMessage,
@@ -727,7 +788,7 @@ namespace CoopSpectator.Patches
                 {
                     _lastSuppressedServerSelectAllFormationsKey = logKey;
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed server-side SelectAllFormations during exact-scene spawn handshake. " +
+                        "BattleMapSpawnHandoffPatch: suppressed server-side SelectAllFormations via order-control guard. " +
                         logDetails);
                 }
 
@@ -757,7 +818,7 @@ namespace CoopSpectator.Patches
                 {
                     _lastSuppressedLocalSelectAllFormationsKey = logKey;
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed local OrderController.SelectAllFormations during exact-scene spawn handshake. " +
+                        "BattleMapSpawnHandoffPatch: suppressed local OrderController.SelectAllFormations via order-control guard. " +
                         logDetails);
                 }
 
@@ -768,6 +829,236 @@ namespace CoopSpectator.Patches
                 ModLogger.Info("BattleMapSpawnHandoffPatch: OrderController.SelectAllFormations prefix failed open: " + ex.Message);
                 return true;
             }
+        }
+
+        private static bool TrySuppressNonCommanderOrderUi(object orderUiHandler)
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive || orderUiHandler == null)
+                return false;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            if (myPeer == null || myPeer.IsServerPeer)
+                return false;
+
+            MissionPeer myMissionPeer = myPeer.GetComponent<MissionPeer>();
+            Agent controlledAgent = myMissionPeer?.ControlledAgent;
+            Agent mainAgent = Agent.Main;
+            Mission mission = Mission.Current ?? controlledAgent?.Mission ?? mainAgent?.Mission;
+            Team team = myMissionPeer?.Team ?? controlledAgent?.Team ?? mainAgent?.Team;
+            if (myMissionPeer == null ||
+                controlledAgent == null ||
+                !controlledAgent.IsActive() ||
+                mission == null ||
+                team == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot selectionBridge =
+                CoopBattleSelectionBridgeFile.ReadCurrentSelection();
+            CoopBattleEntryPolicy.ClientSnapshot entryPolicy =
+                CoopBattleEntryPolicy.BuildClientSnapshot(mission, selectionBridge);
+            if (entryPolicy == null || !entryPolicy.UseAuthoritativeTroopPath)
+                return false;
+
+            string controlledEntryId = ResolveAgentEntryId(controlledAgent, entryPolicy.BridgeTroopOrEntryId);
+            bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
+            bool hasCommanderIdentity = !string.IsNullOrWhiteSpace(commanderEntryId);
+            bool hasCommanderControlCounts = myMissionPeer.BotsUnderControlTotal > 1 || myMissionPeer.BotsUnderControlAlive > 0;
+            if (isExactCommander || (!hasCommanderIdentity && hasCommanderControlCounts))
+                return false;
+
+            object dataSource = TryGetInstanceMemberValue(orderUiHandler, "_dataSource");
+            bool troopPlacerSuspended = TryInvokeSingleBoolMethod(orderUiHandler, "SetSuspendTroopPlacer", value: true);
+            bool? closeToggleResult = TryInvokeBoolMethod(dataSource, "TryCloseToggleOrder", false);
+            if (dataSource != null)
+            {
+                TrySetInstanceMemberValue(dataSource, "CanUseShortcuts", false);
+                TrySetInstanceMemberValue(dataSource, "IsToggleOrderShown", false);
+            }
+
+            bool selectedFormationsCleared = false;
+            bool playerOrderOwnerCleared = false;
+            bool agentOrderOwnerCleared = false;
+            int formationPlayerStateClears = 0;
+            bool playerRoleDemoted = false;
+            bool remoteLeadDisabled = false;
+
+            OrderController playerOrderController = team.PlayerOrderController;
+            if (playerOrderController != null)
+            {
+                try
+                {
+                    playerOrderController.ClearSelectedFormations();
+                    selectedFormationsCleared = true;
+                }
+                catch
+                {
+                    selectedFormationsCleared = false;
+                }
+
+                try
+                {
+                    playerOrderController.Owner = null;
+                    playerOrderOwnerCleared = playerOrderController.Owner == null;
+                }
+                catch
+                {
+                    playerOrderOwnerCleared = false;
+                }
+            }
+
+            OrderController agentOrderController = team.GetOrderControllerOf(controlledAgent);
+            if (agentOrderController != null)
+            {
+                try
+                {
+                    agentOrderController.Owner = null;
+                    agentOrderOwnerCleared = agentOrderController.Owner == null;
+                }
+                catch
+                {
+                    agentOrderOwnerCleared = false;
+                }
+            }
+
+            try
+            {
+                if (team.IsPlayerGeneral || team.IsPlayerSergeant)
+                {
+                    team.SetPlayerRole(isPlayerGeneral: false, isPlayerSergeant: false);
+                    playerRoleDemoted = !team.IsPlayerGeneral && !team.IsPlayerSergeant;
+                }
+            }
+            catch
+            {
+                playerRoleDemoted = false;
+            }
+
+            try
+            {
+                controlledAgent.SetCanLeadFormationsRemotely(value: false);
+                remoteLeadDisabled = true;
+            }
+            catch
+            {
+                remoteLeadDisabled = false;
+            }
+
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null || !ReferenceEquals(formation.Team, team))
+                    continue;
+
+                Agent formationPlayerOwner = TryGetInstanceMemberValue(formation, "PlayerOwner") as Agent;
+                bool ownedByLocalPlayer =
+                    formationPlayerOwner != null &&
+                    ((mainAgent != null && formationPlayerOwner.Index == mainAgent.Index) ||
+                     formationPlayerOwner.Index == controlledAgent.Index);
+                bool hasPlayerControlledTroop = TryGetInstanceBool(formation, "HasPlayerControlledTroop");
+                bool isPlayerTroopInFormation = TryGetInstanceBool(formation, "IsPlayerTroopInFormation");
+                if (!ownedByLocalPlayer && !hasPlayerControlledTroop && !isPlayerTroopInFormation)
+                    continue;
+
+                TrySetInstanceMemberValue(formation, "PlayerOwner", null);
+                TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", false);
+                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", false);
+                formationPlayerStateClears++;
+            }
+
+            _activeExactCommanderMissionOrderVm = null;
+            _pendingLocalCommanderOrderControlFinalization = null;
+            _suppressExactCommanderOrderHotkeyFallbackUntilRelease = false;
+
+            string logKey =
+                myPeer.Index + "|" +
+                team.TeamIndex + "|" +
+                controlledAgent.Index + "|" +
+                (controlledEntryId ?? "none") + "|" +
+                (commanderEntryId ?? "none") + "|" +
+                myMissionPeer.BotsUnderControlTotal + "|" +
+                myMissionPeer.BotsUnderControlAlive;
+            if (string.Equals(_lastSuppressedNonCommanderOrderUiKey, logKey, StringComparison.Ordinal))
+                return true;
+
+            _lastSuppressedNonCommanderOrderUiKey = logKey;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: suppressed local commander order UI for non-commander controlled agent. " +
+                "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
+                " TeamIndex=" + team.TeamIndex +
+                " Side=" + team.Side +
+                " ControlledAgentIndex=" + controlledAgent.Index +
+                " AgentMainIndex=" + (mainAgent?.Index.ToString() ?? "null") +
+                " ControlledFormationIndex=" + (myMissionPeer.ControlledFormation?.FormationIndex.ToString() ?? "null") +
+                " ControlledEntryId=" + (controlledEntryId ?? "null") +
+                " CommanderEntryId=" + (commanderEntryId ?? "null") +
+                " TroopPlacerSuspended=" + troopPlacerSuspended +
+                " CloseToggleResult=" + (closeToggleResult.HasValue ? closeToggleResult.Value.ToString() : "null") +
+                " SelectedFormationsCleared=" + selectedFormationsCleared +
+                " PlayerOrderOwnerCleared=" + playerOrderOwnerCleared +
+                " AgentOrderOwnerCleared=" + agentOrderOwnerCleared +
+                " FormationPlayerStateClears=" + formationPlayerStateClears +
+                " PlayerRoleDemoted=" + playerRoleDemoted +
+                " RemoteLeadDisabled=" + remoteLeadDisabled +
+                " BotsUnderControlTotal=" + myMissionPeer.BotsUnderControlTotal +
+                " BotsUnderControlAlive=" + myMissionPeer.BotsUnderControlAlive +
+                " Mission=" + (mission.SceneName ?? "null"));
+            return true;
+        }
+
+        private static bool TryResolveCommanderEntryIdForTeam(Team team, out string commanderEntryId)
+        {
+            commanderEntryId = null;
+            if (team == null || team.Side == BattleSideEnum.None)
+                return false;
+
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(runtimeState, team.Side);
+            if (commanderEntry == null || string.IsNullOrWhiteSpace(commanderEntry.EntryId))
+                return false;
+
+            commanderEntryId = commanderEntry.EntryId;
+            return true;
+        }
+
+        private static string ResolveAgentEntryId(Agent agent, string fallbackEntryId)
+        {
+            if (agent != null &&
+                ExactCampaignArmyBootstrap.TryGetEntryId(agent, out string controlledEntryId) &&
+                !string.IsNullOrWhiteSpace(controlledEntryId))
+            {
+                return controlledEntryId;
+            }
+
+            return string.IsNullOrWhiteSpace(fallbackEntryId)
+                ? null
+                : fallbackEntryId;
+        }
+
+        private static bool IsEntryIdExactCommanderForTeam(Team team, string candidateEntryId, out string commanderEntryId)
+        {
+            commanderEntryId = null;
+            if (string.IsNullOrWhiteSpace(candidateEntryId) || !TryResolveCommanderEntryIdForTeam(team, out commanderEntryId))
+                return false;
+
+            return string.Equals(
+                StripEntryVariantSuffix(commanderEntryId),
+                StripEntryVariantSuffix(candidateEntryId),
+                StringComparison.Ordinal);
+        }
+
+        private static string StripEntryVariantSuffix(string entryId)
+        {
+            if (string.IsNullOrWhiteSpace(entryId))
+                return entryId;
+
+            const string variantMarker = "|variant-";
+            int variantIndex = entryId.IndexOf(variantMarker, StringComparison.Ordinal);
+            return variantIndex >= 0
+                ? entryId.Substring(0, variantIndex)
+                : entryId;
         }
 
         private static bool ShouldSuppressLocalFollowSwitch(
@@ -1002,6 +1293,35 @@ namespace CoopSpectator.Patches
             if (missionPeer == null || !missionPeer.IsControlledAgentActive)
                 return false;
 
+            Team team = missionPeer.Team ?? missionPeer.ControlledAgent?.Team;
+            string controlledEntryId = ResolveAgentEntryId(
+                missionPeer.ControlledAgent,
+                CoopBattleSpawnRuntimeState.TryGetState(missionPeer, out PeerSpawnRuntimeState spawnIdentityState)
+                    ? spawnIdentityState.EntryId
+                    : null);
+            bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
+            if (!isExactCommander)
+            {
+                logKey =
+                    networkPeer.Index + "|" +
+                    (missionPeer.ControlledAgent?.Index.ToString() ?? "null") + "|" +
+                    (controlledEntryId ?? "none") + "|" +
+                    (commanderEntryId ?? "none") + "|" +
+                    missionPeer.BotsUnderControlTotal + "|" +
+                    missionPeer.BotsUnderControlAlive + "|non-commander";
+                logDetails =
+                    "Peer=" + (networkPeer.UserName ?? networkPeer.Index.ToString()) +
+                    " ControlledAgentIndex=" + (missionPeer.ControlledAgent?.Index.ToString() ?? "null") +
+                    " ControlledFormationIndex=" + (missionPeer.ControlledFormation?.FormationIndex.ToString() ?? "null") +
+                    " BotsUnderControlTotal=" + missionPeer.BotsUnderControlTotal +
+                    " BotsUnderControlAlive=" + missionPeer.BotsUnderControlAlive +
+                    " ControlledEntryId=" + (controlledEntryId ?? "null") +
+                    " CommanderEntryId=" + (commanderEntryId ?? "null") +
+                    " SuppressionReason=non-commander" +
+                    " Mission=" + (mission.SceneName ?? "null");
+                return true;
+            }
+
             if (!CoopBattleSpawnRuntimeState.TryGetState(missionPeer, out PeerSpawnRuntimeState spawnState) ||
                 spawnState.Status != CoopBattleSpawnStatus.Spawned)
             {
@@ -1066,6 +1386,43 @@ namespace CoopSpectator.Patches
             if (controlledAgent == null || !controlledAgent.IsActive())
                 return false;
 
+            Team team = myMissionPeer.Team ?? controlledAgent.Team ?? mission.PlayerTeam;
+            if (!ReferenceEquals(orderController, team?.PlayerOrderController))
+                return false;
+
+            CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot selectionBridge =
+                CoopBattleSelectionBridgeFile.ReadCurrentSelection();
+            CoopBattleEntryPolicy.ClientSnapshot entryPolicy =
+                CoopBattleEntryPolicy.BuildClientSnapshot(mission, selectionBridge);
+            if (entryPolicy == null || !entryPolicy.UseAuthoritativeTroopPath)
+                return false;
+
+            string controlledEntryId = ResolveAgentEntryId(controlledAgent, entryPolicy.BridgeTroopOrEntryId);
+            bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
+            if (!isExactCommander)
+            {
+                logKey =
+                    myPeer.Index + "|" +
+                    controlledAgent.Index + "|" +
+                    (controlledEntryId ?? "none") + "|" +
+                    (commanderEntryId ?? "none") + "|" +
+                    myMissionPeer.BotsUnderControlTotal + "|" +
+                    myMissionPeer.BotsUnderControlAlive + "|non-commander";
+                logDetails =
+                    "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
+                    " ControlledAgentIndex=" + controlledAgent.Index +
+                    " OrderOwnerIndex=" + (orderController.Owner?.Index.ToString() ?? "null") +
+                    " SelectorAgentIndex=" + (selectorAgent?.Index.ToString() ?? "null") +
+                    " ControlledFormationIndex=" + (myMissionPeer.ControlledFormation?.FormationIndex.ToString() ?? "null") +
+                    " BotsUnderControlTotal=" + myMissionPeer.BotsUnderControlTotal +
+                    " BotsUnderControlAlive=" + myMissionPeer.BotsUnderControlAlive +
+                    " ControlledEntryId=" + (controlledEntryId ?? "null") +
+                    " CommanderEntryId=" + (commanderEntryId ?? "null") +
+                    " SuppressionPhase=non-commander" +
+                    " Mission=" + (mission.SceneName ?? "null");
+                return true;
+            }
+
             Agent orderOwner = orderController.Owner;
             if (orderOwner != null && !ReferenceEquals(orderOwner, controlledAgent))
                 return false;
@@ -1094,13 +1451,6 @@ namespace CoopSpectator.Patches
             if (!isEarlyExactSceneSpawnHandshake && !isLateExactSceneSpawnHandshake)
                 return false;
 
-            CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot selectionBridge =
-                CoopBattleSelectionBridgeFile.ReadCurrentSelection();
-            CoopBattleEntryPolicy.ClientSnapshot entryPolicy =
-                CoopBattleEntryPolicy.BuildClientSnapshot(mission, selectionBridge);
-            if (entryPolicy == null || !entryPolicy.UseAuthoritativeTroopPath)
-                return false;
-
             logKey =
                 myPeer.Index + "|" +
                 controlledAgent.Index + "|" +
@@ -1122,6 +1472,164 @@ namespace CoopSpectator.Patches
                 " LifecycleState=" + (hasLifecycleState ? lifecycleState.Status.ToString() : "null") +
                 " TroopId=" + (hasSpawnState ? (spawnState.TroopId ?? "null") : "null") +
                 " EntryId=" + (hasSpawnState ? (spawnState.EntryId ?? "null") : "null") +
+                " Mission=" + (mission.SceneName ?? "null");
+            return true;
+        }
+
+        private static bool ShouldSuppressOrderTroopPlacerTick(
+            object orderTroopPlacer,
+            out string logKey,
+            out string logDetails)
+        {
+            logKey = null;
+            logDetails = null;
+
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive || orderTroopPlacer == null)
+                return false;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            if (myPeer == null || myPeer.IsServerPeer)
+                return false;
+
+            MissionPeer myMissionPeer = myPeer.GetComponent<MissionPeer>();
+            Agent controlledAgent = myMissionPeer?.ControlledAgent;
+            Mission mission = Mission.Current ?? controlledAgent?.Mission;
+            Team team = myMissionPeer?.Team ?? controlledAgent?.Team ?? mission?.PlayerTeam;
+            if (myMissionPeer == null ||
+                controlledAgent == null ||
+                !controlledAgent.IsActive() ||
+                mission == null ||
+                team == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot selectionBridge =
+                CoopBattleSelectionBridgeFile.ReadCurrentSelection();
+            CoopBattleEntryPolicy.ClientSnapshot entryPolicy =
+                CoopBattleEntryPolicy.BuildClientSnapshot(mission, selectionBridge);
+            if (entryPolicy == null || !entryPolicy.UseAuthoritativeTroopPath)
+                return false;
+
+            string controlledEntryId = ResolveAgentEntryId(controlledAgent, entryPolicy.BridgeTroopOrEntryId);
+            bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
+            if (!isExactCommander)
+            {
+                logKey =
+                    myPeer.Index + "|" +
+                    controlledAgent.Index + "|" +
+                    team.TeamIndex + "|" +
+                    (controlledEntryId ?? "none") + "|" +
+                    (commanderEntryId ?? "none") + "|" +
+                    myMissionPeer.BotsUnderControlTotal + "|" +
+                    myMissionPeer.BotsUnderControlAlive + "|non-commander";
+                logDetails =
+                    "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
+                    " ControlledAgentIndex=" + controlledAgent.Index +
+                    " TeamIndex=" + team.TeamIndex +
+                    " ControlledFormationIndex=" + (myMissionPeer.ControlledFormation?.FormationIndex.ToString() ?? "null") +
+                    " PlayerOrderOwnerIndex=" + (team.PlayerOrderController?.Owner?.Index.ToString() ?? "null") +
+                    " BotsUnderControlTotal=" + myMissionPeer.BotsUnderControlTotal +
+                    " BotsUnderControlAlive=" + myMissionPeer.BotsUnderControlAlive +
+                    " ControlledEntryId=" + (controlledEntryId ?? "null") +
+                    " CommanderEntryId=" + (commanderEntryId ?? "null") +
+                    " SuppressionReason=non-commander" +
+                    " Mission=" + (mission.SceneName ?? "null");
+                return true;
+            }
+
+            if (!ReferenceEquals(mission.PlayerTeam, team))
+                mission.PlayerTeam = team;
+
+            OrderController playerOrderController = team.PlayerOrderController;
+            if (playerOrderController == null)
+                return false;
+
+            if (playerOrderController.Owner == null)
+            {
+                try
+                {
+                    playerOrderController.Owner = controlledAgent;
+                }
+                catch
+                {
+                }
+            }
+
+            OrderController agentOrderController = team.GetOrderControllerOf(controlledAgent);
+            if (agentOrderController != null && agentOrderController.Owner == null)
+            {
+                try
+                {
+                    agentOrderController.Owner = controlledAgent;
+                }
+                catch
+                {
+                }
+            }
+
+            object missionScreen = TryGetInstanceMemberValue(orderTroopPlacer, "MissionScreen");
+            object troopPlacerOrderFlag = TryGetInstanceMemberValue(orderTroopPlacer, "OrderFlag");
+            object missionScreenOrderFlag = TryGetInstanceMemberValue(missionScreen, "OrderFlag");
+            if (missionScreenOrderFlag == null && missionScreen != null && troopPlacerOrderFlag != null)
+            {
+                TrySetInstanceMemberValue(missionScreen, "OrderFlag", troopPlacerOrderFlag);
+                missionScreenOrderFlag = TryGetInstanceMemberValue(missionScreen, "OrderFlag");
+            }
+
+            if (playerOrderController.Owner != null && missionScreenOrderFlag != null)
+            {
+                string repairedLogKey =
+                    myPeer.Index + "|" +
+                    controlledAgent.Index + "|" +
+                    team.TeamIndex + "|" +
+                    playerOrderController.Owner.Index + "|" +
+                    missionScreenOrderFlag.GetType().Name + "|" +
+                    (entryPolicy.BridgeTroopOrEntryId ?? "none");
+                if (!string.Equals(_lastRepairedOrderTroopPlacerOwnerKey, repairedLogKey, StringComparison.Ordinal))
+                {
+                    _lastRepairedOrderTroopPlacerOwnerKey = repairedLogKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: repaired local PlayerOrderController.Owner before OrderTroopPlacer tick. " +
+                        "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
+                        " ControlledAgentIndex=" + controlledAgent.Index +
+                        " TeamIndex=" + team.TeamIndex +
+                        " OwnerIndex=" + playerOrderController.Owner.Index +
+                        " AgentOrderOwnerIndex=" + (agentOrderController?.Owner?.Index.ToString() ?? "null") +
+                        " MissionScreenOrderFlagType=" + missionScreenOrderFlag.GetType().Name +
+                        " EntryId=" + (entryPolicy.BridgeTroopOrEntryId ?? "null") +
+                        " Mission=" + (mission.SceneName ?? "null"));
+                }
+
+                return false;
+            }
+
+            bool hasSpawnState = CoopBattleSpawnRuntimeState.TryGetState(myMissionPeer, out PeerSpawnRuntimeState spawnState);
+            bool hasLifecycleState = CoopBattlePeerLifecycleRuntimeState.TryGetState(myMissionPeer, out PeerLifecycleRuntimeState lifecycleState);
+            logKey =
+                myPeer.Index + "|" +
+                controlledAgent.Index + "|" +
+                team.TeamIndex + "|" +
+                (hasSpawnState ? spawnState.Status.ToString() : "none") + "|" +
+                (hasLifecycleState ? lifecycleState.Status.ToString() : "none") + "|" +
+                (entryPolicy.BridgeTroopOrEntryId ?? "none");
+            logDetails =
+                "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
+                " ControlledAgentIndex=" + controlledAgent.Index +
+                " TeamIndex=" + team.TeamIndex +
+                " ControlledFormationIndex=" + (myMissionPeer.ControlledFormation?.FormationIndex.ToString() ?? "null") +
+                " PlayerOrderOwnerIndex=" + (playerOrderController.Owner?.Index.ToString() ?? "null") +
+                " AgentOrderOwnerIndex=" + (agentOrderController?.Owner?.Index.ToString() ?? "null") +
+                " MissionScreenReady=" + (missionScreen != null) +
+                " MissionScreenOrderFlagReady=" + (missionScreenOrderFlag != null) +
+                " TroopPlacerOrderFlagReady=" + (troopPlacerOrderFlag != null) +
+                " BotsUnderControlTotal=" + myMissionPeer.BotsUnderControlTotal +
+                " BotsUnderControlAlive=" + myMissionPeer.BotsUnderControlAlive +
+                " SpawnStatus=" + (hasSpawnState ? spawnState.Status.ToString() : "null") +
+                " LifecycleState=" + (hasLifecycleState ? lifecycleState.Status.ToString() : "null") +
+                " EntryId=" + (entryPolicy.BridgeTroopOrEntryId ?? "null") +
                 " Mission=" + (mission.SceneName ?? "null");
             return true;
         }

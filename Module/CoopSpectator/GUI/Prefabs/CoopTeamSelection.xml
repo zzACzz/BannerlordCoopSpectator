@@ -20,6 +20,7 @@
                         <BrushWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="63" SuggestedHeight="41" HorizontalAlignment="Center" PositionYOffset="-98" Brush="MPHud.Attacker.Icon" IsVisible="@IsAttacker" />
                         <BrushWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="63" SuggestedHeight="41" HorizontalAlignment="Center" PositionYOffset="-98" Brush="MPHud.Defender.Icon" IsHidden="@IsAttacker" />
                         <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" PositionYOffset="-56" Brush="MPTeamSelection.FactionNameText" Text="@TitleText" />
+                        <BannerTableauWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="180" SuggestedHeight="300" HorizontalAlignment="Center" VerticalAlignment="Center" PositionYOffset="10" BannerCodeText="@BannerCodeText" IsNineGrid="true" />
                         <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" VerticalAlignment="Bottom" PositionYOffset="18" Brush="MPTeamSelection.PlayerCountText" Text="@CountText" />
                         <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" VerticalAlignment="Bottom" PositionYOffset="48" Brush="MPTeamSelection.BotCountText" Text="@DetailText" />
                         <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="166" SuggestedHeight="63" HorizontalAlignment="Center" VerticalAlignment="Center" PositionYOffset="-8" Sprite="MPTeamSelection\locked_for_balance" IsHidden="@IsEnabled">
@@ -41,6 +42,7 @@
                         <BrushWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="63" SuggestedHeight="41" HorizontalAlignment="Center" PositionYOffset="-98" Brush="MPHud.Attacker.Icon" IsVisible="@IsAttacker" />
                         <BrushWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="63" SuggestedHeight="41" HorizontalAlignment="Center" PositionYOffset="-98" Brush="MPHud.Defender.Icon" IsHidden="@IsAttacker" />
                         <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" PositionYOffset="-56" Brush="MPTeamSelection.FactionNameText" Text="@TitleText" />
+                        <BannerTableauWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="180" SuggestedHeight="300" HorizontalAlignment="Center" VerticalAlignment="Center" PositionYOffset="10" BannerCodeText="@BannerCodeText" IsNineGrid="true" />
                         <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" VerticalAlignment="Bottom" PositionYOffset="18" Brush="MPTeamSelection.PlayerCountText" Text="@CountText" />
                         <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" VerticalAlignment="Bottom" PositionYOffset="48" Brush="MPTeamSelection.BotCountText" Text="@DetailText" />
                         <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="166" SuggestedHeight="63" HorizontalAlignment="Center" VerticalAlignment="Center" PositionYOffset="-8" Sprite="MPTeamSelection\locked_for_balance" IsHidden="@IsEnabled">
@@ -53,7 +55,19 @@
                   </Children>
                 </Widget>
 
-                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" VerticalAlignment="Bottom" MarginBottom="20" Brush="MPEndOfRound.Description" Text="@HintText" />
+                <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="132" SuggestedHeight="132" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginBottom="150" Brush="MPTeamSelection.AutoAssignButton" Command.Click="ExecuteAutoAssign" IsEnabled="@CanAutoAssign" DoNotPassEventsToChildren="true" UpdateChildrenStates="true">
+                  <Children>
+                    <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="220" SuggestedHeight="50" VerticalAlignment="Bottom" HorizontalAlignment="Center" PositionYOffset="44" Brush="MPTeamSelection.AutoAssignButton.Text" Text="Auto Assign" />
+                  </Children>
+                </ButtonWidget>
+
+                <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="274" SuggestedHeight="57" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginBottom="25" Brush="WideButton.Flat" Command.Click="ExecuteSpectator" IsEnabled="@CanSpectate" DoNotPassEventsToChildren="true" UpdateChildrenStates="true">
+                  <Children>
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" HorizontalAlignment="Center" VerticalAlignment="Center" Brush="MPTeamSelection.SpectateButton.Text" Text="Spectator" />
+                  </Children>
+                </ButtonWidget>
+
+                <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="640" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginBottom="255" DoNotAcceptEvents="true" DoNotPassEventsToChildren="true" Brush="MPEndOfRound.Description" Text="@HintText" />
               </Children>
             </Widget>
           </Children>

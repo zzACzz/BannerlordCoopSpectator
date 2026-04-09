@@ -8,6 +8,7 @@ namespace CoopSpectator.Infrastructure
         private const string CoopSpectatorSubFolder = "CoopSpectator";
         private const string SelectSideRequestFileName = "battle_select_side.request";
         private const string SelectTroopRequestFileName = "battle_select_troop.request";
+        private const string SpectatorRequestFileName = "battle_select_spectator.request";
         private const string CurrentSelectionFileName = "battle_selection_current.txt";
 
         public sealed class SelectionBridgeSnapshot
@@ -42,6 +43,28 @@ namespace CoopSpectator.Infrastructure
             return written;
         }
 
+        public static bool WriteSpectatorRequest(string source)
+        {
+            try
+            {
+                ClearAll(source + " spectator");
+                Directory.CreateDirectory(GetCoopFolderPath());
+                string[] lines =
+                {
+                    "Mode=Spectator",
+                    "Source=" + (source ?? "unknown"),
+                    "RequestedUtc=" + DateTime.UtcNow.ToString("O")
+                };
+                File.WriteAllLines(GetSpectatorRequestFilePath(), lines);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopBattleSelectionBridgeFile: failed to write spectator request file: " + ex.Message);
+                return false;
+            }
+        }
+
         public static bool ConsumeSelectSideRequest(out string side, out string source)
         {
             side = null;
@@ -54,6 +77,42 @@ namespace CoopSpectator.Infrastructure
             troopOrEntryId = null;
             source = null;
             return ConsumeRequest(GetSelectTroopRequestFilePath(), out _, out troopOrEntryId, out source);
+        }
+
+        public static bool ConsumeSpectatorRequest(out string source)
+        {
+            source = null;
+
+            try
+            {
+                string path = GetSpectatorRequestFilePath();
+                if (!File.Exists(path))
+                    return false;
+
+                string[] lines = File.ReadAllLines(path);
+                foreach (string rawLine in lines)
+                {
+                    if (string.IsNullOrWhiteSpace(rawLine))
+                        continue;
+
+                    int separatorIndex = rawLine.IndexOf('=');
+                    if (separatorIndex <= 0)
+                        continue;
+
+                    string key = rawLine.Substring(0, separatorIndex).Trim();
+                    string value = rawLine.Substring(separatorIndex + 1).Trim();
+                    if (key.Equals("Source", StringComparison.OrdinalIgnoreCase))
+                        source = value;
+                }
+
+                File.Delete(path);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopBattleSelectionBridgeFile: failed to consume spectator request file: " + ex.Message);
+                return false;
+            }
         }
 
         public static SelectionBridgeSnapshot ReadCurrentSelection()
@@ -108,6 +167,7 @@ namespace CoopSpectator.Infrastructure
         {
             TryDeleteFile(GetSelectSideRequestFilePath(), source, "select-side request");
             TryDeleteFile(GetSelectTroopRequestFilePath(), source, "select-troop request");
+            TryDeleteFile(GetSpectatorRequestFilePath(), source, "spectator request");
             TryDeleteFile(GetCurrentSelectionFilePath(), source, "current selection");
         }
 
@@ -187,6 +247,11 @@ namespace CoopSpectator.Infrastructure
         private static string GetCurrentSelectionFilePath()
         {
             return Path.Combine(GetCoopFolderPath(), CurrentSelectionFileName);
+        }
+
+        private static string GetSpectatorRequestFilePath()
+        {
+            return Path.Combine(GetCoopFolderPath(), SpectatorRequestFileName);
         }
 
         private static void TryDeleteFile(string path, string source, string label)

@@ -19,6 +19,7 @@ namespace CoopSpectator.UI
         private const float RefreshIntervalSeconds = 0.15f;
         private const float InitialOverlayDelaySeconds = 0.75f;
         private const float StartBattleHotkeyCooldownSeconds = 0.2f;
+        private const float ReopenSelectionHotkeyCooldownSeconds = 0.2f;
         private static readonly TimeSpan LocalSpawnOverlaySuppressionDuration = TimeSpan.FromSeconds(2.5);
 
         private GauntletLayer _gauntletLayer;
@@ -35,7 +36,10 @@ namespace CoopSpectator.UI
         private bool _overlayLoadFailed;
         private bool _inputCaptured;
         private bool _hadLocalControlledAgent;
+        private bool _spectatorOverlayHidden;
         private DateTime _overlaySuppressedUntilUtc = DateTime.MinValue;
+        private float _reopenSelectionHotkeyCooldown;
+        private string _lastAppliedRefreshKey = string.Empty;
 
         public override void OnBehaviorInitialize()
         {
@@ -79,6 +83,7 @@ namespace CoopSpectator.UI
 
             _hadLocalControlledAgent = hasLocalControlledAgent;
             TryHandleStartBattleHotkey(dt, hasLocalControlledAgent);
+            TryHandleReopenSelectionHotkey(dt, hasLocalControlledAgent);
 
             if (_gauntletLayer == null)
             {
@@ -180,14 +185,21 @@ namespace CoopSpectator.UI
                 return;
             }
 
-            EnsureScreenLoaded(snapshot, desiredScreen);
-            _screenViewModel?.Refresh(snapshot, force);
+            bool loadedNewScreen = EnsureScreenLoaded(snapshot, desiredScreen);
+            string refreshKey = GetRefreshKey(snapshot, desiredScreen);
+            bool needsRefresh = force || loadedNewScreen || !string.Equals(_lastAppliedRefreshKey, refreshKey, StringComparison.Ordinal);
+            if (needsRefresh && !loadedNewScreen)
+                _screenViewModel?.Refresh(snapshot, force);
+
+            if (needsRefresh)
+                _lastAppliedRefreshKey = refreshKey;
+
             UpdateOverlayInputState(true);
         }
 
         private CoopSelectionScreen DetermineDesiredScreen(CoopSelectionUiSnapshot snapshot)
         {
-            if (snapshot == null || !snapshot.CanShowOverlay || DateTime.UtcNow < _overlaySuppressedUntilUtc)
+            if (snapshot == null || !snapshot.CanShowOverlay || _spectatorOverlayHidden || DateTime.UtcNow < _overlaySuppressedUntilUtc)
                 return CoopSelectionScreen.None;
 
             if (_requestedScreen == CoopSelectionScreen.ClassLoadout && _selectedSideOverride != BattleSideEnum.None)
@@ -196,22 +208,23 @@ namespace CoopSpectator.UI
             return CoopSelectionScreen.TeamSelection;
         }
 
-        private void EnsureScreenLoaded(CoopSelectionUiSnapshot snapshot, CoopSelectionScreen desiredScreen)
+        private bool EnsureScreenLoaded(CoopSelectionUiSnapshot snapshot, CoopSelectionScreen desiredScreen)
         {
             if (_currentScreen == desiredScreen && _screenViewModel != null && _viewModel != null)
-                return;
+                return false;
 
             ReleaseCurrentMovie();
 
             if (desiredScreen == CoopSelectionScreen.TeamSelection)
             {
-                var vm = new CoopTeamSelectionVM(snapshot, HandleSideSelected);
+                var vm = new CoopTeamSelectionVM(snapshot, HandleSideSelected, HandleAutoAssignRequested, HandleSpectatorRequested);
                 _viewModel = vm;
                 _screenViewModel = vm;
                 _movie = _gauntletLayer.LoadMovie(TeamMovieName, vm);
                 _currentScreen = desiredScreen;
+                _lastAppliedRefreshKey = GetRefreshKey(snapshot, desiredScreen);
                 ModLogger.Info("CoopMissionSelectionView: loaded coop team selection shell.");
-                return;
+                return true;
             }
 
             var classVm = new CoopClassLoadoutVM(snapshot, HandleUnitSelected, HandleSpawnRequested, HandleBackRequested);
@@ -219,7 +232,9 @@ namespace CoopSpectator.UI
             _screenViewModel = classVm;
             _movie = _gauntletLayer.LoadMovie(ClassMovieName, classVm);
             _currentScreen = desiredScreen;
+            _lastAppliedRefreshKey = GetRefreshKey(snapshot, desiredScreen);
             ModLogger.Info("CoopMissionSelectionView: loaded coop class loadout shell.");
+            return true;
         }
 
         private void HandleSideSelected(BattleSideEnum side)
@@ -227,6 +242,7 @@ namespace CoopSpectator.UI
             if (side == BattleSideEnum.None)
                 return;
 
+            _spectatorOverlayHidden = false;
             _selectedSideOverride = side;
             _selectedEntryIdOverride = null;
             _requestedScreen = CoopSelectionScreen.ClassLoadout;
@@ -239,11 +255,57 @@ namespace CoopSpectator.UI
             if (side == BattleSideEnum.None || string.IsNullOrWhiteSpace(entryId))
                 return;
 
+            _spectatorOverlayHidden = false;
             _selectedSideOverride = side;
             _selectedEntryIdOverride = entryId;
             _requestedScreen = CoopSelectionScreen.ClassLoadout;
             CoopBattleSelectionBridgeFile.WriteSelectSideRequest(side.ToString(), "CoopClassLoadoutUI Side");
             CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(entryId, "CoopClassLoadoutUI Entry");
+            RefreshOverlay(force: true, HasLocalControlledAgent());
+        }
+
+        private void HandleAutoAssignRequested()
+        {
+            bool hasLocalControlledAgent = HasLocalControlledAgent();
+            CoopSelectionUiSnapshot snapshot = CoopSelectionUiHelpers.BuildSnapshot(
+                _selectedSideOverride,
+                _selectedEntryIdOverride,
+                hasLocalControlledAgent);
+            BattleSideEnum[] availableSides = new[]
+            {
+                (snapshot?.AttackerSelectableEntryIds?.Length ?? 0) > 0 ? BattleSideEnum.Attacker : BattleSideEnum.None,
+                (snapshot?.DefenderSelectableEntryIds?.Length ?? 0) > 0 ? BattleSideEnum.Defender : BattleSideEnum.None
+            }
+                .Where(side => side != BattleSideEnum.None)
+                .ToArray();
+            if (availableSides.Length <= 0)
+                return;
+
+            BattleSideEnum chosenSide = availableSides.Length == 1
+                ? availableSides[0]
+                : availableSides[MBRandom.RandomInt(availableSides.Length)];
+            ModLogger.Info(
+                "CoopMissionSelectionView: auto assign requested. " +
+                "ChosenSide=" + chosenSide +
+                " AttackerSelectable=" + (snapshot?.AttackerSelectableEntryIds?.Length ?? 0) +
+                " DefenderSelectable=" + (snapshot?.DefenderSelectableEntryIds?.Length ?? 0));
+            HandleSideSelected(chosenSide);
+        }
+
+        private void HandleSpectatorRequested()
+        {
+            _spectatorOverlayHidden = true;
+            _requestedScreen = CoopSelectionScreen.TeamSelection;
+            _selectedSideOverride = BattleSideEnum.None;
+            _selectedEntryIdOverride = null;
+            _overlaySuppressedUntilUtc = DateTime.MinValue;
+
+            if (CoopBattleSelectionBridgeFile.WriteSpectatorRequest("CoopTeamSelectionUI Spectator"))
+            {
+                InformationManager.DisplayMessage(new InformationMessage("Coop Battle: spectator mode enabled. Press H to reopen selection."));
+                ModLogger.Info("CoopMissionSelectionView: wrote spectator selection request.");
+            }
+
             RefreshOverlay(force: true, HasLocalControlledAgent());
         }
 
@@ -259,6 +321,7 @@ namespace CoopSpectator.UI
 
             _selectedSideOverride = snapshot.EffectiveSide;
             _selectedEntryIdOverride = snapshot.SelectedEntryId;
+            _spectatorOverlayHidden = false;
             _overlaySuppressedUntilUtc = DateTime.UtcNow + LocalSpawnOverlaySuppressionDuration;
             CoopBattleSelectionBridgeFile.WriteSelectSideRequest(snapshot.EffectiveSide.ToString(), "CoopClassLoadoutUI SpawnSide");
             CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(snapshot.SelectedEntryId, "CoopClassLoadoutUI SpawnEntry");
@@ -277,6 +340,7 @@ namespace CoopSpectator.UI
             _requestedScreen = CoopSelectionScreen.TeamSelection;
             _selectedSideOverride = BattleSideEnum.None;
             _selectedEntryIdOverride = null;
+            _spectatorOverlayHidden = false;
             ModLogger.Info("CoopMissionSelectionView: reset selection flow. Source=" + source);
         }
 
@@ -376,6 +440,17 @@ namespace CoopSpectator.UI
             _viewModel = null;
             _screenViewModel = null;
             _currentScreen = CoopSelectionScreen.None;
+            _lastAppliedRefreshKey = string.Empty;
+        }
+
+        private static string GetRefreshKey(CoopSelectionUiSnapshot snapshot, CoopSelectionScreen desiredScreen)
+        {
+            if (snapshot == null)
+                return desiredScreen == CoopSelectionScreen.TeamSelection ? "team|null" : "class|null";
+
+            return desiredScreen == CoopSelectionScreen.TeamSelection
+                ? snapshot.TeamRefreshKey ?? string.Empty
+                : snapshot.ClassRefreshKey ?? string.Empty;
         }
 
         private void TryHandleStartBattleHotkey(float dt, bool hasLocalControlledAgent)
@@ -406,6 +481,21 @@ namespace CoopSpectator.UI
                 InformationManager.DisplayMessage(new InformationMessage("Coop Battle: start requested"));
                 ModLogger.Info("CoopMissionSelectionView: wrote start battle request from G hotkey.");
             }
+        }
+
+        private void TryHandleReopenSelectionHotkey(float dt, bool hasLocalControlledAgent)
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return;
+
+            _reopenSelectionHotkeyCooldown -= dt;
+            if (_reopenSelectionHotkeyCooldown > 0f || hasLocalControlledAgent || !_spectatorOverlayHidden || !Input.IsKeyPressed(InputKey.H))
+                return;
+
+            _reopenSelectionHotkeyCooldown = ReopenSelectionHotkeyCooldownSeconds;
+            ResetSelectionFlow("spectator-reopen-hotkey");
+            InformationManager.DisplayMessage(new InformationMessage("Coop Battle: selection reopened"));
+            RefreshOverlay(force: true, hasLocalControlledAgent);
         }
 
         internal static bool HasLocalControlledAgent()

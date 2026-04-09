@@ -33,6 +33,8 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             _lastRequestedRuntimeSceneName = scene ?? string.Empty;
             bool battleMapRuntime = IsBattleMapSceneName(scene);
             string missionShell = battleMapRuntime ? BattleMissionShell : TeamDeathmatchMissionShell;
+            if (battleMapRuntime && GameNetwork.IsServer)
+                TryApplyBattleMapTimerOptionOverrides();
             ModLogger.Info("StartMultiplayerGame CoopBattle called, scene=" + (scene ?? ""));
             if (GameNetwork.IsServer)
                 ModLogger.Info("[CoopSpectator] Server starting mission, GameType=" + GameModeId + " (must match client GetMultiplayerGameMode and multiplayer_strings).");
@@ -46,6 +48,43 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             TryApplyCampaignMapPatchContext(ref record, scene);
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, "CoopBattle mission init pre-open");
             MissionState.OpenNew(missionShell, record, CreateBehaviorsForMission);
+        }
+
+        private static void TryApplyBattleMapTimerOptionOverrides()
+        {
+            try
+            {
+                ApplyBattleMapTimerOptionOverrides(MultiplayerOptions.MultiplayerOptionsAccessMode.CurrentMapOptions);
+                ApplyBattleMapTimerOptionOverrides(MultiplayerOptions.MultiplayerOptionsAccessMode.NextMapOptions);
+                ModLogger.Info(
+                    "MissionMultiplayerCoopBattleMode: applied battle-map timer option overrides. " +
+                    "RoundTimeLimit=" + MultiplayerOptions.OptionType.RoundTimeLimit.GetIntValue() +
+                    " MapTimeLimit=" + MultiplayerOptions.OptionType.MapTimeLimit.GetIntValue() +
+                    " WarmupTimeLimitInSeconds=" + MultiplayerOptions.OptionType.WarmupTimeLimitInSeconds.GetIntValue() +
+                    " RoundPreparationTimeLimit=" + MultiplayerOptions.OptionType.RoundPreparationTimeLimit.GetIntValue() + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionMultiplayerCoopBattleMode: failed to apply battle-map timer option overrides: " + ex.Message);
+            }
+        }
+
+        private static void ApplyBattleMapTimerOptionOverrides(MultiplayerOptions.MultiplayerOptionsAccessMode mode)
+        {
+            // Keep battle-shell timers effectively neutralized, but stay inside native
+            // network compression bounds so peers can join an already active mission.
+            MultiplayerOptions.OptionType.WarmupTimeLimitInSeconds.SetValue(
+                MultiplayerOptions.OptionType.WarmupTimeLimitInSeconds.GetMinimumValue(),
+                mode);
+            MultiplayerOptions.OptionType.RoundPreparationTimeLimit.SetValue(
+                MultiplayerOptions.OptionType.RoundPreparationTimeLimit.GetMinimumValue(),
+                mode);
+            MultiplayerOptions.OptionType.MapTimeLimit.SetValue(
+                MultiplayerOptions.OptionType.MapTimeLimit.GetMaximumValue(),
+                mode);
+            MultiplayerOptions.OptionType.RoundTimeLimit.SetValue(
+                MultiplayerOptions.OptionType.RoundTimeLimit.GetMaximumValue(),
+                mode);
         }
 
         private static IEnumerable<MissionBehavior> CreateBehaviorsForMission(Mission mission)

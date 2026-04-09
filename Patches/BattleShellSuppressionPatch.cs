@@ -19,60 +19,76 @@ namespace CoopSpectator.Patches
 
         public static void Apply(Harmony harmony)
         {
-            try
+            int patchedCount = 0;
+            patchedCount += TryPatchMethod(
+                harmony,
+                "TaleWorlds.MountAndBlade.MultiplayerTimerComponent",
+                "StartTimerAsServer",
+                nameof(MultiplayerTimerComponent_StartTimerAsServer_Prefix),
+                typeof(float)) ? 1 : 0;
+            patchedCount += TryPatchMethod(
+                harmony,
+                "TaleWorlds.MountAndBlade.MultiplayerTimerComponent",
+                "StartTimerAsClient",
+                nameof(MultiplayerTimerComponent_StartTimerAsClient_Prefix),
+                typeof(float),
+                typeof(float)) ? 1 : 0;
+            patchedCount += TryPatchMethod(
+                harmony,
+                "TaleWorlds.MountAndBlade.Multiplayer.ConsoleMatchStartEndHandler",
+                "OnMissionTick",
+                nameof(ConsoleMatchStartEndHandler_OnMissionTick_Prefix),
+                typeof(float)) ? 1 : 0;
+            patchedCount += TryPatchMethod(
+                harmony,
+                "TaleWorlds.MountAndBlade.MultiplayerWarmupComponent",
+                "AfterStart",
+                nameof(MultiplayerWarmupComponent_AfterStart_Prefix)) ? 1 : 0;
+            patchedCount += TryPatchMethod(
+                harmony,
+                "TaleWorlds.MountAndBlade.MultiplayerWarmupComponent",
+                "OnPreDisplayMissionTick",
+                nameof(MultiplayerWarmupComponent_OnPreDisplayMissionTick_Prefix),
+                typeof(float)) ? 1 : 0;
+
+            Type networkPeerType = AccessTools.TypeByName("TaleWorlds.MountAndBlade.NetworkCommunicator");
+            if (networkPeerType != null)
             {
-                PatchMethod(
-                    harmony,
-                    "TaleWorlds.MountAndBlade.MultiplayerWarmupComponent",
-                    "AfterStart",
-                    nameof(MultiplayerWarmupComponent_AfterStart_Prefix));
-                PatchMethod(
-                    harmony,
-                    "TaleWorlds.MountAndBlade.MultiplayerWarmupComponent",
-                    "OnPreDisplayMissionTick",
-                    nameof(MultiplayerWarmupComponent_OnPreDisplayMissionTick_Prefix),
-                    typeof(float));
-                PatchMethod(
+                patchedCount += TryPatchMethod(
                     harmony,
                     "TaleWorlds.MountAndBlade.MultiplayerWarmupComponent",
                     "HandleNewClientAfterSynchronized",
                     nameof(MultiplayerWarmupComponent_HandleNewClientAfterSynchronized_Prefix),
-                    AccessTools.TypeByName("TaleWorlds.MountAndBlade.NetworkCommunicator"));
-                PatchMethod(
-                    harmony,
-                    "TaleWorlds.MountAndBlade.MultiplayerTimerComponent",
-                    "StartTimerAsServer",
-                    nameof(MultiplayerTimerComponent_StartTimerAsServer_Prefix),
-                    typeof(float));
-                PatchMethod(
-                    harmony,
-                    "TaleWorlds.MountAndBlade.MultiplayerTimerComponent",
-                    "StartTimerAsClient",
-                    nameof(MultiplayerTimerComponent_StartTimerAsClient_Prefix),
-                    typeof(float),
-                    typeof(float));
-                PatchMethod(
-                    harmony,
-                    "TaleWorlds.MountAndBlade.Multiplayer.ConsoleMatchStartEndHandler",
-                    "OnMissionTick",
-                    nameof(ConsoleMatchStartEndHandler_OnMissionTick_Prefix),
-                    typeof(float));
+                    networkPeerType) ? 1 : 0;
+            }
+            else
+            {
+                ModLogger.Info("BattleShellSuppressionPatch: type not found. Type=TaleWorlds.MountAndBlade.NetworkCommunicator");
+            }
 
-                ModLogger.Info("BattleShellSuppressionPatch: native warmup/timer suppression patches applied.");
+            ModLogger.Info("BattleShellSuppressionPatch: native warmup/timer suppression patch pass completed. SuccessfulPatches=" + patchedCount + ".");
+        }
+
+        private static bool TryPatchMethod(Harmony harmony, string typeName, string methodName, string prefixMethodName, params Type[] parameterTypes)
+        {
+            try
+            {
+                return PatchMethod(harmony, typeName, methodName, prefixMethodName, parameterTypes);
             }
             catch (Exception ex)
             {
-                ModLogger.Error("BattleShellSuppressionPatch.Apply failed.", ex);
+                ModLogger.Error("BattleShellSuppressionPatch: failed to patch " + typeName + "." + methodName + ".", ex);
+                return false;
             }
         }
 
-        private static void PatchMethod(Harmony harmony, string typeName, string methodName, string prefixMethodName, params Type[] parameterTypes)
+        private static bool PatchMethod(Harmony harmony, string typeName, string methodName, string prefixMethodName, params Type[] parameterTypes)
         {
             Type targetType = AccessTools.TypeByName(typeName);
             if (targetType == null)
             {
                 ModLogger.Info("BattleShellSuppressionPatch: type not found. Type=" + typeName);
-                return;
+                return false;
             }
 
             MethodInfo target = parameterTypes == null || parameterTypes.Length == 0
@@ -82,11 +98,12 @@ namespace CoopSpectator.Patches
             if (target == null || prefix == null)
             {
                 ModLogger.Info("BattleShellSuppressionPatch: method not found. Type=" + typeName + " Method=" + methodName);
-                return;
+                return false;
             }
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleShellSuppressionPatch: patched " + typeName + "." + methodName + ".");
+            return true;
         }
 
         private static bool MultiplayerWarmupComponent_AfterStart_Prefix(object __instance)

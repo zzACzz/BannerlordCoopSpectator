@@ -6,6 +6,7 @@ using CoopSpectator.Campaign; // BattleRosterFileHelper
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback, CoopGameModeIds
 using CoopSpectator.Network.Messages; // BattleSnapshotMessage
 using Newtonsoft.Json.Linq; // JToken, JObject, JArray
+using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_mission, end_mission (Етап 3b)
 {
@@ -245,10 +246,16 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                     // "Warmup Phase / Waiting for players to join" over our own pre-battle phases.
                     // Also neutralize native round/map timeout auto-end so our authoritative
                     // battle completion, not the Battle shell, decides when the mission ends.
-                    optionValues["WarmupTimeLimitInSeconds"] = 0;
-                    optionValues["RoundPreparationTimeLimit"] = 0;
-                    optionValues["MapTimeLimit"] = 9999;
-                    optionValues["RoundTimeLimit"] = 9999;
+                    // Values must remain inside native network compression bounds so late-joining
+                    // peers can deserialize current mission options successfully.
+                    optionValues["WarmupTimeLimitInSeconds"] =
+                        MultiplayerOptions.OptionType.WarmupTimeLimitInSeconds.GetMinimumValue();
+                    optionValues["RoundPreparationTimeLimit"] =
+                        MultiplayerOptions.OptionType.RoundPreparationTimeLimit.GetMinimumValue();
+                    optionValues["MapTimeLimit"] =
+                        MultiplayerOptions.OptionType.MapTimeLimit.GetMaximumValue();
+                    optionValues["RoundTimeLimit"] =
+                        MultiplayerOptions.OptionType.RoundTimeLimit.GetMaximumValue();
                 }
 
                 string setOptionsUrl = baseUrl + "/Manager/set_options";
