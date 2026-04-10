@@ -87,6 +87,7 @@ namespace CoopSpectator.MissionBehaviors
             Mission mission = Mission;
             if (mission == null) return;
 
+            TryPersistLocalHostedPeerIdentity();
             ResetSelectionUiBridgeStateForNewMission("CoopMissionClientLogic.AfterStart");
             CoopMissionSpawnLogic.ResetClientMissionRuntimeState(
                 "CoopMissionClientLogic.AfterStart:" + (mission.SceneName ?? "null"));
@@ -135,6 +136,7 @@ namespace CoopSpectator.MissionBehaviors
             Mission mission = Mission;
             if (mission == null) return;
 
+            TryPersistLocalHostedPeerIdentity();
             TryReleaseStaleClientMainAgent(mission);
             TryRestoreClientMainAgentFromMissionPeer(mission);
             CoopMissionSpawnLogic.TryRunClientExactCampaignVisualObserver(mission);
@@ -1002,6 +1004,20 @@ namespace CoopSpectator.MissionBehaviors
         {
             Agent mainAgent = Agent.Main;
             return mainAgent != null && mainAgent.MissionPeer != null;
+        }
+
+        private static void TryPersistLocalHostedPeerIdentity()
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            if (myPeer == null || !myPeer.IsConnectionActive || !myPeer.IsSynchronized || string.IsNullOrWhiteSpace(myPeer.UserName))
+                return;
+
+            HostSelfJoinRedirectState.TryPersistJoinedLocalHostPeer(
+                myPeer.UserName,
+                "CoopMissionClientLogic");
         }
 
         private static void TryReleaseStaleClientMainAgent(Mission mission)
@@ -3834,6 +3850,7 @@ namespace CoopSpectator.MissionBehaviors
         private static int _materializedBattleResultOnAgentRemovedCount;
         private static int _materializedBattleResultRemovalDebugLogCount;
         private static string _lastLoggedSelectableEntryUniverseKey;
+        private static string _lastPrimaryControllablePeerResolutionKey = string.Empty;
         private static readonly List<string> _materializedBattleResultOnScoreHitSamples = new List<string>();
         private static readonly List<string> _materializedBattleResultOnAgentRemovedSamples = new List<string>();
         private static readonly List<string> _materializedBattleResultReconcileRemovedSamples = new List<string>();
@@ -4533,9 +4550,30 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || !GameNetwork.IsServer)
                 return false;
 
-            CoopMissionSpawnLogic existingBehavior = mission.GetMissionBehavior<CoopMissionSpawnLogic>();
-            if (existingBehavior != null)
-                return true;
+            bool ensuredNetworkBridge = true;
+            if (mission.GetMissionBehavior<CoopMissionNetworkBridge>() == null)
+            {
+                try
+                {
+                    var networkBridge = new CoopMissionNetworkBridge();
+                    mission.AddMissionBehavior(networkBridge);
+                    networkBridge.OnBehaviorInitialize();
+                    networkBridge.AfterStart();
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: dedicated observer attached CoopMissionNetworkBridge mission behavior to active mission. " +
+                        "Mission=" + (mission.SceneName ?? "null") +
+                        " IsNewMission=" + isNewMission + ".");
+                }
+                catch (Exception ex)
+                {
+                    ensuredNetworkBridge = false;
+                    ModLogger.Info("CoopMissionSpawnLogic: dedicated observer failed to attach CoopMissionNetworkBridge mission behavior: " + ex.Message);
+                }
+            }
+
+            bool ensuredSpawnLogic = true;
+            if (mission.GetMissionBehavior<CoopMissionSpawnLogic>() != null)
+                return ensuredNetworkBridge;
 
             try
             {
@@ -4547,13 +4585,14 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopMissionSpawnLogic: dedicated observer attached CoopMissionSpawnLogic mission behavior to active mission. " +
                     "Mission=" + (mission.SceneName ?? "null") +
                     " IsNewMission=" + isNewMission + ".");
-                return true;
             }
             catch (Exception ex)
             {
+                ensuredSpawnLogic = false;
                 ModLogger.Info("CoopMissionSpawnLogic: dedicated observer failed to attach mission behavior: " + ex.Message);
-                return false;
             }
+
+            return ensuredNetworkBridge && ensuredSpawnLogic;
         }
 
         private static bool TryInitializeServerMissionRuntimeState(Mission mission, string source, bool forceReinitialize)
@@ -14267,6 +14306,14 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
+            TryForcePeerRespawnable(mission, missionPeer, source);
+        }
+
+        private static bool TryForcePeerRespawnable(Mission mission, MissionPeer missionPeer, string source)
+        {
+            if (mission == null || missionPeer == null || !GameNetwork.IsServer)
+                return false;
+
             NetworkCommunicator peer = missionPeer.GetNetworkPeer();
             Agent controlledAgent = missionPeer.ControlledAgent;
             bool triggeredVanillaRemoval = false;
@@ -14303,7 +14350,7 @@ namespace CoopSpectator.MissionBehaviors
                     "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
                     " AgentIndex=" + controlledAgent.Index +
                     " Source=" + source);
-                return;
+                return false;
             }
 
             missionPeer.ControlledAgent = null;
@@ -14332,6 +14379,7 @@ namespace CoopSpectator.MissionBehaviors
                 " TriggeredVanillaRemoval=" + triggeredVanillaRemoval +
                 " ReturnedMaterializedAgentToAi=" + returnedMaterializedAgentToAi +
                 " Source=" + source);
+            return true;
         }
 
         private static bool IsMaterializedArmyAgent(Agent agent)
@@ -14598,6 +14646,14 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
+            TryApplySpectatorSelectionToPeer(mission, missionPeer, source);
+        }
+
+        private static bool TryApplySpectatorSelectionToPeer(Mission mission, MissionPeer missionPeer, string source)
+        {
+            if (mission == null || missionPeer == null || !GameNetwork.IsServer)
+                return false;
+
             NetworkCommunicator peer = missionPeer.GetNetworkPeer();
             if (HasActiveControlledAgent(missionPeer))
             {
@@ -14605,7 +14661,7 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopMissionSpawnLogic: spectator selection ignored because peer still controls an active agent. " +
                     "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
                     " Source=" + source);
-                return;
+                return false;
             }
 
             CoopBattleSelectionIntentState.Reset();
@@ -14622,6 +14678,7 @@ namespace CoopSpectator.MissionBehaviors
                 "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
                 " TeamIndex=" + (missionPeer.Team?.TeamIndex ?? -1) +
                 " Source=" + source);
+            return true;
         }
 
         private static void TryApplySelectionIntentToPrimaryPeer(Mission mission, string source)
@@ -14630,45 +14687,8 @@ namespace CoopSpectator.MissionBehaviors
             if (missionPeer == null)
                 return;
 
-            bool peerOccupiesActiveCoopLife = IsPeerOccupyingActiveCoopLife(missionPeer);
-            BattleSideEnum runtimeSide =
-                missionPeer.Team != null && !ReferenceEquals(missionPeer.Team, mission?.SpectatorTeam)
-                    ? missionPeer.Team.Side
-                    : BattleSideEnum.None;
-
             CoopBattleSelectionIntentSnapshot intent = CoopBattleSelectionIntentState.GetCurrent();
-            bool deferCrossSideSelectionWhileActive =
-                peerOccupiesActiveCoopLife &&
-                intent.Side != BattleSideEnum.None &&
-                runtimeSide != BattleSideEnum.None &&
-                runtimeSide != intent.Side;
-            if (intent.Side != BattleSideEnum.None)
-            {
-                CoopBattleAuthorityState.TryRequestSide(missionPeer, intent.Side, source + " side-intent");
-                if (deferCrossSideSelectionWhileActive)
-                {
-                    CoopBattleSelectionRequestState.Clear(missionPeer, source + " deferred-side-change");
-                    CoopBattleSpawnRequestState.Clear(missionPeer, source + " deferred-side-change");
-                }
-                else if (HasAllowedRosterForSide(intent.Side))
-                    CoopBattleAuthorityState.TryAssignSide(missionPeer, intent.Side, source + " side-intent");
-            }
-
-            if (string.IsNullOrWhiteSpace(intent.TroopOrEntryId) || deferCrossSideSelectionWhileActive)
-                return;
-
-            if (CoopBattleAuthorityState.TrySetSelectedEntryId(missionPeer, intent.TroopOrEntryId, source + " intent entry"))
-            {
-                if (ShouldAutoQueueSelectionFromAuthority(missionPeer))
-                    CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
-                return;
-            }
-
-            if (CoopBattleAuthorityState.TrySetSelectedTroopId(missionPeer, intent.TroopOrEntryId, source + " intent troop"))
-            {
-                if (ShouldAutoQueueSelectionFromAuthority(missionPeer))
-                    CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
-            }
+            TryApplySelectionIntentToPeer(mission, missionPeer, intent.Side, intent.TroopOrEntryId, source);
         }
 
         private static void TryApplySpawnIntentToPrimaryPeer(Mission mission, string source)
@@ -14681,30 +14701,145 @@ namespace CoopSpectator.MissionBehaviors
             if (missionPeer == null)
                 return;
 
-            if (missionPeer.ControlledAgent != null)
-            {
-                CoopBattleSpawnIntentState.Clear(source + " already-controlled");
-                return;
-            }
-
-            CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " spawn-intent selection-request");
-            if (!CoopBattleSelectionRequestState.TryGetRequest(missionPeer, out CoopBattleSelectionRequestState.PeerSelectionRequestState selectionRequest))
-                return;
-
-            if (!CoopBattleSpawnRequestState.TryQueueFromSelectionRequest(selectionRequest, source + " spawn-intent"))
-                return;
-
-            if (CoopBattleSpawnRequestState.TryGetPendingRequest(missionPeer, out CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest))
-            {
-                CoopBattleSpawnRuntimeState.MarkPending(pendingRequest);
+            if (TryQueueSpawnIntentForPeer(mission, missionPeer, source + " spawn-intent"))
                 CoopBattleSpawnIntentState.Clear(source + " queued");
+            else if (missionPeer.ControlledAgent != null)
+                CoopBattleSpawnIntentState.Clear(source + " already-controlled");
+        }
+
+        internal static bool TryHandleNetworkSelectionRequest(
+            Mission mission,
+            NetworkCommunicator peer,
+            CoopBattleSelectionRequestKind requestKind,
+            BattleSideEnum requestedSide,
+            string troopOrEntryId,
+            string source)
+        {
+            if (mission == null || !GameNetwork.IsServer || peer == null)
+                return false;
+
+            MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+            if (missionPeer == null)
+                return false;
+
+            switch (requestKind)
+            {
+                case CoopBattleSelectionRequestKind.SelectSide:
+                    return TryApplySelectionIntentToPeer(
+                        mission,
+                        missionPeer,
+                        requestedSide,
+                        null,
+                        source + " select-side");
+                case CoopBattleSelectionRequestKind.SelectEntry:
+                    return TryApplySelectionIntentToPeer(
+                        mission,
+                        missionPeer,
+                        requestedSide,
+                        troopOrEntryId,
+                        source + " select-entry");
+                case CoopBattleSelectionRequestKind.Spectate:
+                    return TryApplySpectatorSelectionToPeer(mission, missionPeer, source + " spectate");
+                case CoopBattleSelectionRequestKind.SpawnNow:
+                    return TryQueueSpawnIntentForPeer(mission, missionPeer, source + " spawn");
+                case CoopBattleSelectionRequestKind.ForceRespawnable:
+                    return TryForcePeerRespawnable(mission, missionPeer, source + " force-respawnable");
+                default:
+                    return false;
             }
+        }
+
+        private static bool TryApplySelectionIntentToPeer(
+            Mission mission,
+            MissionPeer missionPeer,
+            BattleSideEnum requestedSide,
+            string troopOrEntryId,
+            string source)
+        {
+            if (mission == null || missionPeer == null || !GameNetwork.IsServer)
+                return false;
+
+            bool applied = false;
+            bool peerOccupiesActiveCoopLife = IsPeerOccupyingActiveCoopLife(missionPeer);
+            BattleSideEnum runtimeSide =
+                missionPeer.Team != null && !ReferenceEquals(missionPeer.Team, mission.SpectatorTeam)
+                    ? missionPeer.Team.Side
+                    : BattleSideEnum.None;
+            bool deferCrossSideSelectionWhileActive =
+                peerOccupiesActiveCoopLife &&
+                requestedSide != BattleSideEnum.None &&
+                runtimeSide != BattleSideEnum.None &&
+                runtimeSide != requestedSide;
+            if (requestedSide != BattleSideEnum.None)
+            {
+                applied |= CoopBattleAuthorityState.TryRequestSide(missionPeer, requestedSide, source + " side-intent");
+                if (deferCrossSideSelectionWhileActive)
+                {
+                    CoopBattleSelectionRequestState.Clear(missionPeer, source + " deferred-side-change");
+                    CoopBattleSpawnRequestState.Clear(missionPeer, source + " deferred-side-change");
+                    return applied;
+                }
+
+                if (HasAllowedRosterForSide(requestedSide))
+                    applied |= CoopBattleAuthorityState.TryAssignSide(missionPeer, requestedSide, source + " side-intent");
+            }
+
+            if (string.IsNullOrWhiteSpace(troopOrEntryId) || deferCrossSideSelectionWhileActive)
+                return applied;
+
+            if (CoopBattleAuthorityState.TrySetSelectedEntryId(missionPeer, troopOrEntryId, source + " intent entry"))
+            {
+                if (ShouldAutoQueueSelectionFromAuthority(missionPeer))
+                    CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
+                return true;
+            }
+
+            if (CoopBattleAuthorityState.TrySetSelectedTroopId(missionPeer, troopOrEntryId, source + " intent troop"))
+            {
+                if (ShouldAutoQueueSelectionFromAuthority(missionPeer))
+                    CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
+                return true;
+            }
+
+            return applied;
+        }
+
+        private static bool TryQueueSpawnIntentForPeer(Mission mission, MissionPeer missionPeer, string source)
+        {
+            if (mission == null || missionPeer == null || !GameNetwork.IsServer)
+                return false;
+
+            if (missionPeer.ControlledAgent != null)
+                return false;
+
+            CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
+            if (!CoopBattleSelectionRequestState.TryGetRequest(missionPeer, out CoopBattleSelectionRequestState.PeerSelectionRequestState selectionRequest))
+                return false;
+
+            if (!CoopBattleSpawnRequestState.TryQueueFromSelectionRequest(selectionRequest, source))
+                return false;
+
+            if (!CoopBattleSpawnRequestState.TryGetPendingRequest(missionPeer, out CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest))
+                return false;
+
+            CoopBattleSpawnRuntimeState.MarkPending(pendingRequest);
+            return true;
         }
 
         private static MissionPeer ResolvePrimaryControllablePeer(Mission mission)
         {
             if (mission == null || GameNetwork.NetworkPeers == null)
+            {
+                TryLogPrimaryControllablePeerResolution("none", null);
                 return null;
+            }
+
+            MissionPeer hostedLocalPeer = ResolveHostedLocalPeer();
+            if (hostedLocalPeer != null)
+            {
+                TryLogPrimaryControllablePeerResolution("hosted-local-peer", hostedLocalPeer);
+                return hostedLocalPeer;
+            }
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
@@ -14715,10 +14850,55 @@ namespace CoopSpectator.MissionBehaviors
                 if (missionPeer == null)
                     continue;
 
+                TryLogPrimaryControllablePeerResolution("first-synchronized-peer", missionPeer);
                 return missionPeer;
             }
 
+            TryLogPrimaryControllablePeerResolution("none", null);
             return null;
+        }
+
+        private static MissionPeer ResolveHostedLocalPeer()
+        {
+            if (!HostSelfJoinRedirectState.TryResolvePersistedHostedPeerUserName(out string expectedUserName) ||
+                string.IsNullOrWhiteSpace(expectedUserName) ||
+                GameNetwork.NetworkPeers == null)
+            {
+                return null;
+            }
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    continue;
+
+                if (!string.Equals(peer.UserName, expectedUserName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                if (missionPeer != null)
+                    return missionPeer;
+            }
+
+            return null;
+        }
+
+        private static void TryLogPrimaryControllablePeerResolution(string source, MissionPeer missionPeer)
+        {
+            NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
+            string logKey =
+                (source ?? "unknown") + "|" +
+                (peer?.Index.ToString() ?? "none") + "|" +
+                (peer?.UserName ?? "none");
+            if (string.Equals(_lastPrimaryControllablePeerResolutionKey, logKey, StringComparison.Ordinal))
+                return;
+
+            _lastPrimaryControllablePeerResolutionKey = logKey;
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: resolved primary controllable peer. " +
+                "Source=" + (source ?? "unknown") +
+                " Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                " PeerIndex=" + (peer?.Index ?? -1));
         }
 
         private static IReadOnlyList<string> ResolveSelectableEntryIdsForStatus(
@@ -14731,8 +14911,16 @@ namespace CoopSpectator.MissionBehaviors
             if (side == BattleSideEnum.None)
                 return Array.Empty<string>();
 
+            bool hasTrackedBattlefieldState = HasTrackedBattlefieldEntryStateForSide(mission, side);
+            List<string> liveSelectableEntryIds = GetLiveSelectableEntryIdsSnapshot(mission, side);
             if (currentPhase < CoopBattlePhase.BattleActive)
             {
+                if (hasTrackedBattlefieldState)
+                {
+                    source = liveSelectableEntryIds.Count > 0 ? "live-prebattle" : "live-empty-prebattle";
+                    return liveSelectableEntryIds;
+                }
+
                 source = "allowed-prebattle";
                 return CoopBattleAuthorityState.GetAllowedEntryIds(side)?
                            .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
@@ -14741,14 +14929,13 @@ namespace CoopSpectator.MissionBehaviors
                        ?? Array.Empty<string>();
             }
 
-            List<string> liveSelectableEntryIds = GetLiveSelectableEntryIdsSnapshot(mission, side);
             if (liveSelectableEntryIds.Count > 0)
             {
                 source = "live-eligible";
                 return liveSelectableEntryIds;
             }
 
-            if (currentPhase >= CoopBattlePhase.BattleActive || HasTrackedBattlefieldEntryStateForSide(mission, side))
+            if (currentPhase >= CoopBattlePhase.BattleActive || hasTrackedBattlefieldState)
             {
                 source = "live-empty";
                 return Array.Empty<string>();
@@ -14957,17 +15144,17 @@ namespace CoopSpectator.MissionBehaviors
             return string.Join(", ", entryIds.Where(entryId => !string.IsNullOrWhiteSpace(entryId)).Take(6));
         }
 
-        private static void TryWriteEntryStatusSnapshot(Mission mission, string source)
+        internal static CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot BuildEntryStatusSnapshotForPeer(
+            Mission mission,
+            MissionPeer missionPeer,
+            string source)
         {
             if (mission == null || !GameNetwork.IsServer)
-                return;
+                return null;
 
-            MissionPeer missionPeer = ResolvePrimaryControllablePeer(mission);
-            CoopBattleSelectionIntentSnapshot selectionIntent = CoopBattleSelectionIntentState.GetCurrent();
-            BattleSideEnum intentSide = selectionIntent.Side;
             CoopBattlePhaseStateSnapshot phaseSnapshot = CoopBattlePhaseRuntimeState.GetCurrent();
             CoopBattlePhase currentPhase = phaseSnapshot?.Phase ?? CoopBattlePhase.None;
-            bool canStartBattle = IsBattleStartReady(mission, out int assignedPeerCount, out int controlledPeerCount) &&
+            bool canStartBattle = IsBattleStartReady(mission, out _, out _) &&
                 currentPhase >= CoopBattlePhase.PreBattleHold &&
                 currentPhase < CoopBattlePhase.BattleActive;
             IReadOnlyList<string> attackerSelectableEntryIds = ResolveSelectableEntryIdsForStatus(
@@ -14980,6 +15167,10 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSideEnum.Defender,
                 currentPhase,
                 out string defenderSelectableSource);
+            CoopBattleAuthorityState.PeerSelectionState selectionState =
+                missionPeer != null
+                    ? CoopBattleAuthorityState.GetSelectionState(missionPeer)
+                    : default;
 
             var snapshot = new CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot
             {
@@ -14998,8 +15189,8 @@ namespace CoopSpectator.MissionBehaviors
                 LifecycleState = "NoPeer",
                 LifecycleSource = source,
                 DeathCount = 0,
-                IntentSide = intentSide == BattleSideEnum.None ? string.Empty : intentSide.ToString(),
-                IntentTroopOrEntryId = selectionIntent.TroopOrEntryId,
+                IntentSide = selectionState.RequestedSide == BattleSideEnum.None ? string.Empty : selectionState.RequestedSide.ToString(),
+                IntentTroopOrEntryId = selectionState.EntryId ?? selectionState.TroopId,
                 AttackerAllowedTroopIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(CoopBattleAuthorityState.GetAllowedTroopIds(BattleSideEnum.Attacker) ?? Array.Empty<string>()),
                 AttackerAllowedEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(CoopBattleAuthorityState.GetAllowedEntryIds(BattleSideEnum.Attacker) ?? Array.Empty<string>()),
                 AttackerSelectableEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(attackerSelectableEntryIds),
@@ -15013,7 +15204,6 @@ namespace CoopSpectator.MissionBehaviors
 
             if (missionPeer != null)
             {
-                CoopBattleAuthorityState.PeerSelectionState selectionState = CoopBattleAuthorityState.GetSelectionState(missionPeer);
                 snapshot.RequestedSide = selectionState.RequestedSide == BattleSideEnum.None ? string.Empty : selectionState.RequestedSide.ToString();
                 snapshot.AssignedSide = selectionState.Side == BattleSideEnum.None ? string.Empty : selectionState.Side.ToString();
                 snapshot.SelectedTroopId = selectionState.TroopId;
@@ -15053,18 +15243,9 @@ namespace CoopSpectator.MissionBehaviors
                     snapshot.LifecycleState = ResolveEntryLifecycleState(mission, missionPeer, snapshot);
             }
 
-            BattleSideEnum statusSide = BattleSideEnum.None;
-            if (missionPeer != null)
-            {
-                if (Enum.TryParse(snapshot.AssignedSide, out BattleSideEnum assignedSide) && assignedSide != BattleSideEnum.None)
-                    statusSide = assignedSide;
-                else if (Enum.TryParse(snapshot.RequestedSide, out BattleSideEnum requestedSide) && requestedSide != BattleSideEnum.None)
-                    statusSide = requestedSide;
-            }
-
-            if (statusSide == BattleSideEnum.None && intentSide != BattleSideEnum.None)
-                statusSide = intentSide;
-
+            BattleSideEnum statusSide = selectionState.Side != BattleSideEnum.None
+                ? selectionState.Side
+                : selectionState.RequestedSide;
             if (statusSide != BattleSideEnum.None)
             {
                 snapshot.AllowedTroopIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(
@@ -15078,6 +15259,51 @@ namespace CoopSpectator.MissionBehaviors
                     out string currentSelectableSource);
                 snapshot.SelectableEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(currentSelectableEntryIds);
                 snapshot.SelectableEntrySource = currentSelectableSource;
+            }
+            else
+            {
+                snapshot.SelectableEntryIds = string.Empty;
+                snapshot.SelectableEntrySource = string.Empty;
+            }
+
+            return snapshot;
+        }
+
+        private static void TryWriteEntryStatusSnapshot(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer)
+                return;
+
+            MissionPeer missionPeer = ResolvePrimaryControllablePeer(mission);
+            CoopBattlePhaseStateSnapshot phaseSnapshot = CoopBattlePhaseRuntimeState.GetCurrent();
+            CoopBattlePhase currentPhase = phaseSnapshot?.Phase ?? CoopBattlePhase.None;
+            bool canStartBattle = IsBattleStartReady(mission, out int assignedPeerCount, out int controlledPeerCount) &&
+                currentPhase >= CoopBattlePhase.PreBattleHold &&
+                currentPhase < CoopBattlePhase.BattleActive;
+            IReadOnlyList<string> attackerSelectableEntryIds = ResolveSelectableEntryIdsForStatus(
+                mission,
+                BattleSideEnum.Attacker,
+                currentPhase,
+                out string attackerSelectableSource);
+            IReadOnlyList<string> defenderSelectableEntryIds = ResolveSelectableEntryIdsForStatus(
+                mission,
+                BattleSideEnum.Defender,
+                currentPhase,
+                out string defenderSelectableSource);
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot =
+                BuildEntryStatusSnapshotForPeer(mission, missionPeer, source);
+            if (snapshot == null)
+                return;
+
+            BattleSideEnum statusSide = BattleSideEnum.None;
+            if (Enum.TryParse(snapshot.AssignedSide, out BattleSideEnum assignedSide) && assignedSide != BattleSideEnum.None)
+                statusSide = assignedSide;
+            else if (Enum.TryParse(snapshot.RequestedSide, out BattleSideEnum requestedSide) && requestedSide != BattleSideEnum.None)
+                statusSide = requestedSide;
+
+            if (statusSide != BattleSideEnum.None)
+            {
+                IReadOnlyList<string> currentSelectableEntryIds = CoopBattleEntryStatusBridgeFile.DeserializeIdList(snapshot.SelectableEntryIds);
                 TryLogSelectableEntryUniverse(
                     mission,
                     currentPhase,
@@ -15086,13 +15312,11 @@ namespace CoopSpectator.MissionBehaviors
                     defenderSelectableSource,
                     defenderSelectableEntryIds,
                     statusSide,
-                    currentSelectableSource,
+                    snapshot.SelectableEntrySource,
                     currentSelectableEntryIds);
             }
             else
             {
-                snapshot.SelectableEntryIds = string.Empty;
-                snapshot.SelectableEntrySource = string.Empty;
                 TryLogSelectableEntryUniverse(
                     mission,
                     currentPhase,
@@ -15112,7 +15336,8 @@ namespace CoopSpectator.MissionBehaviors
                 assignedPeerCount,
                 controlledPeerCount,
                 source);
-            CoopBattleEntryStatusBridgeFile.WriteStatus(snapshot);
+            if (!GameNetwork.IsDedicatedServer)
+                CoopBattleEntryStatusBridgeFile.WriteStatus(snapshot);
         }
 
         private static void TryLogBattleStartReadinessAudit(

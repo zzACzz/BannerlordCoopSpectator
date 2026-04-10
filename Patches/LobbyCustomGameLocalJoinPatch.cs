@@ -2,38 +2,26 @@ using System; // Type, Reflection
 using System.Linq; // FirstOrDefault
 using System.Reflection; // MethodInfo, BindingFlags
 using HarmonyLib; // Harmony, HarmonyMethod
-using TaleWorlds.Core; // InformationMessage
-using TaleWorlds.Library; // InformationManager
 using CoopSpectator.Infrastructure; // ModLogger
 
 namespace CoopSpectator.Patches
 {
     /// <summary>
-    /// Для Join через Custom Server List на одній машині: замінює публічний IP сервера на 127.0.0.1.
-    /// Ціль — LobbyGameStateCustomGameClient.StartMultiplayer (викликається при Join).
-    /// Патч застосовується через reflection, щоб не вимагати референсу на TaleWorlds.MountAndBlade.Lobby при збірці.
+    /// Reflection patch for lobby join path. It no longer rewrites every advertised address
+    /// to localhost; it only consumes the one-shot host self-join redirect armed from the
+    /// native join result message.
     /// </summary>
     public static class LobbyCustomGameLocalJoinPatch
     {
-        /// <summary>Публічний IP, який підставляємо на 127.0.0.1 при тесті на локалці.</summary>
-        private const string PublicIpToReplace = "85.238.97.249";
+        private static bool _isApplied;
 
-        /// <summary>Prefix-метод для Harmony: якщо serverAddress — наш публічний IP, міняємо на 127.0.0.1.</summary>
         public static void Prefix(
             ref string serverAddress,
             ref int port,
             ref int sessionKey,
             ref int peerIndex)
         {
-            if (string.IsNullOrEmpty(serverAddress))
-                return;
-            if (serverAddress != PublicIpToReplace && !serverAddress.StartsWith("85.238.97"))
-                return;
-
-            string was = serverAddress;
-            serverAddress = "127.0.0.1";
-            ModLogger.Info("LobbyCustomGameLocalJoinPatch: " + was + " -> 127.0.0.1");
-            InformationManager.DisplayMessage(new InformationMessage("Localhost patch: " + was + " → 127.0.0.1"));
+            HostSelfJoinRedirectState.TryConsumeLoopbackRewrite(ref serverAddress, port, "LobbyGameStateCustomGameClient.StartMultiplayer");
         }
 
         /// <summary>
@@ -42,6 +30,9 @@ namespace CoopSpectator.Patches
         /// </summary>
         public static void Apply(Harmony harmony)
         {
+            if (_isApplied)
+                return;
+
             try
             {
                 var lobbyAssembly = AppDomain.CurrentDomain.GetAssemblies()
@@ -69,6 +60,7 @@ namespace CoopSpectator.Patches
 
                 var prefix = typeof(LobbyCustomGameLocalJoinPatch).GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
                 harmony.Patch(method, prefix: new HarmonyMethod(prefix));
+                _isApplied = true;
                 ModLogger.Info("LobbyCustomGameLocalJoinPatch: applied to LobbyGameStateCustomGameClient.StartMultiplayer.");
             }
             catch (Exception ex)

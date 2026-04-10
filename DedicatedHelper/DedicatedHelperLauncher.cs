@@ -77,6 +77,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         /// <summary>Процес дедик-сервера, запущеного з моду (для відправки команд через stdin, якщо сервер їх читає).</summary>
         private static Process _dedicatedProcess;
         private static DedicatedServerLaunchSettings _currentLaunchSettings;
+        private static int _currentLaunchPort;
 
         public static DedicatedServerLaunchSettings GetCurrentLaunchSettings()
         {
@@ -84,6 +85,14 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 return normalized;
 
             return DedicatedServerLaunchSettings.CreateDefault(TestListedServerName, DashboardAdminPassword);
+        }
+
+        public static int GetCurrentLaunchPort() => _currentLaunchPort;
+
+        public static bool HasRunningDedicatedProcess()
+        {
+            Process process = _dedicatedProcess;
+            return process != null && !process.HasExited;
         }
 
         /// <summary>Відправити рядок у stdin процесу дедик-сервера (якщо він був запущений з моду і ще працює). Використовується для start_mission / end_mission. Повертає true, якщо рядок записано.</summary>
@@ -450,6 +459,9 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         public static string Start(string tokenOverride, int port, DedicatedServerLaunchSettings settings)
         {
             if (port <= 0) port = DefaultPort;
+            HostSelfJoinRedirectState.ClearPendingSelfJoinRewrite();
+            HostSelfJoinRedirectState.ClearPersistedHostSession();
+            HostSelfJoinRedirectState.ClearPersistedHostedPeer();
             if (!DedicatedServerLaunchSettings.TryValidateAndNormalize(settings, TestListedServerName, DashboardAdminPassword, out DedicatedServerLaunchSettings launchSettings, out string settingsError))
             {
                 UiFeedback.ShowMessageDeferred(settingsError);
@@ -458,6 +470,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             }
 
             _currentLaunchSettings = launchSettings.Clone();
+            _currentLaunchPort = port;
 
             // Явні логи джерела startup state (для діагностики Steam-like / modded flow).
             ModLogger.Info("DedicatedHelper [startup] SteamLikeLaunch = " + SteamLikeLaunch);
@@ -465,6 +478,8 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             ModLogger.Info("DedicatedHelper [startup] AddPortOnly = " + AddPortOnly);
             ModLogger.Info("DedicatedHelper [startup] AddTokenOnly = " + AddTokenOnly);
             ModLogger.Info("DedicatedHelper [startup] AddTokenAndPortOnly = " + AddTokenAndPortOnly);
+            ModLogger.Info("DedicatedHelper [startup] HostingMode = " + launchSettings.HostingMode);
+            ModLogger.Info("DedicatedHelper [startup] AdvertisedHostAddress = " + (string.IsNullOrWhiteSpace(launchSettings.AdvertisedHostAddress) ? "(default)" : launchSettings.AdvertisedHostAddress));
 
             string token = tokenOverride;
             string tokenFolder = null;
@@ -502,7 +517,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 string logOutputDir = Path.Combine(tempDir, "CoopSpectatorDedicated_logs");
                 try { if (!Directory.Exists(logOutputDir)) Directory.CreateDirectory(logOutputDir); } catch (Exception) { }
                 ModLogger.Info("DedicatedHelper [ModdedOfficialNoTokenArg] Using token from official environment/files, not from arg.");
-                string c1Args = NormalizeDedicatedArguments(BuildArgumentsModdedOfficialNoTokenArg(port, logOutputDir, null));
+                string c1Args = NormalizeDedicatedArguments(BuildArgumentsModdedOfficialNoTokenArg(port, logOutputDir, launchSettings, null));
                 ModLogger.Info("DedicatedHelper [LaunchPlan] mode=ModdedOfficialNoTokenArg OurArgs=" + (string.IsNullOrEmpty(c1Args) ? "(empty)" : c1Args));
                 ModLogger.Info("DedicatedHelper [LaunchPlan] ExpectedStarterAddsArgs=true ConfigInjectionMode=None");
                 ModLogger.Info("DedicatedHelper [ModdedOfficialNoTokenArg] exe=" + exePath);
@@ -518,6 +533,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                     LogDedicatedProcessInfo(p, "ModdedOfficialNoTokenArg after Start (Starter)");
                     LogProcessCommandLine(p.Id);
                     TrySwitchToChildProcessIfAny(p.Id);
+                    HostSelfJoinRedirectState.PersistHostSession(launchSettings, port);
                     Process current = _dedicatedProcess;
                     if (current != null && current.Id != p.Id)
                         ModLogger.Info("DedicatedHelper [ModdedOfficialNoTokenArg] Child PID=" + current.Id);
@@ -550,6 +566,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                     LogDedicatedProcessInfo(p, "B1 after Start (Starter)");
                     LogProcessCommandLine(p.Id);
                     TrySwitchToChildProcessIfAny(p.Id);
+                    HostSelfJoinRedirectState.PersistHostSession(launchSettings, port);
                     Process current = _dedicatedProcess;
                     if (current != null && current.Id != p.Id)
                         ModLogger.Info("DedicatedHelper [B1] Child PID=" + current.Id);
@@ -586,6 +603,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                     LogDedicatedProcessInfo(p, "DEBUG Modded after Start (Starter)");
                     LogProcessCommandLine(p.Id);
                     TrySwitchToChildProcessIfAny(p.Id);
+                    HostSelfJoinRedirectState.PersistHostSession(launchSettings, port);
                     Process current = _dedicatedProcess;
                     if (current != null && current.Id != p.Id)
                         ModLogger.Info("DedicatedHelper [DEBUG Modded] Child PID=" + current.Id);
@@ -620,7 +638,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 {
                     LogStartupState(false, "", "", "", "", "default", "manual");
                 }
-                string moddedOfficialArgs = NormalizeDedicatedArguments(BuildArgumentsModdedOfficialNoTokenArg(port, logOutputDir, moddedConfigFile));
+                string moddedOfficialArgs = NormalizeDedicatedArguments(BuildArgumentsModdedOfficialNoTokenArg(port, logOutputDir, launchSettings, moddedConfigFile));
                 string configInjectionMode = UseStartupConfigInModdedOfficialFlow ? "ListedTest" : "None";
                 ModLogger.Info("DedicatedHelper [LaunchPlan] mode=ModdedOfficial OurArgs=" + (string.IsNullOrEmpty(moddedOfficialArgs) ? "(empty)" : moddedOfficialArgs));
                 ModLogger.Info("DedicatedHelper [LaunchPlan] ExpectedStarterAddsArgs=true ConfigInjectionMode=" + configInjectionMode);
@@ -635,6 +653,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                     LogDedicatedProcessInfo(p, "ModdedOfficial after Start (Starter)");
                     LogProcessCommandLine(p.Id);
                     TrySwitchToChildProcessIfAny(p.Id);
+                    HostSelfJoinRedirectState.PersistHostSession(launchSettings, port);
                     Process current = _dedicatedProcess;
                     if (current != null && current.Id != p.Id)
                         ModLogger.Info("DedicatedHelper [ModdedOfficial] Child PID=" + current.Id);
@@ -694,8 +713,8 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 bool nonSteamConfigApplied = !string.IsNullOrEmpty(configFile);
                 string nonSteamConfigPath = nonSteamConfigApplied ? Path.Combine(GetDedicatedServerRootFromExe(exePath) ?? "", "Modules", "Native", configFile ?? "") : "";
                 LogStartupState(nonSteamConfigApplied, nonSteamConfigPath, "", "TeamDeathmatch", launchSettings.ServerName, nonSteamConfigApplied ? "config file" : "default", nonSteamConfigApplied ? "config" : "manual");
-                arguments = BuildArguments(port, token, configFile, exePath);
-                LogLaunchParams(exePath, workingDir ?? "", port, configFile, arguments);
+                arguments = BuildArguments(port, token, configFile, exePath, launchSettings);
+                LogLaunchParams(exePath, workingDir ?? "", port, configFile, arguments, launchSettings);
             }
 
             arguments = NormalizeDedicatedArguments(arguments ?? "");
@@ -725,6 +744,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 LogDedicatedProcessInfo(p, "after Start (Starter)");
                 LogProcessCommandLine(p.Id);
                 TrySwitchToChildProcessIfAny(p.Id);
+                HostSelfJoinRedirectState.PersistHostSession(launchSettings, port);
 
                 bool safeProfile = SteamLikeLaunch && (AddPortOnly || AddConfigFileOnly) && !AddTokenOnly && !AddTokenAndPortOnly;
                 bool isolationTest = SteamLikeLaunch && (AddTokenOnly || AddTokenAndPortOnly);
@@ -753,9 +773,9 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         }
 
         /// <summary>Логує exe path, working dir і рядок аргументів (токен замінено на "(token)") для діагностики "модового" vs Steam запуску.</summary>
-        private static void LogLaunchParams(string exePath, string workingDir, int port, string configFileName, string fullArgsWithToken)
+        private static void LogLaunchParams(string exePath, string workingDir, int port, string configFileName, string fullArgsWithToken, DedicatedServerLaunchSettings settings)
         {
-            string argsForLog = BuildArguments(port, "(token)", configFileName, exePath);
+            string argsForLog = BuildArguments(port, "(token)", configFileName, exePath, settings);
             ModLogger.Info("DedicatedHelper launch: exe=" + exePath + " | workingDir=" + workingDir + " | args=" + argsForLog);
         }
 
@@ -852,13 +872,14 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         }
 
         /// <summary>ТЗ C1/C2: args для ModdedOfficial — тільки те, що ми передаємо Starter. Official tail (_MODULES_*Native*Multiplayer*_MODULES_ /dedicatedcustomserver ... /playerhosteddedicatedserver) НЕ додаємо: Starter сам дописує його при формуванні command line дочірнього процесу. Дубль у Command Args усунуто.</summary>
-        private static string BuildArgumentsModdedOfficialNoTokenArg(int port, string logOutputPath, string configFileName = null)
+        private static string BuildArgumentsModdedOfficialNoTokenArg(int port, string logOutputPath, DedicatedServerLaunchSettings settings, string configFileName = null)
         {
             var args = new System.Collections.Generic.List<string>();
             args.Add("--multihome 0.0.0.0");
             args.Add("--port " + port);
             if (!string.IsNullOrEmpty(configFileName))
                 args.Add("/dedicatedcustomserverconfigfile " + configFileName);
+            AppendCustomServerHostArgument(args, settings);
             args.Add(ExactCampaignSceneModulesArg);
             if (!string.IsNullOrEmpty(logOutputPath))
                 args.Add("/LogOutputPath \"" + logOutputPath.Trim().Replace("\"", "\"\"") + "\"");
@@ -989,7 +1010,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             return string.Join(" ", args);
         }
 
-        private static string BuildArguments(int port, string token, string configFileName, string exePath)
+        private static string BuildArguments(int port, string token, string configFileName, string exePath, DedicatedServerLaunchSettings settings)
         {
             var args = new System.Collections.Generic.List<string>();
             args.Add("--multihome 0.0.0.0");
@@ -998,12 +1019,25 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             args.Add("--port " + port);
             if (!string.IsNullOrEmpty(configFileName))
                 args.Add("/dedicatedcustomserverconfigfile " + configFileName);
+            AppendCustomServerHostArgument(args, settings);
             args.Add(ModulesArg);
             // Для core exe передаємо аргументи, які Starter додає; для Starter не додаємо — він сам їх підставить.
             string exeName = Path.GetFileName(exePath ?? "");
             if (exeName.IndexOf("Starter", StringComparison.OrdinalIgnoreCase) < 0)
                 args.Add("/dedicatedcustomserver " + port + " USER 0 /playerhosteddedicatedserver");
             return string.Join(" ", args);
+        }
+
+        private static void AppendCustomServerHostArgument(System.Collections.Generic.List<string> args, DedicatedServerLaunchSettings settings)
+        {
+            if (args == null || settings == null || !settings.UsesAdvertisedHostOverride())
+                return;
+
+            string advertisedHostAddress = settings.AdvertisedHostAddress?.Trim();
+            if (string.IsNullOrWhiteSpace(advertisedHostAddress))
+                return;
+
+            args.Add("/customserverhost \"" + advertisedHostAddress.Replace("\"", "\"\"") + "\"");
         }
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.DedicatedHelper
@@ -13,6 +14,8 @@ namespace CoopSpectator.DedicatedHelper
         public string ServerPassword { get; set; }
         public string AdminPassword { get; set; }
         public int MaxPlayerCount { get; set; }
+        public DedicatedServerHostingMode HostingMode { get; set; }
+        public string AdvertisedHostAddress { get; set; }
 
         public DedicatedServerLaunchSettings Clone()
         {
@@ -21,7 +24,9 @@ namespace CoopSpectator.DedicatedHelper
                 ServerName = ServerName,
                 ServerPassword = ServerPassword,
                 AdminPassword = AdminPassword,
-                MaxPlayerCount = MaxPlayerCount
+                MaxPlayerCount = MaxPlayerCount,
+                HostingMode = HostingMode,
+                AdvertisedHostAddress = AdvertisedHostAddress
             };
         }
 
@@ -54,7 +59,9 @@ namespace CoopSpectator.DedicatedHelper
                 ServerName = NormalizeSingleLine(defaultServerName),
                 ServerPassword = string.Empty,
                 AdminPassword = NormalizeSingleLine(defaultAdminPassword),
-                MaxPlayerCount = ClampToAllowedPlayerCount(DefaultMaxPlayerCount)
+                MaxPlayerCount = ClampToAllowedPlayerCount(DefaultMaxPlayerCount),
+                HostingMode = DedicatedServerHostingMode.PublicListed,
+                AdvertisedHostAddress = string.Empty
             };
         }
 
@@ -73,6 +80,8 @@ namespace CoopSpectator.DedicatedHelper
                 normalized.ServerPassword = NormalizeSingleLine(source.ServerPassword);
                 normalized.AdminPassword = NormalizeSingleLine(source.AdminPassword);
                 normalized.MaxPlayerCount = ClampToAllowedPlayerCount(source.MaxPlayerCount);
+                normalized.HostingMode = NormalizeHostingMode(source.HostingMode);
+                normalized.AdvertisedHostAddress = NormalizeHostAddress(source.AdvertisedHostAddress);
             }
 
             if (string.IsNullOrWhiteSpace(normalized.ServerName))
@@ -87,8 +96,29 @@ namespace CoopSpectator.DedicatedHelper
                 return false;
             }
 
+            if (normalized.HostingMode == DedicatedServerHostingMode.VpnOverlay)
+            {
+                if (string.IsNullOrWhiteSpace(normalized.AdvertisedHostAddress))
+                {
+                    error = "Dedicated Server settings: VPN/Overlay mode requires Advertised Host Address.";
+                    return false;
+                }
+
+                if (IsLoopbackHostAddress(normalized.AdvertisedHostAddress))
+                {
+                    error = "Dedicated Server settings: Advertised Host Address cannot be localhost in VPN/Overlay mode.";
+                    return false;
+                }
+            }
+
             error = null;
             return true;
+        }
+
+        public bool UsesAdvertisedHostOverride()
+        {
+            return HostingMode == DedicatedServerHostingMode.VpnOverlay &&
+                   !string.IsNullOrWhiteSpace(AdvertisedHostAddress);
         }
 
         private static int GetOfficialBootstrapPlayerCountLimit()
@@ -104,6 +134,37 @@ namespace CoopSpectator.DedicatedHelper
             }
 
             return OfficialBootstrapPlayerCountLimitFallback;
+        }
+
+        private static DedicatedServerHostingMode NormalizeHostingMode(DedicatedServerHostingMode mode)
+        {
+            return Enum.IsDefined(typeof(DedicatedServerHostingMode), mode)
+                ? mode
+                : DedicatedServerHostingMode.PublicListed;
+        }
+
+        private static string NormalizeHostAddress(string value)
+        {
+            return NormalizeSingleLine(value);
+        }
+
+        private static bool IsLoopbackHostAddress(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            string normalized = value.Trim();
+            if (string.Equals(normalized, "localhost", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "::1", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "[::1]", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (IPAddress.TryParse(normalized, out IPAddress address))
+                return IPAddress.IsLoopback(address);
+
+            return false;
         }
 
         private static string NormalizeSingleLine(string value)

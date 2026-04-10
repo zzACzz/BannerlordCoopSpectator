@@ -135,6 +135,7 @@ namespace CoopSpectator.GameMode
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionAgentPanicHandler"));
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.AgentHumanAILogic"));
             list.Add(new MissionBehaviorDiagnostic());
+            list.Add(new CoopMissionNetworkBridge());
             list.Add(new CoopMissionSpawnLogic());
             return list;
         }
@@ -199,6 +200,7 @@ namespace CoopSpectator.GameMode
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionRecentPlayersComponent"));
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerPreloadHelper"));
             list.Add(new MissionBehaviorDiagnostic());
+            list.Add(new CoopMissionNetworkBridge());
             list.Add(new CoopMissionClientLogic());
             return list;
         }
