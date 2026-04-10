@@ -29,7 +29,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         /// <summary>Пароль адміна для Dashboard (localhost:7210), щоб увійти в Terminal і дослідити API консольних команд.</summary>
         private const string DashboardAdminPassword = "coopforever";
         /// <summary>Пароль для HTTP-логіну в web panel (DedicatedServerCommands / WebPanelAuth).</summary>
-        public static string GetDashboardAdminPassword() => DashboardAdminPassword;
+        public static string GetDashboardAdminPassword() => GetCurrentLaunchSettings().AdminPassword;
         /// <summary>Якщо false — не передаємо конфіг при запуску (як Steam: "Command file is null"), щоб сервер не від'єднувався від Diamond. start_game тоді вводять вручну в консолі сервера.</summary>
         private const bool UseStartupConfig = false;
         /// <summary>Явний список модулів для vanilla-like dedicated launch. Без цього сервер може піднятися без Multiplayer/DedicatedCustomServerHelper і від'єднатися від custom battle server manager.</summary>
@@ -76,6 +76,15 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
 
         /// <summary>Процес дедик-сервера, запущеного з моду (для відправки команд через stdin, якщо сервер їх читає).</summary>
         private static Process _dedicatedProcess;
+        private static DedicatedServerLaunchSettings _currentLaunchSettings;
+
+        public static DedicatedServerLaunchSettings GetCurrentLaunchSettings()
+        {
+            if (DedicatedServerLaunchSettings.TryValidateAndNormalize(_currentLaunchSettings, TestListedServerName, DashboardAdminPassword, out DedicatedServerLaunchSettings normalized, out string _))
+                return normalized;
+
+            return DedicatedServerLaunchSettings.CreateDefault(TestListedServerName, DashboardAdminPassword);
+        }
 
         /// <summary>Відправити рядок у stdin процесу дедик-сервера (якщо він був запущений з моду і ще працює). Використовується для start_mission / end_mission. Повертає true, якщо рядок записано.</summary>
         public static bool TrySendConsoleLine(string line)
@@ -336,8 +345,25 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             catch { return null; }
         }
 
+        private static string BuildStartupConfigContent(DedicatedServerLaunchSettings settings, string gameTypeId, string mapId, bool includeMapLine, bool includeAddMapLine)
+        {
+            var lines = new System.Collections.Generic.List<string>();
+            lines.Add("AdminPassword " + settings.AdminPassword);
+            lines.Add("ServerName " + settings.ServerName);
+            if (!string.IsNullOrWhiteSpace(settings.ServerPassword))
+                lines.Add("GamePassword " + settings.ServerPassword);
+            lines.Add("MaxNumberOfPlayers " + settings.MaxPlayerCount);
+            lines.Add("GameType " + gameTypeId);
+            if (includeMapLine && !string.IsNullOrWhiteSpace(mapId))
+                lines.Add("Map " + mapId);
+            if (includeAddMapLine && !string.IsNullOrWhiteSpace(mapId))
+                lines.Add("add_map_to_usable_maps " + mapId + " " + gameTypeId);
+            lines.Add("start_game");
+            return string.Join(Environment.NewLine, lines.ToArray()) + Environment.NewLine;
+        }
+
         /// <summary>Записує стартовий конфіг (start_game, ServerName) у Dedicated Server Modules\Native. Повертає ім'я файлу для /dedicatedcustomserverconfigfile або null.</summary>
-        private static string TryWriteStartupConfig(string exePath)
+        private static string TryWriteStartupConfig(string exePath, DedicatedServerLaunchSettings settings)
         {
             string root = GetDedicatedServerRootFromExe(exePath);
             if (string.IsNullOrEmpty(root)) return null;
@@ -353,12 +379,14 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 // він не підтримується → "Cannot find game type: TdmClone".
                 // Тому тут завжди ставимо валідний офіційний режим, наприклад TeamDeathmatch.
                 string gameTypeId = "TeamDeathmatch";
-                string content = "AdminPassword " + DashboardAdminPassword + Environment.NewLine
-                    + "ServerName Coop Spectator" + Environment.NewLine
-                    + "GameType " + gameTypeId + Environment.NewLine
-                    + "start_game" + Environment.NewLine;
+                string content = BuildStartupConfigContent(settings, gameTypeId, null, includeMapLine: false, includeAddMapLine: false);
                 File.WriteAllText(configPath, content);
-                ModLogger.Info("DedicatedHelper: wrote startup config to " + configPath + " [config GameTypeId=" + gameTypeId + "]");
+                ModLogger.Info(
+                    "DedicatedHelper: wrote startup config to " + configPath +
+                    " [config GameTypeId=" + gameTypeId +
+                    " serverName=" + settings.ServerName +
+                    " serverPasswordSet=" + (!string.IsNullOrWhiteSpace(settings.ServerPassword)) +
+                    " maxPlayers=" + settings.MaxPlayerCount + "]");
                 return StartupConfigFileName;
             }
             catch (Exception ex)
@@ -368,8 +396,8 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             }
         }
 
-        /// <summary>Записує стартовий конфіг для контрольного тесту listed flow: scene=mp_tdm_map_001, ServerName=ZZZ_COOP_TEST_7210, AdminPassword=coopforever, явний Map + add_map_to_usable_maps + start_game. UseTdmCloneForListedTest=true → GameType TdmClone (для Етапу 3.3 з нашими mission behaviors). Файл ds_config_coop_listed_test.txt у Modules\Native.</summary>
-        private static string TryWriteStartupConfigForListedTest(string exePath)
+        /// <summary>Записує стартовий конфіг для listed flow: явний Map + add_map_to_usable_maps + start_game. UseTdmCloneForListedTest=true → GameType TdmClone.</summary>
+        private static string TryWriteStartupConfigForListedTest(string exePath, DedicatedServerLaunchSettings settings)
         {
             string root = GetDedicatedServerRootFromExe(exePath);
             if (string.IsNullOrEmpty(root)) return null;
@@ -380,14 +408,15 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             try
             {
                 string gameTypeId = UseTdmCloneForListedTest ? CoopGameModeIds.TdmClone : "TeamDeathmatch";
-                string content = "AdminPassword " + DashboardAdminPassword + Environment.NewLine
-                    + "ServerName " + TestListedServerName + Environment.NewLine
-                    + "GameType " + gameTypeId + Environment.NewLine
-                    + "Map " + TestListedScene + Environment.NewLine
-                    + "add_map_to_usable_maps " + TestListedScene + " " + gameTypeId + Environment.NewLine
-                    + "start_game" + Environment.NewLine;
+                string content = BuildStartupConfigContent(settings, gameTypeId, TestListedScene, includeMapLine: true, includeAddMapLine: true);
                 File.WriteAllText(configPath, content);
-                ModLogger.Info("DedicatedHelper: wrote listed-test startup config to " + configPath + " [scene=" + TestListedScene + " serverName=" + TestListedServerName + " gameType=" + gameTypeId + " mapLine=true]");
+                ModLogger.Info(
+                    "DedicatedHelper: wrote listed-test startup config to " + configPath +
+                    " [scene=" + TestListedScene +
+                    " serverName=" + settings.ServerName +
+                    " serverPasswordSet=" + (!string.IsNullOrWhiteSpace(settings.ServerPassword)) +
+                    " maxPlayers=" + settings.MaxPlayerCount +
+                    " gameType=" + gameTypeId + " mapLine=true]");
                 return testConfigFileName;
             }
             catch (Exception ex)
@@ -415,7 +444,20 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         /// </summary>
         public static string Start(string tokenOverride, int port)
         {
+            return Start(tokenOverride, port, null);
+        }
+
+        public static string Start(string tokenOverride, int port, DedicatedServerLaunchSettings settings)
+        {
             if (port <= 0) port = DefaultPort;
+            if (!DedicatedServerLaunchSettings.TryValidateAndNormalize(settings, TestListedServerName, DashboardAdminPassword, out DedicatedServerLaunchSettings launchSettings, out string settingsError))
+            {
+                UiFeedback.ShowMessageDeferred(settingsError);
+                ModLogger.Info("DedicatedHelper: invalid launch settings. " + settingsError);
+                return "ERROR: " + settingsError;
+            }
+
+            _currentLaunchSettings = launchSettings.Clone();
 
             // Явні логи джерела startup state (для діагностики Steam-like / modded flow).
             ModLogger.Info("DedicatedHelper [startup] SteamLikeLaunch = " + SteamLikeLaunch);
@@ -565,14 +607,14 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 string moddedConfigFile = null;
                 if (UseStartupConfigInModdedOfficialFlow)
                 {
-                    moddedConfigFile = TryWriteStartupConfigForListedTest(exePath);
+                    moddedConfigFile = TryWriteStartupConfigForListedTest(exePath, launchSettings);
                     string moddedConfigPath = "";
                     if (!string.IsNullOrEmpty(moddedConfigFile))
                     {
                         string root = GetDedicatedServerRootFromExe(exePath);
                         moddedConfigPath = !string.IsNullOrEmpty(root) ? Path.Combine(root, "Modules", "Native", moddedConfigFile) : moddedConfigFile;
                     }
-                    LogStartupState(!string.IsNullOrEmpty(moddedConfigFile), moddedConfigPath, TestListedScene, UseTdmCloneForListedTest ? "TdmClone" : "TeamDeathmatch", TestListedServerName, "config file (listed-test)", string.IsNullOrEmpty(moddedConfigFile) ? "none" : "config");
+                    LogStartupState(!string.IsNullOrEmpty(moddedConfigFile), moddedConfigPath, TestListedScene, UseTdmCloneForListedTest ? "TdmClone" : "TeamDeathmatch", launchSettings.ServerName, "config file (listed-test)", string.IsNullOrEmpty(moddedConfigFile) ? "none" : "config");
                 }
                 else
                 {
@@ -631,12 +673,12 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                     if (AddPortOnly) safeArgs.Add("--port " + port);
                     if (AddConfigFileOnly)
                     {
-                        configFile = TryWriteStartupConfig(exePath);
+                        configFile = TryWriteStartupConfig(exePath, launchSettings);
                         if (!string.IsNullOrEmpty(configFile)) safeArgs.Add("/dedicatedcustomserverconfigfile " + configFile);
                     }
                     bool steamConfigApplied = AddConfigFileOnly && !string.IsNullOrEmpty(configFile);
                     string steamConfigPath = steamConfigApplied ? Path.Combine(GetDedicatedServerRootFromExe(exePath) ?? "", "Modules", "Native", configFile ?? "") : "";
-                    LogStartupState(steamConfigApplied, steamConfigPath, "", "TeamDeathmatch", "Coop Spectator", steamConfigApplied ? "config file" : "default", steamConfigApplied ? "config" : "manual");
+                    LogStartupState(steamConfigApplied, steamConfigPath, "", "TeamDeathmatch", launchSettings.ServerName, steamConfigApplied ? "config file" : "default", steamConfigApplied ? "config" : "manual");
                     if (DebugTryAddCoopSpectatorDedicatedToModules)
                     {
                         safeArgs.Add("_MODULES_*Native*Multiplayer*DedicatedCustomServerHelper*CoopSpectatorDedicated*_MODULES_");
@@ -648,10 +690,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             }
             else
             {
-                configFile = UseStartupConfig ? TryWriteStartupConfig(exePath) : null;
+                configFile = UseStartupConfig ? TryWriteStartupConfig(exePath, launchSettings) : null;
                 bool nonSteamConfigApplied = !string.IsNullOrEmpty(configFile);
                 string nonSteamConfigPath = nonSteamConfigApplied ? Path.Combine(GetDedicatedServerRootFromExe(exePath) ?? "", "Modules", "Native", configFile ?? "") : "";
-                LogStartupState(nonSteamConfigApplied, nonSteamConfigPath, "", "TeamDeathmatch", "Coop Spectator", nonSteamConfigApplied ? "config file" : "default", nonSteamConfigApplied ? "config" : "manual");
+                LogStartupState(nonSteamConfigApplied, nonSteamConfigPath, "", "TeamDeathmatch", launchSettings.ServerName, nonSteamConfigApplied ? "config file" : "default", nonSteamConfigApplied ? "config" : "manual");
                 arguments = BuildArguments(port, token, configFile, exePath);
                 LogLaunchParams(exePath, workingDir ?? "", port, configFile, arguments);
             }

@@ -131,6 +131,14 @@
       <HintPath>$(BannerlordNativeModuleBinDir)\TaleWorlds.MountAndBlade.View.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade.ViewModelCollection" Condition="Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.ViewModelCollection.dll')">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.MountAndBlade.ViewModelCollection.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SandBox.View" Condition="Exists('$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.View.dll')">
+      <HintPath>$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.View.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!-- Campaign API (Campaign, MobileParty, тощо) -->
     <Reference Include="TaleWorlds.CampaignSystem">
       <HintPath>$(BannerlordBinDir)\TaleWorlds.CampaignSystem.dll</HintPath>
@@ -214,6 +222,14 @@
     </Reference>
     <Reference Include="TaleWorlds.MountAndBlade.View" Condition="Exists('..\Modules\Native\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.View.dll')">
       <HintPath>..\Modules\Native\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.View.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade.ViewModelCollection" Condition="Exists('$(BannerlordRootDir)\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.ViewModelCollection.dll')">
+      <HintPath>$(BannerlordRootDir)\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.ViewModelCollection.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SandBox.View" Condition="Exists('$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.View.dll')">
+      <HintPath>$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.View.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <!-- Campaign API (Campaign, MobileParty, тощо) -->

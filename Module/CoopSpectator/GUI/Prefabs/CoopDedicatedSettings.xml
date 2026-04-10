@@ -1,0 +1,151 @@
+<Prefab>
+  <Window>
+    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="BlankWhiteSquare_9" Color="#000000FF" AlphaFactor="0.55">
+      <Children>
+        <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="760" SuggestedHeight="860" HorizontalAlignment="Center" VerticalAlignment="Center">
+          <Children>
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="StdAssets\Popup\canvas" />
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="StdAssets\Popup\canvas_gradient" IsEnabled="false" />
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="frame_9" ExtendLeft="18" ExtendTop="18" ExtendRight="18" ExtendBottom="18" IsEnabled="false" />
+
+            <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="40" MarginRight="40" MarginTop="28" MarginBottom="28" StackLayout.LayoutMethod="VerticalBottomToTop">
+              <Children>
+                <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" Brush="Popup.Title.Text" Text="@TitleText" />
+                <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginTop="10" MarginBottom="14" Brush="Popup.Description.Text" Text="@DescriptionText" />
+
+                <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginBottom="14">
+                  <Children>
+                    <ScrollablePanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginRight="18" AutoHideScrollBars="true" ClipRect="ContentClipRect" InnerPanel="ContentClipRect\ContentPanel" VerticalScrollbar="..\ContentScrollbar">
+                      <Children>
+                        <Widget Id="ContentClipRect" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" ClipContents="true">
+                          <Children>
+                            <ListPanel Id="ContentPanel" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="8" MarginRight="8" MarginTop="6" MarginBottom="6" StackLayout.LayoutMethod="VerticalBottomToTop">
+                              <Children>
+                                <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="16" Brush="Popup.Description.Text" Text="@LaunchNotesText" />
+                                <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="6" Brush="Popup.Description.Text" Text="@TokenStatusText" />
+                                <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="14" Brush="Popup.Description.Text" Text="@TokenHelpText" />
+
+                                <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="Fixed" SuggestedHeight="64" HorizontalAlignment="Center" MarginBottom="18" StackLayout.LayoutMethod="HorizontalLeftToRight">
+                                  <Children>
+                                    <ButtonWidget DoNotPassEventsToChildren="true" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="300" SuggestedHeight="64" Brush="Popup.Cancel.Button" Command.Click="ExecuteOpenTokensFolder">
+                                      <Children>
+                                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" VerticalAlignment="Center" Brush="Popup.Button.Text" Text="Open Tokens Folder" />
+                                      </Children>
+                                    </ButtonWidget>
+
+                                    <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="20" SuggestedHeight="1" />
+
+                                    <ButtonWidget DoNotPassEventsToChildren="true" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="300" SuggestedHeight="64" Brush="Popup.Done.Button" Command.Click="ExecuteRefreshTokenStatus">
+                                      <Children>
+                                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" VerticalAlignment="Center" Brush="Popup.Button.Text" Text="Refresh Token Status" />
+                                      </Children>
+                                    </ButtonWidget>
+                                  </Children>
+                                </ListPanel>
+
+                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="12" StackLayout.LayoutMethod="VerticalBottomToTop">
+                                  <Children>
+                                    <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" Brush="Popup.Description.Text" Text="Server Name" />
+                                    <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="620" SuggestedHeight="70" HorizontalAlignment="Center" MarginTop="6" Sprite="General\CharacterCreation\name_input_area">
+                                      <Children>
+                                        <EditableTextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="12" MarginRight="12" MarginTop="12" MarginBottom="12" Brush="Review.NameInput.Text" RealText="@ServerName" KeyboardInfoText="Server Name" />
+                                      </Children>
+                                    </Widget>
+                                  </Children>
+                                </ListPanel>
+
+                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="12" StackLayout.LayoutMethod="VerticalBottomToTop">
+                                  <Children>
+                                    <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" Brush="Popup.Description.Text" Text="Server Password (optional)" />
+                                    <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="Fixed" SuggestedHeight="70" HorizontalAlignment="Center" MarginTop="6" StackLayout.LayoutMethod="HorizontalLeftToRight">
+                                      <Children>
+                                        <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="480" SuggestedHeight="70" Sprite="General\CharacterCreation\name_input_area">
+                                          <Children>
+                                            <EditableTextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="12" MarginRight="12" MarginTop="12" MarginBottom="12" Brush="Review.NameInput.Text" RealText="@ServerPassword" IsObfuscationEnabled="@IsServerPasswordObfuscated" KeyboardInfoText="Server Password" />
+                                          </Children>
+                                        </Widget>
+                                        <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="12" SuggestedHeight="1" />
+                                        <ButtonWidget DoNotPassEventsToChildren="true" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="128" SuggestedHeight="64" VerticalAlignment="Center" Brush="Popup.Cancel.Button" Command.Click="ExecuteToggleServerPasswordVisibility">
+                                          <Children>
+                                            <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" VerticalAlignment="Center" Brush="Popup.Button.Text" Text="@ServerPasswordToggleText" />
+                                          </Children>
+                                        </ButtonWidget>
+                                      </Children>
+                                    </ListPanel>
+                                  </Children>
+                                </ListPanel>
+
+                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="12" StackLayout.LayoutMethod="VerticalBottomToTop">
+                                  <Children>
+                                    <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" Brush="Popup.Description.Text" Text="Admin Password" />
+                                    <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="Fixed" SuggestedHeight="70" HorizontalAlignment="Center" MarginTop="6" StackLayout.LayoutMethod="HorizontalLeftToRight">
+                                      <Children>
+                                        <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="480" SuggestedHeight="70" Sprite="General\CharacterCreation\name_input_area">
+                                          <Children>
+                                            <EditableTextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="12" MarginRight="12" MarginTop="12" MarginBottom="12" Brush="Review.NameInput.Text" RealText="@AdminPassword" IsObfuscationEnabled="@IsAdminPasswordObfuscated" KeyboardInfoText="Admin Password" />
+                                          </Children>
+                                        </Widget>
+                                        <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="12" SuggestedHeight="1" />
+                                        <ButtonWidget DoNotPassEventsToChildren="true" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="128" SuggestedHeight="64" VerticalAlignment="Center" Brush="Popup.Cancel.Button" Command.Click="ExecuteToggleAdminPasswordVisibility">
+                                          <Children>
+                                            <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" VerticalAlignment="Center" Brush="Popup.Button.Text" Text="@AdminPasswordToggleText" />
+                                          </Children>
+                                        </ButtonWidget>
+                                      </Children>
+                                    </ListPanel>
+                                  </Children>
+                                </ListPanel>
+
+                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="6" StackLayout.LayoutMethod="VerticalBottomToTop">
+                                  <Children>
+                                    <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="6" Brush="Popup.Description.Text" Text="@PlayerCountHintText" />
+                                    <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" Brush="Popup.Description.Text" Text="Max Player Count" />
+                                    <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="620" SuggestedHeight="70" HorizontalAlignment="Center" MarginTop="6" Sprite="General\CharacterCreation\name_input_area">
+                                      <Children>
+                                        <IntegerInputTextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="12" MarginRight="12" MarginTop="12" MarginBottom="12" Brush="Review.NameInput.Text" IntText="@MaxPlayerCount" MinInt="@MinPlayerCount" MaxInt="@MaxAllowedPlayerCount" EnableClamp="true" MaxLength="3" />
+                                      </Children>
+                                    </Widget>
+                                  </Children>
+                                </ListPanel>
+                              </Children>
+                            </ListPanel>
+                          </Children>
+                        </Widget>
+                      </Children>
+                    </ScrollablePanel>
+
+                    <ScrollbarWidget Id="ContentScrollbar" WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="6" HorizontalAlignment="Right" MarginRight="2" MarginTop="8" MarginBottom="8" Brush="MPClassLoadout.Scrollbar.Bed" AlignmentAxis="Vertical" DoNotUpdateHandleSize="true" Handle="ContentScrollbarHandle" MaxValue="100" MinValue="0">
+                      <Children>
+                        <ImageWidget Id="ContentScrollbarHandle" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="10" SuggestedHeight="180" HorizontalAlignment="Left" VerticalAlignment="Top" Brush="MPClassLoadout.Scrollbar.Handle" />
+                      </Children>
+                    </ScrollbarWidget>
+                  </Children>
+                </Widget>
+
+                <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="18" Brush="Popup.Description.Text" Text="@StatusText" />
+
+                <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="Fixed" SuggestedHeight="64" HorizontalAlignment="Center" MarginBottom="6" StackLayout.LayoutMethod="HorizontalLeftToRight">
+                  <Children>
+                    <ButtonWidget DoNotPassEventsToChildren="true" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="250" SuggestedHeight="64" Brush="Popup.Done.Button" Command.Click="ExecuteStartServer" IsEnabled="@CanStartServer">
+                      <Children>
+                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" VerticalAlignment="Center" Brush="Popup.Button.Text" Text="Start Server" />
+                      </Children>
+                    </ButtonWidget>
+
+                    <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="18" SuggestedHeight="1" />
+
+                    <ButtonWidget DoNotPassEventsToChildren="true" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="250" SuggestedHeight="64" Brush="Popup.Cancel.Button" Command.Click="ExecuteDone">
+                      <Children>
+                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" VerticalAlignment="Center" Brush="Popup.Button.Text" Text="Close" />
+                      </Children>
+                    </ButtonWidget>
+                  </Children>
+                </ListPanel>
+              </Children>
+            </ListPanel>
+          </Children>
+        </Widget>
+      </Children>
+    </Widget>
+  </Window>
+</Prefab>
