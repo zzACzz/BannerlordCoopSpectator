@@ -206,6 +206,66 @@ namespace CoopSpectator.Commands // Оголошуємо простір імен
             return DedicatedHelperLauncher.Start(tokenOverride, port);
         }
 
+        /// <summary>
+        /// Overlay/VPN dedicated start path. Usage:
+        /// coop.dedicated_start_vpn [port] &lt;overlay_host_ip_or_dns&gt; [token]
+        /// Example: coop.dedicated_start_vpn 7210 26.70.145.140
+        /// </summary>
+        [CommandLineFunctionality.CommandLineArgumentFunction("dedicated_start_vpn", "coop")]
+        public static string DedicatedStartVpn(List<string> args)
+        {
+            int port = 7210;
+            string advertisedHostAddress = null;
+            string tokenOverride = null;
+
+            if (args == null || args.Count == 0)
+                return "Usage: coop.dedicated_start_vpn [port] <overlay_host_ip_or_dns> [token]";
+
+            int nextArgIndex = 0;
+            if (int.TryParse(args[0], out int parsedPort))
+            {
+                port = parsedPort;
+                nextArgIndex = 1;
+            }
+
+            if (args.Count <= nextArgIndex)
+                return "Usage: coop.dedicated_start_vpn [port] <overlay_host_ip_or_dns> [token]";
+
+            advertisedHostAddress = args[nextArgIndex];
+            if (args.Count > nextArgIndex + 1)
+                tokenOverride = string.Join(" ", args.GetRange(nextArgIndex + 1, args.Count - nextArgIndex - 1)).Trim();
+
+            if (!TryBuildDedicatedLaunchSettings(
+                    DedicatedServerHostingMode.VpnOverlay,
+                    advertisedHostAddress,
+                    out DedicatedServerLaunchSettings settings,
+                    out string settingsError))
+            {
+                return "ERROR: " + settingsError;
+            }
+
+            return DedicatedHelperLauncher.Start(tokenOverride, port, settings);
+        }
+
+        private static bool TryBuildDedicatedLaunchSettings(
+            DedicatedServerHostingMode hostingMode,
+            string advertisedHostAddress,
+            out DedicatedServerLaunchSettings settings,
+            out string error)
+        {
+            DedicatedServerLaunchSettings defaults = DedicatedHelperLauncher.GetCurrentLaunchSettings();
+            DedicatedServerLaunchSettings requested = defaults.Clone();
+            requested.HostingMode = hostingMode;
+            requested.AdvertisedHostAddress = advertisedHostAddress ?? string.Empty;
+
+            return DedicatedServerLaunchSettings.TryValidateAndNormalize(
+                requested,
+                defaults.ServerName,
+                defaults.AdminPassword,
+                out settings,
+                out error);
+        }
+
         /// <summary>Відкриває папку Tokens у провіднику (для копіювання/генерації токена).</summary>
         [CommandLineFunctionality.CommandLineArgumentFunction("dedicated_open_tokens", "coop")]
         public static string DedicatedOpenTokens(List<string> args)

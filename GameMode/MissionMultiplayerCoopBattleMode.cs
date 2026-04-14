@@ -213,7 +213,6 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             }
 
             list.Add(new MissionBehaviorDiagnostic());
-            list.Add(new CoopMissionNetworkBridge());
             list.Add(new CoopMissionSpawnLogic());
             return list;
         }
@@ -321,7 +320,6 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ModLogger.Info("CoopBattle client: retained recent players, preload, match history, and equipment leave logic for battle-map native bootstrap compatibility.");
 
             list.Add(new MissionBehaviorDiagnostic());
-            list.Add(new CoopMissionNetworkBridge());
             if (minimalBattleMapRuntime && !isDedicated)
             {
                 AddOptional(list, TryCreateMissionAgentLabelUiHandler(mission), "MissionAgentLabelUIHandler");

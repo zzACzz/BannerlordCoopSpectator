@@ -16,6 +16,10 @@ Read in this order when opening a new window:
 
 ## Active Runtime Status
 
+- `docs/WORKING_SPAWN_BASELINE_AND_DIFF_PLAN_2026-04-13.md`
+  Current validated source of truth after the 2026-04-13 recovery: latest mainline join/public/VPN layer kept, spawn-core restored to the proven working baseline, and future perk/captain work split into clean diff buckets.
+- `docs/SPAWN_BASELINE_RESET_AND_PERK_REINTRO_PLAN_2026-04-13.md`
+  Control note for the 2026-04-13 rollback: restore known-good spawn first, then reintroduce captain/perk changes in narrow slices.
 - `docs/BATTLE_MAP_STATUS_AND_HANDOFF_2026-03-30.md`
   Current battle-map status, validated fixes, remaining gaps, and next work.
 - `docs/BATTLE_MAP_CLIENT_SPAWN_CRASH_MATRIX_2026-03-30.md`

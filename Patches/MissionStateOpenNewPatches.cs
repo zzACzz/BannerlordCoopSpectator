@@ -168,16 +168,13 @@ namespace CoopSpectator.Patches
             if (GameNetwork.IsServer)
             {
                 list.Add(new MissionMinimalServerDiagnosticMode());
-                list.Add(new CoopMissionNetworkBridge());
                 list.Add(new CoopMissionSpawnLogic());
                 ModLogger.Info("MissionStateOpenNewPatches: appended MissionMinimalServerDiagnosticMode to vanilla TeamDeathmatch.");
-                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionNetworkBridge to vanilla TeamDeathmatch.");
                 ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionSpawnLogic to vanilla TeamDeathmatch.");
             }
             else
             {
                 list.Add(new MissionMinimalClientDiagnosticMode());
-                list.Add(new CoopMissionNetworkBridge());
                 list.Add(new CoopMissionClientLogic());
 #if !COOPSPECTATOR_DEDICATED
                 if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
@@ -187,7 +184,6 @@ namespace CoopSpectator.Patches
                 }
 #endif
                 ModLogger.Info("MissionStateOpenNewPatches: appended MissionMinimalClientDiagnosticMode to vanilla TeamDeathmatch.");
-                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionNetworkBridge to vanilla TeamDeathmatch.");
                 ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionClientLogic to vanilla TeamDeathmatch.");
             }
 
@@ -232,8 +228,6 @@ namespace CoopSpectator.Patches
 #if !COOPSPECTATOR_DEDICATED
             if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
             {
-                list.Add(new CoopMissionNetworkBridge());
-                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionNetworkBridge to wrapped Battle client stack.");
                 list.Add(new CoopSpectator.UI.CoopMissionSelectionView());
                 ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionSelectionView to wrapped Battle client stack.");
             }

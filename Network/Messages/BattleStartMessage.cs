@@ -138,9 +138,13 @@ namespace CoopSpectator.Network.Messages
         public int BaseHitPoints { get; set; }
         public List<string> PerkIds { get; set; } = new List<string>();
         public string CombatItem0Id { get; set; }
+        public int? CombatItem0Amount { get; set; }
         public string CombatItem1Id { get; set; }
+        public int? CombatItem1Amount { get; set; }
         public string CombatItem2Id { get; set; }
+        public int? CombatItem2Amount { get; set; }
         public string CombatItem3Id { get; set; }
+        public int? CombatItem3Amount { get; set; }
         public string CombatHeadId { get; set; }
         public string CombatBodyId { get; set; }
         public string CombatLegId { get; set; }

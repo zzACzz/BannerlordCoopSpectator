@@ -639,7 +639,6 @@ namespace CoopSpectator.UI
 
             string lifecycle = status.LifecycleState ?? string.Empty;
             return
-                string.Equals(lifecycle, "Dead", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(lifecycle, "NoSide", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(lifecycle, "WaitingForSelection", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(lifecycle, "WaitingForSpawn", StringComparison.OrdinalIgnoreCase) ||

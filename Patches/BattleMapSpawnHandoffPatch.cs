@@ -194,17 +194,17 @@ namespace CoopSpectator.Patches
             MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
                 "HandleServerEventSynchronizeAgentEquipment",
                 BindingFlags.Instance | BindingFlags.NonPublic);
-            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
-                nameof(MissionNetworkComponent_HandleServerEventSynchronizeAgentEquipment_Prefix),
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSynchronizeAgentEquipment_Postfix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || prefix == null)
+            if (target == null || postfix == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSynchronizeAgentEquipment not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSynchronizeAgentEquipment.");
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to MissionNetworkComponent.HandleServerEventSynchronizeAgentEquipment.");
         }
 
         private static void PatchMissionNetworkComponentAssignFormationToPlayer(Harmony harmony)
@@ -580,31 +580,38 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static bool MissionNetworkComponent_HandleServerEventSynchronizeAgentEquipment_Prefix(GameNetworkMessage baseMessage)
+        private static void MissionNetworkComponent_HandleServerEventSynchronizeAgentEquipment_Postfix(GameNetworkMessage baseMessage)
         {
             try
             {
                 if (!(baseMessage is SynchronizeAgentSpawnEquipment synchronizeAgentSpawnEquipment))
-                    return true;
+                    return;
 
                 Mission mission = Mission.Current;
                 if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
-                    return true;
+                    return;
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(synchronizeAgentSpawnEquipment.AgentIndex, canBeNull: true);
                 if (agent == null || !agent.IsActive() || agent.IsMount || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
-                    return true;
+                    return;
 
-                bool replaced = CoopMissionSpawnLogic.TryHandleClientExactCampaignSpawnEquipmentSync(
+                bool applied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
+                    mission,
+                    agent,
+                    preferredEntryId: null,
+                    source: "battle-map handoff SynchronizeAgentSpawnEquipment",
+                    includeWeaponsForClientRefresh: true);
+                if (applied)
+                    return;
+
+                CoopMissionSpawnLogic.TryHandleClientExactCampaignSpawnEquipmentSync(
                     mission,
                     agent,
                     "battle-map handoff SynchronizeAgentSpawnEquipment");
-                return !replaced;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: SynchronizeAgentSpawnEquipment exact override failed open: " + ex.Message);
-                return true;
             }
         }
 

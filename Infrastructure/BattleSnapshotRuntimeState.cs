@@ -124,9 +124,13 @@ namespace CoopSpectator.Infrastructure
         public int BaseHitPoints { get; set; }
         public List<string> PerkIds { get; set; } = new List<string>();
         public string CombatItem0Id { get; set; }
+        public int? CombatItem0Amount { get; set; }
         public string CombatItem1Id { get; set; }
+        public int? CombatItem1Amount { get; set; }
         public string CombatItem2Id { get; set; }
+        public int? CombatItem2Amount { get; set; }
         public string CombatItem3Id { get; set; }
+        public int? CombatItem3Amount { get; set; }
         public string CombatHeadId { get; set; }
         public string CombatBodyId { get; set; }
         public string CombatLegId { get; set; }
@@ -231,9 +235,13 @@ namespace CoopSpectator.Infrastructure
         public int BaseHitPoints { get; set; }
         public List<string> PerkIds { get; set; } = new List<string>();
         public string CombatItem0Id { get; set; }
+        public int? CombatItem0Amount { get; set; }
         public string CombatItem1Id { get; set; }
+        public int? CombatItem1Amount { get; set; }
         public string CombatItem2Id { get; set; }
+        public int? CombatItem2Amount { get; set; }
         public string CombatItem3Id { get; set; }
+        public int? CombatItem3Amount { get; set; }
         public string CombatHeadId { get; set; }
         public string CombatBodyId { get; set; }
         public string CombatLegId { get; set; }
@@ -644,9 +652,13 @@ namespace CoopSpectator.Infrastructure
                         BaseHitPoints = entryProjection.BaseHitPoints,
                         PerkIds = entryProjection.PerkIds != null ? new List<string>(entryProjection.PerkIds) : new List<string>(),
                         CombatItem0Id = entryProjection.CombatItem0Id,
+                        CombatItem0Amount = entryProjection.CombatItem0Amount,
                         CombatItem1Id = entryProjection.CombatItem1Id,
+                        CombatItem1Amount = entryProjection.CombatItem1Amount,
                         CombatItem2Id = entryProjection.CombatItem2Id,
+                        CombatItem2Amount = entryProjection.CombatItem2Amount,
                         CombatItem3Id = entryProjection.CombatItem3Id,
+                        CombatItem3Amount = entryProjection.CombatItem3Amount,
                         CombatHeadId = entryProjection.CombatHeadId,
                         CombatBodyId = entryProjection.CombatBodyId,
                         CombatLegId = entryProjection.CombatLegId,
@@ -736,9 +748,13 @@ namespace CoopSpectator.Infrastructure
                 BaseHitPoints = troop.BaseHitPoints,
                 PerkIds = troop.PerkIds != null ? new List<string>(troop.PerkIds) : new List<string>(),
                 CombatItem0Id = troop.CombatItem0Id,
+                CombatItem0Amount = troop.CombatItem0Amount,
                 CombatItem1Id = troop.CombatItem1Id,
+                CombatItem1Amount = troop.CombatItem1Amount,
                 CombatItem2Id = troop.CombatItem2Id,
+                CombatItem2Amount = troop.CombatItem2Amount,
                 CombatItem3Id = troop.CombatItem3Id,
+                CombatItem3Amount = troop.CombatItem3Amount,
                 CombatHeadId = troop.CombatHeadId,
                 CombatBodyId = troop.CombatBodyId,
                 CombatLegId = troop.CombatLegId,

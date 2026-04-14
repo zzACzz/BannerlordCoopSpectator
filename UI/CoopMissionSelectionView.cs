@@ -2,7 +2,6 @@ using System;
 using System.Linq;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
-using CoopSpectator.MissionBehaviors;
 using TaleWorlds.Core;
 using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.InputSystem;
@@ -247,7 +246,7 @@ namespace CoopSpectator.UI
             _selectedSideOverride = side;
             _selectedEntryIdOverride = null;
             _requestedScreen = CoopSelectionScreen.ClassLoadout;
-            CoopBattleNetworkRequestTransport.TrySelectSide(side, "CoopTeamSelectionUI Side");
+            CoopBattleSelectionBridgeFile.WriteSelectSideRequest(side.ToString(), "CoopTeamSelectionUI Side");
             RefreshOverlay(force: true, HasLocalControlledAgent());
         }
 
@@ -260,7 +259,8 @@ namespace CoopSpectator.UI
             _selectedSideOverride = side;
             _selectedEntryIdOverride = entryId;
             _requestedScreen = CoopSelectionScreen.ClassLoadout;
-            CoopBattleNetworkRequestTransport.TrySelectEntry(side, entryId, "CoopClassLoadoutUI Entry");
+            CoopBattleSelectionBridgeFile.WriteSelectSideRequest(side.ToString(), "CoopClassLoadoutUI Side");
+            CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(entryId, "CoopClassLoadoutUI Entry");
             RefreshOverlay(force: true, HasLocalControlledAgent());
         }
 
@@ -300,7 +300,7 @@ namespace CoopSpectator.UI
             _selectedEntryIdOverride = null;
             _overlaySuppressedUntilUtc = DateTime.MinValue;
 
-            if (CoopBattleNetworkRequestTransport.TrySelectSpectator("CoopTeamSelectionUI Spectator"))
+            if (CoopBattleSelectionBridgeFile.WriteSpectatorRequest("CoopTeamSelectionUI Spectator"))
             {
                 InformationManager.DisplayMessage(new InformationMessage("Coop Battle: spectator mode enabled. Press H to reopen selection."));
                 ModLogger.Info("CoopMissionSelectionView: wrote spectator selection request.");
@@ -323,8 +323,9 @@ namespace CoopSpectator.UI
             _selectedEntryIdOverride = snapshot.SelectedEntryId;
             _spectatorOverlayHidden = false;
             _overlaySuppressedUntilUtc = DateTime.UtcNow + LocalSpawnOverlaySuppressionDuration;
-            CoopBattleNetworkRequestTransport.TrySelectEntry(snapshot.EffectiveSide, snapshot.SelectedEntryId, "CoopClassLoadoutUI SpawnEntry");
-            CoopBattleNetworkRequestTransport.TryRequestSpawn("CoopClassLoadoutUI Spawn");
+            CoopBattleSelectionBridgeFile.WriteSelectSideRequest(snapshot.EffectiveSide.ToString(), "CoopClassLoadoutUI SpawnSide");
+            CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(snapshot.SelectedEntryId, "CoopClassLoadoutUI SpawnEntry");
+            CoopBattleSpawnBridgeFile.WriteSpawnNowRequest("CoopClassLoadoutUI Spawn");
             RefreshOverlay(force: true, hasLocalControlledAgent);
         }
 
@@ -458,7 +459,7 @@ namespace CoopSpectator.UI
                 return;
 
             _startBattleHotkeyCooldown -= dt;
-            if (_startBattleHotkeyCooldown > 0f || !hasLocalControlledAgent || !Input.IsKeyPressed(InputKey.G))
+            if (_startBattleHotkeyCooldown > 0f || !hasLocalControlledAgent || !Input.IsKeyPressed(InputKey.H))
                 return;
 
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
@@ -474,11 +475,11 @@ namespace CoopSpectator.UI
                 return;
             }
 
-            if (CoopBattlePhaseBridgeFile.WriteStartBattleRequest("Battle-map client G hotkey via CoopMissionSelectionView"))
+            if (CoopBattlePhaseBridgeFile.WriteStartBattleRequest("Battle-map client H hotkey via CoopMissionSelectionView"))
             {
                 _startBattleHotkeyCooldown = StartBattleHotkeyCooldownSeconds;
                 InformationManager.DisplayMessage(new InformationMessage("Coop Battle: start requested"));
-                ModLogger.Info("CoopMissionSelectionView: wrote start battle request from G hotkey.");
+                ModLogger.Info("CoopMissionSelectionView: wrote start battle request from H hotkey.");
             }
         }
 

@@ -87,7 +87,6 @@ namespace CoopSpectator.MissionBehaviors
             Mission mission = Mission;
             if (mission == null) return;
 
-            TryPersistLocalHostedPeerIdentity();
             ResetSelectionUiBridgeStateForNewMission("CoopMissionClientLogic.AfterStart");
             CoopMissionSpawnLogic.ResetClientMissionRuntimeState(
                 "CoopMissionClientLogic.AfterStart:" + (mission.SceneName ?? "null"));
@@ -136,7 +135,6 @@ namespace CoopSpectator.MissionBehaviors
             Mission mission = Mission;
             if (mission == null) return;
 
-            TryPersistLocalHostedPeerIdentity();
             TryReleaseStaleClientMainAgent(mission);
             TryRestoreClientMainAgentFromMissionPeer(mission);
             CoopMissionSpawnLogic.TryRunClientExactCampaignVisualObserver(mission);
@@ -279,7 +277,7 @@ namespace CoopSpectator.MissionBehaviors
             _timeUntilNextEntryHint = EntryHintIntervalSeconds;
 
             string message = canStartFromBattlePrompt
-                ? "Coop Battle: host can start. Press G."
+                        ? "Coop Battle: host can start. Press H."
                 : "Coop Entry: side=" + side +
                   " unit=" + selectionLabel +
                   selectionOrderText +
@@ -288,7 +286,7 @@ namespace CoopSpectator.MissionBehaviors
                   " spawn=" + spawn +
                   (snapshot.CanRespawn ? " | respawn ready" : string.Empty) +
                   (snapshot.CanStartBattle ? " | host can start" : string.Empty) +
-                  " | keys: Ctrl+1/2 side, Ctrl+Q/E troop, Ctrl+R spawn, G start";
+                    " | keys: Ctrl+1/2 side, Ctrl+Q/E troop, Ctrl+R spawn, H start";
 #if !COOPSPECTATOR_DEDICATED
             UiFeedback.ShowMessageDeferred(message);
 #endif
@@ -365,7 +363,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             string lifecycle = snapshot.LifecycleState ?? string.Empty;
-            if (Input.IsKeyPressed(InputKey.G))
+            if (Input.IsKeyPressed(InputKey.H))
             {
                 bool canStartBattleNow =
                     snapshot.CanStartBattle &&
@@ -376,7 +374,7 @@ namespace CoopSpectator.MissionBehaviors
                     return;
                 }
 
-                if (CoopBattlePhaseBridgeFile.WriteStartBattleRequest("MP client G hotkey"))
+            if (CoopBattlePhaseBridgeFile.WriteStartBattleRequest("MP client H hotkey"))
                     OnOwnEntryHotkeyHandled("Coop Entry: battle start requested");
                 return;
             }
@@ -696,7 +694,7 @@ namespace CoopSpectator.MissionBehaviors
                 "Source: " + lifecycleSource + "\n" +
                 "Spawn: " + spawn + (snapshot.CanRespawn ? " | respawn ready" : string.Empty) + "\n" +
                 "Options: " + selectionOptionsText + "\n" +
-                "Keys: Ctrl+1/2 side | Ctrl+Q/E troop | Ctrl+R spawn | Ctrl+T reset | G start | Ctrl+M menu";
+                "Keys: Ctrl+1/2 side | Ctrl+Q/E troop | Ctrl+R spawn | Ctrl+T reset | H start | Ctrl+M menu";
 #if !COOPSPECTATOR_DEDICATED
             UiFeedback.ShowMessageDeferred(message);
 #endif
@@ -1004,20 +1002,6 @@ namespace CoopSpectator.MissionBehaviors
         {
             Agent mainAgent = Agent.Main;
             return mainAgent != null && mainAgent.MissionPeer != null;
-        }
-
-        private static void TryPersistLocalHostedPeerIdentity()
-        {
-            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
-                return;
-
-            NetworkCommunicator myPeer = GameNetwork.MyPeer;
-            if (myPeer == null || !myPeer.IsConnectionActive || !myPeer.IsSynchronized || string.IsNullOrWhiteSpace(myPeer.UserName))
-                return;
-
-            HostSelfJoinRedirectState.TryPersistJoinedLocalHostPeer(
-                myPeer.UserName,
-                "CoopMissionClientLogic");
         }
 
         private static void TryReleaseStaleClientMainAgent(Mission mission)
@@ -3850,7 +3834,6 @@ namespace CoopSpectator.MissionBehaviors
         private static int _materializedBattleResultOnAgentRemovedCount;
         private static int _materializedBattleResultRemovalDebugLogCount;
         private static string _lastLoggedSelectableEntryUniverseKey;
-        private static string _lastPrimaryControllablePeerResolutionKey = string.Empty;
         private static readonly List<string> _materializedBattleResultOnScoreHitSamples = new List<string>();
         private static readonly List<string> _materializedBattleResultOnAgentRemovedSamples = new List<string>();
         private static readonly List<string> _materializedBattleResultReconcileRemovedSamples = new List<string>();
@@ -3862,11 +3845,16 @@ namespace CoopSpectator.MissionBehaviors
         private static bool _drivenPropertyBaselineMountContext;
         private const int MaxRecordedBattleResultCombatEvents = 16384;
         private const int MaxBattleResultDebugSampleCount = 24;
+        private const int AgentFlagHorseMasterBit = 0x1000000;
+        private const int AgentFlagMountedCrossbowmanBit = 0x2000000;
+        private const int AgentFlagProjectileDeflectionBit = 0x4000000;
 
         private sealed class MaterializedCombatProfileRuntimeState
         {
             public string EntryId { get; set; }
             public string PartyId { get; set; }
+            public string OriginalCharacterId { get; set; }
+            public bool IsHero { get; set; }
             public int AttributeVigor { get; set; }
             public int AttributeControl { get; set; }
             public int AttributeEndurance { get; set; }
@@ -3913,6 +3901,7 @@ namespace CoopSpectator.MissionBehaviors
             public bool CountedPerkAthleticsAdjustment;
             public bool CountedPerkRidingAdjustment;
             public bool CountedPerkMountAdjustment;
+            public bool CountedPerkExactPersonalAdjustment;
             public bool CountedPartyMoraleAdjustment;
             public bool CountedPartyTacticsAdjustment;
             public bool CountedPartyCaptainAdjustment;
@@ -4005,6 +3994,7 @@ namespace CoopSpectator.MissionBehaviors
             public DateTime NotBeforeUtc { get; set; }
             public int RetryCount { get; set; }
             public string Source { get; set; }
+            public bool IncludeWeaponsForRefresh { get; set; }
         }
 
         private static readonly FormationClass[] RestrictableFormationClasses =
@@ -4550,30 +4540,9 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || !GameNetwork.IsServer)
                 return false;
 
-            bool ensuredNetworkBridge = true;
-            if (mission.GetMissionBehavior<CoopMissionNetworkBridge>() == null)
-            {
-                try
-                {
-                    var networkBridge = new CoopMissionNetworkBridge();
-                    mission.AddMissionBehavior(networkBridge);
-                    networkBridge.OnBehaviorInitialize();
-                    networkBridge.AfterStart();
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: dedicated observer attached CoopMissionNetworkBridge mission behavior to active mission. " +
-                        "Mission=" + (mission.SceneName ?? "null") +
-                        " IsNewMission=" + isNewMission + ".");
-                }
-                catch (Exception ex)
-                {
-                    ensuredNetworkBridge = false;
-                    ModLogger.Info("CoopMissionSpawnLogic: dedicated observer failed to attach CoopMissionNetworkBridge mission behavior: " + ex.Message);
-                }
-            }
-
-            bool ensuredSpawnLogic = true;
-            if (mission.GetMissionBehavior<CoopMissionSpawnLogic>() != null)
-                return ensuredNetworkBridge;
+            CoopMissionSpawnLogic existingBehavior = mission.GetMissionBehavior<CoopMissionSpawnLogic>();
+            if (existingBehavior != null)
+                return true;
 
             try
             {
@@ -4585,14 +4554,13 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopMissionSpawnLogic: dedicated observer attached CoopMissionSpawnLogic mission behavior to active mission. " +
                     "Mission=" + (mission.SceneName ?? "null") +
                     " IsNewMission=" + isNewMission + ".");
+                return true;
             }
             catch (Exception ex)
             {
-                ensuredSpawnLogic = false;
                 ModLogger.Info("CoopMissionSpawnLogic: dedicated observer failed to attach mission behavior: " + ex.Message);
+                return false;
             }
-
-            return ensuredNetworkBridge && ensuredSpawnLogic;
         }
 
         private static bool TryInitializeServerMissionRuntimeState(Mission mission, string source, bool forceReinitialize)
@@ -4891,7 +4859,8 @@ namespace CoopSpectator.MissionBehaviors
             string preferredEntryId,
             string source,
             double delaySeconds,
-            bool force = false)
+            bool force = false,
+            bool includeWeaponsForRefresh = false)
         {
             if (mission == null || agent == null || agent.IsMount || !agent.IsActive() || GameNetwork.IsServer)
                 return false;
@@ -4939,7 +4908,8 @@ namespace CoopSpectator.MissionBehaviors
                 CreatedUtc = DateTime.UtcNow,
                 NotBeforeUtc = DateTime.UtcNow.AddSeconds(Math.Max(0.01, delaySeconds)),
                 RetryCount = 0,
-                Source = source ?? "client exact visual queue"
+                Source = source ?? "client exact visual queue",
+                IncludeWeaponsForRefresh = includeWeaponsForRefresh
             };
             return true;
         }
@@ -5082,8 +5052,15 @@ namespace CoopSpectator.MissionBehaviors
                         pendingState.EntryId,
                         pendingState.Source ?? "client delayed exact visual refresh",
                         ExactCampaignSnapshotOverlayMode.ClientVisualOnly,
-                        includeWeaponsForClientRefresh: false))
+                        includeWeaponsForClientRefresh: pendingState.IncludeWeaponsForRefresh))
                 {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: completed pending client exact visual refresh. " +
+                        "AgentIndex=" + agent.Index +
+                        " EntryId=" + (pendingState.EntryId ?? "null") +
+                        " IncludeWeapons=" + pendingState.IncludeWeaponsForRefresh +
+                        " Retries=" + pendingState.RetryCount +
+                        " Source=" + (pendingState.Source ?? "unknown"));
                     completedAgentIndices.Add(agentIndex);
                 }
                 else if (expired)
@@ -5111,7 +5088,8 @@ namespace CoopSpectator.MissionBehaviors
             Mission mission,
             Agent agent,
             string preferredEntryId,
-            string source)
+            string source,
+            bool includeWeaponsForClientRefresh = false)
         {
             if (mission == null || agent == null || agent.IsMount || !agent.IsActive() || GameNetwork.IsServer)
                 return false;
@@ -5128,13 +5106,33 @@ namespace CoopSpectator.MissionBehaviors
             if (string.IsNullOrWhiteSpace(entryId))
                 return false;
 
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (includeWeaponsForClientRefresh && !IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                return false;
+
             _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = entryId;
+            if (agent.IsActive() && agent.Team != null && agent.Team.Side != BattleSideEnum.None)
+            {
+                _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agent.Index);
+                _exactNativeClientVisualOverlayAppliedAgentIndices.Remove(agent.Index);
+                if (TryApplyExactCampaignSnapshotOverlayToNativeAgent(
+                        agent,
+                        entryId,
+                        source ?? "client exact-visual finalize",
+                        ExactCampaignSnapshotOverlayMode.ClientVisualOnly,
+                        includeWeaponsForClientRefresh: includeWeaponsForClientRefresh))
+                {
+                    return true;
+                }
+            }
+
             return TryQueueClientExactCampaignVisualOverlay(
                 mission,
                 agent,
                 entryId,
                 source ?? "client exact-visual finalize",
-                delaySeconds: 0.35);
+                delaySeconds: 0.35,
+                includeWeaponsForRefresh: includeWeaponsForClientRefresh);
         }
 
         public static bool TryHandleClientExactCampaignSpawnEquipmentSync(
@@ -5153,13 +5151,18 @@ namespace CoopSpectator.MissionBehaviors
             if (string.IsNullOrWhiteSpace(entryId))
                 return false;
 
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                return false;
+
             bool queued = TryQueueClientExactCampaignVisualOverlay(
                 mission,
                 agent,
                 entryId,
                 source ?? "client exact equipment sync",
                 delaySeconds: 0.08,
-                force: true);
+                force: true,
+                includeWeaponsForRefresh: true);
             if (!queued)
                 return false;
 
@@ -5597,8 +5600,9 @@ namespace CoopSpectator.MissionBehaviors
             bool runtimeExactCharacter = ExactCampaignRuntimeObjectRegistry.IsRuntimeCharacter(agent.Character as BasicCharacterObject);
             bool preSpawnExactLoadoutInjected = HasExactCampaignPreSpawnLoadoutInjected(agent);
             bool includeWeaponsForOverlayRefresh =
-                overlayMode == ExactCampaignSnapshotOverlayMode.ServerAuthoritative &&
-                !preSpawnExactLoadoutInjected;
+                overlayMode == ExactCampaignSnapshotOverlayMode.ClientVisualOnly
+                    ? includeWeaponsForClientRefresh
+                    : !preSpawnExactLoadoutInjected;
             if (overlayMode == ExactCampaignSnapshotOverlayMode.ClientVisualOnly)
                 TryApplyEntryIdentityToAgent(agent, entryState);
 
@@ -5687,7 +5691,7 @@ namespace CoopSpectator.MissionBehaviors
             string appliedCombatProfile =
                 overlayMode == ExactCampaignSnapshotOverlayMode.ServerAuthoritative
                     ? TryApplyMaterializedCombatProfile(agent, entryState)
-                    : "AppliedCombatProfile=client-visual-only";
+                    : TryApplyClientVisualOnlyCombatProfile(agent, entryState);
             appliedAgentIndices.Add(agent.Index);
 
             if (loggedEntryIds.Add(entryId))
@@ -5710,6 +5714,29 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return true;
+        }
+
+        private static string TryApplyClientVisualOnlyCombatProfile(Agent agent, RosterEntryState entryState)
+        {
+            if (agent == null || entryState == null || !IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                return "AppliedCombatProfile=client-visual-only";
+
+            try
+            {
+                const string prefix = "AppliedCombatProfile=";
+                string summary = TryApplyMaterializedCombatProfile(agent, entryState);
+                if (string.IsNullOrWhiteSpace(summary))
+                    return "AppliedCombatProfile=client-visual-only";
+
+                if (summary.StartsWith(prefix, StringComparison.Ordinal))
+                    return prefix + "client-local/" + summary.Substring(prefix.Length);
+
+                return summary;
+            }
+            catch (Exception ex)
+            {
+                return "AppliedCombatProfile=client-visual-only-failed:" + ex.GetType().Name;
+            }
         }
 
         private static int TryAssignExactCampaignCommanders(Mission mission, string source)
@@ -8509,6 +8536,10 @@ namespace CoopSpectator.MissionBehaviors
                 return "AppliedCombatProfile=(none)";
 
             RegisterMaterializedCombatProfile(agent, entryState);
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            BattlePartyState partyState = null;
+            if (runtimeState?.PartiesById != null && !string.IsNullOrWhiteSpace(entryState.PartyId))
+                runtimeState.PartiesById.TryGetValue(entryState.PartyId, out partyState);
 
             var parts = new List<string>();
             if (entryState.BaseHitPoints > 0)
@@ -8541,9 +8572,221 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
+            if (IsHeroEntryEligibleForExactPersonalPerks(entryState))
+            {
+                if (TryApplyExactCampaignMissionEquipmentPerks(agent, entryState, partyState, out string equipmentSummary))
+                    parts.Add(equipmentSummary);
+                if (TryApplyExactCampaignHeroFlags(agent, entryState, out string flagSummary))
+                    parts.Add(flagSummary);
+            }
+
             return parts.Count == 0
                 ? "AppliedCombatProfile=(none)"
                 : "AppliedCombatProfile=" + string.Join(", ", parts);
+        }
+
+        private static bool TryApplyExactCampaignMissionEquipmentPerks(
+            Agent agent,
+            RosterEntryState entryState,
+            BattlePartyState partyState,
+            out string summary)
+        {
+            summary = null;
+            if (agent == null || entryState == null || !agent.IsHuman || !IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                return false;
+
+            MissionEquipment equipment = agent.Equipment;
+            if (equipment == null)
+                return false;
+
+            IEnumerable<string> personalPerkIds = entryState.PerkIds ?? Enumerable.Empty<string>();
+            IEnumerable<string> partyLeaderPerkIds = partyState?.Modifiers?.PartyLeaderPerkIds ?? Enumerable.Empty<string>();
+            bool isMounted = agent.HasMount || agent.MountAgent != null;
+            var changes = new List<string>();
+
+            for (EquipmentIndex index = EquipmentIndex.Weapon0; index <= EquipmentIndex.Weapon3; index++)
+            {
+                MissionWeapon missionWeapon = equipment[index];
+                ItemObject item = missionWeapon.Item;
+                WeaponComponentData currentUsageItem = missionWeapon.CurrentUsageItem;
+                if (item == null || currentUsageItem == null)
+                    continue;
+
+                if (currentUsageItem.IsConsumable && currentUsageItem.RelevantSkill != null)
+                {
+                    float ammoBonus = 0f;
+                    if (currentUsageItem.RelevantSkill == DefaultSkills.Bow)
+                    {
+                        if (HasPerkId(personalPerkIds, "BowDeepQuivers"))
+                            ammoBonus += 3f;
+                        if (HasPerkId(partyLeaderPerkIds, "BowDeepQuivers"))
+                            ammoBonus += 1f;
+                    }
+                    else if (currentUsageItem.RelevantSkill == DefaultSkills.Crossbow)
+                    {
+                        if (HasPerkId(personalPerkIds, "CrossbowFletcher"))
+                            ammoBonus += 4f;
+                        if (HasPerkId(partyLeaderPerkIds, "CrossbowFletcher"))
+                            ammoBonus += 2f;
+                    }
+                    else if (currentUsageItem.RelevantSkill == DefaultSkills.Throwing)
+                    {
+                        if (HasPerkId(personalPerkIds, "ThrowingWellPrepared"))
+                            ammoBonus += 1f;
+                        if (HasPerkId(personalPerkIds, "ThrowingResourceful"))
+                            ammoBonus += 2f;
+                        if (isMounted && HasPerkId(personalPerkIds, "ThrowingSaddlebags"))
+                            ammoBonus += 2f;
+                        if (HasPerkId(partyLeaderPerkIds, "ThrowingWellPrepared"))
+                            ammoBonus += 1f;
+                    }
+
+                    int currentAmount = missionWeapon.Amount;
+                    int roundedAmmoBonus = Math.Max(0, MathF.Round(ammoBonus));
+                    int? snapshotBaseAmount = GetSnapshotCombatItemBaseAmount(entryState, index);
+                    int targetAmount = snapshotBaseAmount.HasValue && snapshotBaseAmount.Value > 0
+                        ? Math.Max(0, snapshotBaseAmount.Value + roundedAmmoBonus)
+                        : Math.Max(0, currentAmount + roundedAmmoBonus);
+                    if (targetAmount != currentAmount)
+                    {
+                        if (GameNetwork.IsServerOrRecorder)
+                        {
+                            agent.SetWeaponAmountInSlot(index, (short)targetAmount, enforcePrimaryItem: true);
+                        }
+                        else
+                        {
+                            equipment.SetAmountOfSlot(index, (short)targetAmount, true);
+                        }
+                        changes.Add(
+                            snapshotBaseAmount.HasValue && snapshotBaseAmount.Value > 0
+                                ? index + "Ammo=" + currentAmount + "->" + targetAmount + "(base:" + snapshotBaseAmount.Value + ",+" + roundedAmmoBonus + ")"
+                                : index + "Ammo=" + currentAmount + "->" + targetAmount + "(" + (roundedAmmoBonus >= 0 ? "+" : string.Empty) + roundedAmmoBonus + ")");
+                    }
+                }
+                else if (currentUsageItem.IsShield)
+                {
+                    int currentHitPoints = missionWeapon.HitPoints;
+                    float targetHitPointsValue = currentHitPoints;
+                    if (HasPerkId(personalPerkIds, "EngineeringScaffolds"))
+                        targetHitPointsValue *= 1.3f;
+                    int targetHitPoints = Math.Max(1, MathF.Round(targetHitPointsValue));
+                    if (targetHitPoints != currentHitPoints)
+                    {
+                        equipment.SetHitPointsOfSlot(index, (short)targetHitPoints, true);
+                        int delta = targetHitPoints - currentHitPoints;
+                        changes.Add(index + "Shield=" + (delta >= 0 ? "+" : string.Empty) + delta);
+                    }
+                }
+            }
+
+            if (changes.Count == 0)
+                return false;
+
+            try
+            {
+                agent.UpdateWeapons();
+            }
+            catch (Exception ex)
+            {
+                changes.Add("WeaponRefreshFailed=" + ex.GetType().Name);
+            }
+
+            summary = "ExactPerks=" + string.Join("/", changes);
+            return true;
+        }
+
+        private static int? GetSnapshotCombatItemBaseAmount(RosterEntryState entryState, EquipmentIndex index)
+        {
+            if (entryState == null)
+                return null;
+
+            switch (index)
+            {
+                case EquipmentIndex.Weapon0:
+                    return entryState.CombatItem0Amount;
+                case EquipmentIndex.Weapon1:
+                    return entryState.CombatItem1Amount;
+                case EquipmentIndex.Weapon2:
+                    return entryState.CombatItem2Amount;
+                case EquipmentIndex.Weapon3:
+                    return entryState.CombatItem3Amount;
+                default:
+                    return null;
+            }
+        }
+
+        private static bool TryApplyExactCampaignHeroFlags(Agent agent, RosterEntryState entryState, out string summary)
+        {
+            summary = null;
+            if (agent == null || entryState?.PerkIds == null || entryState.PerkIds.Count == 0 || !agent.IsHuman || !IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                return false;
+
+            int desiredFlagBits = 0;
+            if (HasPerkId(entryState.PerkIds, "BowHorseMaster"))
+                desiredFlagBits |= AgentFlagHorseMasterBit;
+            if (HasPerkId(entryState.PerkIds, "CrossbowMountedCrossbowman"))
+                desiredFlagBits |= AgentFlagMountedCrossbowmanBit;
+            if (HasPerkId(entryState.PerkIds, "TwoHandedProjectileDeflection"))
+                desiredFlagBits |= AgentFlagProjectileDeflectionBit;
+
+            if (desiredFlagBits == 0)
+                return false;
+
+            AgentFlag currentFlags = agent.GetAgentFlags();
+            int currentFlagBits = (int)currentFlags;
+            int updatedFlagBits = currentFlagBits | desiredFlagBits;
+            if (updatedFlagBits == currentFlagBits)
+                return false;
+
+            agent.SetAgentFlags((AgentFlag)updatedFlagBits);
+
+            var appliedFlags = new List<string>();
+            if ((desiredFlagBits & AgentFlagHorseMasterBit) != 0 && (currentFlagBits & AgentFlagHorseMasterBit) == 0)
+                appliedFlags.Add("HorseMaster");
+            if ((desiredFlagBits & AgentFlagMountedCrossbowmanBit) != 0 && (currentFlagBits & AgentFlagMountedCrossbowmanBit) == 0)
+                appliedFlags.Add("MountedCrossbowman");
+            if ((desiredFlagBits & AgentFlagProjectileDeflectionBit) != 0 && (currentFlagBits & AgentFlagProjectileDeflectionBit) == 0)
+                appliedFlags.Add("ProjectileDeflection");
+
+            if (appliedFlags.Count == 0)
+                return false;
+
+            summary = "HeroFlags=" + string.Join("/", appliedFlags);
+            return true;
+        }
+
+        private static bool IsHeroEntryEligibleForExactPersonalPerks(RosterEntryState entryState)
+        {
+            return HasEntryExactPersonalPerkHeroIdentity(entryState);
+        }
+
+        private static bool IsHeroProfileEligibleForExactPersonalPerks(MaterializedCombatProfileRuntimeState profile)
+        {
+            return profile != null &&
+                   (profile.IsHero ||
+                   string.Equals(profile.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool HasEntryExactPersonalPerkHeroIdentity(RosterEntryState entryState)
+        {
+            return entryState != null &&
+                   (entryState.IsHero ||
+                    !string.IsNullOrWhiteSpace(entryState.HeroId) ||
+                    string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool HasPerkId(IEnumerable<string> perkIds, string perkId)
+        {
+            if (perkIds == null || string.IsNullOrWhiteSpace(perkId))
+                return false;
+
+            foreach (string candidate in perkIds)
+            {
+                if (string.Equals(candidate, perkId, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
         }
 
         private static void ResetMaterializedCombatProfileRuntimeState()
@@ -8630,6 +8873,8 @@ namespace CoopSpectator.MissionBehaviors
             {
                 EntryId = entryState.EntryId,
                 PartyId = entryState.PartyId,
+                OriginalCharacterId = entryState.OriginalCharacterId,
+                IsHero = HasEntryExactPersonalPerkHeroIdentity(entryState),
                 AttributeVigor = entryState.AttributeVigor,
                 AttributeControl = entryState.AttributeControl,
                 AttributeEndurance = entryState.AttributeEndurance,
@@ -10121,6 +10366,8 @@ namespace CoopSpectator.MissionBehaviors
             int templateRelevantSkill = TryGetCharacterSkillValue(agent.Character, relevantSkill);
             int desiredRelevantSkill = TryGetCombatProfileSkillValue(profile, relevantSkill, templateRelevantSkill);
 
+            bool suppressApproximateHeroRangedBallistics = ShouldSuppressApproximateHeroRangedBallistics(profile, agent, primaryWeapon);
+
             SetDrivenPropertyBaselineContext(profile, agent, isMountContext: false);
             try
             {
@@ -10130,7 +10377,17 @@ namespace CoopSpectator.MissionBehaviors
                     CountMaterializedCombatProfileApply(profile, "weapon-skill", ref profile.CountedWeaponSkillAdjustment);
                 }
 
-                if (TryApplyPrimaryWeaponInaccuracyDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill))
+                if ((suppressApproximateHeroRangedBallistics &&
+                        TryApplyExactHeroPrimaryRangedAccuracyDrivenStats(
+                            agent,
+                            profile,
+                            agentDrivenProperties,
+                            primaryWeapon,
+                            relevantSkill,
+                            templateRelevantSkill,
+                            desiredRelevantSkill)) ||
+                    (!suppressApproximateHeroRangedBallistics &&
+                        TryApplyPrimaryWeaponInaccuracyDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill)))
                 {
                     applied = true;
                     CountMaterializedCombatProfileApply(profile, "weapon-inaccuracy", ref profile.CountedWeaponInaccuracyAdjustment);
@@ -10142,7 +10399,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (TryApplyEnduranceDrivenStats(agent, profile, agentDrivenProperties))
                     applied = true;
 
-                if (TryApplyPerkDrivenStats(agent, profile, agentDrivenProperties))
+                if (TryApplyPerkDrivenStats(agent, profile, agentDrivenProperties, primaryWeapon, relevantSkill))
                     applied = true;
 
                 if (TryApplyPartyModifierDrivenStats(agent, profile, agentDrivenProperties))
@@ -10152,11 +10409,17 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     int templateRiding = TryGetCharacterSkillValue(agent.Character, DefaultSkills.Riding);
                     int desiredRiding = profile.SkillRiding > 0 ? profile.SkillRiding : templateRiding;
-                    if (TryApplyMountedHumanRidingDrivenStats(agent, agentDrivenProperties, templateRiding, desiredRiding))
+                    if (TryApplyMountedHumanRidingDrivenStats(
+                            agent,
+                            agentDrivenProperties,
+                            templateRiding,
+                            desiredRiding,
+                            includeAccuracyAdjustments: !suppressApproximateHeroRangedBallistics))
                     {
                         applied = true;
                         CountMaterializedCombatProfileApply(profile, "riding", ref profile.CountedRidingAttributeAdjustment);
-                        CountMaterializedCombatProfileApply(profile, "mounted-penalty", ref profile.CountedMountedPenaltyAdjustment);
+                        if (!suppressApproximateHeroRangedBallistics)
+                            CountMaterializedCombatProfileApply(profile, "mounted-penalty", ref profile.CountedMountedPenaltyAdjustment);
                     }
                 }
 
@@ -10248,7 +10511,8 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing"))
+            if (AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing") &&
+                !ShouldSuppressApproximateHeroRangedBallistics(profile, agent))
             {
                 if (TryApplyControlDrivenStats(agentDrivenProperties, templateControl, desiredControl))
                 {
@@ -10263,12 +10527,29 @@ namespace CoopSpectator.MissionBehaviors
         private static bool TryApplyPerkDrivenStats(
             Agent agent,
             MaterializedCombatProfileRuntimeState profile,
-            AgentDrivenProperties agentDrivenProperties)
+            AgentDrivenProperties agentDrivenProperties,
+            WeaponComponentData primaryWeapon,
+            SkillObject relevantSkill)
         {
             if (agent == null || profile == null || agentDrivenProperties == null || profile.PerkIds == null || profile.PerkIds.Count == 0)
                 return false;
 
             bool applied = false;
+            bool isMounted = agent.HasMount || agent.MountAgent != null;
+            int adjustedRangedPerkCount = profile.PerkRangedCount;
+
+            if (TryApplyExactPersonalPerkDrivenStats(agent, profile, agentDrivenProperties, primaryWeapon, relevantSkill))
+            {
+                applied = true;
+                CountMaterializedCombatProfileApply(profile, "perk-personal-exact", ref profile.CountedPerkExactPersonalAdjustment);
+
+                if (IsHeroProfileEligibleForExactPersonalPerks(profile))
+                {
+                    adjustedRangedPerkCount = Math.Max(
+                        0,
+                        adjustedRangedPerkCount - CountExactPersonalRangedPerkCoverage(profile, relevantSkill, primaryWeapon, isMounted));
+                }
+            }
 
             if (profile.PerkMeleeCount > 0 && AgentLoadoutContainsRelevantSkill(agent, "OneHanded", "TwoHanded", "Polearm"))
             {
@@ -10279,9 +10560,11 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (profile.PerkRangedCount > 0 && AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing"))
+            if (adjustedRangedPerkCount > 0 &&
+                ShouldApplyApproximateRangedPerkDrivenStats(profile) &&
+                AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing"))
             {
-                if (TryApplyRangedPerkDrivenStats(agentDrivenProperties, profile.PerkRangedCount))
+                if (TryApplyRangedPerkDrivenStats(agentDrivenProperties, adjustedRangedPerkCount))
                 {
                     applied = true;
                     CountMaterializedCombatProfileApply(profile, "perk-ranged", ref profile.CountedPerkRangedAdjustment);
@@ -10307,6 +10590,226 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return applied;
+        }
+
+        private static bool TryApplyExactPersonalPerkDrivenStats(
+            Agent agent,
+            MaterializedCombatProfileRuntimeState profile,
+            AgentDrivenProperties agentDrivenProperties,
+            WeaponComponentData primaryWeapon,
+            SkillObject relevantSkill)
+        {
+            if (agent == null ||
+                profile == null ||
+                agentDrivenProperties == null ||
+                profile.PerkIds == null ||
+                profile.PerkIds.Count == 0 ||
+                !IsHeroProfileEligibleForExactPersonalPerks(profile) ||
+                !agent.IsHuman)
+            {
+                return false;
+            }
+
+            bool applied = false;
+
+            if (HasPerkId(profile.PerkIds, "AthleticsFormFittingArmor"))
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ArmorEncumbrance, 1f, 0.85f);
+
+            // Keep personal ranged driven perks disabled until they are bridged
+            // against the native runtime weapon-state path. The first direct port
+            // caused projectile drift and ammo/runtime divergence despite correct
+            // snapshot transfer.
+            if (IsExactPersonalRangedDrivenPerkSubsetEnabled())
+            {
+                applied |= TryApplyExactPersonalRangedPerkDrivenStats(
+                    agent,
+                    profile,
+                    agentDrivenProperties,
+                    relevantSkill,
+                    primaryWeapon);
+            }
+
+            return applied;
+        }
+
+        private static bool TryApplyExactPersonalRangedPerkDrivenStats(
+            Agent agent,
+            MaterializedCombatProfileRuntimeState profile,
+            AgentDrivenProperties agentDrivenProperties,
+            SkillObject relevantSkill,
+            WeaponComponentData primaryWeapon)
+        {
+            if (agent == null || profile == null || agentDrivenProperties == null)
+                return false;
+
+            string relevantSkillId = GetPrimaryCombatRelevantSkillId(relevantSkill, primaryWeapon);
+            if (!IsExactPersonalRangedRelevantSkillId(relevantSkillId))
+                return false;
+
+            bool isMounted = agent.HasMount || agent.MountAgent != null;
+            bool applied = false;
+
+            if (HasPerkId(profile.PerkIds, "BowNockingPoint"))
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadMovementPenaltyFactor, 1f, 0.5f);
+
+            if (isMounted && HasPerkId(profile.PerkIds, "RidingSagittarius"))
+            {
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponWorstMobileAccuracyPenalty, 1f, 0.85f);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponWorstUnsteadyAccuracyPenalty, 1f, 0.85f);
+            }
+
+            if (string.Equals(relevantSkillId, "Bow", StringComparison.OrdinalIgnoreCase))
+            {
+                if (HasPerkId(profile.PerkIds, "BowBowControl"))
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponWorstMobileAccuracyPenalty, 1f, 0.7f);
+                if (HasPerkId(profile.PerkIds, "BowRapidFire"))
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, 1f, 1.25f);
+                if (HasPerkId(profile.PerkIds, "BowQuickAdjustments"))
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponRotationalAccuracyPenaltyInRadians, 1f, 0.5f);
+                if (HasPerkId(profile.PerkIds, "BowDiscipline"))
+                {
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponUnsteadyBeginTime, 1f, 1.5f);
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponUnsteadyEndTime, 1f, 1.5f);
+                }
+                if (HasPerkId(profile.PerkIds, "BowQuickDraw"))
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, 1f, 1.25f);
+                if (isMounted && HasPerkId(profile.PerkIds, "BowMountedArchery"))
+                {
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponWorstMobileAccuracyPenalty, 1f, 0.7f);
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponWorstUnsteadyAccuracyPenalty, 1f, 0.7f);
+                }
+            }
+            else if (string.Equals(relevantSkillId, "Crossbow", StringComparison.OrdinalIgnoreCase))
+            {
+                if (isMounted && HasPerkId(profile.PerkIds, "CrossbowSteady"))
+                {
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponWorstMobileAccuracyPenalty, 1f, 0.5f);
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponRotationalAccuracyPenaltyInRadians, 1f, 0.5f);
+                }
+                if (HasPerkId(profile.PerkIds, "CrossbowWindWinder"))
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, 1f, 1.25f);
+                if (HasPerkId(profile.PerkIds, "CrossbowDonkeysSwiftness"))
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponWorstMobileAccuracyPenalty, 1f, 0.7f);
+                if (HasPerkId(profile.PerkIds, "CrossbowMarksmen"))
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, 1f, 1.25f);
+            }
+            else if (string.Equals(relevantSkillId, "Throwing", StringComparison.OrdinalIgnoreCase))
+            {
+                if (HasPerkId(profile.PerkIds, "ThrowingQuickDraw"))
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, 1f, 1.2f);
+                if (HasPerkId(profile.PerkIds, "ThrowingPerfectTechnique"))
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MissileSpeedMultiplier, 1f, 1.25f);
+                if (isMounted && HasPerkId(profile.PerkIds, "ThrowingMountedSkirmisher"))
+                {
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponWorstMobileAccuracyPenalty, 1f, 0.8f);
+                    applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponWorstUnsteadyAccuracyPenalty, 1f, 0.8f);
+                }
+            }
+
+            return applied;
+        }
+
+        private static int CountExactPersonalRangedPerkCoverage(
+            MaterializedCombatProfileRuntimeState profile,
+            SkillObject relevantSkill,
+            WeaponComponentData primaryWeapon,
+            bool isMounted)
+        {
+            if (!IsExactPersonalRangedDrivenPerkSubsetEnabled())
+                return 0;
+
+            if (profile?.PerkIds == null || profile.PerkIds.Count == 0)
+                return 0;
+
+            string relevantSkillId = GetPrimaryCombatRelevantSkillId(relevantSkill, primaryWeapon);
+            if (!IsExactPersonalRangedRelevantSkillId(relevantSkillId))
+                return 0;
+
+            int count = 0;
+
+            if (HasPerkId(profile.PerkIds, "BowNockingPoint"))
+                count++;
+
+            if (string.Equals(relevantSkillId, "Bow", StringComparison.OrdinalIgnoreCase))
+            {
+                if (HasPerkId(profile.PerkIds, "BowBowControl"))
+                    count++;
+                if (HasPerkId(profile.PerkIds, "BowRapidFire"))
+                    count++;
+                if (HasPerkId(profile.PerkIds, "BowQuickAdjustments"))
+                    count++;
+                if (HasPerkId(profile.PerkIds, "BowDiscipline"))
+                    count++;
+                if (HasPerkId(profile.PerkIds, "BowQuickDraw"))
+                    count++;
+                if (isMounted && HasPerkId(profile.PerkIds, "BowMountedArchery"))
+                    count++;
+            }
+            else if (string.Equals(relevantSkillId, "Crossbow", StringComparison.OrdinalIgnoreCase))
+            {
+                if (isMounted && HasPerkId(profile.PerkIds, "CrossbowSteady"))
+                    count++;
+                if (HasPerkId(profile.PerkIds, "CrossbowWindWinder"))
+                    count++;
+                if (HasPerkId(profile.PerkIds, "CrossbowDonkeysSwiftness"))
+                    count++;
+                if (HasPerkId(profile.PerkIds, "CrossbowMarksmen"))
+                    count++;
+            }
+            else if (string.Equals(relevantSkillId, "Throwing", StringComparison.OrdinalIgnoreCase))
+            {
+                if (HasPerkId(profile.PerkIds, "ThrowingQuickDraw"))
+                    count++;
+                if (HasPerkId(profile.PerkIds, "ThrowingPerfectTechnique"))
+                    count++;
+                if (isMounted && HasPerkId(profile.PerkIds, "ThrowingMountedSkirmisher"))
+                    count++;
+            }
+
+            return count;
+        }
+
+        private static bool IsExactPersonalRangedDrivenPerkSubsetEnabled()
+        {
+            return false;
+        }
+
+        private static bool ShouldApplyApproximateRangedPerkDrivenStats(MaterializedCombatProfileRuntimeState profile)
+        {
+            // The old count-based ranged approximation mutates generic inaccuracy and
+            // missile properties without the native skill/weapon conditions. For hero
+            // entries this produced visibly wrong bow ballistics. Keep it only for the
+            // non-hero fallback path until ranged perks are ported exact from native.
+            return !IsHeroProfileEligibleForExactPersonalPerks(profile);
+        }
+
+        private static bool ShouldSuppressApproximateHeroRangedBallistics(
+            MaterializedCombatProfileRuntimeState profile,
+            Agent agent,
+            WeaponComponentData primaryWeapon = null)
+        {
+            if (!IsHeroProfileEligibleForExactPersonalPerks(profile) || agent == null)
+                return false;
+
+            SkillObject relevantSkill = primaryWeapon?.RelevantSkill;
+            if (relevantSkill == DefaultSkills.Bow || relevantSkill == DefaultSkills.Crossbow || relevantSkill == DefaultSkills.Throwing)
+                return true;
+
+            return AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing");
+        }
+
+        private static string GetPrimaryCombatRelevantSkillId(SkillObject relevantSkill, WeaponComponentData primaryWeapon)
+        {
+            return relevantSkill?.StringId
+                ?? primaryWeapon?.RelevantSkill?.StringId
+                ?? string.Empty;
+        }
+
+        private static bool IsExactPersonalRangedRelevantSkillId(string relevantSkillId)
+        {
+            return string.Equals(relevantSkillId, "Bow", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(relevantSkillId, "Crossbow", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(relevantSkillId, "Throwing", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool TryApplyPartyModifierDrivenStats(
@@ -10706,7 +11209,8 @@ namespace CoopSpectator.MissionBehaviors
             bool applied = false;
             applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.AIAttackOnDecideChance, 1f, decisionFactor);
 
-            if (AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing"))
+            if (AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing") &&
+                !ShouldSuppressApproximateHeroRangedBallistics(profile, agent))
             {
                 float rangedFactor = ComputePartySkillPositiveFactor(profile.LeaderTacticsSkill, 0.00012f, 0.035f);
                 rangedFactor *= ComputePerkPositiveFactor(commandPerkCount, 0.002f, 0.03f);
@@ -10729,6 +11233,10 @@ namespace CoopSpectator.MissionBehaviors
             MaterializedCombatProfileRuntimeState profile)
         {
             if (agentDrivenProperties == null || profile == null)
+                return false;
+
+            Agent baselineAgent = _drivenPropertyBaselineAgentContext;
+            if (ShouldSuppressApproximateHeroRangedBallistics(profile, baselineAgent))
                 return false;
 
             int scoutPerkCount = profile.ScoutRolePerkCount;
@@ -10764,7 +11272,8 @@ namespace CoopSpectator.MissionBehaviors
                 applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.HandlingMultiplier, 1f, handlingFactor);
             }
 
-            if (AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing"))
+            if (AgentLoadoutContainsRelevantSkill(agent, "Bow", "Crossbow", "Throwing") &&
+                !ShouldSuppressApproximateHeroRangedBallistics(profile, agent))
             {
                 float speedFactor = ComputePerkPositiveFactor(profile.CaptainPerkCount, 0.003f, 0.045f);
                 float accuracyFactor = ComputePerkPenaltyReductionFactor(profile.CaptainPerkCount, 0.005f, 0.08f, 0.88f);
@@ -10862,11 +11371,56 @@ namespace CoopSpectator.MissionBehaviors
             return TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponInaccuracy, baseInaccuracy, desiredInaccuracy);
         }
 
+        private static bool TryApplyExactHeroPrimaryRangedAccuracyDrivenStats(
+            Agent agent,
+            MaterializedCombatProfileRuntimeState profile,
+            AgentDrivenProperties agentDrivenProperties,
+            WeaponComponentData primaryWeapon,
+            SkillObject relevantSkill,
+            int templateRelevantSkill,
+            int desiredRelevantSkill)
+        {
+            if (agent == null ||
+                profile == null ||
+                agentDrivenProperties == null ||
+                primaryWeapon == null ||
+                !IsHeroProfileEligibleForExactPersonalPerks(profile))
+            {
+                return false;
+            }
+
+            string relevantSkillId = GetPrimaryCombatRelevantSkillId(relevantSkill, primaryWeapon);
+            if (!IsExactPersonalRangedRelevantSkillId(relevantSkillId))
+                return false;
+
+            bool applied = false;
+            float baseInaccuracy = ComputeWeaponInaccuracy(primaryWeapon, templateRelevantSkill);
+            float desiredInaccuracy = ComputeWeaponInaccuracy(primaryWeapon, desiredRelevantSkill);
+
+            if (agent.HasMount || agent.MountAgent != null)
+            {
+                int templateRiding = TryGetCharacterSkillValue(agent.Character, DefaultSkills.Riding);
+                int desiredRiding = profile.SkillRiding > 0 ? profile.SkillRiding : templateRiding;
+
+                baseInaccuracy *= ComputeMountedWeaponInaccuracyFactor(templateRiding);
+                desiredInaccuracy *= ComputeSandboxMountedWeaponInaccuracyFactor(desiredRiding);
+            }
+
+            applied |= TryScaleDrivenProperty(
+                agentDrivenProperties,
+                DrivenProperty.WeaponInaccuracy,
+                Math.Max(0.0001f, baseInaccuracy),
+                Math.Max(0.0001f, desiredInaccuracy));
+
+            return applied;
+        }
+
         private static bool TryApplyMountedHumanRidingDrivenStats(
             Agent agent,
             AgentDrivenProperties agentDrivenProperties,
             int templateRiding,
-            int desiredRiding)
+            int desiredRiding,
+            bool includeAccuracyAdjustments = true)
         {
             if (desiredRiding <= 0)
                 return false;
@@ -10883,13 +11437,16 @@ namespace CoopSpectator.MissionBehaviors
             applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, baseMountedSpeedFactor, desiredMountedSpeedFactor);
             applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, baseMountedSpeedFactor, desiredMountedSpeedFactor);
 
-            float baseWaitFactor = ComputeMountedWeaponAccuracyWaitFactor(templateRiding);
-            float desiredWaitFactor = ComputeMountedWeaponAccuracyWaitFactor(desiredRiding);
-            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponBestAccuracyWaitTime, baseWaitFactor, desiredWaitFactor);
+            if (includeAccuracyAdjustments)
+            {
+                float baseWaitFactor = ComputeMountedWeaponAccuracyWaitFactor(templateRiding);
+                float desiredWaitFactor = ComputeMountedWeaponAccuracyWaitFactor(desiredRiding);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponBestAccuracyWaitTime, baseWaitFactor, desiredWaitFactor);
 
-            float baseInaccuracyFactor = ComputeMountedWeaponInaccuracyFactor(templateRiding);
-            float desiredInaccuracyFactor = ComputeMountedWeaponInaccuracyFactor(desiredRiding);
-            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponInaccuracy, baseInaccuracyFactor, desiredInaccuracyFactor);
+                float baseInaccuracyFactor = ComputeMountedWeaponInaccuracyFactor(templateRiding);
+                float desiredInaccuracyFactor = ComputeMountedWeaponInaccuracyFactor(desiredRiding);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.WeaponInaccuracy, baseInaccuracyFactor, desiredInaccuracyFactor);
+            }
 
             return applied;
         }
@@ -10986,6 +11543,12 @@ namespace CoopSpectator.MissionBehaviors
         private static float ComputeMountedWeaponInaccuracyFactor(int ridingSkill)
         {
             float penalty = 15f - ridingSkill * 0.15f;
+            return penalty > 0f ? 1f + penalty : 1f;
+        }
+
+        private static float ComputeSandboxMountedWeaponInaccuracyFactor(int ridingSkill)
+        {
+            float penalty = 5f - ridingSkill * 0.05f;
             return penalty > 0f ? 1f + penalty : 1f;
         }
 
@@ -13646,10 +14209,10 @@ namespace CoopSpectator.MissionBehaviors
                 return string.Empty;
 
             var parts = new List<string>();
-            AddEntryCombatEquipmentSummaryPart(parts, "Item0", entry.CombatItem0Id);
-            AddEntryCombatEquipmentSummaryPart(parts, "Item1", entry.CombatItem1Id);
-            AddEntryCombatEquipmentSummaryPart(parts, "Item2", entry.CombatItem2Id);
-            AddEntryCombatEquipmentSummaryPart(parts, "Item3", entry.CombatItem3Id);
+            AddEntryCombatEquipmentSummaryPart(parts, "Item0", entry.CombatItem0Id, entry.CombatItem0Amount);
+            AddEntryCombatEquipmentSummaryPart(parts, "Item1", entry.CombatItem1Id, entry.CombatItem1Amount);
+            AddEntryCombatEquipmentSummaryPart(parts, "Item2", entry.CombatItem2Id, entry.CombatItem2Amount);
+            AddEntryCombatEquipmentSummaryPart(parts, "Item3", entry.CombatItem3Id, entry.CombatItem3Amount);
             AddEntryCombatEquipmentSummaryPart(parts, "Head", entry.CombatHeadId);
             AddEntryCombatEquipmentSummaryPart(parts, "Body", entry.CombatBodyId);
             AddEntryCombatEquipmentSummaryPart(parts, "Leg", entry.CombatLegId);
@@ -13754,12 +14317,12 @@ namespace CoopSpectator.MissionBehaviors
                 : " " + string.Join(" ", parts);
         }
 
-        private static void AddEntryCombatEquipmentSummaryPart(List<string> parts, string label, string itemId)
+        private static void AddEntryCombatEquipmentSummaryPart(List<string> parts, string label, string itemId, int? itemAmount = null)
         {
             if (parts == null || string.IsNullOrWhiteSpace(itemId))
                 return;
 
-            parts.Add(label + "=" + itemId);
+            parts.Add(label + "=" + itemId + (itemAmount.HasValue ? "x" + itemAmount.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty));
         }
 
         private static IEnumerable<string> BuildAllowedControlTroopCandidates(IEnumerable<string> baseControlTroopIds)
@@ -14306,14 +14869,6 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
-            TryForcePeerRespawnable(mission, missionPeer, source);
-        }
-
-        private static bool TryForcePeerRespawnable(Mission mission, MissionPeer missionPeer, string source)
-        {
-            if (mission == null || missionPeer == null || !GameNetwork.IsServer)
-                return false;
-
             NetworkCommunicator peer = missionPeer.GetNetworkPeer();
             Agent controlledAgent = missionPeer.ControlledAgent;
             bool triggeredVanillaRemoval = false;
@@ -14350,7 +14905,7 @@ namespace CoopSpectator.MissionBehaviors
                     "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
                     " AgentIndex=" + controlledAgent.Index +
                     " Source=" + source);
-                return false;
+                return;
             }
 
             missionPeer.ControlledAgent = null;
@@ -14379,7 +14934,6 @@ namespace CoopSpectator.MissionBehaviors
                 " TriggeredVanillaRemoval=" + triggeredVanillaRemoval +
                 " ReturnedMaterializedAgentToAi=" + returnedMaterializedAgentToAi +
                 " Source=" + source);
-            return true;
         }
 
         private static bool IsMaterializedArmyAgent(Agent agent)
@@ -14646,14 +15200,6 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
-            TryApplySpectatorSelectionToPeer(mission, missionPeer, source);
-        }
-
-        private static bool TryApplySpectatorSelectionToPeer(Mission mission, MissionPeer missionPeer, string source)
-        {
-            if (mission == null || missionPeer == null || !GameNetwork.IsServer)
-                return false;
-
             NetworkCommunicator peer = missionPeer.GetNetworkPeer();
             if (HasActiveControlledAgent(missionPeer))
             {
@@ -14661,7 +15207,7 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopMissionSpawnLogic: spectator selection ignored because peer still controls an active agent. " +
                     "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
                     " Source=" + source);
-                return false;
+                return;
             }
 
             CoopBattleSelectionIntentState.Reset();
@@ -14678,7 +15224,6 @@ namespace CoopSpectator.MissionBehaviors
                 "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
                 " TeamIndex=" + (missionPeer.Team?.TeamIndex ?? -1) +
                 " Source=" + source);
-            return true;
         }
 
         private static void TryApplySelectionIntentToPrimaryPeer(Mission mission, string source)
@@ -14687,8 +15232,45 @@ namespace CoopSpectator.MissionBehaviors
             if (missionPeer == null)
                 return;
 
+            bool peerOccupiesActiveCoopLife = IsPeerOccupyingActiveCoopLife(missionPeer);
+            BattleSideEnum runtimeSide =
+                missionPeer.Team != null && !ReferenceEquals(missionPeer.Team, mission?.SpectatorTeam)
+                    ? missionPeer.Team.Side
+                    : BattleSideEnum.None;
+
             CoopBattleSelectionIntentSnapshot intent = CoopBattleSelectionIntentState.GetCurrent();
-            TryApplySelectionIntentToPeer(mission, missionPeer, intent.Side, intent.TroopOrEntryId, source);
+            bool deferCrossSideSelectionWhileActive =
+                peerOccupiesActiveCoopLife &&
+                intent.Side != BattleSideEnum.None &&
+                runtimeSide != BattleSideEnum.None &&
+                runtimeSide != intent.Side;
+            if (intent.Side != BattleSideEnum.None)
+            {
+                CoopBattleAuthorityState.TryRequestSide(missionPeer, intent.Side, source + " side-intent");
+                if (deferCrossSideSelectionWhileActive)
+                {
+                    CoopBattleSelectionRequestState.Clear(missionPeer, source + " deferred-side-change");
+                    CoopBattleSpawnRequestState.Clear(missionPeer, source + " deferred-side-change");
+                }
+                else if (HasAllowedRosterForSide(intent.Side))
+                    CoopBattleAuthorityState.TryAssignSide(missionPeer, intent.Side, source + " side-intent");
+            }
+
+            if (string.IsNullOrWhiteSpace(intent.TroopOrEntryId) || deferCrossSideSelectionWhileActive)
+                return;
+
+            if (CoopBattleAuthorityState.TrySetSelectedEntryId(missionPeer, intent.TroopOrEntryId, source + " intent entry"))
+            {
+                if (ShouldAutoQueueSelectionFromAuthority(missionPeer))
+                    CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
+                return;
+            }
+
+            if (CoopBattleAuthorityState.TrySetSelectedTroopId(missionPeer, intent.TroopOrEntryId, source + " intent troop"))
+            {
+                if (ShouldAutoQueueSelectionFromAuthority(missionPeer))
+                    CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
+            }
         }
 
         private static void TryApplySpawnIntentToPrimaryPeer(Mission mission, string source)
@@ -14701,145 +15283,30 @@ namespace CoopSpectator.MissionBehaviors
             if (missionPeer == null)
                 return;
 
-            if (TryQueueSpawnIntentForPeer(mission, missionPeer, source + " spawn-intent"))
-                CoopBattleSpawnIntentState.Clear(source + " queued");
-            else if (missionPeer.ControlledAgent != null)
-                CoopBattleSpawnIntentState.Clear(source + " already-controlled");
-        }
-
-        internal static bool TryHandleNetworkSelectionRequest(
-            Mission mission,
-            NetworkCommunicator peer,
-            CoopBattleSelectionRequestKind requestKind,
-            BattleSideEnum requestedSide,
-            string troopOrEntryId,
-            string source)
-        {
-            if (mission == null || !GameNetwork.IsServer || peer == null)
-                return false;
-
-            MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-            if (missionPeer == null)
-                return false;
-
-            switch (requestKind)
-            {
-                case CoopBattleSelectionRequestKind.SelectSide:
-                    return TryApplySelectionIntentToPeer(
-                        mission,
-                        missionPeer,
-                        requestedSide,
-                        null,
-                        source + " select-side");
-                case CoopBattleSelectionRequestKind.SelectEntry:
-                    return TryApplySelectionIntentToPeer(
-                        mission,
-                        missionPeer,
-                        requestedSide,
-                        troopOrEntryId,
-                        source + " select-entry");
-                case CoopBattleSelectionRequestKind.Spectate:
-                    return TryApplySpectatorSelectionToPeer(mission, missionPeer, source + " spectate");
-                case CoopBattleSelectionRequestKind.SpawnNow:
-                    return TryQueueSpawnIntentForPeer(mission, missionPeer, source + " spawn");
-                case CoopBattleSelectionRequestKind.ForceRespawnable:
-                    return TryForcePeerRespawnable(mission, missionPeer, source + " force-respawnable");
-                default:
-                    return false;
-            }
-        }
-
-        private static bool TryApplySelectionIntentToPeer(
-            Mission mission,
-            MissionPeer missionPeer,
-            BattleSideEnum requestedSide,
-            string troopOrEntryId,
-            string source)
-        {
-            if (mission == null || missionPeer == null || !GameNetwork.IsServer)
-                return false;
-
-            bool applied = false;
-            bool peerOccupiesActiveCoopLife = IsPeerOccupyingActiveCoopLife(missionPeer);
-            BattleSideEnum runtimeSide =
-                missionPeer.Team != null && !ReferenceEquals(missionPeer.Team, mission.SpectatorTeam)
-                    ? missionPeer.Team.Side
-                    : BattleSideEnum.None;
-            bool deferCrossSideSelectionWhileActive =
-                peerOccupiesActiveCoopLife &&
-                requestedSide != BattleSideEnum.None &&
-                runtimeSide != BattleSideEnum.None &&
-                runtimeSide != requestedSide;
-            if (requestedSide != BattleSideEnum.None)
-            {
-                applied |= CoopBattleAuthorityState.TryRequestSide(missionPeer, requestedSide, source + " side-intent");
-                if (deferCrossSideSelectionWhileActive)
-                {
-                    CoopBattleSelectionRequestState.Clear(missionPeer, source + " deferred-side-change");
-                    CoopBattleSpawnRequestState.Clear(missionPeer, source + " deferred-side-change");
-                    return applied;
-                }
-
-                if (HasAllowedRosterForSide(requestedSide))
-                    applied |= CoopBattleAuthorityState.TryAssignSide(missionPeer, requestedSide, source + " side-intent");
-            }
-
-            if (string.IsNullOrWhiteSpace(troopOrEntryId) || deferCrossSideSelectionWhileActive)
-                return applied;
-
-            if (CoopBattleAuthorityState.TrySetSelectedEntryId(missionPeer, troopOrEntryId, source + " intent entry"))
-            {
-                if (ShouldAutoQueueSelectionFromAuthority(missionPeer))
-                    CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
-                return true;
-            }
-
-            if (CoopBattleAuthorityState.TrySetSelectedTroopId(missionPeer, troopOrEntryId, source + " intent troop"))
-            {
-                if (ShouldAutoQueueSelectionFromAuthority(missionPeer))
-                    CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
-                return true;
-            }
-
-            return applied;
-        }
-
-        private static bool TryQueueSpawnIntentForPeer(Mission mission, MissionPeer missionPeer, string source)
-        {
-            if (mission == null || missionPeer == null || !GameNetwork.IsServer)
-                return false;
-
             if (missionPeer.ControlledAgent != null)
-                return false;
+            {
+                CoopBattleSpawnIntentState.Clear(source + " already-controlled");
+                return;
+            }
 
-            CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
+            CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " spawn-intent selection-request");
             if (!CoopBattleSelectionRequestState.TryGetRequest(missionPeer, out CoopBattleSelectionRequestState.PeerSelectionRequestState selectionRequest))
-                return false;
+                return;
 
-            if (!CoopBattleSpawnRequestState.TryQueueFromSelectionRequest(selectionRequest, source))
-                return false;
+            if (!CoopBattleSpawnRequestState.TryQueueFromSelectionRequest(selectionRequest, source + " spawn-intent"))
+                return;
 
-            if (!CoopBattleSpawnRequestState.TryGetPendingRequest(missionPeer, out CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest))
-                return false;
-
-            CoopBattleSpawnRuntimeState.MarkPending(pendingRequest);
-            return true;
+            if (CoopBattleSpawnRequestState.TryGetPendingRequest(missionPeer, out CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest))
+            {
+                CoopBattleSpawnRuntimeState.MarkPending(pendingRequest);
+                CoopBattleSpawnIntentState.Clear(source + " queued");
+            }
         }
 
         private static MissionPeer ResolvePrimaryControllablePeer(Mission mission)
         {
             if (mission == null || GameNetwork.NetworkPeers == null)
-            {
-                TryLogPrimaryControllablePeerResolution("none", null);
                 return null;
-            }
-
-            MissionPeer hostedLocalPeer = ResolveHostedLocalPeer();
-            if (hostedLocalPeer != null)
-            {
-                TryLogPrimaryControllablePeerResolution("hosted-local-peer", hostedLocalPeer);
-                return hostedLocalPeer;
-            }
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
@@ -14850,55 +15317,10 @@ namespace CoopSpectator.MissionBehaviors
                 if (missionPeer == null)
                     continue;
 
-                TryLogPrimaryControllablePeerResolution("first-synchronized-peer", missionPeer);
                 return missionPeer;
             }
 
-            TryLogPrimaryControllablePeerResolution("none", null);
             return null;
-        }
-
-        private static MissionPeer ResolveHostedLocalPeer()
-        {
-            if (!HostSelfJoinRedirectState.TryResolvePersistedHostedPeerUserName(out string expectedUserName) ||
-                string.IsNullOrWhiteSpace(expectedUserName) ||
-                GameNetwork.NetworkPeers == null)
-            {
-                return null;
-            }
-
-            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
-            {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
-                    continue;
-
-                if (!string.Equals(peer.UserName, expectedUserName, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                if (missionPeer != null)
-                    return missionPeer;
-            }
-
-            return null;
-        }
-
-        private static void TryLogPrimaryControllablePeerResolution(string source, MissionPeer missionPeer)
-        {
-            NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
-            string logKey =
-                (source ?? "unknown") + "|" +
-                (peer?.Index.ToString() ?? "none") + "|" +
-                (peer?.UserName ?? "none");
-            if (string.Equals(_lastPrimaryControllablePeerResolutionKey, logKey, StringComparison.Ordinal))
-                return;
-
-            _lastPrimaryControllablePeerResolutionKey = logKey;
-            ModLogger.Info(
-                "CoopMissionSpawnLogic: resolved primary controllable peer. " +
-                "Source=" + (source ?? "unknown") +
-                " Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
-                " PeerIndex=" + (peer?.Index ?? -1));
         }
 
         private static IReadOnlyList<string> ResolveSelectableEntryIdsForStatus(
@@ -14911,16 +15333,8 @@ namespace CoopSpectator.MissionBehaviors
             if (side == BattleSideEnum.None)
                 return Array.Empty<string>();
 
-            bool hasTrackedBattlefieldState = HasTrackedBattlefieldEntryStateForSide(mission, side);
-            List<string> liveSelectableEntryIds = GetLiveSelectableEntryIdsSnapshot(mission, side);
             if (currentPhase < CoopBattlePhase.BattleActive)
             {
-                if (hasTrackedBattlefieldState)
-                {
-                    source = liveSelectableEntryIds.Count > 0 ? "live-prebattle" : "live-empty-prebattle";
-                    return liveSelectableEntryIds;
-                }
-
                 source = "allowed-prebattle";
                 return CoopBattleAuthorityState.GetAllowedEntryIds(side)?
                            .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
@@ -14929,13 +15343,14 @@ namespace CoopSpectator.MissionBehaviors
                        ?? Array.Empty<string>();
             }
 
+            List<string> liveSelectableEntryIds = GetLiveSelectableEntryIdsSnapshot(mission, side);
             if (liveSelectableEntryIds.Count > 0)
             {
                 source = "live-eligible";
                 return liveSelectableEntryIds;
             }
 
-            if (currentPhase >= CoopBattlePhase.BattleActive || hasTrackedBattlefieldState)
+            if (currentPhase >= CoopBattlePhase.BattleActive || HasTrackedBattlefieldEntryStateForSide(mission, side))
             {
                 source = "live-empty";
                 return Array.Empty<string>();
@@ -15144,17 +15559,17 @@ namespace CoopSpectator.MissionBehaviors
             return string.Join(", ", entryIds.Where(entryId => !string.IsNullOrWhiteSpace(entryId)).Take(6));
         }
 
-        internal static CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot BuildEntryStatusSnapshotForPeer(
-            Mission mission,
-            MissionPeer missionPeer,
-            string source)
+        private static void TryWriteEntryStatusSnapshot(Mission mission, string source)
         {
             if (mission == null || !GameNetwork.IsServer)
-                return null;
+                return;
 
+            MissionPeer missionPeer = ResolvePrimaryControllablePeer(mission);
+            CoopBattleSelectionIntentSnapshot selectionIntent = CoopBattleSelectionIntentState.GetCurrent();
+            BattleSideEnum intentSide = selectionIntent.Side;
             CoopBattlePhaseStateSnapshot phaseSnapshot = CoopBattlePhaseRuntimeState.GetCurrent();
             CoopBattlePhase currentPhase = phaseSnapshot?.Phase ?? CoopBattlePhase.None;
-            bool canStartBattle = IsBattleStartReady(mission, out _, out _) &&
+            bool canStartBattle = IsBattleStartReady(mission, out int assignedPeerCount, out int controlledPeerCount) &&
                 currentPhase >= CoopBattlePhase.PreBattleHold &&
                 currentPhase < CoopBattlePhase.BattleActive;
             IReadOnlyList<string> attackerSelectableEntryIds = ResolveSelectableEntryIdsForStatus(
@@ -15167,10 +15582,6 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSideEnum.Defender,
                 currentPhase,
                 out string defenderSelectableSource);
-            CoopBattleAuthorityState.PeerSelectionState selectionState =
-                missionPeer != null
-                    ? CoopBattleAuthorityState.GetSelectionState(missionPeer)
-                    : default;
 
             var snapshot = new CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot
             {
@@ -15189,8 +15600,8 @@ namespace CoopSpectator.MissionBehaviors
                 LifecycleState = "NoPeer",
                 LifecycleSource = source,
                 DeathCount = 0,
-                IntentSide = selectionState.RequestedSide == BattleSideEnum.None ? string.Empty : selectionState.RequestedSide.ToString(),
-                IntentTroopOrEntryId = selectionState.EntryId ?? selectionState.TroopId,
+                IntentSide = intentSide == BattleSideEnum.None ? string.Empty : intentSide.ToString(),
+                IntentTroopOrEntryId = selectionIntent.TroopOrEntryId,
                 AttackerAllowedTroopIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(CoopBattleAuthorityState.GetAllowedTroopIds(BattleSideEnum.Attacker) ?? Array.Empty<string>()),
                 AttackerAllowedEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(CoopBattleAuthorityState.GetAllowedEntryIds(BattleSideEnum.Attacker) ?? Array.Empty<string>()),
                 AttackerSelectableEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(attackerSelectableEntryIds),
@@ -15204,6 +15615,7 @@ namespace CoopSpectator.MissionBehaviors
 
             if (missionPeer != null)
             {
+                CoopBattleAuthorityState.PeerSelectionState selectionState = CoopBattleAuthorityState.GetSelectionState(missionPeer);
                 snapshot.RequestedSide = selectionState.RequestedSide == BattleSideEnum.None ? string.Empty : selectionState.RequestedSide.ToString();
                 snapshot.AssignedSide = selectionState.Side == BattleSideEnum.None ? string.Empty : selectionState.Side.ToString();
                 snapshot.SelectedTroopId = selectionState.TroopId;
@@ -15243,9 +15655,18 @@ namespace CoopSpectator.MissionBehaviors
                     snapshot.LifecycleState = ResolveEntryLifecycleState(mission, missionPeer, snapshot);
             }
 
-            BattleSideEnum statusSide = selectionState.Side != BattleSideEnum.None
-                ? selectionState.Side
-                : selectionState.RequestedSide;
+            BattleSideEnum statusSide = BattleSideEnum.None;
+            if (missionPeer != null)
+            {
+                if (Enum.TryParse(snapshot.AssignedSide, out BattleSideEnum assignedSide) && assignedSide != BattleSideEnum.None)
+                    statusSide = assignedSide;
+                else if (Enum.TryParse(snapshot.RequestedSide, out BattleSideEnum requestedSide) && requestedSide != BattleSideEnum.None)
+                    statusSide = requestedSide;
+            }
+
+            if (statusSide == BattleSideEnum.None && intentSide != BattleSideEnum.None)
+                statusSide = intentSide;
+
             if (statusSide != BattleSideEnum.None)
             {
                 snapshot.AllowedTroopIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(
@@ -15259,51 +15680,6 @@ namespace CoopSpectator.MissionBehaviors
                     out string currentSelectableSource);
                 snapshot.SelectableEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(currentSelectableEntryIds);
                 snapshot.SelectableEntrySource = currentSelectableSource;
-            }
-            else
-            {
-                snapshot.SelectableEntryIds = string.Empty;
-                snapshot.SelectableEntrySource = string.Empty;
-            }
-
-            return snapshot;
-        }
-
-        private static void TryWriteEntryStatusSnapshot(Mission mission, string source)
-        {
-            if (mission == null || !GameNetwork.IsServer)
-                return;
-
-            MissionPeer missionPeer = ResolvePrimaryControllablePeer(mission);
-            CoopBattlePhaseStateSnapshot phaseSnapshot = CoopBattlePhaseRuntimeState.GetCurrent();
-            CoopBattlePhase currentPhase = phaseSnapshot?.Phase ?? CoopBattlePhase.None;
-            bool canStartBattle = IsBattleStartReady(mission, out int assignedPeerCount, out int controlledPeerCount) &&
-                currentPhase >= CoopBattlePhase.PreBattleHold &&
-                currentPhase < CoopBattlePhase.BattleActive;
-            IReadOnlyList<string> attackerSelectableEntryIds = ResolveSelectableEntryIdsForStatus(
-                mission,
-                BattleSideEnum.Attacker,
-                currentPhase,
-                out string attackerSelectableSource);
-            IReadOnlyList<string> defenderSelectableEntryIds = ResolveSelectableEntryIdsForStatus(
-                mission,
-                BattleSideEnum.Defender,
-                currentPhase,
-                out string defenderSelectableSource);
-            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot =
-                BuildEntryStatusSnapshotForPeer(mission, missionPeer, source);
-            if (snapshot == null)
-                return;
-
-            BattleSideEnum statusSide = BattleSideEnum.None;
-            if (Enum.TryParse(snapshot.AssignedSide, out BattleSideEnum assignedSide) && assignedSide != BattleSideEnum.None)
-                statusSide = assignedSide;
-            else if (Enum.TryParse(snapshot.RequestedSide, out BattleSideEnum requestedSide) && requestedSide != BattleSideEnum.None)
-                statusSide = requestedSide;
-
-            if (statusSide != BattleSideEnum.None)
-            {
-                IReadOnlyList<string> currentSelectableEntryIds = CoopBattleEntryStatusBridgeFile.DeserializeIdList(snapshot.SelectableEntryIds);
                 TryLogSelectableEntryUniverse(
                     mission,
                     currentPhase,
@@ -15312,11 +15688,13 @@ namespace CoopSpectator.MissionBehaviors
                     defenderSelectableSource,
                     defenderSelectableEntryIds,
                     statusSide,
-                    snapshot.SelectableEntrySource,
+                    currentSelectableSource,
                     currentSelectableEntryIds);
             }
             else
             {
+                snapshot.SelectableEntryIds = string.Empty;
+                snapshot.SelectableEntrySource = string.Empty;
                 TryLogSelectableEntryUniverse(
                     mission,
                     currentPhase,
@@ -15336,8 +15714,7 @@ namespace CoopSpectator.MissionBehaviors
                 assignedPeerCount,
                 controlledPeerCount,
                 source);
-            if (!GameNetwork.IsDedicatedServer)
-                CoopBattleEntryStatusBridgeFile.WriteStatus(snapshot);
+            CoopBattleEntryStatusBridgeFile.WriteStatus(snapshot);
         }
 
         private static void TryLogBattleStartReadinessAudit(

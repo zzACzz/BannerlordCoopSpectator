@@ -4855,9 +4855,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public string Signature { get; set; }
             public int SampledCount { get; set; }
             public string CombatItem0Id { get; set; }
+            public int? CombatItem0Amount { get; set; }
             public string CombatItem1Id { get; set; }
+            public int? CombatItem1Amount { get; set; }
             public string CombatItem2Id { get; set; }
+            public int? CombatItem2Amount { get; set; }
             public string CombatItem3Id { get; set; }
+            public int? CombatItem3Amount { get; set; }
             public string CombatHeadId { get; set; }
             public string CombatBodyId { get; set; }
             public string CombatLegId { get; set; }
@@ -5075,9 +5079,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             var variant = new CombatEquipmentVariantSnapshot
             {
                 CombatItem0Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon0),
+                CombatItem0Amount = TryGetEquipmentSlotItemAmount(equipment, EquipmentIndex.Weapon0),
                 CombatItem1Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon1),
+                CombatItem1Amount = TryGetEquipmentSlotItemAmount(equipment, EquipmentIndex.Weapon1),
                 CombatItem2Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon2),
+                CombatItem2Amount = TryGetEquipmentSlotItemAmount(equipment, EquipmentIndex.Weapon2),
                 CombatItem3Id = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Weapon3),
+                CombatItem3Amount = TryGetEquipmentSlotItemAmount(equipment, EquipmentIndex.Weapon3),
                 CombatHeadId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Head),
                 CombatBodyId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Body),
                 CombatLegId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Leg),
@@ -5090,9 +5098,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             variant.Signature = string.Join("|", new[]
             {
                 variant.CombatItem0Id ?? string.Empty,
+                variant.CombatItem0Amount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
                 variant.CombatItem1Id ?? string.Empty,
+                variant.CombatItem1Amount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
                 variant.CombatItem2Id ?? string.Empty,
+                variant.CombatItem2Amount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
                 variant.CombatItem3Id ?? string.Empty,
+                variant.CombatItem3Amount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
                 variant.CombatHeadId ?? string.Empty,
                 variant.CombatBodyId ?? string.Empty,
                 variant.CombatLegId ?? string.Empty,
@@ -7130,9 +7142,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return;
 
             troop.CombatItem0Id = equipment.CombatItem0Id;
+            troop.CombatItem0Amount = equipment.CombatItem0Amount;
             troop.CombatItem1Id = equipment.CombatItem1Id;
+            troop.CombatItem1Amount = equipment.CombatItem1Amount;
             troop.CombatItem2Id = equipment.CombatItem2Id;
+            troop.CombatItem2Amount = equipment.CombatItem2Amount;
             troop.CombatItem3Id = equipment.CombatItem3Id;
+            troop.CombatItem3Amount = equipment.CombatItem3Amount;
             troop.CombatHeadId = equipment.CombatHeadId;
             troop.CombatBodyId = equipment.CombatBodyId;
             troop.CombatLegId = equipment.CombatLegId;
@@ -7260,6 +7276,78 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return null;
         }
 
+        private static int? TryGetEquipmentSlotItemAmount(object equipment, EquipmentIndex slot)
+        {
+            if (equipment == null)
+                return null;
+
+            try
+            {
+                MethodInfo getEquipmentFromSlot = equipment.GetType().GetMethod(
+                    "GetEquipmentFromSlot",
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(EquipmentIndex) },
+                    null);
+
+                if (getEquipmentFromSlot != null)
+                {
+                    object equipmentElement = getEquipmentFromSlot.Invoke(equipment, new object[] { slot });
+                    int? itemAmount = TryGetEquipmentElementAmount(equipmentElement);
+                    if (itemAmount.HasValue)
+                        return itemAmount;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                MethodInfo getEquipmentElement = equipment.GetType().GetMethod(
+                    "GetEquipmentElement",
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(EquipmentIndex) },
+                    null);
+
+                if (getEquipmentElement != null)
+                {
+                    object equipmentElement = getEquipmentElement.Invoke(equipment, new object[] { slot });
+                    int? itemAmount = TryGetEquipmentElementAmount(equipmentElement);
+                    if (itemAmount.HasValue)
+                        return itemAmount;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                PropertyInfo indexer = equipment.GetType()
+                    .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(property =>
+                    {
+                        ParameterInfo[] parameters = property.GetIndexParameters();
+                        return parameters.Length == 1 && parameters[0].ParameterType == typeof(EquipmentIndex);
+                    });
+
+                if (indexer != null)
+                {
+                    object equipmentElement = indexer.GetValue(equipment, new object[] { slot });
+                    int? itemAmount = TryGetEquipmentElementAmount(equipmentElement);
+                    if (itemAmount.HasValue)
+                        return itemAmount;
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
         private static string TryGetEquipmentElementItemId(object equipmentElement)
         {
             if (equipmentElement == null)
@@ -7269,16 +7357,48 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return TryGetStringId(item);
         }
 
+        private static int? TryGetEquipmentElementAmount(object equipmentElement)
+        {
+            if (equipmentElement == null)
+                return null;
+
+            try
+            {
+                MethodInfo getModifiedStackCountForUsage = equipmentElement.GetType().GetMethod(
+                    "GetModifiedStackCountForUsage",
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(int) },
+                    null);
+
+                if (getModifiedStackCountForUsage != null)
+                {
+                    int amount = Math.Max(0, TryConvertToInt(getModifiedStackCountForUsage.Invoke(equipmentElement, new object[] { 0 })));
+                    if (amount > 0)
+                        return amount;
+                }
+            }
+            catch
+            {
+            }
+
+            int directAmount = Math.Max(0, TryGetIntProperty(equipmentElement, "Amount"));
+            if (directAmount > 0)
+                return directAmount;
+
+            return null;
+        }
+
         private static string FormatCombatEquipmentSummary(TroopStackInfo troop)
         {
             if (troop == null)
                 return string.Empty;
 
             List<string> parts = new List<string>();
-            AddCombatEquipmentSummaryPart(parts, "Item0", troop.CombatItem0Id);
-            AddCombatEquipmentSummaryPart(parts, "Item1", troop.CombatItem1Id);
-            AddCombatEquipmentSummaryPart(parts, "Item2", troop.CombatItem2Id);
-            AddCombatEquipmentSummaryPart(parts, "Item3", troop.CombatItem3Id);
+            AddCombatEquipmentSummaryPart(parts, "Item0", troop.CombatItem0Id, troop.CombatItem0Amount);
+            AddCombatEquipmentSummaryPart(parts, "Item1", troop.CombatItem1Id, troop.CombatItem1Amount);
+            AddCombatEquipmentSummaryPart(parts, "Item2", troop.CombatItem2Id, troop.CombatItem2Amount);
+            AddCombatEquipmentSummaryPart(parts, "Item3", troop.CombatItem3Id, troop.CombatItem3Amount);
             AddCombatEquipmentSummaryPart(parts, "Head", troop.CombatHeadId);
             AddCombatEquipmentSummaryPart(parts, "Body", troop.CombatBodyId);
             AddCombatEquipmentSummaryPart(parts, "Leg", troop.CombatLegId);
@@ -7383,12 +7503,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return " profile=[" + string.Join(" ", parts) + "]";
         }
 
-        private static void AddCombatEquipmentSummaryPart(List<string> parts, string label, string itemId)
+        private static void AddCombatEquipmentSummaryPart(List<string> parts, string label, string itemId, int? itemAmount = null)
         {
             if (parts == null || string.IsNullOrWhiteSpace(itemId))
                 return;
 
-            parts.Add(label + "=" + itemId);
+            parts.Add(label + "=" + itemId + (itemAmount.HasValue ? "x" + itemAmount.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty));
         }
 
         private static bool TryGetCharacterIsRanged(object instance)

@@ -447,6 +447,32 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             ModLogger.Info("DedicatedHelper [startup] start_game sent via = " + (startGameSentVia ?? ""));
         }
 
+        private static void LogJoinContract(DedicatedServerLaunchSettings launchSettings, int port)
+        {
+            if (launchSettings == null)
+                return;
+
+            ModLogger.Info(
+                "DedicatedHelper [join-contract] HostSelfJoin = local-only. " +
+                "The localhost rewrite is armed from the native custom-game join result " +
+                "and only consumed when this machine matches the persisted host session.");
+
+            if (launchSettings.UsesAdvertisedHostOverride())
+            {
+                ModLogger.Info(
+                    "DedicatedHelper [join-contract] RemotePeerJoin = VPN/Overlay. " +
+                    "Peers must use the custom-game address advertised via /customserverhost \"" +
+                    (launchSettings.AdvertisedHostAddress ?? string.Empty) +
+                    "\" on UDP " + port + ".");
+            }
+            else
+            {
+                ModLogger.Info(
+                    "DedicatedHelper [join-contract] RemotePeerJoin = Public/listed. " +
+                    "Peers use the manager-advertised custom-game address on UDP " + port + ".");
+            }
+        }
+
         /// <summary>
         /// Запускає Dedicated Helper. Токен: з папки Tokens або переданий явно.
         /// Повертає повідомлення для консолі (успіх або текст помилки).
@@ -480,6 +506,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             ModLogger.Info("DedicatedHelper [startup] AddTokenAndPortOnly = " + AddTokenAndPortOnly);
             ModLogger.Info("DedicatedHelper [startup] HostingMode = " + launchSettings.HostingMode);
             ModLogger.Info("DedicatedHelper [startup] AdvertisedHostAddress = " + (string.IsNullOrWhiteSpace(launchSettings.AdvertisedHostAddress) ? "(default)" : launchSettings.AdvertisedHostAddress));
+            LogJoinContract(launchSettings, port);
 
             string token = tokenOverride;
             string tokenFolder = null;

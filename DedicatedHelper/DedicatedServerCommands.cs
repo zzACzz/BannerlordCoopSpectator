@@ -241,7 +241,7 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                 optionValues["Map"] = requestedScene;
                 if (string.Equals(appliedGameType, CoopGameModeIds.OfficialBattle, StringComparison.Ordinal))
                 {
-                    // CoopBattle owns side/unit selection, deployment, and the explicit G-start flow.
+        // CoopBattle owns side/unit selection, deployment, and the explicit H-start flow.
                     // Disable native Battle/TDM warmup countdown so the client does not keep showing
                     // "Warmup Phase / Waiting for players to join" over our own pre-battle phases.
                     // Also neutralize native round/map timeout auto-end so our authoritative
