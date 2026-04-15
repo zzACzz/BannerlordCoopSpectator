@@ -8,8 +8,11 @@ using CoopSpectator.DedicatedServer.MissionOverrides;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.MissionModels;
 using CoopSpectator.Patches;
+using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.ComponentInterfaces;
 
 namespace CoopSpectator
 {
@@ -204,6 +207,14 @@ namespace CoopSpectator
             }
         }
 
+        protected override void OnGameStart(Game game, IGameStarter gameStarterObject)
+        {
+            base.OnGameStart(game, gameStarterObject);
+            TryRegisterCoopCampaignDerivedAgentStatModel(game, gameStarterObject, "dedicated");
+            TryRegisterCoopCampaignDerivedStrikeMagnitudeModel(game, gameStarterObject, "dedicated");
+            TryRegisterCoopCampaignDerivedAgentApplyDamageModel(game, gameStarterObject, "dedicated");
+        }
+
         private static void TryApplyExactCampaignArmyBootstrapPatch()
         {
             try
@@ -371,7 +382,149 @@ namespace CoopSpectator
 
         private static void TryApplyCampaignCombatProfileAgentStatsPatch()
         {
-            ModLogger.Info("CoopSpectatorDedicated: skipping CampaignCombatProfileAgentStatsPatch on dedicated; using manual combat-profile refresh path.");
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+
+                if (CampaignCombatProfileAgentStatsPatch.ApplyWeaponDamageOnly(_harmony))
+                    ModLogger.Info("CoopSpectatorDedicated: applied CampaignCombatProfileAgentStatsPatch weapon damage postfix on dedicated; UpdateAgentStats remains manual.");
+                else
+                    ModLogger.Info("CoopSpectatorDedicated: failed to apply CampaignCombatProfileAgentStatsPatch weapon damage postfix on dedicated; using OnScoreHit fallback path.");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: weapon damage combat-profile patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryRegisterCoopCampaignDerivedAgentStatModel(Game game, IGameStarter gameStarterObject, string source)
+        {
+            try
+            {
+                BasicGameStarter basicStarter = gameStarterObject as BasicGameStarter;
+                if (basicStarter == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedAgentStatCalculateModel: skip registration on " + source +
+                        " because starter is " + (gameStarterObject?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                AgentStatCalculateModel baseModel = basicStarter.GetModel<AgentStatCalculateModel>();
+                if (baseModel == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedAgentStatCalculateModel: skip registration on " + source +
+                        " because base AgentStatCalculateModel is missing. GameType=" +
+                        (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                if (baseModel is CoopCampaignDerivedAgentStatCalculateModel)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedAgentStatCalculateModel: already registered on " + source +
+                        ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                basicStarter.AddModel(new CoopCampaignDerivedAgentStatCalculateModel(baseModel));
+                ModLogger.Info(
+                    "CoopCampaignDerivedAgentStatCalculateModel: registered on " + source +
+                    ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") +
+                    " BaseModel=" + baseModel.GetType().FullName + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopCampaignDerivedAgentStatCalculateModel: registration failed on " + source + ": " + ex.Message);
+            }
+        }
+
+        private static void TryRegisterCoopCampaignDerivedStrikeMagnitudeModel(Game game, IGameStarter gameStarterObject, string source)
+        {
+            try
+            {
+                BasicGameStarter basicStarter = gameStarterObject as BasicGameStarter;
+                if (basicStarter == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedStrikeMagnitudeCalculationModel: skip registration on " + source +
+                        " because starter is " + (gameStarterObject?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                StrikeMagnitudeCalculationModel baseModel = basicStarter.GetModel<StrikeMagnitudeCalculationModel>();
+                if (baseModel == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedStrikeMagnitudeCalculationModel: skip registration on " + source +
+                        " because base StrikeMagnitudeCalculationModel is missing. GameType=" +
+                        (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                if (baseModel is CoopCampaignDerivedStrikeMagnitudeCalculationModel)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedStrikeMagnitudeCalculationModel: already registered on " + source +
+                        ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                basicStarter.AddModel(new CoopCampaignDerivedStrikeMagnitudeCalculationModel(baseModel));
+                ModLogger.Info(
+                    "CoopCampaignDerivedStrikeMagnitudeCalculationModel: registered on " + source +
+                    ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") +
+                    " BaseModel=" + baseModel.GetType().FullName + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopCampaignDerivedStrikeMagnitudeCalculationModel: registration failed on " + source + ": " + ex.Message);
+            }
+        }
+
+        private static void TryRegisterCoopCampaignDerivedAgentApplyDamageModel(Game game, IGameStarter gameStarterObject, string source)
+        {
+            try
+            {
+                BasicGameStarter basicStarter = gameStarterObject as BasicGameStarter;
+                if (basicStarter == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedAgentApplyDamageModel: skip registration on " + source +
+                        " because starter is " + (gameStarterObject?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                AgentApplyDamageModel baseModel = basicStarter.GetModel<AgentApplyDamageModel>();
+                if (baseModel == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedAgentApplyDamageModel: skip registration on " + source +
+                        " because base AgentApplyDamageModel is missing. GameType=" +
+                        (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                if (baseModel is CoopCampaignDerivedAgentApplyDamageModel)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedAgentApplyDamageModel: already registered on " + source +
+                        ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                basicStarter.AddModel(new CoopCampaignDerivedAgentApplyDamageModel(baseModel));
+                ModLogger.Info(
+                    "CoopCampaignDerivedAgentApplyDamageModel: registered on " + source +
+                    ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") +
+                    " BaseModel=" + baseModel.GetType().FullName + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopCampaignDerivedAgentApplyDamageModel: registration failed on " + source + ": " + ex.Message);
+            }
         }
 
         private static void TryApplyWebPanelPatches()

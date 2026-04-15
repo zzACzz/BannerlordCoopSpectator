@@ -255,6 +255,7 @@ namespace CoopSpectator.Infrastructure
     public static class BattleSnapshotRuntimeState
     {
         private static readonly object Sync = new object();
+        private static readonly HashSet<string> LoggedMissionSafeFallbackEntryIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static BattleSnapshotMessage _current;
         private static BattleSnapshotProjectionState _projection;
         private static BattleRuntimeState _state;
@@ -272,6 +273,7 @@ namespace CoopSpectator.Infrastructure
                 _current = snapshot;
                 _projection = BuildProjection(snapshot);
                 _state = BuildState(_projection);
+                LoggedMissionSafeFallbackEntryIds.Clear();
                 runtimeState = _state;
                 _source = source ?? "unknown";
                 _updatedUtc = DateTime.UtcNow;
@@ -349,6 +351,7 @@ namespace CoopSpectator.Infrastructure
                 _current = null;
                 _projection = null;
                 _state = null;
+                LoggedMissionSafeFallbackEntryIds.Clear();
                 _source = reason ?? "cleared";
                 _updatedUtc = DateTime.UtcNow;
             }
@@ -432,42 +435,187 @@ namespace CoopSpectator.Infrastructure
             BattleRosterEntryProjectionState entry = GetEntry(entryId);
             if (!string.IsNullOrWhiteSpace(entry?.OriginalCharacterId))
             {
-                try
-                {
-                    BasicCharacterObject originalCharacter = MBObjectManager.Instance.GetObject<BasicCharacterObject>(entry.OriginalCharacterId);
-                    if (originalCharacter != null)
-                        return originalCharacter;
-                }
-                catch
-                {
-                }
+                BasicCharacterObject originalCharacter = TryResolveBasicCharacterObject(entry.OriginalCharacterId);
+                if (originalCharacter != null)
+                    return originalCharacter;
             }
 
             if (!string.IsNullOrWhiteSpace(entry?.HeroTemplateId))
             {
-                try
-                {
-                    BasicCharacterObject heroTemplateCharacter = MBObjectManager.Instance.GetObject<BasicCharacterObject>(entry.HeroTemplateId);
-                    if (heroTemplateCharacter != null)
-                        return heroTemplateCharacter;
-                }
-                catch
-                {
-                }
+                BasicCharacterObject heroTemplateCharacter = TryResolveBasicCharacterObject(entry.HeroTemplateId);
+                if (heroTemplateCharacter != null)
+                    return heroTemplateCharacter;
             }
 
             string spawnTemplateId = ResolveSpawnTemplateId(entry);
             if (string.IsNullOrWhiteSpace(spawnTemplateId))
                 return null;
 
+            BasicCharacterObject spawnTemplateCharacter = TryResolveBasicCharacterObject(spawnTemplateId);
+            if (spawnTemplateCharacter != null)
+                return spawnTemplateCharacter;
+
+            return TryResolveMissionSafeFallbackCharacter(entryId, entry, spawnTemplateId);
+        }
+
+        private static BasicCharacterObject TryResolveBasicCharacterObject(string characterId)
+        {
+            if (string.IsNullOrWhiteSpace(characterId))
+                return null;
+
             try
             {
-                return MBObjectManager.Instance.GetObject<BasicCharacterObject>(spawnTemplateId);
+                MBObjectManager objectManager = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
+                return objectManager?.GetObject<BasicCharacterObject>(characterId);
             }
             catch
             {
                 return null;
             }
+        }
+
+        private static BasicCharacterObject TryResolveMissionSafeFallbackCharacter(
+            string entryId,
+            BattleRosterEntryProjectionState entry,
+            string spawnTemplateId)
+        {
+            foreach (string fallbackCharacterId in BuildMissionSafeFallbackCharacterIds(entry, spawnTemplateId))
+            {
+                BasicCharacterObject fallbackCharacter = TryResolveBasicCharacterObject(fallbackCharacterId);
+                if (fallbackCharacter == null)
+                    continue;
+
+                bool shouldLog;
+                lock (Sync)
+                    shouldLog = LoggedMissionSafeFallbackEntryIds.Add(entryId ?? spawnTemplateId ?? fallbackCharacterId);
+
+                if (shouldLog)
+                {
+                    ModLogger.Info(
+                        "BattleSnapshotRuntimeState: resolved mission-safe fallback character for battle entry. " +
+                        "EntryId=" + (entryId ?? "null") +
+                        " RequestedTemplate=" + (spawnTemplateId ?? "null") +
+                        " FallbackCharacterId=" + fallbackCharacterId +
+                        " Culture=" + (entry?.CultureId ?? "null") +
+                        " Mounted=" + (entry?.IsMounted ?? false) +
+                        " Ranged=" + (entry?.IsRanged ?? false) +
+                        " Shield=" + (entry?.HasShield ?? false) +
+                        " Thrown=" + (entry?.HasThrown ?? false) +
+                        " Hero=" + (entry?.IsHero ?? false));
+                }
+
+                return fallbackCharacter;
+            }
+
+            return null;
+        }
+
+        private static IEnumerable<string> BuildMissionSafeFallbackCharacterIds(
+            BattleRosterEntryProjectionState entry,
+            string spawnTemplateId)
+        {
+            var candidateIds = new List<string>();
+            var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string cultureToken = ExtractFallbackCultureToken(entry, spawnTemplateId);
+            bool preferHeroVariant =
+                !string.IsNullOrWhiteSpace(spawnTemplateId) &&
+                spawnTemplateId.EndsWith("_hero", StringComparison.OrdinalIgnoreCase);
+            bool isMounted = entry?.IsMounted ?? false;
+            bool isRanged = entry?.IsRanged ?? false;
+            bool hasShield = entry?.HasShield ?? false;
+            bool hasThrown = entry?.HasThrown ?? false;
+            bool wantsSkirmisherFallback =
+                !string.IsNullOrWhiteSpace(spawnTemplateId) &&
+                spawnTemplateId.IndexOf("_skirmisher_", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            void AddCandidate(string candidateId)
+            {
+                if (string.IsNullOrWhiteSpace(candidateId) || !seenIds.Add(candidateId))
+                    return;
+
+                candidateIds.Add(candidateId);
+            }
+
+            void AddRolePair(string baseId)
+            {
+                if (string.IsNullOrWhiteSpace(baseId))
+                    return;
+
+                if (preferHeroVariant)
+                {
+                    AddCandidate(baseId + "_hero");
+                    AddCandidate(baseId + "_troop");
+                }
+                else
+                {
+                    AddCandidate(baseId + "_troop");
+                    AddCandidate(baseId + "_hero");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(cultureToken))
+            {
+                if (wantsSkirmisherFallback || (hasThrown && !isMounted && !isRanged))
+                {
+                    AddRolePair("mp_light_infantry_" + cultureToken);
+                    AddRolePair("mp_shock_infantry_" + cultureToken);
+                    AddRolePair("mp_heavy_infantry_" + cultureToken);
+                }
+
+                if (isMounted)
+                {
+                    AddRolePair("mp_light_cavalry_" + cultureToken);
+                    AddRolePair("mp_heavy_cavalry_" + cultureToken);
+                }
+
+                if (isRanged)
+                {
+                    AddRolePair("mp_heavy_ranged_" + cultureToken);
+                    AddRolePair("mp_light_ranged_" + cultureToken);
+                }
+
+                if (hasShield)
+                {
+                    AddRolePair("mp_light_infantry_" + cultureToken);
+                    AddRolePair("mp_heavy_infantry_" + cultureToken);
+                }
+                else
+                {
+                    AddRolePair("mp_shock_infantry_" + cultureToken);
+                    AddRolePair("mp_light_infantry_" + cultureToken);
+                }
+            }
+
+            AddCandidate("imperial_infantryman");
+            AddCandidate("mp_coop_light_infantry_empire_troop");
+            AddCandidate("mp_light_infantry_empire_troop");
+            AddCandidate("mp_light_infantry_empire_hero");
+
+            return candidateIds;
+        }
+
+        private static string ExtractFallbackCultureToken(BattleRosterEntryProjectionState entry, string spawnTemplateId)
+        {
+            string cultureId = entry?.CultureId;
+            if (!string.IsNullOrWhiteSpace(cultureId))
+                return cultureId.Trim().ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(spawnTemplateId))
+                return null;
+
+            string[] knownCultureTokens =
+            {
+                "empire",
+                "vlandia",
+                "battania",
+                "sturgia",
+                "khuzait",
+                "aserai"
+            };
+
+            string normalizedTemplateId = spawnTemplateId.Trim().ToLowerInvariant();
+            return knownCultureTokens.FirstOrDefault(token =>
+                normalizedTemplateId.IndexOf("_" + token + "_", StringComparison.Ordinal) >= 0);
         }
 
         private static BattleSnapshotProjectionState BuildProjection(BattleSnapshotMessage snapshot)

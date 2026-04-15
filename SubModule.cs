@@ -4,12 +4,14 @@ using CoopSpectator.Campaign; // Підключаємо campaign behaviors (Host
 using CoopSpectator.GameMode; // Реєстрація TdmClone на клієнті для Join до сервера з GameType TdmClone (Етап 3.3)
 #endif
 using CoopSpectator.Infrastructure; // Підключаємо інфраструктуру (логер, dispatcher)
+using CoopSpectator.MissionModels; // Low-level mission model wrappers for CoopBattle
 using CoopSpectator.Patches; // LobbyCustomGameLocalJoinPatch
 using HarmonyLib; // Підключаємо Harmony для патчингу методів гри
 using TaleWorlds.CampaignSystem; // Підключаємо CampaignGameStarter та Campaign (щоб додати behaviors у кампанію)
 using TaleWorlds.Core; // Підключаємо базові типи Bannerlord (InformationMessage)
 using TaleWorlds.Library; // Підключаємо утиліти Bannerlord (InformationManager)
 using TaleWorlds.MountAndBlade; // Підключаємо базовий API модів (MBSubModuleBase)
+using TaleWorlds.MountAndBlade.ComponentInterfaces;
 
 namespace CoopSpectator // Використовуємо кореневий namespace моду (має співпасти з SubModule.xml)
 { // Починаємо блок простору імен
@@ -141,7 +143,9 @@ namespace CoopSpectator // Використовуємо кореневий names
         { // Починаємо блок методу
             base.OnGameStart(game, gameStarterObject); // Викликаємо базову реалізацію, щоб не ламати ініціалізацію гри
 
-            if (game != null && game.GameType is TaleWorlds.CampaignSystem.Campaign) // Перевіряємо що гра стартувала саме як кампанія (наш мод працює в кампанії)
+            bool isCampaignGame = game != null && game.GameType is TaleWorlds.CampaignSystem.Campaign;
+
+            if (isCampaignGame) // Перевіряємо що гра стартувала саме як кампанія (наш мод працює в кампанії)
             { // Починаємо блок if
                 CampaignGameStarter starter = gameStarterObject as CampaignGameStarter; // Пробуємо привести IGameStarter до CampaignGameStarter, щоб додати behaviors
 
@@ -154,6 +158,12 @@ namespace CoopSpectator // Використовуємо кореневий names
                     ModLogger.Info("Campaign behaviors додано (HostStateBroadcaster + SpectatorStateReceiver)."); // Логуємо факт додавання behaviors для дебагу
                 } // Завершуємо блок if
             } // Завершуємо блок if
+            else
+            {
+                TryRegisterCoopCampaignDerivedAgentStatModel(game, gameStarterObject, "client");
+                TryRegisterCoopCampaignDerivedStrikeMagnitudeModel(game, gameStarterObject, "client");
+                TryRegisterCoopCampaignDerivedAgentApplyDamageModel(game, gameStarterObject, "client");
+            }
 
             if (_hasShownLoadedMessage) // Перевіряємо прапорець, щоб не показувати повідомлення повторно
             { // Починаємо блок if
@@ -163,6 +173,135 @@ namespace CoopSpectator // Використовуємо кореневий names
             _hasShownLoadedMessage = true; // Встановлюємо прапорець, щоб повторний OnGameStart не спамив повідомленнями
             ShowMessage("CoopSpectator mod loaded! (v0.1.1-ui)"); // Version marker to confirm the client runs the latest build
         } // Завершуємо блок методу
+
+        private static void TryRegisterCoopCampaignDerivedAgentStatModel(Game game, IGameStarter gameStarterObject, string source)
+        {
+            try
+            {
+                BasicGameStarter basicStarter = gameStarterObject as BasicGameStarter;
+                if (basicStarter == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedAgentStatCalculateModel: skip registration on " + source +
+                        " because starter is " + (gameStarterObject?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                AgentStatCalculateModel baseModel = basicStarter.GetModel<AgentStatCalculateModel>();
+                if (baseModel == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedAgentStatCalculateModel: skip registration on " + source +
+                        " because base AgentStatCalculateModel is missing. GameType=" +
+                        (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                if (baseModel is CoopCampaignDerivedAgentStatCalculateModel)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedAgentStatCalculateModel: already registered on " + source +
+                        ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                basicStarter.AddModel(new CoopCampaignDerivedAgentStatCalculateModel(baseModel));
+                ModLogger.Info(
+                    "CoopCampaignDerivedAgentStatCalculateModel: registered on " + source +
+                    ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") +
+                    " BaseModel=" + baseModel.GetType().FullName + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopCampaignDerivedAgentStatCalculateModel: registration failed on " + source + ": " + ex.Message);
+            }
+        }
+
+        private static void TryRegisterCoopCampaignDerivedStrikeMagnitudeModel(Game game, IGameStarter gameStarterObject, string source)
+        {
+            try
+            {
+                BasicGameStarter basicStarter = gameStarterObject as BasicGameStarter;
+                if (basicStarter == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedStrikeMagnitudeCalculationModel: skip registration on " + source +
+                        " because starter is " + (gameStarterObject?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                StrikeMagnitudeCalculationModel baseModel = basicStarter.GetModel<StrikeMagnitudeCalculationModel>();
+                if (baseModel == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedStrikeMagnitudeCalculationModel: skip registration on " + source +
+                        " because base StrikeMagnitudeCalculationModel is missing. GameType=" +
+                        (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                if (baseModel is CoopCampaignDerivedStrikeMagnitudeCalculationModel)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedStrikeMagnitudeCalculationModel: already registered on " + source +
+                        ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                basicStarter.AddModel(new CoopCampaignDerivedStrikeMagnitudeCalculationModel(baseModel));
+                ModLogger.Info(
+                    "CoopCampaignDerivedStrikeMagnitudeCalculationModel: registered on " + source +
+                    ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") +
+                    " BaseModel=" + baseModel.GetType().FullName + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopCampaignDerivedStrikeMagnitudeCalculationModel: registration failed on " + source + ": " + ex.Message);
+            }
+        }
+
+        private static void TryRegisterCoopCampaignDerivedAgentApplyDamageModel(Game game, IGameStarter gameStarterObject, string source)
+        {
+            try
+            {
+                BasicGameStarter basicStarter = gameStarterObject as BasicGameStarter;
+                if (basicStarter == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedAgentApplyDamageModel: skip registration on " + source +
+                        " because starter is " + (gameStarterObject?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                AgentApplyDamageModel baseModel = basicStarter.GetModel<AgentApplyDamageModel>();
+                if (baseModel == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedAgentApplyDamageModel: skip registration on " + source +
+                        " because base AgentApplyDamageModel is missing. GameType=" +
+                        (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                if (baseModel is CoopCampaignDerivedAgentApplyDamageModel)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedAgentApplyDamageModel: already registered on " + source +
+                        ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                basicStarter.AddModel(new CoopCampaignDerivedAgentApplyDamageModel(baseModel));
+                ModLogger.Info(
+                    "CoopCampaignDerivedAgentApplyDamageModel: registered on " + source +
+                    ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") +
+                    " BaseModel=" + baseModel.GetType().FullName + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopCampaignDerivedAgentApplyDamageModel: registration failed on " + source + ": " + ex.Message);
+            }
+        }
 
         protected override void OnSubModuleUnloaded() // Викликається коли мод вивантажується (закриття гри / перезавантаження модів)
         { // Починаємо блок методу

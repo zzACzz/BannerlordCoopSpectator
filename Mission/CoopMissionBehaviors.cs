@@ -18,6 +18,7 @@ using TaleWorlds.ObjectSystem; // MBObjectManager
 using CoopSpectator.Campaign; // BattleRosterFileHelper (варіант A: roster з кампанії)
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback
+using CoopSpectator.MissionModels;
 using CoopSpectator.Network.Messages;
 
 namespace CoopSpectator.MissionBehaviors
@@ -3961,6 +3962,15 @@ namespace CoopSpectator.MissionBehaviors
             public bool IsMissile { get; set; }
             public bool IsBlocked { get; set; }
             public bool IsSiegeEngineHit { get; set; }
+            public string VictimBodyPart { get; set; }
+            public bool IsHeadShot { get; set; }
+            public float BlowBaseMagnitude { get; set; }
+            public float CollisionBaseMagnitude { get; set; }
+            public int AbsorbedByArmor { get; set; }
+            public float MovementSpeedDamageModifier { get; set; }
+            public float MissileVelocity { get; set; }
+            public float MissileStartSpeed { get; set; }
+            public float MissileTotalDamage { get; set; }
             public float Damage { get; set; }
             public float MissionTime { get; set; }
         }
@@ -4147,6 +4157,17 @@ namespace CoopSpectator.MissionBehaviors
             float hitDistance,
             float shotDifficulty)
         {
+            float authoritativeDamagedHp = damagedHp;
+            TryApplyAuthoritativeExactPersonalRangedDamageBonusOnScoreHit(
+                affectedAgent,
+                affectorAgent,
+                attackerWeapon,
+                isBlocked,
+                isSiegeEngineHit,
+                blow,
+                collisionData,
+                ref authoritativeDamagedHp);
+
             _materializedBattleResultRawOnScoreHitCount++;
             TryTrackMaterializedBattleResultScoreHit(
                 affectedAgent,
@@ -4156,10 +4177,10 @@ namespace CoopSpectator.MissionBehaviors
                 isSiegeEngineHit,
                 blow,
                 collisionData,
-                damagedHp,
+                authoritativeDamagedHp,
                 hitDistance,
                 shotDifficulty);
-            base.OnScoreHit(affectedAgent, affectorAgent, attackerWeapon, isBlocked, isSiegeEngineHit, blow, collisionData, damagedHp, hitDistance, shotDifficulty);
+            base.OnScoreHit(affectedAgent, affectorAgent, attackerWeapon, isBlocked, isSiegeEngineHit, blow, collisionData, authoritativeDamagedHp, hitDistance, shotDifficulty);
         }
 
         public override void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, AgentState agentState, KillingBlow blow)
@@ -9020,6 +9041,15 @@ namespace CoopSpectator.MissionBehaviors
                 IsMissile = collisionData.IsMissile,
                 IsBlocked = isBlocked,
                 IsSiegeEngineHit = isSiegeEngineHit,
+                VictimBodyPart = collisionData.VictimHitBodyPart.ToString(),
+                IsHeadShot = collisionData.VictimHitBodyPart == BoneBodyPartType.Head,
+                BlowBaseMagnitude = blow.BaseMagnitude,
+                CollisionBaseMagnitude = collisionData.BaseMagnitude,
+                AbsorbedByArmor = collisionData.AbsorbedByArmor,
+                MovementSpeedDamageModifier = collisionData.MovementSpeedDamageModifier,
+                MissileVelocity = collisionData.MissileVelocity.Length,
+                MissileStartSpeed = collisionData.MissileStartingBaseSpeed,
+                MissileTotalDamage = collisionData.MissileTotalDamage,
                 Damage = Math.Max(0f, damagedHp),
                 MissionTime = normalizedAffectorAgent.Mission.CurrentTime
             };
@@ -9032,6 +9062,7 @@ namespace CoopSpectator.MissionBehaviors
                 " Alt=" + collisionData.IsAlternativeAttack +
                 " Fall=" + collisionData.IsFallDamage +
                 " Blocked=" + isBlocked +
+                " BodyPart=" + collisionData.VictimHitBodyPart +
                 " Siege=" + isSiegeEngineHit +
                 " Dmg=" + Math.Max(0f, damagedHp).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
                 " Flags=" + weaponFlags);
@@ -9267,6 +9298,15 @@ namespace CoopSpectator.MissionBehaviors
                 " Missile=" + state.IsMissile +
                 " Blocked=" + state.IsBlocked +
                 " Siege=" + state.IsSiegeEngineHit +
+                " BodyPart=" + (state.VictimBodyPart ?? string.Empty) +
+                " HeadShot=" + state.IsHeadShot +
+                " BlowBaseMagnitude=" + state.BlowBaseMagnitude.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " CollisionBaseMagnitude=" + state.CollisionBaseMagnitude +
+                " AbsorbedByArmor=" + state.AbsorbedByArmor +
+                " MoveSpeedMod=" + state.MovementSpeedDamageModifier.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " MissileVelocity=" + state.MissileVelocity.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " MissileStartSpeed=" + state.MissileStartSpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " MissileTotalDamage=" + state.MissileTotalDamage.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
                 " Damage=" + state.Damage.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
                 " MissionTime=" + state.MissionTime.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         }
@@ -10431,6 +10471,139 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        internal static bool TryApplyWeaponDamageMultiplierCombatProfile(
+            Agent agent,
+            WeaponComponentData weapon,
+            ref float damageMultiplier)
+        {
+            if (agent == null || weapon == null || !agent.IsHuman)
+                return false;
+
+            Mission mission = agent.Mission;
+            if (mission == null)
+                return false;
+
+            EnsureMaterializedCombatProfileMission(mission);
+
+            if (!_materializedCombatProfilesByAgentIndex.TryGetValue(agent.Index, out MaterializedCombatProfileRuntimeState profile) ||
+                !IsHeroProfileEligibleForExactPersonalPerks(profile))
+            {
+                return false;
+            }
+
+            SkillObject relevantSkill = ResolveWeaponDamageMultiplierRelevantSkill(weapon);
+            if (relevantSkill == null)
+                return false;
+
+            int templateRelevantSkill = TryGetCharacterSkillValue(agent.Character, relevantSkill);
+            int desiredRelevantSkill = TryGetCombatProfileSkillValue(profile, relevantSkill, templateRelevantSkill);
+            float desiredSkillMultiplier = ComputeExactPersonalWeaponDamageMultiplier(relevantSkill, desiredRelevantSkill);
+            if (desiredSkillMultiplier <= 0f || Math.Abs(desiredSkillMultiplier - 1f) < 0.0001f)
+                return false;
+
+            float currentMultiplier = Math.Max(0f, damageMultiplier);
+            float updatedMultiplier = Math.Max(0f, currentMultiplier * desiredSkillMultiplier);
+            if (Math.Abs(updatedMultiplier - currentMultiplier) < 0.0001f)
+                return false;
+
+            damageMultiplier = updatedMultiplier;
+            return true;
+        }
+
+        private static SkillObject ResolveWeaponDamageMultiplierRelevantSkill(WeaponComponentData weapon)
+        {
+            if (weapon == null)
+                return null;
+
+            SkillObject relevantSkill = weapon.RelevantSkill;
+            if (relevantSkill != null)
+            {
+                if (string.Equals(relevantSkill.StringId, "Bow", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relevantSkill.StringId, "Crossbow", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relevantSkill.StringId, "Throwing", StringComparison.OrdinalIgnoreCase))
+                {
+                    return relevantSkill;
+                }
+            }
+
+            string skillHint = MapCombatEventWeaponClassToSkillHint(weapon.WeaponClass.ToString(), isSiegeEngineHit: false);
+            switch (skillHint)
+            {
+                case "Bow":
+                    return DefaultSkills.Bow;
+                case "Crossbow":
+                    return DefaultSkills.Crossbow;
+                case "Throwing":
+                    return DefaultSkills.Throwing;
+                default:
+                    return relevantSkill;
+            }
+        }
+
+        private static bool TryApplyAuthoritativeExactPersonalRangedDamageBonusOnScoreHit(
+            Agent affectedAgent,
+            Agent affectorAgent,
+            WeaponComponentData attackerWeapon,
+            bool isBlocked,
+            bool isSiegeEngineHit,
+            in Blow blow,
+            in AttackCollisionData collisionData,
+            ref float damagedHp)
+        {
+            if (!GameNetwork.IsServer || GameNetwork.IsClientOrReplay)
+                return false;
+
+            if (affectedAgent == null || affectorAgent == null || attackerWeapon == null || !affectorAgent.IsHuman || !affectedAgent.IsActive())
+                return false;
+
+            if (CoopCampaignDerivedAgentStatCalculateModel.IsActiveForMission(affectorAgent.Mission))
+                return false;
+
+            if (isBlocked || isSiegeEngineHit || damagedHp <= 0.01f || affectedAgent.Health < 1f)
+                return false;
+
+            float desiredMultiplier = 1f;
+            if (!TryApplyWeaponDamageMultiplierCombatProfile(affectorAgent, attackerWeapon, ref desiredMultiplier) ||
+                desiredMultiplier <= 1.0001f)
+            {
+                return false;
+            }
+
+            float currentHealth = affectedAgent.Health;
+            if (currentHealth <= 0f)
+                return false;
+
+            float desiredDamage = Math.Max(0f, damagedHp) * desiredMultiplier;
+            int extraDamage = TaleWorlds.Library.MathF.Ceiling(desiredDamage - damagedHp);
+            if (extraDamage <= 0)
+                return false;
+
+            float updatedHealth = Math.Max(0f, currentHealth - extraDamage);
+            float appliedExtraDamage = currentHealth - updatedHealth;
+            if (appliedExtraDamage <= 0.01f)
+                return false;
+
+            affectedAgent.Health = updatedHealth;
+            if (updatedHealth < 1f && currentHealth >= 1f)
+            {
+                Agent.KillInfo overrideKillInfo = blow.IsFallDamage ? Agent.KillInfo.Gravity : Agent.KillInfo.Invalid;
+                affectedAgent.Die(blow, overrideKillInfo);
+            }
+
+            damagedHp += appliedExtraDamage;
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: applied authoritative exact personal ranged damage bonus. " +
+                "Attacker=" + affectorAgent.Index +
+                " Victim=" + affectedAgent.Index +
+                " WeaponSkill=" + (attackerWeapon.RelevantSkill?.StringId ?? "null") +
+                " Multiplier=" + desiredMultiplier.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " BaseDamage=" + Math.Max(0f, damagedHp - appliedExtraDamage).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
+                " ExtraDamage=" + appliedExtraDamage.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
+                " FinalDamage=" + damagedHp.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
+                " TargetHealth=" + updatedHealth.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + ".");
+            return true;
+        }
+
         private static ItemObject TryResolveAgentPrimaryCombatItem(
             Agent agent,
             MissionEquipment equipment,
@@ -11501,6 +11674,52 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        internal static bool TryGetExactHeroCombatProfileSkillValue(
+            Agent agent,
+            SkillObject skillObject,
+            out int skillValue,
+            out string entryId)
+        {
+            skillValue = 0;
+            entryId = string.Empty;
+
+            if (agent == null || skillObject == null || agent.Mission == null)
+                return false;
+
+            EnsureMaterializedCombatProfileMission(agent.Mission);
+            if (!_materializedCombatProfilesByAgentIndex.TryGetValue(agent.Index, out MaterializedCombatProfileRuntimeState profile) ||
+                !IsHeroProfileEligibleForExactPersonalPerks(profile))
+            {
+                return false;
+            }
+
+            int exactSkillValue = TryGetCombatProfileSkillValue(profile, skillObject, 0);
+            if (exactSkillValue <= 0)
+                return false;
+
+            skillValue = exactSkillValue;
+            entryId = profile.EntryId ?? string.Empty;
+            return true;
+        }
+
+        internal static bool HasExactHeroCombatProfilePerk(Agent agent, string perkId, out string entryId)
+        {
+            entryId = string.Empty;
+
+            if (agent == null || string.IsNullOrWhiteSpace(perkId) || agent.Mission == null)
+                return false;
+
+            EnsureMaterializedCombatProfileMission(agent.Mission);
+            if (!_materializedCombatProfilesByAgentIndex.TryGetValue(agent.Index, out MaterializedCombatProfileRuntimeState profile) ||
+                !IsHeroProfileEligibleForExactPersonalPerks(profile))
+            {
+                return false;
+            }
+
+            entryId = profile.EntryId ?? string.Empty;
+            return HasPerkId(profile.PerkIds, perkId);
+        }
+
         private static int TryGetCharacterSkillValue(BasicCharacterObject character, SkillObject skillObject)
         {
             if (character == null || skillObject == null)
@@ -11544,6 +11763,27 @@ namespace CoopSpectator.MissionBehaviors
         {
             float penalty = 15f - ridingSkill * 0.15f;
             return penalty > 0f ? 1f + penalty : 1f;
+        }
+
+        private static float ComputeExactPersonalWeaponDamageMultiplier(SkillObject relevantSkill, int desiredRelevantSkill)
+        {
+            if (relevantSkill == null || desiredRelevantSkill <= 0)
+                return 1f;
+
+            string skillId = relevantSkill.StringId;
+            if (string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase))
+            {
+                // Native SP DefaultSkillEffects.BowDamage = +0.11% per skill level.
+                return 1f + desiredRelevantSkill * 0.0011f;
+            }
+
+            if (string.Equals(skillId, "Throwing", StringComparison.OrdinalIgnoreCase))
+            {
+                // Native SP DefaultSkillEffects.ThrowingDamage = +0.06% per skill level.
+                return 1f + desiredRelevantSkill * 0.0006f;
+            }
+
+            return 1f;
         }
 
         private static float ComputeSandboxMountedWeaponInaccuracyFactor(int ridingSkill)

@@ -375,6 +375,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _nextMissionBattleResultPollUtc = DateTime.MinValue;
             _nextBattleStartAttemptUtc = DateTime.MinValue;
             _nextBattleStartWaitLogUtc = DateTime.MinValue;
+            TryAttachCampaignBattleDamageDiagnosticsMissionLogic();
             ModLogger.Info("BattleDetector: mission entered (Mission.Current set). Notifying dedicated if applicable.");
             TryStartMissionForCurrentRole();
         } // Завершуємо блок методу
@@ -443,6 +444,35 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             else
             {
                 _nextBattleStartAttemptUtc = nowUtc.AddMilliseconds(750);
+            }
+        }
+
+        private static void TryAttachCampaignBattleDamageDiagnosticsMissionLogic()
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (mission == null || TaleWorlds.CampaignSystem.Campaign.Current == null)
+                    return;
+
+                if (GameNetwork.IsClient)
+                    return;
+
+                if (mission.GetMissionBehavior<CampaignBattleDamageDiagnosticsMissionLogic>() != null)
+                    return;
+
+                if (TryGetCurrentBattleObject() == null)
+                    return;
+
+                mission.AddMissionBehavior(new CampaignBattleDamageDiagnosticsMissionLogic());
+                ModLogger.Info(
+                    "BattleDetector: attached CampaignBattleDamageDiagnosticsMissionLogic. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " Mode=" + mission.Mode + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to attach CampaignBattleDamageDiagnosticsMissionLogic. " + ex.Message);
             }
         }
 

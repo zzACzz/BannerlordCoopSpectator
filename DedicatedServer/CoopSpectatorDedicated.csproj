@@ -49,6 +49,9 @@
     <Compile Include="..\GameMode\MissionBehaviorHelpers.cs" Link="GameMode\MissionBehaviorHelpers.cs" />
     <Compile Include="..\GameMode\MissionBehaviorDiagnostic.cs" Link="GameMode\MissionBehaviorDiagnostic.cs" />
     <Compile Include="..\Mission\CoopMissionBehaviors.cs" Link="Mission\CoopMissionBehaviors.cs" />
+    <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
+    <Compile Include="..\MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" Link="MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" />
+    <Compile Include="..\MissionModels\CoopCampaignDerivedAgentApplyDamageModel.cs" Link="MissionModels\CoopCampaignDerivedAgentApplyDamageModel.cs" />
     <Compile Include="Mission\DedicatedKnockoutOutcomeModelOverride.cs" Link="Mission\DedicatedKnockoutOutcomeModelOverride.cs" />
     <Compile Include="..\DedicatedHelper\DedicatedServerHostingMode.cs" Link="DedicatedHelper\DedicatedServerHostingMode.cs" />
     <Compile Include="..\DedicatedHelper\DedicatedServerLaunchSettings.cs" Link="DedicatedHelper\DedicatedServerLaunchSettings.cs" />

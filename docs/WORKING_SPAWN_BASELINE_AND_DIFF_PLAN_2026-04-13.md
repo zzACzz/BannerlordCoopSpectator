@@ -203,6 +203,45 @@ For captain-only work add:
    - commander can assign formation captains
    - formation captain source is visible in logs before captain perks are validated
 
+## Diagnostics-first rule for perk and damage work
+
+Perk and damage work must not proceed as "change code, then guess from gameplay".
+
+Before each rerun:
+
+1. identify the exact native runtime function or model that is supposed to own the behavior
+2. identify whether the current path is:
+   - native model replacement
+   - Harmony postfix/prefix
+   - mission behavior fallback
+   - snapshot/materialization overlay
+3. add one log line at the authoritative server point and, if relevant, one mirrored client log line
+4. state in advance which exact log line should prove success or failure
+
+During each rerun:
+
+1. prefer one focused scenario per run
+2. keep weapon/loadout/perk combinations narrow enough that one missing effect is attributable
+3. check logs before inferring from feel alone
+
+For lower-level combat work, the preferred diagnostic points are:
+
+- `AgentStatCalculateModel`
+- `StrikeMagnitudeCalculationModel`
+- `AgentApplyDamageModel`
+- `Mission.OnScoreHit`
+- `MissionCombatMechanicsHelper`
+
+If the effect is not visible in these points, do not add new higher-level perk glue until the lower-level path is understood.
+
+### Current diagnostics priority for ranged damage
+
+1. prove whether `GetWeaponDamageMultiplier(...)` was reached on authoritative server
+2. prove whether `WeaponClass -> Skill` resolution matches the intended campaign skill
+3. prove whether extra damage was added in `OnScoreHit` fallback
+4. if campaign-vs-MP gap remains, move to `StrikeMagnitudeCalculationModel`
+5. only after that inspect `AgentApplyDamageModel`
+
 ## Practical rule for the next Codex window
 
 If a proposed change touches both:
