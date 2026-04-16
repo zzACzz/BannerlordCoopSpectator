@@ -3799,6 +3799,7 @@ namespace CoopSpectator.MissionBehaviors
                 ["seax"] = "mp_default_dagger",
                 ["torn_bandit_clothes"] = "mp_vlandia_bandit_c",
                 ["western_javelin_2_t3"] = "mp_javelin",
+                ["battania_polearm_1_t5"] = "mp_battania_long_infantry_spear",
                 ["bolted_leather_strips"] = "fur_cloak_a",
                 ["bolt_c"] = "bolt_a",
                 ["bolt_d"] = "bolt_a",
@@ -10518,7 +10519,10 @@ namespace CoopSpectator.MissionBehaviors
             SkillObject relevantSkill = weapon.RelevantSkill;
             if (relevantSkill != null)
             {
-                if (string.Equals(relevantSkill.StringId, "Bow", StringComparison.OrdinalIgnoreCase) ||
+                if (string.Equals(relevantSkill.StringId, "OneHanded", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relevantSkill.StringId, "TwoHanded", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relevantSkill.StringId, "Polearm", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relevantSkill.StringId, "Bow", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(relevantSkill.StringId, "Crossbow", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(relevantSkill.StringId, "Throwing", StringComparison.OrdinalIgnoreCase))
                 {
@@ -10529,6 +10533,12 @@ namespace CoopSpectator.MissionBehaviors
             string skillHint = MapCombatEventWeaponClassToSkillHint(weapon.WeaponClass.ToString(), isSiegeEngineHit: false);
             switch (skillHint)
             {
+                case "OneHanded":
+                    return DefaultSkills.OneHanded;
+                case "TwoHanded":
+                    return DefaultSkills.TwoHanded;
+                case "Polearm":
+                    return DefaultSkills.Polearm;
                 case "Bow":
                     return DefaultSkills.Bow;
                 case "Crossbow":
@@ -10784,8 +10794,9 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             bool applied = false;
+            bool lowLevelExactAgentStatsActive = CoopCampaignDerivedAgentStatCalculateModel.IsActiveForMission(agent.Mission);
 
-            if (HasPerkId(profile.PerkIds, "AthleticsFormFittingArmor"))
+            if (!lowLevelExactAgentStatsActive && HasPerkId(profile.PerkIds, "AthleticsFormFittingArmor"))
                 applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ArmorEncumbrance, 1f, 0.85f);
 
             // Keep personal ranged driven perks disabled until they are bridged
@@ -11702,6 +11713,30 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        internal static bool TryGetExactHeroCombatProfileBaseHitPoints(
+            Agent agent,
+            out int baseHitPoints,
+            out string entryId)
+        {
+            baseHitPoints = 0;
+            entryId = string.Empty;
+
+            if (agent == null || agent.Mission == null)
+                return false;
+
+            EnsureMaterializedCombatProfileMission(agent.Mission);
+            if (!_materializedCombatProfilesByAgentIndex.TryGetValue(agent.Index, out MaterializedCombatProfileRuntimeState profile) ||
+                !IsHeroProfileEligibleForExactPersonalPerks(profile) ||
+                profile.BaseHitPoints <= 0)
+            {
+                return false;
+            }
+
+            baseHitPoints = profile.BaseHitPoints;
+            entryId = profile.EntryId ?? string.Empty;
+            return true;
+        }
+
         internal static bool HasExactHeroCombatProfilePerk(Agent agent, string perkId, out string entryId)
         {
             entryId = string.Empty;
@@ -11771,6 +11806,24 @@ namespace CoopSpectator.MissionBehaviors
                 return 1f;
 
             string skillId = relevantSkill.StringId;
+            if (string.Equals(skillId, "OneHanded", StringComparison.OrdinalIgnoreCase))
+            {
+                // Native SP DefaultSkillEffects.OneHandedDamage = +0.15% per skill level.
+                return 1f + desiredRelevantSkill * 0.0015f;
+            }
+
+            if (string.Equals(skillId, "TwoHanded", StringComparison.OrdinalIgnoreCase))
+            {
+                // Native SP DefaultSkillEffects.TwoHandedDamage = +0.16% per skill level.
+                return 1f + desiredRelevantSkill * 0.0016f;
+            }
+
+            if (string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase))
+            {
+                // Native SP DefaultSkillEffects.PolearmDamage = +0.07% per skill level.
+                return 1f + desiredRelevantSkill * 0.0007f;
+            }
+
             if (string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase))
             {
                 // Native SP DefaultSkillEffects.BowDamage = +0.11% per skill level.

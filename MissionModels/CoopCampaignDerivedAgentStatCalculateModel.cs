@@ -21,6 +21,9 @@ namespace CoopSpectator.MissionModels
         private readonly HashSet<string> _loggedExactSkillKeys = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> _loggedWeaponDamageKeys = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> _loggedRangedDrivenKeys = new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> _loggedExactMaxHealthKeys = new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> _loggedExactDefenseDrivenKeys = new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> _loggedExactMeleeDrivenKeys = new HashSet<string>(StringComparer.Ordinal);
         private bool _hasLoggedBattleActivation;
 
         public CoopCampaignDerivedAgentStatCalculateModel(AgentStatCalculateModel baseModel)
@@ -51,6 +54,8 @@ namespace CoopSpectator.MissionModels
         public override void UpdateAgentStats(Agent agent, AgentDrivenProperties agentDrivenProperties)
         {
             _baseModel.UpdateAgentStats(agent, agentDrivenProperties);
+            TryApplyExactDefenseDrivenPropertyOverrides(agent, agentDrivenProperties);
+            TryApplyExactMeleeDrivenPropertyOverrides(agent, agentDrivenProperties);
             TryApplyExactRangedDrivenPropertyOverrides(agent, agentDrivenProperties);
         }
 
@@ -76,7 +81,13 @@ namespace CoopSpectator.MissionModels
 
         public override float GetEffectiveMaxHealth(Agent agent)
         {
-            return _baseModel.GetEffectiveMaxHealth(agent);
+            float baseHealth = _baseModel.GetEffectiveMaxHealth(agent);
+            if (!TryResolveExactMaxHealthOverride(agent, baseHealth, out float exactHealth, out string entryId))
+                return baseHealth;
+
+            TryLogBattleActivation(agent);
+            TryLogExactMaxHealthOverride(agent, entryId, baseHealth, exactHealth);
+            return exactHealth;
         }
 
         public override float GetEnvironmentSpeedFactor(Agent agent)
@@ -323,7 +334,10 @@ namespace CoopSpectator.MissionModels
             if (relevantSkill != null)
             {
                 string relevantSkillId = relevantSkill.StringId;
-                if (string.Equals(relevantSkillId, "Bow", StringComparison.OrdinalIgnoreCase) ||
+                if (string.Equals(relevantSkillId, "OneHanded", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relevantSkillId, "TwoHanded", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relevantSkillId, "Polearm", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relevantSkillId, "Bow", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(relevantSkillId, "Crossbow", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(relevantSkillId, "Throwing", StringComparison.OrdinalIgnoreCase))
                 {
@@ -336,6 +350,19 @@ namespace CoopSpectator.MissionModels
 
             switch (weapon.WeaponClass)
             {
+                case WeaponClass.OneHandedSword:
+                case WeaponClass.OneHandedAxe:
+                case WeaponClass.Mace:
+                case WeaponClass.Dagger:
+                case WeaponClass.OneHandedPolearm:
+                    return DefaultSkills.OneHanded;
+                case WeaponClass.TwoHandedSword:
+                case WeaponClass.TwoHandedAxe:
+                case WeaponClass.TwoHandedMace:
+                    return DefaultSkills.TwoHanded;
+                case WeaponClass.TwoHandedPolearm:
+                case WeaponClass.LowGripPolearm:
+                    return DefaultSkills.Polearm;
                 case WeaponClass.Bow:
                     return DefaultSkills.Bow;
                 case WeaponClass.Crossbow:
@@ -348,6 +375,287 @@ namespace CoopSpectator.MissionModels
                 default:
                     return relevantSkill;
             }
+        }
+
+        private bool TryResolveExactMaxHealthOverride(
+            Agent agent,
+            float baseHealth,
+            out float exactHealth,
+            out string entryId)
+        {
+            exactHealth = baseHealth;
+            entryId = string.Empty;
+
+            if (agent == null)
+                return false;
+
+            Mission mission = agent.Mission;
+            if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                return false;
+
+            if (!CoopMissionSpawnLogic.TryGetExactHeroCombatProfileBaseHitPoints(agent, out int exactBaseHitPoints, out entryId))
+                return false;
+
+            float candidateHealth = Math.Max(1f, exactBaseHitPoints);
+            if (Math.Abs(candidateHealth - baseHealth) < 0.0001f)
+                return false;
+
+            exactHealth = candidateHealth;
+            return true;
+        }
+
+        private void TryLogExactMaxHealthOverride(
+            Agent agent,
+            string entryId,
+            float baseHealth,
+            float exactHealth)
+        {
+            string logKey =
+                (agent?.Index ?? -1).ToString() + "|" +
+                (entryId ?? string.Empty) + "|" +
+                exactHealth.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+            if (!_loggedExactMaxHealthKeys.Add(logKey))
+                return;
+
+            ModLogger.Info(
+                "CoopCampaignDerivedAgentStatCalculateModel: exact max health override applied. " +
+                "Agent=" + (agent?.Index ?? -1) +
+                " EntryId=" + (string.IsNullOrWhiteSpace(entryId) ? "unknown" : entryId) +
+                " Base=" + baseHealth.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " Exact=" + exactHealth.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                " Mission=" + (agent?.Mission?.SceneName ?? "null") + ".");
+        }
+
+        private void TryApplyExactDefenseDrivenPropertyOverrides(Agent agent, AgentDrivenProperties agentDrivenProperties)
+        {
+            if (agent == null || agentDrivenProperties == null || !agent.IsHuman)
+                return;
+
+            Mission mission = agent.Mission;
+            if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                return;
+
+            bool applied = false;
+            string entryId = string.Empty;
+            string summary = string.Empty;
+
+            if (CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(agent, "AthleticsFormFittingArmor", out string formFittingEntryId))
+            {
+                float baseArmorEncumbrance = agentDrivenProperties.ArmorEncumbrance;
+                float exactArmorEncumbrance = baseArmorEncumbrance * 0.85f;
+                if (Math.Abs(exactArmorEncumbrance - baseArmorEncumbrance) >= 0.0001f)
+                {
+                    agentDrivenProperties.ArmorEncumbrance = exactArmorEncumbrance;
+                    entryId = formFittingEntryId;
+                    summary = AppendAppliedPerkSummary(
+                        summary,
+                        "FormFittingArmor ArmorEncumbrance=" +
+                        baseArmorEncumbrance.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                        "->" +
+                        exactArmorEncumbrance.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+                    applied = true;
+                }
+            }
+
+            if (!(agent.HasMount || agent.MountAgent != null) &&
+                CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(agent, "AthleticsIgnorePain", out string ignorePainEntryId))
+            {
+                bool armorScaled = false;
+                armorScaled |= TryScaleArmorDrivenProperty(agentDrivenProperties, DrivenProperty.ArmorHead, 1.1f);
+                armorScaled |= TryScaleArmorDrivenProperty(agentDrivenProperties, DrivenProperty.ArmorTorso, 1.1f);
+                armorScaled |= TryScaleArmorDrivenProperty(agentDrivenProperties, DrivenProperty.ArmorArms, 1.1f);
+                armorScaled |= TryScaleArmorDrivenProperty(agentDrivenProperties, DrivenProperty.ArmorLegs, 1.1f);
+                if (armorScaled)
+                {
+                    if (string.IsNullOrWhiteSpace(entryId))
+                        entryId = ignorePainEntryId;
+
+                    summary = AppendAppliedPerkSummary(summary, "IgnorePain Armor=1.1");
+                    applied = true;
+                }
+            }
+
+            if (!applied)
+                return;
+
+            TryLogBattleActivation(agent);
+            TryLogDefenseDrivenOverride(agent, entryId, summary);
+        }
+
+        private void TryLogDefenseDrivenOverride(Agent agent, string entryId, string summary)
+        {
+            string logKey =
+                (agent?.Index ?? -1).ToString() + "|" +
+                (entryId ?? string.Empty) + "|" +
+                (summary ?? string.Empty);
+
+            if (!_loggedExactDefenseDrivenKeys.Add(logKey))
+                return;
+
+            ModLogger.Info(
+                "CoopCampaignDerivedAgentStatCalculateModel: exact defense driven-property override applied. " +
+                "Agent=" + (agent?.Index ?? -1) +
+                " EntryId=" + (string.IsNullOrWhiteSpace(entryId) ? "unknown" : entryId) +
+                " Applied=" + (string.IsNullOrWhiteSpace(summary) ? "none" : summary) +
+                " Mission=" + (agent?.Mission?.SceneName ?? "null") + ".");
+        }
+
+        private void TryApplyExactMeleeDrivenPropertyOverrides(Agent agent, AgentDrivenProperties agentDrivenProperties)
+        {
+            if (agent == null || agentDrivenProperties == null || !agent.IsHuman)
+                return;
+
+            Mission mission = agent.Mission;
+            if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                return;
+
+            MissionEquipment equipment = agent.Equipment;
+            if (equipment == null)
+                return;
+
+            EquipmentIndex primaryWieldedItemIndex = agent.GetPrimaryWieldedItemIndex();
+            if (primaryWieldedItemIndex == EquipmentIndex.None)
+                return;
+
+            WeaponComponentData primaryWeapon = equipment[primaryWieldedItemIndex].CurrentUsageItem;
+            SkillObject relevantSkill = ResolveWeaponDamageRelevantSkill(primaryWeapon);
+            if (relevantSkill == null)
+                return;
+
+            string skillId = relevantSkill.StringId ?? string.Empty;
+            if (!string.Equals(skillId, "OneHanded", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(skillId, "TwoHanded", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (!TryResolveExactSkillOverride(agent, relevantSkill, 0, out int exactSkill, out string entryId))
+                return;
+
+            int templateSkill = TryGetCharacterSkillValue(agent.Character, relevantSkill);
+            float perSkillFactor = ResolvePersonalWeaponSpeedFactorPerSkill(skillId);
+            if (perSkillFactor <= 0f)
+                return;
+
+            float baseSkillFactor = 1f + templateSkill * perSkillFactor;
+            float exactSkillFactor = 1f + exactSkill * perSkillFactor;
+            if (baseSkillFactor <= 0.0001f || Math.Abs(exactSkillFactor - baseSkillFactor) < 0.0001f)
+                return;
+
+            float baseSwingSpeed = agentDrivenProperties.SwingSpeedMultiplier;
+            float baseReadySpeed = agentDrivenProperties.ThrustOrRangedReadySpeedMultiplier;
+            float updatedSwingSpeed = Math.Max(0f, baseSwingSpeed / baseSkillFactor * exactSkillFactor);
+            float updatedReadySpeed = Math.Max(0f, baseReadySpeed / baseSkillFactor * exactSkillFactor);
+
+            bool applied = false;
+            if (Math.Abs(updatedSwingSpeed - baseSwingSpeed) >= 0.0001f)
+            {
+                agentDrivenProperties.SwingSpeedMultiplier = updatedSwingSpeed;
+                applied = true;
+            }
+
+            if (Math.Abs(updatedReadySpeed - baseReadySpeed) >= 0.0001f)
+            {
+                agentDrivenProperties.ThrustOrRangedReadySpeedMultiplier = updatedReadySpeed;
+                applied = true;
+            }
+
+            if (!applied)
+                return;
+
+            TryLogBattleActivation(agent);
+            TryLogExactMeleeDrivenOverride(
+                agent,
+                relevantSkill,
+                entryId,
+                baseSwingSpeed,
+                updatedSwingSpeed,
+                baseReadySpeed,
+                updatedReadySpeed,
+                templateSkill,
+                exactSkill);
+        }
+
+        private void TryLogExactMeleeDrivenOverride(
+            Agent agent,
+            SkillObject relevantSkill,
+            string entryId,
+            float baseSwingSpeed,
+            float exactSwingSpeed,
+            float baseReadySpeed,
+            float exactReadySpeed,
+            int templateSkill,
+            int exactSkill)
+        {
+            string skillId = relevantSkill?.StringId ?? "null";
+            string logKey =
+                (agent?.Index ?? -1).ToString() + "|" +
+                skillId + "|" +
+                (entryId ?? string.Empty) + "|" +
+                exactSwingSpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                exactReadySpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+            if (!_loggedExactMeleeDrivenKeys.Add(logKey))
+                return;
+
+            ModLogger.Info(
+                "CoopCampaignDerivedAgentStatCalculateModel: exact melee driven-property override applied. " +
+                "Agent=" + (agent?.Index ?? -1) +
+                " EntryId=" + (string.IsNullOrWhiteSpace(entryId) ? "unknown" : entryId) +
+                " Skill=" + skillId +
+                " TemplateSkill=" + templateSkill +
+                " ExactSkill=" + exactSkill +
+                " SwingSpeedMultiplier=" + baseSwingSpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                "->" + exactSwingSpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " ReadySpeedMultiplier=" + baseReadySpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                "->" + exactReadySpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " Mission=" + (agent?.Mission?.SceneName ?? "null") + ".");
+        }
+
+        private static float ResolvePersonalWeaponSpeedFactorPerSkill(string skillId)
+        {
+            if (string.Equals(skillId, "OneHanded", StringComparison.OrdinalIgnoreCase))
+                return 0.0007f;
+            if (string.Equals(skillId, "TwoHanded", StringComparison.OrdinalIgnoreCase))
+                return 0.0006f;
+            if (string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase))
+                return 0.0006f;
+
+            return 0f;
+        }
+
+        private static int TryGetCharacterSkillValue(BasicCharacterObject character, SkillObject skillObject)
+        {
+            if (character == null || skillObject == null)
+                return 0;
+
+            try
+            {
+                return character.GetSkillValue(skillObject);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static bool TryScaleArmorDrivenProperty(
+            AgentDrivenProperties agentDrivenProperties,
+            DrivenProperty property,
+            float scaleFactor)
+        {
+            float currentValue = agentDrivenProperties.GetStat(property);
+            if (currentValue <= 0f)
+                return false;
+
+            float updatedValue = Math.Max(0f, currentValue * scaleFactor);
+            if (Math.Abs(updatedValue - currentValue) < 0.0001f)
+                return false;
+
+            agentDrivenProperties.SetStat(property, updatedValue);
+            return true;
         }
 
         private void TryApplyExactRangedDrivenPropertyOverrides(Agent agent, AgentDrivenProperties agentDrivenProperties)
