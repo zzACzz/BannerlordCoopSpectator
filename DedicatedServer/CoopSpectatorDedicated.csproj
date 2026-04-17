@@ -65,7 +65,9 @@
     <Compile Include="..\Infrastructure\CampaignMultiplayerHeroClassResolver.cs" Link="Infrastructure\CampaignMultiplayerHeroClassResolver.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignArmyBootstrap.cs" Link="Infrastructure\ExactCampaignArmyBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
+    <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />
+    <Compile Include="..\Infrastructure\ModulePathHelper.cs" Link="Infrastructure\ModulePathHelper.cs" />
     <Compile Include="..\Infrastructure\SceneRuntimeClassifier.cs" Link="Infrastructure\SceneRuntimeClassifier.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePhaseBridgeFile.cs" Link="Infrastructure\CoopBattlePhaseBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePhaseRuntimeState.cs" Link="Infrastructure\CoopBattlePhaseRuntimeState.cs" />

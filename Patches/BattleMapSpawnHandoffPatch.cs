@@ -563,12 +563,13 @@ namespace CoopSpectator.Patches
                     mission,
                     agent,
                     preferredEntryId: null,
-                    source: "battle-map handoff CreateAgent");
+                    source: "battle-map handoff CreateAgent",
+                    allowImmediateApply: false);
                 if (!exactVisualApplied)
                     return;
 
                 ModLogger.Info(
-                    "BattleMapSpawnHandoffPatch: queued delayed client exact visual finalization after CreateAgent. " +
+                    "BattleMapSpawnHandoffPatch: deferred client exact visual finalization after CreateAgent. " +
                     "AgentIndex=" + agent.Index +
                     " TeamSide=" + agent.Team.Side +
                     " TroopId=" + (agent.Character?.StringId ?? "null") +

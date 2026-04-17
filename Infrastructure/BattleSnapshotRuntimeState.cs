@@ -279,6 +279,7 @@ namespace CoopSpectator.Infrastructure
                 _updatedUtc = DateTime.UtcNow;
             }
 
+            ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(runtimeState, _source);
             ExactCampaignRuntimeObjectRegistry.SyncFromState(runtimeState, _source);
 
             ModLogger.Info(
@@ -356,6 +357,7 @@ namespace CoopSpectator.Infrastructure
                 _updatedUtc = DateTime.UtcNow;
             }
 
+            ExactCampaignRuntimeItemRegistry.Reset(reason);
             ExactCampaignRuntimeObjectRegistry.Clear(reason);
 
             ModLogger.Info("BattleSnapshotRuntimeState: snapshot cleared. Reason=" + (_source ?? "unknown"));

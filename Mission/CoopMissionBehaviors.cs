@@ -98,6 +98,9 @@ namespace CoopSpectator.MissionBehaviors
             if (SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName))
             {
                 ExactCampaignObjectCatalogBootstrap.EnsureLoaded("client-afterstart:" + (mission.SceneName ?? "null"));
+                ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(
+                    BattleSnapshotRuntimeState.GetState(),
+                    "client-afterstart:" + (mission.SceneName ?? "null"));
                 BattleMapContractDiagnostics.LogMissionRuntimeContract(mission, "CoopMissionClientLogic.AfterStart");
             }
             _lastControlledAgent = Agent.Main;
@@ -3638,6 +3641,7 @@ namespace CoopSpectator.MissionBehaviors
         private static string _exactNativeClientVisualOverlayQueueSnapshotKey = string.Empty;
         private static readonly HashSet<int> _battlePhaseHeldFormationKeys = new HashSet<int>();
         private static readonly HashSet<string> _loggedAutomatedMaterializedEntrySkipIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> _loggedSuppressedMaterializedEquipmentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static Mission _lastBattlePhaseAiHoldMission;
         private static Mission _lastMaterializedArmyMission;
         private static Mission _lastClientBattleSnapshotRefreshMission;
@@ -3646,6 +3650,7 @@ namespace CoopSpectator.MissionBehaviors
         private static CoopBattlePhase? _lastAppliedFormationHoldPhase;
         private static bool _hasMaterializedBattlefieldArmies;
         private static bool _hasLoggedImportedEquipmentAvailabilityDiagnostics;
+        private static bool _hasLoggedHeroEquipmentResolutionAudit;
         private static bool _hasLoggedMaterializedEquipmentCoverageSummary;
         private static bool _hasTriggeredAuthoritativeBattleCompletion;
         private static string _authoritativeBattleWinnerSide = string.Empty;
@@ -4029,6 +4034,7 @@ namespace CoopSpectator.MissionBehaviors
             ResetClientExactCampaignVisualOverlayAssignmentState(source);
             _battlePhaseHeldFormationKeys.Clear();
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
+            _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
             _lastMaterializedArmyMission = null;
             _lastClientBattleSnapshotRefreshMission = null;
@@ -4088,6 +4094,11 @@ namespace CoopSpectator.MissionBehaviors
                     mission,
                     "CoopMissionSpawnLogic.AfterStart battle-map deferred",
                     forceReinitialize: false);
+                ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(
+                    BattleSnapshotRuntimeState.GetState(),
+                    "CoopMissionSpawnLogic.AfterStart battle-map deferred");
+                LogImportedEquipmentAvailabilityDiagnostics();
+                LogHeroEquipmentResolutionAudit();
                 ModLogger.Info("CoopMissionSpawnLogic: battle-map AfterStart using minimal deferred startup path. BuildMarker=" + BattleMapStartupBuildMarker);
                 _timeUntilNextPeerLog = ServerLogIntervalSeconds;
                 ModLogger.Info("CoopMissionSpawnLogic AfterStart EXIT (battle-map deferred). BuildMarker=" + BattleMapStartupBuildMarker);
@@ -4095,6 +4106,9 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             TryInitializeServerMissionRuntimeState(mission, "CoopMissionSpawnLogic.AfterStart", forceReinitialize: false);
+            ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(
+                BattleSnapshotRuntimeState.GetState(),
+                "CoopMissionSpawnLogic.AfterStart");
 
             ModLogger.Info("CoopMissionSpawnLogic: server mission entered.");
             try
@@ -4117,6 +4131,7 @@ namespace CoopSpectator.MissionBehaviors
                 ModLogger.Info("CoopMissionSpawnLogic: no allowed troop id available yet (roster empty).");
             LogAllowedCharacterResolution();
             LogImportedEquipmentAvailabilityDiagnostics();
+            LogHeroEquipmentResolutionAudit();
             CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, "CoopMissionSpawnLogic.AfterStart", mission);
 
             _timeUntilNextPeerLog = ServerLogIntervalSeconds;
@@ -4228,6 +4243,7 @@ namespace CoopSpectator.MissionBehaviors
             _exactNativeClientVisualOverlayEntryQueuesByAssignmentKey.Clear();
             _battlePhaseHeldFormationKeys.Clear();
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
+            _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
             _lastAppliedBattlePhaseAiHold = null;
             _lastAppliedFormationHoldPhase = null;
@@ -4541,6 +4557,7 @@ namespace CoopSpectator.MissionBehaviors
                     "Mission=" + (mission.SceneName ?? "null") +
                     " Source=" + (_lastServerRuntimeInitializationSource ?? "unknown"));
                 LogImportedEquipmentAvailabilityDiagnostics();
+                LogHeroEquipmentResolutionAudit();
                 CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, "dedicated observer mission detected", mission);
             }
 
@@ -4618,6 +4635,7 @@ namespace CoopSpectator.MissionBehaviors
             _exactNativeClientVisualOverlayEntryQueuesByAssignmentKey.Clear();
             _exactNativeClientVisualOverlayQueueSnapshotKey = string.Empty;
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
+            _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _battlePhaseHeldFormationKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
             _lastAppliedBattlePhaseAiHold = null;
@@ -4627,6 +4645,7 @@ namespace CoopSpectator.MissionBehaviors
             ResetMaterializedBattleResultRuntimeState();
             _hasMaterializedBattlefieldArmies = false;
             _hasLoggedImportedEquipmentAvailabilityDiagnostics = false;
+            _hasLoggedHeroEquipmentResolutionAudit = false;
             _hasLoggedMaterializedEquipmentCoverageSummary = false;
             _hasTriggeredAuthoritativeBattleCompletion = false;
             _authoritativeBattleWinnerSide = string.Empty;
@@ -5111,7 +5130,8 @@ namespace CoopSpectator.MissionBehaviors
             Agent agent,
             string preferredEntryId,
             string source,
-            bool includeWeaponsForClientRefresh = false)
+            bool includeWeaponsForClientRefresh = false,
+            bool allowImmediateApply = true)
         {
             if (mission == null || agent == null || agent.IsMount || !agent.IsActive() || GameNetwork.IsServer)
                 return false;
@@ -5129,10 +5149,22 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
-            if (includeWeaponsForClientRefresh && !IsHeroEntryEligibleForExactPersonalPerks(entryState))
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
                 return false;
 
             _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = entryId;
+            if (!allowImmediateApply)
+            {
+                return TryQueueClientExactCampaignVisualOverlay(
+                    mission,
+                    agent,
+                    entryId,
+                    source ?? "client exact-visual finalize",
+                    delaySeconds: 0.35,
+                    force: true,
+                    includeWeaponsForRefresh: includeWeaponsForClientRefresh);
+            }
+
             if (agent.IsActive() && agent.Team != null && agent.Team.Side != BattleSideEnum.None)
             {
                 _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agent.Index);
@@ -6576,6 +6608,7 @@ namespace CoopSpectator.MissionBehaviors
                 _materializedArmySideByAgentIndex.Clear();
                 _materializedAgentInstanceByIndex.Clear();
                 _loggedAutomatedMaterializedEntrySkipIds.Clear();
+                _loggedSuppressedMaterializedEquipmentKeys.Clear();
                 MaterializedEquipmentResolutionSourceCounts.Clear();
                 MaterializedEquipmentMissCounts.Clear();
                 MaterializedEquipmentNormalizedFallbackCounts.Clear();
@@ -12452,6 +12485,29 @@ namespace CoopSpectator.MissionBehaviors
             if (string.IsNullOrWhiteSpace(itemId))
                 return null;
 
+            if (ShouldSuppressMaterializedEquipmentItem(itemId, entryState, slotLabel, out string suppressionReason))
+            {
+                resolvedItemId = itemId;
+                resolutionSource = suppressionReason ?? "suppressed";
+                RecordMaterializedEquipmentResolution(itemId, resolutionSource, trackCoverage);
+                LogSuppressedMaterializedEquipmentItem(itemId, entryState, slotLabel, resolutionSource);
+                return null;
+            }
+
+            if (ShouldPreferNormalizedMaterializedEquipmentItem(itemId, entryState, slotLabel) &&
+                TryNormalizeCampaignEquipmentToMpItemId(itemId, entryState, slotLabel, out string preferredNormalizedItemId) &&
+                !string.IsNullOrWhiteSpace(preferredNormalizedItemId))
+            {
+                ItemObject preferredNormalizedItem = TryGetMaterializedEquipmentItem(preferredNormalizedItemId);
+                if (preferredNormalizedItem != null)
+                {
+                    resolvedItemId = preferredNormalizedItem.StringId;
+                    resolutionSource = "normalized-preferred";
+                    RecordMaterializedEquipmentResolution(itemId, resolutionSource, trackCoverage);
+                    return preferredNormalizedItem;
+                }
+            }
+
             ItemObject directItem = TryGetMaterializedEquipmentItem(itemId);
             if (directItem != null)
             {
@@ -12528,6 +12584,80 @@ namespace CoopSpectator.MissionBehaviors
             return null;
         }
 
+        private static bool ShouldPreferNormalizedMaterializedEquipmentItem(
+            string itemId,
+            RosterEntryState entryState,
+            string slotLabel)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return false;
+
+            switch (itemId.Trim().ToLowerInvariant())
+            {
+                case "sling_wool":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool ShouldSuppressMaterializedEquipmentItem(
+            string itemId,
+            RosterEntryState entryState,
+            string slotLabel,
+            out string suppressionReason)
+        {
+            suppressionReason = null;
+            if (string.IsNullOrWhiteSpace(itemId) || entryState == null)
+                return false;
+
+            if (entryState.IsHero ||
+                !string.Equals(entryState.CultureId, "looters", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            switch (itemId.Trim().ToLowerInvariant())
+            {
+                case "throwing_stone":
+                    suppressionReason = "suppressed-looter-thrown-weapon1";
+                    return true;
+                case "sling_wool":
+                case "sling_braided":
+                    suppressionReason = "suppressed-looter-sling-weapon1";
+                    return true;
+                case "sling_stoneammo":
+                    suppressionReason = "suppressed-looter-sling-ammo";
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static void LogSuppressedMaterializedEquipmentItem(
+            string itemId,
+            RosterEntryState entryState,
+            string slotLabel,
+            string suppressionReason)
+        {
+            string logKey =
+                (entryState?.EntryId ?? "(unknown)") + "|" +
+                (slotLabel ?? "(slot)") + "|" +
+                (itemId ?? "(item)") + "|" +
+                (suppressionReason ?? "(reason)");
+            if (!_loggedSuppressedMaterializedEquipmentKeys.Add(logKey))
+                return;
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: suppressed risky materialized equipment item for mission-safe non-hero runtime. " +
+                "EntryId=" + (entryState?.EntryId ?? "(null)") +
+                " TroopId=" + (entryState?.CharacterId ?? "(null)") +
+                " Slot=" + (slotLabel ?? "(null)") +
+                " ItemId=" + (itemId ?? "(null)") +
+                " Reason=" + (suppressionReason ?? "(none)") +
+                " MissionSafeCulture=" + (entryState?.CultureId ?? "(null)"));
+        }
+
         private static void LogImportedEquipmentAvailabilityDiagnostics()
         {
             if (_hasLoggedImportedEquipmentAvailabilityDiagnostics)
@@ -12587,6 +12717,105 @@ namespace CoopSpectator.MissionBehaviors
                     string.Join(", ", missingAliases) +
                     "].");
             }
+        }
+
+        private static void LogHeroEquipmentResolutionAudit()
+        {
+            if (_hasLoggedHeroEquipmentResolutionAudit)
+                return;
+
+            _hasLoggedHeroEquipmentResolutionAudit = true;
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            if (runtimeState?.EntriesById == null || runtimeState.EntriesById.Count == 0)
+                return;
+
+            var heroEntries = runtimeState.EntriesById.Values
+                .Where(entry => entry != null && entry.IsHero)
+                .OrderBy(entry => entry.EntryId, StringComparer.Ordinal)
+                .ToList();
+            if (heroEntries.Count == 0)
+                return;
+
+            foreach (RosterEntryState heroEntry in heroEntries)
+            {
+                string audit =
+                    BuildHeroEquipmentResolutionAuditForSlot(heroEntry, "Item0", heroEntry.CombatItem0Id) + "; " +
+                    BuildHeroEquipmentResolutionAuditForSlot(heroEntry, "Item1", heroEntry.CombatItem1Id) + "; " +
+                    BuildHeroEquipmentResolutionAuditForSlot(heroEntry, "Item2", heroEntry.CombatItem2Id) + "; " +
+                    BuildHeroEquipmentResolutionAuditForSlot(heroEntry, "Item3", heroEntry.CombatItem3Id) + "; " +
+                    BuildHeroEquipmentResolutionAuditForSlot(heroEntry, "Head", heroEntry.CombatHeadId) + "; " +
+                    BuildHeroEquipmentResolutionAuditForSlot(heroEntry, "Body", heroEntry.CombatBodyId) + "; " +
+                    BuildHeroEquipmentResolutionAuditForSlot(heroEntry, "Leg", heroEntry.CombatLegId) + "; " +
+                    BuildHeroEquipmentResolutionAuditForSlot(heroEntry, "Gloves", heroEntry.CombatGlovesId) + "; " +
+                    BuildHeroEquipmentResolutionAuditForSlot(heroEntry, "Cape", heroEntry.CombatCapeId) + "; " +
+                    BuildHeroEquipmentResolutionAuditForSlot(heroEntry, "Horse", heroEntry.CombatHorseId) + "; " +
+                    BuildHeroEquipmentResolutionAuditForSlot(heroEntry, "HorseHarness", heroEntry.CombatHorseHarnessId);
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: hero equipment resolution audit. " +
+                    "EntryId=" + (heroEntry.EntryId ?? "null") +
+                    " HeroId=" + (heroEntry.HeroId ?? "null") +
+                    " HeroRole=" + (heroEntry.HeroRole ?? "null") +
+                    " SpawnTemplate=" + (heroEntry.SpawnTemplateId ?? "null") +
+                    " Audit=[" + audit + "].");
+            }
+        }
+
+        private static string BuildHeroEquipmentResolutionAuditForSlot(
+            RosterEntryState entryState,
+            string slotLabel,
+            string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return (slotLabel ?? "slot") + "=(none)";
+
+            string normalizedItemId = null;
+            bool normalizedCandidate =
+                TryNormalizeCampaignEquipmentToMpItemId(itemId, entryState, slotLabel, out normalizedItemId) &&
+                !string.IsNullOrWhiteSpace(normalizedItemId);
+            string aliasItemId =
+                ExactEquipmentCompatibilityAliasIds.TryGetValue(itemId, out string aliasCandidate) &&
+                !string.IsNullOrWhiteSpace(aliasCandidate)
+                    ? aliasCandidate
+                    : null;
+            string standInItemId =
+                ExactEquipmentCompatibilityStandInItemIds.TryGetValue(itemId, out string standInCandidate) &&
+                !string.IsNullOrWhiteSpace(standInCandidate)
+                    ? standInCandidate
+                    : null;
+            string mpPrefixedItemId = itemId.StartsWith("mp_", StringComparison.Ordinal)
+                ? null
+                : "mp_" + itemId;
+
+            bool direct = TryGetMaterializedEquipmentItem(itemId) != null;
+            bool alias = !string.IsNullOrWhiteSpace(aliasItemId) && TryGetMaterializedEquipmentItem(aliasItemId) != null;
+            bool standIn = !string.IsNullOrWhiteSpace(standInItemId) && TryGetMaterializedEquipmentItem(standInItemId) != null;
+            bool mpPrefix = !string.IsNullOrWhiteSpace(mpPrefixedItemId) && TryGetMaterializedEquipmentItem(mpPrefixedItemId) != null;
+            bool normalized = normalizedCandidate && TryGetMaterializedEquipmentItem(normalizedItemId) != null;
+
+            string resolvedItemId;
+            string resolutionSource;
+            ItemObject resolvedItem = ResolveMaterializedEquipmentItem(
+                itemId,
+                entryState,
+                slotLabel,
+                out resolvedItemId,
+                out resolutionSource,
+                trackCoverage: false);
+
+            return
+                (slotLabel ?? "slot") + "=" + itemId +
+                " -> " + (resolvedItem?.StringId ?? "unresolved") +
+                "(via:" + (resolutionSource ?? "null") +
+                ", direct=" + direct +
+                ", alias=" + alias +
+                ", standin=" + standIn +
+                ", mpPrefix=" + mpPrefix +
+                ", normalized=" + normalized +
+                ", aliasId=" + (aliasItemId ?? "(none)") +
+                ", standinId=" + (standInItemId ?? "(none)") +
+                ", normalizedId=" + (normalizedItemId ?? "(none)") +
+                ")";
         }
 
         private static void RecordMaterializedEquipmentResolution(string sourceItemId, string resolutionSource, bool trackCoverage)

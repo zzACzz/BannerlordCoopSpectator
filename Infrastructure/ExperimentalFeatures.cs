@@ -86,6 +86,15 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableExactCampaignObjectCatalogBootstrap = true;
 
         /// <summary>
+        /// Exact hero equipment parity path: when a campaign hero item id still
+        /// does not direct-resolve after the generic catalog bootstrap, load the
+        /// exact item xml node into `MBObjectManager` on both sides in a stable
+        /// order before equipment sync. This is the low-level alternative to
+        /// `compat-standin` mappings.
+        /// </summary>
+        public const bool EnableExactCampaignRuntimeItemRegistry = true;
+
+        /// <summary>
         /// Multiplayer mission systems assume every spawned character belongs to
         /// an `MPHeroClass`. When exact campaign agents use original
         /// `BasicCharacterObject` ids, this flag maps them to a surrogate
