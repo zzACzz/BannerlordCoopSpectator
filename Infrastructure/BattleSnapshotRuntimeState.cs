@@ -481,11 +481,9 @@ namespace CoopSpectator.Infrastructure
             BattleRosterEntryProjectionState entry,
             string spawnTemplateId)
         {
-            foreach (string fallbackCharacterId in BuildMissionSafeFallbackCharacterIds(entry, spawnTemplateId))
+            foreach (string fallbackCharacterId in BuildMissionSafeResolvableFallbackCharacterIds(entry, spawnTemplateId))
             {
                 BasicCharacterObject fallbackCharacter = TryResolveBasicCharacterObject(fallbackCharacterId);
-                if (fallbackCharacter == null)
-                    continue;
 
                 bool shouldLog;
                 lock (Sync)
@@ -510,6 +508,53 @@ namespace CoopSpectator.Infrastructure
             }
 
             return null;
+        }
+
+        public static string TryResolveMissionSafeFallbackCharacterId(RosterEntryState entryState, string spawnTemplateId = null)
+        {
+            if (entryState == null)
+                return null;
+
+            var projectionState = new BattleRosterEntryProjectionState
+            {
+                EntryId = entryState.EntryId,
+                CharacterId = entryState.CharacterId,
+                OriginalCharacterId = entryState.OriginalCharacterId,
+                SpawnTemplateId = entryState.SpawnTemplateId,
+                CultureId = entryState.CultureId,
+                IsHero = entryState.IsHero,
+                IsMounted = entryState.IsMounted,
+                IsRanged = entryState.IsRanged,
+                HasShield = entryState.HasShield,
+                HasThrown = entryState.HasThrown
+            };
+
+            return TryResolveMissionSafeFallbackCharacterId(
+                projectionState,
+                !string.IsNullOrWhiteSpace(spawnTemplateId) ? spawnTemplateId : entryState.SpawnTemplateId ?? entryState.CharacterId);
+        }
+
+        public static string TryResolveMissionSafeFallbackCharacterId(BattleRosterEntryProjectionState entryState, string spawnTemplateId = null)
+        {
+            if (entryState == null)
+                return null;
+
+            string resolvedSpawnTemplateId =
+                !string.IsNullOrWhiteSpace(spawnTemplateId)
+                    ? spawnTemplateId
+                    : entryState.SpawnTemplateId ?? entryState.CharacterId;
+            return BuildMissionSafeResolvableFallbackCharacterIds(entryState, resolvedSpawnTemplateId).FirstOrDefault();
+        }
+
+        private static IEnumerable<string> BuildMissionSafeResolvableFallbackCharacterIds(
+            BattleRosterEntryProjectionState entry,
+            string spawnTemplateId)
+        {
+            foreach (string fallbackCharacterId in BuildMissionSafeFallbackCharacterIds(entry, spawnTemplateId))
+            {
+                if (TryResolveBasicCharacterObject(fallbackCharacterId) != null)
+                    yield return fallbackCharacterId;
+            }
         }
 
         private static IEnumerable<string> BuildMissionSafeFallbackCharacterIds(

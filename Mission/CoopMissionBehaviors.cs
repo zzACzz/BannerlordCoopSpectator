@@ -5020,7 +5020,8 @@ namespace CoopSpectator.MissionBehaviors
 
             return string.Equals(entryState.CharacterId, currentTroopId, StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(entryState.OriginalCharacterId, currentTroopId, StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(entryState.SpawnTemplateId, currentTroopId, StringComparison.OrdinalIgnoreCase);
+                   string.Equals(entryState.SpawnTemplateId, currentTroopId, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(ResolveEntryMissionSafeFallbackTroopId(entryState), currentTroopId, StringComparison.OrdinalIgnoreCase);
         }
 
         private static void TryProcessPendingClientExactCampaignVisualOverlays(Mission mission)
@@ -5477,15 +5478,22 @@ namespace CoopSpectator.MissionBehaviors
                     if (string.IsNullOrWhiteSpace(spawnTemplateId) || string.IsNullOrWhiteSpace(entryState.EntryId))
                         continue;
 
-                    string assignmentKey = BuildClientExactCampaignVisualOverlayAssignmentKey(side, spawnTemplateId);
-                    if (!_exactNativeClientVisualOverlayEntryQueuesByAssignmentKey.TryGetValue(assignmentKey, out Queue<string> entryQueue))
-                    {
-                        entryQueue = new Queue<string>();
-                        _exactNativeClientVisualOverlayEntryQueuesByAssignmentKey[assignmentKey] = entryQueue;
-                    }
+                    EnqueueClientExactCampaignVisualOverlayAssignmentEntries(
+                        side,
+                        spawnTemplateId,
+                        entryState.EntryId,
+                        availableCount);
 
-                    for (int i = 0; i < availableCount; i++)
-                        entryQueue.Enqueue(entryState.EntryId);
+                    string fallbackTroopId = ResolveEntryMissionSafeFallbackTroopId(entryState);
+                    if (!string.IsNullOrWhiteSpace(fallbackTroopId) &&
+                        !string.Equals(fallbackTroopId, spawnTemplateId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        EnqueueClientExactCampaignVisualOverlayAssignmentEntries(
+                            side,
+                            fallbackTroopId,
+                            entryState.EntryId,
+                            availableCount);
+                    }
                 }
             }
 
@@ -5559,6 +5567,38 @@ namespace CoopSpectator.MissionBehaviors
         private static string BuildClientExactCampaignVisualOverlayAssignmentKey(BattleSideEnum side, string troopId)
         {
             return side + "|" + (troopId ?? string.Empty);
+        }
+
+        private static void EnqueueClientExactCampaignVisualOverlayAssignmentEntries(
+            BattleSideEnum side,
+            string troopId,
+            string entryId,
+            int availableCount)
+        {
+            if (side == BattleSideEnum.None ||
+                string.IsNullOrWhiteSpace(troopId) ||
+                string.IsNullOrWhiteSpace(entryId) ||
+                availableCount <= 0)
+            {
+                return;
+            }
+
+            string assignmentKey = BuildClientExactCampaignVisualOverlayAssignmentKey(side, troopId);
+            if (!_exactNativeClientVisualOverlayEntryQueuesByAssignmentKey.TryGetValue(assignmentKey, out Queue<string> entryQueue))
+            {
+                entryQueue = new Queue<string>();
+                _exactNativeClientVisualOverlayEntryQueuesByAssignmentKey[assignmentKey] = entryQueue;
+            }
+
+            for (int i = 0; i < availableCount; i++)
+                entryQueue.Enqueue(entryId);
+        }
+
+        private static string ResolveEntryMissionSafeFallbackTroopId(RosterEntryState entryState)
+        {
+            return BattleSnapshotRuntimeState.TryResolveMissionSafeFallbackCharacterId(
+                entryState,
+                ResolveEntrySpawnTemplateId(entryState));
         }
 
         private static void EnsureClientBattleSnapshotFreshForMission(Mission mission, string source)
@@ -15960,7 +16000,33 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
+            if (_exactNativeClientVisualOverlayEntryIdByAgentIndex.TryGetValue(agent.Index, out string clientOverlayEntryId) &&
+                !string.IsNullOrWhiteSpace(clientOverlayEntryId) &&
+                BattleSnapshotRuntimeState.GetEntryState(clientOverlayEntryId) != null)
+            {
+                entryId = clientOverlayEntryId;
+                return true;
+            }
+
             return false;
+        }
+
+        public static bool TryResolveExactDisplayNameForAgent(Agent agent, out string entryId, out TextObject exactName)
+        {
+            entryId = null;
+            exactName = null;
+            if (agent == null)
+                return false;
+
+            if (!TryResolveSelectableEntryId(agent, out entryId) || string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (!HasEntryHeroIdentity(entryState) || string.IsNullOrWhiteSpace(entryState.TroopName))
+                return false;
+
+            exactName = new TextObject(entryState.TroopName);
+            return true;
         }
 
         private static bool HasTrackedBattlefieldEntryStateForSide(Mission mission, BattleSideEnum side)
