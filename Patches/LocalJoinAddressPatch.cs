@@ -15,9 +15,22 @@ namespace CoopSpectator.Patches
         [HarmonyPatch("StartMultiplayerOnClient")]
         private static class StartMultiplayerOnClientPatch
         {
-            public static void Prefix([HarmonyArgument(0)] ref string serverAddress, [HarmonyArgument(1)] int port)
+            public static void Prefix(
+                [HarmonyArgument(0)] ref string serverAddress,
+                [HarmonyArgument(1)] int port,
+                [HarmonyArgument(2)] int sessionKey,
+                [HarmonyArgument(3)] int playerIndex)
             {
-                HostSelfJoinRedirectState.TryConsumeLoopbackRewrite(ref serverAddress, port, "GameNetwork.StartMultiplayerOnClient");
+                string originalAddress = serverAddress;
+                bool consumed = HostSelfJoinRedirectState.TryConsumeLoopbackRewrite(ref serverAddress, port, "GameNetwork.StartMultiplayerOnClient");
+                ModLogger.Info(
+                    "LocalJoinAddressPatch: final StartMultiplayerOnClient address. " +
+                    "originalAddress=" + (originalAddress ?? string.Empty) +
+                    " finalAddress=" + (serverAddress ?? string.Empty) +
+                    " port=" + port +
+                    " sessionKey=" + sessionKey +
+                    " playerIndex=" + playerIndex +
+                    " selfJoinRedirect=" + consumed + ".");
             }
         }
     }

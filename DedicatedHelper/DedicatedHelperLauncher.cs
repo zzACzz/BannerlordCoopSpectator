@@ -499,6 +499,14 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             _currentLaunchPort = port;
 
             // Явні логи джерела startup state (для діагностики Steam-like / modded flow).
+            ModLogger.Info(
+                "DedicatedHelper [startup] resolved launch settings. " +
+                "serverName=" + launchSettings.ServerName +
+                " maxPlayerCount=" + launchSettings.MaxPlayerCount +
+                " hostingMode=" + launchSettings.HostingMode +
+                " advertisedHostAddress=" + (string.IsNullOrWhiteSpace(launchSettings.AdvertisedHostAddress) ? "(default)" : launchSettings.AdvertisedHostAddress) +
+                " useCustomServerHostArg=" + launchSettings.UsesAdvertisedHostOverride() +
+                " port=" + port + ".");
             ModLogger.Info("DedicatedHelper [startup] SteamLikeLaunch = " + SteamLikeLaunch);
             ModLogger.Info("DedicatedHelper [startup] AddConfigFileOnly = " + AddConfigFileOnly);
             ModLogger.Info("DedicatedHelper [startup] AddPortOnly = " + AddPortOnly);

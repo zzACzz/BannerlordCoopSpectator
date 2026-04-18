@@ -262,15 +262,31 @@ namespace CoopSpectator.Infrastructure
                     PushInitTeamSideSanitization(mission, playerSide, source);
                 try
                 {
+                    initializationStep = "ensure-deployment-team-plans-post-sanitization";
+                    if (!TryEnsureDeploymentPlanTeamPlans(mission, source, out string postSanitizationDeploymentPlanDiagnostics))
+                    {
+                        reason = postSanitizationDeploymentPlanDiagnostics ?? "deployment-team-plan-bridge-post-sanitization-failed";
+                        return false;
+                    }
+
+                    string combinedDeploymentPlanDiagnostics = deploymentPlanDiagnostics;
+                    if (!string.Equals(postSanitizationDeploymentPlanDiagnostics, deploymentPlanDiagnostics, StringComparison.Ordinal))
+                    {
+                        combinedDeploymentPlanDiagnostics +=
+                            " PostSanitization={" + (postSanitizationDeploymentPlanDiagnostics ?? string.Empty) + "}";
+                    }
+
+                    initializationStep = "log-bootstrap-contract";
                     LogBootstrapContractSnapshot(
                         mission,
                         spawnLogic,
                         playerSide,
                         supplierDiagnostics +
                         " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
-                        " DeploymentPlanBridge={" + deploymentPlanDiagnostics + "}",
+                        " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}",
                         "pre-init-with-single-phase",
                         source);
+                    initializationStep = "init-with-single-phase";
                     spawnLogic.InitWithSinglePhase(
                         defenderTotal,
                         attackerTotal,

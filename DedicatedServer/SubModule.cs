@@ -136,6 +136,7 @@ namespace CoopSpectator
                 try { AssemblyDiagnostics.LogRuntimeLoadPaths(); AssemblyDiagnostics.WarnIfAssemblyPathUnexpected(); } catch (Exception ex) { ModLogger.Info("[DedicatedDiag] AssemblyDiagnostics failed: " + ex.Message); }
 
                 base.OnSubModuleLoad();
+                LogDedicatedStartupInfo();
 
                 try { DedicatedSceneContractProbe.RunStartupProbe(); } catch (Exception ex) { ModLogger.Info("CoopSpectatorDedicated: scene contract startup probe failed: " + ex.Message); }
 
@@ -174,6 +175,35 @@ namespace CoopSpectator
                 System.Console.WriteLine(msg);
                 try { File.AppendAllText(GetProofFilePath(errorFile), ex.ToString() + Environment.NewLine); } catch (Exception) { }
                 throw;
+            }
+        }
+
+        private static void LogDedicatedStartupInfo()
+        {
+            try
+            {
+                GameStartupInfo startupInfo = TaleWorlds.MountAndBlade.Module.CurrentModule?.StartupInfo;
+                if (startupInfo == null)
+                {
+                    ModLogger.Info("CoopSpectatorDedicated [startup] StartupInfo unavailable.");
+                    return;
+                }
+
+                ModLogger.Info(
+                    "CoopSpectatorDedicated [startup] StartupInfo. " +
+                    "StartupType=" + startupInfo.StartupType +
+                    " DedicatedServerType=" + startupInfo.DedicatedServerType +
+                    " PlayerHostedDedicatedServer=" + startupInfo.PlayerHostedDedicatedServer +
+                    " ServerPort=" + startupInfo.ServerPort +
+                    " ServerRegion=" + (startupInfo.ServerRegion ?? string.Empty) +
+                    " Permission=" + startupInfo.Permission +
+                    " CustomServerHostIP=" + (string.IsNullOrWhiteSpace(startupInfo.CustomServerHostIP) ? "(default)" : startupInfo.CustomServerHostIP) +
+                    " CustomGameServerConfigFile=" + (startupInfo.CustomGameServerConfigFile ?? string.Empty) +
+                    " AllowsOptionalModules=" + startupInfo.CustomGameServerAllowsOptionalModules + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated [startup] StartupInfo logging failed: " + ex.Message);
             }
         }
 
@@ -293,43 +323,50 @@ namespace CoopSpectator
                 Harmony.SetSwitch("DMDDebug", false);
                 Harmony.ClearSwitch("DMDDumpTo");
 
-                string[] preferredGeneratorTypes =
+                (string SwitchValue, string TypeName)[] preferredGeneratorTypes =
                 {
-                    "MonoMod.Utils.DMDCecilGenerator",
-                    "MonoMod.Utils.DMDEmitDynamicMethodGenerator",
-                    "MonoMod.Utils.DMDEmitMethodBuilderGenerator"
+                    // Dedicated runtime on the helper host has been failing patch apply under DMDCecilGenerator
+                    // with MissingMethodException on ILGenerator.MarkSequencePoint. Prefer emit-based generators first.
+                    ("dynamicmethod", "MonoMod.Utils.DMDEmitDynamicMethodGenerator"),
+                    ("methodbuilder", "MonoMod.Utils.DMDEmitMethodBuilderGenerator"),
+                    ("cecil", "MonoMod.Utils.DMDCecilGenerator")
                 };
 
-                Type selectedGeneratorType = null;
+                string selectedGeneratorSwitchValue = null;
                 var availableGeneratorTypes = new System.Collections.Generic.List<string>();
-                foreach (string generatorTypeName in preferredGeneratorTypes)
+                foreach ((string switchValue, string generatorTypeName) in preferredGeneratorTypes)
                 {
                     Type candidateType = typeof(Harmony).Assembly.GetType(generatorTypeName, throwOnError: false);
                     if (candidateType != null)
                     {
-                        availableGeneratorTypes.Add(generatorTypeName);
-                        if (selectedGeneratorType == null)
+                        availableGeneratorTypes.Add(generatorTypeName + "=>" + switchValue);
+                        if (selectedGeneratorSwitchValue == null)
                         {
-                            selectedGeneratorType = candidateType;
+                            selectedGeneratorSwitchValue = switchValue;
                             _configuredHarmonyDmdGeneratorTypeName = generatorTypeName;
                         }
                     }
                 }
 
-                if (selectedGeneratorType == null)
+                if (selectedGeneratorSwitchValue == null)
                 {
                     _configuredHarmonyDmdGeneratorTypeName = "not-found";
+                    Harmony.ClearSwitch("DMDType");
                     ModLogger.Info(
                         "CoopSpectatorDedicated: configured Harmony runtime compat. " +
                         "DMDDebug=false AvailableDMDTypes=[] SelectedDMDType=none.");
                     return;
                 }
 
-                Harmony.SetSwitch("DMDType", selectedGeneratorType);
+                // Harmony 2.4.2 reads the DMDType switch as a string token/alias, not as a System.Type.
+                // Passing the Type object logs nicely but gets ignored by DynamicMethodDefinition.Generate(),
+                // which silently falls back to its default generator selection.
+                Harmony.SetSwitch("DMDType", selectedGeneratorSwitchValue);
                 ModLogger.Info(
                     "CoopSpectatorDedicated: configured Harmony runtime compat. " +
                     "DMDDebug=false AvailableDMDTypes=[" + string.Join(", ", availableGeneratorTypes) + "] " +
-                    "SelectedDMDType=" + _configuredHarmonyDmdGeneratorTypeName + ".");
+                    "SelectedDMDType=" + _configuredHarmonyDmdGeneratorTypeName +
+                    " SelectedDMDSwitch=" + selectedGeneratorSwitchValue + ".");
             }
             catch (Exception ex)
             {

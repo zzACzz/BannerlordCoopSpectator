@@ -17,22 +17,36 @@ namespace CoopSpectator.Patches
                 if (__0 == null)
                     return;
 
-                PropertyInfo successProperty = __0.GetType().GetProperty("Success", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (successProperty == null || !(successProperty.GetValue(__0) is bool success) || !success)
-                    return;
-
+                bool success = GetBoolPropertyValue(__0, "Success");
+                object response = GetPropertyValue(__0, "Response");
+                bool isAdmin = GetBoolPropertyValue(__0, "IsAdmin");
                 object joinGameData = GetPropertyValue(__0, "JoinGameData");
                 object gameServerProperties = GetPropertyValue(joinGameData, "GameServerProperties");
-                if (gameServerProperties == null)
-                    return;
-
-                string serverName = GetPropertyValue(gameServerProperties, "Name") as string;
-                string serverAddress = GetPropertyValue(gameServerProperties, "Address") as string;
+                string serverName = GetStringPropertyValue(gameServerProperties, "Name");
+                string hostName = GetStringPropertyValue(gameServerProperties, "HostName");
+                string serverAddress = GetStringPropertyValue(gameServerProperties, "Address");
                 int serverPort = GetIntPropertyValue(gameServerProperties, "Port");
-                if (serverPort <= 0)
-                    return;
+                bool isOfficial = GetBoolPropertyValue(gameServerProperties, "IsOfficial");
+                int peerIndex = GetIntPropertyValue(joinGameData, "PeerIndex");
+                int sessionKey = GetIntPropertyValue(joinGameData, "SessionKey");
+                bool armedSelfJoin = false;
 
-                HostSelfJoinRedirectState.ArmForNextJoinIfCurrentHost(serverName, serverAddress, serverPort);
+                if (success && serverPort > 0)
+                    armedSelfJoin = HostSelfJoinRedirectState.ArmForNextJoinIfCurrentHost(serverName, serverAddress, serverPort);
+
+                ModLogger.Info(
+                    "LobbyJoinResultSelfJoinArmPatch: native join result handled. " +
+                    "success=" + success +
+                    " response=" + (response?.ToString() ?? string.Empty) +
+                    " serverName=" + serverName +
+                    " hostName=" + hostName +
+                    " address=" + serverAddress +
+                    " port=" + serverPort +
+                    " isOfficial=" + isOfficial +
+                    " peerIndex=" + peerIndex +
+                    " sessionKey=" + sessionKey +
+                    " isAdmin=" + isAdmin +
+                    " armedSelfJoin=" + armedSelfJoin + ".");
             }
             catch (Exception ex)
             {
@@ -95,6 +109,17 @@ namespace CoopSpectator.Patches
         {
             object value = GetPropertyValue(target, propertyName);
             return value is int intValue ? intValue : 0;
+        }
+
+        private static bool GetBoolPropertyValue(object target, string propertyName)
+        {
+            object value = GetPropertyValue(target, propertyName);
+            return value is bool boolValue && boolValue;
+        }
+
+        private static string GetStringPropertyValue(object target, string propertyName)
+        {
+            return GetPropertyValue(target, propertyName) as string ?? string.Empty;
         }
     }
 }

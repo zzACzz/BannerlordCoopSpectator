@@ -127,9 +127,11 @@ namespace CoopSpectator // Використовуємо кореневий names
                 ModLogger.Info("CampaignVisualResetPatch: disabled in this build (safe rollback while investigating campaign mannequin/crash path).");
                 AppDomain.CurrentDomain.AssemblyLoad += (_, e) => // Коли підвантажиться нова збірка (наприклад Lobby)
                 { // Перевіряємо чи це Lobby — тоді застосуємо патч
-                    if (e.LoadedAssembly.GetName().Name == "TaleWorlds.MountAndBlade.Lobby")
+                    string loadedAssemblyName = e.LoadedAssembly.GetName().Name;
+                    if (loadedAssemblyName == "TaleWorlds.MountAndBlade.Multiplayer" ||
+                        loadedAssemblyName == "TaleWorlds.MountAndBlade.Lobby")
                         LobbyCustomGameLocalJoinPatch.Apply(harmony);
-                    if (e.LoadedAssembly.GetName().Name == "TaleWorlds.MountAndBlade.Diamond")
+                    if (loadedAssemblyName == "TaleWorlds.MountAndBlade.Diamond")
                         LobbyJoinResultSelfJoinArmPatch.Apply(harmony);
                 };
                 ModLogger.Info("Harmony патчі застосовано успішно."); // Логуємо успіх, щоб було видно що патчинг активний

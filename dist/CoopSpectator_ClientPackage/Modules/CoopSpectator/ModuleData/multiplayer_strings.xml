@@ -1,12 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<base xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" type="string">
-  <strings>
-    <!-- Назва режиму для офіційного списку та лобі (ID має збігатися з GameModeId у коді). -->
-    <string id="str_multiplayer_official_game_type_name.CoopTdm" text="{=*}Coop TDM" />
-    <string id="str_multiplayer_game_type.CoopTdm" text="{=*}Coop TDM" />
-    <string id="str_multiplayer_official_game_type_name.CoopBattle" text="{=*}Coop Battle" />
-    <string id="str_multiplayer_game_type.CoopBattle" text="{=*}Coop Battle" />
-    <string id="str_multiplayer_official_game_type_name.TdmClone" text="{=*}TDM Clone" />
-    <string id="str_multiplayer_game_type.TdmClone" text="{=*}TDM Clone" />
-  </strings>
-</base>
+<strings>
+  <string id="str_multiplayer_official_game_type_name.CoopTdm" text="{=*}Coop TDM" />
+  <string id="str_multiplayer_game_type.CoopTdm" text="{=*}Coop TDM" />
+  <string id="str_multiplayer_official_game_type_name.CoopBattle" text="{=*}Coop Battle" />
+  <string id="str_multiplayer_game_type.CoopBattle" text="{=*}Coop Battle" />
+  <string id="str_multiplayer_official_game_type_name.TdmClone" text="{=*}TDM Clone" />
+  <string id="str_multiplayer_game_type.TdmClone" text="{=*}TDM Clone" />
+</strings>

@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.MissionBehaviors;
 using TaleWorlds.Core;
 using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.InputSystem;
@@ -246,7 +247,7 @@ namespace CoopSpectator.UI
             _selectedSideOverride = side;
             _selectedEntryIdOverride = null;
             _requestedScreen = CoopSelectionScreen.ClassLoadout;
-            CoopBattleSelectionBridgeFile.WriteSelectSideRequest(side.ToString(), "CoopTeamSelectionUI Side");
+            CoopBattleNetworkRequestTransport.TrySelectSide(side, "CoopTeamSelectionUI Side");
             RefreshOverlay(force: true, HasLocalControlledAgent());
         }
 
@@ -259,8 +260,7 @@ namespace CoopSpectator.UI
             _selectedSideOverride = side;
             _selectedEntryIdOverride = entryId;
             _requestedScreen = CoopSelectionScreen.ClassLoadout;
-            CoopBattleSelectionBridgeFile.WriteSelectSideRequest(side.ToString(), "CoopClassLoadoutUI Side");
-            CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(entryId, "CoopClassLoadoutUI Entry");
+            CoopBattleNetworkRequestTransport.TrySelectEntry(side, entryId, "CoopClassLoadoutUI Entry");
             RefreshOverlay(force: true, HasLocalControlledAgent());
         }
 
@@ -300,7 +300,7 @@ namespace CoopSpectator.UI
             _selectedEntryIdOverride = null;
             _overlaySuppressedUntilUtc = DateTime.MinValue;
 
-            if (CoopBattleSelectionBridgeFile.WriteSpectatorRequest("CoopTeamSelectionUI Spectator"))
+            if (CoopBattleNetworkRequestTransport.TrySelectSpectator("CoopTeamSelectionUI Spectator"))
             {
                 InformationManager.DisplayMessage(new InformationMessage("Coop Battle: spectator mode enabled. Press H to reopen selection."));
                 ModLogger.Info("CoopMissionSelectionView: wrote spectator selection request.");
@@ -323,9 +323,8 @@ namespace CoopSpectator.UI
             _selectedEntryIdOverride = snapshot.SelectedEntryId;
             _spectatorOverlayHidden = false;
             _overlaySuppressedUntilUtc = DateTime.UtcNow + LocalSpawnOverlaySuppressionDuration;
-            CoopBattleSelectionBridgeFile.WriteSelectSideRequest(snapshot.EffectiveSide.ToString(), "CoopClassLoadoutUI SpawnSide");
-            CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(snapshot.SelectedEntryId, "CoopClassLoadoutUI SpawnEntry");
-            CoopBattleSpawnBridgeFile.WriteSpawnNowRequest("CoopClassLoadoutUI Spawn");
+            CoopBattleNetworkRequestTransport.TrySelectEntry(snapshot.EffectiveSide, snapshot.SelectedEntryId, "CoopClassLoadoutUI SpawnEntry");
+            CoopBattleNetworkRequestTransport.TryRequestSpawn("CoopClassLoadoutUI Spawn");
             RefreshOverlay(force: true, hasLocalControlledAgent);
         }
 

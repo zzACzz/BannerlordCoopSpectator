@@ -90,11 +90,11 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        public static void ArmForNextJoinIfCurrentHost(string serverName, string serverAddress, int port)
+        public static bool ArmForNextJoinIfCurrentHost(string serverName, string serverAddress, int port)
         {
             string normalizedServerName = Normalize(serverName);
             if (!MatchesPersistedHostSession(normalizedServerName, port))
-                return;
+                return false;
 
             _pendingLoopbackRewrite = true;
             _expectedPort = port;
@@ -104,6 +104,7 @@ namespace CoopSpectator.Infrastructure
                 "serverName=" + normalizedServerName +
                 " address=" + (serverAddress ?? "") +
                 " port=" + port + ".");
+            return true;
         }
 
         public static bool TryConsumeLoopbackRewrite(ref string serverAddress, int port, string source)

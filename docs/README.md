@@ -16,6 +16,10 @@ Read in this order when opening a new window:
 
 ## Active Runtime Status
 
+- `docs/COOP_BATTLE_STABILIZATION_AND_CONNECTIVITY_HANDOFF_2026-04-18.md`
+  Current move-on handoff after the battle/runtime recovery: what was stabilized, which low-level lessons actually worked, and which runtime files should now be treated as protected while connectivity work starts.
+- `docs/NEW_WINDOW_PROMPT_PUBLIC_OFFICIAL_AND_RADMIN_VPN_2026-04-18.md`
+  Copy-paste prompt for the next Codex window focused only on `Public` official connection and `Radmin VPN`, with explicit `ilspycmd` / low-level investigation requirements.
 - `docs/WORKING_SPAWN_BASELINE_AND_DIFF_PLAN_2026-04-13.md`
   Current validated source of truth after the 2026-04-13 recovery: latest mainline join/public/VPN layer kept, spawn-core restored to the proven working baseline, and future perk/captain work split into clean diff buckets.
 - `docs/SPAWN_BASELINE_RESET_AND_PERK_REINTRO_PLAN_2026-04-13.md`

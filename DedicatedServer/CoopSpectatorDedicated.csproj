@@ -27,6 +27,7 @@
     <_RefMultiplayerDir Condition="'$(_UseDedicatedRefs)'=='true' and Exists('$(DedicatedServerRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Server\TaleWorlds.MountAndBlade.Multiplayer.dll')">$(DedicatedServerRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Server</_RefMultiplayerDir>
     <_RefMultiplayerDir Condition="'$(_UseDedicatedRefs)'=='true' and '$(_RefMultiplayerDir)'=='' and Exists('$(DedicatedServerBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">$(DedicatedServerBinDir)</_RefMultiplayerDir>
     <_RefMultiplayerDir Condition="'$(_RefMultiplayerDir)'==''">$(MultiplayerModuleBinDir)</_RefMultiplayerDir>
+    <DedicatedHarmonyRuntimeAsset>$(NuGetPackageRoot)lib.harmony\2.4.2\lib\net6.0\0Harmony.dll</DedicatedHarmonyRuntimeAsset>
   </PropertyGroup>
 
   <ItemGroup>
@@ -49,6 +50,7 @@
     <Compile Include="..\GameMode\MissionBehaviorHelpers.cs" Link="GameMode\MissionBehaviorHelpers.cs" />
     <Compile Include="..\GameMode\MissionBehaviorDiagnostic.cs" Link="GameMode\MissionBehaviorDiagnostic.cs" />
     <Compile Include="..\Mission\CoopMissionBehaviors.cs" Link="Mission\CoopMissionBehaviors.cs" />
+    <Compile Include="..\Mission\CoopMissionNetworkBridge.cs" Link="Mission\CoopMissionNetworkBridge.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" Link="MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentApplyDamageModel.cs" Link="MissionModels\CoopCampaignDerivedAgentApplyDamageModel.cs" />
@@ -204,6 +206,13 @@
   </Target>
 
   <!-- Діагностика деплою: лише лог на стороні білда, exists для критичних файлів (не змінює запуск dedicated). -->
+  <Target Name="OverrideDedicatedHarmonyRuntimeAsset" BeforeTargets="DiagnoseDeployPaths;DeployServerToDedicated">
+    <Message Text="[CoopSpectatorDedicated] Runtime Harmony override path=$(DedicatedHarmonyRuntimeAsset) exists=true" Importance="high" Condition="Exists('$(DedicatedHarmonyRuntimeAsset)')" />
+    <Warning Text="[CoopSpectatorDedicated] Runtime Harmony override path=$(DedicatedHarmonyRuntimeAsset) exists=false" Condition="!Exists('$(DedicatedHarmonyRuntimeAsset)')" />
+    <Copy SourceFiles="$(DedicatedHarmonyRuntimeAsset)" DestinationFiles="$(OutputPath)0Harmony.dll" SkipUnchangedFiles="false" Condition="Exists('$(DedicatedHarmonyRuntimeAsset)')" />
+    <Message Text="[CoopSpectatorDedicated] Runtime Harmony override copied to $(OutputPath)0Harmony.dll" Importance="high" Condition="Exists('$(DedicatedHarmonyRuntimeAsset)')" />
+  </Target>
+
   <Target Name="DiagnoseDeployPaths" AfterTargets="Build">
     <PropertyGroup>
       <_DiagModuleDir Condition="'$(DedicatedServerRootDir)' != ''">$(DedicatedServerRootDir)\Modules\CoopSpectatorDedicated</_DiagModuleDir>

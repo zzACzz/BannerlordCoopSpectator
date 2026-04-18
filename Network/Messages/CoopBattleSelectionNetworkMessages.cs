@@ -80,14 +80,12 @@ namespace CoopSpectator.Network.Messages
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
     public sealed class CoopBattlePayloadChunkMessage : GameNetworkMessage
     {
-        public const int MaxChunkBytes = 896;
+        public const int MaxChunkBytes = 256;
 
         private static readonly CompressionInfo.Integer PayloadKindCompressionInfo = new CompressionInfo.Integer(0, 1, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer TransmissionCompressionInfo = new CompressionInfo.Integer(0, 1048575, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer ChunkIndexCompressionInfo = new CompressionInfo.Integer(0, 255, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer ChunkCountCompressionInfo = new CompressionInfo.Integer(1, 255, maximumValueGiven: true);
-        private static readonly CompressionInfo.Integer ChunkLengthCompressionInfo = new CompressionInfo.Integer(0, MaxChunkBytes, maximumValueGiven: true);
-
         public CoopBattlePayloadChunkMessage(
             CoopBattlePayloadKind payloadKind,
             int transmissionId,
@@ -124,13 +122,20 @@ namespace CoopSpectator.Network.Messages
             TransmissionId = ReadIntFromPacket(TransmissionCompressionInfo, ref bufferReadValid);
             ChunkIndex = ReadIntFromPacket(ChunkIndexCompressionInfo, ref bufferReadValid);
             ChunkCount = ReadIntFromPacket(ChunkCountCompressionInfo, ref bufferReadValid);
-            int payloadLength = ReadIntFromPacket(ChunkLengthCompressionInfo, ref bufferReadValid);
-
-            PayloadBytes = payloadLength > 0 ? new byte[payloadLength] : Array.Empty<byte>();
-            if (payloadLength > 0)
+            byte[] payloadBuffer = new byte[MaxChunkBytes];
+            int bytesRead = ReadByteArrayFromPacket(payloadBuffer, 0, MaxChunkBytes, ref bufferReadValid);
+            if (bytesRead <= 0)
             {
-                int bytesRead = ReadByteArrayFromPacket(PayloadBytes, 0, payloadLength, ref bufferReadValid);
-                bufferReadValid = bufferReadValid && bytesRead == payloadLength;
+                PayloadBytes = Array.Empty<byte>();
+            }
+            else if (bytesRead == payloadBuffer.Length)
+            {
+                PayloadBytes = payloadBuffer;
+            }
+            else
+            {
+                PayloadBytes = new byte[bytesRead];
+                Buffer.BlockCopy(payloadBuffer, 0, PayloadBytes, 0, bytesRead);
             }
 
             return bufferReadValid;
@@ -144,7 +149,6 @@ namespace CoopSpectator.Network.Messages
             WriteIntToPacket(TransmissionId, TransmissionCompressionInfo);
             WriteIntToPacket(ChunkIndex, ChunkIndexCompressionInfo);
             WriteIntToPacket(ChunkCount, ChunkCountCompressionInfo);
-            WriteIntToPacket(payloadLength, ChunkLengthCompressionInfo);
             if (payloadLength > 0)
                 WriteByteArrayToPacket(payloadBytes, 0, payloadLength);
         }

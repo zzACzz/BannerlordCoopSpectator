@@ -14,6 +14,17 @@ namespace CoopSpectator.Patches
     public static class LobbyCustomGameLocalJoinPatch
     {
         private static bool _isApplied;
+        private static readonly string[] CandidateAssemblyNames =
+        {
+            "TaleWorlds.MountAndBlade.Multiplayer",
+            "TaleWorlds.MountAndBlade.Lobby"
+        };
+
+        private static readonly string[] CandidateTypeNames =
+        {
+            "TaleWorlds.MountAndBlade.LobbyGameStateCustomGameClient",
+            "TaleWorlds.MountAndBlade.Lobby.LobbyGameStateCustomGameClient"
+        };
 
         public static void Prefix(
             ref string serverAddress,
@@ -21,7 +32,16 @@ namespace CoopSpectator.Patches
             ref int sessionKey,
             ref int peerIndex)
         {
-            HostSelfJoinRedirectState.TryConsumeLoopbackRewrite(ref serverAddress, port, "LobbyGameStateCustomGameClient.StartMultiplayer");
+            string originalAddress = serverAddress;
+            bool consumed = HostSelfJoinRedirectState.TryConsumeLoopbackRewrite(ref serverAddress, port, "LobbyGameStateCustomGameClient.StartMultiplayer");
+            ModLogger.Info(
+                "LobbyCustomGameLocalJoinPatch: lobby join handoff. " +
+                "originalAddress=" + (originalAddress ?? string.Empty) +
+                " finalAddress=" + (serverAddress ?? string.Empty) +
+                " port=" + port +
+                " sessionKey=" + sessionKey +
+                " peerIndex=" + peerIndex +
+                " selfJoinRedirect=" + consumed + ".");
         }
 
         /// <summary>
@@ -35,15 +55,18 @@ namespace CoopSpectator.Patches
 
             try
             {
-                var lobbyAssembly = AppDomain.CurrentDomain.GetAssemblies()
-                    .FirstOrDefault(a => a.GetName().Name == "TaleWorlds.MountAndBlade.Lobby");
+                Assembly lobbyAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(a => CandidateAssemblyNames.Contains(a.GetName().Name));
                 if (lobbyAssembly == null)
                 {
-                    ModLogger.Info("LobbyCustomGameLocalJoinPatch: TaleWorlds.MountAndBlade.Lobby not loaded, skip.");
+                    ModLogger.Info("LobbyCustomGameLocalJoinPatch: multiplayer lobby assembly not loaded, skip.");
                     return;
                 }
 
-                var type = lobbyAssembly.GetType("TaleWorlds.MountAndBlade.Lobby.LobbyGameStateCustomGameClient");
+                Type type = null;
+                for (int i = 0; i < CandidateTypeNames.Length && type == null; i++)
+                    type = lobbyAssembly.GetType(CandidateTypeNames[i]);
+
                 if (type == null)
                 {
                     ModLogger.Info("LobbyCustomGameLocalJoinPatch: LobbyGameStateCustomGameClient type not found.");
@@ -61,7 +84,12 @@ namespace CoopSpectator.Patches
                 var prefix = typeof(LobbyCustomGameLocalJoinPatch).GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
                 harmony.Patch(method, prefix: new HarmonyMethod(prefix));
                 _isApplied = true;
-                ModLogger.Info("LobbyCustomGameLocalJoinPatch: applied to LobbyGameStateCustomGameClient.StartMultiplayer.");
+                ModLogger.Info(
+                    "LobbyCustomGameLocalJoinPatch: applied to " +
+                    type.FullName +
+                    " in assembly " +
+                    lobbyAssembly.GetName().Name +
+                    ".");
             }
             catch (Exception ex)
             {
