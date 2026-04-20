@@ -864,3 +864,182 @@ Current package hashes after this refresh:
 3. In any early/prepared-but-not-ready window, a premature remote spawn click should now be rejected by log rather than queued:
    - `CoopMissionSpawnLogic: rejected spawn request because peer is not spawn-ready. ...`
 4. Once armies are really ready, normal spawn should still continue through the existing replace-bot/materialization path.
+
+## 12. Addendum 2026-04-20F - caravan battle surrogate names + remote client crash
+
+Fresh paired reruns exposed two separate low-level runtime defects after the earlier VPN/battle fixes:
+
+1. Selection UI and in-world labels fell back to surrogate identifiers during the second battle:
+   - selection list showed raw entry ids like `attacker|player_party|caravan_guard_aserai|mp_coop_light_cavalry_aserai_troop`
+   - agent labels could fall back to names like `Coop Jawwal`
+2. Remote client later crashed during the caravan battle after mission load / live possession.
+
+### 12a. Root cause #1 - second battle snapshot never reached the remote client
+
+Authoritative proof from the rerun:
+
+- the first battle still delivered a normal `BattleSnapshot` to the remote client
+- the second battle did not
+- dedicated repeatedly logged:
+  - `CoopMissionNetworkBridge: payload too large for staged chunk transport. Kind=BattleSnapshot Bytes=96177 Chunks=376 ChunkBytes=256`
+
+At that point our staged transport hard-cap was still effectively `255` chunks. The caravan/own-army `BattleSnapshot` needed `376`, so the server rejected that payload before queueing it for the remote peer.
+
+That explains the raw UI strings:
+
+- the remote client still had only the previous battle snapshot/runtime scene
+- it did keep receiving `EntryStatusSnapshot` updates with the new caravan `EntryId`s
+- UI display resolution therefore had no exact roster state for those ids and fell back to the raw entry-id text
+
+### 12b. Root cause #2 - stale file refresh kept reloading the old scene snapshot into the live mission
+
+The remote crash was also log-backed. During the second battle the client repeatedly logged:
+
+- `CoopMissionSpawnLogic: refreshed client battle snapshot for mission. Mission=battle_terrain_biome_094 ... SceneMismatch=True ... RefreshedSnapshotKey=...battle_terrain_029...`
+- followed immediately by:
+  - `reset client exact visual overlay assignment state`
+  - `reset client mission runtime state`
+- then native `SetWieldedItemIndex` traffic continued
+
+The actual bug was local:
+
+- `EnsureClientBattleSnapshotFreshForMission(...)` called `BattleRosterFileHelper.ReadSnapshot()`
+- `BattleRosterFileHelper.ReadSnapshot()` mutates `BattleSnapshotRuntimeState`
+- on the remote client, the local roster file still contained the previous battle snapshot for `battle_terrain_029`
+- scene mismatch logic therefore kept re-injecting stale snapshot state into the active `battle_terrain_biome_094` mission and resetting runtime underneath live agent/equipment replication
+
+### 12c. Root cause #3 - display-name override only handled heroes
+
+`AgentDisplayNamePatch` / `TryResolveExactDisplayNameForAgent(...)` only overrode display names for hero entries. Non-hero agents therefore kept the fallback mission-safe materialization names instead of the exact roster display names when available.
+
+### 12d. Applied smallest fixes
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Campaign\BattleRosterFile.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\BattleSnapshotRuntimeState.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopSelectionUiHelpers.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionNetworkBridge.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Network\Messages\CoopBattleSelectionNetworkMessages.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Patches\AgentDisplayNamePatch.cs`
+
+Applied changes:
+
+1. Added `BattleRosterFileHelper.PeekSnapshot()` so client-side scene-mismatch probes can inspect the roster file without mutating `BattleSnapshotRuntimeState`.
+2. Changed `EnsureClientBattleSnapshotFreshForMission(...)` so scene-mismatch refresh only applies a file snapshot when the candidate scene actually matches the active mission scene.
+3. Raised staged payload transport support from `255` to `1023` chunks:
+   - `CoopBattlePayloadChunkMessage.MaxChunkCount = 1023`
+   - `PendingPayloadTransmission.Create(...)` now uses that limit
+4. Centralized exact/friendly display-name resolution in `BattleSnapshotRuntimeState.ResolveEntryDisplayName(...)` and reused it in:
+   - selection UI
+   - agent display-name override
+5. Broadened agent display-name override so non-hero entries can also resolve to exact roster names instead of surrogate materialization labels.
+
+### 12e. Rebuild + refreshed package after the fixes
+
+Rebuilt successfully:
+
+- `dotnet build .\CoopSpectator.csproj -c Debug`
+- `dotnet build .\DedicatedServer\CoopSpectatorDedicated.csproj -c Debug /p:UseDedicatedServerRefs=true`
+
+Refreshed again:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage`
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage.zip`
+
+Current package hashes after this refresh:
+
+- built DLL SHA256: `3239B27F089417103AABFDA6684E2F722FB194A39260ED3323475765D93568B0`
+- `dist` DLL SHA256: `3239B27F089417103AABFDA6684E2F722FB194A39260ED3323475765D93568B0`
+- `dist` zip SHA256: `BB4ADE6172550CEC985BA20E015CAA44F5038CE77C0F2EC6F82FCCE6F7120338`
+
+### 12f. Updated next rerun checks
+
+1. Dedicated must no longer log:
+   - `payload too large for staged chunk transport. Kind=BattleSnapshot ...`
+2. Remote client should now receive a second battle snapshot for the caravan scene instead of keeping only the previous battle scene.
+3. On scene mismatch with a stale local file snapshot, client should now log:
+   - `CoopMissionSpawnLogic: skipped stale client battle snapshot refresh because candidate scene does not match mission. ...`
+   and must not keep resetting runtime state underneath live mission replication.
+4. Selection list and in-world names should resolve to friendly troop/hero names instead of raw entry ids or surrogate fallback labels.
+
+## 13. Addendum 2026-04-20G - dedicated crash after host died and re-possessed another soldier
+
+### 13a. Exact native crash site
+
+The dedicated crash was dump-backed, not inferred from truncated logs.
+
+`watchdog_log_13276.txt` produced a managed dump under:
+
+- `C:\Users\Admin\AppData\Local\Temp\CoopSpectatorDedicated_logs\crashes\2026-04-20_03.27.39\dump.dmp`
+
+`dotnet-dump` showed:
+
+- exception: `System.InvalidOperationException`
+- message: `Sequence contains more than one matching element`
+- native/managed stack:
+  - `System.Linq.Enumerable.SingleOrDefault(...)`
+  - `TaleWorlds.MountAndBlade.MissionLobbyComponent.OnBotKills(...)`
+  - `TaleWorlds.MountAndBlade.DedicatedCustomServer.MissionCustomGameServerComponent.OnBotKills(...)`
+  - `TaleWorlds.MountAndBlade.MissionLobbyComponent.OnAgentRemoved(...)`
+
+Decompile of native `MissionLobbyComponent.OnBotKills(...)` confirmed the exact predicate:
+
+- `GameNetwork.NetworkPeers.SingleOrDefault(x => x.GetComponent<MissionPeer>() != null && x.GetComponent<MissionPeer>().ControlledFormation == botAgent.Formation)`
+
+That means native scoreboard/lobby code assumes there is at most one `MissionPeer` owning a given `ControlledFormation`.
+
+### 13b. Why our runtime violated that contract
+
+In the crashing run:
+
+- remote peer `XCTwnik` first possessed `aserai_footman`:
+  - `rgl_log_13276.txt:55815` -> `Formation=Infantry ... CommanderControl=(captain)`
+- later host peer `AC` died as `main_hero`, entered `DeadAwaitingRespawn`, then possessed `battanian_oathsworn`:
+  - `rgl_log_13276.txt:78349` -> `DeadAwaitingRespawn`
+  - `rgl_log_13276.txt:80185` -> `Formation=Infantry ... CommanderControl=(captain)`
+
+Both peers were therefore non-commanders on the same `Infantry` formation. Our `TryReplaceMaterializedBotWithPlayer(...)` still assigned:
+
+- `missionPeer.ControlledFormation = targetFormation`
+- non-zero `BotsUnderControlAlive/Total`
+
+for every replace-bot possession, including non-commanders.
+
+That left two live `MissionPeer`s with the same `ControlledFormation == Infantry`, and the next native `OnBotKills(...)` call fataled on `SingleOrDefault(...)`.
+
+### 13c. Applied smallest fix
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+
+Applied change:
+
+1. After `TryPromoteExactCampaignCommanderPeerToGeneralControl(...)`, non-commander replace-bot possessions now immediately normalize back to no formation ownership:
+   - clear `missionPeer.ControlledFormation`
+   - force `BotsUnderControlTotal=0`
+   - force `BotsUnderControlAlive=0`
+   - reset formation player-owner state via `TryResetMaterializedFormationPlayerState(...)`
+   - broadcast `BotsControlledChange(..., 0, 0)`
+2. Commander/general path is left unchanged:
+   - if `CommanderControl=general`, the peer retains native/general formation ownership
+3. Added one authoritative log line for the new branch:
+   - `CoopMissionSpawnLogic: cleared non-commander formation ownership after replace-bot. ...`
+
+This keeps the exact commander path alive while removing the duplicate native `ControlledFormation` state that caused the server crash.
+
+### 13d. Rebuild + refreshed package after the fix
+
+Rebuilt successfully:
+
+- `dotnet build .\CoopSpectator.csproj -c Debug`
+- `dotnet build .\DedicatedServer\CoopSpectatorDedicated.csproj -c Debug /p:UseDedicatedServerRefs=true`
+
+### 13e. Updated next rerun checks
+
+1. Dedicated must log for non-commander respawn:
+   - `CoopMissionSpawnLogic: cleared non-commander formation ownership after replace-bot. ...`
+2. After such a respawn, peers on the same side/formation must no longer keep non-zero bot ownership counts simultaneously.
+3. Dedicated must no longer crash in native `MissionLobbyComponent.OnBotKills(...)` when either of those formations scores a bot kill.

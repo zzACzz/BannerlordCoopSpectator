@@ -608,7 +608,7 @@ namespace CoopSpectator.MissionBehaviors
 
                 byte[] payloadBytes = Encoding.UTF8.GetBytes(payloadJson);
                 int chunkCount = Math.Max(1, (payloadBytes.Length + CoopBattlePayloadChunkMessage.MaxChunkBytes - 1) / CoopBattlePayloadChunkMessage.MaxChunkBytes);
-                if (chunkCount > 255)
+                if (chunkCount > CoopBattlePayloadChunkMessage.MaxChunkCount)
                 {
                     ModLogger.Info(
                         "CoopMissionNetworkBridge: payload too large for staged chunk transport. " +

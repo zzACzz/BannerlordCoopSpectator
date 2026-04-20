@@ -11,7 +11,7 @@ namespace CoopSpectator.Patches
 {
     /// <summary>
     /// Keeps stable mission-safe fallback characters, but overrides their displayed names
-    /// from the exact campaign snapshot for hero entries (player, companions, lords).
+    /// from the exact campaign snapshot/runtime resolver for both hero and non-hero entries.
     /// </summary>
     public static class AgentDisplayNamePatch
     {

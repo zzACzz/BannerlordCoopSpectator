@@ -106,7 +106,17 @@ namespace CoopSpectator.Campaign
             }
         }
 
+        public static BattleSnapshotMessage PeekSnapshot()
+        {
+            return ReadSnapshot(updateRuntimeState: false);
+        }
+
         public static BattleSnapshotMessage ReadSnapshot()
+        {
+            return ReadSnapshot(updateRuntimeState: true);
+        }
+
+        private static BattleSnapshotMessage ReadSnapshot(bool updateRuntimeState)
         {
             string path = GetRosterFilePath();
             try
@@ -120,7 +130,8 @@ namespace CoopSpectator.Campaign
                 if (snapshot?.Sides == null || snapshot.Sides.Count == 0)
                     return null;
 
-                BattleSnapshotRuntimeState.SetCurrent(snapshot, "battle-roster-file");
+                if (updateRuntimeState)
+                    BattleSnapshotRuntimeState.SetCurrent(snapshot, "battle-roster-file");
                 ModLogger.Info("BattleRosterFile: read snapshot with " + snapshot.Sides.Count + " sides from " + path);
                 return snapshot;
             }

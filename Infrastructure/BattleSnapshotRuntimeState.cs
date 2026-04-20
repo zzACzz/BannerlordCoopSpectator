@@ -407,6 +407,30 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static string ResolveEntryDisplayName(RosterEntryState entryState, string fallbackId)
+        {
+            string resolvedName = NormalizeDisplayNameCandidate(entryState?.TroopName);
+            if (!string.IsNullOrWhiteSpace(resolvedName))
+                return resolvedName;
+
+            foreach (string candidateId in BuildDisplayNameCandidateIds(entryState, fallbackId))
+            {
+                BasicCharacterObject character = TryResolveBasicCharacterObject(candidateId);
+                resolvedName = NormalizeDisplayNameCandidate(character?.Name?.ToString());
+                if (!string.IsNullOrWhiteSpace(resolvedName))
+                    return resolvedName;
+            }
+
+            foreach (string candidateId in BuildDisplayNameCandidateIds(entryState, fallbackId))
+            {
+                resolvedName = PrettifyIdentifierToken(candidateId);
+                if (!string.IsNullOrWhiteSpace(resolvedName))
+                    return resolvedName;
+            }
+
+            return "Unknown Unit";
+        }
+
         public static string TryResolveEntryId(string canonicalSideKey, string troopId)
         {
             if (string.IsNullOrWhiteSpace(canonicalSideKey) || string.IsNullOrWhiteSpace(troopId))
@@ -508,6 +532,151 @@ namespace CoopSpectator.Infrastructure
             }
 
             return null;
+        }
+
+        private static IEnumerable<string> BuildDisplayNameCandidateIds(RosterEntryState entryState, string fallbackId)
+        {
+            var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (!string.IsNullOrWhiteSpace(entryState?.OriginalCharacterId))
+            {
+                if (yielded.Add(entryState.OriginalCharacterId))
+                    yield return entryState.OriginalCharacterId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entryState?.HeroTemplateId))
+            {
+                if (yielded.Add(entryState.HeroTemplateId))
+                    yield return entryState.HeroTemplateId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entryState?.SpawnTemplateId))
+            {
+                if (yielded.Add(entryState.SpawnTemplateId))
+                    yield return entryState.SpawnTemplateId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entryState?.CharacterId))
+            {
+                if (yielded.Add(entryState.CharacterId))
+                    yield return entryState.CharacterId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entryState?.EntryId))
+            {
+                foreach (string token in ExtractDisplayNameFallbackTokens(entryState.EntryId))
+                {
+                    if (!yielded.Add(token))
+                        continue;
+
+                    yield return token;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(fallbackId))
+            {
+                foreach (string token in ExtractDisplayNameFallbackTokens(fallbackId))
+                {
+                    if (!yielded.Add(token))
+                        continue;
+
+                    yield return token;
+                }
+            }
+        }
+
+        private static IEnumerable<string> ExtractDisplayNameFallbackTokens(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                yield break;
+
+            string trimmed = value.Trim();
+            if (trimmed.IndexOf('|') < 0)
+            {
+                yield return trimmed;
+                yield break;
+            }
+
+            string[] parts = trimmed.Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = parts.Length - 1; i >= 0; i--)
+            {
+                string part = parts[i]?.Trim();
+                if (string.IsNullOrWhiteSpace(part))
+                    continue;
+
+                yield return part;
+            }
+        }
+
+        private static string NormalizeDisplayNameCandidate(string candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+                return null;
+
+            string trimmed = candidate.Trim();
+            if (trimmed.Length <= 0)
+                return null;
+
+            if (trimmed.IndexOf('|') >= 0)
+                return null;
+
+            return LooksLikeOpaqueIdentifier(trimmed) ? null : trimmed;
+        }
+
+        private static bool LooksLikeOpaqueIdentifier(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return true;
+
+            string trimmed = value.Trim();
+            if (trimmed.IndexOf('|') >= 0)
+                return true;
+
+            if (trimmed.StartsWith("mp_", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("spc_", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("CharacterObject_", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return trimmed.IndexOf('_') >= 0 && !trimmed.Contains(" ");
+        }
+
+        private static string PrettifyIdentifierToken(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+                return null;
+
+            string trimmed = token.Trim();
+            if (trimmed.Length <= 0)
+                return null;
+
+            if (trimmed.StartsWith("mp_", StringComparison.OrdinalIgnoreCase))
+                trimmed = trimmed.Substring(3);
+            else if (trimmed.StartsWith("spc_", StringComparison.OrdinalIgnoreCase))
+                trimmed = trimmed.Substring(4);
+
+            if (trimmed.EndsWith("_troop", StringComparison.OrdinalIgnoreCase))
+                trimmed = trimmed.Substring(0, trimmed.Length - "_troop".Length);
+            else if (trimmed.EndsWith("_hero", StringComparison.OrdinalIgnoreCase))
+                trimmed = trimmed.Substring(0, trimmed.Length - "_hero".Length);
+
+            if (trimmed.StartsWith("CharacterObject_", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            string prettified = trimmed.Replace('_', ' ').Trim();
+            if (prettified.Length <= 0)
+                return null;
+
+            return string.Join(" ", prettified
+                .Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(word =>
+                {
+                    if (word.Length == 1)
+                        return char.ToUpperInvariant(word[0]).ToString();
+
+                    return char.ToUpperInvariant(word[0]) + word.Substring(1);
+                }));
         }
 
         public static string TryResolveMissionSafeFallbackCharacterId(RosterEntryState entryState, string spawnTemplateId = null)

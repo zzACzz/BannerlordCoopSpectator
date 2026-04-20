@@ -81,11 +81,12 @@ namespace CoopSpectator.Network.Messages
     public sealed class CoopBattlePayloadChunkMessage : GameNetworkMessage
     {
         public const int MaxChunkBytes = 256;
+        public const int MaxChunkCount = 1023;
 
         private static readonly CompressionInfo.Integer PayloadKindCompressionInfo = new CompressionInfo.Integer(0, 1, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer TransmissionCompressionInfo = new CompressionInfo.Integer(0, 1048575, maximumValueGiven: true);
-        private static readonly CompressionInfo.Integer ChunkIndexCompressionInfo = new CompressionInfo.Integer(0, 255, maximumValueGiven: true);
-        private static readonly CompressionInfo.Integer ChunkCountCompressionInfo = new CompressionInfo.Integer(1, 255, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer ChunkIndexCompressionInfo = new CompressionInfo.Integer(0, MaxChunkCount, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer ChunkCountCompressionInfo = new CompressionInfo.Integer(1, MaxChunkCount, maximumValueGiven: true);
         public CoopBattlePayloadChunkMessage(
             CoopBattlePayloadKind payloadKind,
             int transmissionId,

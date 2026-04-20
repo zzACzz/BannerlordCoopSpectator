@@ -365,13 +365,7 @@ namespace CoopSpectator.UI
 
         public static string ResolveEntryDisplayName(RosterEntryState entryState, string fallbackId)
         {
-            if (!string.IsNullOrWhiteSpace(entryState?.TroopName))
-                return entryState.TroopName.Trim();
-
-            if (!string.IsNullOrWhiteSpace(entryState?.CharacterId))
-                return entryState.CharacterId.Trim();
-
-            return string.IsNullOrWhiteSpace(fallbackId) ? "Unknown Unit" : fallbackId.Trim();
+            return BattleSnapshotRuntimeState.ResolveEntryDisplayName(entryState, fallbackId);
         }
 
         public static string ResolveEntryDetailText(RosterEntryState entryState)
