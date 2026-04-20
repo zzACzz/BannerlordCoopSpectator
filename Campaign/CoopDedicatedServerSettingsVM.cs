@@ -21,6 +21,7 @@ namespace CoopSpectator.Campaign
         private bool _isAdminPasswordObfuscated = true;
         private bool _canStartServer;
         private bool _hasToken;
+        private bool _hasPersistedCloseSnapshot;
 
         public CoopDedicatedServerSettingsVM(Action onClose)
         {
@@ -34,6 +35,12 @@ namespace CoopSpectator.Campaign
             _hostingMode = currentSettings.HostingMode;
             _advertisedHostAddress = currentSettings.AdvertisedHostAddress;
             _statusText = "Ready.";
+
+            ModLogger.Info(
+                "CoopDedicatedServerSettingsVM: initialized. " +
+                "hostingMode=" + _hostingMode +
+                " advertisedHostAddress=" + (string.IsNullOrWhiteSpace(_advertisedHostAddress) ? "(default)" : _advertisedHostAddress) +
+                " serverName=" + (_serverName ?? string.Empty) + ".");
 
             RefreshTokenStatus();
             RefreshHostingModeBindings();
@@ -167,6 +174,7 @@ namespace CoopSpectator.Campaign
                 return;
 
             _hostingMode = DedicatedServerHostingMode.PublicListed;
+            ModLogger.Info("CoopDedicatedServerSettingsVM: switched hosting mode to PublicListed.");
             RefreshHostingModeBindings();
             UpdateStartAvailability();
         }
@@ -177,6 +185,7 @@ namespace CoopSpectator.Campaign
                 return;
 
             _hostingMode = DedicatedServerHostingMode.VpnOverlay;
+            ModLogger.Info("CoopDedicatedServerSettingsVM: switched hosting mode to VpnOverlay.");
             RefreshHostingModeBindings();
             UpdateStartAvailability();
         }
@@ -195,7 +204,40 @@ namespace CoopSpectator.Campaign
 
         public void ExecuteDone()
         {
+            PersistCurrentSettingsSnapshot("ExecuteDone");
             _onClose?.Invoke();
+        }
+
+        public void PersistCurrentSettingsSnapshot(string source)
+        {
+            if (_hasPersistedCloseSnapshot)
+                return;
+
+            DedicatedServerLaunchSettings currentDefaults = DedicatedHelperLauncher.GetCurrentLaunchSettings();
+            if (DedicatedServerLaunchSettings.TryValidateAndNormalize(
+                    BuildRequestedSettings(),
+                    currentDefaults.ServerName,
+                    currentDefaults.AdminPassword,
+                    out DedicatedServerLaunchSettings normalized,
+                    out string error))
+            {
+                _hasPersistedCloseSnapshot = true;
+                DedicatedHelperLauncher.RememberPreferredLaunchSettings(normalized, source);
+                ModLogger.Info(
+                    "CoopDedicatedServerSettingsVM: persisted close snapshot. " +
+                    "source=" + source +
+                    " hostingMode=" + normalized.HostingMode +
+                    " advertisedHostAddress=" + (string.IsNullOrWhiteSpace(normalized.AdvertisedHostAddress) ? "(default)" : normalized.AdvertisedHostAddress) +
+                    " serverName=" + (normalized.ServerName ?? string.Empty) + ".");
+            }
+            else
+            {
+                _hasPersistedCloseSnapshot = true;
+                ModLogger.Info(
+                    "CoopDedicatedServerSettingsVM: skipped close snapshot because settings are invalid. " +
+                    "source=" + source +
+                    " error=" + error);
+            }
         }
 
         private void RefreshTokenStatus()
@@ -273,8 +315,12 @@ namespace CoopSpectator.Campaign
                 BuildRequestedSettings(),
                 currentDefaults.ServerName,
                 currentDefaults.AdminPassword,
-                out DedicatedServerLaunchSettings _,
+                out DedicatedServerLaunchSettings normalized,
                 out string _);
+            if (isValid)
+            {
+                DedicatedHelperLauncher.RememberPreferredLaunchSettings(normalized, "CoopDedicatedServerSettingsVM.UpdateStartAvailability");
+            }
             CanStartServer = _hasToken && isValid;
         }
 

@@ -30,9 +30,23 @@ namespace CoopSpectator.Patches
                 int peerIndex = GetIntPropertyValue(joinGameData, "PeerIndex");
                 int sessionKey = GetIntPropertyValue(joinGameData, "SessionKey");
                 bool armedSelfJoin = false;
+                bool vpnRedirectApplied = false;
+                string vpnRedirectAddress = string.Empty;
 
                 if (success && serverPort > 0)
+                {
                     armedSelfJoin = HostSelfJoinRedirectState.ArmForNextJoinIfCurrentHost(serverName, serverAddress, serverPort);
+                    if (armedSelfJoin)
+                    {
+                        PendingCustomGameJoinAddressOverrideState.Clear("host-self-join");
+                    }
+                    else if (PendingCustomGameJoinAddressOverrideState.TryConsume(serverName, serverAddress, serverPort, out vpnRedirectAddress))
+                    {
+                        SetPropertyValue(gameServerProperties, "Address", vpnRedirectAddress);
+                        serverAddress = vpnRedirectAddress;
+                        vpnRedirectApplied = true;
+                    }
+                }
 
                 ModLogger.Info(
                     "LobbyJoinResultSelfJoinArmPatch: native join result handled. " +
@@ -46,7 +60,9 @@ namespace CoopSpectator.Patches
                     " peerIndex=" + peerIndex +
                     " sessionKey=" + sessionKey +
                     " isAdmin=" + isAdmin +
-                    " armedSelfJoin=" + armedSelfJoin + ".");
+                    " armedSelfJoin=" + armedSelfJoin +
+                    " vpnRedirectApplied=" + vpnRedirectApplied +
+                    " vpnRedirectAddress=" + (string.IsNullOrWhiteSpace(vpnRedirectAddress) ? "(none)" : vpnRedirectAddress) + ".");
             }
             catch (Exception ex)
             {
@@ -103,6 +119,16 @@ namespace CoopSpectator.Patches
 
             PropertyInfo property = target.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             return property?.GetValue(target);
+        }
+
+        private static void SetPropertyValue(object target, string propertyName, object value)
+        {
+            if (target == null)
+                return;
+
+            PropertyInfo property = target.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property != null && property.CanWrite)
+                property.SetValue(target, value);
         }
 
         private static int GetIntPropertyValue(object target, string propertyName)

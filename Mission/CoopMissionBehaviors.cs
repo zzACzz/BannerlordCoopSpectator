@@ -15912,10 +15912,30 @@ namespace CoopSpectator.MissionBehaviors
 
             bool applied = false;
             bool peerOccupiesActiveCoopLife = IsPeerOccupyingActiveCoopLife(missionPeer);
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            BattleSideEnum assignedSide = CoopBattleAuthorityState.GetAssignedSide(missionPeer);
             BattleSideEnum runtimeSide =
                 missionPeer.Team != null && !ReferenceEquals(missionPeer.Team, mission.SpectatorTeam)
                     ? missionPeer.Team.Side
                     : BattleSideEnum.None;
+            BattleSideEnum committedSide = assignedSide != BattleSideEnum.None ? assignedSide : runtimeSide;
+            if (requestedSide != BattleSideEnum.None &&
+                currentPhase >= CoopBattlePhase.BattleActive &&
+                currentPhase < CoopBattlePhase.BattleEnded &&
+                committedSide != BattleSideEnum.None &&
+                committedSide != requestedSide)
+            {
+                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected cross-side selection during active battle. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " CurrentSide=" + committedSide +
+                    " RequestedSide=" + requestedSide +
+                    " Phase=" + currentPhase +
+                    " Source=" + source);
+                return false;
+            }
+
             bool deferCrossSideSelectionWhileActive =
                 peerOccupiesActiveCoopLife &&
                 requestedSide != BattleSideEnum.None &&
@@ -15966,6 +15986,51 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
             if (!CoopBattleSelectionRequestState.TryGetRequest(missionPeer, out CoopBattleSelectionRequestState.PeerSelectionRequestState selectionRequest))
                 return false;
+
+            BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " spawn-ready");
+            if (!TryResolvePeerSpawnAvailability(
+                    mission,
+                    missionPeer,
+                    authoritativeSide,
+                    out CoopBattlePhase currentPhase,
+                    out IReadOnlyList<string> selectableEntryIds,
+                    out string selectableSource,
+                    out string readinessSource,
+                    out int attackerActive,
+                    out int defenderActive,
+                    out string spawnAvailabilityReason))
+            {
+                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected spawn request because peer is not spawn-ready. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " Phase=" + currentPhase +
+                    " Reason=" + spawnAvailabilityReason +
+                    " SelectableSource=" + selectableSource +
+                    " SelectableCount=" + (selectableEntryIds?.Count ?? 0) +
+                    " ArmiesReadySource=" + readinessSource +
+                    " AttackerActive=" + attackerActive +
+                    " DefenderActive=" + defenderActive +
+                    " Source=" + source);
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(selectionRequest.EntryId) &&
+                !selectableEntryIds.Contains(selectionRequest.EntryId, StringComparer.Ordinal))
+            {
+                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected spawn request because current entry is not selectable. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " EntryId=" + selectionRequest.EntryId +
+                    " SelectableSource=" + selectableSource +
+                    " SelectableCount=" + selectableEntryIds.Count +
+                    " Phase=" + currentPhase +
+                    " Source=" + source);
+                return false;
+            }
 
             if (!CoopBattleSpawnRequestState.TryQueueFromSelectionRequest(selectionRequest, source))
                 return false;
@@ -16556,6 +16621,13 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase >= CoopBattlePhase.BattleEnded)
+            {
+                reason = "battle already ended";
+                return false;
+            }
+
             BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, "entry-status can-respawn");
             if (authoritativeSide == BattleSideEnum.None)
             {
@@ -16583,6 +16655,82 @@ namespace CoopSpectator.MissionBehaviors
                 lifecycleState.Status == CoopBattlePeerLifecycleStatus.NoSide)
             {
                 reason = "peer lifecycle still no-side";
+                return false;
+            }
+
+            if (!TryResolvePeerSpawnAvailability(
+                    mission,
+                    missionPeer,
+                    authoritativeSide,
+                    out CoopBattlePhase _,
+                    out IReadOnlyList<string> _,
+                    out string _,
+                    out string _,
+                    out int _,
+                    out int _,
+                    out string availabilityReason))
+            {
+                reason = availabilityReason;
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryResolvePeerSpawnAvailability(
+            Mission mission,
+            MissionPeer missionPeer,
+            BattleSideEnum authoritativeSide,
+            out CoopBattlePhase currentPhase,
+            out IReadOnlyList<string> selectableEntryIds,
+            out string selectableSource,
+            out string readinessSource,
+            out int attackerActive,
+            out int defenderActive,
+            out string reason)
+        {
+            currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            selectableEntryIds = Array.Empty<string>();
+            selectableSource = "none";
+            readinessSource = string.Empty;
+            attackerActive = 0;
+            defenderActive = 0;
+            reason = string.Empty;
+
+            if (mission == null || missionPeer == null)
+            {
+                reason = "mission or peer missing";
+                return false;
+            }
+
+            if (authoritativeSide == BattleSideEnum.None)
+            {
+                reason = "peer side not assigned";
+                return false;
+            }
+
+            selectableEntryIds = ResolveSelectableEntryIdsForStatus(
+                mission,
+                authoritativeSide,
+                currentPhase,
+                out selectableSource);
+            if (selectableEntryIds.Count == 0)
+            {
+                reason =
+                    "no selectable entries available" +
+                    " | selectableSource=" + selectableSource +
+                    " | phase=" + currentPhase;
+                return false;
+            }
+
+            if (!AreBattlefieldArmiesReadyForStart(mission, out readinessSource, out attackerActive, out defenderActive))
+            {
+                reason =
+                    "battlefield armies not ready" +
+                    " | readinessSource=" + readinessSource +
+                    " | phase=" + currentPhase +
+                    " | attackerActive=" + attackerActive +
+                    " | defenderActive=" + defenderActive;
                 return false;
             }
 

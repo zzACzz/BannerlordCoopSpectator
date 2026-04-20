@@ -16,6 +16,7 @@ namespace CoopSpectator.Patches
     public static class BattleShellSuppressionPatch
     {
         private static string _lastSuppressionLogKey;
+        private static string _lastEndTransitionPassThroughLogKey;
 
         public static void Apply(Harmony harmony)
         {
@@ -141,6 +142,31 @@ namespace CoopSpectator.Patches
             Mission mission = (instance as MissionBehavior)?.Mission ?? Mission.Current;
             if (!IsCoopBattleMapRuntime(mission))
                 return false;
+
+            MissionLobbyComponent lobbyComponent = mission.GetMissionBehavior<MissionLobbyComponent>();
+            MissionLobbyComponent.MultiplayerGameState? lobbyState = lobbyComponent?.CurrentMultiplayerState;
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (lobbyState == MissionLobbyComponent.MultiplayerGameState.Ending ||
+                currentPhase >= CoopBattlePhase.BattleEnded)
+            {
+                string passThroughKey =
+                    (source ?? "unknown") + "|" +
+                    (mission?.SceneName ?? "unknown") + "|" +
+                    (lobbyState?.ToString() ?? "null") + "|" +
+                    currentPhase;
+                if (!string.Equals(_lastEndTransitionPassThroughLogKey, passThroughKey, StringComparison.Ordinal))
+                {
+                    _lastEndTransitionPassThroughLogKey = passThroughKey;
+                    ModLogger.Info(
+                        "BattleShellSuppressionPatch: allowed native battle shell path for end transition. " +
+                        "Source=" + (source ?? "unknown") +
+                        " Scene=" + (mission?.SceneName ?? "unknown") +
+                        " LobbyState=" + (lobbyState?.ToString() ?? "null") +
+                        " BattlePhase=" + currentPhase + ".");
+                }
+
+                return false;
+            }
 
             string key = (source ?? "unknown") + "|" + (mission?.SceneName ?? "unknown");
             if (!string.Equals(_lastSuppressionLogKey, key, StringComparison.Ordinal))

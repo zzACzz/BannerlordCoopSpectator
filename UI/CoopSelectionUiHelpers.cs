@@ -193,6 +193,24 @@ namespace CoopSpectator.UI
             return battlefieldRosterCount + " in battlefield roster";
         }
 
+        public static bool CanSelectSide(CoopSelectionUiSnapshot snapshot, BattleSideEnum side, int selectableCount)
+        {
+            if (selectableCount <= 0)
+                return false;
+
+            if (snapshot == null)
+                return true;
+
+            if (snapshot.IsBattleEnded)
+                return false;
+
+            if (!string.Equals(snapshot.BattlePhase, nameof(CoopBattlePhase.BattleActive), StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            BattleSideEnum assignedSide = NormalizeSide(snapshot.Status?.AssignedSide);
+            return assignedSide == BattleSideEnum.None || assignedSide == side;
+        }
+
         public static string BuildSelectedNameText(CoopSelectionUiSnapshot snapshot)
         {
             RosterEntryState entryState = ResolveEntryState(snapshot?.EffectiveSide ?? BattleSideEnum.None, snapshot?.SelectedEntryId);

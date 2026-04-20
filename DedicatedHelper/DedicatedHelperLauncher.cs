@@ -78,16 +78,140 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private static Process _dedicatedProcess;
         private static DedicatedServerLaunchSettings _currentLaunchSettings;
         private static int _currentLaunchPort;
+        private static bool _loadedPersistedLaunchSettings;
 
         public static DedicatedServerLaunchSettings GetCurrentLaunchSettings()
         {
-            if (DedicatedServerLaunchSettings.TryValidateAndNormalize(_currentLaunchSettings, TestListedServerName, DashboardAdminPassword, out DedicatedServerLaunchSettings normalized, out string _))
+            if (_currentLaunchSettings != null &&
+                DedicatedServerLaunchSettings.TryValidateAndNormalize(_currentLaunchSettings, TestListedServerName, DashboardAdminPassword, out DedicatedServerLaunchSettings normalized, out string _))
                 return normalized;
 
-            return DedicatedServerLaunchSettings.CreateDefault(TestListedServerName, DashboardAdminPassword);
+            if (!_loadedPersistedLaunchSettings)
+            {
+                _loadedPersistedLaunchSettings = true;
+                if (TryReadPersistedLaunchSettings(out DedicatedServerLaunchSettings persistedSettings))
+                {
+                    _currentLaunchSettings = persistedSettings.Clone();
+                    if (DedicatedServerLaunchSettings.TryValidateAndNormalize(_currentLaunchSettings, TestListedServerName, DashboardAdminPassword, out normalized, out string _))
+                        return normalized;
+
+                    ModLogger.Info("DedicatedHelper [settings] persisted launch settings were invalid after normalization. Falling back to defaults.");
+                }
+                else
+                {
+                    ModLogger.Info("DedicatedHelper [settings] no persisted launch settings found. Falling back to defaults.");
+                }
+            }
+
+            DedicatedServerLaunchSettings defaults = DedicatedServerLaunchSettings.CreateDefault(TestListedServerName, DashboardAdminPassword);
+            _currentLaunchSettings = defaults.Clone();
+            return defaults;
+        }
+
+        public static void RememberPreferredLaunchSettings(DedicatedServerLaunchSettings settings, string source)
+        {
+            if (!DedicatedServerLaunchSettings.TryValidateAndNormalize(settings, TestListedServerName, DashboardAdminPassword, out DedicatedServerLaunchSettings normalized, out string _))
+                return;
+
+            if (HasEquivalentLaunchSettings(_currentLaunchSettings, normalized))
+                return;
+
+            _currentLaunchSettings = normalized.Clone();
+            PersistLaunchSettings(normalized, source);
         }
 
         public static int GetCurrentLaunchPort() => _currentLaunchPort;
+
+        private static bool HasEquivalentLaunchSettings(DedicatedServerLaunchSettings left, DedicatedServerLaunchSettings right)
+        {
+            if (left == null || right == null)
+                return false;
+
+            return string.Equals(left.ServerName ?? string.Empty, right.ServerName ?? string.Empty, System.StringComparison.Ordinal) &&
+                   string.Equals(left.ServerPassword ?? string.Empty, right.ServerPassword ?? string.Empty, System.StringComparison.Ordinal) &&
+                   string.Equals(left.AdminPassword ?? string.Empty, right.AdminPassword ?? string.Empty, System.StringComparison.Ordinal) &&
+                   left.MaxPlayerCount == right.MaxPlayerCount &&
+                   left.HostingMode == right.HostingMode &&
+                   string.Equals(left.AdvertisedHostAddress ?? string.Empty, right.AdvertisedHostAddress ?? string.Empty, System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void PersistLaunchSettings(DedicatedServerLaunchSettings settings, string source)
+        {
+            if (settings == null)
+                return;
+
+            try
+            {
+                Directory.CreateDirectory(PersistedLaunchSettingsDirectory);
+                File.WriteAllLines(
+                    PersistedLaunchSettingsFilePath,
+                    new[]
+                    {
+                        settings.ServerName ?? string.Empty,
+                        settings.ServerPassword ?? string.Empty,
+                        settings.AdminPassword ?? string.Empty,
+                        settings.MaxPlayerCount.ToString(),
+                        ((int)settings.HostingMode).ToString(),
+                        settings.AdvertisedHostAddress ?? string.Empty
+                    });
+
+                ModLogger.Info(
+                    "DedicatedHelper [settings] persisted preferred launch settings. " +
+                    "source=" + (string.IsNullOrWhiteSpace(source) ? "unknown" : source) +
+                    " hostingMode=" + settings.HostingMode +
+                    " advertisedHostAddress=" + (string.IsNullOrWhiteSpace(settings.AdvertisedHostAddress) ? "(default)" : settings.AdvertisedHostAddress) +
+                    " path=" + PersistedLaunchSettingsFilePath + ".");
+            }
+            catch (System.Exception ex)
+            {
+                ModLogger.Info("DedicatedHelper [settings] failed to persist launch settings. " + ex.Message);
+            }
+        }
+
+        private static bool TryReadPersistedLaunchSettings(out DedicatedServerLaunchSettings settings)
+        {
+            settings = null;
+
+            try
+            {
+                if (!File.Exists(PersistedLaunchSettingsFilePath))
+                    return false;
+
+                string[] lines = File.ReadAllLines(PersistedLaunchSettingsFilePath);
+                if (lines == null || lines.Length < 6)
+                    return false;
+
+                int.TryParse(lines[3], out int maxPlayerCount);
+                int.TryParse(lines[4], out int hostingModeValue);
+
+                settings = new DedicatedServerLaunchSettings
+                {
+                    ServerName = lines[0] ?? string.Empty,
+                    ServerPassword = lines[1] ?? string.Empty,
+                    AdminPassword = lines[2] ?? string.Empty,
+                    MaxPlayerCount = maxPlayerCount,
+                    HostingMode = System.Enum.IsDefined(typeof(DedicatedServerHostingMode), hostingModeValue)
+                        ? (DedicatedServerHostingMode)hostingModeValue
+                        : DedicatedServerHostingMode.PublicListed,
+                    AdvertisedHostAddress = lines[5] ?? string.Empty
+                };
+
+                ModLogger.Info(
+                    "DedicatedHelper [settings] loaded persisted launch settings. " +
+                    "hostingMode=" + settings.HostingMode +
+                    " advertisedHostAddress=" + (string.IsNullOrWhiteSpace(settings.AdvertisedHostAddress) ? "(default)" : settings.AdvertisedHostAddress) +
+                    " path=" + PersistedLaunchSettingsFilePath + ".");
+                return true;
+            }
+            catch (System.Exception ex)
+            {
+                ModLogger.Info("DedicatedHelper [settings] failed to read persisted launch settings. " + ex.Message);
+                return false;
+            }
+        }
+
+        private static string PersistedLaunchSettingsDirectory => Path.Combine(Path.GetTempPath(), "CoopSpectator");
+        private static string PersistedLaunchSettingsFilePath => Path.Combine(PersistedLaunchSettingsDirectory, "dedicated_launch_settings.txt");
 
         public static bool HasRunningDedicatedProcess()
         {
@@ -495,7 +619,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 return "ERROR: " + settingsError;
             }
 
-            _currentLaunchSettings = launchSettings.Clone();
+            RememberPreferredLaunchSettings(launchSettings, "DedicatedHelperLauncher.Start");
             _currentLaunchPort = port;
 
             // Явні логи джерела startup state (для діагностики Steam-like / modded flow).

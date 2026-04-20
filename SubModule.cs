@@ -112,6 +112,7 @@ namespace CoopSpectator // Використовуємо кореневий names
                 // Патч на Lobby Custom Join (127.0.0.1 для тесту на одній машині) — через reflection, бо збірка Lobby може завантажитись пізніше
                 LobbyCustomGameLocalJoinPatch.Apply(harmony);
                 LobbyJoinResultSelfJoinArmPatch.Apply(harmony);
+                LobbyRequestJoinDiagnosticsPatch.Apply(harmony);
                 IntermissionVmCrashGuardPatch.Apply(harmony);
                 MissionStateOpenNewPatches.Apply(harmony);
                 ExactCampaignArmyBootstrapPatch.Apply(harmony);
@@ -132,7 +133,10 @@ namespace CoopSpectator // Використовуємо кореневий names
                         loadedAssemblyName == "TaleWorlds.MountAndBlade.Lobby")
                         LobbyCustomGameLocalJoinPatch.Apply(harmony);
                     if (loadedAssemblyName == "TaleWorlds.MountAndBlade.Diamond")
+                    {
                         LobbyJoinResultSelfJoinArmPatch.Apply(harmony);
+                        LobbyRequestJoinDiagnosticsPatch.Apply(harmony);
+                    }
                 };
                 ModLogger.Info("Harmony патчі застосовано успішно."); // Логуємо успіх, щоб було видно що патчинг активний
             } // Завершуємо блок try

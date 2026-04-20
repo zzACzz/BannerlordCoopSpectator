@@ -216,3 +216,212 @@ For `VpnOverlay`, the next rerun should prove:
 2. launch args contain `/customserverhost "<overlay address>"`
 3. join result log shows the same overlay address
 4. remote overlay client reaches the server with `selfJoinRedirect=false`
+
+## Addendum 2026-04-20
+
+Fresh VPN/Radmin logs changed the blocker picture:
+
+- dedicated startup is correct and log-backed:
+  - host launcher emitted `/customserverhost "26.70.145.140"`
+  - dedicated parsed `StartupInfo.CustomServerHostIP="26.70.145.140"`
+- native browser/join payload is still wrong for `VpnOverlay`:
+  - selected custom-game entry used `99.235.249.111:7210`
+  - `JoinCustomGameResultMessage` still carried `GameServerProperties.Address=99.235.249.111`
+  - host self-join succeeded only because our one-shot localhost rewrite converted that WAN address to `127.0.0.1`
+
+That means the old inference was too optimistic:
+
+- native `RegisterGame(..., overriddenIP)` receives the overlay host override
+- but the actual listed/custom-game manager path used by this player-hosted dedicated flow still publishes the observed WAN address back to clients
+
+So the real divergence is now log-backed:
+
+- native dedicated bootstrap honors `/customserverhost`
+- native remote custom-game browser/join path for this flow does not return that overlay host to the client payload
+
+## Updated blocker list
+
+### Public official
+
+- no fresh public-listed rerun yet on the new diagnostics cycle
+- still need proof whether the public/listed path is healthy or diverges in a different place than `VpnOverlay`
+
+### VPN / overlay
+
+- exact blocker is now confirmed:
+  - remote peers do not receive the host overlay address from native server-list or join-result payloads
+  - they receive the observed WAN address instead
+- therefore remote VPN join cannot be made reliable only by passing `/customserverhost`
+
+### Self-join
+
+- still healthy:
+  - one-shot host localhost rewrite remains the correct and proven path
+
+### Remote join
+
+- new required workaround contract:
+  - remote peer must arm a one-shot overlay redirect before `JoinCustomGameResultMessage` is consumed
+  - the final `GameServerProperties.Address` must be rewritten from native WAN -> configured overlay host only for the matched join target
+
+## Current branch workaround contract
+
+This branch now uses the smallest local workaround instead of broad patching:
+
+1. `LobbyClient.RequestJoinCustomGame(...)` logs the exact selected browser entry and arms a one-shot VPN redirect only for that target.
+2. `LobbyClient.OnJoinCustomGameResultMessage(...)` still prioritizes host self-join localhost rewrite.
+3. If the join is not host self-join, and the selected target matches the armed VPN redirect, the patch rewrites `GameServerProperties.Address` from native WAN to the locally configured overlay host before native handoff continues.
+
+The local overlay host source is still the existing `DedicatedServerLaunchSettings` abstraction:
+
+- `HostingMode=VpnOverlay`
+- `AdvertisedHostAddress=<host overlay IP/DNS>`
+
+Those settings are now persisted client-side even without starting dedicated, so a remote tester can set them once in the existing dedicated settings UI and then join through the normal custom-game list.
+
+## Next rerun checklist
+
+For the remote VPN peer:
+
+1. open the existing dedicated settings UI once
+2. set `Hosting Mode = VPN/Overlay`
+3. set `Advertised Host Address = 26.70.145.140`
+4. close the panel
+5. join the listed custom game normally
+
+Authoritative lines expected on the next run:
+
+- `DedicatedHelper [settings] persisted preferred launch settings... hostingMode=VpnOverlay advertisedHostAddress=26.70.145.140`
+- `LobbyRequestJoinDiagnosticsPatch: selected custom game join target... address=99.235.249.111 ... vpnRedirectArmed=True advertisedHostAddress=26.70.145.140`
+- `LobbyJoinResultSelfJoinArmPatch: native join result handled... address=26.70.145.140 ... vpnRedirectApplied=True`
+- `LocalJoinAddressPatch: final StartMultiplayerOnClient address. originalAddress=26.70.145.140 finalAddress=26.70.145.140 ... selfJoinRedirect=False`
+
+## Addendum 2026-04-20B
+
+Fresh VPN rerun where the host did not self-join and only the remote client attempted to connect:
+
+- host-side bootstrap is still correct and unchanged:
+  - launcher persisted `hostingMode=VpnOverlay advertisedHostAddress=26.70.145.140`
+  - launcher started `DedicatedCustomServer.Starter.exe` with `/customserverhost "26.70.145.140"`
+  - dedicated parsed `StartupInfo.CustomServerHostIP="26.70.145.140"`
+- remote client loaded the new connectivity patches, but did not enter the VPN redirect branch:
+  - `LobbyRequestJoinDiagnosticsPatch` fired
+  - selected custom-game entry was still `address=99.235.249.111 port=7210`
+  - decisive line: `vpnRedirectArmed=False advertisedHostAddress=(default)`
+  - `LobbyJoinResultSelfJoinArmPatch` therefore kept `vpnRedirectApplied=False`
+  - `LocalJoinAddressPatch` handed native `finalAddress=99.235.249.111`
+
+So this rerun does not prove a new code regression in the VPN redirect implementation.
+It proves that the remote tester did not have the local overlay override configured on that machine.
+
+Observed native sequence on the remote machine:
+
+- native join still reached `Join game successful`
+- about 20 seconds later the client returned to lobby and the dedicated logged `RemoveNetworkPeer`
+
+That second-stage disconnect is real, but it should not be debugged as the primary VPN blocker yet.
+This rerun never exercised the intended overlay branch because the remote machine stayed on the native WAN address.
+
+Updated interpretation:
+
+- bootstrap contract for `VpnOverlay` remains healthy
+- native listed join payload still returns WAN for this player-hosted dedicated flow
+- local workaround remains valid, but only when the remote machine has:
+  - `HostingMode=VpnOverlay`
+  - `AdvertisedHostAddress=<host overlay IP>`
+
+Therefore the next authoritative VPN rerun must first prove:
+
+1. remote client logs `vpnRedirectArmed=True`
+2. remote client logs `vpnRedirectApplied=True`
+3. remote client logs `finalAddress=26.70.145.140`
+
+Only after that is it worth opening the later `RemoveNetworkPeer` path as a separate blocker.
+
+## Addendum 2026-04-20C
+
+Fresh rerun where the remote tester explicitly tried the campaign-side VPN setup first still did not enter the overlay branch.
+
+What the logs proved:
+
+- host side stayed correct:
+  - launcher persisted `hostingMode=VpnOverlay advertisedHostAddress=26.70.145.140`
+  - dedicated started with `/customserverhost "26.70.145.140"`
+  - dedicated parsed `StartupInfo.CustomServerHostIP="26.70.145.140"`
+- remote client still joined with native WAN:
+  - `LobbyRequestJoinDiagnosticsPatch ... vpnRedirectArmed=False advertisedHostAddress=(default)`
+  - `LobbyJoinResultSelfJoinArmPatch ... vpnRedirectApplied=False`
+  - `LocalJoinAddressPatch ... finalAddress=99.235.249.111`
+
+The missing proof was earlier than multiplayer join:
+
+- the remote campaign log only persisted `hostingMode=PublicListed advertisedHostAddress=(default)`
+- there was no authoritative `VpnOverlay` persist line at all
+
+So the blocker for this rerun was no longer "join patch ignored persisted VPN settings".
+It was "the remote campaign-side settings session never produced a persisted `VpnOverlay` snapshot".
+
+Branch change after this finding:
+
+- the campaign settings VM now logs:
+  - initialization snapshot
+  - explicit hosting-mode switches
+  - final close snapshot
+- the map view now persists one final normalized settings snapshot on `OnFinalize`, even if the player closes the view/game without starting dedicated
+- `DedicatedHelperLauncher.GetCurrentLaunchSettings()` now logs when it falls back to defaults because no persisted settings were found
+
+That means the next rerun should be judged on these earlier authoritative lines first:
+
+1. campaign/client:
+   - `CoopDedicatedServerSettingsVM: switched hosting mode to VpnOverlay.`
+   - `CoopDedicatedServerSettingsVM: persisted close snapshot. ... hostingMode=VpnOverlay advertisedHostAddress=26.70.145.140`
+2. multiplayer/client:
+   - either `DedicatedHelper [settings] loaded persisted launch settings. hostingMode=VpnOverlay advertisedHostAddress=26.70.145.140`
+   - or, if missing, `DedicatedHelper [settings] no persisted launch settings found. Falling back to defaults.`
+3. join path:
+   - `vpnRedirectArmed=True`
+   - `vpnRedirectApplied=True`
+   - `finalAddress=26.70.145.140`
+
+## Addendum 2026-04-20D
+
+Fresh rerun plus the new settings diagnostics exposed the exact local bug in the client-side VPN workaround.
+
+Observed facts:
+
+- remote campaign run now clearly persisted the correct overlay settings:
+  - `CoopDedicatedServerSettingsVM: switched hosting mode to VpnOverlay.`
+  - `DedicatedHelper [settings] persisted preferred launch settings... hostingMode=VpnOverlay advertisedHostAddress=26.70.145.140`
+  - `CoopDedicatedServerSettingsVM: persisted close snapshot... hostingMode=VpnOverlay advertisedHostAddress=26.70.145.140`
+- host and dedicated bootstrap remained correct:
+  - `/customserverhost "26.70.145.140"`
+  - `StartupInfo.CustomServerHostIP="26.70.145.140"`
+- but the remote multiplayer run still logged:
+  - `vpnRedirectArmed=False advertisedHostAddress=(default)`
+  - `vpnRedirectApplied=False`
+  - `finalAddress=99.235.249.111`
+
+The exact code divergence was local to `DedicatedHelperLauncher.GetCurrentLaunchSettings()`:
+
+- it called `TryValidateAndNormalize(_currentLaunchSettings, ...)` even when `_currentLaunchSettings == null`
+- that method returns a valid normalized default (`PublicListed`) for `null`
+- so the multiplayer client returned defaults immediately
+- and never reached the persisted-settings read path at all
+
+That means the previous workaround design is still viable.
+The bug was in our implementation of the local settings source, not in the native join-result rewrite concept itself.
+
+Branch fix:
+
+- `GetCurrentLaunchSettings()` now reads persisted settings before accepting defaults when `_currentLaunchSettings` is null
+- default settings are only materialized after the persisted read path has been attempted
+
+The next authoritative VPN rerun should therefore show:
+
+1. client multiplayer:
+   - `DedicatedHelper [settings] loaded persisted launch settings. hostingMode=VpnOverlay advertisedHostAddress=26.70.145.140`
+2. client join request:
+   - `vpnRedirectArmed=True advertisedHostAddress=26.70.145.140`
+3. join-result handoff:
+   - `vpnRedirectApplied=True`
+   - `finalAddress=26.70.145.140`

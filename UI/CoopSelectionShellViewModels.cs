@@ -79,7 +79,7 @@ namespace CoopSpectator.UI
                 presentation.CountText,
                 presentation.DetailText,
                 presentation.BannerCodeText,
-                selectableCount > 0,
+                CoopSelectionUiHelpers.CanSelectSide(snapshot, side, selectableCount),
                 snapshot?.EffectiveSide == side,
                 _onSelectSide);
         }

@@ -43,6 +43,8 @@ namespace CoopSpectator.Campaign
         {
             base.OnFinalize();
 
+            _dataSource?.PersistCurrentSettingsSnapshot("GauntletCoopDedicatedServerSettingsView.OnFinalize");
+
             if (base.Layer != null)
             {
                 base.Layer.InputRestrictions.ResetInputRestrictions();

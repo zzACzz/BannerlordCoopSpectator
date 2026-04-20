@@ -657,3 +657,210 @@ Current client DLL hash after this addendum refresh:
    - remote `0 selectable`
    - missing army materialization
    - host fallback to spectator
+
+### Addendum Finding 10. Battle completion was authoritative, but dead peers could still cross over to the enemy during `BattleActive`
+
+Fresh authoritative artifacts from the successful connectivity/spawn run:
+
+- host logs:
+  - `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_46496.txt`
+  - `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_61340.txt`
+- dedicated log:
+  - `C:\Users\Admin\AppData\Local\Temp\CoopSpectatorDedicated_logs\logs\rgl_log_54376.txt`
+- remote logs:
+  - `C:\Users\Admin\Downloads\VVS logs\rgl_log_14388.txt`
+  - `C:\Users\Admin\Downloads\VVS logs\watchdog_log_14388.txt`
+
+#### 10a. Dedicated already detected battle completion correctly
+
+The dedicated log proved that the authoritative mission-side completion logic was firing:
+
+- `CoopMissionSpawnLogic: battle completion audit. AttackerActive=0 DefenderActive=7`
+- `CoopBattlePhaseRuntimeState: phase updated. Phase=BattleEnded`
+- `CoopBattleResultBridgeFile: wrote result ... WinnerSide=Defender`
+- `CoopMissionSpawnLogic: authoritative battle completion detected. WinnerSide=Defender ... AwaitingHostEndMission=True.`
+- `Multiplayer game mission ending`
+
+So the primary failure was not "the server never detected the winner". The authoritative completion path and writeback bridge were already alive in this run.
+
+#### 10b. The real divergence was a mid-battle side-switch after death
+
+The dedicated log showed the host peer (`AC`) die on the attacker side:
+
+- `CoopMissionSpawnLogic: peer returned to respawnable state ... Peer=AC`
+
+Then, while the phase was still `BattleActive`, the same peer was allowed to switch onto the defender side:
+
+- `CoopBattleAuthorityState: side request updated. Peer=AC PreviousRequestedSide=Attacker RequestedSide=Defender`
+- `CoopBattleAuthorityState: authoritative side assigned. Peer=AC PreviousSide=Attacker Side=Defender`
+- `CoopMissionSpawnLogic: materialized army replace-bot succeeded. Peer=AC ... PendingEntryId=defender|...`
+
+The remote client log mirrored the same contract drift:
+
+- client sent `CoopBattleSelectionClientRequest Kind=SelectSide Side=Defender`
+- the next applied payload showed `AssignedSide=Defender ... CanRespawn=True`
+
+That explains the player-visible symptom. The battle *did* end authoritatively, but before that the dead host peer could cross from the defeated attacker side into the living defender roster and continue materializing inside the enemy army.
+
+#### Applied fix after the log-backed side-switch analysis
+
+The fix stays narrow and authoritative:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+  - rejects cross-side selection during `BattleActive` before `TryRequestSide(...)` mutates the requested-side state
+  - uses the current committed side (`assigned` first, otherwise live runtime team) as the lock source
+  - adds one authoritative log line:
+    - `CoopMissionSpawnLogic: rejected cross-side selection during active battle. ...`
+  - forces `CanRespawn` to return `false` once `CoopBattlePhaseRuntimeState` is already `BattleEnded`
+- `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopSelectionUiHelpers.cs`
+  - adds `CanSelectSide(...)` so team buttons mirror the authoritative side lock during `BattleActive`
+- `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopSelectionShellViewModels.cs`
+  - uses the new `CanSelectSide(...)` gate for team-button enablement
+
+The intent is specific:
+
+- keep late/no-side joins working
+- stop already-committed peers from swapping to the enemy mid-battle
+- stop stale `CanRespawn=True` status from surviving past `BattleEnded`
+- avoid a broad rewrite of completion/writeback flow that the logs already proved is executing
+
+#### Updated artifacts after the side-lock fix
+
+Rebuilt again:
+
+- `dotnet build .\CoopSpectator.csproj -c Debug`
+- `dotnet build .\DedicatedServer\CoopSpectatorDedicated.csproj -c Debug /p:UseDedicatedServerRefs=true`
+
+Refreshed again:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage`
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage.zip`
+
+Current client package hashes after this refresh:
+
+- built DLL SHA256: `9D64B97EEB83DAD8587F4BF5EF9609A174A4B6460260E5B7EF66C4917EA447EF`
+- `dist` DLL SHA256: `9D64B97EEB83DAD8587F4BF5EF9609A174A4B6460260E5B7EF66C4917EA447EF`
+- `dist` zip SHA256: `07AC2D9D785025B2F8E2132B3560C8AD2CE733333B5C22174FA3A0445228169A`
+
+#### Updated smallest next rerun checks
+
+1. In dedicated log, when a dead peer clicks the enemy side during `BattleActive`, confirm the new authoritative rejection:
+   - `CoopMissionSpawnLogic: rejected cross-side selection during active battle. Peer=... CurrentSide=Attacker RequestedSide=Defender Phase=BattleActive`
+2. In client/team-selection UI, confirm the opposite-side button is no longer enabled once the peer is already locked to a side during `BattleActive`.
+3. After the last attacker dies, confirm post-end status does not keep advertising respawn:
+   - remote `EntryStatusSnapshot ... CanRespawn=False`
+4. Re-evaluate host mission exit timing only if the battle still visibly hangs *after* the cross-side handoff is gone.
+
+## 11. Post-victory dedicated fall + pre-materialization spawn contract (2026-04-18 evening rerun)
+
+### 11a. Dedicated crash was a native mission-ending timer contract violation, not a battle-result failure
+
+Fresh evidence from:
+
+- `C:\Users\Admin\AppData\Local\Temp\CoopSpectatorDedicated_logs\logs\rgl_log_60860.txt`
+- `C:\Users\Admin\AppData\Local\Temp\CoopSpectatorDedicated_logs\crashes\2026-04-18_19.20.56\dump.dmp`
+
+showed that authoritative completion and writeback were already correct:
+
+- dedicated reached `CoopBattlePhaseRuntimeState: phase updated. Phase=BattleEnded`
+- dedicated wrote `battle result snapshot written ... WinnerSide=Attacker`
+- dedicated logged `authoritative battle completion detected ... AwaitingHostEndMission=True`
+- host campaign log consumed the result and wrote it back successfully
+
+The dedicated fall was a separate post-victory fault. `dotnet-dump` showed:
+
+- wrapper throw site: `TaleWorlds.MountAndBlade.ListedServer.ServerSideIntermissionManager.Tick(...)`
+- wrapped task fault: `System.NullReferenceException`
+
+Native decompile then showed the exact contract in `MissionLobbyComponent.SetStateEndingAsServer()`:
+
+- set `CurrentMultiplayerState = Ending`
+- call `_timerComponent.StartTimerAsServer(PostMatchWaitDuration)`
+- immediately read `_timerComponent.GetCurrentTimerStartTime()`
+
+Our own logs proved we were still suppressing `MultiplayerTimerComponent.StartTimerAsServer` at mission end:
+
+- `Multiplayer game mission ending`
+- `BattleShellSuppressionPatch: suppressed native battle shell path. Source=MultiplayerTimerComponent.StartTimerAsServer ...`
+
+That is enough to explain the `NullReferenceException`: native `SetStateEndingAsServer()` dereferenced `_missionTimer` after our suppression patch skipped the timer initialization.
+
+### 11b. Applied smallest fix for the native end-mission contract
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+
+The patch now lets native shell/timer methods pass through once either condition is true:
+
+- `MissionLobbyComponent.CurrentMultiplayerState == Ending`
+- `CoopBattlePhaseRuntimeState >= BattleEnded`
+
+and logs one authoritative line:
+
+- `BattleShellSuppressionPatch: allowed native battle shell path for end transition. ...`
+
+This keeps the earlier coop runtime suppression alive during the active bootstrap/runtime window, but stops breaking native listed-server intermission teardown once the match is actually ending.
+
+### 11c. The first failed launch was a real spawn contract gap before battlefield readiness
+
+The same rerun also confirmed a separate low-level gap:
+
+- server still advertised `SelectableEntrySource=allowed-prebattle`
+- client could send `SpawnNow`
+- current `TryQueueSpawnIntentForPeer(...)` accepted spawn requests without checking battlefield readiness
+- current `CanPeerRespawnFromCoopRuntime(...)` could still return `true` with no live/selectable entries as long as the peer had side + selection and no active agent
+
+That matched the player-visible failure mode from the first launch:
+
+- remote peer could press spawn before armies were safely ready/materialized
+- spawn then drifted into an invalid map-edge/glitched state
+
+### 11d. Applied smallest fix for spawn/respawn readiness
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+
+Added a shared authoritative readiness check that now requires:
+
+- peer side is assigned
+- at least one current selectable entry exists for that side
+- `AreBattlefieldArmiesReadyForStart(...)` is already `true`
+
+Then wired that gate into both:
+
+- `CanPeerRespawnFromCoopRuntime(...)`
+- `TryQueueSpawnIntentForPeer(...)`
+
+`SpawnNow` also now rejects stale selected entries that are no longer in the current selectable set and logs one authoritative line:
+
+- `CoopMissionSpawnLogic: rejected spawn request because peer is not spawn-ready. ...`
+- or `CoopMissionSpawnLogic: rejected spawn request because current entry is not selectable. ...`
+
+### 11e. Rebuild + refreshed package after the two fixes
+
+Rebuilt successfully:
+
+- `dotnet build .\CoopSpectator.csproj -c Debug`
+- `dotnet build .\DedicatedServer\CoopSpectatorDedicated.csproj -c Debug /p:UseDedicatedServerRefs=true`
+
+Refreshed again:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage`
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage.zip`
+
+Current package hashes after this refresh:
+
+- built DLL SHA256: `9E5EB4B285C8E5FA30E43521E23B0D5A4A64487EC5F886518CF28160532035A9`
+- `dist` DLL SHA256: `9E5EB4B285C8E5FA30E43521E23B0D5A4A64487EC5F886518CF28160532035A9`
+- `dist` zip SHA256: `C46835E9A747AF561690E077848041FD2383AA7B7F97EFB1727C112F7C8E7F97`
+
+### 11f. Updated next rerun checks
+
+1. On battle end, dedicated should now log:
+   - `BattleShellSuppressionPatch: allowed native battle shell path for end transition. Source=MultiplayerTimerComponent.StartTimerAsServer ...`
+2. Dedicated must no longer produce the old `ServerSideIntermissionManager.Tick -> Couldn't start the game in time` crash after a successful battle result/writeback.
+3. In any early/prepared-but-not-ready window, a premature remote spawn click should now be rejected by log rather than queued:
+   - `CoopMissionSpawnLogic: rejected spawn request because peer is not spawn-ready. ...`
+4. Once armies are really ready, normal spawn should still continue through the existing replace-bot/materialization path.
