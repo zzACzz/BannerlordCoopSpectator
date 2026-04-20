@@ -425,3 +425,68 @@ The next authoritative VPN rerun should therefore show:
 3. join-result handoff:
    - `vpnRedirectApplied=True`
    - `finalAddress=26.70.145.140`
+
+## Addendum 2026-04-20E
+
+Fresh reruns after the `GetCurrentLaunchSettings()` fix confirm that the `VpnOverlay` workaround path is now alive end-to-end.
+
+Authoritative client-side proof:
+
+- remote client loaded the persisted overlay settings:
+  - `DedicatedHelper [settings] loaded persisted launch settings. hostingMode=VpnOverlay advertisedHostAddress=26.70.145.140`
+- join request armed the VPN redirect:
+  - `LobbyRequestJoinDiagnosticsPatch ... vpnRedirectArmed=True advertisedHostAddress=26.70.145.140`
+- join-result rewrite applied the overlay host:
+  - `LobbyJoinResultSelfJoinArmPatch ... success=True ... address=26.70.145.140 ... armedSelfJoin=False vpnRedirectApplied=True vpnRedirectAddress=26.70.145.140`
+- final client connect target stayed on the overlay address:
+  - `LocalJoinAddressPatch ... originalAddress=26.70.145.140 finalAddress=26.70.145.140 ... selfJoinRedirect=False`
+- native client join completed:
+  - `Join game successful`
+
+Authoritative dedicated-side proof:
+
+- dedicated still launched with the expected overlay bootstrap:
+  - `StartupInfo ... CustomServerHostIP="26.70.145.140"`
+- payload delivery reached the remote peer:
+  - `CoopMissionNetworkBridge: queued payload transmission. Peer=XCTwnik ...`
+  - `CoopMissionNetworkBridge: completed payload transmission. Peer=XCTwnik ...`
+- battle start readiness became authoritative:
+  - `CoopMissionSpawnLogic: battle start readiness audit ... CanStartBattle=True ...`
+
+Authoritative mission/runtime proof on the remote client:
+
+- remote peer received and assembled both payload kinds:
+  - `received first payload chunk. Kind=BattleSnapshot ...`
+  - `received first payload chunk. Kind=EntryStatusSnapshot ...`
+  - `assembled client payload. Kind=EntryStatusSnapshot ...`
+  - `applied client payload. Kind=EntryStatusSnapshot AssignedSide=Attacker ... SelectableEntryIds=... CanRespawn=True`
+
+Observed gameplay result from the paired reruns:
+
+- remote client joined the custom-game lobby through VPN
+- remote client loaded the mission and possessed a unit
+- host self-join still used the separate localhost rewrite path
+- spawn-before-materialization stayed correctly blocked
+- battle end and return-to-lobby / next-mission flow also completed in later reruns
+
+Interpretation:
+
+- the previously unresolved VPN blocker was real, but it was local to our persisted-settings source
+- the current workaround design remains valid:
+  - keep the native custom-game session contract
+  - rewrite only the final join address from WAN to overlay host on remote peers
+  - keep host self-join on its own localhost-only path
+
+Current status after these reruns:
+
+- `VpnOverlay` connection path: log-backed working
+- host self-join path: still working
+- spawn/materialization gate: working on the tested reruns
+- battle end / lobby return / next mission: working on the tested reruns
+- `PublicListed` player-hosted connectivity: still a separate open contract and not proven green by these VPN runs
+
+One first-run anomaly was observed by the tester:
+
+- host-side team-selection briefly showed unavailable/vanished when the remote peer selected first
+
+That anomaly did not reproduce on the immediately following rerun where two battles completed successfully with different pick order. There is currently no log-backed evidence that it is caused by IP identity collision, and no repeatable blocker has been isolated from it yet.

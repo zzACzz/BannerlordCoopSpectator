@@ -37,6 +37,8 @@ namespace CoopSpectator.Patches
         private static string _lastPromotedLocalCommanderGeneralKey;
         private static string _lastFinalizedLocalCommanderOrderControlKey;
         private static string _lastMaintainedLocalCommanderOrderControlKey;
+        private static string _lastResolvedControlledEntryFallbackKey;
+        private static string _lastEstablishedCommanderStateBypassKey;
         private static string _lastAutoSelectedAllLocalCommanderFormationsKey;
         private static string _lastPreFormationCommanderPromotionKey;
         private static string _lastForcedCampaignCommanderOrderUiKey;
@@ -108,6 +110,8 @@ namespace CoopSpectator.Patches
             _lastPromotedLocalCommanderGeneralKey = null;
             _lastFinalizedLocalCommanderOrderControlKey = null;
             _lastMaintainedLocalCommanderOrderControlKey = null;
+            _lastResolvedControlledEntryFallbackKey = null;
+            _lastEstablishedCommanderStateBypassKey = null;
             _lastAutoSelectedAllLocalCommanderFormationsKey = null;
             _lastPreFormationCommanderPromotionKey = null;
             _lastForcedCampaignCommanderOrderUiKey = null;
@@ -678,6 +682,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                TryPromoteLocalExactCommanderFromOrderUiTick();
                 if (TrySuppressNonCommanderOrderUi(__instance))
                     return;
 
@@ -689,6 +694,38 @@ namespace CoopSpectator.Patches
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: local commander order-control finalization tick failed: " + ex.Message);
             }
+        }
+
+        private static void TryPromoteLocalExactCommanderFromOrderUiTick()
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            if (myPeer == null || myPeer.IsServerPeer)
+                return;
+
+            MissionPeer myMissionPeer = myPeer.GetComponent<MissionPeer>();
+            if (myMissionPeer == null)
+                return;
+
+            if (!TryPromoteLocalExactCommanderToGeneral(
+                    myMissionPeer,
+                    myMissionPeer.BotsUnderControlAlive,
+                    myMissionPeer.BotsUnderControlTotal,
+                    out string logKey,
+                    out string logDetails))
+            {
+                return;
+            }
+
+            if (string.Equals(_lastPromotedLocalCommanderGeneralKey, logKey, StringComparison.Ordinal))
+                return;
+
+            _lastPromotedLocalCommanderGeneralKey = logKey;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: promoted local exact-scene commander to general control during order UI tick fallback. " +
+                logDetails);
         }
 
         private static void MissionOrderVM_ViewOrders_Postfix(object __instance)
@@ -871,8 +908,27 @@ namespace CoopSpectator.Patches
             if (entryPolicy == null || !entryPolicy.UseAuthoritativeTroopPath)
                 return false;
 
-            string controlledEntryId = ResolveAgentEntryId(controlledAgent, entryPolicy.BridgeTroopOrEntryId);
+            string controlledEntryId = ResolveControlledEntryId(
+                myMissionPeer,
+                controlledAgent,
+                mission,
+                entryPolicy.BridgeTroopOrEntryId,
+                out _);
             bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
+            if (!isExactCommander &&
+                string.IsNullOrWhiteSpace(controlledEntryId) &&
+                TryBypassNonCommanderSuppressionFromEstablishedLocalCommanderState(
+                    context: "OrderUi",
+                    myPeer,
+                    myMissionPeer,
+                    team,
+                    controlledAgent,
+                    mainAgent,
+                    mission))
+            {
+                return false;
+            }
+
             bool hasCommanderIdentity = !string.IsNullOrWhiteSpace(commanderEntryId);
             bool hasCommanderControlCounts = myMissionPeer.BotsUnderControlTotal > 1 || myMissionPeer.BotsUnderControlAlive > 0;
             if (isExactCommander || (!hasCommanderIdentity && hasCommanderControlCounts))
@@ -1045,10 +1101,284 @@ namespace CoopSpectator.Patches
                 : fallbackEntryId;
         }
 
+        private static string ResolveControlledEntryId(
+            MissionPeer missionPeer,
+            Agent controlledAgent,
+            Mission mission,
+            string bridgeTroopOrEntryId,
+            out string resolutionSource)
+        {
+            resolutionSource = null;
+
+            string controlledEntryId = ResolveAgentEntryId(controlledAgent, fallbackEntryId: null);
+            if (!string.IsNullOrWhiteSpace(controlledEntryId))
+            {
+                resolutionSource = "agent-entry";
+                return controlledEntryId;
+            }
+
+            NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();
+            if (missionPeer != null &&
+                CoopBattleSpawnRuntimeState.TryGetState(missionPeer, out PeerSpawnRuntimeState spawnState) &&
+                !string.IsNullOrWhiteSpace(spawnState.EntryId))
+            {
+                resolutionSource = "spawn-runtime";
+                controlledEntryId = spawnState.EntryId.Trim();
+                LogResolvedControlledEntryIdFallback(
+                    networkPeer,
+                    controlledAgent,
+                    mission,
+                    controlledEntryId,
+                    resolutionSource,
+                    bridgeTroopOrEntryId,
+                    spawnState,
+                    status: null);
+                return controlledEntryId;
+            }
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = ReadRelevantBattleMapStatus(networkPeer, mission);
+            if (TryResolveStatusEntryId(status, out controlledEntryId, out string statusSource))
+            {
+                resolutionSource = statusSource;
+                LogResolvedControlledEntryIdFallback(
+                    networkPeer,
+                    controlledAgent,
+                    mission,
+                    controlledEntryId,
+                    resolutionSource,
+                    bridgeTroopOrEntryId,
+                    spawnState: default,
+                    status);
+                return controlledEntryId;
+            }
+
+            if (LooksLikeEntryId(bridgeTroopOrEntryId))
+            {
+                resolutionSource = "bridge-selection";
+                controlledEntryId = bridgeTroopOrEntryId.Trim();
+                LogResolvedControlledEntryIdFallback(
+                    networkPeer,
+                    controlledAgent,
+                    mission,
+                    controlledEntryId,
+                    resolutionSource,
+                    bridgeTroopOrEntryId,
+                    spawnState: default,
+                    status);
+                return controlledEntryId;
+            }
+
+            return null;
+        }
+
+        private static CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot ReadRelevantBattleMapStatus(
+            NetworkCommunicator networkPeer,
+            Mission mission)
+        {
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status =
+                CoopBattleEntryStatusBridgeFile.ReadStatus();
+            if (status == null)
+                return null;
+
+            int peerIndex = networkPeer?.Index ?? -1;
+            string missionName = mission?.SceneName;
+            return IsRelevantBattleMapStatus(status, peerIndex, missionName)
+                ? status
+                : null;
+        }
+
+        private static bool TryResolveStatusEntryId(
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+            out string entryId,
+            out string source)
+        {
+            entryId = null;
+            source = null;
+            if (status == null)
+                return false;
+
+            if (!string.IsNullOrWhiteSpace(status.SelectedEntryId))
+            {
+                entryId = status.SelectedEntryId.Trim();
+                source = "status-selected-entry";
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(status.SpawnRequestEntryId))
+            {
+                entryId = status.SpawnRequestEntryId.Trim();
+                source = "status-spawn-request";
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(status.SelectionRequestEntryId))
+            {
+                entryId = status.SelectionRequestEntryId.Trim();
+                source = "status-selection-request";
+                return true;
+            }
+
+            if (LooksLikeEntryId(status.IntentTroopOrEntryId))
+            {
+                entryId = status.IntentTroopOrEntryId.Trim();
+                source = "status-intent-entry";
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool LooksLikeEntryId(string value)
+        {
+            return !string.IsNullOrWhiteSpace(value) &&
+                   value.IndexOf('|') >= 0;
+        }
+
+        private static void LogResolvedControlledEntryIdFallback(
+            NetworkCommunicator networkPeer,
+            Agent controlledAgent,
+            Mission mission,
+            string resolvedEntryId,
+            string resolutionSource,
+            string bridgeTroopOrEntryId,
+            PeerSpawnRuntimeState spawnState,
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status)
+        {
+            if (string.IsNullOrWhiteSpace(resolvedEntryId) || string.IsNullOrWhiteSpace(resolutionSource))
+                return;
+
+            string logKey =
+                (networkPeer?.Index.ToString() ?? "null") + "|" +
+                (controlledAgent?.Index.ToString() ?? "null") + "|" +
+                resolutionSource + "|" +
+                resolvedEntryId + "|" +
+                (spawnState.EntryId ?? "null") + "|" +
+                (status?.SelectedEntryId ?? "null") + "|" +
+                (status?.SpawnRequestEntryId ?? "null") + "|" +
+                (status?.SelectionRequestEntryId ?? "null") + "|" +
+                (bridgeTroopOrEntryId ?? "null");
+            if (string.Equals(_lastResolvedControlledEntryFallbackKey, logKey, StringComparison.Ordinal))
+                return;
+
+            _lastResolvedControlledEntryFallbackKey = logKey;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: resolved local controlled entry identity via authoritative fallback. " +
+                "Peer=" + (networkPeer?.UserName ?? networkPeer?.Index.ToString() ?? "null") +
+                " ControlledAgentIndex=" + (controlledAgent?.Index.ToString() ?? "null") +
+                " Source=" + resolutionSource +
+                " EntryId=" + resolvedEntryId +
+                " SpawnRuntimeEntryId=" + (spawnState.EntryId ?? "null") +
+                " StatusSelectedEntryId=" + (status?.SelectedEntryId ?? "null") +
+                " StatusSpawnRequestEntryId=" + (status?.SpawnRequestEntryId ?? "null") +
+                " StatusSelectionRequestEntryId=" + (status?.SelectionRequestEntryId ?? "null") +
+                " BridgeTroopOrEntryId=" + (bridgeTroopOrEntryId ?? "null") +
+                " Mission=" + (mission?.SceneName ?? "null"));
+        }
+
+        private static bool TryBypassNonCommanderSuppressionFromEstablishedLocalCommanderState(
+            string context,
+            NetworkCommunicator networkPeer,
+            MissionPeer missionPeer,
+            Team team,
+            Agent controlledAgent,
+            Agent mainAgent,
+            Mission mission)
+        {
+            if (missionPeer == null || team == null || controlledAgent == null || !controlledAgent.IsActive())
+                return false;
+
+            if (!team.IsPlayerGeneral)
+                return false;
+
+            Agent generalAgent = team.GeneralAgent;
+            if (generalAgent == null)
+                return false;
+
+            bool generalMatchesLocalCommander =
+                generalAgent.Index == controlledAgent.Index ||
+                (mainAgent != null && generalAgent.Index == mainAgent.Index);
+            if (!generalMatchesLocalCommander)
+                return false;
+
+            OrderController playerOrderController = team.PlayerOrderController;
+            OrderController agentOrderController = team.GetOrderControllerOf(controlledAgent);
+            int playerOrderOwnerIndex = playerOrderController?.Owner?.Index ?? -1;
+            int agentOrderOwnerIndex = agentOrderController?.Owner?.Index ?? -1;
+            bool orderOwnerMatchesLocalCommander =
+                playerOrderOwnerIndex == controlledAgent.Index ||
+                agentOrderOwnerIndex == controlledAgent.Index ||
+                (mainAgent != null &&
+                 (playerOrderOwnerIndex == mainAgent.Index || agentOrderOwnerIndex == mainAgent.Index));
+            bool hasOwnedFormationWithUnits = HasLocalCommanderFormationAuthority(team, controlledAgent, mainAgent);
+            bool hasCommanderUnits = missionPeer.BotsUnderControlTotal > 1 || missionPeer.BotsUnderControlAlive > 0;
+            if (!orderOwnerMatchesLocalCommander && !hasOwnedFormationWithUnits && !hasCommanderUnits)
+                return false;
+
+            string logKey =
+                (context ?? "unknown") + "|" +
+                (networkPeer?.Index.ToString() ?? "null") + "|" +
+                team.TeamIndex + "|" +
+                controlledAgent.Index + "|" +
+                (mainAgent?.Index.ToString() ?? "null") + "|" +
+                generalAgent.Index + "|" +
+                playerOrderOwnerIndex + "|" +
+                agentOrderOwnerIndex + "|" +
+                hasOwnedFormationWithUnits + "|" +
+                missionPeer.BotsUnderControlTotal + "|" +
+                missionPeer.BotsUnderControlAlive;
+            if (string.Equals(_lastEstablishedCommanderStateBypassKey, logKey, StringComparison.Ordinal))
+                return true;
+
+            _lastEstablishedCommanderStateBypassKey = logKey;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: preserved local commander control via established general state despite missing controlled entry identity. " +
+                "Context=" + (context ?? "unknown") +
+                " Peer=" + (networkPeer?.UserName ?? networkPeer?.Index.ToString() ?? "null") +
+                " TeamIndex=" + team.TeamIndex +
+                " Side=" + team.Side +
+                " ControlledAgentIndex=" + controlledAgent.Index +
+                " AgentMainIndex=" + (mainAgent?.Index.ToString() ?? "null") +
+                " GeneralAgentIndex=" + generalAgent.Index +
+                " PlayerOrderOwnerIndex=" + (playerOrderOwnerIndex >= 0 ? playerOrderOwnerIndex.ToString() : "null") +
+                " AgentOrderOwnerIndex=" + (agentOrderOwnerIndex >= 0 ? agentOrderOwnerIndex.ToString() : "null") +
+                " HasOwnedFormationWithUnits=" + hasOwnedFormationWithUnits +
+                " BotsUnderControlTotal=" + missionPeer.BotsUnderControlTotal +
+                " BotsUnderControlAlive=" + missionPeer.BotsUnderControlAlive +
+                " Mission=" + (mission?.SceneName ?? "null"));
+            return true;
+        }
+
+        private static bool HasLocalCommanderFormationAuthority(Team team, Agent controlledAgent, Agent mainAgent)
+        {
+            if (team == null || controlledAgent == null)
+                return false;
+
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null || !ReferenceEquals(formation.Team, team) || formation.CountOfUnits <= 0)
+                    continue;
+
+                Agent formationPlayerOwner = TryGetInstanceMemberValue(formation, "PlayerOwner") as Agent;
+                bool ownerMatchesLocalCommander =
+                    formationPlayerOwner != null &&
+                    (formationPlayerOwner.Index == controlledAgent.Index ||
+                     (mainAgent != null && formationPlayerOwner.Index == mainAgent.Index));
+                bool captainMatchesLocalCommander =
+                    (formation.Captain != null && formation.Captain.Index == controlledAgent.Index) ||
+                    (mainAgent != null && formation.Captain != null && formation.Captain.Index == mainAgent.Index);
+                bool hasPlayerControlledTroop = TryGetInstanceBool(formation, "HasPlayerControlledTroop");
+                bool isPlayerTroopInFormation = TryGetInstanceBool(formation, "IsPlayerTroopInFormation");
+                if (ownerMatchesLocalCommander || captainMatchesLocalCommander || hasPlayerControlledTroop || isPlayerTroopInFormation)
+                    return true;
+            }
+
+            return false;
+        }
+
         private static bool IsEntryIdExactCommanderForTeam(Team team, string candidateEntryId, out string commanderEntryId)
         {
             commanderEntryId = null;
-            if (string.IsNullOrWhiteSpace(candidateEntryId) || !TryResolveCommanderEntryIdForTeam(team, out commanderEntryId))
+            if (!TryResolveCommanderEntryIdForTeam(team, out commanderEntryId) || string.IsNullOrWhiteSpace(candidateEntryId))
                 return false;
 
             return string.Equals(
@@ -1405,8 +1735,28 @@ namespace CoopSpectator.Patches
             if (entryPolicy == null || !entryPolicy.UseAuthoritativeTroopPath)
                 return false;
 
-            string controlledEntryId = ResolveAgentEntryId(controlledAgent, entryPolicy.BridgeTroopOrEntryId);
+            Agent mainAgent = Agent.Main;
+            string controlledEntryId = ResolveControlledEntryId(
+                myMissionPeer,
+                controlledAgent,
+                mission,
+                entryPolicy.BridgeTroopOrEntryId,
+                out _);
             bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
+            if (!isExactCommander &&
+                string.IsNullOrWhiteSpace(controlledEntryId) &&
+                TryBypassNonCommanderSuppressionFromEstablishedLocalCommanderState(
+                    context: "SelectAllFormations",
+                    myPeer,
+                    myMissionPeer,
+                    team,
+                    controlledAgent,
+                    mainAgent,
+                    mission))
+            {
+                return false;
+            }
+
             if (!isExactCommander)
             {
                 logKey =
@@ -1521,8 +1871,28 @@ namespace CoopSpectator.Patches
             if (entryPolicy == null || !entryPolicy.UseAuthoritativeTroopPath)
                 return false;
 
-            string controlledEntryId = ResolveAgentEntryId(controlledAgent, entryPolicy.BridgeTroopOrEntryId);
+            Agent mainAgent = Agent.Main;
+            string controlledEntryId = ResolveControlledEntryId(
+                myMissionPeer,
+                controlledAgent,
+                mission,
+                entryPolicy.BridgeTroopOrEntryId,
+                out _);
             bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
+            if (!isExactCommander &&
+                string.IsNullOrWhiteSpace(controlledEntryId) &&
+                TryBypassNonCommanderSuppressionFromEstablishedLocalCommanderState(
+                    context: "OrderTroopPlacerTick",
+                    myPeer,
+                    myMissionPeer,
+                    team,
+                    controlledAgent,
+                    mainAgent,
+                    mission))
+            {
+                isExactCommander = true;
+            }
+
             if (!isExactCommander)
             {
                 logKey =
@@ -1694,14 +2064,13 @@ namespace CoopSpectator.Patches
             if (commanderEntry == null || string.IsNullOrWhiteSpace(commanderEntry.EntryId))
                 return false;
 
-            string controlledEntryId = null;
-            if (!ExactCampaignArmyBootstrap.TryGetEntryId(controlledAgent, out controlledEntryId))
-                controlledEntryId = null;
-
-            if (string.IsNullOrWhiteSpace(controlledEntryId))
-                controlledEntryId = entryPolicy.BridgeTroopOrEntryId;
-
-            if (!string.Equals(controlledEntryId, commanderEntry.EntryId, StringComparison.Ordinal))
+            string controlledEntryId = ResolveControlledEntryId(
+                myMissionPeer,
+                controlledAgent,
+                mission,
+                entryPolicy.BridgeTroopOrEntryId,
+                out _);
+            if (!IsEntryIdExactCommanderForTeam(team, controlledEntryId, out _))
                 return false;
 
             if (promotionBeforeLocalFormationAttach)
