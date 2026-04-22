@@ -1043,3 +1043,440 @@ Rebuilt successfully:
    - `CoopMissionSpawnLogic: cleared non-commander formation ownership after replace-bot. ...`
 2. After such a respawn, peers on the same side/formation must no longer keep non-zero bot ownership counts simultaneously.
 3. Dedicated must no longer crash in native `MissionLobbyComponent.OnBotKills(...)` when either of those formations scores a bot kill.
+
+## 14. Addendum 2026-04-20H - giant battle transport scalability and surrogate names
+
+### 14a. Exact giant-battle outcome from the fresh logs
+
+The final oversized battle did not hang because of a timer-backed forced finish.
+
+Host log:
+
+- `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_8032.txt:550788`
+  - `BattleDetector: consumed battle_result writeback audit ... WinnerSide=Attacker Entries=770 ...`
+
+So the battle-completion/writeback path stayed alive even in the oversized run.
+
+### 14b. Exact low-level blocker
+
+The real blocker was `BattleSnapshot` transport scale on the remote-client sync path.
+
+Dedicated repeatedly logged:
+
+- `C:\Users\Admin\AppData\Local\Temp\CoopSpectatorDedicated_logs\logs\rgl_log_4800.txt:254213`
+  - `CoopMissionNetworkBridge: payload too large for staged chunk transport. Kind=BattleSnapshot Bytes=1864687 Chunks=7284 ChunkBytes=256`
+
+This same line kept repeating throughout the giant battle window, which means the dedicated could not enqueue the oversized battle snapshot for staged transmission at all.
+
+At the same time the host did build the correct giant battle snapshot locally:
+
+- `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_8032.txt:124143`
+  - `BattleSnapshotRuntimeState: snapshot updated. Source=battle-roster-file Sides=2 Entries=770 ...`
+
+But the remote client never got a fresh `CoopMissionNetworkBridge` snapshot for that giant battle. Its last received transport snapshot stayed from a much smaller battle:
+
+- `C:\Users\Admin\Downloads\VVS logs\rgl_log_2080.txt:232092`
+  - `BattleSnapshotRuntimeState: snapshot updated. Source=CoopMissionNetworkBridge Sides=2 Entries=22 ...`
+
+Later, during the giant battle, the client only logged stale-refresh rejects:
+
+- `C:\Users\Admin\Downloads\VVS logs\rgl_log_2080.txt:282112`
+  - `CoopMissionSpawnLogic: skipped stale client battle snapshot refresh because candidate scene does not match mission. ... PreviousSnapshotKey=... attacker:31:9,defender:44:13`
+
+That explains both visible symptoms:
+
+1. giant-battle remote runtime lagged badly because it never switched to the authoritative giant-battle roster snapshot,
+2. surrogate/raw roster labels appeared because the client was resolving entry identity against stale snapshot state instead of the current 770-entry battle roster.
+
+### 14c. Why the previous transport still failed after earlier chunk-limit work
+
+Even after raising staged transport support for medium-large payloads, the giant battle exceeded that ceiling:
+
+- previous wire payload needed `7284` chunks at `256` bytes each,
+- previous `CoopBattlePayloadChunkMessage.MaxChunkCount` ceiling was still too low for that case.
+
+There was also a second scaling bug in our own hot path:
+
+- `TrySyncBattleSnapshotPayloads(...)` serialized the full battle snapshot JSON again before checking pending staged-transmission state,
+- so once the battle snapshot got huge, dedicated kept paying repeated megabyte-scale serialization cost every UDP tick even though the payload still could not be transported.
+
+### 14d. Applied smallest fix
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionNetworkBridge.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Network\Messages\CoopBattleSelectionNetworkMessages.cs`
+
+Applied changes:
+
+1. Raised staged transport ceiling again:
+   - `CoopBattlePayloadChunkMessage.MaxChunkCount = 8191`
+2. Added battle-snapshot transport payload caching keyed by snapshot identity:
+   - giant `BattleSnapshot` JSON is now serialized once per snapshot key instead of every tick
+3. Added `gzip` compression for `BattleSnapshot` wire payloads:
+   - if compressed bytes are smaller than raw JSON bytes, staged transport now sends the compressed wire payload and restores JSON on the client
+4. Added dynamic per-tick chunk budget for large `BattleSnapshot` transmissions only:
+   - small payload behavior stays narrow
+   - large giant-battle snapshots flush faster without broadening `EntryStatusSnapshot` traffic
+5. Added one authoritative preparation log line:
+   - `CoopMissionNetworkBridge: prepared battle snapshot transport payload. ComparisonKey=... RawBytes=... WireBytes=... Compressed=... Chunks=... Entries=...`
+
+This keeps the current staged transport contract intact instead of inventing a separate channel.
+
+### 14e. Rebuild + refreshed package after the fix
+
+Rebuilt successfully:
+
+- `dotnet build .\CoopSpectator.csproj -c Debug`
+- `dotnet build .\DedicatedServer\CoopSpectatorDedicated.csproj -c Debug /p:UseDedicatedServerRefs=true`
+
+Refreshed again:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage`
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage.zip`
+
+Current package hashes after this refresh:
+
+- built DLL SHA256: `6CBF3CB6929610E6C90D7BE7BCA496151819C1290EFEFE3E1DDBE2C288FAFE46`
+- `dist` DLL SHA256: `6CBF3CB6929610E6C90D7BE7BCA496151819C1290EFEFE3E1DDBE2C288FAFE46`
+- `dist` zip SHA256: `742AB16A30DDC11827C984ACC176C41CFBDC723746877C2BF45A77D09EAD59EF`
+
+### 14f. Updated next rerun checks
+
+1. Dedicated must log the new preparation line for the giant battle:
+   - `prepared battle snapshot transport payload ... RawBytes=... WireBytes=... Compressed=... Chunks=... Entries=770`
+2. Dedicated must no longer log:
+   - `payload too large for staged chunk transport. Kind=BattleSnapshot ...`
+3. Remote client must receive a fresh giant-battle snapshot:
+   - `BattleSnapshotRuntimeState: snapshot updated. Source=CoopMissionNetworkBridge Sides=2 Entries=770 ...`
+4. Giant-battle selection/in-world names should resolve to friendly roster names again instead of surrogate/raw entry ids.
+5. If the next oversized run still lags badly after transport succeeds, only then open a separate blocker for runtime materialization/per-tick cost. The current fresh logs do not justify opening that layer yet.
+
+## 15. Exact entry spawn drift in huge battle rerun (2026-04-20)
+
+### 15a. Fresh log-backed finding
+
+The large-battle transport fix held: dedicated prepared and staged a compressed battle snapshot successfully, and the remote client updated to `Entries=581`. The next blocker was different:
+
+- when the host selected an exact cavalry entry such as `attacker|player_party|eastern_mounted_mercenary_t4|mp_coop_light_cavalry_sturgia_troop|variant-2`,
+- the pending spawn request could later be rewritten by `TryForcePreferredHeroClassForPeer(...)` into a different allowed entry such as:
+  - `attacker|player_party|imperial_elite_cataphract|mp_coop_light_cavalry_empire_troop`, then
+  - later even `attacker|player_party|caravan_master_empire|mp_coop_heavy_infantry_empire_troop|variant-1`,
+- and after a later manual retry the host finally possessed a completely different ranged unit:
+  - `attacker|player_party|forest_people_tier_1|mp_light_ranged_empire_troop|variant-1`.
+
+This was not just “selected unit died before spawn.” Our own pending-request refresh path was silently mutating exact-entry spawn intent into troop-match / surrogate fallback.
+
+### 15b. Exact divergence point
+
+The mutation path was:
+
+1. `TryForcePreferredHeroClassForPeer(...)`
+2. `TryResolvePreferredHeroClassForPeer(...)`
+3. `ApplyAuthoritativePreferredSelection(...)`
+4. `CoopBattleSpawnRequestState.TryQueueFromSelection(... pending-request-refresh)`
+
+If the original exact entry was gone, the code still refreshed the pending spawn request from:
+
+- `exact troop id match entry`, or
+- `peer-culture surrogate entry`
+
+instead of rejecting the stale exact selection.
+
+### 15c. Applied smallest fix
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+
+Applied change:
+
+- before any auto fallback selection is allowed to refresh a pending spawn request, we now detect:
+  - pending spawn has an exact `EntryId`,
+  - resolved fallback `preferredEntry` is missing or different,
+- and then reject that pending spawn instead of mutating it.
+
+Authoritative behavior now is:
+
+1. clear pending selection request
+2. clear pending spawn request
+3. mark spawn runtime `Rejected` with reason `exact selected entry no longer spawnable`
+4. advance lifecycle back toward respawnable/selection state
+5. emit one authoritative line:
+   - `CoopMissionSpawnLogic: canceled pending exact-entry spawn instead of mutating to fallback selection ...`
+
+This preserves the player contract:
+
+- exact unit chosen -> either exact unit is still spawnable,
+- or spawn is canceled and the player must choose again,
+- but the server no longer silently possesses a different surrogate unit.
+
+### 15d. Additional interpretation from the same run
+
+The “naked riders” seen in the huge battle are not yet log-backed as a separate missing-equipment regression. In the same run, mounted entries such as `eleftheroi_tier_1` were injected with snapshot loadouts like:
+
+- `Body=armored_baggy_trunks`
+- `Body=baggy_trunks`
+
+and exact overlay lines showed `EquipmentMisses=overlay-skipped`, not missing-equipment failures. So for now this looks more like actual source loadout data than a confirmed new materialization bug.
+
+### 15e. Rebuild + refreshed package after the fix
+
+Rebuilt successfully:
+
+- `dotnet build .\CoopSpectator.csproj -c Debug`
+- `dotnet build .\DedicatedServer\CoopSpectatorDedicated.csproj -c Debug /p:UseDedicatedServerRefs=true`
+
+Refreshed again:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage`
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage.zip`
+
+Current package hashes after this refresh:
+
+- built DLL SHA256: `37B77FCB33D1A36BFF6F0339EF39A70D7473771949E1DB7AEE56882D0E5B52CA`
+- `dist` zip SHA256: `A08F1CBA64816C87A953AA50C91A6F05FBF47C28C6158851298E1EFC128B19BB`
+
+### 15f. Updated next rerun checks
+
+1. If an exact selected unit dies before possession, dedicated must log:
+   - `canceled pending exact-entry spawn instead of mutating to fallback selection ...`
+2. Dedicated must no longer log new `pending-request-refresh` lines that rewrite the host from the original exact entry into:
+   - `exact troop id match entry`, or
+   - `peer-culture surrogate entry`
+   while the old exact spawn is still pending.
+3. The host should either:
+   - possess the exact selected entry, or
+   - be forced to pick again after the exact entry disappears.
+4. If raw/surrogate unit names still appear after this rerun, open that as a separate display-name contract issue with fresh logs. It is no longer justified to mix it with the exact-entry possession bug.
+
+## 16. Reconnect respawn exact-entry bridge + safe mid-battle side switching (2026-04-20)
+
+### 16a. Fresh log-backed findings
+
+From:
+
+- `C:\Users\Admin\AppData\Local\Temp\CoopSpectatorDedicated_logs\logs\rgl_log_19764.txt`
+- `C:\Users\Admin\Downloads\VVS logs\rgl_log_14108.txt`
+
+the previous exact-entry protection was confirmed working as designed, but it exposed a narrower reconnect/respawn blocker:
+
+1. the peer selected a valid exact entry
+2. the spawn request was queued with that exact `EntryId`
+3. `TryForcePreferredHeroClassForPeer(...)` still ran the peer-culture bridge
+4. `TryResolvePreferredHeroClassForPeer(...)` chose a `peer-culture surrogate`
+5. the exact-entry protection correctly refused to mutate the pending spawn
+6. spawn was rejected as:
+   - `exact selected entry no longer spawnable`
+
+So the real defect was no longer the rejection itself. The defect was that hero-class bridging for vanilla spawn visuals was still trying to rewrite authoritative exact-entry respawns.
+
+The same review also confirmed that mid-battle side switching was still blocked by our own hard reject in `TryApplySelectionIntentToPeer(...)`, even though the code already had a safer defer path for peers that still occupy an active coop life.
+
+### 16b. Applied smallest fix
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+
+Applied changes:
+
+1. When a peer has a pending spawn request with an explicit exact `EntryId`, the hero-class bridge now becomes bridge-only:
+   - it may still choose a `preferredTroopIndex` for vanilla visuals/spawn plumbing,
+   - but it no longer rewrites authoritative selection or refreshes the pending spawn request to a surrogate entry.
+2. During `BattleActive`, cross-side selection is no longer hard-rejected up front.
+   - if the peer still occupies an active coop life, the existing defer path stays in charge,
+   - if the peer is already dead / no longer occupies an active coop life, the side change may proceed immediately.
+
+This restores the intended contract:
+
+- exact selected entry remains authoritative during reconnect/death respawns,
+- surrogate class bridging is allowed only as a vanilla index bridge,
+- side switching during battle is available again without reopening the earlier active-life crash path.
+
+### 16c. Rebuild + refreshed package after the fix
+
+Rebuilt successfully:
+
+- `dotnet build .\CoopSpectator.csproj -c Debug`
+- `dotnet build .\DedicatedServer\CoopSpectatorDedicated.csproj -c Debug /p:UseDedicatedServerRefs=true`
+
+Refreshed again:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage`
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage.zip`
+
+Current package hashes after this refresh:
+
+- built DLL SHA256: `DF85DF54B6C971EEB8AC8366A59F1DC8B3A2120118785169ACA5148D658FE9C1`
+- packaged client DLL SHA256: `DF85DF54B6C971EEB8AC8366A59F1DC8B3A2120118785169ACA5148D658FE9C1`
+- `dist` zip SHA256: `F1AF13FBA3AE52753761DAC2E86E274D33649A0B2B2BDC5CD26D2C6F1554B07B`
+
+### 16d. Updated next rerun checks
+
+1. After reconnect/death, dedicated should no longer log:
+   - `canceled pending exact-entry spawn instead of mutating to fallback selection ... Source=peer-culture surrogate`
+   for otherwise valid exact-entry respawns.
+2. Dedicated should instead log the usual successful bridge/apply path and then either:
+   - `possessed materialized army agent via vanilla replace-bot flow`, or
+   - `coop direct spawn succeeded`
+   for the exact selected entry.
+3. During `BattleActive`, when a living peer requests the opposite side, dedicated should log:
+   - `deferred cross-side selection until peer leaves active coop life ...`
+4. After death / no active coop life, side switching should work again without reopening the old crash behavior.
+
+## 17. Commander-death FollowMe crash + forced cross-side respawn contract (2026-04-22)
+
+### 17a. Fresh log-backed findings
+
+From:
+
+- `C:\Users\Admin\Downloads\VVS logs\rgl_log_16724.txt`
+- `C:\Users\Admin\Downloads\VVS logs\AC logs\rgl_log_38728.txt`
+
+the reconnect possession fix stayed green, but two narrower issues remained:
+
+1. `SelectSide` during battle was already reaching the server and being applied in authority state.
+   - dedicated logged repeated `authoritative side assigned ... Applied=True`
+   - so the remaining problem was not server-side refusal
+   - it was the fact that a living peer still occupied an active coop life, and our current contract only deferred the effective switch
+2. the dedicated crash after commander death was consistent with stale commander/order ownership.
+   - the remote peer became cavalry commander and issued `SetOrderWithAgent FollowMe ...`
+   - after that peer died, dedicated moved the peer to spectator/respawnable state
+   - native then started logging `peer.ControlledAgent == null` / `peersTeam == null`
+   - shortly after, watchdog produced the dedicated dump
+
+Native decompile confirmed the low-level risk point:
+
+- `TaleWorlds.MountAndBlade.MissionLobbyComponent.OnBotKills(...)` uses `SingleOrDefault(...)` over peers matched by `ControlledFormation`
+- `OrderController.SetOrderWithAgent(OrderType.FollowMe, agent)` leaves selected formations following the commander agent until something explicitly replaces that movement order
+
+So the real gap was that our `lost-controlled-agent` / `force-respawnable` paths cleared peer state, but did not fully release team-level commander/order ownership and did not actively replace commander-driven follow orders with AI fallback orders.
+
+### 17b. Applied smallest fix
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+
+Applied changes:
+
+1. Added `TryReleasePeerOrderOwnershipAfterLeavingActiveLife(...)` and `TryClearDeadPeerOrderControllerOwnership(...)`.
+   - runs before `MovePeerToSpectatorHoldingState(...)`
+   - clears dead peer `PlayerOwner` / player-troop flags on owned formations
+   - clears dead peer `OrderController.Owner`
+   - if the peer was the team general, clears `GeneralAgent`, disables player-general role, delegates the team back to AI, and forces formation fallback orders to `Charge + FireAtWill`
+   - emits one authoritative log line:
+     - `released post-life commander ownership back to AI ...`
+2. Hooked that cleanup into both:
+   - `TryRefreshPendingSpawnRequests(...)` lost-controlled-agent recovery
+   - `TryForcePeerRespawnable(...)`
+3. Changed active-life cross-side selection contract:
+   - if a living peer requests the opposite side during battle, the server now forces that peer into respawnable state first
+   - then applies the requested side immediately
+   - authoritative log:
+     - `applied cross-side selection by forcing peer out of active coop life ...`
+
+This keeps the change narrow:
+
+- no spawn/runtime rewrite
+- no new commander abstraction
+- only cleanup at the exact death/forced-leave boundary plus reuse of the existing respawnable path
+
+### 17c. Rebuild + refreshed package after the fix
+
+Rebuilt successfully:
+
+- `dotnet build .\CoopSpectator.csproj -c Debug`
+- `dotnet build .\DedicatedServer\CoopSpectatorDedicated.csproj -c Debug /p:UseDedicatedServerRefs=true`
+
+Refreshed again:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage`
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\CoopSpectator_ClientPackage.zip`
+
+Current package hashes after this refresh:
+
+- built DLL SHA256: `78ACCC1D9D9AB787BF95538072F42C34C419398E48643A7ED570B412D3483A66`
+- packaged client DLL SHA256: `78ACCC1D9D9AB787BF95538072F42C34C419398E48643A7ED570B412D3483A66`
+- `dist` zip SHA256: `3FAA5416BB19057EB890E8AAF0422859FE0933A7553FD4629F066D54D423E942`
+
+### 17d. Updated next rerun checks
+
+1. On commander death after `FollowMe`, dedicated should now log:
+   - `released post-life commander ownership back to AI ... ReleasedGeneralOwnership=True ...`
+2. The same death should no longer end with the old native spam pattern staying alive until crash:
+   - `peer.ControlledAgent == null`
+   - `peersTeam == null`
+3. For living mid-battle side switch, dedicated should now log:
+   - `applied cross-side selection by forcing peer out of active coop life ...`
+4. After that forced switch, the peer should be able to pick/spawn on the new side instead of only carrying a deferred request.
+
+## 18. Post-death side selection UI still disabled despite valid server-side selection state (2026-04-22)
+
+### 18a. Fresh finding from the latest rerun
+
+The commander-death crash fix held, but post-death side switching was still visually unavailable.
+
+The fresh logs showed this was no longer a server-side `SelectSide` rejection:
+
+- dedicated still handled side requests after death:
+  - `CoopMissionNetworkBridge: handled client selection request. Peer=XCTwnik Kind=SelectSide Side=Defender ... Applied=True`
+- the client also kept receiving valid `EntryStatusSnapshot` payloads with:
+  - `AssignedSide=Defender`
+  - non-empty `SelectableEntryIds`
+  - both `CanRespawn=True` and later `CanRespawn=False` snapshots during the same post-death window
+
+So the real gap was narrower: during `BattleActive`, the team-selection UI still disabled the opposite side button whenever `AssignedSide` was already set, even if the peer no longer had any live controlled agent.
+
+### 18b. Applied smallest fix
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopSelectionUiHelpers.cs`
+
+Applied change:
+
+1. Narrowed `CanSelectSide(...)` so that during `BattleActive` it now allows side selection when:
+   - the side still has selectable entries, and
+   - the authoritative status says `HasAgent=false`
+
+This keeps the server-side side-selection contract unchanged and only removes the stale UI lock for peers that are already post-life / back in the selection overlay.
+
+### 18c. Expected next rerun behavior
+
+1. After death, if the selection overlay is visible and the opposite side has selectable entries, that side button should no longer stay disabled just because `AssignedSide` still points to the old side.
+2. The next decisive server log for a real cross-side switch should be:
+   - `applied cross-side selection by forcing peer out of active coop life ...`
+3. If the player is already dead / agentless, the switch should go through without looking like a locked team-selection shell.
+
+## 19. Commander-death fallback order verified + one-shot host start hint (2026-04-22)
+
+### 19a. Fresh finding from the latest rerun
+
+The latest rerun confirmed that the commander-death crash path stayed fixed, and the dedicated log also showed that the fallback attack order path really executed for the dead team general:
+
+- `released post-life commander ownership back to AI ... ReleasedGeneralOwnership=True ReleasedFormations=8 ChargedFormations=3 ClearedOrderControllers=2 PulsedAgents=22`
+
+That is sufficient log-backed proof that the post-death commander cleanup no longer only clears ownership, but also pushes affected formations into the fallback `Charge + FireAtWill` path.
+
+### 19b. Applied smallest UX fix
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopMissionSelectionView.cs`
+
+Applied change:
+
+1. Added a one-shot local instruction that appears the first time the local host-controlled peer possesses a unit while battle start is actually available.
+2. Message text:
+   - `Coop Battle: press H to start the battle.`
+3. The message is gated by the existing `CanStartBattle` contract and does not change battle start behavior or hotkey handling.
+
+### 19c. Expected next rerun behavior
+
+1. On the host machine, the first valid pre-battle possession should now show the one-shot instruction:
+   - `Coop Battle: press H to start the battle.`
+2. Client should not get that hint unless it also satisfies the same start-authority contract.
+3. The host log should contain:
+   - `CoopMissionSelectionView: showed one-shot start battle instruction for local host-controlled peer.`

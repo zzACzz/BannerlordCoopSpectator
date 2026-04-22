@@ -37,6 +37,7 @@ namespace CoopSpectator.UI
         private bool _overlayLoadFailed;
         private bool _inputCaptured;
         private bool _hadLocalControlledAgent;
+        private bool _startBattleInstructionShown;
         private bool _spectatorOverlayHidden;
         private DateTime _overlaySuppressedUntilUtc = DateTime.MinValue;
         private float _reopenSelectionHotkeyCooldown;
@@ -60,6 +61,7 @@ namespace CoopSpectator.UI
             ViewOrderPriority = 25;
             _overlayStartupDelay = InitialOverlayDelaySeconds;
             _hadLocalControlledAgent = HasLocalControlledAgent();
+            _startBattleInstructionShown = false;
             ResetSelectionFlow("mission-screen-initialize");
             ModLogger.Info("CoopMissionSelectionView: OnMissionScreenInitialize, coop selection shell init deferred.");
         }
@@ -84,6 +86,7 @@ namespace CoopSpectator.UI
 
             _hadLocalControlledAgent = hasLocalControlledAgent;
             TryHandleStartBattleHotkey(dt, hasLocalControlledAgent);
+            TryShowStartBattleInstruction(hasLocalControlledAgent);
             TryHandleReopenSelectionHotkey(dt, hasLocalControlledAgent);
 
             if (_gauntletLayer == null)
@@ -480,6 +483,25 @@ namespace CoopSpectator.UI
                 InformationManager.DisplayMessage(new InformationMessage("Coop Battle: start requested"));
                 ModLogger.Info("CoopMissionSelectionView: wrote start battle request from H hotkey.");
             }
+        }
+
+        private void TryShowStartBattleInstruction(bool hasLocalControlledAgent)
+        {
+            if (_startBattleInstructionShown || !hasLocalControlledAgent || !GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return;
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            string lifecycle = snapshot?.LifecycleState ?? string.Empty;
+            bool canStartBattleNow =
+                snapshot != null &&
+                snapshot.CanStartBattle &&
+                (snapshot.HasAgent || string.Equals(lifecycle, "Alive", StringComparison.OrdinalIgnoreCase));
+            if (!canStartBattleNow)
+                return;
+
+            _startBattleInstructionShown = true;
+            InformationManager.DisplayMessage(new InformationMessage("Coop Battle: press H to start the battle."));
+            ModLogger.Info("CoopMissionSelectionView: showed one-shot start battle instruction for local host-controlled peer.");
         }
 
         private void TryHandleReopenSelectionHotkey(float dt, bool hasLocalControlledAgent)

@@ -15336,6 +15336,7 @@ namespace CoopSpectator.MissionBehaviors
                      ReferenceEquals(missionPeer.Team, mission.SpectatorTeam));
                 if (lostControlledAgent)
                 {
+                    Team previousTeam = missionPeer.Team ?? controlledAgent?.Team;
                     if (controlledAgent != null && !controlledAgent.IsActive())
                     {
                         missionPeer.ControlledAgent = null;
@@ -15351,6 +15352,13 @@ namespace CoopSpectator.MissionBehaviors
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " lost-controlled-agent");
                     ExpireMissionPeerVanillaSpawnVisuals(missionPeer);
                     CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " lost-controlled-agent");
+                    TryReleasePeerOrderOwnershipAfterLeavingActiveLife(
+                        mission,
+                        missionPeer,
+                        peer,
+                        previousTeam,
+                        controlledAgent,
+                        source + " lost-controlled-agent");
                     MovePeerToSpectatorHoldingState(mission, missionPeer, peer, source + " lost-controlled-agent");
                     CoopBattlePeerLifecycleRuntimeState.MarkDeadAwaitingRespawn(missionPeer, lastTroopId, lastEntryId, source + " lost-controlled-agent");
                     ModLogger.Info(
@@ -15563,6 +15571,7 @@ namespace CoopSpectator.MissionBehaviors
 
             NetworkCommunicator peer = missionPeer.GetNetworkPeer();
             Agent controlledAgent = missionPeer.ControlledAgent;
+            Team previousTeam = missionPeer.Team ?? controlledAgent?.Team;
             bool triggeredVanillaRemoval = false;
             bool returnedMaterializedAgentToAi = false;
             if (controlledAgent != null && controlledAgent.IsActive())
@@ -15600,6 +15609,14 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            TryReleasePeerOrderOwnershipAfterLeavingActiveLife(
+                mission,
+                missionPeer,
+                peer,
+                previousTeam,
+                controlledAgent,
+                source + " forced-respawnable");
+
             missionPeer.ControlledAgent = null;
             missionPeer.FollowedAgent = null;
             if (peer != null && ReferenceEquals(peer.ControlledAgent, controlledAgent))
@@ -15627,6 +15644,154 @@ namespace CoopSpectator.MissionBehaviors
                 " ReturnedMaterializedAgentToAi=" + returnedMaterializedAgentToAi +
                 " Source=" + source);
             return true;
+        }
+
+        private static void TryReleasePeerOrderOwnershipAfterLeavingActiveLife(
+            Mission mission,
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            Team previousTeam,
+            Agent controlledAgent,
+            string source)
+        {
+            if (mission == null || missionPeer == null || previousTeam == null || controlledAgent == null)
+                return;
+
+            if (ReferenceEquals(previousTeam, mission.SpectatorTeam) || previousTeam.Side == BattleSideEnum.None)
+                return;
+
+            bool releasedGeneralOwnership =
+                ReferenceEquals(previousTeam.GeneralAgent, controlledAgent) ||
+                ReferenceEquals(previousTeam.PlayerOrderController?.Owner, controlledAgent);
+            int releasedFormationCount = 0;
+            int chargedFormationCount = 0;
+
+            foreach (Formation formation in previousTeam.FormationsIncludingSpecialAndEmpty)
+            {
+                if (formation == null || !ReferenceEquals(formation.Team, previousTeam))
+                    continue;
+
+                bool ownedByDeadPeer = ReferenceEquals(GetServerMemberValue(formation, "PlayerOwner"), controlledAgent);
+                bool shouldReleaseFormation =
+                    ownedByDeadPeer ||
+                    (releasedGeneralOwnership && formation.CountOfUnits > 0);
+                if (!shouldReleaseFormation)
+                    continue;
+
+                SetServerMemberValue(formation, "PlayerOwner", null);
+                SetServerMemberValue(formation, "HasPlayerControlledTroop", false);
+                SetServerMemberValue(formation, "IsPlayerTroopInFormation", false);
+                formation.SetControlledByAI(true, true);
+                formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
+                if (formation.CountOfUnits > 0)
+                {
+                    formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
+                    chargedFormationCount++;
+                }
+
+                releasedFormationCount++;
+            }
+
+            int clearedOrderControllers = TryClearDeadPeerOrderControllerOwnership(previousTeam, controlledAgent, source);
+            if (ReferenceEquals(previousTeam.PlayerOrderController?.Owner, controlledAgent))
+            {
+                previousTeam.PlayerOrderController.ClearSelectedFormations();
+                previousTeam.PlayerOrderController.Owner = null;
+            }
+
+            int pulsedAgents = 0;
+            if (releasedGeneralOwnership)
+            {
+                previousTeam.SetPlayerRole(isPlayerGeneral: false, isPlayerSergeant: false);
+                if (ReferenceEquals(previousTeam.GeneralAgent, controlledAgent))
+                    previousTeam.GeneralAgent = null;
+
+                previousTeam.ResetTactic();
+                previousTeam.DelegateCommandToAI();
+                pulsedAgents = TryActivateBattleActiveReinforcementAi(previousTeam);
+            }
+
+            try
+            {
+                controlledAgent.SetCanLeadFormationsRemotely(value: false);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: failed to clear remote commander flag after leaving active life. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+            }
+            if (releasedFormationCount <= 0 && clearedOrderControllers <= 0 && !releasedGeneralOwnership)
+                return;
+
+            if (peer != null && peer.IsConnectionActive)
+            {
+                try
+                {
+                    GameNetwork.BeginBroadcastModuleEvent();
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.BotsControlledChange(peer, 0, 0));
+                    GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: failed to broadcast cleared post-life order ownership. " +
+                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                        " Source=" + (source ?? "unknown") +
+                        " Error=" + ex.Message);
+                }
+            }
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: released post-life commander ownership back to AI. " +
+                "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                " TeamSide=" + previousTeam.Side +
+                " ReleasedGeneralOwnership=" + releasedGeneralOwnership +
+                " ReleasedFormations=" + releasedFormationCount +
+                " ChargedFormations=" + chargedFormationCount +
+                " ClearedOrderControllers=" + clearedOrderControllers +
+                " PulsedAgents=" + pulsedAgents +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        private static int TryClearDeadPeerOrderControllerOwnership(Team team, Agent controlledAgent, string source)
+        {
+            if (team == null || controlledAgent == null)
+                return 0;
+
+            try
+            {
+                if (!(GetServerMemberValue(team, "_orderControllers") is System.Collections.IEnumerable orderControllers))
+                    return 0;
+
+                int clearedCount = 0;
+                foreach (object orderControllerObject in orderControllers)
+                {
+                    OrderController orderController = orderControllerObject as OrderController;
+                    if (orderController == null ||
+                        !ReferenceEquals(orderController.Owner, controlledAgent))
+                    {
+                        continue;
+                    }
+
+                    orderController.ClearSelectedFormations();
+                    orderController.Owner = null;
+                    clearedCount++;
+                }
+
+                return clearedCount;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: failed to clear dead peer order controller ownership. " +
+                    "TeamSide=" + team.Side +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+                return 0;
+            }
         }
 
         private static bool IsMaterializedArmyAgent(Agent agent)
@@ -16023,17 +16188,17 @@ namespace CoopSpectator.MissionBehaviors
                 currentPhase >= CoopBattlePhase.BattleActive &&
                 currentPhase < CoopBattlePhase.BattleEnded &&
                 committedSide != BattleSideEnum.None &&
-                committedSide != requestedSide)
+                committedSide != requestedSide &&
+                peerOccupiesActiveCoopLife)
             {
                 NetworkCommunicator peer = missionPeer.GetNetworkPeer();
                 ModLogger.Info(
-                    "CoopMissionSpawnLogic: rejected cross-side selection during active battle. " +
+                    "CoopMissionSpawnLogic: deferred cross-side selection until peer leaves active coop life. " +
                     "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
                     " CurrentSide=" + committedSide +
                     " RequestedSide=" + requestedSide +
                     " Phase=" + currentPhase +
                     " Source=" + source);
-                return false;
             }
 
             bool deferCrossSideSelectionWhileActive =
@@ -16046,9 +16211,25 @@ namespace CoopSpectator.MissionBehaviors
                 applied |= CoopBattleAuthorityState.TryRequestSide(missionPeer, requestedSide, source + " side-intent");
                 if (deferCrossSideSelectionWhileActive)
                 {
-                    CoopBattleSelectionRequestState.Clear(missionPeer, source + " deferred-side-change");
-                    CoopBattleSpawnRequestState.Clear(missionPeer, source + " deferred-side-change");
-                    return applied;
+                    NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+                    if (TryForcePeerRespawnable(mission, missionPeer, source + " cross-side active-life"))
+                    {
+                        applied |= CoopBattleAuthorityState.TryAssignSide(missionPeer, requestedSide, source + " cross-side forced-respawnable");
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: applied cross-side selection by forcing peer out of active coop life. " +
+                            "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                            " PreviousSide=" + runtimeSide +
+                            " RequestedSide=" + requestedSide +
+                            " Phase=" + currentPhase +
+                            " Source=" + source);
+                        deferCrossSideSelectionWhileActive = false;
+                    }
+                    else
+                    {
+                        CoopBattleSelectionRequestState.Clear(missionPeer, source + " deferred-side-change");
+                        CoopBattleSpawnRequestState.Clear(missionPeer, source + " deferred-side-change");
+                        return applied;
+                    }
                 }
 
                 if (HasAllowedRosterForSide(requestedSide))
@@ -17636,6 +17817,9 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattleAuthorityState.PeerSelectionState selectionState = CoopBattleAuthorityState.GetSelectionState(missionPeer);
             bool hasExplicitSelection = CoopBattleAuthorityState.HasExplicitSelection(missionPeer);
             RosterEntryState preferredAllowedEntry = ResolvePreferredAllowedEntryStateForPeer(missionPeer, selectionState);
+            bool preservePendingExactEntryAuthority =
+                CoopBattleSpawnRequestState.TryGetPendingRequest(missionPeer, out CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequestForBridge) &&
+                !string.IsNullOrWhiteSpace(pendingRequestForBridge.EntryId);
             int currentSelectedTroopIndex = missionPeer.SelectedTroopIndex;
             if (!hasExplicitSelection &&
                 currentSelectedTroopIndex >= 0 &&
@@ -17646,6 +17830,17 @@ namespace CoopSpectator.MissionBehaviors
                 if (!string.IsNullOrWhiteSpace(matchedAllowedTroopId))
                 {
                     RosterEntryState matchedAllowedEntry = ResolveMatchedAllowedEntryState(currentlySelectedClass, missionPeer, selectionState, preferredAllowedEntry);
+                    if (TryRejectPendingExactEntrySpawnDrift(
+                            missionPeer,
+                            matchedAllowedEntry,
+                            matchedAllowedTroopId,
+                            "preserve player-selected allowed class",
+                            out string pendingEntryDriftReason))
+                    {
+                        debugReason = pendingEntryDriftReason;
+                        return false;
+                    }
+
                     ApplyAuthoritativePreferredSelection(
                         missionPeer,
                         matchedAllowedEntry,
@@ -17663,6 +17858,30 @@ namespace CoopSpectator.MissionBehaviors
             if (exactIndex >= 0)
             {
                 RosterEntryState exactMatchEntry = ResolveMatchedAllowedEntryState(cultureClasses[exactIndex], missionPeer, selectionState, preferredAllowedEntry);
+                if (preservePendingExactEntryAuthority)
+                {
+                    preferredClass = cultureClasses[exactIndex];
+                    preferredTroopIndex = exactIndex;
+                    debugReason =
+                        "exact troop id bridge for explicit exact-entry pending spawn '" +
+                        targetTroopId +
+                        "' entry='" +
+                        pendingRequestForBridge.EntryId +
+                        "'";
+                    return !ReferenceEquals(preferredClass, vanillaClass) || missionPeer.SelectedTroopIndex != preferredTroopIndex;
+                }
+
+                if (TryRejectPendingExactEntrySpawnDrift(
+                        missionPeer,
+                        exactMatchEntry,
+                        targetTroopId,
+                        "exact troop id match",
+                        out string pendingEntryDriftReason))
+                {
+                    debugReason = pendingEntryDriftReason;
+                    return false;
+                }
+
                 ApplyAuthoritativePreferredSelection(missionPeer, exactMatchEntry, targetTroopId, "exact troop id match");
                 preferredClass = cultureClasses[exactIndex];
                 preferredTroopIndex = exactIndex;
@@ -17678,6 +17897,30 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             RosterEntryState surrogateEntry = ResolveMatchedAllowedEntryState(cultureClasses[bestIndex], missionPeer, selectionState, preferredAllowedEntry);
+            if (preservePendingExactEntryAuthority)
+            {
+                preferredClass = cultureClasses[bestIndex];
+                preferredTroopIndex = bestIndex;
+                debugReason =
+                    "peer-culture surrogate bridge for explicit exact-entry pending spawn '" +
+                    targetTroopId +
+                    "' entry='" +
+                    pendingRequestForBridge.EntryId +
+                    "'";
+                return !ReferenceEquals(preferredClass, vanillaClass) || missionPeer.SelectedTroopIndex != preferredTroopIndex;
+            }
+
+            if (TryRejectPendingExactEntrySpawnDrift(
+                    missionPeer,
+                    surrogateEntry,
+                    targetTroopId,
+                    "peer-culture surrogate",
+                    out string surrogatePendingEntryDriftReason))
+            {
+                debugReason = surrogatePendingEntryDriftReason;
+                return false;
+            }
+
             ApplyAuthoritativePreferredSelection(missionPeer, surrogateEntry, targetTroopId, "peer-culture surrogate");
             preferredClass = cultureClasses[bestIndex];
             preferredTroopIndex = bestIndex;
@@ -17937,6 +18180,48 @@ namespace CoopSpectator.MissionBehaviors
                 if (hadPendingSpawnRequest)
                     CoopBattleSpawnRequestState.TryQueueFromSelection(missionPeer, source + " pending-request-refresh");
             }
+        }
+
+        private static bool TryRejectPendingExactEntrySpawnDrift(
+            MissionPeer missionPeer,
+            RosterEntryState preferredEntry,
+            string preferredTroopId,
+            string source,
+            out string reason)
+        {
+            reason = string.Empty;
+            if (missionPeer == null ||
+                !CoopBattleSpawnRequestState.TryGetPendingRequest(missionPeer, out CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest) ||
+                string.IsNullOrWhiteSpace(pendingRequest.EntryId))
+            {
+                return false;
+            }
+
+            string nextEntryId = preferredEntry?.EntryId;
+            if (string.Equals(pendingRequest.EntryId, nextEntryId, StringComparison.Ordinal))
+                return false;
+
+            reason =
+                "exact selected entry no longer spawnable; canceled pending spawn before '" +
+                (source ?? "unknown") +
+                "' fallback";
+
+            string rejectSource = (source ?? "unknown") + " exact-entry-missing";
+            CoopBattleSelectionRequestState.Clear(missionPeer, rejectSource);
+            CoopBattleSpawnRequestState.Clear(missionPeer, rejectSource);
+            CoopBattleSpawnRuntimeState.MarkRejected(missionPeer, rejectSource, "exact selected entry no longer spawnable");
+            AdvanceLifecycleAfterSpawnWaitOrReject(Mission.Current, missionPeer, "exact selected entry no longer spawnable", rejectSource);
+
+            NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: canceled pending exact-entry spawn instead of mutating to fallback selection. " +
+                "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                " PendingEntryId=" + pendingRequest.EntryId +
+                " PendingTroopId=" + (pendingRequest.TroopId ?? "null") +
+                " PreferredEntryId=" + (nextEntryId ?? "null") +
+                " PreferredTroopId=" + (preferredTroopId ?? "null") +
+                " Source=" + (source ?? "unknown"));
+            return true;
         }
 
         private static void TryForcePreferredHeroClassForPeer(Mission mission, string source)

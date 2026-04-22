@@ -207,6 +207,9 @@ namespace CoopSpectator.UI
             if (!string.Equals(snapshot.BattlePhase, nameof(CoopBattlePhase.BattleActive), StringComparison.OrdinalIgnoreCase))
                 return true;
 
+            if (snapshot.Status != null && !snapshot.Status.HasAgent)
+                return true;
+
             BattleSideEnum assignedSide = NormalizeSide(snapshot.Status?.AssignedSide);
             return assignedSide == BattleSideEnum.None || assignedSide == side;
         }
