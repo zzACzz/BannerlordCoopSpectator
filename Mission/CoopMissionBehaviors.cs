@@ -252,7 +252,7 @@ namespace CoopSpectator.MissionBehaviors
             string battlePhase = snapshot.BattlePhase ?? string.Empty;
             bool canStartFromBattlePrompt =
                 snapshot.CanStartBattle &&
-                (snapshot.HasAgent || string.Equals(lifecycle, "Alive", StringComparison.OrdinalIgnoreCase));
+                HasClientControlledAgent();
             bool shouldHint =
                 !snapshot.HasAgent ||
                 snapshot.CanRespawn ||
@@ -366,19 +366,18 @@ namespace CoopSpectator.MissionBehaviors
             if (snapshot == null)
                 return;
 
-            string lifecycle = snapshot.LifecycleState ?? string.Empty;
             if (Input.IsKeyPressed(InputKey.H))
             {
                 bool canStartBattleNow =
                     snapshot.CanStartBattle &&
-                    (snapshot.HasAgent || string.Equals(lifecycle, "Alive", StringComparison.OrdinalIgnoreCase));
+                    HasClientControlledAgent();
                 if (!canStartBattleNow)
                 {
                     OnOwnEntryHotkeyHandled("Coop Entry: start battle not ready");
                     return;
                 }
 
-            if (CoopBattlePhaseBridgeFile.WriteStartBattleRequest("MP client H hotkey"))
+                if (CoopBattlePhaseBridgeFile.WriteStartBattleRequest("MP client H hotkey"))
                     OnOwnEntryHotkeyHandled("Coop Entry: battle start requested");
                 return;
             }
@@ -1005,7 +1004,12 @@ namespace CoopSpectator.MissionBehaviors
         private static bool HasClientControlledAgent()
         {
             Agent mainAgent = Agent.Main;
-            return mainAgent != null && mainAgent.MissionPeer != null;
+            if (mainAgent != null && mainAgent.IsActive() && mainAgent.MissionPeer != null)
+                return true;
+
+            MissionPeer missionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            Agent controlledAgent = missionPeer?.ControlledAgent;
+            return controlledAgent != null && controlledAgent.IsActive();
         }
 
         private static void TryReleaseStaleClientMainAgent(Mission mission)
@@ -16497,6 +16501,15 @@ namespace CoopSpectator.MissionBehaviors
             return null;
         }
 
+        private static bool IsBattleStartAuthorityPeer(Mission mission, MissionPeer missionPeer)
+        {
+            if (mission == null || missionPeer == null)
+                return false;
+
+            MissionPeer hostedLocalPeer = ResolveHostedLocalMissionPeer(mission);
+            return hostedLocalPeer != null && ReferenceEquals(hostedLocalPeer, missionPeer);
+        }
+
         private static bool HasBootstrapReadySide(MissionPeer missionPeer, Mission mission, string source)
         {
             if (missionPeer == null || mission == null)
@@ -16901,6 +16914,7 @@ namespace CoopSpectator.MissionBehaviors
             bool canStartBattle = IsBattleStartReady(mission, out _, out _) &&
                 currentPhase >= CoopBattlePhase.PreBattleHold &&
                 currentPhase < CoopBattlePhase.BattleActive;
+            bool canStartBattleForPeer = canStartBattle && IsBattleStartAuthorityPeer(mission, missionPeer);
             IReadOnlyList<string> attackerSelectableEntryIds = ResolveSelectableEntryIdsForStatus(
                 mission,
                 BattleSideEnum.Attacker,
@@ -16931,7 +16945,7 @@ namespace CoopSpectator.MissionBehaviors
                 HasPeer = missionPeer != null,
                 HasAgent = missionPeer?.ControlledAgent != null && missionPeer.ControlledAgent.IsActive(),
                 CanRespawn = false,
-                CanStartBattle = canStartBattle,
+                CanStartBattle = canStartBattleForPeer,
                 LifecycleState = "NoPeer",
                 LifecycleSource = source,
                 DeathCount = 0,

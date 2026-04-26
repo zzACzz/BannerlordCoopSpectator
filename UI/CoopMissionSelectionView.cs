@@ -465,15 +465,17 @@ namespace CoopSpectator.UI
                 return;
 
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
-            string lifecycle = snapshot?.LifecycleState ?? string.Empty;
-            bool canStartBattleNow =
-                snapshot != null &&
-                snapshot.CanStartBattle &&
-                (snapshot.HasAgent || string.Equals(lifecycle, "Alive", StringComparison.OrdinalIgnoreCase));
+            bool canStartBattleNow = snapshot != null && snapshot.CanStartBattle;
             if (!canStartBattleNow)
             {
                 _startBattleHotkeyCooldown = StartBattleHotkeyCooldownSeconds;
-                ModLogger.Info("CoopMissionSelectionView: start battle hotkey ignored because battle is not ready.");
+                ModLogger.Info(
+                    "CoopMissionSelectionView: start battle hotkey ignored because battle is not ready. " +
+                    "HasLocalControlledAgent=" + hasLocalControlledAgent +
+                    " CanStartBattle=" + (snapshot?.CanStartBattle ?? false) +
+                    " SnapshotHasAgent=" + (snapshot?.HasAgent ?? false) +
+                    " Lifecycle=" + (snapshot?.LifecycleState ?? string.Empty) +
+                    " Peer=" + (snapshot?.PeerName ?? string.Empty));
                 return;
             }
 
@@ -491,11 +493,7 @@ namespace CoopSpectator.UI
                 return;
 
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
-            string lifecycle = snapshot?.LifecycleState ?? string.Empty;
-            bool canStartBattleNow =
-                snapshot != null &&
-                snapshot.CanStartBattle &&
-                (snapshot.HasAgent || string.Equals(lifecycle, "Alive", StringComparison.OrdinalIgnoreCase));
+            bool canStartBattleNow = snapshot != null && snapshot.CanStartBattle;
             if (!canStartBattleNow)
                 return;
 

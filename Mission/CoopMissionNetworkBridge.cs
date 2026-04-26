@@ -515,7 +515,11 @@ namespace CoopSpectator.MissionBehaviors
                             " AssignedSide=" + (snapshot.AssignedSide ?? string.Empty) +
                             " SelectedEntryId=" + (snapshot.SelectedEntryId ?? string.Empty) +
                             " SelectableEntryIds=" + (snapshot.SelectableEntryIds ?? string.Empty) +
-                            " CanRespawn=" + snapshot.CanRespawn);
+                            " CanRespawn=" + snapshot.CanRespawn +
+                            " CanStartBattle=" + snapshot.CanStartBattle +
+                            " HasAgent=" + snapshot.HasAgent +
+                            " Lifecycle=" + (snapshot.LifecycleState ?? string.Empty) +
+                            " Peer=" + (snapshot.PeerName ?? string.Empty));
                     }
                     break;
                 }
