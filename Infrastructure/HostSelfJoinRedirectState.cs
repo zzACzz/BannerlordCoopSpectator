@@ -19,6 +19,7 @@ namespace CoopSpectator.Infrastructure
         private static int _activeJoinedHostPort;
         private static string _activeJoinedHostServerName;
         private static string _lastPersistedHostedPeerUserName;
+        private static long _lastPersistedHostedPeerCreatedUtcTicks;
 
         public static void ClearPendingSelfJoinRewrite()
         {
@@ -46,6 +47,7 @@ namespace CoopSpectator.Infrastructure
         public static void ClearPersistedHostedPeer()
         {
             _lastPersistedHostedPeerUserName = null;
+            _lastPersistedHostedPeerCreatedUtcTicks = 0;
             _activeJoinedHostServerName = null;
             _activeJoinedHostPort = 0;
 
@@ -174,6 +176,7 @@ namespace CoopSpectator.Infrastructure
                     });
 
                 _lastPersistedHostedPeerUserName = normalizedUserName;
+                _lastPersistedHostedPeerCreatedUtcTicks = DateTime.UtcNow.Ticks;
                 _activeJoinedHostServerName = null;
                 _activeJoinedHostPort = 0;
                 ModLogger.Info(
@@ -195,6 +198,14 @@ namespace CoopSpectator.Infrastructure
         {
             userName = string.Empty;
 
+            if (!string.IsNullOrWhiteSpace(_lastPersistedHostedPeerUserName) &&
+                _lastPersistedHostedPeerCreatedUtcTicks > 0 &&
+                !IsExpired(_lastPersistedHostedPeerCreatedUtcTicks))
+            {
+                userName = _lastPersistedHostedPeerUserName;
+                return true;
+            }
+
             if (!TryReadHostedPeerMarker(out _, out int _, out string markerUserName, out long markerTicks))
                 return false;
 
@@ -207,6 +218,8 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
+            _lastPersistedHostedPeerUserName = markerUserName;
+            _lastPersistedHostedPeerCreatedUtcTicks = markerTicks;
             userName = markerUserName;
             return true;
         }

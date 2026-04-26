@@ -212,9 +212,18 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ModLogger.Info("CoopBattle server: retained recent players, match history, equipment leave logic, preload helper, panic handler, and human AI for battle-map native peer-sync compatibility.");
             }
 
-            list.Add(new MissionBehaviorDiagnostic());
-            list.Add(new CoopMissionNetworkBridge());
-            list.Add(new CoopMissionSpawnLogic());
+            if (isDedicated)
+            {
+                ModLogger.Info(
+                    "CoopBattle server: deferred CoopMissionNetworkBridge/CoopMissionSpawnLogic initial mission behavior injection for dedicated process. " +
+                    "They will be attached after native mission-ready state stabilization.");
+            }
+            else
+            {
+                list.Add(new MissionBehaviorDiagnostic());
+                list.Add(new CoopMissionNetworkBridge());
+                list.Add(new CoopMissionSpawnLogic());
+            }
             return list;
         }
 
@@ -547,9 +556,12 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
             try
             {
-                string rosterSceneName = BattleRosterFileHelper.ReadSnapshot()?.MultiplayerScene ?? string.Empty;
-                if (!string.IsNullOrWhiteSpace(rosterSceneName))
-                    return rosterSceneName;
+                if (!GameNetwork.IsClient || CustomGameJoinContextState.ShouldAllowLocalBattleRosterFileFallback())
+                {
+                    string rosterSceneName = BattleRosterFileHelper.ReadSnapshot()?.MultiplayerScene ?? string.Empty;
+                    if (!string.IsNullOrWhiteSpace(rosterSceneName))
+                        return rosterSceneName;
+                }
             }
             catch
             {

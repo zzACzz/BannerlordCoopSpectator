@@ -36,17 +36,24 @@ namespace CoopSpectator.Infrastructure
             bool isPlayerSide =
                 sideState.IsPlayerSide ||
                 candidateEntries.Any(entry => IsHeroRoleEntry(entry, "player"));
+            List<RosterEntryState> commanderSignalEntries = candidateEntries
+                .Where(entry => HasCommanderIdentitySignal(runtimeState, isPlayerSide, entry))
+                .ToList();
+            if (commanderSignalEntries.Count > 0)
+            {
+                return commanderSignalEntries
+                    .OrderBy(entry => GetCommanderSelectionPriority(runtimeState, isPlayerSide, entry))
+                    .ThenByDescending(entry => PartyMatchesSideLeader(entry, leaderPartyId))
+                    .ThenByDescending(entry => PartyLeaderHeroMatchesEntry(runtimeState, entry))
+                    .ThenByDescending(entry => entry.IsHero)
+                    .ThenByDescending(entry => entry.HeroLevel)
+                    .ThenByDescending(entry => entry.Tier)
+                    .ThenByDescending(entry => entry.BaseHitPoints)
+                    .ThenBy(entry => entry.EntryId, StringComparer.Ordinal)
+                    .FirstOrDefault();
+            }
 
-            return candidateEntries
-                .OrderBy(entry => GetCommanderSelectionPriority(runtimeState, isPlayerSide, entry))
-                .ThenByDescending(entry => PartyMatchesSideLeader(entry, leaderPartyId))
-                .ThenByDescending(entry => PartyLeaderHeroMatchesEntry(runtimeState, entry))
-                .ThenByDescending(entry => entry.IsHero)
-                .ThenByDescending(entry => entry.HeroLevel)
-                .ThenByDescending(entry => entry.Tier)
-                .ThenByDescending(entry => entry.BaseHitPoints)
-                .ThenBy(entry => entry.EntryId, StringComparer.Ordinal)
-                .FirstOrDefault();
+            return ResolveFallbackCommanderEntry(runtimeState, sideState, candidateEntries);
         }
 
         public static bool IsCommanderEntry(BattleRuntimeState runtimeState, BattleSideEnum side, RosterEntryState entry)
@@ -83,6 +90,36 @@ namespace CoopSpectator.Infrastructure
                 return 4;
 
             return 10;
+        }
+
+        private static bool HasCommanderIdentitySignal(
+            BattleRuntimeState runtimeState,
+            bool isPlayerSide,
+            RosterEntryState entry)
+        {
+            return GetCommanderSelectionPriority(runtimeState, isPlayerSide, entry) < 10;
+        }
+
+        private static RosterEntryState ResolveFallbackCommanderEntry(
+            BattleRuntimeState runtimeState,
+            BattleSideState sideState,
+            IEnumerable<RosterEntryState> candidateEntries)
+        {
+            if (sideState == null || candidateEntries == null)
+                return null;
+
+            string leaderPartyId = sideState.LeaderPartyId ?? string.Empty;
+            return candidateEntries
+                .Where(entry => entry != null)
+                .OrderByDescending(entry => PartyMatchesSideLeader(entry, leaderPartyId))
+                .ThenByDescending(entry => PartyLeaderHeroMatchesEntry(runtimeState, entry))
+                .ThenByDescending(entry => entry.IsHero)
+                .ThenByDescending(entry => entry.HeroLevel)
+                .ThenByDescending(entry => entry.Tier)
+                .ThenByDescending(entry => entry.BaseHitPoints)
+                .ThenByDescending(entry => entry.Count)
+                .ThenBy(entry => entry.EntryId, StringComparer.Ordinal)
+                .FirstOrDefault();
         }
 
         private static bool PartyMatchesSideLeader(RosterEntryState entry, string leaderPartyId)

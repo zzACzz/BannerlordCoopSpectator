@@ -74,6 +74,7 @@ namespace CoopSpectator.Patches
         {
             ModLogger.Info("MissionState.OpenNew ENTER missionName=" + (missionName ?? "") + " (engine will create mission then call behavior factory).");
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(rec, "MissionState.OpenNew prefix");
+            LogMissionOpenHandlerContract(missionName, handler, addDefaultMissionBehaviors, needsMemoryCleanup);
 
             bool isOfficialBattleMission = string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal);
             bool isCoopBattleFactory = IsCoopBattleBehaviorFactory(handler);
@@ -145,6 +146,38 @@ namespace CoopSpectator.Patches
 
             string fullName = type.FullName ?? string.Empty;
             return fullName.IndexOf(nameof(MissionMultiplayerCoopBattleMode), StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static void LogMissionOpenHandlerContract(
+            string missionName,
+            InitializeMissionBehaviorsDelegate handler,
+            bool addDefaultMissionBehaviors,
+            bool needsMemoryCleanup)
+        {
+            try
+            {
+                if (!string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal) &&
+                    !string.Equals(missionName, OfficialTeamDeathmatchMissionName, StringComparison.Ordinal))
+                    return;
+
+                MethodInfo handlerMethod = handler?.Method;
+                Type declaringType = handlerMethod?.DeclaringType;
+                Type targetType = handler?.Target?.GetType();
+                ModLogger.Info(
+                    "MissionState.OpenNew handler contract. " +
+                    "MissionName=" + (missionName ?? string.Empty) +
+                    " HandlerMethod=" + (handlerMethod?.Name ?? "null") +
+                    " HandlerDeclaringType=" + (declaringType?.FullName ?? "null") +
+                    " HandlerTargetType=" + (targetType?.FullName ?? "null") +
+                    " AddDefaultMissionBehaviors=" + addDefaultMissionBehaviors +
+                    " NeedsMemoryCleanup=" + needsMemoryCleanup +
+                    " IsServer=" + GameNetwork.IsServer +
+                    " IsClient=" + GameNetwork.IsClient + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionState.OpenNew handler contract log failed: " + ex.Message);
+            }
         }
 
         private static IEnumerable<MissionBehavior> WrapVanillaTeamDeathmatchBehaviors(

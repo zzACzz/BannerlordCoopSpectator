@@ -178,7 +178,7 @@ namespace CoopSpectator // Використовуємо кореневий names
             } // Завершуємо блок if
 
             _hasShownLoadedMessage = true; // Встановлюємо прапорець, щоб повторний OnGameStart не спамив повідомленнями
-            ShowMessage("CoopSpectator mod loaded! (v0.1.1-ui)"); // Version marker to confirm the client runs the latest build
+            ShowMessage("Bannerlord Coop Campaign mod loaded! (v0.1.1-ui)"); // Version marker to confirm the client runs the latest build
         } // Завершуємо блок методу
 
         private static void TryRegisterCoopCampaignDerivedAgentStatModel(Game game, IGameStarter gameStarterObject, string source)

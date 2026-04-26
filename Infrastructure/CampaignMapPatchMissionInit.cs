@@ -31,7 +31,7 @@ namespace CoopSpectator.Infrastructure
 
             string source = string.IsNullOrWhiteSpace(logSource) ? "CampaignMapPatchMissionInit" : logSource;
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " pre-apply");
-            BattleSnapshotMessage snapshot = TryResolveSnapshot();
+            BattleSnapshotMessage snapshot = TryResolveSnapshot(source);
             if (snapshot == null)
             {
                 ModLogger.Info(source + ": skipped campaign map patch context (battle snapshot missing).");
@@ -183,7 +183,7 @@ namespace CoopSpectator.Infrastructure
             return changed;
         }
 
-        private static BattleSnapshotMessage TryResolveSnapshot()
+        private static BattleSnapshotMessage TryResolveSnapshot(string source)
         {
             try
             {
@@ -193,6 +193,14 @@ namespace CoopSpectator.Infrastructure
             }
             catch
             {
+            }
+
+            if (GameNetwork.IsClient && !CustomGameJoinContextState.ShouldAllowLocalBattleRosterFileFallback())
+            {
+                ModLogger.Info(
+                    (string.IsNullOrWhiteSpace(source) ? "CampaignMapPatchMissionInit" : source) +
+                    ": skipped local battle roster snapshot fallback for remote custom-game join.");
+                return null;
             }
 
             try

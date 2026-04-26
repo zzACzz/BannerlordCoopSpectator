@@ -203,6 +203,28 @@ namespace CoopSpectator.Infrastructure
             return _selectedTroopIdByPeer.ContainsKey(networkPeer.Index) || _selectedEntryIdByPeer.ContainsKey(networkPeer.Index);
         }
 
+        public static bool TryGetExplicitSelectedTroopId(MissionPeer missionPeer, out string troopId)
+        {
+            troopId = null;
+            NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();
+            if (networkPeer == null)
+                return false;
+
+            return _selectedTroopIdByPeer.TryGetValue(networkPeer.Index, out troopId) &&
+                   !string.IsNullOrWhiteSpace(troopId);
+        }
+
+        public static bool TryGetExplicitSelectedEntryId(MissionPeer missionPeer, out string entryId)
+        {
+            entryId = null;
+            NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();
+            if (networkPeer == null)
+                return false;
+
+            return _selectedEntryIdByPeer.TryGetValue(networkPeer.Index, out entryId) &&
+                   !string.IsNullOrWhiteSpace(entryId);
+        }
+
         public static bool TrySetSelectedTroopId(MissionPeer missionPeer, string troopId, string source)
         {
             NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();
@@ -413,11 +435,7 @@ namespace CoopSpectator.Infrastructure
                 return selectedTroopId;
             }
 
-            string resolvedTroopId = allowedTroopIds.FirstOrDefault() ?? _fallbackSelectedTroopId;
-            if (networkPeer != null && !string.IsNullOrWhiteSpace(resolvedTroopId))
-                _selectedTroopIdByPeer[networkPeer.Index] = resolvedTroopId;
-
-            return resolvedTroopId;
+            return allowedTroopIds.FirstOrDefault() ?? _fallbackSelectedTroopId;
         }
 
         private static string ResolveSelectedEntryId(NetworkCommunicator networkPeer, BattleSideEnum side, string troopId)
@@ -445,9 +463,6 @@ namespace CoopSpectator.Infrastructure
             {
                 resolvedEntryId = allowedEntryIds.FirstOrDefault() ?? _fallbackSelectedEntryId;
             }
-
-            if (networkPeer != null && !string.IsNullOrWhiteSpace(resolvedEntryId))
-                _selectedEntryIdByPeer[networkPeer.Index] = resolvedEntryId;
 
             return resolvedEntryId;
         }

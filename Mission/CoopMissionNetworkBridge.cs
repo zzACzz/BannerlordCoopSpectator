@@ -113,6 +113,7 @@ namespace CoopSpectator.MissionBehaviors
         private byte[] _cachedBattleSnapshotPayloadBytes = Array.Empty<byte>();
         private int _cachedBattleSnapshotLogicalBytes;
         private int _nextTransmissionId = 1;
+        private bool _persistedHostedLocalPeerMarker;
 
         protected override void AddRemoveMessageHandlers(GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
         {
@@ -131,11 +132,30 @@ namespace CoopSpectator.MissionBehaviors
 
         protected override void OnUdpNetworkHandlerTick()
         {
+            TryPersistHostedLocalPeerMarker();
+
             if (!GameNetwork.IsServer || Mission == null)
                 return;
 
             TrySyncBattleSnapshotPayloads();
             TrySyncEntryStatusPayloads();
+        }
+
+        private void TryPersistHostedLocalPeerMarker()
+        {
+            if (_persistedHostedLocalPeerMarker || !GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            if (myPeer == null || myPeer.IsServerPeer || string.IsNullOrWhiteSpace(myPeer.UserName))
+                return;
+
+            if (HostSelfJoinRedirectState.TryPersistJoinedLocalHostPeer(
+                    myPeer.UserName,
+                    "CoopMissionNetworkBridge.OnUdpNetworkHandlerTick"))
+            {
+                _persistedHostedLocalPeerMarker = true;
+            }
         }
 
         protected override void HandleNewClientAfterSynchronized(NetworkCommunicator networkPeer)

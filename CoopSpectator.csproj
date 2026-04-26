@@ -256,22 +256,20 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
   </ItemGroup>
 
-  <!-- Після збірки копіюємо обидва модулі (CoopSpectator + CoopSpectatorMP) у папку гри -->
+  <!-- Після збірки копіюємо актуальний модуль CoopSpectator у папку гри -->
   <PropertyGroup>
     <GameModulesDir>$(BannerlordRootDir)\Modules\CoopSpectator</GameModulesDir>
     <GameModulesBinDir>$(GameModulesDir)\bin\Win64_Shipping_Client</GameModulesBinDir>
     <GameModulesMPDir>$(BannerlordRootDir)\Modules\CoopSpectatorMP</GameModulesMPDir>
-    <GameModulesMPBinDir>$(GameModulesMPDir)\bin\Win64_Shipping_Client</GameModulesMPBinDir>
   </PropertyGroup>
   <Target Name="DeployModToGame" AfterTargets="Build">
-    <MakeDir Directories="$(GameModulesDir);$(GameModulesBinDir);$(GameModulesMPDir);$(GameModulesMPBinDir)" />
+    <RemoveDir Directories="$(GameModulesMPDir)" Condition="Exists('$(GameModulesMPDir)')" />
+    <MakeDir Directories="$(GameModulesDir);$(GameModulesBinDir)" />
     <Copy SourceFiles="$(ProjectDir)Module\CoopSpectator\SubModule.xml" DestinationFolder="$(GameModulesDir)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(ProjectDir)Module\CoopSpectatorMP\SubModule.xml" DestinationFolder="$(GameModulesMPDir)" SkipUnchangedFiles="true" />
     <ItemGroup>
       <_DeployBinFiles Include="$(OutputPath)*" />
     </ItemGroup>
     <Copy SourceFiles="@(_DeployBinFiles)" DestinationFolder="$(GameModulesBinDir)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(_DeployBinFiles)" DestinationFolder="$(GameModulesMPBinDir)" SkipUnchangedFiles="true" />
     <!-- ModuleData (multiplayer_strings.xml тощо) — щоб гра бачила назви режимів у лобі -->
     <ItemGroup Condition="Exists('$(ProjectDir)Module\CoopSpectator\ModuleData')">
       <_ModuleDataFiles Include="$(ProjectDir)Module\CoopSpectator\ModuleData\**\*" />
@@ -281,7 +279,7 @@
     </ItemGroup>
     <Copy SourceFiles="@(_ModuleDataFiles)" DestinationFolder="$(GameModulesDir)\ModuleData\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('$(ProjectDir)Module\CoopSpectator\ModuleData')" />
     <Copy SourceFiles="@(_GuiFiles)" DestinationFolder="$(GameModulesDir)\GUI\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('$(ProjectDir)Module\CoopSpectator\GUI')" />
-    <Warning Text="[CoopSpectator] Deploy done: CoopSpectator + CoopSpectatorMP (incl. ModuleData) → $(BannerlordRootDir)\Modules. Restart launcher if open." />
+    <Warning Text="[CoopSpectator] Deploy done: CoopSpectator (incl. ModuleData). Removed stale CoopSpectatorMP if present. Restart launcher if open." />
   </Target>
 
   <Target Name="BuildAndDeployDedicatedModule" AfterTargets="DeployModToGame" Condition="'$(BuildDedicatedServerModule)'=='true' and Exists('$(ProjectDir)DedicatedServer\CoopSpectatorDedicated.csproj')">

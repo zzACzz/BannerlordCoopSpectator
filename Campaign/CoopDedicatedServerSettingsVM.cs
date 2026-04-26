@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using CoopSpectator.DedicatedHelper;
 using CoopSpectator.Infrastructure;
 using TaleWorlds.Library;
@@ -7,6 +8,7 @@ namespace CoopSpectator.Campaign
 {
     public sealed class CoopDedicatedServerSettingsVM : ViewModel
     {
+        private const string SupportUrl = "https://ko-fi.com/zaczua";
         private readonly Action _onClose;
         private string _serverName;
         private string _serverPassword;
@@ -47,10 +49,12 @@ namespace CoopSpectator.Campaign
             UpdateStartAvailability();
         }
 
-        [DataSourceProperty] public string TitleText => "Coop Dedicated Server";
-        [DataSourceProperty] public string DescriptionText => "Configure the current dedicated bootstrap path from campaign map pause menu.";
+        [DataSourceProperty] public string TitleText => "Bannerlord Coop Campaign";
+        [DataSourceProperty] public string DescriptionText => "Configure the current dedicated hosting path from the campaign pause menu.";
         [DataSourceProperty] public string LaunchNotesText => "Reuses the current modded dedicated launch path on port 7210. Current bootstrap map remains the existing listed TDM scene until battle handoff changes it.";
         [DataSourceProperty] public string PlayerCountHintText => "Current bootstrap mode is TeamDeathmatch, so Max Player Count is limited to the official " + MinPlayerCount + "-" + MaxAllowedPlayerCount + " range.";
+        [DataSourceProperty] public string SupportPromptText => "The mod is free. Support is optional.";
+        [DataSourceProperty] public string SupportButtonText => "Support the mod";
         [DataSourceProperty] public string HostingModeText => "Hosting Mode";
         [DataSourceProperty] public string HostingModeDescriptionText => IsPublicHostingMode
             ? "Public mode advertises the server through the normal listed flow. Use it when friends can reach your current public IP on UDP 7210."
@@ -200,6 +204,28 @@ namespace CoopSpectator.Campaign
         public void ExecuteRefreshTokenStatus()
         {
             RefreshTokenStatus();
+        }
+
+        public void ExecuteOpenSupportPage()
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = SupportUrl,
+                    UseShellExecute = true
+                });
+
+                StatusText = "Opened support page in browser.";
+                UiFeedback.ShowMessageDeferred("Opened support page in browser.");
+                ModLogger.Info("CoopDedicatedServerSettingsVM: opened support page in browser.");
+            }
+            catch (Exception ex)
+            {
+                StatusText = "Failed to open support page: " + ex.Message;
+                UiFeedback.ShowMessageDeferred(StatusText);
+                ModLogger.Info("CoopDedicatedServerSettingsVM: failed to open support page: " + ex.Message);
+            }
         }
 
         public void ExecuteDone()

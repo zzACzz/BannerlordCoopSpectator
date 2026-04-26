@@ -46,6 +46,14 @@ namespace CoopSpectator.Patches
                         serverAddress = vpnRedirectAddress;
                         vpnRedirectApplied = true;
                     }
+
+                    CustomGameJoinContextState.Update(
+                        serverName,
+                        serverAddress,
+                        serverPort,
+                        allowLocalBattleRosterFileFallback: armedSelfJoin,
+                        source: "LobbyJoinResultSelfJoinArmPatch");
+                    BattleSnapshotRuntimeState.Clear("LobbyJoinResultSelfJoinArmPatch join-result");
                 }
 
                 ModLogger.Info(

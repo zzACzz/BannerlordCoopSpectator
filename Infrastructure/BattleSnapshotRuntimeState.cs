@@ -347,8 +347,13 @@ namespace CoopSpectator.Infrastructure
 
         public static void Clear(string reason)
         {
+            string previousBattleId;
+            int previousEntryCount;
+
             lock (Sync)
             {
+                previousBattleId = _current?.BattleId ?? string.Empty;
+                previousEntryCount = _projection?.EntriesById?.Count ?? 0;
                 _current = null;
                 _projection = null;
                 _state = null;
@@ -360,7 +365,11 @@ namespace CoopSpectator.Infrastructure
             ExactCampaignRuntimeItemRegistry.Reset(reason);
             ExactCampaignRuntimeObjectRegistry.Clear(reason);
 
-            ModLogger.Info("BattleSnapshotRuntimeState: snapshot cleared. Reason=" + (_source ?? "unknown"));
+            ModLogger.Info(
+                "BattleSnapshotRuntimeState: snapshot cleared. " +
+                "Source=" + (_source ?? "unknown") +
+                " PreviousBattleId=" + (string.IsNullOrWhiteSpace(previousBattleId) ? "null" : previousBattleId) +
+                " PreviousEntries=" + previousEntryCount + ".");
         }
 
         public static List<string> FlattenTroopIds(BattleSnapshotMessage snapshot)

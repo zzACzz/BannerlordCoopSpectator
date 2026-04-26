@@ -1,5 +1,26 @@
 # Remote Client Battle Runtime Blockers (2026-04-18)
 
+## 2026-04-26 Delta
+
+The startup crash boundary is still behind us. The current failures are lower-level runtime ownership and prebattle-control defects:
+
+- server-side `primary peer` and exact-campaign bootstrap were still allowed to bind to the first synchronized peer instead of the hosted local self-join peer. If the remote client synchronized first, host-side selection/bootstrap could be effectively routed through the wrong peer.
+- prebattle formation hold was preserving army freeze by reasserting stop/hold-fire every tick. That also erased valid commander-issued prebattle movement orders, which matches the symptom where commanders could give commands before battle start but troops did not obey until battle start.
+- the generated `BannerlordCoopCampaign_v0.1.1_LightRelease.zip` in `dist` was stale and did not contain the current client/host DLLs. The release script now generates the light package directly so future reruns do not accidentally validate old binaries.
+
+The next rerun should be evaluated against host-first controllability and prebattle commander authority, not against the already-fixed early dedicated startup crash.
+
+## 2026-04-25 Delta
+
+The current blocker set has moved past early dedicated battle startup. Fresh host/client logs now point to three narrower runtime issues during battle entry selection and commander ownership:
+
+- `PreBattleHold` could expose already materialized armies while still publishing an empty live selectable-entry list. The status path now falls back to the authoritative allowed prebattle roster instead of returning `live-prebattle-empty`.
+- sides without hero-tagged leaders, especially looter/bandit parties, could end up with no commander entry at all. Commander resolution now falls back to the strongest side-leader candidate when no hero-role signal exists.
+- local order-control guards were fail-open when `ControlledEntryId` was still unresolved, which allowed non-commanders to inherit commander flags and order UI. The guard now keeps suppression active until the controlled entry identity resolves.
+- the deeper selection blocker is architectural: `GetSelectionState()` was previously writing fallback/default entry ids into explicit authority state, and claim filtering treated that fallback as a real claim. That could remove commander from prebattle selectable lists immediately after `AssignSide`, before any peer explicitly chose the commander.
+
+The next rerun should be evaluated against selection ownership and commander availability, not the earlier `Mission.Initialize` startup crash boundary.
+
 ## Scope
 
 This note is limited to the fresh host/dedicated/remote-client rerun from:
@@ -1480,3 +1501,1469 @@ Applied change:
 2. Client should not get that hint unless it also satisfies the same start-authority contract.
 3. The host log should contain:
    - `CoopMissionSelectionView: showed one-shot start battle instruction for local host-controlled peer.`
+
+## 20. Large-battle enemy reinforcements starved by PlayerTeam drift (2026-04-23)
+
+### 20a. Fresh finding from the latest rerun
+
+The large-battle rerun produced an exact server-side contract break, not a vague "reinforcements are flaky" symptom.
+
+Dedicated logs showed:
+
+- native bootstrap initialized with a stable attacker-oriented contract:
+  - `PlayerSide=Attacker`
+  - `AppliedPlayerTeam=Attacker#1`
+  - `AppliedPlayerEnemyTeam=Defender#2`
+- later during the same mission, our runtime bridge flipped that mission contract to the remote defender peer:
+  - `AppliedPlayerTeam=Defender#2`
+  - `AppliedPlayerEnemyTeam=Attacker#1`
+
+This matters because native `MissionAgentSpawnLogic` reinforcement spawning ultimately resolves spawn teams through native `Mission.GetAgentTeam(IAgentOriginBase troopOrigin, bool isPlayerSide)`, and decompile confirms that method maps non-player-side origins to `Mission.Current.PlayerEnemyTeam`.
+
+That means our exact-native troop suppliers were built once with `isPlayerSide` fixed at bootstrap init, but later we changed `Mission.PlayerTeam / PlayerEnemyTeam` underneath the active native spawn logic. In the large battle this let the defender reinforcement side reserve troops (`UnsuppliedBySide` fell, `HasReserved=True` appeared), but those batches never materialized and `SpawnedLastBatch` stayed `0`.
+
+### 20b. Applied smallest fix
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\ExactCampaignArmyBootstrap.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+
+Applied change:
+
+1. Exact native bootstrap now captures the active `Mission.PlayerTeam` / `Mission.PlayerEnemyTeam` contract at successful initialization.
+2. Once exact native bootstrap is active for the mission, `TryEnsureExactCampaignNativeArmyBootstrap(...)` no longer re-bridges mission player teams from whichever peer is currently authoritative.
+3. Reinforcement sync now also re-applies the captured mission player-team contract if runtime drift changed it.
+
+New authoritative log:
+
+- `ExactCampaignArmyBootstrap: restored native player team contract after runtime drift...`
+
+### 20c. Expected next rerun behavior
+
+1. In the large battle, after bootstrap init there should no longer be a later server log that flips:
+   - `AppliedPlayerTeam=Defender#2 AppliedPlayerEnemyTeam=Attacker#1`
+2. If some other runtime path still mutates those mission team pointers, the dedicated log should now show:
+   - `restored native player team contract after runtime drift...`
+3. Enemy reinforcements should no longer get stuck in the old state where:
+   - `RemainingBySide[Defender>0]`
+   - `UnsuppliedBySide[Defender]` drains toward `0`
+   - but `SpawnedLastBatch=0` and no `native reinforcement batch spawned` ever appears.
+
+## 21. Remote client reused stale local battle_roster snapshot after host swap (2026-04-23)
+
+### 21a. Fresh finding from host/client role swap rerun
+
+When the previous host became a remote client and joined someone else's small battle, the client still loaded `battle_roster.json` from its own local Documents folder on `MissionState.OpenNew`.
+
+Fresh evidence:
+
+- client `rgl_log_43408.txt`:
+  - `BattleSnapshotRuntimeState: snapshot updated. Source=battle-roster-file Sides=2 Entries=582`
+  - `BattleRosterFile: read snapshot with 2 sides from ...\battle_roster.json`
+- the mission that actually opened was `battle_terrain_001` for the new small battle, so that `582`-entry snapshot was stale local data from the old hosted run, not authoritative data from the new remote host.
+
+### 21b. Root cause
+
+We still allowed remote custom-game joins to fall back to the local `battle_roster.json` in three places:
+
+1. `CampaignMapPatchMissionInit.TryResolveSnapshot(...)`
+2. `EnsureClientBattleSnapshotFreshForMission(...)`
+3. `RefreshAllowedTroopsFromRoster(...)`
+
+That was acceptable for host self-join on one machine, but wrong for remote join after a host/client swap because the local file belonged to the client's previous campaign-hosted battle.
+
+### 21c. Applied smallest fix
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\CustomGameJoinContextState.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Patches\LobbyJoinResultSelfJoinArmPatch.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\CampaignMapPatchMissionInit.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\GameMode\MissionMultiplayerCoopBattleMode.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\BattleSnapshotRuntimeState.cs`
+
+Applied change:
+
+1. Added `CustomGameJoinContextState`, updated directly from `LobbyJoinResultSelfJoinArmPatch`.
+2. Host self-join keeps `allowLocalBattleRosterFallback=True`.
+3. Any remote custom-game join now sets `allowLocalBattleRosterFallback=False`.
+4. On every successful join result, stale in-memory `BattleSnapshotRuntimeState` is cleared before mission load.
+5. Client-side mission/bootstrap paths now skip local `battle_roster.json` fallback for remote joins.
+
+### 21d. Expected next rerun behavior
+
+1. Remote client should log:
+   - `CustomGameJoinContextState: updated current custom-game join context ... allowLocalBattleRosterFallback=False`
+2. Remote client should log:
+   - `BattleSnapshotRuntimeState: snapshot cleared. Source=LobbyJoinResultSelfJoinArmPatch join-result ...`
+3. Remote client should no longer log:
+   - `BattleRosterFile: read snapshot ... battle_roster.json`
+   during a remote mission open.
+
+## 22. Remote client could not spawn in large pre-battle because selectable list still advertised reserve entries (2026-04-23)
+
+### 22a. Fresh finding from rerun with working reinforcements
+
+Reinforcements were green in this run, but the remote client still failed its initial spawn until it disconnected and rejoined mid-battle.
+
+Fresh evidence:
+
+- dedicated `rgl_log_29888.txt` repeatedly logged:
+  - `materialized army possession found no eligible candidate ... EntryMatches=0 TroopMatches=0`
+- just before that same pending spawn, dedicated still advertised:
+  - `selectable entry universe updated ... Phase=PreBattleHold AttackerSource=allowed-prebattle-claim-filtered AttackerCount=543`
+- client `rgl_log_9048.txt` received:
+  - `EntryStatusSnapshot ... SelectedEntryId=attacker|player_party|aserai_footman|mp_light_infantry_aserai_troop|variant-3 ... CanRespawn=True`
+
+So the client was allowed to pick a reserve exact-entry that was valid in the full roster but not currently materialized on the battlefield.
+
+### 22b. Root cause
+
+`ResolveSelectableEntryIdsForStatus(...)` still returned the full `allowed-prebattle` roster for every `currentPhase < BattleActive`.
+
+That was wrong once exact/materialized battlefield state already existed during `PreBattleHold`, because pending exact-entry possession can only succeed against currently materialized live agents.
+
+### 22c. Applied smallest fix
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+
+Applied change:
+
+1. During `PreBattleHold`, if the requested side already has tracked battlefield entry state, selectable entries now come from current live materialized entry ids instead of the full reserve roster.
+2. That live list is still claim-filtered per viewing peer.
+3. If tracked battlefield state exists but no live entries remain, the source now becomes `live-prebattle-empty` and the peer is no longer told it can respawn into reserve-only entries.
+
+### 22d. Expected next rerun behavior
+
+1. Dedicated should log:
+   - `AttackerSource=live-prebattle-materialized` or `DefenderSource=live-prebattle-materialized`
+   during `Phase=PreBattleHold` once materialized battlefield state exists.
+2. The old bad state should no longer appear:
+   - `Phase=PreBattleHold ... allowed-prebattle ...`
+   for a side that already has tracked materialized entries.
+3. Remote peers should no longer get stuck on:
+   - `materialized army possession found no eligible candidate ... EntryMatches=0 TroopMatches=0`
+   after choosing a supposedly selectable pre-battle entry.
+
+## 23. Dedicated crash on clean host machine during first mission-open observer tick (2026-04-24)
+
+### 23a. Fresh finding from dedicated dump + host-only logs
+
+The crash was not a lobby/join disconnect. It was a real dedicated native crash on a clean host machine.
+
+Fresh evidence:
+
+- dedicated `watchdog_log_12976.txt` reported:
+  - `ExceptionCode: 0xC0000005`
+  - `ExceptionAddress: 0x7ffcc7b9591a`
+- `module_list.txt` + dump module map placed that address inside:
+  - `FairyTale.Library.dll`
+- managed dump stack on the crashing thread showed:
+  - `CoopSpectator.dll!CoopSpectator.MissionBehaviors.CoopMissionSpawnLogic..cctor()`
+  - `CoopSpectator.dll!CoopSpectator.MissionBehaviors.CoopMissionSpawnLogic.TryRunDedicatedMissionObserver(Mission)`
+  - `CoopSpectator.dll!CoopSpectator.SubModule.OnApplicationTick(Single)`
+
+At the same time, host logs already proved the earlier module-path fix was active:
+
+- exact item registry built with real items, not zero
+- `BattleSnapshotRuntimeState` loaded correctly
+- crash still happened right after `IMono_MBMission::create_mission`
+
+So the strongest low-level boundary was no longer item availability. It was the first dedicated observer touch of `CoopMissionSpawnLogic` during the mission-open timing window.
+
+### 23b. Root cause
+
+The first fix confirmed the original hypothesis only partially.
+
+It did move the crash away from the immediate `CoopMissionSpawnLogic..cctor()` boundary, but the next foreign-host dump still showed the dedicated process dying before the mission fully left the native `StartUp` window.
+
+Local successful logs showed that the old observer path still attached `CoopMissionNetworkBridge` / `CoopMissionSpawnLogic` while mission mode was still `StartUp`, right after `IMono_MBMission::create_mission`.
+
+So the real boundary was not just "wait one second". The real boundary was:
+
+1. mission must exist,
+2. native mission mode must leave `StartUp`,
+3. core native mission behaviors must already exist,
+4. only then may the dedicated observer and mission-model override touch the mission.
+
+### 23c. Applied smallest fix
+
+Updated:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\DedicatedServer\SubModule.cs`
+
+Applied change:
+
+1. Replaced the pure fixed-delay observer activation with a state-based gate in the dedicated submodule.
+2. Dedicated now waits until all of these are true:
+   - mission scene name is non-empty
+   - mission mode is no longer `StartUp`
+   - `MissionLobbyComponent`, `MultiplayerTimerComponent`, and `MultiplayerTeamSelectComponent` already exist
+3. That ready state must stay true for `3` consecutive ticks before activation.
+4. `DedicatedKnockoutOutcomeModelOverride.UpdateForMission(...)` is now also held behind the same state gate, so it no longer mutates mission models during the early `StartUp` window.
+5. A `15s` timeout remains only as an emergency fallback, not as the primary contract.
+
+This keeps the fix narrow: still no broad spawn/runtime rewrite, but now the activation depends on native mission state instead of machine speed.
+
+### 23d. Expected next rerun behavior
+
+1. Dedicated should first log:
+   - `CoopSpectatorDedicated: deferred dedicated mission observer activation pending native mission-ready state...`
+2. While the mission is still early, dedicated should log:
+   - `CoopSpectatorDedicated: waiting before activating dedicated mission observer... Stage=waiting-native-ready-state ...`
+3. Once the mission leaves `StartUp` and the native behavior stack is present, dedicated should log:
+   - `CoopSpectatorDedicated: activating dedicated mission observer after native mission-ready state stabilized...`
+4. The old crash should no longer happen during the early post-`IMono_MBMission::create_mission` window.
+
+### 23e. Foreign-host rerun showed the direct mission behavior factory was still earlier than the observer gate
+
+Fresh low-level review after the next foreign-host crash showed the state-based observer gate still did not protect the earliest coop touchpoint on dedicated.
+
+Reason:
+
+1. `MissionMultiplayerCoopBattleMode.BuildServerMissionBehaviorsForCoopBattle(...)` still injected:
+   - `MissionBehaviorDiagnostic`
+   - `CoopMissionNetworkBridge`
+   - `CoopMissionSpawnLogic`
+   directly into the initial dedicated mission behavior list.
+2. Those behaviors therefore still entered `AfterStart()` during native mission-open, before the new observer/state gate in `DedicatedServer/SubModule.OnApplicationTick(...)` could even run.
+
+Applied narrow follow-up fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\GameMode\MissionMultiplayerCoopBattleMode.cs`
+- dedicated server mission factory now logs:
+  - `deferred CoopMissionNetworkBridge/CoopMissionSpawnLogic initial mission behavior injection for dedicated process`
+- on dedicated, initial server mission behavior construction no longer injects the coop mission behaviors directly
+- the state-based dedicated observer is now the only path that attaches coop server mission behaviors after native mission-ready stabilization
+
+Expected rerun behavior after this follow-up:
+
+1. Dedicated should first log the new mission-factory defer line.
+2. Dedicated should then log the existing state-gate lines from section `23d`.
+3. Only after stabilization should dedicated log the observer attachment of:
+   - `CoopMissionNetworkBridge`
+   - `CoopMissionSpawnLogic`
+
+### 23f. Dedicated `rgl_log_10768` proved the new build was active and the crash is now earlier than any coop mission-behavior attach
+
+Fresh foreign-host dedicated logs finally included the missing dedicated `rgl_log_10768.txt`, which closed the previous uncertainty about whether the host had actually installed the new package.
+
+Authoritative proof from that log:
+
+1. The dedicated process was running the new server build:
+   - `SERVER_BINARY_ID ... MVID=27f52031-9e5b-4cdd-b418-f625a3d50c0b`
+2. The module-path / item-registry fixes were active and healthy:
+   - `ModulePathHelper: resolved module root via explicit game root environment...`
+   - `ExactCampaignRuntimeItemRegistry: built exact campaign item index. IndexedItems=1265`
+3. The new state-based gate was also active:
+   - `deferred dedicated mission observer activation pending native mission-ready state...`
+   - `waiting before activating dedicated mission observer... Mode=StartUp ...`
+4. But there were still **no** logs for:
+   - `CoopBattle CreateBehaviorsForMission ...`
+   - `deferred CoopMissionNetworkBridge/CoopMissionSpawnLogic initial mission behavior injection for dedicated process`
+   - `activating dedicated mission observer after native mission-ready state stabilized`
+   - `dedicated observer attached CoopMissionNetworkBridge ...`
+   - `dedicated observer attached CoopMissionSpawnLogic ...`
+
+This changed the low-level conclusion:
+
+1. The foreign-host crash is no longer attributable to:
+   - missing base modules
+   - missing item catalogs
+   - early observer activation
+   - early dedicated observer attach of coop mission behaviors
+2. The server now dies while the official native `MultiplayerBattle` mission is still in `StartUp`, after `MissionState.OpenNew EXIT` and before the mission ever becomes observer-ready.
+3. The absence of any `MissionMultiplayerCoopBattleMode` factory logs also indicates the foreign-host path is currently crashing inside the native official `MultiplayerBattle` startup contract, before our custom coop behavior factory becomes relevant.
+
+Applied follow-up diagnostics for the next rerun:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\MissionStateOpenNewPatches.cs`
+  - logs authoritative handler metadata for `MissionState.OpenNew(...)`
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - logs a one-shot observation on entry to native `MultiplayerWarmupComponent.AfterStart`
+
+These diagnostics are intended to answer the next exact question:
+
+1. Which mission behavior handler is actually passed into native `MissionState.OpenNew("MultiplayerBattle", ...)` on foreign-host dedicated startup?
+2. Does the official native lifecycle reach `MultiplayerWarmupComponent.AfterStart`, or does the crash happen even earlier during battle-shell startup?
+
+### 23g. Foreign-host rerun proved the dedicated server uses the official native `OpenBattleMission` handler and dies before the first server battle-shell `AfterStart`
+
+Fresh host-only logs answered both diagnostic questions from `23f`.
+
+Authoritative dedicated evidence:
+
+1. `MissionState.OpenNew handler contract...` logged:
+   - `HandlerDeclaringType=TaleWorlds.MountAndBlade.Multiplayer.MultiplayerMissions+<>c`
+   - `HandlerMethod=<OpenBattleMission>b__3_0`
+   - `IsServer=True`
+2. `MissionState.OpenNew EXIT missionName=MultiplayerBattle` was reached successfully.
+3. There were still no server-side logs for:
+   - `deferred dedicated mission observer activation...`
+   - `waiting before activating dedicated mission observer...`
+   - `BattleShellSuppressionPatch: observed native MultiplayerWarmupComponent.AfterStart entry...`
+
+At the same time, the remote client log for the same run did reach:
+
+- `BattleShellSuppressionPatch: observed native MultiplayerWarmupComponent.AfterStart entry...`
+
+This narrows the current foreign-host crash boundary to:
+
+1. **after** `MissionState.OpenNew("MultiplayerBattle", ...)` returns on dedicated,
+2. **before** the first dedicated `Mission.AfterStart` / `MultiplayerWarmupComponent.AfterStart` battle-shell step becomes observable,
+3. while the dedicated server is still in the official native `OpenBattleMission` lifecycle rather than any coop-specific mission handler.
+
+Applied next-step diagnostics:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - logs one-shot server battle-start steps for:
+    - `Mission.AfterStart`
+    - `MissionLobbyComponent.AfterStart`
+    - `MultiplayerRoundController.AfterStart`
+    - `MissionMultiplayerFlagDomination.AfterStart`
+    - `MultiplayerWarmupComponent.AfterStart`
+
+The next foreign-host rerun should now reveal the last official server battle-start step that occurs before the native access violation.
+
+### 23h. Foreign-host rerun with `SuccessfulPatches=11` still died before `FinishMissionLoading`
+
+Fresh dedicated `rgl_log_12136.txt` proved the host had already installed the next diagnostics build:
+
+1. `SERVER_BINARY_ID ... MVID=dcd7236f-e06b-4e36-8988-0bdb7a5d741b`
+2. `BattleShellSuppressionPatch: patched TaleWorlds.MountAndBlade.MissionState.FinishMissionLoading.`
+3. `BattleShellSuppressionPatch: patched TaleWorlds.MountAndBlade.Mission.Tick.`
+4. `BattleShellSuppressionPatch: native warmup/timer suppression patch pass completed. SuccessfulPatches=11.`
+
+The same log then reached:
+
+1. `MissionState.OpenNew handler contract... HandlerMethod=<OpenBattleMission>b__3_0 ... IsServer=True`
+2. `IMono_MBMission::create_mission`
+3. `MissionState.OpenNew EXIT missionName=MultiplayerBattle`
+
+And still contained **none** of:
+
+1. `BattleShellSuppressionPatch: observed MissionState.FinishMissionLoading entry...`
+2. `BattleShellSuppressionPatch: observed native Mission.Tick during mission-loading window...`
+3. `BattleShellSuppressionPatch: observed official battle startup step. Source=Mission.AfterStart ...`
+
+This moved the crash boundary again:
+
+1. It is now **after** `MissionState.OpenNew EXIT`,
+2. but still **before** any observed `FinishMissionLoading` or mission-loading `Mission.Tick`,
+3. which means the foreign-host crash is earlier than the `FinishMissionLoading -> CurrentMission.Tick -> AfterStart` window.
+
+Applied next-step diagnostics:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - now also logs one-shot early mission-loading lifecycle steps for:
+    - `MissionState.OnActivate`
+    - `MissionState.OnTick` while mission state is `NewlyCreated/Initializing`
+    - `Mission.ClearUnreferencedResources`
+    - `MissionState.LoadMission`
+    - `Mission.Initialize`
+    - `Mission.OnMissionStateActivate`
+
+The next foreign-host rerun should now tell us whether the dedicated server dies:
+
+1. before state activation,
+2. during the first loading tick,
+3. during `ClearUnreferencedResources`,
+4. or inside `Mission.Initialize` itself.
+
+### 23i. Foreign-host rerun proved the dedicated server now reaches `MissionState.LoadMission` but still dies before `Mission.Initialize`
+
+Fresh dedicated `rgl_log_6540.txt` finally crossed the earlier `OpenNew EXIT` boundary and confirmed the next exact loading step.
+
+Authoritative evidence:
+
+1. The host again ran the latest diagnostics build:
+   - `SERVER_BINARY_ID ... MVID=844f8b99-0780-49c5-93f7-ea5f579867e0`
+   - `SuccessfulPatches=17`
+2. The dedicated server now logged:
+   - `Source=MissionState.OnActivate`
+   - `Source=Mission.OnMissionStateActivate`
+   - `Source=MissionState.OnTick loading-step`
+   - `Source=Mission.ClearUnreferencedResources`
+   - `Source=MissionState.LoadMission`
+3. The same log still contained **no**:
+   - `Source=Mission.Initialize`
+   - `Source=Mission.Initialize completed`
+   - `Source=MissionState.LoadMission completed`
+
+This narrows the current foreign-host crash boundary to:
+
+1. after `MissionState.LoadMission` entry,
+2. after `Mission.ClearUnreferencedResources`,
+3. but before the first observed `Mission.Initialize` entry.
+
+Given the native `LoadMission()` sequence, the remaining window is now essentially:
+
+1. `missionBehavior.OnMissionScreenPreLoad()` for one of the official battle-shell behaviors, or
+2. `Utilities.ClearOldResourcesAndObjects()` / immediate return from it right before `CurrentMission.Initialize()`.
+
+Applied next-step diagnostics:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - added probes for:
+    - `TaleWorlds.Engine.Utilities.ClearOldResourcesAndObjects` prefix/postfix
+    - `MissionState.LoadMission` postfix
+    - `Mission.Initialize` postfix
+
+The next foreign-host rerun should now tell us whether the dedicated server dies:
+
+1. inside engine cleanup,
+2. immediately after engine cleanup returns,
+3. or on the first managed/native entry into `Mission.Initialize()`.
+
+### 23j. Foreign-host rerun proved the dedicated server now reaches `TickLoading completed` and `LoadMission completed`, but still dies before any observed `Mission.Initialize`
+
+Fresh dedicated `rgl_log_8256.txt` moved the boundary one more step forward and revealed an internal inconsistency worth probing directly.
+
+Authoritative evidence:
+
+1. The host again ran the latest diagnostics build:
+   - `SERVER_BINARY_ID ... MVID=3e1d5f62-2fbf-45fd-b26a-6c6f9020cbc0`
+   - `SuccessfulPatches=25`
+2. The same dedicated log now shows:
+   - `Source=MissionState.TickLoading`
+   - `Source=MissionState.TickLoading completed`
+   - `Source=MissionState.LoadMission`
+   - `Source=MissionState.LoadMission completed`
+3. The same run still contains **none** of:
+   - `Source=Mission.Initialize`
+   - `Source=Mission.Initialize completed`
+   - `Source=MissionState.FinishMissionLoading`
+
+This means the foreign-host crash boundary is now:
+
+1. after `MissionState.TickLoading completed`,
+2. after `MissionState.LoadMission completed`,
+3. but still before any observed `Mission.Initialize` / `FinishMissionLoading` progression.
+
+That is notable because the native `MissionState.LoadMission()` contract decompiles to:
+
+1. `MissionBehavior.OnMissionScreenPreLoad()`
+2. `Utilities.ClearOldResourcesAndObjects()`
+3. `_missionInitializing = true`
+4. `CurrentMission.Initialize()`
+
+So the next question is no longer "does it reach `LoadMission`?", but rather:
+
+1. what `_missionInitializing` and `_tickCountBeforeLoad` look like on the exact `TickLoading / LoadMission` boundary,
+2. and whether the crash happens right at the `CurrentMission.Initialize()` edge or whether the mission-state bookkeeping itself is drifting before that.
+
+Applied next-step diagnostics:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - added a dedicated `mission-state loader boundary` log for:
+    - `MissionState.TickLoading`
+    - `MissionState.TickLoading completed`
+    - `MissionState.LoadMission`
+    - `MissionState.LoadMission completed`
+  - this now logs:
+    - `_missionInitializing`
+    - `_tickCountBeforeLoad`
+    - `Mission.CurrentState`
+    - `Mission.IsLoadingFinished`
+
+The next foreign-host rerun should now tell us whether the dedicated server:
+
+1. leaves `LoadMission` with `_missionInitializing=false` unexpectedly,
+2. leaves `LoadMission` with `_missionInitializing=true` but no visible `Mission.Initialize`,
+3. or dies exactly on the first transition from `NewlyCreated` toward `Initializing`.
+
+### 23k. Foreign-host rerun proved `LoadMission completed` still leaves `_missionInitializing=false` and `MissionState=NewlyCreated`
+
+Fresh dedicated `rgl_log_13116.txt` confirmed an exact loader-state inconsistency rather than merely "another crash near mission startup".
+
+Authoritative evidence:
+
+1. The host again ran the latest diagnostics build:
+   - `SERVER_BINARY_ID ... MVID=4a8086f8-9158-4dbe-a180-0960e8d06b33`
+   - `SuccessfulPatches=25`
+2. The same log now shows:
+   - `Source=MissionState.TickLoading ... MissionInitializing=False TickCountBeforeLoad=0`
+   - `Source=MissionState.TickLoading completed ... MissionInitializing=False TickCountBeforeLoad=0`
+   - `Source=MissionState.LoadMission ... MissionInitializing=False TickCountBeforeLoad=1`
+   - `Source=MissionState.LoadMission completed ... MissionInitializing=False TickCountBeforeLoad=1`
+3. The same run still contains **none** of:
+   - `Source=Mission.Initialize`
+   - `Source=Mission.Initialize completed`
+   - `Source=MissionState.FinishMissionLoading`
+
+This is now a direct contradiction with the decompiled native contract for `MissionState.LoadMission()`, which still is:
+
+1. `MissionBehavior.OnMissionScreenPreLoad()`
+2. `Utilities.ClearOldResourcesAndObjects()`
+3. `_missionInitializing = true`
+4. `CurrentMission.Initialize()`
+
+So the current foreign-host crash boundary is no longer just "around `LoadMission`". It is now specifically:
+
+1. after managed `MissionState.LoadMission completed` returns,
+2. while mission state still reports `NewlyCreated`,
+3. and while `_missionInitializing` still reports `false`,
+4. which strongly suggests the failure happens on or immediately before the native/managed transition that should move the mission into `Initializing`.
+
+Applied next-step diagnostics:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - now also logs `Mission.set_CurrentState(...)` transition requests
+
+The next foreign-host rerun should now tell us whether:
+
+1. `Mission.CurrentState` ever requests `Initializing`,
+2. that request is emitted and then the process dies immediately after it,
+3. or the transition request never happens at all on the crashing machine.
+
+### 23l. Foreign-host rerun proved the current crash happens inside early `Mission.ClearUnreferencedResources(...)`, before `TickLoading`
+
+Fresh dedicated `rgl_log_17236.txt` moved the boundary again and disproved the earlier assumption that the crash was already inside `TickLoading` or `LoadMission`.
+
+Authoritative evidence:
+
+1. The host again ran the latest diagnostics build:
+   - `SERVER_BINARY_ID ... MVID=085bc03c-b23c-456f-94c5-7da309bd4521`
+   - `SuccessfulPatches=26`
+2. The same log now shows the following sequence:
+   - `Mission.CurrentState transition request ... PreviousState=NewlyCreated NextState=NewlyCreated`
+   - `Source=MissionState.OnActivate`
+   - `Source=Mission.OnMissionStateActivate`
+   - `MissionState.OpenNew EXIT missionName=MultiplayerBattle`
+   - `Source=MissionState.OnTick loading-step`
+   - `Source=Mission.ClearUnreferencedResources ... ForceClearGPUResources=True`
+3. The same run still contains **none** of:
+   - `Source=Mission.ClearUnreferencedResources completed`
+   - `Source=MissionState.TickLoading`
+   - `Source=MissionState.LoadMission`
+   - `Source=Mission.Initialize`
+
+At first this looked contradictory with the earlier `LoadMission` hypothesis, so `MissionState.OnTick(...)` was re-decompiled. The native contract there is:
+
+1. if `CurrentMission.CurrentState == NewlyCreated`,
+2. call `CurrentMission.ClearUnreferencedResources(CurrentMission.NeedsMemoryCleanup)`,
+3. then call `TickLoading(realDt)`.
+
+Separately, `Mission.ClearUnreferencedResources(bool forceClearGPUResources)` decompiles to:
+
+1. `Common.MemoryCleanupGC()`
+2. if `forceClearGPUResources`, call `MBAPI.IMBMission.ClearResources(Pointer)`
+
+That matches the foreign-host dump and Visual Studio inspection:
+
+1. native AV still occurs in `FairyTale.Library.dll`
+2. faulting instruction writes through `[rsi+rax]`
+3. register snapshot showed `RAX=0`, `RSI=FFFFFFFFFFFFFFFF`
+4. so the native cleanup path is writing through an invalid sentinel pointer `-1`
+
+Applied stabilization fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - `Mission.ClearUnreferencedResources(...)` now short-circuits only for:
+    - dedicated server process
+    - scene-aware battle runtime
+    - `MissionState=NewlyCreated`
+    - `IsLoadingFinished=false`
+    - `ForceClearGPUResources=true`
+  - added authoritative skip log:
+    - `skipped early dedicated Mission.ClearUnreferencedResources to avoid native startup crash`
+    - includes `MissionPointer=...`
+
+This is intentionally narrow: it does not change client runtime, host self-join runtime, or later mission cleanup; it only avoids the exact foreign-host native cleanup call that currently crashes before the mission can even reach `TickLoading`.
+
+### 23m. Foreign-host rerun proved the `ClearUnreferencedResources` guard works, and the next crash boundary is now inside `MissionBehavior.OnMissionScreenPreLoad()`
+
+Fresh dedicated `rgl_log_1072.txt` confirmed that the early cleanup guard is now active and effective:
+
+1. the host ran the new build:
+   - `SERVER_BINARY_ID ... MVID=ea6a386a-7886-44ec-a61e-46d2c6a97e62`
+   - `SuccessfulPatches=27`
+2. the same log now shows:
+   - `skipped early dedicated Mission.ClearUnreferencedResources to avoid native startup crash`
+   - `Mission.ClearUnreferencedResources completed`
+   - `MissionState.TickLoading`
+   - `MissionState.TickLoading completed`
+   - `MissionState.LoadMission`
+3. but it still contains **none** of:
+   - `Utilities.ClearOldResourcesAndObjects`
+   - `MissionState.LoadMission completed`
+   - `Mission.Initialize`
+
+That is now a direct decompile-backed boundary, because `MissionState.LoadMission()` is:
+
+1. `foreach (MissionBehavior missionBehavior in CurrentMission.MissionBehaviors) missionBehavior.OnMissionScreenPreLoad();`
+2. `Utilities.ClearOldResourcesAndObjects();`
+3. `_missionInitializing = true;`
+4. `CurrentMission.Initialize();`
+
+So after the cleanup guard moved the crash forward, the next failure point is no longer ambiguous:
+
+1. the server enters `LoadMission`,
+2. but never reaches `Utilities.ClearOldResourcesAndObjects`,
+3. so the crash is now inside one of the mission behavior `OnMissionScreenPreLoad()` calls.
+
+Applied stabilization fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - `MissionState.LoadMission` prefix now patches the actual `OnMissionScreenPreLoad()` override on every current mission behavior
+  - those preload methods are then skipped only when:
+    - running in dedicated server process
+    - scene-aware battle runtime
+    - `MissionState=NewlyCreated`
+    - `IsLoadingFinished=false`
+  - new authoritative logs:
+    - `patched mission behavior preload hook. BehaviorType=...`
+    - `skipped dedicated MissionBehavior.OnMissionScreenPreLoad during early battle startup ...`
+
+This remains narrow: it does not affect client runtime and does not globally suppress mission behavior preloads; it only bypasses the early dedicated-only pre-screen preload phase that now appears to be the next native crash trigger on the foreign host machine.
+
+### 23n. Foreign-host rerun proved the preload guard was not actually active yet, because Harmony was still targeting inherited `MissionBehavior.OnMissionScreenPreLoad()` methods incorrectly
+
+Fresh foreign-host `rgl_log_11168.txt` moved the boundary again:
+
+1. the early `Mission.ClearUnreferencedResources(...)` guard still works
+2. `MissionState.TickLoading` and `MissionState.TickLoading completed` are now observed
+3. `MissionState.LoadMission` and even `MissionState.LoadMission completed` are now observed
+4. but the log still shows:
+   - `failed to patch mission behavior preload hooks: You can only patch implemented methods/constructors. Patch the declared method virtual System.Void TaleWorlds.MountAndBlade.MissionBehavior::OnMissionScreenPreLoad() instead.`
+5. the dedicated server then still crashes before any later engine cleanup / mission initialize steps
+
+That means the previous preload stabilization idea was directionally right, but the implementation was not actually active on the foreign host machine:
+
+1. inherited/non-overridden behavior methods were being discovered via normal reflection
+2. Harmony rejected those targets because they were not declared on the concrete behavior type
+3. so the early dedicated `OnMissionScreenPreLoad()` bypass was never fully in place
+
+Applied fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - base `TaleWorlds.MountAndBlade.MissionBehavior.OnMissionScreenPreLoad()` is now patched directly during the normal startup patch pass
+  - runtime preload patching now only targets real declared overrides via `BindingFlags.DeclaredOnly`
+  - inherited base methods are no longer re-patched as if they were concrete behavior implementations
+
+This keeps the fix narrow while making it real:
+
+1. behaviors that inherit the base preload hook are now covered by the base patch
+2. behaviors that implement their own override are still patched explicitly at runtime
+3. the foreign host should no longer fail the preload-guard setup itself before mission startup continues
+
+### 23o. Foreign-host rerun proved the base preload hook is now active, but `LoadMission` still crashes before postfix
+
+Fresh foreign-host `rgl_log_1128.txt` confirmed the new dedicated build was installed:
+
+1. `SERVER_BINARY_ID ... MVID=817d0ebd-9bd0-4238-96ea-bfb406363009`
+2. `BattleShellSuppressionPatch: patched TaleWorlds.MountAndBlade.MissionBehavior.OnMissionScreenPreLoad.`
+3. `SuccessfulPatches=28`
+
+The early cleanup guard still works and the mission reaches:
+
+1. `MissionState.TickLoading`
+2. `MissionState.TickLoading completed`
+3. `MissionState.LoadMission`
+
+After `MissionState.LoadMission`, the log now contains one more authoritative line:
+
+1. `Mission.get_IsLoadingFinished completed ... Result=False`
+
+and then the dedicated server still dies with native AV before:
+
+1. `MissionState.LoadMission completed`
+2. `Utilities.ClearOldResourcesAndObjects`
+3. `Mission.Initialize`
+
+That means the base preload hook is at least entering the window now, but the current telemetry is still insufficient to say whether the crash is:
+
+1. inside the first concrete `MissionBehavior.OnMissionScreenPreLoad()` call,
+2. inside our own preload guard while resolving the exact runtime behavior type,
+3. or on the next behavior in the same loop before `LoadMission` can return.
+
+Applied diagnostic hardening:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - removed `mission.IsLoadingFinished` from the dedicated preload skip predicate
+  - removed `mission.IsLoadingFinished` from the preload skip log payload
+  - added:
+    - `observed mission behavior preload stack ...`
+    - `entering MissionBehavior.OnMissionScreenPreLoad ...`
+
+This keeps the fix narrow while turning the next foreign-host rerun into an exact runtime behavior-stack capture instead of another blind `LoadMission` crash.
+
+### 23p. Foreign-host rerun proved the crash is now after the fifth skipped preload behavior, before engine cleanup
+
+Fresh foreign-host logs:
+
+- `C:\Users\Admin\Downloads\VVS logs\rgl_log_7420.txt`
+- `C:\Users\Admin\Downloads\VVS logs\watchdog_log_7420.txt`
+
+Authoritative evidence:
+
+1. The host ran the expected package build:
+   - `SERVER_BINARY_ID ... MVID=bfcf6163-aa71-4111-a890-da0efd663bd8`
+   - `SuccessfulPatches=28`
+2. The early `Mission.ClearUnreferencedResources(true)` guard still works:
+   - `skipped early dedicated Mission.ClearUnreferencedResources to avoid native startup crash`
+   - `Mission.ClearUnreferencedResources completed`
+3. The dedicated server reaches:
+   - `MissionState.TickLoading`
+   - `MissionState.TickLoading completed`
+   - `observed mission behavior preload stack`
+   - `MissionState.LoadMission`
+   - `MissionState.LoadMission completed`
+4. The captured preload stack has 26 official battle-shell behaviors. The last observed per-behavior skip is:
+   - `TaleWorlds.MountAndBlade.SpawnComponent#4`
+5. The next behavior in the stack is:
+   - `TaleWorlds.MountAndBlade.MissionHardBorderPlacer#5`
+6. The same log still contains no:
+   - `Utilities.ClearOldResourcesAndObjects`
+   - `Mission.Initialize`
+7. The watchdog confirms the same native access violation shape:
+   - `ExceptionCode: 0xC0000005`
+   - `Parameter-0: 0x1`
+   - `Parameter-1: 0xffffffffffffffff`
+
+This narrows the active crash boundary to the native/managed preload dispatch loop itself: after returning from the skipped `SpawnComponent` preload call and before the next observable preload entry or engine cleanup.
+
+Applied stabilization fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - `MissionState.LoadMission` now has a dedicated-only manual preload bypass for:
+    - dedicated server process
+    - scene-aware battle runtime
+    - `MissionState=NewlyCreated`
+  - the bypass skips the whole early `MissionBehavior.OnMissionScreenPreLoad()` loop and then runs the remaining decompiled `LoadMission()` contract:
+    - `Utilities.ClearOldResourcesAndObjects()`
+    - `_missionInitializing = true`
+    - `CurrentMission.Initialize()`
+  - added authoritative log:
+    - `skipped dedicated MissionBehavior.OnMissionScreenPreLoad loop during early battle startup`
+
+Updated package after this fix:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_Release.zip`
+- SHA256: `C5035EEDD2950D61B009538CDA16D99AFFFB58976F8246049D6B0B3DCC41AE28`
+- Host DLL MVID: `afda82df-cff9-4eb4-a6bc-37fce9bde1e6`
+- Client DLL MVID: `f4c19e2f-c634-4514-ab12-240267951aa2`
+
+The next foreign-host rerun should check for:
+
+1. `skipped dedicated MissionBehavior.OnMissionScreenPreLoad loop during early battle startup`
+2. `Utilities.ClearOldResourcesAndObjects`
+3. `Utilities.ClearOldResourcesAndObjects completed`
+4. `Mission.Initialize`
+5. `Mission.Initialize completed`
+6. `MissionState.FinishMissionLoading`
+
+If it still crashes, the new boundary should be either engine cleanup or mission initialize, and the new dump is worth collecting.
+
+### 23q. Foreign-host rerun entered the manual preload bypass but still died before engine cleanup
+
+Fresh foreign-host logs:
+
+- `C:\Users\Admin\Downloads\VVS logs\rgl_log_15868.txt`
+- `C:\Users\Admin\Downloads\VVS logs\watchdog_log_15868.txt`
+
+Authoritative evidence:
+
+1. The host ran the expected package build:
+   - `SERVER_BINARY_ID ... MVID=afda82df-cff9-4eb4-a6bc-37fce9bde1e6`
+   - `SuccessfulPatches=28`
+2. The old early cleanup guard still works:
+   - `skipped early dedicated Mission.ClearUnreferencedResources to avoid native startup crash`
+   - `Mission.ClearUnreferencedResources completed`
+3. The server entered the new manual preload bypass:
+   - `Source=MissionState.LoadMission dedicated manual preload bypass`
+4. The same log still contains no:
+   - `skipped dedicated MissionBehavior.OnMissionScreenPreLoad loop during early battle startup`
+   - `Utilities.ClearOldResourcesAndObjects`
+   - `Mission.Initialize`
+5. The watchdog again confirms the same native access violation shape:
+   - `ExceptionCode: 0xC0000005`
+   - `Parameter-0: 0x1`
+   - `Parameter-1: 0xffffffffffffffff`
+
+This means the crash is now inside the first manual bypass bookkeeping/logging window, not in the original per-behavior preload loop and not yet inside `Utilities.ClearOldResourcesAndObjects`.
+
+Applied next-step hardening:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - removed post-entry `MissionBehaviors` inspection from the manual bypass path
+  - removed `LogMissionStateLoaderObservation(...)` from the manual bypass path because it calls `Mission.IsLoadingFinished`
+  - removed per-behavior skip logging from the manual bypass path
+  - added minimal breadcrumb logs:
+    - `dedicated manual MissionState.LoadMission preload bypass step. Step=entered`
+    - `Step=before engine cleanup`
+    - `Step=after engine cleanup`
+    - `Step=before mission-initializing flag`
+    - `Step=before Mission.Initialize`
+    - `Step=completed`
+
+Updated package after this hardening:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_Release.zip`
+- SHA256: `A28051103E42AC4ADFA2B11D74263B5B57A7E8FF6854AF39E7B45A345562AD26`
+- Host DLL MVID: `e0d1a207-d4ea-4706-9195-ea5bd46fa94d`
+- Client DLL MVID: `2108a49f-3206-44b9-bd50-31da5f6e2158`
+
+The next foreign-host rerun should check the last observed `dedicated manual MissionState.LoadMission preload bypass step` value. If it reaches `before engine cleanup` and then dies, the next stabilization target is skipping `Utilities.ClearOldResourcesAndObjects()` in this dedicated early-start path. If it reaches `before Mission.Initialize` and then dies, the new dump is useful.
+
+### 23r. ILSpy confirmed the engine cleanup wrapper and the dedicated manual bypass now skips it
+
+Fresh foreign-host logs:
+
+- `C:\Users\Admin\Downloads\VVS logs\rgl_log_10024.txt`
+- `C:\Users\Admin\Downloads\VVS logs\watchdog_log_10024.txt`
+
+Authoritative evidence:
+
+1. The host ran the expected package build:
+   - `SERVER_BINARY_ID ... MVID=e0d1a207-d4ea-4706-9195-ea5bd46fa94d`
+   - `SuccessfulPatches=28`
+2. The old early cleanup guard still works:
+   - `skipped early dedicated Mission.ClearUnreferencedResources to avoid native startup crash`
+   - `Mission.ClearUnreferencedResources completed`
+3. The server entered the minimal manual preload bypass and reached:
+   - `dedicated manual MissionState.LoadMission preload bypass step. Step=entered`
+   - `dedicated manual MissionState.LoadMission preload bypass step. Step=before engine cleanup`
+4. The same log still contains no:
+   - `dedicated manual MissionState.LoadMission preload bypass step. Step=after engine cleanup`
+   - `Mission.Initialize`
+   - `Mission.Initialize completed`
+   - `MissionState.FinishMissionLoading`
+5. The watchdog again confirms the same native access violation shape:
+   - `ExceptionCode: 0xC0000005`
+   - `Parameter-0: 0x1`
+   - `Parameter-1: 0xffffffffffffffff`
+
+This narrows the active crash boundary to `TaleWorlds.Engine.Utilities.ClearOldResourcesAndObjects()` in the dedicated early-start `MissionState.LoadMission` path.
+
+ILSpy confirmation:
+
+- `MissionState.TickLoading()` calls `LoadMission()` once `_tickCountBeforeLoad > 0` and `_missionInitializing == false`.
+- `MissionState.LoadMission()` runs:
+  - every `MissionBehavior.OnMissionScreenPreLoad()`
+  - `Utilities.ClearOldResourcesAndObjects()`
+  - `_missionInitializing = true`
+  - `CurrentMission.Initialize()`
+- `Utilities.ClearOldResourcesAndObjects()` is only a managed wrapper over:
+  - `EngineApplicationInterface.IUtil.ClearOldResourcesAndObjects()`
+
+This means the current crash is not a broad client/host connection issue. It is another native engine resource-cleanup call that is unsafe during foreign-host dedicated battle startup, similar in shape to the already-fixed early `Mission.ClearUnreferencedResources(true)` crash.
+
+Applied stabilization fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - the dedicated-only manual `MissionState.LoadMission` preload bypass now skips `Utilities.ClearOldResourcesAndObjects()`
+  - it proceeds directly to:
+    - `_missionInitializing = true`
+    - `Mission.Initialize()`
+  - added authoritative breadcrumb:
+    - `dedicated manual MissionState.LoadMission preload bypass step. Step=skipped engine cleanup`
+
+Updated package after this fix:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_Release.zip`
+- SHA256: `31E0C1C83E1486055B63592E2609AD0F356E2A7A95050764B9183309D613D038`
+- Host DLL MVID: `40f081ab-364a-4ca7-ad2c-881b2e19ef75`
+- Client DLL MVID: `2442be01-daf5-44c2-b3f2-2689c6f74864`
+
+The next foreign-host rerun should check for:
+
+1. `dedicated manual MissionState.LoadMission preload bypass step. Step=skipped engine cleanup`
+2. `dedicated manual MissionState.LoadMission preload bypass step. Step=before mission-initializing flag`
+3. `dedicated manual MissionState.LoadMission preload bypass step. Step=before Mission.Initialize`
+4. `Mission.Initialize`
+5. `Mission.Initialize completed`
+6. `MissionState.FinishMissionLoading`
+
+For the `10024` run, a dump is not needed because the breadcrumb boundary is already exact. If the next run reaches `before Mission.Initialize` and then dies, the dump becomes useful again.
+
+### 23s. Foreign-host rerun moved the active boundary up to MissionState.OnTick before TickLoading
+
+Fresh foreign-host logs:
+
+- `C:\Users\Admin\Downloads\VVS logs\rgl_log_11836.txt`
+- `C:\Users\Admin\Downloads\VVS logs\watchdog_log_11836.txt`
+
+Authoritative evidence:
+
+1. The host ran the expected package build:
+   - `SERVER_BINARY_ID ... MVID=40f081ab-364a-4ca7-ad2c-881b2e19ef75`
+   - `SuccessfulPatches=28`
+2. The server reached mission creation and activation:
+   - `MissionState.OpenNew EXIT missionName=MultiplayerBattle`
+   - `MissionState.OnActivate`
+   - `Mission.OnMissionStateActivate`
+3. The last observed mod boundary was:
+   - `BattleShellSuppressionPatch: observed early mission-loading lifecycle step. Source=MissionState.OnTick loading-step ... MissionState=NewlyCreated ...`
+4. The same log contains no runtime entry for:
+   - `Mission.ClearUnreferencedResources`
+   - `MissionState.TickLoading`
+   - `MissionState.LoadMission`
+   - `dedicated manual MissionState.LoadMission preload bypass step`
+   - `Mission.Initialize`
+5. The watchdog again confirms the same native access violation shape:
+   - `ExceptionCode: 0xC0000005`
+   - `Parameter-0: 0x1`
+   - `Parameter-1: 0xffffffffffffffff`
+   - dump path: `C:\Users\user\AppData\Local\Temp\CoopSpectatorDedicated_logs/\crashes\2026-04-24_21.10.24\dump.dmp`
+
+ILSpy confirmation for the new boundary:
+
+- `MissionState.OnTick(float realDt)` starts with:
+  - `base.OnTick(realDt)`
+  - delayed disconnect check
+  - `CurrentMission.ClearUnreferencedResources(CurrentMission.NeedsMemoryCleanup)` while `CurrentState == NewlyCreated`
+  - `TickLoading(realDt)`
+- The `11836` log stops after our `MissionState.OnTick` prefix and before the `Mission.ClearUnreferencedResources` prefix, which means the active crash boundary is now inside original `MissionState.OnTick` before the loading branch reaches `TickLoading`.
+
+Applied stabilization fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - `MissionState.OnTick` prefix now returns `false` for dedicated-only early battle startup loading states:
+    - dedicated server process
+    - scene-aware battle runtime
+    - `MissionState=NewlyCreated` or `MissionState=Initializing`
+  - the bypass skips original `base.OnTick` and the early `ClearUnreferencedResources` call
+  - it manually invokes private `MissionState.TickLoading(realDt)` so the existing `LoadMission`/`FinishMissionLoading` instrumentation remains authoritative
+  - added authoritative breadcrumbs:
+    - `dedicated manual MissionState.OnTick loading bypass step. Step=entered`
+    - `Step=skipped base OnTick and ClearUnreferencedResources`
+    - `Step=before manual TickLoading`
+    - `Step=after manual TickLoading`
+
+Updated package after this fix:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_Release.zip`
+- SHA256: `DEC13028A9544F1DE860F5371A0F677367DE2790A63D58420A1F424A1E45D0C9`
+- Host DLL MVID: `405c49e5-7295-4dc9-bb28-0fb66c1acba5`
+- Client DLL MVID: `0f2e4636-b6d9-493d-b2f8-e311186f1b16`
+
+The next foreign-host rerun should check for:
+
+1. `dedicated manual MissionState.OnTick loading bypass step. Step=entered`
+2. `dedicated manual MissionState.OnTick loading bypass step. Step=skipped base OnTick and ClearUnreferencedResources`
+3. `dedicated manual MissionState.OnTick loading bypass step. Step=before manual TickLoading`
+4. `MissionState.TickLoading`
+5. `dedicated manual MissionState.LoadMission preload bypass step. Step=skipped engine cleanup`
+6. `dedicated manual MissionState.LoadMission preload bypass step. Step=before Mission.Initialize`
+7. `Mission.Initialize`
+8. `Mission.Initialize completed`
+9. `MissionState.FinishMissionLoading`
+
+For the `11836` run, a dump is not needed because the log boundary is already exact. If the next run reaches `before Mission.Initialize` or `MissionState.FinishMissionLoading` and then dies, the dump becomes useful again.
+
+### 23t. Foreign-host rerun proved reflection TickLoading re-entered the unsafe original private path
+
+Fresh foreign-host logs:
+
+- `C:\Users\Admin\Downloads\VVS logs\rgl_log_6660.txt`
+- `C:\Users\Admin\Downloads\VVS logs\watchdog_log_6660.txt`
+
+Authoritative evidence:
+
+1. The host ran the expected package build:
+   - `SERVER_BINARY_ID ... MVID=405c49e5-7295-4dc9-bb28-0fb66c1acba5`
+   - `SuccessfulPatches=28`
+2. The dedicated `MissionState.OnTick` bypass worked:
+   - `dedicated manual MissionState.OnTick loading bypass step. Step=entered`
+   - `Step=skipped base OnTick and ClearUnreferencedResources`
+   - `Step=before manual TickLoading`
+3. The server entered `MissionState.TickLoading`:
+   - `observed mission-state loader boundary. Source=MissionState.TickLoading ... MissionInitializing=False TickCountBeforeLoad=0`
+4. The same log contains no:
+   - `MissionState.LoadMission`
+   - `dedicated manual MissionState.LoadMission preload bypass step`
+   - `Mission.Initialize`
+5. The watchdog again confirms the same native access violation shape:
+   - `ExceptionCode: 0xC0000005`
+   - `Parameter-0: 0x1`
+   - `Parameter-1: 0xffffffffffffffff`
+   - dump path: `C:\Users\user\AppData\Local\Temp\CoopSpectatorDedicated_logs/\crashes\2026-04-24_21.20.55\dump.dmp`
+
+This means invoking private `MissionState.TickLoading(realDt)` by reflection still re-enters the unsafe original private loading path before our `LoadMission` prefix can take over. Practically, the dedicated startup path must not call original `TickLoading` at all.
+
+Applied stabilization fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - the dedicated-only `MissionState.OnTick` bypass no longer invokes original private `TickLoading`
+  - it manually performs the small decompiled `TickLoading` contract:
+    - increments `_tickCountBeforeLoad`
+    - calls the already hardened manual `LoadMission` bypass
+    - skips `Utilities.SetLoadingScreenPercentage(0.01f)` in this early dedicated path
+  - for later `_missionInitializing=true` ticks, it checks `Mission.IsLoadingFinished` and manually invokes `FinishMissionLoading` only when ready
+  - added authoritative breadcrumbs:
+    - `dedicated manual MissionState.OnTick loading bypass step. Step=manual TickLoading advanced tick count`
+    - `Step=before manual LoadMission`
+    - `Step=after manual LoadMission`
+    - `Step=skipped loading screen percentage`
+
+Updated package after this fix:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_Release.zip`
+- SHA256: `648F1635446E9E51020A27B45391782D9189A2B195F1D657C8DF8C901B1DFB41`
+- Host DLL MVID: `40ad70cd-b26b-49bc-bf72-d43d19093476`
+- Client DLL MVID: `15b0842a-5d19-4a2d-bbf1-f063916133cf`
+
+The next foreign-host rerun should check for:
+
+1. `dedicated manual MissionState.OnTick loading bypass step. Step=manual TickLoading advanced tick count`
+2. `dedicated manual MissionState.OnTick loading bypass step. Step=before manual LoadMission`
+3. `dedicated manual MissionState.LoadMission preload bypass step. Step=skipped engine cleanup`
+4. `dedicated manual MissionState.LoadMission preload bypass step. Step=before Mission.Initialize`
+5. `Mission.Initialize`
+6. `Mission.Initialize completed`
+7. `dedicated manual MissionState.OnTick loading bypass step. Step=after manual LoadMission`
+8. `dedicated manual MissionState.OnTick loading bypass step. Step=skipped loading screen percentage`
+
+For the `6660` run, a dump is not needed because the log boundary is already exact. If the next run reaches `before Mission.Initialize` and then dies, collect the dump.
+
+### 23u. Foreign-host rerun showed even OnTick breadcrumbs are unsafe before direct LoadMission
+
+Fresh foreign-host logs:
+
+- `C:\Users\Admin\Downloads\VVS logs\rgl_log_9612.txt`
+- `C:\Users\Admin\Downloads\VVS logs\watchdog_log_9612.txt`
+
+Authoritative evidence:
+
+1. The host ran the expected package build:
+   - `SERVER_BINARY_ID ... MVID=40ad70cd-b26b-49bc-bf72-d43d19093476`
+   - `SuccessfulPatches=28`
+2. The dedicated `MissionState.OnTick` bypass reached:
+   - `dedicated manual MissionState.OnTick loading bypass step. Step=entered`
+   - `Step=skipped base OnTick and ClearUnreferencedResources`
+3. The same log contains no:
+   - `manual TickLoading advanced tick count`
+   - `before direct manual LoadMission`
+   - `dedicated manual MissionState.LoadMission preload bypass step`
+4. The watchdog again confirms the same native access violation shape:
+   - `ExceptionCode: 0xC0000005`
+   - `Parameter-0: 0x1`
+   - `Parameter-1: 0xffffffffffffffff`
+   - dump path: `C:\Users\user\AppData\Local\Temp\CoopSpectatorDedicated_logs/\crashes\2026-04-24_21.28.53\dump.dmp`
+
+This means even extra `MissionState.OnTick` breadcrumb/property activity is unsafe before entering the manual `LoadMission` path. The fix now prioritizes doing the work first and letting the existing `LoadMission` breadcrumbs define the next boundary.
+
+Applied stabilization fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - in dedicated `NewlyCreated` battle startup, the `MissionState.OnTick` prefix now immediately calls `TryHandleDedicatedEarlyLoadMissionWithoutPreload(...)`
+  - removed the `NewlyCreated` OnTick breadcrumbs before the manual load call
+  - keeps original `OnTick` skipped even if manual LoadMission is unavailable, to avoid re-entering the known unsafe native path
+
+Verified the packaged host DLL with ILSpy:
+
+- `TryHandleDedicatedEarlyMissionStateOnTick(...)`
+  - checks dedicated server, current mission, `NewlyCreated`/`Initializing`, and scene-aware battle runtime
+  - for `NewlyCreated`, directly calls `TryHandleDedicatedEarlyLoadMissionWithoutPreload(missionStateInstance)`
+  - no longer logs `entered`, `skipped base OnTick`, or `before direct manual LoadMission` in that branch
+
+Updated package after this fix:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_Release.zip`
+- SHA256: `67DF72429A7EE27A553CAD3AB182C7631BDACA894ED2A3BC05C4CD1C4934E731`
+- Host DLL MVID: `78544a60-df5b-4e0b-8c52-598f4e655fbb`
+- Client DLL MVID: `cdc34b73-f774-4b71-8ced-c496cbb859cf`
+
+The next foreign-host rerun should check for:
+
+1. `dedicated manual MissionState.LoadMission preload bypass step. Step=entered`
+2. `dedicated manual MissionState.LoadMission preload bypass step. Step=skipped engine cleanup`
+3. `dedicated manual MissionState.LoadMission preload bypass step. Step=before mission-initializing flag`
+4. `dedicated manual MissionState.LoadMission preload bypass step. Step=before Mission.Initialize`
+5. `Mission.Initialize`
+6. `Mission.Initialize completed`
+
+For the `9612` run, a dump is not needed because the log boundary is exact. If the next run reaches `before Mission.Initialize` and then dies, collect the dump.
+
+### 23v. Crash/no-crash comparison showed the foreign host is missing staged SandBox/SandBoxCore assets
+
+Compared crash-machine logs:
+
+- `C:\Users\Admin\Downloads\VVS logs\rgl_log_9612.txt`
+- `C:\Users\Admin\Downloads\VVS logs\watchdog_log_9612.txt`
+
+against local no-crash logs:
+
+- `C:\Users\Admin\AppData\Local\Temp\CoopSpectatorDedicated_logs\logs\rgl_log_55308.txt`
+- `C:\Users\Admin\AppData\Local\Temp\CoopSpectatorDedicated_logs\logs\watchdog_log_55308.txt`
+
+Authoritative difference:
+
+1. The crash machine did not have the same dedicated runtime layout:
+   - crash host: `SERVER_BINARY_ID ... Win64_Shipping_Server\CoopSpectator.dll ... MVID=40ad70cd-b26b-49bc-bf72-d43d19093476`
+   - local no-crash host: `SERVER_BINARY_ID ... Win64_Shipping_Client\CoopSpectator.dll ... MVID=78544a60-df5b-4e0b-8c52-598f4e655fbb`
+2. The crash machine had no staged scene registry/assets in the dedicated `Modules` tree:
+   - `module-owned scenes. Module=SandBoxCore Count=0 ContainsBattleTerrainN=False ContainsBattleTerrainBiome087b=False`
+   - `scene resolution. Scene=battle_terrain_n PathResolved=False`
+   - `scene resolution. Scene=battle_terrain_biome_087b PathResolved=False`
+   - `exact bootstrap runtime files ... HasSandBoxModule=False HasSandBoxCoreModule=False HasSpBattleScenesXml=False HasBattleTerrainNScene=False HasBattleTerrainBiome087bScene=False`
+3. The local no-crash machine did have those files:
+   - `module-owned scenes. Module=SandBoxCore Count=98 ContainsBattleTerrainN=True ContainsBattleTerrainBiome087b=True`
+   - `scene resolution. Scene=battle_terrain_n PathResolved=True`
+   - `scene resolution. Scene=battle_terrain_biome_087b PathResolved=True ... UniqueSceneIdResolved=True`
+   - `exact bootstrap runtime files ... HasSandBoxModule=True HasSandBoxCoreModule=True HasSpBattleScenesXml=True HasBattleTerrainNScene=True HasBattleTerrainBiome087bScene=True`
+
+Conclusion:
+
+- this is not primarily a Windows 10 vs Windows 11 signal
+- this is not primarily a port/firewall signal, because both hosts reach the pre-client mission startup boundary
+- the strongest mismatch is packaging/deployment: local MSBuild deploy stages `SandBox`/`SandBoxCore` runtime assets into the dedicated install, but the release zip only shipped `CoopSpectatorDedicated`
+
+Applied packaging fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\scripts\CreateReleasePackage.ps1`
+  - release `Host\Modules` now includes:
+    - `SandBox\SubModule.xml`
+    - `SandBox\ModuleData\**\*.xml`
+    - `SandBoxCore\SubModule.xml`
+    - `SandBoxCore\ModuleData\**\*.xml`
+    - `SandBoxCore\SceneObj\battle_terrain*\**\*`
+  - release `Host\Modules\CoopSpectatorDedicated\bin` now mirrors local dedicated deploy:
+    - `Win64_Shipping_Server\CoopSpectator.dll`
+    - `Win64_Shipping_Client\CoopSpectator.dll`
+    - `Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll`
+
+Verified package contents:
+
+- `Host\Modules\SandBox\ModuleData\sp_battle_scenes.xml`
+- `Host\Modules\SandBoxCore\SceneObj\battle_terrain_001\scene.xscene`
+- `Host\Modules\SandBoxCore\SceneObj\battle_terrain_n\scene.xscene`
+- `Host\Modules\SandBoxCore\SceneObj\battle_terrain_biome_087b\scene.xscene`
+- `SandboxXmlCount=1570`
+- `SandboxCoreXmlCount=81`
+- `BattleTerrainDirCount=98`
+- `BattleTerrainFileCount=686`
+- `HostClientBinFileCount=3`
+
+Updated package:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_Release.zip`
+- SHA256: `363D184EB16A990C0A6EAC354CA90F3623CCFE36EA11F278427603C6288304DA`
+- Size: `1002047285` bytes
+- Host `Win64_Shipping_Server` MVID: `78544a60-df5b-4e0b-8c52-598f4e655fbb`
+- Host `Win64_Shipping_Client` MVID: `78544a60-df5b-4e0b-8c52-598f4e655fbb`
+
+The next foreign-host test must install the whole `Host` payload into the dedicated server root so that the target machine has `Modules\CoopSpectatorDedicated`, `Modules\SandBox`, and `Modules\SandBoxCore` side by side.
+
+### 23w. Foreign host reached battle startup but missed custom CoopSpectator ModuleData
+
+Fresh comparison:
+
+- foreign host/dedicated: `C:\Users\Admin\Downloads\VVS logs\rgl_log_10272.txt`
+- foreign host/campaign: `C:\Users\Admin\Downloads\VVS logs\rgl_log_2288.txt`
+- foreign remote client: `C:\Users\Admin\Downloads\VVS logs\AC logs\rgl_log_60000.txt`
+- local working dedicated: `C:\Users\Admin\AppData\Local\Temp\CoopSpectatorDedicated_logs\logs\rgl_log_57104.txt`
+- local working host/client logs: `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_44184.txt`, `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_61308.txt`, `C:\Users\Admin\Downloads\Telegram Desktop\rgl_log_16708.txt`
+
+Authoritative progress:
+
+1. The foreign-host startup crash is gone with the staged scene package.
+2. The foreign host now loads the expected server binary:
+   - `SERVER_BINARY_ID ... Win64_Shipping_Client\CoopSpectator.dll ... MVID=78544a60-df5b-4e0b-8c52-598f4e655fbb`
+3. The foreign host now resolves dedicated battle scenes:
+   - `HasSandBoxModule=True`
+   - `HasSandBoxCoreModule=True`
+   - `HasSpBattleScenesXml=True`
+   - `HasBattleTerrainNScene=True`
+   - `HasBattleTerrainBiome087bScene=True`
+
+New blocker:
+
+1. The foreign host still loaded only the vanilla multiplayer character catalog:
+   - `CoopMissionSpawnLogic: loaded BasicCharacterObject count = 89`
+2. Custom coop characters were missing:
+   - `closest loaded BasicCharacterObject ids for 'mp_coop_looter_troop' = [...]`
+   - `direct lookup failed for 'mp_coop_looter_troop'. Trying guaranteed mission-safe fallback 'imperial_infantryman'.`
+3. The release `Host\Modules\CoopSpectatorDedicated` folder had no `ModuleData` at all, while the local working dedicated install did have:
+   - `coopspectator_crafting_pieces.xml`
+   - `coopspectator_items.xml`
+   - `coopspectator_mpcharacters.xml`
+   - `coopspectator_mpclassdivisions.xml`
+   - `multiplayer_strings.xml`
+
+This explains the new foreign-host symptom: scenes were fixed, but the dedicated server still did not load the custom coop unit/class definitions. It therefore fell back to vanilla mission-safe characters and could materialize units with wrong/partial character contracts.
+
+Applied packaging fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\scripts\CreateReleasePackage.ps1`
+  - `Host\Modules\CoopSpectatorDedicated\ModuleData` now receives all XML files from `Module\CoopSpectator\ModuleData`, matching the local MSBuild dedicated deploy target
+- updated release README templates to explicitly require these host-side files after copy
+
+Verified package contents:
+
+- `Host\Modules\CoopSpectatorDedicated\ModuleData\coopspectator_mpcharacters.xml`
+- `Host\Modules\CoopSpectatorDedicated\ModuleData\coopspectator_mpclassdivisions.xml`
+- `Host\Modules\CoopSpectatorDedicated\ModuleData\coopspectator_items.xml`
+- `Host\Modules\CoopSpectatorDedicated\ModuleData\coopspectator_crafting_pieces.xml`
+- `Host\Modules\CoopSpectatorDedicated\ModuleData\multiplayer_strings.xml`
+- `Host\Modules\CoopSpectatorDedicated\bin\Win64_Shipping_Client\CoopSpectator.dll`
+- `Host\Modules\SandBox\ModuleData\sp_battle_scenes.xml`
+- `Host\Modules\SandBoxCore\SceneObj\battle_terrain_001\scene.xscene`
+
+Updated package:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_Release.zip`
+- SHA256: `FBAC9BB81187789A7E100F55495BCE26A474151E7D95AB93E575B472A7328B6E`
+- Size: `1002092406` bytes
+- Host `Win64_Shipping_Server` MVID: `78544a60-df5b-4e0b-8c52-598f4e655fbb`
+- Host `Win64_Shipping_Client` MVID: `78544a60-df5b-4e0b-8c52-598f4e655fbb`
+
+Next foreign-host rerun should check:
+
+1. `SERVER_BINARY_ID ... MVID=78544a60-df5b-4e0b-8c52-598f4e655fbb`
+2. `HasSandBoxModule=True HasSandBoxCoreModule=True HasSpBattleScenesXml=True`
+3. `opening ..\..\Modules\CoopSpectatorDedicated/ModuleData/coopspectator_mpcharacters.xml`
+4. `opening ..\..\Modules\CoopSpectatorDedicated/ModuleData/coopspectator_mpclassdivisions.xml`
+5. `CoopMissionSpawnLogic: loaded BasicCharacterObject count` should be greater than the old vanilla-only `89`
+6. there should be no repeated direct lookup failure for `mp_coop_looter_troop`
+
+Separate note from the local successful run:
+
+- `watchdog_log_57104.txt` did record a native `0xC0000005` after the battle had ended and after:
+  - `EndGameAsServer called`
+  - `Starting to clean up the current mission now.`
+  - `--Mission is closed`
+- dump path: `C:\Users\Admin\AppData\Local\Temp\CoopSpectatorDedicated_logs\crashes\2026-04-25_12.09.57\dump.dmp`
+- this is a real shutdown/mission-close crash, but it is separate from the current foreign-host pre-spawn/loadout issue because the battle had already completed successfully.
+
+### 23x. Dump confirmed post-battle crash was our unsafe ClearUnreferencedResources diagnostic during MissionState finalize
+
+Fresh logs/dump:
+
+- dedicated host log: `C:\Users\Admin\Downloads\VVS logs\rgl_log_2364.txt`
+- dedicated watchdog: `C:\Users\Admin\Downloads\VVS logs\watchdog_log_2364.txt`
+- dump: `C:\Users\Admin\Downloads\VVS logs\dump.dmp`
+- remote client log: `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_10448.txt`
+
+Authoritative progress:
+
+1. Foreign-host battle now completes successfully.
+2. Custom ModuleData is loaded on dedicated:
+   - `opening ..\..\Modules\CoopSpectatorDedicated/ModuleData/coopspectator_mpcharacters.xml`
+3. Result/end flow reaches the expected end boundary:
+   - `CoopMissionSpawnLogic: authoritative battle completion detected... AwaitingHostEndMission=True`
+   - `EndGameAsServer called`
+   - `Starting to clean up the current mission now.`
+   - `I called EndMissionInternal`
+   - `Mission.CurrentState ... EndingNextFrame`
+   - `Mission.CurrentState ... Over`
+   - `--Mission is closed`
+4. Watchdog then records the same native access violation shape as the previous local successful run:
+   - `ExceptionCode: 0xC0000005`
+   - `Parameter-0: 0x0`
+   - `Parameter-1: 0xe46348`
+
+Dump stack:
+
+- crashing thread was in:
+  - `CoopSpectator.Patches.BattleShellSuppressionPatch.LogMissionStateLifecycleObservation(...)`
+  - called from `BattleShellSuppressionPatch.Mission_ClearUnreferencedResources_Prefix(...)`
+  - during `TaleWorlds.MountAndBlade.Mission.OnMissionStateFinalize(Boolean)`
+  - during `TaleWorlds.MountAndBlade.MissionState.OnFinalize()`
+  - during `GameStateManager.OnPopState(...)`
+
+Conclusion:
+
+- this crash is not a battle result bridge failure
+- this crash is not missing scene/item/module data
+- this crash is our diagnostic prefix touching mission/native properties during mission-state finalization after the battle is already complete
+
+Applied stabilization fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+  - `Mission.ClearUnreferencedResources` prefix/postfix no longer logs detailed mission lifecycle observations on dedicated after the early loading states
+  - `LogIsLoadingFinishedObservation(...)` no longer touches dedicated mission state after `NewlyCreated` / `Initializing`
+  - added a guarded `TryGetMissionState(...)` helper so the early skip path checks managed mission state before touching scene/native properties
+
+Updated package:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_Release.zip`
+- SHA256: `663771B4936317C91A3A6569A3BB4CB55F91A8C3A495AA678288C3E516798BBB`
+- Size: `1002092807` bytes
+- Host `Win64_Shipping_Server` MVID: `10275574-cc55-4160-9e31-becdf16a2c50`
+- Host `Win64_Shipping_Client` MVID: `10275574-cc55-4160-9e31-becdf16a2c50`
+
+Next rerun should check:
+
+1. battle still completes and result reaches campaign/client
+2. dedicated still reaches:
+   - `EndGameAsServer called`
+   - `Starting to clean up the current mission now.`
+   - `I called EndMissionInternal`
+   - `--Mission is closed`
+3. no `watchdog_log` native `0xC0000005` after mission close
+4. no dump folder with `dump.dmp` after successful shutdown
+
+### 23y. Crash-free run exposed pre-possession materialization delay and unstable regular-troop commander fallback
+
+Fresh logs:
+
+- dedicated/host-side: `C:\Users\Admin\Downloads\VVS logs\rgl_log_10840.txt`, `C:\Users\Admin\Downloads\VVS logs\rgl_log_15252.txt`, `C:\Users\Admin\Downloads\VVS logs\rgl_log_15988.txt`
+- remote client: `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_62440.txt`
+
+Authoritative progress:
+
+1. The dedicated shutdown/startup crash is no longer present in this run.
+2. The host loaded the expected runtime data:
+   - battle snapshot contained `main_hero -> mp_light_cavalry_battania_hero`
+   - custom coop entries were selectable on both sides
+3. The observed "army only materializes when the client enters selection/spawns" symptom was caused by our own guard:
+   - `CoopMissionSpawnLogic: deferring initial battlefield materialization on exact campaign scene until a synchronized peer has a controlled agent...`
+4. The observed defender commander flicker was caused by `BattleCommanderResolver` falling back to an arbitrary regular troop when a side had no hero/leader entry. Bandit looter variants are valid selectable troops, but they are not stable commander identities.
+
+Applied stabilization fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+  - exact campaign battle materialization is no longer deferred just because no synchronized peer has a controlled agent yet
+  - the existing native exact-scene bootstrap guard remains intact
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\BattleCommanderResolver.cs`
+  - commander resolution now requires a real identity signal: player hero, lord, party leader hero, player-side companion/wanderer, or other hero entry
+  - regular non-hero troops no longer receive the `COMMANDER` badge
+
+Updated package:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_Release.zip`
+- SHA256: `6502C3E13D393FA5CA25D25207901B768C58254E6302AF668CB7EF37A75B61EC`
+- Size: `1002092778` bytes
+- Host `Win64_Shipping_Server` MVID: `8406aea4-2398-4ebf-9f31-b9c073568345`
+- Host `Win64_Shipping_Client` MVID: `8406aea4-2398-4ebf-9f31-b9c073568345`
+- Client `Win64_Shipping_Client` MVID: `0adb78e7-6291-4429-becf-2aaf4aac4997`
+
+Next rerun should check:
+
+1. dedicated should no longer log:
+   - `deferring initial battlefield materialization on exact campaign scene until a synchronized peer has a controlled agent`
+2. battlefield armies should materialize before a client gains player possession
+3. bandit/looter side should not show a flickering `COMMANDER` badge on regular troops
+4. player-side commander remains the main hero entry when that exact entry is available to the viewing peer; if another peer already claimed that body, it should be absent from the second peer's selectable list by design
+
+### 23z. Dump confirmed materialized AI spawn crash in native formation frame lookup
+
+Fresh logs/dump:
+
+- foreign dedicated host logs: `C:\Users\Admin\Downloads\Telegram Desktop\rgl_log_844.txt`, `C:\Users\Admin\Downloads\Telegram Desktop\rgl_log_24768.txt`, `C:\Users\Admin\Downloads\Telegram Desktop\rgl_log_5976.txt`
+- foreign dedicated watchdog: `C:\Users\Admin\Downloads\Telegram Desktop\watchdog_log_5976.txt`
+- dump: `C:\Users\Admin\Downloads\Telegram Desktop\Crash_2026-04-25_15.11.10\2026-04-25_15.11.10\dump.dmp`
+- local client logs from the paired run: `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_34744.txt`, `C:\ProgramData\Mount and Blade II Bannerlord\logs\watchdog_log_34744.txt`
+
+Authoritative progress:
+
+1. The old early startup crash is still gone. The foreign dedicated host reaches mission loading, the dedicated observer activates, and the mission gets into side selection.
+2. The crash moved forward into battlefield army materialization:
+   - `CoopSpectatorDedicated: activating dedicated mission observer...`
+   - `CoopMissionSpawnLogic: dedicated observer attached CoopMissionNetworkBridge`
+   - `CoopMissionSpawnLogic: dedicated observer attached CoopMissionSpawnLogic`
+   - `ExactCampaignArmyBootstrap: deferred native-like army bootstrap initialization. Scene=battle_terrain_biome_028 Reason=authoritative-side-none ...`
+   - `CoopMissionSpawnLogic: materialized battlefield entry spawn begin... SpawnFrameSource=formation-repaired`
+3. The watchdog records a native access violation:
+   - `ExceptionCode: 0xC0000005`
+   - `ExceptionAddress: 0x7ffc0c5b5e1d`
+4. `dotnet-dump` shows the crashing managed/native interop stack on thread `0x343c`:
+   - `ManagedCallbacks.ScriptingInterfaceOfIScene.WorldPositionValidateZ(...)`
+   - `TaleWorlds.Engine.WorldPosition.ValidateZ(...)`
+   - `TaleWorlds.Engine.WorldPosition.GetGroundZ()`
+   - `TaleWorlds.Engine.WorldPosition.GetGroundVec3()`
+   - `TaleWorlds.MountAndBlade.DefaultFormationDeploymentPlan.CreateNewDeploymentWorldPosition(...)`
+   - `TaleWorlds.MountAndBlade.Mission.GetFormationSpawnFrame(...)`
+   - `CoopSpectator.MissionBehaviors.CoopMissionSpawnLogic.ResolveMaterializedArmySpawnFrame(...)`
+   - `CoopSpectator.MissionBehaviors.CoopMissionSpawnLogic.SpawnMaterializedAgentsForEntry(...)`
+   - `CoopSpectator.MissionBehaviors.CoopMissionSpawnLogic.MaterializeArmyForSide(...)`
+
+Conclusion:
+
+- this is not the previous `Mission.ClearUnreferencedResources(true)` or mission-close crash
+- this is not a Windows 10 vs Windows 11 issue
+- the current native crash boundary is our materialized AI path calling Bannerlord's `Mission.GetFormationSpawnFrame`, which can crash inside scene/world-position Z validation on this dedicated startup path
+- the `authoritative-side-none` log also showed that the previous materialization loosened too far and could begin before any synchronized peer had a stable authoritative side
+
+Applied stabilization fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+  - exact campaign initial materialization now waits for at least one synchronized non-server peer with an authoritative side, rather than waiting for a controlled agent
+  - the defer log now reports the peer/side counters, for example `AssignedPeers=0`
+  - materialized AI spawn no longer calls native `Mission.GetFormationSpawnFrame`
+  - materialized AI spawn no longer builds a `WorldPosition` only to call `GetGroundVec3()`
+  - materialized AI spawn now uses a plain `Vec3` from repaired deployment plan, then FFA spawn frame fallback, then direct fallback
+
+Updated package:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_Release.zip`
+- SHA256: `EC95D740F32D509F0C0A7500206C2B1563C866C666FA189D3BA6B7D63D2D50FB`
+- Host `Win64_Shipping_Server` MVID: `f59b2c57-f6ff-4f4b-9c15-b33ce3e00a80`
+- Host `Win64_Shipping_Client` MVID: `f59b2c57-f6ff-4f4b-9c15-b33ce3e00a80`
+- Client `Win64_Shipping_Client` MVID: `14762f62-5853-40d2-babe-5b528d7da4a6`
+
+Next rerun should check:
+
+1. no crash/dump at the old stack:
+   - `Mission.GetFormationSpawnFrame`
+   - `WorldPositionValidateZ`
+   - `ResolveMaterializedArmySpawnFrame`
+2. before a peer side is authoritative, dedicated should log:
+   - `deferring initial battlefield materialization on exact campaign scene until a synchronized peer has an authoritative side`
+3. after side selection, materialized entries should use:
+   - `SpawnFrameSource=formation-repaired`
+   - or `SpawnFrameSource=ffa-scene`
+   - or `SpawnFrameSource=direct-fallback`
+4. dedicated should not show the old bad sequence where `Reason=authoritative-side-none` is immediately followed by materialized battlefield spawn
+5. if it still crashes, collect the new foreign host dedicated `rgl_log_<pid>.txt`, `watchdog_log_<pid>.txt`, and `dump.dmp`; the stack should tell us whether the next boundary moved past spawn-frame resolution
+
+### 23aa. Host commander spawn/control blocked by peer-order bootstrap and weak pre-battle hold
+
+Fresh logs:
+
+- foreign host game client: `C:\Users\Admin\Downloads\Telegram Desktop\rgl_log_13340.txt`
+- foreign dedicated host: `C:\Users\Admin\Downloads\Telegram Desktop\rgl_log_7676.txt`
+- foreign launcher/helper: `C:\Users\Admin\Downloads\Telegram Desktop\rgl_log_7672.txt`
+- remote client: `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_49624.txt`
+
+Authoritative findings:
+
+1. There was no native crash in this run. The remaining failure was battle runtime state, not startup.
+2. The host selected the player-side commander, but never sent `SpawnNow` because the status snapshot still reported `CanRespawn=False`.
+3. The dedicated exact native bootstrap kept logging `Reason=authoritative-side-none` after the host had selected a side because it used the first synchronized peer as the bootstrap peer. In this run that first peer was the remote client `AC`, not the visual host `XCTwnik`.
+4. Once `AC` selected Attacker, the exact bootstrap initialized and `AC` could spawn as the commander. That made the issue look host-specific, but the root cause was peer selection order.
+5. After `AC` spawned, the server moved to `PreBattleHold`, but `PauseAITick=False` and the formation hold affected `0` formations. Active troop counts then dropped during `PreBattleHold`, confirming that armies were fighting before the host start command.
+6. The client commander was also briefly classified as non-commander because local `ControlledEntryId` had not resolved yet:
+   - `suppressed local OrderController.SelectAllFormations ... ControlledEntryId=null CommanderEntryId=attacker|player_party|main_hero|... SuppressionPhase=non-commander`
+
+Applied stabilization fix:
+
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+  - exact native campaign bootstrap now selects a synchronized peer with an authoritative side and committed selection instead of blindly taking the first synchronized peer
+  - battle phase readiness now counts peers with authoritative selection state even if they are still in spectator/holding team, so one spawned client cannot advance the battle past an unspawned host
+  - pre-battle AI pause now remains enabled until `BattleActive`
+  - formation hold is re-applied during pre-battle and tracks unit-count changes, so newly spawned native exact formations are not left on old attack orders
+  - pre-battle formation hold now disables AI control and applies stop/hold-fire until battle start
+- updated `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleMapSpawnHandoffPatch.cs`
+  - local/server non-commander order suppression now defers when `CommanderEntryId` is known but `ControlledEntryId` is still missing during spawn handoff
+  - this prevents exact commander order control from being stripped during the short identity sync gap
+
+Updated packages:
+
+- full: `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_Release.zip`
+  - SHA256: `77E8D54A8942A4B4FEEE9AC0C4336D2704416B4B2ADAC23B8DC270CB183A12F1`
+  - Size: `1002094651` bytes
+- light: `C:\dev\projects\BannerlordCoopSpectator3\dist\BannerlordCoopCampaign_v0.1.1_LightRelease.zip`
+  - SHA256: `99F56F24F6B9FD34AF79035B539CBE2DCB0AE34C762371BB8BB7E74FD3B75F23`
+  - Size: `4566928` bytes
+- Host `Win64_Shipping_Server` MVID: `222e29b1-1e53-4f9e-8281-56502bba141f`
+- Host `Win64_Shipping_Client` MVID: `222e29b1-1e53-4f9e-8281-56502bba141f`
+- Client `Win64_Shipping_Client` MVID: `091d09d5-da20-4b95-b9e2-7e73b8c686ce`
+
+Next rerun should check:
+
+1. after the visual host selects side/commander, dedicated should initialize exact bootstrap without waiting for the remote client to select:
+   - `ExactCampaignArmyBootstrap: initialized native-like army bootstrap`
+   - no repeated `Reason=authoritative-side-none` after host side selection
+2. host client should receive `CanRespawn=True` for the selected commander and then emit `Writing message. Kind=SpawnNow`
+3. while not all assigned peers are controlled, dedicated should not report `CanStartBattle=True`
+4. during `PreBattleHold`, dedicated should report `PauseAITick=True` and active attacker/defender counts should not drop before start
+5. if local commander entry identity is briefly missing, logs should show:
+   - `deferred non-commander suppression until controlled entry identity resolves`
+   - not `suppressed local OrderController.SelectAllFormations ... SuppressionPhase=non-commander` for the exact commander

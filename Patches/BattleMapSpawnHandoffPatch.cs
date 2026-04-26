@@ -39,6 +39,7 @@ namespace CoopSpectator.Patches
         private static string _lastMaintainedLocalCommanderOrderControlKey;
         private static string _lastResolvedControlledEntryFallbackKey;
         private static string _lastEstablishedCommanderStateBypassKey;
+        private static string _lastDeferredNonCommanderSuppressionKey;
         private static string _lastAutoSelectedAllLocalCommanderFormationsKey;
         private static string _lastPreFormationCommanderPromotionKey;
         private static string _lastForcedCampaignCommanderOrderUiKey;
@@ -112,6 +113,7 @@ namespace CoopSpectator.Patches
             _lastMaintainedLocalCommanderOrderControlKey = null;
             _lastResolvedControlledEntryFallbackKey = null;
             _lastEstablishedCommanderStateBypassKey = null;
+            _lastDeferredNonCommanderSuppressionKey = null;
             _lastAutoSelectedAllLocalCommanderFormationsKey = null;
             _lastPreFormationCommanderPromotionKey = null;
             _lastForcedCampaignCommanderOrderUiKey = null;
@@ -929,6 +931,20 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
+            if (!isExactCommander &&
+                ShouldDeferNonCommanderSuppressionUntilControlledEntryIdentityResolves(
+                    "OrderUi",
+                    myPeer,
+                    myMissionPeer,
+                    controlledAgent,
+                    team,
+                    controlledEntryId,
+                    commanderEntryId,
+                    mission))
+            {
+                return false;
+            }
+
             bool hasCommanderIdentity = !string.IsNullOrWhiteSpace(commanderEntryId);
             bool hasCommanderControlCounts = myMissionPeer.BotsUnderControlTotal > 1 || myMissionPeer.BotsUnderControlAlive > 0;
             if (isExactCommander || (!hasCommanderIdentity && hasCommanderControlCounts))
@@ -1348,6 +1364,46 @@ namespace CoopSpectator.Patches
             return true;
         }
 
+        private static bool ShouldDeferNonCommanderSuppressionUntilControlledEntryIdentityResolves(
+            string context,
+            NetworkCommunicator networkPeer,
+            MissionPeer missionPeer,
+            Agent controlledAgent,
+            Team team,
+            string controlledEntryId,
+            string commanderEntryId,
+            Mission mission)
+        {
+            if (!string.IsNullOrWhiteSpace(controlledEntryId) || string.IsNullOrWhiteSpace(commanderEntryId))
+                return false;
+
+            string logKey =
+                (context ?? "unknown") + "|" +
+                (networkPeer?.Index.ToString() ?? "null") + "|" +
+                (team?.TeamIndex.ToString() ?? "null") + "|" +
+                (controlledAgent?.Index.ToString() ?? "null") + "|" +
+                commanderEntryId + "|" +
+                (missionPeer?.BotsUnderControlTotal.ToString() ?? "null") + "|" +
+                (missionPeer?.BotsUnderControlAlive.ToString() ?? "null");
+            if (!string.Equals(_lastDeferredNonCommanderSuppressionKey, logKey, StringComparison.Ordinal))
+            {
+                _lastDeferredNonCommanderSuppressionKey = logKey;
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: keeping non-commander suppression active until controlled entry identity resolves. " +
+                    "Context=" + (context ?? "unknown") +
+                    " Peer=" + (networkPeer?.UserName ?? networkPeer?.Index.ToString() ?? "null") +
+                    " TeamIndex=" + (team?.TeamIndex.ToString() ?? "null") +
+                    " ControlledAgentIndex=" + (controlledAgent?.Index.ToString() ?? "null") +
+                    " ControlledEntryId=null" +
+                    " CommanderEntryId=" + commanderEntryId +
+                    " BotsUnderControlTotal=" + (missionPeer?.BotsUnderControlTotal.ToString() ?? "null") +
+                    " BotsUnderControlAlive=" + (missionPeer?.BotsUnderControlAlive.ToString() ?? "null") +
+                    " Mission=" + (mission?.SceneName ?? "null"));
+            }
+
+            return false;
+        }
+
         private static bool HasLocalCommanderFormationAuthority(Team team, Agent controlledAgent, Agent mainAgent)
         {
             if (team == null || controlledAgent == null)
@@ -1638,6 +1694,20 @@ namespace CoopSpectator.Patches
                     ? spawnIdentityState.EntryId
                     : null);
             bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
+            if (!isExactCommander &&
+                ShouldDeferNonCommanderSuppressionUntilControlledEntryIdentityResolves(
+                    "ServerSelectAllFormations",
+                    networkPeer,
+                    missionPeer,
+                    missionPeer.ControlledAgent,
+                    team,
+                    controlledEntryId,
+                    commanderEntryId,
+                    mission))
+            {
+                return false;
+            }
+
             if (!isExactCommander)
             {
                 logKey =
@@ -1752,6 +1822,20 @@ namespace CoopSpectator.Patches
                     team,
                     controlledAgent,
                     mainAgent,
+                    mission))
+            {
+                return false;
+            }
+
+            if (!isExactCommander &&
+                ShouldDeferNonCommanderSuppressionUntilControlledEntryIdentityResolves(
+                    "SelectAllFormations",
+                    myPeer,
+                    myMissionPeer,
+                    controlledAgent,
+                    team,
+                    controlledEntryId,
+                    commanderEntryId,
                     mission))
             {
                 return false;
@@ -1888,6 +1972,20 @@ namespace CoopSpectator.Patches
                     team,
                     controlledAgent,
                     mainAgent,
+                    mission))
+            {
+                isExactCommander = true;
+            }
+
+            if (!isExactCommander &&
+                ShouldDeferNonCommanderSuppressionUntilControlledEntryIdentityResolves(
+                    "OrderTroopPlacerTick",
+                    myPeer,
+                    myMissionPeer,
+                    controlledAgent,
+                    team,
+                    controlledEntryId,
+                    commanderEntryId,
                     mission))
             {
                 isExactCommander = true;

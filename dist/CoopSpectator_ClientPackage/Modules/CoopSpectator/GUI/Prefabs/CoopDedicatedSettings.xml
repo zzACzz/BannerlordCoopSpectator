@@ -162,7 +162,18 @@
                   </Children>
                 </Widget>
 
-                <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="18" Brush="Popup.Description.Text" Text="@StatusText" />
+                <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="12" Brush="Popup.Description.Text" Text="@StatusText" />
+
+                <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" MarginBottom="18" StackLayout.LayoutMethod="VerticalBottomToTop">
+                  <Children>
+                    <ButtonWidget DoNotPassEventsToChildren="true" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="250" SuggestedHeight="64" Brush="Popup.Done.Button" Command.Click="ExecuteOpenSupportPage">
+                      <Children>
+                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" VerticalAlignment="Center" Brush="Popup.Button.Text" Text="@SupportButtonText" />
+                      </Children>
+                    </ButtonWidget>
+                    <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" MarginBottom="8" Brush="Popup.Description.Text" Text="@SupportPromptText" />
+                  </Children>
+                </ListPanel>
 
                 <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="Fixed" SuggestedHeight="64" HorizontalAlignment="Center" MarginBottom="6" StackLayout.LayoutMethod="HorizontalLeftToRight">
                   <Children>

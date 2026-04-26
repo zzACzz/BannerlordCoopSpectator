@@ -79,6 +79,7 @@
     <Compile Include="..\Infrastructure\CoopBattleEntryStatusBridgeFile.cs" Link="Infrastructure\CoopBattleEntryStatusBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleResultBridgeFile.cs" Link="Infrastructure\CoopBattleResultBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSelectionBridgeFile.cs" Link="Infrastructure\CoopBattleSelectionBridgeFile.cs" />
+    <Compile Include="..\Infrastructure\CustomGameJoinContextState.cs" Link="Infrastructure\CustomGameJoinContextState.cs" />
     <Compile Include="..\Infrastructure\HostSelfJoinRedirectState.cs" Link="Infrastructure\HostSelfJoinRedirectState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSelectionIntentState.cs" Link="Infrastructure\CoopBattleSelectionIntentState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSpawnBridgeFile.cs" Link="Infrastructure\CoopBattleSpawnBridgeFile.cs" />

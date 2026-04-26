@@ -23,3 +23,12 @@ _ReSharper*/
 # Логи
 *.log
 
+# Release packages generated under dist
+dist/BannerlordCoopCampaign_v*_Release/
+dist/BannerlordCoopCampaign_v*_Release.zip
+dist/BannerlordCoopCampaign_v*_LightRelease/
+dist/BannerlordCoopCampaign_v*_LightRelease.zip
+dist/_tmp_host_from_zip*.dll
+
+# Local Codex scratch files
+.codex_tmp/
