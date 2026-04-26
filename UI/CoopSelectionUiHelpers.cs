@@ -18,6 +18,8 @@ namespace CoopSpectator.UI
         public BattleRuntimeState BattleState { get; set; }
         public string[] AttackerSelectableEntryIds { get; set; } = Array.Empty<string>();
         public string[] DefenderSelectableEntryIds { get; set; } = Array.Empty<string>();
+        public int AttackerSelectableEntryCount { get; set; }
+        public int DefenderSelectableEntryCount { get; set; }
         public string[] EffectiveSelectableEntryIds { get; set; } = Array.Empty<string>();
         public BattleSideEnum EffectiveSide { get; set; }
         public string SelectedEntryId { get; set; }
@@ -25,6 +27,9 @@ namespace CoopSpectator.UI
         public string Lifecycle { get; set; }
         public bool HasLocalControlledAgent { get; set; }
         public bool IsBattleEnded { get; set; }
+        public bool BattleDataReady { get; set; }
+        public string BattleDataReadinessStage { get; set; }
+        public string BattleDataReadinessReason { get; set; }
         public bool CanSpawn { get; set; }
         public bool CanShowOverlay { get; set; }
         public string TeamRefreshKey { get; set; } = string.Empty;
@@ -71,6 +76,7 @@ namespace CoopSpectator.UI
 
     internal static class CoopSelectionUiHelpers
     {
+        private const string LoadingBattleDataText = "Loading battle data...";
         private const string NeutralPlayerBannerCode = "11.163.166.1528.1528.764.764.1.0.0.133.171.171.483.483.764.764.0.0.0";
         private const string BanditBannerCode = "24.193.116.1536.1536.768.768.1.0.0";
         private const string DeserterBannerCode = "35.116.116.1528.1528.766.740.1.0.0.510.19.171.1528.353.758.658.0.0.0.510.19.171.1528.398.760.845.0.0.0";
@@ -89,27 +95,46 @@ namespace CoopSpectator.UI
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
             CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot currentSelection = CoopBattleSelectionBridgeFile.ReadCurrentSelection();
             BattleRuntimeState battleState = BattleSnapshotRuntimeState.GetState();
-            string[] attackerSelectableEntryIds = ResolveSelectableEntryIds(status, BattleSideEnum.Attacker);
-            string[] defenderSelectableEntryIds = ResolveSelectableEntryIds(status, BattleSideEnum.Defender);
-            BattleSideEnum effectiveSide = ResolveEffectiveSide(
-                selectedSideOverride,
+            bool battleDataReady = status?.BattleDataReady == true;
+            string[] attackerSelectableEntryIds = battleDataReady
+                ? ResolveSelectableEntryIds(status, BattleSideEnum.Attacker)
+                : Array.Empty<string>();
+            string[] defenderSelectableEntryIds = battleDataReady
+                ? ResolveSelectableEntryIds(status, BattleSideEnum.Defender)
+                : Array.Empty<string>();
+            int attackerSelectableEntryCount = ResolveSelectableEntryCount(
                 status,
-                currentSelection,
-                attackerSelectableEntryIds,
+                BattleSideEnum.Attacker,
+                attackerSelectableEntryIds);
+            int defenderSelectableEntryCount = ResolveSelectableEntryCount(
+                status,
+                BattleSideEnum.Defender,
                 defenderSelectableEntryIds);
-            string[] effectiveSelectableEntryIds = OrderSelectableEntryIdsForDisplay(
-                battleState,
-                effectiveSide,
-                GetSelectableEntryIdsForSide(
-                    effectiveSide,
+            BattleSideEnum effectiveSide = battleDataReady
+                ? ResolveEffectiveSide(
+                    selectedSideOverride,
+                    status,
+                    currentSelection,
                     attackerSelectableEntryIds,
-                    defenderSelectableEntryIds));
-            string selectedEntryId = ResolveSelectedEntryId(
-                effectiveSide,
-                effectiveSelectableEntryIds,
-                currentSelection,
-                status,
-                selectedEntryIdOverride);
+                    defenderSelectableEntryIds)
+                : BattleSideEnum.None;
+            string[] effectiveSelectableEntryIds = battleDataReady
+                ? OrderSelectableEntryIdsForDisplay(
+                    battleState,
+                    effectiveSide,
+                    GetSelectableEntryIdsForSide(
+                        effectiveSide,
+                        attackerSelectableEntryIds,
+                        defenderSelectableEntryIds))
+                : Array.Empty<string>();
+            string selectedEntryId = battleDataReady
+                ? ResolveSelectedEntryId(
+                    effectiveSide,
+                    effectiveSelectableEntryIds,
+                    currentSelection,
+                    status,
+                    selectedEntryIdOverride)
+                : string.Empty;
 
             CoopSelectionUiSnapshot snapshot = new CoopSelectionUiSnapshot
             {
@@ -118,6 +143,8 @@ namespace CoopSpectator.UI
                 BattleState = battleState,
                 AttackerSelectableEntryIds = attackerSelectableEntryIds,
                 DefenderSelectableEntryIds = defenderSelectableEntryIds,
+                AttackerSelectableEntryCount = attackerSelectableEntryCount,
+                DefenderSelectableEntryCount = defenderSelectableEntryCount,
                 EffectiveSide = effectiveSide,
                 EffectiveSelectableEntryIds = effectiveSelectableEntryIds,
                 SelectedEntryId = selectedEntryId,
@@ -127,7 +154,10 @@ namespace CoopSpectator.UI
                 Lifecycle = status?.LifecycleState ?? string.Empty,
                 HasLocalControlledAgent = hasLocalControlledAgent,
                 IsBattleEnded = string.Equals(status?.BattlePhase, nameof(CoopBattlePhase.BattleEnded), StringComparison.OrdinalIgnoreCase),
-                CanSpawn = (status?.CanRespawn ?? true) && !string.IsNullOrWhiteSpace(selectedEntryId),
+                BattleDataReady = battleDataReady,
+                BattleDataReadinessStage = status?.BattleDataReadinessStage ?? string.Empty,
+                BattleDataReadinessReason = status?.BattleDataReadinessReason ?? string.Empty,
+                CanSpawn = battleDataReady && (status?.CanRespawn ?? false) && !string.IsNullOrWhiteSpace(selectedEntryId),
                 CanShowOverlay = ShouldOverlayBeVisible(status, hasLocalControlledAgent)
             };
 
@@ -153,6 +183,9 @@ namespace CoopSpectator.UI
 
         public static string BuildTeamHintText(CoopSelectionUiSnapshot snapshot)
         {
+            if (snapshot != null && !snapshot.BattleDataReady)
+                return LoadingBattleDataText;
+
             return snapshot == null
                 ? "Choose a side."
                 : "Choose a side, auto assign, or spectate.";
@@ -163,6 +196,9 @@ namespace CoopSpectator.UI
             if (snapshot == null)
                 return "Choose a living unit.";
 
+            if (!snapshot.BattleDataReady)
+                return LoadingBattleDataText;
+
             return snapshot.CanSpawn
                 ? "Deploy into the selected living unit."
                 : "Choose a living unit, then deploy.";
@@ -170,6 +206,9 @@ namespace CoopSpectator.UI
 
         public static string BuildUnitEmptyText(CoopSelectionUiSnapshot snapshot)
         {
+            if (snapshot != null && !snapshot.BattleDataReady)
+                return LoadingBattleDataText;
+
             if (snapshot == null || snapshot.EffectiveSide == BattleSideEnum.None)
                 return "Select a side to view living units.";
 
@@ -195,6 +234,9 @@ namespace CoopSpectator.UI
 
         public static bool CanSelectSide(CoopSelectionUiSnapshot snapshot, BattleSideEnum side, int selectableCount)
         {
+            if (snapshot != null && !snapshot.BattleDataReady)
+                return false;
+
             if (selectableCount <= 0)
                 return false;
 
@@ -269,6 +311,17 @@ namespace CoopSpectator.UI
 
         public static CoopSidePresentation ResolveSidePresentation(CoopSelectionUiSnapshot snapshot, BattleSideEnum side, int selectableCount)
         {
+            if (snapshot != null && !snapshot.BattleDataReady)
+            {
+                return new CoopSidePresentation
+                {
+                    TitleText = ResolveSideDisplayName(snapshot.BattleState, side),
+                    CountText = "Loading",
+                    DetailText = "Battle data sync in progress",
+                    BannerCodeText = ResolveSideBannerCode(snapshot.BattleState, side)
+                };
+            }
+
             return new CoopSidePresentation
             {
                 TitleText = ResolveSideDisplayName(snapshot?.BattleState, side),
@@ -439,12 +492,18 @@ namespace CoopSpectator.UI
             string selectableRaw = side == BattleSideEnum.Attacker ? status.AttackerSelectableEntryIds : status.DefenderSelectableEntryIds;
             string selectableSource = side == BattleSideEnum.Attacker ? status.AttackerSelectableEntrySource : status.DefenderSelectableEntrySource;
             string allowedRaw = side == BattleSideEnum.Attacker ? status.AttackerAllowedEntryIds : status.DefenderAllowedEntryIds;
+            int explicitSelectableCount = side == BattleSideEnum.Attacker
+                ? status.AttackerSelectableEntryCount
+                : status.DefenderSelectableEntryCount;
             string[] selectableEntryIds = CoopBattleEntryStatusBridgeFile.DeserializeIdList(selectableRaw);
-            if (!string.IsNullOrWhiteSpace(selectableSource))
-                return selectableEntryIds;
-
             if (selectableEntryIds.Length > 0)
                 return selectableEntryIds;
+
+            // Remote transport compacts per-side selectable lists for large battles.
+            // In that case the source marker remains populated, but the actual IDs are
+            // only present in the current-side SelectableEntryIds payload below.
+            if (!string.IsNullOrWhiteSpace(selectableSource) && explicitSelectableCount <= 0)
+                return Array.Empty<string>();
 
             BattleSideEnum snapshotSide = NormalizeSide(status.AssignedSide);
             if (snapshotSide == BattleSideEnum.None)
@@ -462,6 +521,23 @@ namespace CoopSpectator.UI
 
             string[] allowedEntryIds = CoopBattleEntryStatusBridgeFile.DeserializeIdList(allowedRaw);
             return allowedEntryIds.Length > 0 ? allowedEntryIds : Array.Empty<string>();
+        }
+
+        private static int ResolveSelectableEntryCount(
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+            BattleSideEnum side,
+            string[] selectableEntryIds)
+        {
+            if (status == null || side == BattleSideEnum.None)
+                return selectableEntryIds?.Length ?? 0;
+
+            int explicitCount = side == BattleSideEnum.Attacker
+                ? status.AttackerSelectableEntryCount
+                : status.DefenderSelectableEntryCount;
+            if (explicitCount > 0)
+                return explicitCount;
+
+            return selectableEntryIds?.Length ?? 0;
         }
 
         private static string[] GetSelectableEntryIdsForSide(
@@ -665,6 +741,9 @@ namespace CoopSpectator.UI
             if (snapshot == null)
                 return "Selection";
 
+            if (!snapshot.BattleDataReady)
+                return "Loading Battle Data";
+
             if (snapshot.IsBattleEnded)
                 return "Battle Ended";
 
@@ -685,20 +764,22 @@ namespace CoopSpectator.UI
             CoopSidePresentation attackerPresentation = ResolveSidePresentation(
                 snapshot,
                 BattleSideEnum.Attacker,
-                snapshot.AttackerSelectableEntryIds?.Length ?? 0);
+                snapshot.AttackerSelectableEntryCount);
             CoopSidePresentation defenderPresentation = ResolveSidePresentation(
                 snapshot,
                 BattleSideEnum.Defender,
-                snapshot.DefenderSelectableEntryIds?.Length ?? 0);
+                snapshot.DefenderSelectableEntryCount);
 
             return string.Join("\n", new[]
             {
                 "team",
+                snapshot.BattleDataReady.ToString(),
+                snapshot.BattleDataReadinessStage ?? string.Empty,
                 snapshot.BattlePhase ?? string.Empty,
                 snapshot.Lifecycle ?? string.Empty,
                 snapshot.EffectiveSide.ToString(),
-                BuildSideRefreshDescriptor(attackerPresentation, snapshot.AttackerSelectableEntryIds),
-                BuildSideRefreshDescriptor(defenderPresentation, snapshot.DefenderSelectableEntryIds)
+                BuildSideRefreshDescriptor(attackerPresentation, snapshot.AttackerSelectableEntryCount),
+                BuildSideRefreshDescriptor(defenderPresentation, snapshot.DefenderSelectableEntryCount)
             });
         }
 
@@ -710,6 +791,8 @@ namespace CoopSpectator.UI
             List<string> parts = new List<string>
             {
                 "class",
+                snapshot.BattleDataReady.ToString(),
+                snapshot.BattleDataReadinessStage ?? string.Empty,
                 snapshot.BattlePhase ?? string.Empty,
                 snapshot.Lifecycle ?? string.Empty,
                 snapshot.EffectiveSide.ToString(),
@@ -735,7 +818,7 @@ namespace CoopSpectator.UI
             return string.Join("\n", parts);
         }
 
-        private static string BuildSideRefreshDescriptor(CoopSidePresentation presentation, IReadOnlyCollection<string> selectableEntryIds)
+        private static string BuildSideRefreshDescriptor(CoopSidePresentation presentation, int selectableEntryCount)
         {
             return string.Join("|", new[]
             {
@@ -743,7 +826,7 @@ namespace CoopSpectator.UI
                 presentation?.CountText ?? string.Empty,
                 presentation?.DetailText ?? string.Empty,
                 presentation?.BannerCodeText ?? string.Empty,
-                selectableEntryIds?.Count.ToString() ?? "0"
+                selectableEntryCount.ToString()
             });
         }
 

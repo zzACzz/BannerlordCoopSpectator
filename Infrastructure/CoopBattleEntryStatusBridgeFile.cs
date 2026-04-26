@@ -23,6 +23,9 @@ namespace CoopSpectator.Infrastructure
             public int PeerIndex { get; set; }
             public bool HasPeer { get; set; }
             public bool HasAgent { get; set; }
+            public bool BattleDataReady { get; set; }
+            public string BattleDataReadinessStage { get; set; }
+            public string BattleDataReadinessReason { get; set; }
             public bool CanRespawn { get; set; }
             public bool CanStartBattle { get; set; }
             public string LifecycleState { get; set; }
@@ -48,10 +51,12 @@ namespace CoopSpectator.Infrastructure
             public string SelectableEntrySource { get; set; }
             public string AttackerAllowedTroopIds { get; set; }
             public string AttackerAllowedEntryIds { get; set; }
+            public int AttackerSelectableEntryCount { get; set; }
             public string AttackerSelectableEntryIds { get; set; }
             public string AttackerSelectableEntrySource { get; set; }
             public string DefenderAllowedTroopIds { get; set; }
             public string DefenderAllowedEntryIds { get; set; }
+            public int DefenderSelectableEntryCount { get; set; }
             public string DefenderSelectableEntryIds { get; set; }
             public string DefenderSelectableEntrySource { get; set; }
             public DateTime UpdatedUtc { get; set; }
@@ -127,6 +132,9 @@ namespace CoopSpectator.Infrastructure
                     "PeerIndex=" + snapshot.PeerIndex,
                     "HasPeer=" + snapshot.HasPeer,
                     "HasAgent=" + snapshot.HasAgent,
+                    "BattleDataReady=" + snapshot.BattleDataReady,
+                    "BattleDataReadinessStage=" + (snapshot.BattleDataReadinessStage ?? string.Empty),
+                    "BattleDataReadinessReason=" + (snapshot.BattleDataReadinessReason ?? string.Empty),
                     "CanRespawn=" + snapshot.CanRespawn,
                     "CanStartBattle=" + snapshot.CanStartBattle,
                     "LifecycleState=" + (snapshot.LifecycleState ?? string.Empty),
@@ -152,10 +160,12 @@ namespace CoopSpectator.Infrastructure
                     "SelectableEntrySource=" + (snapshot.SelectableEntrySource ?? string.Empty),
                     "AttackerAllowedTroopIds=" + (snapshot.AttackerAllowedTroopIds ?? string.Empty),
                     "AttackerAllowedEntryIds=" + (snapshot.AttackerAllowedEntryIds ?? string.Empty),
+                    "AttackerSelectableEntryCount=" + snapshot.AttackerSelectableEntryCount,
                     "AttackerSelectableEntryIds=" + (snapshot.AttackerSelectableEntryIds ?? string.Empty),
                     "AttackerSelectableEntrySource=" + (snapshot.AttackerSelectableEntrySource ?? string.Empty),
                     "DefenderAllowedTroopIds=" + (snapshot.DefenderAllowedTroopIds ?? string.Empty),
                     "DefenderAllowedEntryIds=" + (snapshot.DefenderAllowedEntryIds ?? string.Empty),
+                    "DefenderSelectableEntryCount=" + snapshot.DefenderSelectableEntryCount,
                     "DefenderSelectableEntryIds=" + (snapshot.DefenderSelectableEntryIds ?? string.Empty),
                     "DefenderSelectableEntrySource=" + (snapshot.DefenderSelectableEntrySource ?? string.Empty),
                     "UpdatedUtc=" + snapshot.UpdatedUtc.ToString("O")
@@ -203,6 +213,9 @@ namespace CoopSpectator.Infrastructure
                     PeerIndex = -1,
                     HasPeer = false,
                     HasAgent = false,
+                    BattleDataReady = false,
+                    BattleDataReadinessStage = string.Empty,
+                    BattleDataReadinessReason = string.Empty,
                     CanRespawn = false,
                     CanStartBattle = false,
                     LifecycleState = string.Empty,
@@ -283,6 +296,16 @@ namespace CoopSpectator.Infrastructure
                             if (bool.TryParse(value, out bool hasAgent))
                                 snapshot.HasAgent = hasAgent;
                             break;
+                        case "BattleDataReady":
+                            if (bool.TryParse(value, out bool battleDataReady))
+                                snapshot.BattleDataReady = battleDataReady;
+                            break;
+                        case "BattleDataReadinessStage":
+                            snapshot.BattleDataReadinessStage = value;
+                            break;
+                        case "BattleDataReadinessReason":
+                            snapshot.BattleDataReadinessReason = value;
+                            break;
                         case "CanRespawn":
                             if (bool.TryParse(value, out bool canRespawn))
                                 snapshot.CanRespawn = canRespawn;
@@ -361,6 +384,10 @@ namespace CoopSpectator.Infrastructure
                         case "AttackerAllowedEntryIds":
                             snapshot.AttackerAllowedEntryIds = value;
                             break;
+                        case "AttackerSelectableEntryCount":
+                            if (int.TryParse(value, out int attackerSelectableEntryCount))
+                                snapshot.AttackerSelectableEntryCount = attackerSelectableEntryCount;
+                            break;
                         case "AttackerSelectableEntryIds":
                             snapshot.AttackerSelectableEntryIds = value;
                             break;
@@ -372,6 +399,10 @@ namespace CoopSpectator.Infrastructure
                             break;
                         case "DefenderAllowedEntryIds":
                             snapshot.DefenderAllowedEntryIds = value;
+                            break;
+                        case "DefenderSelectableEntryCount":
+                            if (int.TryParse(value, out int defenderSelectableEntryCount))
+                                snapshot.DefenderSelectableEntryCount = defenderSelectableEntryCount;
                             break;
                         case "DefenderSelectableEntryIds":
                             snapshot.DefenderSelectableEntryIds = value;

@@ -518,18 +518,24 @@ namespace CoopSpectator.Patches
                 if (entryPolicy == null || !entryPolicy.UseAuthoritativeTroopPath)
                     return;
 
+                string preferredEntryId = ResolveControlledEntryId(
+                    missionPeer,
+                    agent,
+                    mission,
+                    entryPolicy.BridgeTroopOrEntryId,
+                    out string entryResolutionSource);
                 string logKey =
                     agent.Index + "|" +
                     (agent.SpawnEquipment != null).ToString() + "|" +
                     (agent.MountAgent?.Index.ToString() ?? "none") + "|" +
-                    (entryPolicy.BridgeTroopOrEntryId ?? "none");
+                    (preferredEntryId ?? entryPolicy.BridgeTroopOrEntryId ?? "none");
                 if (string.Equals(_lastLocalVisualFinalizeKey, logKey, StringComparison.Ordinal))
                     return;
 
                 bool exactVisualFinalized = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
                     mission,
                     agent,
-                    entryPolicy.BridgeTroopOrEntryId,
+                    preferredEntryId,
                     "battle-map handoff SetAgentPeer");
                 if (exactVisualFinalized)
                     agent.MountAgent?.UpdateAgentProperties();
@@ -541,6 +547,8 @@ namespace CoopSpectator.Patches
                     " HasSpawnEquipment=" + (agent.SpawnEquipment != null) +
                     " MountAgentIndex=" + (agent.MountAgent?.Index.ToString() ?? "null") +
                     " ExactVisualFinalized=" + exactVisualFinalized +
+                    " PreferredEntryId=" + (preferredEntryId ?? "null") +
+                    " EntryResolutionSource=" + (entryResolutionSource ?? "null") +
                     " BridgeTroop=" + (entryPolicy.BridgeTroopOrEntryId ?? "null") +
                     " Mission=" + (mission.SceneName ?? "null"));
             }
@@ -1106,7 +1114,7 @@ namespace CoopSpectator.Patches
         private static string ResolveAgentEntryId(Agent agent, string fallbackEntryId)
         {
             if (agent != null &&
-                ExactCampaignArmyBootstrap.TryGetEntryId(agent, out string controlledEntryId) &&
+                CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out string controlledEntryId) &&
                 !string.IsNullOrWhiteSpace(controlledEntryId))
             {
                 return controlledEntryId;
@@ -1172,6 +1180,23 @@ namespace CoopSpectator.Patches
             {
                 resolutionSource = "bridge-selection";
                 controlledEntryId = bridgeTroopOrEntryId.Trim();
+                LogResolvedControlledEntryIdFallback(
+                    networkPeer,
+                    controlledAgent,
+                    mission,
+                    controlledEntryId,
+                    resolutionSource,
+                    bridgeTroopOrEntryId,
+                    spawnState: default,
+                    status);
+                return controlledEntryId;
+            }
+
+            if (controlledAgent != null &&
+                CoopMissionSpawnLogic.TryResolveSelectableEntryId(controlledAgent, out controlledEntryId) &&
+                !string.IsNullOrWhiteSpace(controlledEntryId))
+            {
+                resolutionSource = "agent-entry-client-overlay";
                 LogResolvedControlledEntryIdFallback(
                     networkPeer,
                     controlledAgent,

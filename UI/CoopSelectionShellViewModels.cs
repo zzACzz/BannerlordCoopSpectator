@@ -44,10 +44,16 @@ namespace CoopSpectator.UI
 
         public void Refresh(CoopSelectionUiSnapshot snapshot, bool force)
         {
+            TitleText = snapshot != null && !snapshot.BattleDataReady
+                ? "LOADING BATTLE DATA"
+                : "TEAM SELECTION";
+            SubtitleText = snapshot != null && !snapshot.BattleDataReady
+                ? "Please wait"
+                : "Coop Battle";
             StatusText = CoopSelectionUiHelpers.BuildTeamStatusText(snapshot);
             HintText = CoopSelectionUiHelpers.BuildTeamHintText(snapshot);
-            Team1 = BuildSideVm(snapshot, BattleSideEnum.Attacker, snapshot?.AttackerSelectableEntryIds?.Length ?? 0);
-            Team2 = BuildSideVm(snapshot, BattleSideEnum.Defender, snapshot?.DefenderSelectableEntryIds?.Length ?? 0);
+            Team1 = BuildSideVm(snapshot, BattleSideEnum.Attacker, snapshot?.AttackerSelectableEntryCount ?? 0);
+            Team2 = BuildSideVm(snapshot, BattleSideEnum.Defender, snapshot?.DefenderSelectableEntryCount ?? 0);
             CanAutoAssign = (Team1?.IsEnabled == true) || (Team2?.IsEnabled == true);
             CanSpectate = true;
 

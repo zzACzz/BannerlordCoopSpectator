@@ -22,6 +22,7 @@ namespace CoopSpectator.UI
         private const float StartBattleHotkeyCooldownSeconds = 0.2f;
         private const float ReopenSelectionHotkeyCooldownSeconds = 0.2f;
         private static readonly TimeSpan LocalSpawnOverlaySuppressionDuration = TimeSpan.FromSeconds(2.5);
+        private static readonly TimeSpan LocalSpawnPendingTimeout = TimeSpan.FromSeconds(20);
 
         private GauntletLayer _gauntletLayer;
         private GauntletMovieIdentifier _movie;
@@ -42,6 +43,10 @@ namespace CoopSpectator.UI
         private DateTime _overlaySuppressedUntilUtc = DateTime.MinValue;
         private float _reopenSelectionHotkeyCooldown;
         private string _lastAppliedRefreshKey = string.Empty;
+        private bool _localSpawnPending;
+        private DateTime _localSpawnPendingStartedUtc = DateTime.MinValue;
+        private string _localSpawnPendingEntryId;
+        private BattleSideEnum _localSpawnPendingSide = BattleSideEnum.None;
 
         public override void OnBehaviorInitialize()
         {
@@ -62,6 +67,7 @@ namespace CoopSpectator.UI
             _overlayStartupDelay = InitialOverlayDelaySeconds;
             _hadLocalControlledAgent = HasLocalControlledAgent();
             _startBattleInstructionShown = false;
+            ClearLocalSpawnPending("mission-screen-initialize");
             ResetSelectionFlow("mission-screen-initialize");
             ModLogger.Info("CoopMissionSelectionView: OnMissionScreenInitialize, coop selection shell init deferred.");
         }
@@ -76,11 +82,13 @@ namespace CoopSpectator.UI
             bool hasLocalControlledAgent = HasLocalControlledAgent();
             if (_hadLocalControlledAgent && !hasLocalControlledAgent)
             {
+                ClearLocalSpawnPending("lost-local-agent");
                 _overlaySuppressedUntilUtc = DateTime.MinValue;
                 ResetSelectionFlow("lost-local-agent");
             }
             else if (!_hadLocalControlledAgent && hasLocalControlledAgent)
             {
+                ClearLocalSpawnPending("gained-local-agent");
                 _selectedEntryIdOverride = null;
             }
 
@@ -206,6 +214,12 @@ namespace CoopSpectator.UI
             if (snapshot == null || !snapshot.CanShowOverlay || _spectatorOverlayHidden || DateTime.UtcNow < _overlaySuppressedUntilUtc)
                 return CoopSelectionScreen.None;
 
+            if (ShouldKeepOverlaySuppressedWhileAwaitingLocalSpawn(snapshot))
+                return CoopSelectionScreen.None;
+
+            if (!snapshot.BattleDataReady)
+                return CoopSelectionScreen.TeamSelection;
+
             if (_requestedScreen == CoopSelectionScreen.ClassLoadout && _selectedSideOverride != BattleSideEnum.None)
                 return CoopSelectionScreen.ClassLoadout;
 
@@ -276,8 +290,8 @@ namespace CoopSpectator.UI
                 hasLocalControlledAgent);
             BattleSideEnum[] availableSides = new[]
             {
-                (snapshot?.AttackerSelectableEntryIds?.Length ?? 0) > 0 ? BattleSideEnum.Attacker : BattleSideEnum.None,
-                (snapshot?.DefenderSelectableEntryIds?.Length ?? 0) > 0 ? BattleSideEnum.Defender : BattleSideEnum.None
+                (snapshot?.AttackerSelectableEntryCount ?? 0) > 0 ? BattleSideEnum.Attacker : BattleSideEnum.None,
+                (snapshot?.DefenderSelectableEntryCount ?? 0) > 0 ? BattleSideEnum.Defender : BattleSideEnum.None
             }
                 .Where(side => side != BattleSideEnum.None)
                 .ToArray();
@@ -290,13 +304,14 @@ namespace CoopSpectator.UI
             ModLogger.Info(
                 "CoopMissionSelectionView: auto assign requested. " +
                 "ChosenSide=" + chosenSide +
-                " AttackerSelectable=" + (snapshot?.AttackerSelectableEntryIds?.Length ?? 0) +
-                " DefenderSelectable=" + (snapshot?.DefenderSelectableEntryIds?.Length ?? 0));
+                " AttackerSelectable=" + (snapshot?.AttackerSelectableEntryCount ?? 0) +
+                " DefenderSelectable=" + (snapshot?.DefenderSelectableEntryCount ?? 0));
             HandleSideSelected(chosenSide);
         }
 
         private void HandleSpectatorRequested()
         {
+            ClearLocalSpawnPending("spectator-requested");
             _spectatorOverlayHidden = true;
             _requestedScreen = CoopSelectionScreen.TeamSelection;
             _selectedSideOverride = BattleSideEnum.None;
@@ -325,9 +340,15 @@ namespace CoopSpectator.UI
             _selectedSideOverride = snapshot.EffectiveSide;
             _selectedEntryIdOverride = snapshot.SelectedEntryId;
             _spectatorOverlayHidden = false;
+            MarkLocalSpawnPending(snapshot);
             _overlaySuppressedUntilUtc = DateTime.UtcNow + LocalSpawnOverlaySuppressionDuration;
-            CoopBattleNetworkRequestTransport.TrySelectEntry(snapshot.EffectiveSide, snapshot.SelectedEntryId, "CoopClassLoadoutUI SpawnEntry");
-            CoopBattleNetworkRequestTransport.TryRequestSpawn("CoopClassLoadoutUI Spawn");
+            bool entryQueued = CoopBattleNetworkRequestTransport.TrySelectEntry(
+                snapshot.EffectiveSide,
+                snapshot.SelectedEntryId,
+                "CoopClassLoadoutUI SpawnEntry");
+            bool spawnQueued = CoopBattleNetworkRequestTransport.TryRequestSpawn("CoopClassLoadoutUI Spawn");
+            if (!entryQueued || !spawnQueued)
+                ClearLocalSpawnPending("spawn-request-write-failed");
             RefreshOverlay(force: true, hasLocalControlledAgent);
         }
 
@@ -344,6 +365,81 @@ namespace CoopSpectator.UI
             _selectedEntryIdOverride = null;
             _spectatorOverlayHidden = false;
             ModLogger.Info("CoopMissionSelectionView: reset selection flow. Source=" + source);
+        }
+
+        private void MarkLocalSpawnPending(CoopSelectionUiSnapshot snapshot)
+        {
+            _localSpawnPending = true;
+            _localSpawnPendingStartedUtc = DateTime.UtcNow;
+            _localSpawnPendingEntryId = snapshot?.SelectedEntryId;
+            _localSpawnPendingSide = snapshot?.EffectiveSide ?? BattleSideEnum.None;
+            ModLogger.Info(
+                "CoopMissionSelectionView: marked local spawn pending. " +
+                "Side=" + _localSpawnPendingSide +
+                " EntryId=" + (_localSpawnPendingEntryId ?? string.Empty));
+        }
+
+        private void ClearLocalSpawnPending(string source)
+        {
+            if (!_localSpawnPending)
+                return;
+
+            ModLogger.Info(
+                "CoopMissionSelectionView: cleared local spawn pending. " +
+                "Source=" + source +
+                " Side=" + _localSpawnPendingSide +
+                " EntryId=" + (_localSpawnPendingEntryId ?? string.Empty));
+            _localSpawnPending = false;
+            _localSpawnPendingStartedUtc = DateTime.MinValue;
+            _localSpawnPendingEntryId = null;
+            _localSpawnPendingSide = BattleSideEnum.None;
+        }
+
+        private bool ShouldKeepOverlaySuppressedWhileAwaitingLocalSpawn(CoopSelectionUiSnapshot snapshot)
+        {
+            if (!_localSpawnPending)
+                return false;
+
+            if (snapshot?.HasLocalControlledAgent == true || snapshot?.Status?.HasAgent == true)
+            {
+                ClearLocalSpawnPending("authoritative-agent-ready");
+                return false;
+            }
+
+            if (_localSpawnPendingStartedUtc != DateTime.MinValue &&
+                DateTime.UtcNow - _localSpawnPendingStartedUtc >= LocalSpawnPendingTimeout)
+            {
+                ClearLocalSpawnPending("timeout");
+                return false;
+            }
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = snapshot?.Status;
+            string lifecycle = status?.LifecycleState ?? snapshot?.Lifecycle ?? string.Empty;
+            if (string.Equals(lifecycle, "AwaitingSelection", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, "NoSide", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, "DeadAwaitingRespawn", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearLocalSpawnPending("server-returned-to-selection");
+                return false;
+            }
+
+            if (status == null)
+                return true;
+
+            bool matchesPendingEntry =
+                !string.IsNullOrWhiteSpace(_localSpawnPendingEntryId) &&
+                (string.Equals(status.SpawnRequestEntryId, _localSpawnPendingEntryId, StringComparison.Ordinal) ||
+                 string.Equals(status.SelectionRequestEntryId, _localSpawnPendingEntryId, StringComparison.Ordinal) ||
+                 string.Equals(status.SelectedEntryId, _localSpawnPendingEntryId, StringComparison.Ordinal));
+            if (matchesPendingEntry ||
+                string.Equals(lifecycle, "Waiting", StringComparison.OrdinalIgnoreCase) ||
+                (!status.CanRespawn && !status.HasAgent))
+            {
+                return true;
+            }
+
+            ClearLocalSpawnPending("state-no-longer-pending");
+            return false;
         }
 
         private void UpdateOverlayInputState(bool shouldCaptureInput)
