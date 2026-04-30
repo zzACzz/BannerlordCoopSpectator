@@ -57,6 +57,18 @@ namespace CoopSpectator.MissionBehaviors
             return CoopBattleSpawnBridgeFile.WriteForceRespawnableRequest(source ?? "network-fallback force-respawnable");
         }
 
+        public static bool TryAcknowledgeBattleSnapshot(int transmissionId, string source)
+        {
+            if (transmissionId <= 0)
+                return false;
+
+            return TrySendClientRequest(
+                CoopBattleSelectionRequestKind.BattleSnapshotReadyAck,
+                BattleSideEnum.None,
+                transmissionId.ToString(),
+                source);
+        }
+
         private static bool TrySendClientRequest(
             CoopBattleSelectionRequestKind requestKind,
             BattleSideEnum requestedSide,
@@ -105,6 +117,8 @@ namespace CoopSpectator.MissionBehaviors
         private readonly Dictionary<int, string> _lastSentBattleSnapshotPayloadByPeer = new Dictionary<int, string>();
         private readonly Dictionary<string, PendingPayloadTransmission> _pendingPayloadsByKey = new Dictionary<string, PendingPayloadTransmission>(StringComparer.Ordinal);
         private readonly Dictionary<string, PayloadAssemblyState> _clientPayloadAssemblies = new Dictionary<string, PayloadAssemblyState>(StringComparer.Ordinal);
+        private static readonly Dictionary<int, int> _expectedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
+        private static readonly Dictionary<int, int> _acknowledgedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private string _cachedBattleSnapshotComparisonKey = string.Empty;
         private byte[] _cachedBattleSnapshotPayloadBytes = Array.Empty<byte>();
         private int _cachedBattleSnapshotLogicalBytes;
@@ -182,6 +196,7 @@ namespace CoopSpectator.MissionBehaviors
             _lastSentBattleSnapshotPayloadByPeer.Remove(networkPeer.Index);
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.EntryStatusSnapshot));
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.BattleSnapshot));
+            ClearPeerBattleSnapshotSyncState(networkPeer.Index);
         }
 
         public override void OnRemoveBehavior()
@@ -190,6 +205,8 @@ namespace CoopSpectator.MissionBehaviors
             _lastSentBattleSnapshotPayloadByPeer.Clear();
             _pendingPayloadsByKey.Clear();
             _clientPayloadAssemblies.Clear();
+            _expectedBattleSnapshotTransmissionIdByPeer.Clear();
+            _acknowledgedBattleSnapshotTransmissionIdByPeer.Clear();
             base.OnRemoveBehavior();
         }
 
@@ -200,6 +217,14 @@ namespace CoopSpectator.MissionBehaviors
 
             try
             {
+                if (message.RequestKind == CoopBattleSelectionRequestKind.BattleSnapshotReadyAck)
+                {
+                    bool acknowledged = TryAcknowledgePeerBattleSnapshot(peer, message.SelectionId);
+                    if (acknowledged)
+                        TrySendEntryStatusToPeer(peer, force: true);
+                    return true;
+                }
+
                 bool applied = CoopMissionSpawnLogic.TryHandleNetworkSelectionRequest(
                     Mission,
                     peer,
@@ -440,6 +465,9 @@ namespace CoopSpectator.MissionBehaviors
                 if (pendingTransmission == null)
                     return;
 
+                if (payloadKind == CoopBattlePayloadKind.BattleSnapshot)
+                    RegisterExpectedBattleSnapshotTransmission(peer.Index, pendingTransmission.TransmissionId);
+
                 _pendingPayloadsByKey[transmissionKey] = pendingTransmission;
                 ModLogger.Info(
                     "CoopMissionNetworkBridge: queued payload transmission. " +
@@ -583,10 +611,10 @@ namespace CoopSpectator.MissionBehaviors
                 " TransmissionId=" + assemblyState.TransmissionId +
                 " Bytes=" + payloadBytes.Length +
                 " Chunks=" + assemblyState.ChunkCount);
-            ApplyCompletedPayload(assemblyState.PayloadKind, payloadBytes);
+            ApplyCompletedPayload(assemblyState.PayloadKind, assemblyState.TransmissionId, payloadBytes);
         }
 
-        private void ApplyCompletedPayload(CoopBattlePayloadKind payloadKind, byte[] payloadBytes)
+        private void ApplyCompletedPayload(CoopBattlePayloadKind payloadKind, int transmissionId, byte[] payloadBytes)
         {
             if (!TryDecodePayloadJson(payloadKind, payloadBytes, out string payloadJson))
                 return;
@@ -637,13 +665,18 @@ namespace CoopSpectator.MissionBehaviors
                     if (snapshot != null)
                     {
                         BattleSnapshotRuntimeState.SetCurrent(snapshot, "CoopMissionNetworkBridge");
+                        bool acknowledged = CoopBattleNetworkRequestTransport.TryAcknowledgeBattleSnapshot(
+                            transmissionId,
+                            "CoopMissionNetworkBridge.ApplyCompletedPayload");
                         ModLogger.Info(
                             "CoopMissionNetworkBridge: applied client payload. " +
                             "Kind=" + payloadKind +
+                            " TransmissionId=" + transmissionId +
                             " BattleId=" + (snapshot.BattleId ?? string.Empty) +
                             " MapScene=" + (snapshot.MapScene ?? string.Empty) +
                             " Parties=" + (snapshot.Sides?.Sum(side => side?.Parties?.Count ?? 0) ?? 0) +
-                            " Sides=" + (snapshot.Sides?.Count ?? 0));
+                            " Sides=" + (snapshot.Sides?.Count ?? 0) +
+                            " AckSent=" + acknowledged);
                     }
                     break;
                 }
@@ -912,6 +945,63 @@ namespace CoopSpectator.MissionBehaviors
                 _nextTransmissionId = 1;
 
             return _nextTransmissionId++;
+        }
+
+        internal static bool HasPeerAcknowledgedCurrentBattleSnapshot(
+            MissionPeer missionPeer,
+            out int expectedTransmissionId,
+            out int acknowledgedTransmissionId)
+        {
+            expectedTransmissionId = 0;
+            acknowledgedTransmissionId = 0;
+
+            NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
+            if (peer == null || peer.IsServerPeer)
+                return false;
+
+            _expectedBattleSnapshotTransmissionIdByPeer.TryGetValue(peer.Index, out expectedTransmissionId);
+            _acknowledgedBattleSnapshotTransmissionIdByPeer.TryGetValue(peer.Index, out acknowledgedTransmissionId);
+            return expectedTransmissionId > 0 && acknowledgedTransmissionId >= expectedTransmissionId;
+        }
+
+        private static void RegisterExpectedBattleSnapshotTransmission(int peerIndex, int transmissionId)
+        {
+            if (peerIndex < 0 || transmissionId <= 0)
+                return;
+
+            _expectedBattleSnapshotTransmissionIdByPeer[peerIndex] = transmissionId;
+        }
+
+        private static void ClearPeerBattleSnapshotSyncState(int peerIndex)
+        {
+            if (peerIndex < 0)
+                return;
+
+            _expectedBattleSnapshotTransmissionIdByPeer.Remove(peerIndex);
+            _acknowledgedBattleSnapshotTransmissionIdByPeer.Remove(peerIndex);
+        }
+
+        private bool TryAcknowledgePeerBattleSnapshot(NetworkCommunicator peer, string rawTransmissionId)
+        {
+            if (peer == null || string.IsNullOrWhiteSpace(rawTransmissionId) || !int.TryParse(rawTransmissionId, out int transmissionId))
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: rejected battle snapshot readiness ack. " +
+                    "Peer=" + (peer?.UserName ?? "null") +
+                    " RawTransmissionId=" + (rawTransmissionId ?? string.Empty));
+                return false;
+            }
+
+            _acknowledgedBattleSnapshotTransmissionIdByPeer[peer.Index] = transmissionId;
+            _expectedBattleSnapshotTransmissionIdByPeer.TryGetValue(peer.Index, out int expectedTransmissionId);
+            bool snapshotReady = expectedTransmissionId > 0 && transmissionId >= expectedTransmissionId;
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: acknowledged client battle snapshot readiness. " +
+                "Peer=" + (peer.UserName ?? "null") +
+                " TransmissionId=" + transmissionId +
+                " ExpectedTransmissionId=" + expectedTransmissionId +
+                " SnapshotReady=" + snapshotReady);
+            return true;
         }
 
         private static bool IsEligibleRemotePeer(NetworkCommunicator peer)

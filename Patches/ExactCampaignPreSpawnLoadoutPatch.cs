@@ -11,11 +11,13 @@ namespace CoopSpectator.Patches
     public static class ExactCampaignPreSpawnLoadoutPatch
     {
         private static readonly HashSet<string> LoggedEntryIds = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, bool> EquipmentInjectedByEntryId = new Dictionary<string, bool>(StringComparer.Ordinal);
         public static bool IsOperationalOnCurrentProcess { get; private set; }
 
         public static void Apply(Harmony harmony)
         {
             IsOperationalOnCurrentProcess = false;
+            EquipmentInjectedByEntryId.Clear();
             try
             {
                 var target = AccessTools.Method(
@@ -57,7 +59,38 @@ namespace CoopSpectator.Patches
             if (entryState == null)
                 return;
 
-            Equipment exactEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(entryState);
+            bool isPlayerControlledOrigin = ((IAgentOriginBase)exactOrigin).IsUnderPlayersCommand;
+
+            string exactEntryCompatibilitySummary;
+            string weaponDecisionReason;
+            bool includeWeapons = ShouldIncludeWeaponsForPreSpawnInjection(
+                exactOrigin,
+                isPlayerControlledOrigin,
+                entryState,
+                out exactEntryCompatibilitySummary,
+                out weaponDecisionReason);
+            string capeDecisionReason;
+            bool includeCape;
+            if (isPlayerControlledOrigin)
+            {
+                includeCape = false;
+                capeDecisionReason =
+                    "player-controlled origin keeps native template visual slots until local client exact overlay applies";
+            }
+            else
+            {
+                includeCape = CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(
+                    entryState,
+                    out _,
+                    out capeDecisionReason);
+            }
+            bool injectEquipment = includeWeapons || includeCape;
+            Equipment exactEquipment = injectEquipment
+                ? CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
+                    entryState,
+                    includeWeapons: includeWeapons)
+                : null;
+            EquipmentInjectedByEntryId[exactOrigin.EntryId] = injectEquipment && exactEquipment != null;
             if (exactEquipment != null)
                 agentBuildData.Equipment(exactEquipment);
 
@@ -82,9 +115,54 @@ namespace CoopSpectator.Patches
                 "EntryId=" + exactOrigin.EntryId +
                 " TroopId=" + exactOrigin.TroopId +
                 " Hero=" + entryState.IsHero +
+                " PlayerControlledOrigin=" + isPlayerControlledOrigin +
+                " InjectEquipment=" + (exactEquipment != null) +
+                " IncludeWeapons=" + includeWeapons +
+                " WeaponDecision=" + weaponDecisionReason +
+                " IncludeCape=" + includeCape +
+                " CapeDecision=" + capeDecisionReason +
+                " " + exactEntryCompatibilitySummary +
                 " SpawnFromAgentVisuals=" + spawnFromAgentVisuals +
-                " Equipment=" + SummarizeEquipment(exactEquipment) +
+                " Equipment=" + (exactEquipment != null ? SummarizeEquipment(exactEquipment) : "(native-template)") +
                 " Body=" + (!bodyProperties.Equals(default(BodyProperties))));
+        }
+
+        public static bool WasEquipmentInjectedForEntry(string entryId)
+        {
+            if (string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            return EquipmentInjectedByEntryId.TryGetValue(entryId, out bool injected) && injected;
+        }
+
+        private static bool ShouldIncludeWeaponsForPreSpawnInjection(
+            ExactCampaignSnapshotAgentOrigin exactOrigin,
+            bool isPlayerControlledOrigin,
+            RosterEntryState entryState,
+            out string exactEntryCompatibilitySummary,
+            out string decisionReason)
+        {
+            exactEntryCompatibilitySummary = "ExactEntryContract=(none)";
+            if (exactOrigin == null || entryState == null)
+            {
+                decisionReason = "entry state unavailable";
+                return false;
+            }
+
+            if (isPlayerControlledOrigin)
+            {
+                decisionReason =
+                    "player-controlled origin keeps native template spawn equipment until remote CreateAgent contract is proven safe";
+                return false;
+            }
+
+            // Only strict exact hero entries may carry pre-spawn weapons through Mission.SpawnAgent.
+            // Bulk native MP agents must keep weapon injection disabled until their runtime path is
+            // proven safe, otherwise CreateAgent / SetWieldedItemIndex can desync the client.
+            return CoopMissionSpawnLogic.EvaluateExactRuntimePreSpawnWeaponInjectionContract(
+                entryState,
+                out exactEntryCompatibilitySummary,
+                out decisionReason);
         }
 
         private static bool HasHeroIdentity(RosterEntryState entryState)

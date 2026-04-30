@@ -89,43 +89,55 @@ namespace CoopSpectator.Infrastructure
             SetState(peerIndex, BattleSideEnum.None, null, null, CoopBattlePeerLifecycleStatus.NoPeer, source, deathCountOverride: null);
         }
 
+        public static void Apply(
+            MissionPeer missionPeer,
+            BattleSideEnum side,
+            string troopId,
+            string entryId,
+            CoopBattlePeerLifecycleStatus status,
+            string source,
+            bool incrementDeathCount = false)
+        {
+            SetState(missionPeer, side, troopId, entryId, status, source, incrementDeathCount);
+        }
+
         public static void MarkNoSide(MissionPeer missionPeer, BattleSideEnum side, string source)
         {
-            SetState(missionPeer, side, null, null, CoopBattlePeerLifecycleStatus.NoSide, source, incrementDeathCount: false);
+            Apply(missionPeer, side, null, null, CoopBattlePeerLifecycleStatus.NoSide, source, incrementDeathCount: false);
         }
 
         public static void MarkAwaitingSelection(MissionPeer missionPeer, BattleSideEnum side, string source)
         {
-            SetState(missionPeer, side, null, null, CoopBattlePeerLifecycleStatus.AwaitingSelection, source, incrementDeathCount: false);
+            Apply(missionPeer, side, null, null, CoopBattlePeerLifecycleStatus.AwaitingSelection, source, incrementDeathCount: false);
         }
 
         public static void MarkSpawnQueued(MissionPeer missionPeer, string troopId, string entryId, string source)
         {
             BattleSideEnum side = CoopBattleAuthorityState.GetSelectionState(missionPeer).Side;
-            SetState(missionPeer, side, troopId, entryId, CoopBattlePeerLifecycleStatus.SpawnQueued, source, incrementDeathCount: false);
+            Apply(missionPeer, side, troopId, entryId, CoopBattlePeerLifecycleStatus.SpawnQueued, source, incrementDeathCount: false);
         }
 
         public static void MarkAlive(MissionPeer missionPeer, string troopId, string entryId, string source)
         {
             BattleSideEnum side = CoopBattleAuthorityState.GetSelectionState(missionPeer).Side;
-            SetState(missionPeer, side, troopId, entryId, CoopBattlePeerLifecycleStatus.Alive, source, incrementDeathCount: false);
+            Apply(missionPeer, side, troopId, entryId, CoopBattlePeerLifecycleStatus.Alive, source, incrementDeathCount: false);
         }
 
         public static void MarkDeadAwaitingRespawn(MissionPeer missionPeer, string troopId, string entryId, string source)
         {
             BattleSideEnum side = CoopBattleAuthorityState.GetSelectionState(missionPeer).Side;
-            SetState(missionPeer, side, troopId, entryId, CoopBattlePeerLifecycleStatus.DeadAwaitingRespawn, source, incrementDeathCount: true);
+            Apply(missionPeer, side, troopId, entryId, CoopBattlePeerLifecycleStatus.DeadAwaitingRespawn, source, incrementDeathCount: true);
         }
 
         public static void MarkRespawnable(MissionPeer missionPeer, string troopId, string entryId, string source)
         {
             BattleSideEnum side = CoopBattleAuthorityState.GetSelectionState(missionPeer).Side;
-            SetState(missionPeer, side, troopId, entryId, CoopBattlePeerLifecycleStatus.Respawnable, source, incrementDeathCount: false);
+            Apply(missionPeer, side, troopId, entryId, CoopBattlePeerLifecycleStatus.Respawnable, source, incrementDeathCount: false);
         }
 
         public static void MarkWaiting(MissionPeer missionPeer, BattleSideEnum side, string troopId, string entryId, string source)
         {
-            SetState(missionPeer, side, troopId, entryId, CoopBattlePeerLifecycleStatus.Waiting, source, incrementDeathCount: false);
+            Apply(missionPeer, side, troopId, entryId, CoopBattlePeerLifecycleStatus.Waiting, source, incrementDeathCount: false);
         }
 
         private static void SetState(

@@ -97,7 +97,7 @@ namespace CoopSpectator.Patches
             }
         }
 
-        public static void ResetRuntimeState(string source)
+        public static void ResetRuntimeState(string source, bool preserveCommanderOrderControlState = false)
         {
             _lastSuppressedFollowSwitchKey = null;
             _lastLocalVisualFinalizeKey = null;
@@ -126,12 +126,16 @@ namespace CoopSpectator.Patches
             _lastExactCommanderOrderBarMovieBindingKey = null;
             _lastForcedExactCommanderTroopSelectionInputsKey = null;
             _lastExactCommanderOrderItemExecutionKey = null;
-            _suppressExactCommanderOrderHotkeyFallbackUntilRelease = false;
-            _activeExactCommanderMissionOrderVm = null;
-            _pendingLocalCommanderOrderControlFinalization = null;
+            if (!preserveCommanderOrderControlState)
+            {
+                _suppressExactCommanderOrderHotkeyFallbackUntilRelease = false;
+                _activeExactCommanderMissionOrderVm = null;
+                _pendingLocalCommanderOrderControlFinalization = null;
+            }
             ModLogger.Info(
                 "BattleMapSpawnHandoffPatch: reset runtime state. " +
-                "Source=" + (source ?? "unknown"));
+                "Source=" + (source ?? "unknown") +
+                " PreserveCommanderOrderControlState=" + preserveCommanderOrderControlState);
         }
 
         private static void PatchMissionPeerFollowedAgent(Harmony harmony)
@@ -532,12 +536,17 @@ namespace CoopSpectator.Patches
                 if (string.Equals(_lastLocalVisualFinalizeKey, logKey, StringComparison.Ordinal))
                     return;
 
+                bool deferImmediateExactVisualFinalize =
+                    agent.SpawnEquipment == null ||
+                    agent.MountAgent != null;
                 bool exactVisualFinalized = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
                     mission,
                     agent,
                     preferredEntryId,
-                    "battle-map handoff SetAgentPeer");
-                if (exactVisualFinalized)
+                    "battle-map handoff SetAgentPeer",
+                    includeWeaponsForClientRefresh: true,
+                    allowImmediateApply: !deferImmediateExactVisualFinalize);
+                if (exactVisualFinalized && !deferImmediateExactVisualFinalize)
                     agent.MountAgent?.UpdateAgentProperties();
 
                 _lastLocalVisualFinalizeKey = logKey;
@@ -547,6 +556,7 @@ namespace CoopSpectator.Patches
                     " HasSpawnEquipment=" + (agent.SpawnEquipment != null) +
                     " MountAgentIndex=" + (agent.MountAgent?.Index.ToString() ?? "null") +
                     " ExactVisualFinalized=" + exactVisualFinalized +
+                    " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
                     " PreferredEntryId=" + (preferredEntryId ?? "null") +
                     " EntryResolutionSource=" + (entryResolutionSource ?? "null") +
                     " BridgeTroop=" + (entryPolicy.BridgeTroopOrEntryId ?? "null") +
@@ -610,12 +620,16 @@ namespace CoopSpectator.Patches
                 if (agent == null || !agent.IsActive() || agent.IsMount || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
                     return;
 
+                bool deferImmediateExactVisualFinalize =
+                    agent.MissionPeer != null &&
+                    agent.MountAgent != null;
                 bool applied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
                     mission,
                     agent,
                     preferredEntryId: null,
                     source: "battle-map handoff SynchronizeAgentSpawnEquipment",
-                    includeWeaponsForClientRefresh: true);
+                    includeWeaponsForClientRefresh: true,
+                    allowImmediateApply: !deferImmediateExactVisualFinalize);
                 if (applied)
                     return;
 

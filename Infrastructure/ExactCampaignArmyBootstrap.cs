@@ -235,9 +235,12 @@ namespace CoopSpectator.Infrastructure
 
                 initializationStep = "build-native-wave-spawn-settings";
                 MissionSpawnSettings spawnSettings = CreateNativeCampaignBattleWaveSpawnSettings();
-                int defenderInitial = defenderTotal;
-                int attackerInitial = attackerTotal;
-                int battleSizeBudget = BattleSnapshotRuntimeState.GetState()?.BattleSizeBudget ?? (defenderTotal + attackerTotal);
+                ComputeInitialSpawnCounts(
+                    defenderTotal,
+                    attackerTotal,
+                    out int defenderInitial,
+                    out int attackerInitial,
+                    out int battleSizeBudget);
                 int reinforcementWaveCount = GetResolvedReinforcementWaveCount();
 
                 initializationStep = "ensure-deployment-team-plans";
