@@ -6038,6 +6038,8 @@ namespace CoopSpectator.MissionBehaviors
                 GameNetwork.IsServer &&
                 overlayMode == ExactCampaignSnapshotOverlayMode.ServerAuthoritative;
             bool refreshedMountNativeVisuals = false;
+            bool refreshedMountExactVisuals = false;
+            string clientMountVisualRepairReason = null;
             if (enforceServerAuthoritativeOverlayContract &&
                 !IsServerAuthoritativeNativeExactOverlaySupported(diagnostic))
             {
@@ -6078,7 +6080,22 @@ namespace CoopSpectator.MissionBehaviors
             bool includeArmorVisualsForOverlayRefresh = true;
             bool includeMountVisualsForOverlayRefresh = !clientVisualOnly;
             if (clientVisualOnly)
+            {
                 TryApplyEntryIdentityToAgent(agent, entryState);
+                includeMountVisualsForOverlayRefresh = ShouldAttemptClientMountedHeroMountVisualRepair(
+                    agent,
+                    entryState,
+                    out clientMountVisualRepairReason);
+                if (includeMountVisualsForOverlayRefresh)
+                {
+                    ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                        "client-mount-visual-repair-request",
+                        "AgentIndex=" + agent.Index +
+                        " EntryId=" + entryId +
+                        " Reason=" + (clientMountVisualRepairReason ?? "none") +
+                        " Source=" + (source ?? "unknown"));
+                }
+            }
 
             Equipment seedEquipment = agent.SpawnEquipment?.Clone(false);
             Equipment spawnEquipment =
@@ -6119,7 +6136,7 @@ namespace CoopSpectator.MissionBehaviors
                             : "client-rider-visual-refresh, " + appliedEquipment;
                 }
                 equipmentMisses = missedSlots.Count > 0 ? string.Join(", ", missedSlots) : "(none)";
-                if (clientVisualOnly)
+                if (clientVisualOnly && !includeMountVisualsForOverlayRefresh)
                 {
                     string keptNativeSlots = includeWeaponsForOverlayRefresh
                         ? "Horse/HorseHarness=kept-native"
@@ -6161,7 +6178,34 @@ namespace CoopSpectator.MissionBehaviors
                         }
                     }
 
-                    if (clientVisualOnly && agent.MountAgent?.SpawnEquipment != null)
+                    if (clientVisualOnly && includeMountVisualsForOverlayRefresh)
+                    {
+                        if (TryRefreshClientMountedHeroExactMountVisuals(
+                                agent,
+                                entryState,
+                                entryId,
+                                source,
+                                clientMountVisualRepairReason,
+                                out string appliedMountVisuals,
+                                out string mountVisualRefreshIssue))
+                        {
+                            refreshedMountExactVisuals = true;
+                            if (!string.IsNullOrWhiteSpace(appliedMountVisuals) &&
+                                !string.Equals(appliedMountVisuals, "(none)", StringComparison.Ordinal))
+                            {
+                                appliedEquipment += ", Mount=" + appliedMountVisuals;
+                            }
+                        }
+                        else if (!string.IsNullOrWhiteSpace(mountVisualRefreshIssue) &&
+                                 !string.Equals(mountVisualRefreshIssue, "(none)", StringComparison.Ordinal))
+                        {
+                            equipmentMisses =
+                                equipmentMisses == "(none)"
+                                    ? mountVisualRefreshIssue
+                                    : equipmentMisses + ", " + mountVisualRefreshIssue;
+                        }
+                    }
+                    else if (clientVisualOnly && agent.MountAgent?.SpawnEquipment != null)
                     {
                         try
                         {
@@ -6194,7 +6238,7 @@ namespace CoopSpectator.MissionBehaviors
                     }
                 }
 
-                if (clientVisualOnly && refreshedMountNativeVisuals)
+                if (clientVisualOnly && refreshedMountNativeVisuals && !refreshedMountExactVisuals)
                     appliedEquipment += ", Mount=native-refresh";
             }
             else if (preSpawnExactLoadoutInjected)
@@ -12741,6 +12785,164 @@ namespace CoopSpectator.MissionBehaviors
             return appliedSlots.Count > 0 ? string.Join(", ", appliedSlots) : "(none)";
         }
 
+        private static bool ShouldAttemptClientMountedHeroMountVisualRepair(
+            Agent agent,
+            RosterEntryState entryState,
+            out string reason)
+        {
+            reason = null;
+            if (agent == null || entryState == null || !entryState.IsMounted)
+                return false;
+
+            string expectedHorseId = ResolveExpectedMaterializedEquipmentItemId(entryState.CombatHorseId, entryState, "Horse");
+            string expectedHorseHarnessId = ResolveExpectedMaterializedEquipmentItemId(entryState.CombatHorseHarnessId, entryState, "HorseHarness");
+            if (string.IsNullOrWhiteSpace(expectedHorseId) && string.IsNullOrWhiteSpace(expectedHorseHarnessId))
+                return false;
+
+            var mismatches = new List<string>();
+            AppendExpectedEquipmentMismatch(
+                mismatches,
+                "Horse",
+                expectedHorseId,
+                agent.SpawnEquipment?[EquipmentIndex.Horse].Item?.StringId);
+            AppendExpectedEquipmentMismatch(
+                mismatches,
+                "HorseHarness",
+                expectedHorseHarnessId,
+                agent.SpawnEquipment?[EquipmentIndex.HorseHarness].Item?.StringId);
+
+            Agent mountAgent = agent.MountAgent;
+            if (mountAgent != null)
+            {
+                AppendExpectedEquipmentMismatch(
+                    mismatches,
+                    "MountAgentHorse",
+                    expectedHorseId,
+                    mountAgent.SpawnEquipment?[EquipmentIndex.Horse].Item?.StringId);
+                AppendExpectedEquipmentMismatch(
+                    mismatches,
+                    "MountAgentHorseHarness",
+                    expectedHorseHarnessId,
+                    mountAgent.SpawnEquipment?[EquipmentIndex.HorseHarness].Item?.StringId);
+            }
+
+            if (mismatches.Count == 0)
+                return false;
+
+            reason = string.Join(" | ", mismatches);
+            return true;
+        }
+
+        private static bool TryRefreshClientMountedHeroExactMountVisuals(
+            Agent riderAgent,
+            RosterEntryState entryState,
+            string entryId,
+            string source,
+            string repairReason,
+            out string appliedMountVisuals,
+            out string refreshIssue)
+        {
+            appliedMountVisuals = "(none)";
+            refreshIssue = "(none)";
+            if (riderAgent?.MountAgent == null || entryState == null)
+            {
+                refreshIssue = "mount-visual-refresh-skipped:MountAgentNull";
+                return false;
+            }
+
+            Equipment mountSpawnEquipment = riderAgent.MountAgent.SpawnEquipment?.Clone(false) ?? new Equipment();
+            var missedSlots = new List<string>();
+            appliedMountVisuals = TryApplyMaterializedEquipmentOverrides(
+                mountSpawnEquipment,
+                entryState,
+                missedSlots,
+                trackCoverage: false,
+                includeWeapons: false,
+                includeArmorVisuals: false,
+                includeMountVisuals: true);
+            if (string.Equals(appliedMountVisuals, "(none)", StringComparison.Ordinal))
+            {
+                refreshIssue = missedSlots.Count > 0
+                    ? "mount-visual-refresh-missed:" + string.Join("|", missedSlots)
+                    : "mount-visual-refresh-noop";
+                return false;
+            }
+
+            try
+            {
+                riderAgent.MountAgent.UpdateSpawnEquipmentAndRefreshVisuals(mountSpawnEquipment);
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-mount-visual-repair-success",
+                    "AgentIndex=" + riderAgent.Index +
+                    " MountAgentIndex=" + riderAgent.MountAgent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " AppliedMount={" + appliedMountVisuals + "}" +
+                    " Reason=" + (repairReason ?? "none") +
+                    " Source=" + (source ?? "unknown"));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                refreshIssue = "mount-visual-refresh-failed:" + ex.GetType().Name;
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-mount-visual-repair-failed",
+                    "AgentIndex=" + riderAgent.Index +
+                    " MountAgentIndex=" + (riderAgent.MountAgent?.Index.ToString() ?? "null") +
+                    " EntryId=" + (entryId ?? "null") +
+                    " AppliedMount={" + appliedMountVisuals + "}" +
+                    " Reason=" + (repairReason ?? "none") +
+                    " ExceptionType=" + ex.GetType().Name +
+                    " Source=" + (source ?? "unknown"));
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: client mounted hero exact mount visual refresh failed. " +
+                    "AgentIndex=" + riderAgent.Index +
+                    " MountAgentIndex=" + (riderAgent.MountAgent?.Index.ToString() ?? "null") +
+                    " EntryId=" + (entryId ?? "null") +
+                    " AppliedMount={" + appliedMountVisuals + "}" +
+                    " Reason=" + (repairReason ?? "none") +
+                    " Source=" + (source ?? "unknown") +
+                    " Exception=" + ex);
+                return false;
+            }
+        }
+
+        private static string ResolveExpectedMaterializedEquipmentItemId(
+            string itemId,
+            RosterEntryState entryState,
+            string slotLabel)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return null;
+
+            string resolvedItemId;
+            string resolutionSource;
+            ItemObject item = ResolveMaterializedEquipmentItem(
+                itemId,
+                entryState,
+                slotLabel,
+                out resolvedItemId,
+                out resolutionSource,
+                trackCoverage: false);
+            return item?.StringId ?? resolvedItemId;
+        }
+
+        private static void AppendExpectedEquipmentMismatch(
+            List<string> mismatches,
+            string slotLabel,
+            string expectedItemId,
+            string actualItemId)
+        {
+            if (mismatches == null || string.IsNullOrWhiteSpace(expectedItemId))
+                return;
+
+            if (string.Equals(expectedItemId, actualItemId, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            mismatches.Add(
+                slotLabel + "=" + (actualItemId ?? "empty") +
+                " expected=" + expectedItemId);
+        }
+
         private static void ClearTemplateEquipmentForUnspecifiedSnapshotSlots(
             Equipment spawnEquipment,
             RosterEntryState entryState,
@@ -14290,6 +14492,7 @@ namespace CoopSpectator.MissionBehaviors
                 " WieldedItem=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
                 " " + BuildExactBattleAgentSpawnTraceEquipmentSummary(ResolveAgentTraceEquipmentSnapshot(agent)) +
                 " " + BuildExactBattleAgentSpawnTraceContractSummary(diagnostic) +
+                " " + BuildClientMountedHeroMountRepairSummary(agent, entryState) +
                 " " + BuildClientExactVisualOverlayStateSummary(agent.Index) +
                 " Source=" + (source ?? "unknown") +
                 (string.IsNullOrWhiteSpace(payloadSummary) ? string.Empty : " " + payloadSummary);
@@ -14339,6 +14542,14 @@ namespace CoopSpectator.MissionBehaviors
                 ",PendingEntryId=" + (pendingState?.EntryId ?? "null") +
                 ",PendingRetries=" + (pending ? pendingState.RetryCount.ToString() : "0") +
                 ",PendingSource=" + (pendingState?.Source ?? "null") + "}";
+        }
+
+        private static string BuildClientMountedHeroMountRepairSummary(Agent agent, RosterEntryState entryState)
+        {
+            bool needed = ShouldAttemptClientMountedHeroMountVisualRepair(agent, entryState, out string reason);
+            return
+                "ClientMountRepair={Needed=" + needed +
+                ",Reason=" + (reason ?? "none") + "}";
         }
 
         private static void TraceServerExactHeroRemovalContract(
