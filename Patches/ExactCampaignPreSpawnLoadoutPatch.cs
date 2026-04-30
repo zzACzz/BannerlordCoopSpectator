@@ -94,6 +94,17 @@ namespace CoopSpectator.Patches
             if (exactEquipment != null)
                 agentBuildData.Equipment(exactEquipment);
 
+            CoopMissionSpawnLogic.TraceServerPreSpawnExactHeroContract(
+                exactOrigin,
+                entryState,
+                exactEquipment,
+                injectEquipment,
+                includeWeapons,
+                includeCape,
+                weaponDecisionReason,
+                capeDecisionReason,
+                spawnFromAgentVisuals);
+
             if (TryResolveEntryBodyProperties(entryState, out BodyProperties bodyProperties))
                 agentBuildData.BodyProperties(bodyProperties);
 

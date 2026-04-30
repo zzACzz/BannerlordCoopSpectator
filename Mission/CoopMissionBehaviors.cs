@@ -3664,6 +3664,7 @@ namespace CoopSpectator.MissionBehaviors
         private static Mission _lastBattlePhaseAiHoldMission;
         private static Mission _lastMaterializedArmyMission;
         private static Mission _lastClientBattleSnapshotRefreshMission;
+        private static string _lastClientMountedHeroRuntimeBundleMissionKey = string.Empty;
         private static string _lastClientBattleSnapshotRefreshKey = string.Empty;
         private static string _lastSkippedClientBattleSnapshotRefreshKey = string.Empty;
         private static bool? _lastAppliedBattlePhaseAiHold;
@@ -4069,6 +4070,7 @@ namespace CoopSpectator.MissionBehaviors
             _lastMaterializedArmyMission = null;
             _lastClientBattleSnapshotRefreshMission = null;
             _battleLifecycleStartupTraceKeys.Clear();
+            _lastClientMountedHeroRuntimeBundleMissionKey = string.Empty;
             _lastClientBattleSnapshotRefreshKey = string.Empty;
             _lastSkippedClientBattleSnapshotRefreshKey = string.Empty;
             _nextSkippedClientBattleSnapshotRefreshLogUtc = DateTime.MinValue;
@@ -4269,6 +4271,7 @@ namespace CoopSpectator.MissionBehaviors
         public override void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, AgentState agentState, KillingBlow blow)
         {
             _materializedBattleResultRawOnAgentRemovedCount++;
+            TraceServerExactHeroRemovalContract(affectedAgent, affectorAgent, agentState, "CoopMissionSpawnLogic.OnAgentRemoved");
             TrySyncExactCampaignNativeOriginRemoval(Mission, affectedAgent, affectorAgent, agentState);
             TryTrackMaterializedBattleResultRemoval(affectedAgent, affectorAgent, agentState);
             TryLogMaterializedBattleResultRemovalDebug(affectedAgent, affectorAgent, agentState, blow);
@@ -5221,6 +5224,13 @@ namespace CoopSpectator.MissionBehaviors
                         " IncludeWeapons=" + pendingState.IncludeWeaponsForRefresh +
                         " Retries=" + pendingState.RetryCount +
                         " Source=" + (pendingState.Source ?? "unknown"));
+                    ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                        "client-exact-visual-complete",
+                        "AgentIndex=" + agent.Index +
+                        " EntryId=" + (pendingState.EntryId ?? "null") +
+                        " IncludeWeapons=" + pendingState.IncludeWeaponsForRefresh +
+                        " Retries=" + pendingState.RetryCount +
+                        " Source=" + (pendingState.Source ?? "unknown"));
                     completedAgentIndices.Add(agentIndex);
                 }
                 else if (expired)
@@ -5228,6 +5238,12 @@ namespace CoopSpectator.MissionBehaviors
                     completedAgentIndices.Add(agentIndex);
                     ModLogger.Info(
                         "CoopMissionSpawnLogic: abandoned pending client exact visual overlay because apply never succeeded. " +
+                        "AgentIndex=" + agentIndex +
+                        " EntryId=" + (pendingState.EntryId ?? "null") +
+                        " Retries=" + pendingState.RetryCount +
+                        " Source=" + (pendingState.Source ?? "unknown"));
+                    ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                        "client-exact-visual-abandoned",
                         "AgentIndex=" + agentIndex +
                         " EntryId=" + (pendingState.EntryId ?? "null") +
                         " Retries=" + pendingState.RetryCount +
@@ -5305,6 +5321,12 @@ namespace CoopSpectator.MissionBehaviors
                         " EntryId=" + entryId +
                         " Retries=" + pendingState.RetryCount +
                         " PendingSource=" + (pendingState.Source ?? "unknown"));
+                    ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                        "client-exact-visual-escalate",
+                        "AgentIndex=" + agent.Index +
+                        " EntryId=" + entryId +
+                        " Retries=" + pendingState.RetryCount +
+                        " PendingSource=" + (pendingState.Source ?? "unknown"));
                 }
 
                 if (_clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.TryGetValue(agent.Index, out DateTime lastAttemptUtc) &&
@@ -5325,6 +5347,12 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     ModLogger.Info(
                         "CoopMissionSpawnLogic: watchdog applied client exact hero visual overlay. " +
+                        "AgentIndex=" + agent.Index +
+                        " EntryId=" + entryId +
+                        " TeamSide=" + agent.Team.Side +
+                        " TroopId=" + (agent.Character?.StringId ?? "null"));
+                    ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                        "client-exact-visual-watchdog-applied",
                         "AgentIndex=" + agent.Index +
                         " EntryId=" + entryId +
                         " TeamSide=" + agent.Team.Side +
@@ -13395,6 +13423,12 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSnapshotRuntimeState.GetUpdatedUtc(),
                 summary,
                 diagnostics.Select(BuildExactEntryCompatibilityReportLine));
+            ExactBattleRuntimeBundleBridgeFile.AppendMissionContext(
+                runtimeState.Snapshot?.BattleId,
+                null,
+                source ?? "compatibility-audit",
+                "CompatibilityReportPath=" + ExactBattleEntryCompatibilityBridgeFile.GetReportFilePath() +
+                " Summary={" + summary + "}");
             AppendExactBattleAgentSpawnTraceEvent(
                 "compatibility-audit",
                 "Summary={" + summary + "}" +
@@ -14131,6 +14165,11 @@ namespace CoopSpectator.MissionBehaviors
                 mission?.SceneName ?? string.Empty,
                 BattleSnapshotRuntimeState.GetUpdatedUtc(),
                 source ?? "unknown");
+            ExactBattleRuntimeBundleBridgeFile.AppendMissionContext(
+                battleId,
+                mission?.SceneName ?? string.Empty,
+                source ?? "unknown",
+                "TraceFilePath=" + ExactBattleAgentSpawnTraceBridgeFile.GetTraceFilePath());
         }
 
         private static void AppendExactBattleAgentSpawnTraceLifecycleStep(
@@ -14171,6 +14210,177 @@ namespace CoopSpectator.MissionBehaviors
                 " Utc=" + DateTime.UtcNow.ToString("O") +
                 " Event=" + (eventName ?? "unknown") +
                 (string.IsNullOrWhiteSpace(details) ? string.Empty : " " + details));
+        }
+
+        internal static void TraceServerPreSpawnExactHeroContract(
+            ExactCampaignSnapshotAgentOrigin exactOrigin,
+            RosterEntryState entryState,
+            Equipment exactEquipment,
+            bool injectEquipment,
+            bool includeWeapons,
+            bool includeCape,
+            string weaponDecisionReason,
+            string capeDecisionReason,
+            bool spawnFromAgentVisuals)
+        {
+            if (!GameNetwork.IsServer || exactOrigin == null || entryState == null)
+                return;
+
+            bool isPlayerControlledOrigin = ((IAgentOriginBase)exactOrigin).IsUnderPlayersCommand;
+            if (!isPlayerControlledOrigin && !HasEntryExactPersonalPerkHeroIdentity(entryState))
+                return;
+
+            ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
+            string details =
+                "EntryId=" + (entryState.EntryId ?? "null") +
+                " TroopId=" + (exactOrigin.TroopId ?? "null") +
+                " Hero=" + entryState.IsHero +
+                " PlayerControlledOrigin=" + isPlayerControlledOrigin +
+                " Mounted=" + entryState.IsMounted +
+                " InjectEquipment=" + injectEquipment +
+                " IncludeWeapons=" + includeWeapons +
+                " IncludeCape=" + includeCape +
+                " SpawnFromAgentVisuals=" + spawnFromAgentVisuals +
+                " WeaponDecision=" + (weaponDecisionReason ?? "null") +
+                " CapeDecision=" + (capeDecisionReason ?? "null") +
+                " EquipmentSource=" + (exactEquipment != null ? "exact-snapshot" : "native-template") +
+                " " + BuildExactBattleAgentSpawnTraceEquipmentSummary(exactEquipment) +
+                " " + BuildExactBattleAgentSpawnTraceContractSummary(diagnostic);
+            AppendExactBattleAgentSpawnTraceEvent("server-pre-spawn-contract", details);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent("server-pre-spawn-contract", details);
+        }
+
+        internal static void TraceClientMountedHeroNetworkContract(
+            Agent agent,
+            string eventName,
+            string source,
+            string payloadSummary = null)
+        {
+            if (GameNetwork.IsServer || agent == null || agent.IsMount)
+                return;
+
+            Mission mission = agent.Mission ?? Mission.Current;
+            TryAppendClientMountedHeroMissionContext(mission, source);
+
+            string entryId = null;
+            if (!_exactNativeClientVisualOverlayEntryIdByAgentIndex.TryGetValue(agent.Index, out entryId) ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                entryId = ResolveClientExactCampaignVisualOverlayEntryId(agent);
+            }
+
+            if (string.IsNullOrWhiteSpace(entryId))
+                return;
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                return;
+
+            ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
+            string details =
+                "AgentIndex=" + agent.Index +
+                " TeamSide=" + (agent.Team?.Side.ToString() ?? "null") +
+                " EntryId=" + entryId +
+                " AgentCharacterId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                " MissionPeerIndex=" + (agent.MissionPeer?.Peer?.Index.ToString() ?? "null") +
+                " MissionPeerName=" + (agent.MissionPeer?.Peer?.UserName ?? "null") +
+                " MountAgentIndex=" + (agent.MountAgent?.Index.ToString() ?? "null") +
+                " Active=" + agent.IsActive() +
+                " Health=" + agent.Health.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) +
+                " WieldedItem=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
+                " " + BuildExactBattleAgentSpawnTraceEquipmentSummary(ResolveAgentTraceEquipmentSnapshot(agent)) +
+                " " + BuildExactBattleAgentSpawnTraceContractSummary(diagnostic) +
+                " " + BuildClientExactVisualOverlayStateSummary(agent.Index) +
+                " Source=" + (source ?? "unknown") +
+                (string.IsNullOrWhiteSpace(payloadSummary) ? string.Empty : " " + payloadSummary);
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: client mounted hero network contract. " +
+                "Event=" + (eventName ?? "unknown") +
+                " " + details);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(eventName ?? "client-mounted-hero-contract", details);
+        }
+
+        private static void TryAppendClientMountedHeroMissionContext(Mission mission, string source)
+        {
+            if (GameNetwork.IsServer || mission == null)
+                return;
+
+            BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            string battleId =
+                snapshot?.BattleId ??
+                runtimeState?.Snapshot?.BattleId ??
+                string.Empty;
+            string missionKey =
+                (battleId ?? string.Empty) + "|" +
+                (mission.SceneName ?? string.Empty);
+            if (string.Equals(_lastClientMountedHeroRuntimeBundleMissionKey, missionKey, StringComparison.Ordinal))
+                return;
+
+            _lastClientMountedHeroRuntimeBundleMissionKey = missionKey;
+            ExactBattleRuntimeBundleBridgeFile.AppendMissionContext(
+                battleId,
+                mission.SceneName ?? string.Empty,
+                source ?? "client-mounted-hero-contract",
+                "ClientObserver=true");
+        }
+
+        private static string BuildClientExactVisualOverlayStateSummary(int agentIndex)
+        {
+            bool applied = _exactNativeClientVisualOverlayAppliedAgentIndices.Contains(agentIndex);
+            bool includesWeapons =
+                _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.TryGetValue(agentIndex, out bool appliedIncludesWeapons) &&
+                appliedIncludesWeapons;
+            bool pending = _pendingExactNativeClientVisualOverlaysByAgentIndex.TryGetValue(agentIndex, out PendingClientExactVisualOverlayState pendingState);
+            return
+                "ClientExactVisual={Applied=" + applied +
+                ",IncludesWeapons=" + includesWeapons +
+                ",Pending=" + pending +
+                ",PendingEntryId=" + (pendingState?.EntryId ?? "null") +
+                ",PendingRetries=" + (pending ? pendingState.RetryCount.ToString() : "0") +
+                ",PendingSource=" + (pendingState?.Source ?? "null") + "}";
+        }
+
+        private static void TraceServerExactHeroRemovalContract(
+            Agent affectedAgent,
+            Agent affectorAgent,
+            AgentState agentState,
+            string source)
+        {
+            if (!GameNetwork.IsServer || affectedAgent == null || affectedAgent.IsMount)
+                return;
+
+            string entryId = null;
+            if (!ExactCampaignArmyBootstrap.TryGetEntryId(affectedAgent, out entryId))
+                _materializedArmyEntryIdByAgentIndex.TryGetValue(affectedAgent.Index, out entryId);
+
+            RosterEntryState entryState = !string.IsNullOrWhiteSpace(entryId)
+                ? BattleSnapshotRuntimeState.GetEntryState(entryId)
+                : null;
+            if (entryState == null && affectedAgent.MissionPeer == null)
+                return;
+
+            if (entryState != null && !IsHeroEntryEligibleForExactPersonalPerks(entryState) && affectedAgent.MissionPeer == null)
+                return;
+
+            ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
+            string details =
+                "AgentIndex=" + affectedAgent.Index +
+                " EntryId=" + (entryId ?? "null") +
+                " AgentCharacterId=" + ((affectedAgent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                " AgentState=" + agentState +
+                " Health=" + affectedAgent.Health.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) +
+                " MissionPeerIndex=" + (affectedAgent.MissionPeer?.Peer?.Index.ToString() ?? "null") +
+                " MissionPeerName=" + (affectedAgent.MissionPeer?.Peer?.UserName ?? "null") +
+                " MountAgentIndex=" + (affectedAgent.MountAgent?.Index.ToString() ?? "null") +
+                " AffectorAgentIndex=" + (affectorAgent?.Index.ToString() ?? "null") +
+                " WieldedItem=" + (affectedAgent.WieldedWeapon.Item?.StringId ?? "none") +
+                " PreSpawnExactLoadoutInjected=" + HasExactCampaignPreSpawnLoadoutInjected(affectedAgent) +
+                " " + BuildExactBattleAgentSpawnTraceEquipmentSummary(ResolveAgentTraceEquipmentSnapshot(affectedAgent)) +
+                " " + BuildExactBattleAgentSpawnTraceContractSummary(diagnostic) +
+                " Source=" + (source ?? "unknown");
+            AppendExactBattleAgentSpawnTraceEvent("server-agent-removed", details);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent("server-agent-removed", details);
         }
 
         private static string BuildExactBattleAgentSpawnTraceWarnings(ExactEntryCompatibilityDiagnostic diagnostic)

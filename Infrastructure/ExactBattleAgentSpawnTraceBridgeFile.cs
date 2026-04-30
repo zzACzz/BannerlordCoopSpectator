@@ -30,7 +30,9 @@ namespace CoopSpectator.Infrastructure
                     "MissionName=" + (missionName ?? string.Empty),
                     "SnapshotUpdatedUtc=" + (snapshotUpdatedUtc == DateTime.MinValue ? string.Empty : snapshotUpdatedUtc.ToString("O")),
                     "SessionStartedUtc=" + DateTime.UtcNow.ToString("O"),
-                    "Source=" + (source ?? string.Empty)
+                    "Source=" + (source ?? string.Empty),
+                    "BuildMarker=" + AssemblyDiagnostics.BUILD_MARKER,
+                    "RuntimeBundlePath=" + ExactBattleRuntimeBundleBridgeFile.GetBundleFilePath()
                 };
 
                 using (FileStream stream = new FileStream(GetTraceFilePath(), FileMode.Create, FileAccess.Write, FileShare.ReadWrite))

@@ -12,7 +12,7 @@ namespace CoopSpectator.Infrastructure
     public static class AssemblyDiagnostics
     {
         /// <summary>Маркер збірки мода для порівняння dedicated vs client логів.</summary>
-        public const string BUILD_MARKER = "COOP_FIX_2026_03_08_A";
+        public const string BUILD_MARKER = "EXACT_CAMPAIGN_TRANSFER_DIAG_2026_04_30_A";
 
         private static readonly string[] KeyAssemblyNames = new[]
         {

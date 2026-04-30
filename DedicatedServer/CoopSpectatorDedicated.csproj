@@ -65,6 +65,9 @@
     <Compile Include="..\Infrastructure\BattleCommanderResolver.cs" Link="Infrastructure\BattleCommanderResolver.cs" />
     <Compile Include="..\Infrastructure\CampaignMapPatchMissionInit.cs" Link="Infrastructure\CampaignMapPatchMissionInit.cs" />
     <Compile Include="..\Infrastructure\CampaignMultiplayerHeroClassResolver.cs" Link="Infrastructure\CampaignMultiplayerHeroClassResolver.cs" />
+    <Compile Include="..\Infrastructure\ExactBattleAgentSpawnTraceBridgeFile.cs" Link="Infrastructure\ExactBattleAgentSpawnTraceBridgeFile.cs" />
+    <Compile Include="..\Infrastructure\ExactBattleEntryCompatibilityBridgeFile.cs" Link="Infrastructure\ExactBattleEntryCompatibilityBridgeFile.cs" />
+    <Compile Include="..\Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" Link="Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignArmyBootstrap.cs" Link="Infrastructure\ExactCampaignArmyBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />

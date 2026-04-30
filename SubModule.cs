@@ -29,6 +29,7 @@ namespace CoopSpectator // Використовуємо кореневий names
 
             // Runtime diagnostics: assembly paths/versions (to detect build mismatch vs dedicated).
             try { AssemblyDiagnostics.LogRuntimeLoadPaths(); AssemblyDiagnostics.WarnIfAssemblyPathUnexpected(); } catch (Exception ex) { ModLogger.Info("AssemblyDiagnostics failed: " + ex.Message); }
+            try { ExactBattleRuntimeBundleBridgeFile.ResetBundle("SubModule.OnSubModuleLoad"); } catch (Exception ex) { ModLogger.Info("ExactBattleRuntimeBundleBridgeFile reset failed: " + ex.Message); }
 
             CoopRuntime.Initialize(); // Ініціалізуємо глобальний runtime (NetworkManager, тощо)
             _battleDetector = new BattleDetector(); // Створюємо детектор битви один раз (використовуватиметься з OnApplicationTick)

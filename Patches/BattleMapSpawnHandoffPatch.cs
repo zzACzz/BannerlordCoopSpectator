@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -72,6 +73,8 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateAgent), () => PatchMissionNetworkComponentCreateAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSynchronizeAgentEquipment), () => PatchMissionNetworkComponentSynchronizeAgentEquipment(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentPeer), () => PatchMissionNetworkComponentSetAgentPeer(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentHealth), () => PatchMissionNetworkComponentSetAgentHealth(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWieldedItemIndex), () => PatchMissionNetworkComponentSetWieldedItemIndex(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAssignFormationToPlayer), () => PatchMissionNetworkComponentAssignFormationToPlayer(harmony));
             TryApplyPatchStep(nameof(PatchOrderControllerSelectAllFormations), () => PatchOrderControllerSelectAllFormations(harmony));
             TryApplyPatchStep(nameof(PatchOrderTroopPlacerMissionScreenTick), () => PatchOrderTroopPlacerMissionScreenTick(harmony));
@@ -215,6 +218,42 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, postfix: new HarmonyMethod(postfix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to MissionNetworkComponent.HandleServerEventSynchronizeAgentEquipment.");
+        }
+
+        private static void PatchMissionNetworkComponentSetAgentHealth(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetAgentHealth",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetAgentHealth_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetAgentHealth not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to MissionNetworkComponent.HandleServerEventSetAgentHealth.");
+        }
+
+        private static void PatchMissionNetworkComponentSetWieldedItemIndex(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetWieldedItemIndex",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetWieldedItemIndex_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetWieldedItemIndex not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to MissionNetworkComponent.HandleServerEventSetWieldedItemIndex.");
         }
 
         private static void PatchMissionNetworkComponentAssignFormationToPlayer(Harmony harmony)
@@ -561,6 +600,14 @@ namespace CoopSpectator.Patches
                     " EntryResolutionSource=" + (entryResolutionSource ?? "null") +
                     " BridgeTroop=" + (entryPolicy.BridgeTroopOrEntryId ?? "null") +
                     " Mission=" + (mission.SceneName ?? "null"));
+                CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                    agent,
+                    "client-set-agent-peer",
+                    "battle-map handoff SetAgentPeer",
+                    "PayloadPeerIndex=" + (setAgentPeer.Peer?.Index.ToString() ?? "null") +
+                    " PreferredEntryId=" + (preferredEntryId ?? "null") +
+                    " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
+                    " ExactVisualFinalized=" + exactVisualFinalized);
             }
             catch (Exception ex)
             {
@@ -598,6 +645,15 @@ namespace CoopSpectator.Patches
                     " TeamSide=" + agent.Team.Side +
                     " TroopId=" + (agent.Character?.StringId ?? "null") +
                     " Mission=" + (mission.SceneName ?? "null"));
+                CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                    agent,
+                    "client-create-agent",
+                    "battle-map handoff CreateAgent",
+                    "PayloadMissionWeapons={" + BuildMissionEquipmentWeaponSummary(createAgent.MissionEquipment) + "}" +
+                    " PayloadMount={" + BuildEquipmentSummary(createAgent.SpawnEquipment, EquipmentIndex.Horse, EquipmentIndex.HorseHarness) + "}" +
+                    " PayloadMountAgentIndex=" + createAgent.MountAgentIndex +
+                    " PayloadIsPlayerAgent=" + createAgent.IsPlayerAgent +
+                    " DeferredExactVisualFinalize=" + exactVisualApplied);
             }
             catch (Exception ex)
             {
@@ -630,6 +686,20 @@ namespace CoopSpectator.Patches
                     source: "battle-map handoff SynchronizeAgentSpawnEquipment",
                     includeWeaponsForClientRefresh: true,
                     allowImmediateApply: !deferImmediateExactVisualFinalize);
+                CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                    agent,
+                    "client-synchronize-agent-equipment",
+                    "battle-map handoff SynchronizeAgentSpawnEquipment",
+                    "PayloadEquipment={" + BuildEquipmentSummary(
+                        synchronizeAgentSpawnEquipment.SpawnEquipment,
+                        EquipmentIndex.Weapon0,
+                        EquipmentIndex.Weapon1,
+                        EquipmentIndex.Weapon2,
+                        EquipmentIndex.Weapon3,
+                        EquipmentIndex.Horse,
+                        EquipmentIndex.HorseHarness) + "}" +
+                    " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
+                    " ExactVisualFinalizeResult=" + applied);
                 if (applied)
                     return;
 
@@ -642,6 +712,115 @@ namespace CoopSpectator.Patches
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: SynchronizeAgentSpawnEquipment exact override failed open: " + ex.Message);
             }
+        }
+
+        private static void MissionNetworkComponent_HandleServerEventSetAgentHealth_Postfix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is SetAgentHealth setAgentHealth))
+                    return;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return;
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setAgentHealth.AgentIndex, canBeNull: true);
+                if (agent == null || agent.IsMount)
+                    return;
+
+                if (setAgentHealth.Health > 0 && agent.MountAgent == null && agent.MissionPeer == null)
+                    return;
+
+                CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                    agent,
+                    "client-set-agent-health",
+                    "battle-map handoff SetAgentHealth",
+                    "PayloadHealth=" + setAgentHealth.Health);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetAgentHealth contract trace failed: " + ex.Message);
+            }
+        }
+
+        private static void MissionNetworkComponent_HandleServerEventSetWieldedItemIndex_Postfix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is SetWieldedItemIndex setWieldedItemIndex))
+                    return;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return;
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWieldedItemIndex.AgentIndex, canBeNull: true);
+                if (agent == null || agent.IsMount)
+                    return;
+
+                if (setWieldedItemIndex.WieldedItemIndex != EquipmentIndex.Weapon2 &&
+                    !setWieldedItemIndex.IsWieldedOnSpawn &&
+                    agent.MountAgent == null)
+                {
+                    return;
+                }
+
+                CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                    agent,
+                    "client-set-wielded-item-index",
+                    "battle-map handoff SetWieldedItemIndex",
+                    "PayloadWieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                    " PayloadIsLeftHand=" + setWieldedItemIndex.IsLeftHand +
+                    " PayloadIsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
+                    " PayloadIsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
+                    " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetWieldedItemIndex contract trace failed: " + ex.Message);
+            }
+        }
+
+        private static string BuildMissionEquipmentWeaponSummary(MissionEquipment equipment)
+        {
+            if (equipment == null)
+                return "(none)";
+
+            var parts = new List<string>();
+            AppendMissionWeaponSummary(parts, equipment, EquipmentIndex.Weapon0);
+            AppendMissionWeaponSummary(parts, equipment, EquipmentIndex.Weapon1);
+            AppendMissionWeaponSummary(parts, equipment, EquipmentIndex.Weapon2);
+            AppendMissionWeaponSummary(parts, equipment, EquipmentIndex.Weapon3);
+            return parts.Count > 0 ? string.Join(", ", parts) : "(empty)";
+        }
+
+        private static void AppendMissionWeaponSummary(List<string> parts, MissionEquipment equipment, EquipmentIndex slot)
+        {
+            MissionWeapon element = equipment[slot];
+            if (element.IsEmpty || element.Item == null)
+                return;
+
+            parts.Add(slot + "=" + element.Item.StringId);
+        }
+
+        private static string BuildEquipmentSummary(Equipment equipment, params EquipmentIndex[] slots)
+        {
+            if (equipment == null)
+                return "(none)";
+
+            var parts = new List<string>();
+            for (int i = 0; i < slots.Length; i++)
+            {
+                EquipmentIndex slot = slots[i];
+                EquipmentElement element = equipment[slot];
+                if (element.IsEmpty || element.Item == null)
+                    continue;
+
+                parts.Add(slot + "=" + element.Item.StringId);
+            }
+
+            return parts.Count > 0 ? string.Join(", ", parts) : "(empty)";
         }
 
         private static bool MissionNetworkComponent_HandleServerEventAssignFormationToPlayer_Prefix(GameNetworkMessage baseMessage)

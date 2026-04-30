@@ -30,7 +30,9 @@ namespace CoopSpectator.Infrastructure
                     "BattleId=" + (battleId ?? string.Empty),
                     "SnapshotUpdatedUtc=" + snapshotUpdatedUtc.ToString("O"),
                     "GeneratedUtc=" + DateTime.UtcNow.ToString("O"),
-                    "Summary=" + (summaryLine ?? string.Empty)
+                    "Summary=" + (summaryLine ?? string.Empty),
+                    "BuildMarker=" + AssemblyDiagnostics.BUILD_MARKER,
+                    "RuntimeBundlePath=" + ExactBattleRuntimeBundleBridgeFile.GetBundleFilePath()
                 };
 
                 if (entryLines != null)
