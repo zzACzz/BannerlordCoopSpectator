@@ -12883,7 +12883,30 @@ namespace CoopSpectator.MissionBehaviors
             }
             catch (Exception ex)
             {
-                refreshIssue = "mount-visual-refresh-failed:" + ex.GetType().Name;
+                if (TryFallbackManualClientMountedHeroExactMountVisualRefresh(
+                        riderAgent,
+                        mountSpawnEquipment,
+                        entryId,
+                        source,
+                        repairReason,
+                        ex,
+                        out string fallbackRefreshIssue))
+                {
+                    ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                        "client-mount-visual-repair-fallback-success",
+                        "AgentIndex=" + riderAgent.Index +
+                        " MountAgentIndex=" + (riderAgent.MountAgent?.Index.ToString() ?? "null") +
+                        " EntryId=" + (entryId ?? "null") +
+                        " AppliedMount={" + appliedMountVisuals + "}" +
+                        " Reason=" + (repairReason ?? "none") +
+                        " PrimaryExceptionType=" + ex.GetType().Name +
+                        " Source=" + (source ?? "unknown"));
+                    return true;
+                }
+
+                refreshIssue = string.IsNullOrWhiteSpace(fallbackRefreshIssue) || string.Equals(fallbackRefreshIssue, "(none)", StringComparison.Ordinal)
+                    ? "mount-visual-refresh-failed:" + ex.GetType().Name
+                    : "mount-visual-refresh-failed:" + ex.GetType().Name + ", " + fallbackRefreshIssue;
                 ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
                     "client-mount-visual-repair-failed",
                     "AgentIndex=" + riderAgent.Index +
@@ -12892,6 +12915,7 @@ namespace CoopSpectator.MissionBehaviors
                     " AppliedMount={" + appliedMountVisuals + "}" +
                     " Reason=" + (repairReason ?? "none") +
                     " ExceptionType=" + ex.GetType().Name +
+                    " FallbackIssue=" + (fallbackRefreshIssue ?? "none") +
                     " Source=" + (source ?? "unknown"));
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: client mounted hero exact mount visual refresh failed. " +
@@ -12901,7 +12925,73 @@ namespace CoopSpectator.MissionBehaviors
                     " AppliedMount={" + appliedMountVisuals + "}" +
                     " Reason=" + (repairReason ?? "none") +
                     " Source=" + (source ?? "unknown") +
+                    " FallbackIssue=" + (fallbackRefreshIssue ?? "none") +
                     " Exception=" + ex);
+                return false;
+            }
+        }
+
+        private static bool TryFallbackManualClientMountedHeroExactMountVisualRefresh(
+            Agent riderAgent,
+            Equipment mountSpawnEquipment,
+            string entryId,
+            string source,
+            string repairReason,
+            Exception primaryRefreshException,
+            out string refreshIssue)
+        {
+            refreshIssue = "(none)";
+            Agent mountAgent = riderAgent?.MountAgent;
+            if (mountAgent == null)
+            {
+                refreshIssue = "mount-visual-manual-refresh-skipped:MountAgentNull";
+                return false;
+            }
+
+            if (mountSpawnEquipment == null)
+            {
+                refreshIssue = "mount-visual-manual-refresh-skipped:EquipmentNull";
+                return false;
+            }
+
+            try
+            {
+                mountAgent.InitializeSpawnEquipment(mountSpawnEquipment);
+                mountAgent.InitializeMissionEquipment(null, null);
+                MBAgentVisuals visuals = mountAgent.AgentVisuals;
+                visuals?.ClearVisualComponents(removeSkeleton: false);
+                visuals?.ClearAllWeaponMeshes();
+                mountAgent.EquipItemsFromSpawnEquipment(
+                    neededBatchedItems: true,
+                    prepareImmediately: true,
+                    useFaceCache: false,
+                    faceCacheID: 0);
+                mountAgent.UpdateAgentProperties();
+                mountAgent.PreloadForRendering();
+                visuals?.CheckResources(addToQueue: true);
+                visuals?.BatchLastLodMeshes();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: client mounted hero exact mount visual manual fallback succeeded. " +
+                    "AgentIndex=" + riderAgent.Index +
+                    " MountAgentIndex=" + mountAgent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " Reason=" + (repairReason ?? "none") +
+                    " Source=" + (source ?? "unknown") +
+                    " PrimaryExceptionType=" + (primaryRefreshException?.GetType().Name ?? "null"));
+                return true;
+            }
+            catch (Exception fallbackEx)
+            {
+                refreshIssue = "mount-visual-manual-refresh-failed:" + fallbackEx.GetType().Name;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: client mounted hero exact mount visual manual fallback failed. " +
+                    "AgentIndex=" + riderAgent.Index +
+                    " MountAgentIndex=" + mountAgent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " Reason=" + (repairReason ?? "none") +
+                    " Source=" + (source ?? "unknown") +
+                    " PrimaryExceptionType=" + (primaryRefreshException?.GetType().Name ?? "null") +
+                    " Exception=" + fallbackEx);
                 return false;
             }
         }
