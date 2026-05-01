@@ -4275,6 +4275,7 @@ namespace CoopSpectator.MissionBehaviors
             TrySyncExactCampaignNativeOriginRemoval(Mission, affectedAgent, affectorAgent, agentState);
             TryTrackMaterializedBattleResultRemoval(affectedAgent, affectorAgent, agentState);
             TryLogMaterializedBattleResultRemovalDebug(affectedAgent, affectorAgent, agentState, blow);
+            ClearMaterializedAgentIndexScopedRuntimeCaches(affectedAgent?.Index ?? -1, clearRemovedGuard: false);
             TryCompleteBattleIfResolved(Mission, "server behavior agent-removed");
             base.OnAgentRemoved(affectedAgent, affectorAgent, agentState, blow);
         }
@@ -4310,8 +4311,12 @@ namespace CoopSpectator.MissionBehaviors
             _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.Clear();
             _exactNativeClientVisualOverlayLoggedEntryIds.Clear();
             _exactNativeClientVisualOverlayEntryIdByAgentIndex.Clear();
+            _exactNativeClientVisualOverlayAgentByIndex.Clear();
             _pendingExactNativeClientVisualOverlaysByAgentIndex.Clear();
+            _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Clear();
+            _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Clear();
             _exactNativeClientVisualOverlayEntryQueuesByAssignmentKey.Clear();
+            _exactNativeClientVisualOverlayQueueSnapshotKey = string.Empty;
             _battlePhaseHeldFormationKeys.Clear();
             _battlePhaseHeldFormationUnitCounts.Clear();
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
@@ -4729,7 +4734,10 @@ namespace CoopSpectator.MissionBehaviors
             _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.Clear();
             _exactNativeClientVisualOverlayLoggedEntryIds.Clear();
             _exactNativeClientVisualOverlayEntryIdByAgentIndex.Clear();
+            _exactNativeClientVisualOverlayAgentByIndex.Clear();
             _pendingExactNativeClientVisualOverlaysByAgentIndex.Clear();
+            _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Clear();
+            _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Clear();
             _exactNativeClientVisualOverlayEntryQueuesByAssignmentKey.Clear();
             _exactNativeClientVisualOverlayQueueSnapshotKey = string.Empty;
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
@@ -5075,6 +5083,40 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private static void ClearClientExactCampaignVisualOverlayAgentIndexState(
+            int agentIndex,
+            string source,
+            bool logClear = false,
+            string reason = null)
+        {
+            if (agentIndex < 0)
+                return;
+
+            bool hadTrackedAgent = _exactNativeClientVisualOverlayAgentByIndex.Remove(agentIndex);
+            bool hadApplied = _exactNativeClientVisualOverlayAppliedAgentIndices.Remove(agentIndex);
+            bool hadIncludesWeapons = _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.Remove(agentIndex);
+            bool hadEntryId = _exactNativeClientVisualOverlayEntryIdByAgentIndex.Remove(agentIndex);
+            bool hadPending = _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agentIndex);
+            bool hadWatchdogFirstSeen = _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Remove(agentIndex);
+            bool hadWatchdogLastAttempt = _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Remove(agentIndex);
+            if (logClear &&
+                (hadTrackedAgent || hadApplied || hadIncludesWeapons || hadEntryId || hadPending || hadWatchdogFirstSeen || hadWatchdogLastAttempt))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: cleared client exact visual overlay agent-index state. " +
+                    "AgentIndex=" + agentIndex +
+                    " Reason=" + (reason ?? "unknown") +
+                    " Source=" + (source ?? "unknown") +
+                    " HadTrackedAgent=" + hadTrackedAgent +
+                    " HadApplied=" + hadApplied +
+                    " HadIncludesWeapons=" + hadIncludesWeapons +
+                    " HadEntryId=" + hadEntryId +
+                    " HadPending=" + hadPending +
+                    " HadWatchdogFirstSeen=" + hadWatchdogFirstSeen +
+                    " HadWatchdogLastAttempt=" + hadWatchdogLastAttempt);
+            }
+        }
+
         private static void RefreshClientExactCampaignVisualOverlayAgentIndexState(
             Agent agent,
             string source,
@@ -5110,10 +5152,11 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
-            _exactNativeClientVisualOverlayAppliedAgentIndices.Remove(agent.Index);
-            _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.Remove(agent.Index);
-            _exactNativeClientVisualOverlayEntryIdByAgentIndex.Remove(agent.Index);
-            _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agent.Index);
+            ClearClientExactCampaignVisualOverlayAgentIndexState(
+                agent.Index,
+                source ?? "unknown",
+                logClear: false,
+                reason: "refresh-agent-index-state");
             _exactNativeClientVisualOverlayAgentByIndex[agent.Index] = agent;
 
             if (logRefresh)
@@ -9964,12 +10007,7 @@ namespace CoopSpectator.MissionBehaviors
             if (clearRemovedGuard)
                 _materializedBattleResultRemovedAgentIndices.Remove(agentIndex);
             _exactNativeSnapshotOverlayAppliedAgentIndices.Remove(agentIndex);
-            _exactNativeClientVisualOverlayAppliedAgentIndices.Remove(agentIndex);
-            _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.Remove(agentIndex);
-            _exactNativeClientVisualOverlayEntryIdByAgentIndex.Remove(agentIndex);
-            _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agentIndex);
-            _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Remove(agentIndex);
-            _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Remove(agentIndex);
+            ClearClientExactCampaignVisualOverlayAgentIndexState(agentIndex, "clear-materialized-agent-index-runtime-caches");
         }
 
         private static bool TryRefreshMaterializedAgentIdentityCache(
@@ -14554,13 +14592,7 @@ namespace CoopSpectator.MissionBehaviors
             Mission mission = agent.Mission ?? Mission.Current;
             TryAppendClientMountedHeroMissionContext(mission, source);
 
-            string entryId = null;
-            if (!_exactNativeClientVisualOverlayEntryIdByAgentIndex.TryGetValue(agent.Index, out entryId) ||
-                string.IsNullOrWhiteSpace(entryId))
-            {
-                entryId = ResolveClientExactCampaignVisualOverlayEntryId(agent);
-            }
-
+            string entryId = ResolveClientExactCampaignVisualOverlayEntryId(agent);
             if (string.IsNullOrWhiteSpace(entryId))
                 return;
 
@@ -19512,8 +19544,27 @@ namespace CoopSpectator.MissionBehaviors
             if (_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string trackedEntryId) &&
                 !string.IsNullOrWhiteSpace(trackedEntryId))
             {
-                entryId = trackedEntryId;
-                return true;
+                RosterEntryState trackedEntryState = BattleSnapshotRuntimeState.GetEntryState(trackedEntryId);
+                if (trackedEntryState != null &&
+                    DoesClientVisualOverlayEntryMatchAgentTroop(trackedEntryState, agent.Character?.StringId))
+                {
+                    entryId = trackedEntryId;
+                    return true;
+                }
+
+                _materializedArmyEntryIdByAgentIndex.Remove(agent.Index);
+                _materializedArmySideByAgentIndex.Remove(agent.Index);
+                _materializedAgentInstanceByIndex.Remove(agent.Index);
+                ClearClientExactCampaignVisualOverlayAgentIndexState(
+                    agent.Index,
+                    "TryResolveAuthoritativeTrackedEntryId",
+                    logClear: true,
+                    reason: "stale-authoritative-tracked-entry");
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: cleared stale authoritative tracked entry mapping. " +
+                    "AgentIndex=" + agent.Index +
+                    " TrackedEntryId=" + trackedEntryId +
+                    " CurrentTroopId=" + (agent.Character?.StringId ?? "null"));
             }
 
             if (ExactCampaignArmyBootstrap.TryGetEntryId(agent, out string originEntryId) &&
@@ -19532,11 +19583,21 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
 
             if (_exactNativeClientVisualOverlayEntryIdByAgentIndex.TryGetValue(agent.Index, out string clientOverlayEntryId) &&
-                !string.IsNullOrWhiteSpace(clientOverlayEntryId) &&
-                BattleSnapshotRuntimeState.GetEntryState(clientOverlayEntryId) != null)
+                !string.IsNullOrWhiteSpace(clientOverlayEntryId))
             {
-                entryId = clientOverlayEntryId;
-                return true;
+                RosterEntryState overlayEntryState = BattleSnapshotRuntimeState.GetEntryState(clientOverlayEntryId);
+                if (overlayEntryState != null &&
+                    DoesClientVisualOverlayEntryMatchAgentTroop(overlayEntryState, agent?.Character?.StringId))
+                {
+                    entryId = clientOverlayEntryId;
+                    return true;
+                }
+
+                ClearClientExactCampaignVisualOverlayAgentIndexState(
+                    agent?.Index ?? -1,
+                    "TryResolveSelectableEntryId",
+                    logClear: true,
+                    reason: "stale-selectable-overlay-entry");
             }
 
             return false;
