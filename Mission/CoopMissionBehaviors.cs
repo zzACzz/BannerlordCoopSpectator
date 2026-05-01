@@ -4427,8 +4427,25 @@ namespace CoopSpectator.MissionBehaviors
             if (riderAgentIndex < 0 || string.IsNullOrWhiteSpace(failureReason))
                 return;
 
+            StrictExactHeroTransferRuntimeState state = EnsureStrictExactHeroTransferState(riderAgentIndex);
+            if (state == null)
+                return;
+
+            if (failureReason.StartsWith("create-agent-handler-exception:", StringComparison.Ordinal))
+            {
+                state.ExactVisualQueued = false;
+                state.ExactVisualApplied = false;
+                state.RiderMaterialized = false;
+                state.PeerBound = false;
+                state.EquipmentSynchronized = false;
+                state.MountMaterialized = false;
+                state.MountLinkVerified = false;
+                if (state.Stage > StrictExactHeroTransferStage.CreateAgentPayloadObserved)
+                    state.Stage = StrictExactHeroTransferStage.CreateAgentPayloadObserved;
+            }
+
             AdvanceStrictExactHeroTransferStage(
-                EnsureStrictExactHeroTransferState(riderAgentIndex),
+                state,
                 StrictExactHeroTransferStage.Unknown,
                 source ?? "strict exact hero transfer failure",
                 failureReason: failureReason);

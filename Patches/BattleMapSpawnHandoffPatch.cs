@@ -687,6 +687,7 @@ namespace CoopSpectator.Patches
                 CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndexFromPayload(
                     createAgent.AgentIndex,
                     createAgent.MountAgentIndex);
+                CanonicalizeCreateAgentPayloadForBattleMap(createAgent);
             }
             catch (Exception ex)
             {
@@ -783,6 +784,204 @@ namespace CoopSpectator.Patches
             }
 
             return __exception;
+        }
+
+        private static void CanonicalizeCreateAgentPayloadForBattleMap(CreateAgent createAgent)
+        {
+            if (createAgent == null)
+                return;
+
+            bool coercedRemotePlayerAgent = false;
+            bool strippedRemotePeer = false;
+            bool canonicalizedCharacter = false;
+            bool repairedBodyPropertyRange = false;
+            string characterSource = null;
+            string bodyPropertyRangeSource = null;
+
+            canonicalizedCharacter = TryCanonicalizeCreateAgentCharacterToResolvedSurrogate(
+                createAgent,
+                out characterSource);
+
+            if (ShouldCoerceRemotePlayerCreateAgentToNonPlayer(createAgent))
+            {
+                TrySetInstanceMemberValue(createAgent, "IsPlayerAgent", false);
+                TrySetInstanceMemberValue(createAgent, "<IsPlayerAgent>k__BackingField", false);
+                coercedRemotePlayerAgent = !createAgent.IsPlayerAgent;
+            }
+
+            if (ShouldStripRemotePeerFromCreateAgentPayload(createAgent))
+            {
+                TrySetInstanceMemberValue(createAgent, "Peer", null);
+                TrySetInstanceMemberValue(createAgent, "<Peer>k__BackingField", null);
+                strippedRemotePeer = createAgent.Peer == null;
+            }
+
+            repairedBodyPropertyRange = TryEnsureCreateAgentCharacterBodyPropertyRange(
+                createAgent.Character,
+                out bodyPropertyRangeSource);
+
+            if (!coercedRemotePlayerAgent &&
+                !strippedRemotePeer &&
+                !canonicalizedCharacter &&
+                !repairedBodyPropertyRange)
+            {
+                return;
+            }
+
+            string details =
+                "AgentIndex=" + createAgent.AgentIndex +
+                " Character=" + (createAgent.Character?.StringId ?? "null") +
+                " PeerIndex=" + (createAgent.Peer?.Index.ToString() ?? "null") +
+                " MountAgentIndex=" + createAgent.MountAgentIndex +
+                " CoercedRemotePlayerAgent=" + coercedRemotePlayerAgent +
+                " StrippedRemotePeer=" + strippedRemotePeer +
+                " EffectiveIsPlayerAgent=" + createAgent.IsPlayerAgent +
+                " CanonicalizedCharacter=" + canonicalizedCharacter +
+                " CharacterSource=" + (characterSource ?? "none") +
+                " RepairedBodyPropertyRange=" + repairedBodyPropertyRange +
+                " BodyPropertyRangeSource=" + (bodyPropertyRangeSource ?? "none");
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: canonicalized CreateAgent payload before native handler. " +
+                details);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                "client-create-agent-payload-canonicalized",
+                details + " Source=battle-map handoff CreateAgent prefix");
+        }
+
+        private static bool ShouldCoerceRemotePlayerCreateAgentToNonPlayer(CreateAgent createAgent)
+        {
+            if (createAgent == null ||
+                !createAgent.IsPlayerAgent ||
+                createAgent.Peer == null ||
+                createAgent.Peer.IsMine ||
+                createAgent.MountAgentIndex < 0)
+            {
+                return false;
+            }
+
+            string characterId = createAgent.Character?.StringId ?? string.Empty;
+            return createAgent.Character?.IsHero == true ||
+                   characterId.EndsWith("_hero", StringComparison.Ordinal);
+        }
+
+        private static bool ShouldStripRemotePeerFromCreateAgentPayload(CreateAgent createAgent)
+        {
+            if (createAgent?.Peer == null || createAgent.Peer.IsMine || createAgent.MountAgentIndex < 0)
+                return false;
+
+            string characterId = createAgent.Character?.StringId ?? string.Empty;
+            return createAgent.Character?.IsHero == true ||
+                   characterId.EndsWith("_hero", StringComparison.Ordinal);
+        }
+
+        private static bool TryCanonicalizeCreateAgentCharacterToResolvedSurrogate(
+            CreateAgent createAgent,
+            out string source)
+        {
+            source = null;
+            if (createAgent?.Character == null)
+                return false;
+
+            if (!CampaignMultiplayerHeroClassResolver.TryResolve(
+                    createAgent.Character,
+                    out MultiplayerClassDivisions.MPHeroClass resolvedClass,
+                    out bool treatAsTroop,
+                    out string _))
+            {
+                return false;
+            }
+
+            BasicCharacterObject canonicalCharacter = treatAsTroop
+                ? resolvedClass?.TroopCharacter ?? resolvedClass?.HeroCharacter
+                : resolvedClass?.HeroCharacter ?? resolvedClass?.TroopCharacter;
+            if (canonicalCharacter == null)
+                return false;
+
+            string originalCharacterId = createAgent.Character.StringId ?? string.Empty;
+            string canonicalCharacterId = canonicalCharacter.StringId ?? string.Empty;
+            if (ReferenceEquals(canonicalCharacter, createAgent.Character) ||
+                string.Equals(originalCharacterId, canonicalCharacterId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            TrySetInstanceMemberValue(createAgent, "Character", canonicalCharacter);
+            TrySetInstanceMemberValue(createAgent, "<Character>k__BackingField", canonicalCharacter);
+            source = (treatAsTroop ? "resolved-class-troop" : "resolved-class-hero") +
+                     ":" + canonicalCharacterId;
+            return ReferenceEquals(createAgent.Character, canonicalCharacter) ||
+                   string.Equals(createAgent.Character?.StringId, canonicalCharacterId, StringComparison.Ordinal);
+        }
+
+        private static bool TryEnsureCreateAgentCharacterBodyPropertyRange(
+            BasicCharacterObject character,
+            out string source)
+        {
+            source = null;
+            if (character == null)
+                return false;
+
+            try
+            {
+                if (character.BodyPropertyRange != null)
+                    return false;
+            }
+            catch
+            {
+            }
+
+            if (!CampaignMultiplayerHeroClassResolver.TryResolve(
+                    character,
+                    out MultiplayerClassDivisions.MPHeroClass resolvedClass,
+                    out bool treatAsTroop,
+                    out string _))
+            {
+                return false;
+            }
+
+            var fallbackCharacters = new List<(BasicCharacterObject Character, string Source)>();
+            if (treatAsTroop)
+            {
+                fallbackCharacters.Add((resolvedClass?.TroopCharacter, "resolved-class-troop"));
+                fallbackCharacters.Add((resolvedClass?.HeroCharacter, "resolved-class-hero"));
+            }
+            else
+            {
+                fallbackCharacters.Add((resolvedClass?.HeroCharacter, "resolved-class-hero"));
+                fallbackCharacters.Add((resolvedClass?.TroopCharacter, "resolved-class-troop"));
+            }
+
+            foreach ((BasicCharacterObject fallbackCharacter, string fallbackSource) in fallbackCharacters)
+            {
+                if (fallbackCharacter == null || ReferenceEquals(fallbackCharacter, character))
+                    continue;
+
+                MBBodyProperty fallbackRange = null;
+                try
+                {
+                    fallbackRange = fallbackCharacter.BodyPropertyRange;
+                }
+                catch
+                {
+                }
+
+                if (fallbackRange == null)
+                    continue;
+
+                TrySetInstanceMemberValue(character, "BodyPropertyRange", fallbackRange);
+                TrySetInstanceMemberValue(character, "<BodyPropertyRange>k__BackingField", fallbackRange);
+                source = fallbackSource + ":" + (fallbackCharacter.StringId ?? "null");
+                try
+                {
+                    return character.BodyPropertyRange != null;
+                }
+                catch
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static void MissionNetworkComponent_HandleServerEventSynchronizeAgentEquipment_Postfix(GameNetworkMessage baseMessage)
