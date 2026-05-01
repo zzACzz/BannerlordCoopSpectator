@@ -4419,6 +4419,21 @@ namespace CoopSpectator.MissionBehaviors
             AdvanceStrictExactHeroTransferStage(state, StrictExactHeroTransferStage.DeathObserved, source);
         }
 
+        internal static void ReportStrictExactHeroTransferFailure(
+            int riderAgentIndex,
+            string source,
+            string failureReason)
+        {
+            if (riderAgentIndex < 0 || string.IsNullOrWhiteSpace(failureReason))
+                return;
+
+            AdvanceStrictExactHeroTransferStage(
+                EnsureStrictExactHeroTransferState(riderAgentIndex),
+                StrictExactHeroTransferStage.Unknown,
+                source ?? "strict exact hero transfer failure",
+                failureReason: failureReason);
+        }
+
         private static void ClearStrictExactHeroTransferState(
             int riderAgentIndex,
             string source,

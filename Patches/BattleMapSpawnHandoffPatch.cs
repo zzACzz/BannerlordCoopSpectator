@@ -195,14 +195,21 @@ namespace CoopSpectator.Patches
             MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(MissionNetworkComponent_HandleServerEventCreateAgent_Postfix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || prefix == null || postfix == null)
+            MethodInfo finalizer = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventCreateAgent_Finalizer),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null || postfix == null || finalizer == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventCreateAgent not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to MissionNetworkComponent.HandleServerEventCreateAgent.");
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(prefix),
+                postfix: new HarmonyMethod(postfix),
+                finalizer: new HarmonyMethod(finalizer));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix/finalizer applied to MissionNetworkComponent.HandleServerEventCreateAgent.");
         }
 
         private static void PatchMissionNetworkComponentSynchronizeAgentEquipment(Harmony harmony)
@@ -734,6 +741,48 @@ namespace CoopSpectator.Patches
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: local CreateAgent exact visual finalization failed: " + ex.Message);
             }
+        }
+
+        private static Exception MissionNetworkComponent_HandleServerEventCreateAgent_Finalizer(
+            Exception __exception,
+            GameNetworkMessage baseMessage)
+        {
+            if (__exception == null)
+                return null;
+
+            try
+            {
+                if (!(baseMessage is CreateAgent createAgent))
+                    return __exception;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return __exception;
+
+                string failureReason = "create-agent-handler-exception:" + __exception.GetType().Name;
+                CoopMissionSpawnLogic.ReportStrictExactHeroTransferFailure(
+                    createAgent.AgentIndex,
+                    "battle-map handoff CreateAgent finalizer",
+                    failureReason);
+                string payloadSummary =
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " MountAgentIndex=" + createAgent.MountAgentIndex +
+                    " PayloadIsPlayerAgent=" + createAgent.IsPlayerAgent +
+                    " ExceptionType=" + __exception.GetType().FullName +
+                    " ExceptionMessage=" + __exception.Message;
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: CreateAgent handler threw during battle-map handoff. " +
+                    payloadSummary);
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-create-agent-handler-exception",
+                    payloadSummary + " Source=battle-map handoff CreateAgent finalizer");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: CreateAgent finalizer failed open: " + ex.Message);
+            }
+
+            return __exception;
         }
 
         private static void MissionNetworkComponent_HandleServerEventSynchronizeAgentEquipment_Postfix(GameNetworkMessage baseMessage)
