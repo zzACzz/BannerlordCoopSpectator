@@ -3706,6 +3706,12 @@ namespace CoopSpectator.MissionBehaviors
             typeof(MultiplayerWarmupComponent).GetField("_currentStateStartTime", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo NativeWarmupStateField =
             typeof(MultiplayerWarmupComponent).GetField("_warmupState", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo AgentSetMountAgentMethod =
+            typeof(Agent).GetMethod("SetMountAgent", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo AgentUpdateMountAgentCacheMethod =
+            typeof(Agent).GetMethod("UpdateMountAgentCache", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo AgentUpdateRiderAgentCacheMethod =
+            typeof(Agent).GetMethod("UpdateRiderAgentCache", BindingFlags.Instance | BindingFlags.NonPublic);
         private const float NativeBattleMapWarmupFallbackDurationSeconds = 1800f;
         private const float NativeBattleMapWarmupFutureStartOffsetSeconds = 1770f;
         private static Agent _diagnosticAllowedAgent;
@@ -5134,6 +5140,15 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private static void ClearClientExactCampaignVisualOverlayAppliedState(int agentIndex)
+        {
+            if (agentIndex < 0)
+                return;
+
+            _exactNativeClientVisualOverlayAppliedAgentIndices.Remove(agentIndex);
+            _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.Remove(agentIndex);
+        }
+
         private static bool ClearTrackedClientMountedHeroMountAgentIndexState(int riderAgentIndex)
         {
             if (riderAgentIndex < 0)
@@ -5221,6 +5236,208 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             TrackClientMountedHeroMountAgentIndex(riderAgent.Index, mountAgentIndex, entryId);
+        }
+
+        private static bool TryGetTrackedClientMountedHeroMountAgentIndex(
+            int riderAgentIndex,
+            out int mountAgentIndex,
+            out string entryId)
+        {
+            mountAgentIndex = -1;
+            entryId = null;
+            if (riderAgentIndex < 0)
+                return false;
+
+            if (!_clientMountedHeroMountAgentIndexByRiderAgentIndex.TryGetValue(riderAgentIndex, out mountAgentIndex) ||
+                mountAgentIndex < 0)
+            {
+                mountAgentIndex = -1;
+                return false;
+            }
+
+            if (!_clientMountedHeroEntryIdByMountAgentIndex.TryGetValue(mountAgentIndex, out entryId) ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                _exactNativeClientVisualOverlayEntryIdByAgentIndex.TryGetValue(riderAgentIndex, out entryId);
+            }
+
+            if (string.IsNullOrWhiteSpace(entryId))
+                _materializedArmyEntryIdByAgentIndex.TryGetValue(riderAgentIndex, out entryId);
+
+            return true;
+        }
+
+        private static bool RequiresTrackedClientMountedHeroMountLinkRepair(
+            Agent riderAgent,
+            RosterEntryState entryState,
+            out int trackedMountAgentIndex,
+            out string reason)
+        {
+            trackedMountAgentIndex = -1;
+            reason = null;
+            if (GameNetwork.IsServer ||
+                riderAgent == null ||
+                riderAgent.IsMount ||
+                riderAgent.Index < 0 ||
+                entryState == null ||
+                !entryState.IsMounted ||
+                riderAgent.MountAgent != null)
+            {
+                return false;
+            }
+
+            if (!TryGetTrackedClientMountedHeroMountAgentIndex(
+                    riderAgent.Index,
+                    out trackedMountAgentIndex,
+                    out _))
+            {
+                return false;
+            }
+
+            reason = "MountLinkMissing tracked=" + trackedMountAgentIndex;
+            return true;
+        }
+
+        private static bool TryRepairTrackedClientMountedHeroMountLink(
+            Agent riderAgent,
+            int trackedMountAgentIndex,
+            string source,
+            out string repairReason)
+        {
+            repairReason = null;
+            if (riderAgent == null || riderAgent.IsMount || riderAgent.Index < 0 || trackedMountAgentIndex < 0)
+            {
+                repairReason = "mount-link-repair-invalid-rider";
+                return false;
+            }
+
+            if (riderAgent.MountAgent != null)
+            {
+                repairReason = "mount-link-already-linked";
+                return true;
+            }
+
+            if (AgentSetMountAgentMethod == null ||
+                AgentUpdateMountAgentCacheMethod == null ||
+                AgentUpdateRiderAgentCacheMethod == null)
+            {
+                repairReason = "mount-link-repair-reflection-unavailable";
+                return false;
+            }
+
+            Agent mountAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(trackedMountAgentIndex, canBeNull: true);
+            if (mountAgent == null)
+            {
+                repairReason = "tracked-mount-agent-unavailable:" + trackedMountAgentIndex;
+                return false;
+            }
+
+            if (!mountAgent.IsMount)
+            {
+                repairReason = "tracked-agent-not-mount:" + trackedMountAgentIndex;
+                return false;
+            }
+
+            if (!mountAgent.IsActive())
+            {
+                repairReason = "tracked-mount-agent-inactive:" + trackedMountAgentIndex;
+                return false;
+            }
+
+            if (mountAgent.Team == null || mountAgent.Team.Side == BattleSideEnum.None)
+            {
+                repairReason = "tracked-mount-agent-not-ready:" + trackedMountAgentIndex;
+                return false;
+            }
+
+            if (mountAgent.RiderAgent != null && !ReferenceEquals(mountAgent.RiderAgent, riderAgent))
+            {
+                repairReason = "tracked-mount-owned-by-other-rider:" + mountAgent.RiderAgent.Index;
+                return false;
+            }
+
+            try
+            {
+                AgentSetMountAgentMethod.Invoke(riderAgent, new object[] { mountAgent });
+                AgentUpdateMountAgentCacheMethod.Invoke(riderAgent, new object[] { mountAgent });
+                AgentUpdateRiderAgentCacheMethod.Invoke(mountAgent, new object[] { riderAgent });
+                riderAgent.UpdateAgentStats();
+                riderAgent.UpdateAgentProperties();
+                mountAgent.UpdateAgentProperties();
+
+                if (riderAgent.MountAgent == null || riderAgent.MountAgent.Index != mountAgent.Index)
+                {
+                    repairReason = "mount-link-cache-link-missing:" + trackedMountAgentIndex;
+                    return false;
+                }
+
+                if (!TryGetTrackedClientMountedHeroMountAgentIndex(
+                        riderAgent.Index,
+                        out _,
+                        out string entryId) ||
+                    string.IsNullOrWhiteSpace(entryId))
+                {
+                    entryId = ResolveClientExactCampaignVisualOverlayEntryId(riderAgent);
+                }
+
+                if (!string.IsNullOrWhiteSpace(entryId))
+                    TrackClientMountedHeroMountAgentIndex(riderAgent.Index, mountAgent.Index, entryId);
+
+                repairReason = "mounted-hero-link-repaired:" + mountAgent.Index;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: repaired tracked client mounted-hero rider-to-mount link. " +
+                    "AgentIndex=" + riderAgent.Index +
+                    " MountAgentIndex=" + mountAgent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " Source=" + (source ?? "unknown"));
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-mount-link-repair-success",
+                    "AgentIndex=" + riderAgent.Index +
+                    " MountAgentIndex=" + mountAgent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " Source=" + (source ?? "unknown"));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Exception actual = ex is TargetInvocationException invocationEx && invocationEx.InnerException != null
+                    ? invocationEx.InnerException
+                    : ex;
+                repairReason = "mounted-hero-link-repair-failed:" + actual.GetType().Name;
+                return false;
+            }
+        }
+
+        private static bool TryEnsureTrackedClientMountedHeroMountLinkReady(
+            Agent riderAgent,
+            RosterEntryState entryState,
+            string source,
+            out string reason)
+        {
+            reason = null;
+            if (!RequiresTrackedClientMountedHeroMountLinkRepair(
+                    riderAgent,
+                    entryState,
+                    out int trackedMountAgentIndex,
+                    out string missingReason))
+            {
+                return true;
+            }
+
+            if (TryRepairTrackedClientMountedHeroMountLink(
+                    riderAgent,
+                    trackedMountAgentIndex,
+                    source,
+                    out string repairReason))
+            {
+                reason = repairReason;
+                return true;
+            }
+
+            reason = string.IsNullOrWhiteSpace(repairReason)
+                ? missingReason
+                : missingReason + " | " + repairReason;
+            return false;
         }
 
         internal static bool TryResolveTrackedClientMountedHeroMissingMountAgentHealth(
@@ -5480,6 +5697,13 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 TrackClientMountedHeroMountAgentIndex(agent, entryId);
+                bool mountLinkReady = TryEnsureTrackedClientMountedHeroMountLinkReady(
+                    agent,
+                    entryState,
+                    "client hero exact visual watchdog",
+                    out _);
+                if (!mountLinkReady)
+                    ClearClientExactCampaignVisualOverlayAppliedState(agent.Index);
 
                 bool alreadyApplied =
                     _exactNativeClientVisualOverlayAppliedAgentIndices.Contains(agent.Index) &&
@@ -5601,6 +5825,29 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             TrackClientMountedHeroMountAgentIndex(agent, entryId);
+            bool mountLinkReady = TryEnsureTrackedClientMountedHeroMountLinkReady(
+                agent,
+                entryState,
+                source ?? "client exact-visual finalize",
+                out string mountLinkReason);
+            if (!mountLinkReady)
+            {
+                ClearClientExactCampaignVisualOverlayAppliedState(agent.Index);
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: deferred client exact visual finalize until tracked mount link is ready. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " Reason=" + (mountLinkReason ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+                return TryQueueClientExactCampaignVisualOverlay(
+                    mission,
+                    agent,
+                    entryId,
+                    source ?? "client exact-visual finalize",
+                    delaySeconds: 0.12d,
+                    force: true,
+                    includeWeaponsForRefresh: includeWeaponsForClientRefresh);
+            }
 
             _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = entryId;
             if (_exactNativeClientVisualOverlayAppliedAgentIndices.Contains(agent.Index) &&
@@ -6274,6 +6521,15 @@ namespace CoopSpectator.MissionBehaviors
             bool includeMountVisualsForOverlayRefresh = !clientVisualOnly;
             if (clientVisualOnly)
             {
+                if (!TryEnsureTrackedClientMountedHeroMountLinkReady(
+                        agent,
+                        entryState,
+                        source ?? "client exact visual overlay",
+                        out _))
+                {
+                    return false;
+                }
+
                 TryApplyEntryIdentityToAgent(agent, entryState);
                 includeMountVisualsForOverlayRefresh = ShouldAttemptClientMountedHeroMountVisualRepair(
                     agent,
@@ -13180,7 +13436,16 @@ namespace CoopSpectator.MissionBehaviors
                 agent.SpawnEquipment?[EquipmentIndex.HorseHarness].Item?.StringId);
 
             Agent mountAgent = agent.MountAgent;
-            if (mountAgent != null)
+            if (mountAgent == null &&
+                RequiresTrackedClientMountedHeroMountLinkRepair(
+                    agent,
+                    entryState,
+                    out _,
+                    out string mountLinkReason))
+            {
+                mismatches.Add(mountLinkReason);
+            }
+            else if (mountAgent != null)
             {
                 AppendExpectedEquipmentMismatch(
                     mismatches,
