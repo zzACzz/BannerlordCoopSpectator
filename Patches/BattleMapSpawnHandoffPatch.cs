@@ -243,17 +243,20 @@ namespace CoopSpectator.Patches
             MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
                 "HandleServerEventSetWieldedItemIndex",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetWieldedItemIndex_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
             MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(MissionNetworkComponent_HandleServerEventSetWieldedItemIndex_Postfix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || postfix == null)
+            if (target == null || prefix == null || postfix == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetWieldedItemIndex not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to MissionNetworkComponent.HandleServerEventSetWieldedItemIndex.");
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to MissionNetworkComponent.HandleServerEventSetWieldedItemIndex.");
         }
 
         private static void PatchMissionNetworkComponentAssignFormationToPlayer(Harmony harmony)
@@ -744,10 +747,78 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void MissionNetworkComponent_HandleServerEventSetWieldedItemIndex_Postfix(GameNetworkMessage baseMessage)
+        private static bool MissionNetworkComponent_HandleServerEventSetWieldedItemIndex_Prefix(GameNetworkMessage baseMessage, ref bool __state)
+        {
+            __state = false;
+
+            try
+            {
+                if (!(baseMessage is SetWieldedItemIndex setWieldedItemIndex))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (setWieldedItemIndex.WieldedItemIndex != EquipmentIndex.None || setWieldedItemIndex.IsWieldedOnSpawn)
+                    return true;
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWieldedItemIndex.AgentIndex, canBeNull: true);
+                if (agent == null || agent.IsMount)
+                    return true;
+
+                if (agent.IsActive() && agent.Health > 0f)
+                    return true;
+
+                string entryId = null;
+                if (!CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                    !CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId))
+                {
+                    return true;
+                }
+
+                RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+                if (entryState == null || !entryState.IsHero)
+                    return true;
+
+                __state = true;
+                string payloadSummary =
+                    "PayloadWieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                    " PayloadIsLeftHand=" + setWieldedItemIndex.IsLeftHand +
+                    " PayloadIsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
+                    " PayloadIsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
+                    " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
+                    " SuppressedReason=dead-exact-hero-none-wield-reset";
+
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: suppressed dead exact-hero SetWieldedItemIndex after removal. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " AgentActive=" + agent.IsActive() +
+                    " Health=" + agent.Health.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) +
+                    " " + payloadSummary);
+                CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                    agent,
+                    "client-set-wielded-item-index-suppressed",
+                    "battle-map handoff SetWieldedItemIndex death guard",
+                    payloadSummary);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetWieldedItemIndex prefix failed open: " + ex.Message);
+                __state = false;
+                return true;
+            }
+        }
+
+        private static void MissionNetworkComponent_HandleServerEventSetWieldedItemIndex_Postfix(GameNetworkMessage baseMessage, bool __state)
         {
             try
             {
+                if (__state)
+                    return;
+
                 if (!(baseMessage is SetWieldedItemIndex setWieldedItemIndex))
                     return;
 
