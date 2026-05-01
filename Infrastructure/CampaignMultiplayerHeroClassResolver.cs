@@ -63,7 +63,9 @@ namespace CoopSpectator.Infrastructure
                 }
                 else
                 {
-                    bool isHero = TryGetBoolProperty(character, "IsHero");
+                    bool isHero =
+                        TryGetBoolProperty(character, "IsHero") ||
+                        characterId.EndsWith("_hero", StringComparison.Ordinal);
                     bool isMounted = ResolveIsMounted(character);
                     bool isRanged = ResolveIsRanged(character);
                     int tier = ResolveTier(character, isHero);
@@ -72,6 +74,11 @@ namespace CoopSpectator.Infrastructure
                     string heroTemplateId = isHero ? TryConvertTroopTemplateToHeroTemplateId(troopTemplateId) : null;
 
                     List<string> candidateIds = new List<string>();
+                    if (!string.IsNullOrWhiteSpace(characterId) &&
+                        characterId.StartsWith("mp_", StringComparison.Ordinal))
+                    {
+                        candidateIds.Add(characterId);
+                    }
                     if (!string.IsNullOrWhiteSpace(heroTemplateId))
                         candidateIds.Add(heroTemplateId);
                     if (!string.IsNullOrWhiteSpace(troopTemplateId))

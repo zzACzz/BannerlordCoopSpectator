@@ -10660,7 +10660,10 @@ namespace CoopSpectator.MissionBehaviors
                 " MissionTime=" + state.MissionTime.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        private static void ClearMaterializedAgentIndexScopedRuntimeCaches(int agentIndex, bool clearRemovedGuard)
+        private static void ClearMaterializedAgentIndexScopedRuntimeCaches(
+            int agentIndex,
+            bool clearRemovedGuard,
+            bool preserveClientMountedHeroPayloadState = false)
         {
             if (agentIndex < 0)
                 return;
@@ -10674,7 +10677,8 @@ namespace CoopSpectator.MissionBehaviors
                 _materializedBattleResultRemovedAgentIndices.Remove(agentIndex);
             _exactNativeSnapshotOverlayAppliedAgentIndices.Remove(agentIndex);
             ClearClientExactCampaignVisualOverlayAgentIndexState(agentIndex, "clear-materialized-agent-index-runtime-caches");
-            ClearClientMountedHeroPayloadMountAgentIndexState(agentIndex);
+            if (!preserveClientMountedHeroPayloadState)
+                ClearClientMountedHeroPayloadMountAgentIndexState(agentIndex);
         }
 
         private static bool TryRefreshMaterializedAgentIdentityCache(
@@ -10722,7 +10726,10 @@ namespace CoopSpectator.MissionBehaviors
             if (shouldResetIndexState)
             {
                 clearedRemovedGuard = _materializedBattleResultRemovedAgentIndices.Contains(agent.Index);
-                ClearMaterializedAgentIndexScopedRuntimeCaches(agent.Index, clearRemovedGuard: true);
+                ClearMaterializedAgentIndexScopedRuntimeCaches(
+                    agent.Index,
+                    clearRemovedGuard: true,
+                    preserveClientMountedHeroPayloadState: true);
             }
             else if (agent.IsActive())
             {

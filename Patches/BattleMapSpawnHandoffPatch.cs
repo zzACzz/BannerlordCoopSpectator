@@ -568,9 +568,7 @@ namespace CoopSpectator.Patches
                 if (!isLocalPayloadPeer)
                 {
                     bool remoteDeferImmediateExactVisualFinalize =
-                        agent.SpawnEquipment == null ||
-                        agent.MountAgent != null ||
-                        CoopMissionSpawnLogic.HasTrackedClientMountedHeroMountAgentIndex(agent.Index);
+                        ShouldDeferImmediateClientExactVisualFinalize(agent);
                     CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent);
                     bool remoteExactVisualFinalized = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
                         mission,
@@ -627,9 +625,7 @@ namespace CoopSpectator.Patches
                     return;
 
                 bool deferImmediateExactVisualFinalize =
-                    agent.SpawnEquipment == null ||
-                    agent.MountAgent != null ||
-                    CoopMissionSpawnLogic.HasTrackedClientMountedHeroMountAgentIndex(agent.Index);
+                    ShouldDeferImmediateClientExactVisualFinalize(agent);
                 bool exactVisualFinalized = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
                     mission,
                     agent,
@@ -757,8 +753,7 @@ namespace CoopSpectator.Patches
 
                 bool deferImmediateExactVisualFinalize =
                     agent.MissionPeer != null &&
-                    (agent.MountAgent != null ||
-                     CoopMissionSpawnLogic.HasTrackedClientMountedHeroMountAgentIndex(agent.Index));
+                    ShouldDeferImmediateClientExactVisualFinalize(agent);
                 bool applied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
                     mission,
                     agent,
@@ -841,6 +836,24 @@ namespace CoopSpectator.Patches
                 __state = false;
                 return true;
             }
+        }
+
+        private static bool ShouldDeferImmediateClientExactVisualFinalize(Agent agent)
+        {
+            if (agent == null)
+                return false;
+
+            if (agent.SpawnEquipment == null)
+                return true;
+
+            if (agent.MountAgent != null)
+                return true;
+
+            if (CoopMissionSpawnLogic.HasTrackedClientMountedHeroMountAgentIndex(agent.Index))
+                return true;
+
+            return agent.SpawnEquipment[EquipmentIndex.Horse].Item != null ||
+                   agent.SpawnEquipment[EquipmentIndex.HorseHarness].Item != null;
         }
 
         private static void MissionNetworkComponent_HandleServerEventSetAgentHealth_Postfix(GameNetworkMessage baseMessage, bool __state)
