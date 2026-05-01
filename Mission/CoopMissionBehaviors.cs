@@ -3660,6 +3660,8 @@ namespace CoopSpectator.MissionBehaviors
             new Dictionary<int, string>();
         private static readonly Dictionary<int, PendingClientExactVisualOverlayState> _pendingExactNativeClientVisualOverlaysByAgentIndex =
             new Dictionary<int, PendingClientExactVisualOverlayState>();
+        private static readonly Dictionary<int, StrictExactHeroTransferRuntimeState> _strictExactHeroTransferStateByRiderAgentIndex =
+            new Dictionary<int, StrictExactHeroTransferRuntimeState>();
         private static readonly Dictionary<int, DateTime> _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex =
             new Dictionary<int, DateTime>();
         private static readonly Dictionary<int, DateTime> _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex =
@@ -4059,6 +4061,43 @@ namespace CoopSpectator.MissionBehaviors
             public bool IncludeWeaponsForRefresh { get; set; }
         }
 
+        private enum StrictExactHeroTransferStage
+        {
+            Unknown = 0,
+            EntryResolved = 10,
+            CreateAgentPayloadObserved = 20,
+            RiderMaterialized = 30,
+            PeerBound = 40,
+            EquipmentSynchronized = 50,
+            MountLinkVerified = 60,
+            ExactVisualQueued = 70,
+            ExactVisualApplied = 80,
+            DeathObserved = 90
+        }
+
+        private sealed class StrictExactHeroTransferRuntimeState
+        {
+            public int RiderAgentIndex { get; set; }
+            public string EntryId { get; set; }
+            public bool IsMountedHero { get; set; }
+            public int ExpectedMountAgentIndex { get; set; } = -1;
+            public bool CreateAgentPayloadObserved { get; set; }
+            public bool RiderMaterialized { get; set; }
+            public bool PeerBound { get; set; }
+            public bool EquipmentSynchronized { get; set; }
+            public bool MountMaterialized { get; set; }
+            public bool MountLinkVerified { get; set; }
+            public bool ExactVisualQueued { get; set; }
+            public bool ExactVisualApplied { get; set; }
+            public bool IncludesWeaponsApplied { get; set; }
+            public bool DeathObserved { get; set; }
+            public StrictExactHeroTransferStage Stage { get; set; }
+            public string LastSource { get; set; }
+            public string LastBlockedReason { get; set; }
+            public string LastFailureReason { get; set; }
+            public DateTime LastUpdatedUtc { get; set; }
+        }
+
         private static readonly FormationClass[] RestrictableFormationClasses =
         {
             FormationClass.Infantry,
@@ -4111,6 +4150,7 @@ namespace CoopSpectator.MissionBehaviors
             _clientMountedHeroPayloadRiderAgentIndexByMountAgentIndex.Clear();
             _clientMountedHeroEntryIdByMountAgentIndex.Clear();
             _pendingExactNativeClientVisualOverlaysByAgentIndex.Clear();
+            _strictExactHeroTransferStateByRiderAgentIndex.Clear();
             _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Clear();
             _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Clear();
             _exactNativeClientVisualOverlayEntryQueuesByAssignmentKey.Clear();
@@ -4118,6 +4158,321 @@ namespace CoopSpectator.MissionBehaviors
             ModLogger.Info(
                 "CoopMissionSpawnLogic: reset client exact visual overlay assignment state. " +
                 "Source=" + (source ?? "unknown"));
+        }
+
+        private static StrictExactHeroTransferRuntimeState EnsureStrictExactHeroTransferState(int riderAgentIndex)
+        {
+            if (riderAgentIndex < 0)
+                return null;
+
+            if (!_strictExactHeroTransferStateByRiderAgentIndex.TryGetValue(riderAgentIndex, out StrictExactHeroTransferRuntimeState state))
+            {
+                state = new StrictExactHeroTransferRuntimeState
+                {
+                    RiderAgentIndex = riderAgentIndex,
+                    Stage = StrictExactHeroTransferStage.Unknown,
+                    LastUpdatedUtc = DateTime.UtcNow
+                };
+                _strictExactHeroTransferStateByRiderAgentIndex[riderAgentIndex] = state;
+            }
+
+            return state;
+        }
+
+        private static void AdvanceStrictExactHeroTransferStage(
+            StrictExactHeroTransferRuntimeState state,
+            StrictExactHeroTransferStage nextStage,
+            string source,
+            string blockedReason = null,
+            string failureReason = null)
+        {
+            if (state == null)
+                return;
+
+            StrictExactHeroTransferStage previousStage = state.Stage;
+            if (nextStage > state.Stage)
+                state.Stage = nextStage;
+
+            if (!string.IsNullOrWhiteSpace(blockedReason))
+                state.LastBlockedReason = blockedReason;
+            if (!string.IsNullOrWhiteSpace(failureReason))
+                state.LastFailureReason = failureReason;
+            state.LastSource = source ?? "unknown";
+            state.LastUpdatedUtc = DateTime.UtcNow;
+
+            bool shouldLog =
+                nextStage > previousStage ||
+                !string.IsNullOrWhiteSpace(blockedReason) ||
+                !string.IsNullOrWhiteSpace(failureReason);
+            if (!shouldLog)
+                return;
+
+            string details =
+                "AgentIndex=" + state.RiderAgentIndex +
+                " EntryId=" + (state.EntryId ?? "null") +
+                " Stage=" + state.Stage +
+                " PreviousStage=" + previousStage +
+                " ExpectedMountAgentIndex=" + state.ExpectedMountAgentIndex +
+                " MountedHero=" + state.IsMountedHero +
+                " RiderMaterialized=" + state.RiderMaterialized +
+                " PeerBound=" + state.PeerBound +
+                " EquipmentSynchronized=" + state.EquipmentSynchronized +
+                " MountMaterialized=" + state.MountMaterialized +
+                " MountLinkVerified=" + state.MountLinkVerified +
+                " ExactVisualQueued=" + state.ExactVisualQueued +
+                " ExactVisualApplied=" + state.ExactVisualApplied +
+                " DeathObserved=" + state.DeathObserved +
+                " BlockedReason=" + (state.LastBlockedReason ?? "null") +
+                " FailureReason=" + (state.LastFailureReason ?? "null") +
+                " Source=" + (source ?? "unknown");
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: strict exact hero transfer stage. " +
+                details);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent("strict-exact-hero-transfer-stage", details);
+        }
+
+        private static void UpdateStrictExactHeroTransferEntryState(
+            int riderAgentIndex,
+            string entryId,
+            RosterEntryState entryState,
+            string source)
+        {
+            if (riderAgentIndex < 0 || entryState == null || !IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                return;
+
+            StrictExactHeroTransferRuntimeState state = EnsureStrictExactHeroTransferState(riderAgentIndex);
+            if (state == null)
+                return;
+
+            state.EntryId = entryId;
+            state.IsMountedHero = entryState.IsMounted;
+            if (entryState.IsMounted &&
+                TryGetTrackedClientMountedHeroMountAgentIndex(riderAgentIndex, out int mountAgentIndex, out _))
+            {
+                state.ExpectedMountAgentIndex = mountAgentIndex;
+            }
+
+            AdvanceStrictExactHeroTransferStage(state, StrictExactHeroTransferStage.EntryResolved, source);
+        }
+
+        private static void UpdateStrictExactHeroTransferPayloadState(
+            int riderAgentIndex,
+            int mountAgentIndex,
+            string source)
+        {
+            if (riderAgentIndex < 0)
+                return;
+
+            StrictExactHeroTransferRuntimeState state = EnsureStrictExactHeroTransferState(riderAgentIndex);
+            if (state == null)
+                return;
+
+            if (mountAgentIndex >= 0)
+            {
+                state.ExpectedMountAgentIndex = mountAgentIndex;
+                state.IsMountedHero = true;
+                state.CreateAgentPayloadObserved = true;
+            }
+
+            AdvanceStrictExactHeroTransferStage(state, StrictExactHeroTransferStage.CreateAgentPayloadObserved, source);
+        }
+
+        private static void UpdateStrictExactHeroTransferMaterializedState(Agent riderAgent, string source)
+        {
+            if (riderAgent == null || riderAgent.Index < 0 || riderAgent.IsMount)
+                return;
+
+            StrictExactHeroTransferRuntimeState state = EnsureStrictExactHeroTransferState(riderAgent.Index);
+            if (state == null)
+                return;
+
+            state.RiderMaterialized = riderAgent.IsActive();
+            if (riderAgent.MountAgent != null)
+            {
+                state.IsMountedHero = true;
+                state.ExpectedMountAgentIndex = riderAgent.MountAgent.Index;
+                state.MountMaterialized = true;
+                state.MountLinkVerified = true;
+            }
+
+            AdvanceStrictExactHeroTransferStage(state, StrictExactHeroTransferStage.RiderMaterialized, source);
+            if (state.MountLinkVerified)
+                AdvanceStrictExactHeroTransferStage(state, StrictExactHeroTransferStage.MountLinkVerified, source);
+        }
+
+        private static void UpdateStrictExactHeroTransferPeerBoundState(Agent riderAgent, string source)
+        {
+            if (riderAgent == null || riderAgent.Index < 0 || riderAgent.IsMount)
+                return;
+
+            StrictExactHeroTransferRuntimeState state = EnsureStrictExactHeroTransferState(riderAgent.Index);
+            if (state == null)
+                return;
+
+            state.PeerBound = riderAgent.MissionPeer != null;
+            if (riderAgent.MountAgent != null)
+            {
+                state.ExpectedMountAgentIndex = riderAgent.MountAgent.Index;
+                state.MountMaterialized = true;
+                state.MountLinkVerified = true;
+            }
+
+            AdvanceStrictExactHeroTransferStage(state, StrictExactHeroTransferStage.PeerBound, source);
+            if (state.MountLinkVerified)
+                AdvanceStrictExactHeroTransferStage(state, StrictExactHeroTransferStage.MountLinkVerified, source);
+        }
+
+        private static void UpdateStrictExactHeroTransferEquipmentSyncState(Agent riderAgent, string source)
+        {
+            if (riderAgent == null || riderAgent.Index < 0 || riderAgent.IsMount)
+                return;
+
+            StrictExactHeroTransferRuntimeState state = EnsureStrictExactHeroTransferState(riderAgent.Index);
+            if (state == null)
+                return;
+
+            state.EquipmentSynchronized = true;
+            AdvanceStrictExactHeroTransferStage(state, StrictExactHeroTransferStage.EquipmentSynchronized, source);
+        }
+
+        private static void UpdateStrictExactHeroTransferMountLinkState(
+            Agent riderAgent,
+            RosterEntryState entryState,
+            string source,
+            string blockedReason = null)
+        {
+            if (riderAgent == null || riderAgent.Index < 0 || riderAgent.IsMount || entryState == null || !entryState.IsMounted)
+                return;
+
+            StrictExactHeroTransferRuntimeState state = EnsureStrictExactHeroTransferState(riderAgent.Index);
+            if (state == null)
+                return;
+
+            state.IsMountedHero = true;
+            if (TryGetTrackedClientMountedHeroMountAgentIndex(riderAgent.Index, out int trackedMountAgentIndex, out _))
+                state.ExpectedMountAgentIndex = trackedMountAgentIndex;
+            if (riderAgent.MountAgent != null)
+            {
+                state.ExpectedMountAgentIndex = riderAgent.MountAgent.Index;
+                state.MountMaterialized = true;
+                state.MountLinkVerified = true;
+                state.LastBlockedReason = null;
+                AdvanceStrictExactHeroTransferStage(state, StrictExactHeroTransferStage.MountLinkVerified, source);
+                return;
+            }
+
+            state.MountMaterialized = false;
+            state.MountLinkVerified = false;
+            AdvanceStrictExactHeroTransferStage(state, state.Stage, source, blockedReason: blockedReason);
+        }
+
+        private static void UpdateStrictExactHeroTransferVisualQueuedState(
+            int riderAgentIndex,
+            string entryId,
+            string source)
+        {
+            if (riderAgentIndex < 0)
+                return;
+
+            StrictExactHeroTransferRuntimeState state = EnsureStrictExactHeroTransferState(riderAgentIndex);
+            if (state == null)
+                return;
+
+            if (!string.IsNullOrWhiteSpace(entryId))
+                state.EntryId = entryId;
+            state.ExactVisualQueued = true;
+            state.ExactVisualApplied = false;
+            AdvanceStrictExactHeroTransferStage(state, StrictExactHeroTransferStage.ExactVisualQueued, source);
+        }
+
+        private static void UpdateStrictExactHeroTransferVisualAppliedState(
+            int riderAgentIndex,
+            string entryId,
+            bool includesWeapons,
+            string source)
+        {
+            if (riderAgentIndex < 0)
+                return;
+
+            StrictExactHeroTransferRuntimeState state = EnsureStrictExactHeroTransferState(riderAgentIndex);
+            if (state == null)
+                return;
+
+            if (!string.IsNullOrWhiteSpace(entryId))
+                state.EntryId = entryId;
+            state.ExactVisualQueued = false;
+            state.ExactVisualApplied = true;
+            state.IncludesWeaponsApplied = includesWeapons;
+            AdvanceStrictExactHeroTransferStage(state, StrictExactHeroTransferStage.ExactVisualApplied, source);
+        }
+
+        private static void UpdateStrictExactHeroTransferDeathState(int riderAgentIndex, string source)
+        {
+            if (riderAgentIndex < 0)
+                return;
+
+            StrictExactHeroTransferRuntimeState state = EnsureStrictExactHeroTransferState(riderAgentIndex);
+            if (state == null)
+                return;
+
+            state.DeathObserved = true;
+            AdvanceStrictExactHeroTransferStage(state, StrictExactHeroTransferStage.DeathObserved, source);
+        }
+
+        private static void ClearStrictExactHeroTransferState(
+            int riderAgentIndex,
+            string source,
+            string reason = null,
+            bool logClear = false)
+        {
+            if (riderAgentIndex < 0)
+                return;
+
+            if (!_strictExactHeroTransferStateByRiderAgentIndex.TryGetValue(riderAgentIndex, out StrictExactHeroTransferRuntimeState state))
+                return;
+
+            if (logClear)
+            {
+                string details =
+                    "AgentIndex=" + riderAgentIndex +
+                    " EntryId=" + (state.EntryId ?? "null") +
+                    " Stage=" + state.Stage +
+                    " ExpectedMountAgentIndex=" + state.ExpectedMountAgentIndex +
+                    " Reason=" + (reason ?? "unknown") +
+                    " Source=" + (source ?? "unknown");
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: cleared strict exact hero transfer state. " +
+                    details);
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent("strict-exact-hero-transfer-cleared", details);
+            }
+
+            _strictExactHeroTransferStateByRiderAgentIndex.Remove(riderAgentIndex);
+        }
+
+        private static string BuildStrictExactHeroTransferStateSummary(int riderAgentIndex)
+        {
+            if (riderAgentIndex < 0 ||
+                !_strictExactHeroTransferStateByRiderAgentIndex.TryGetValue(riderAgentIndex, out StrictExactHeroTransferRuntimeState state) ||
+                state == null)
+            {
+                return "StrictTransfer={State=absent}";
+            }
+
+            return
+                "StrictTransfer={Stage=" + state.Stage +
+                ",EntryId=" + (state.EntryId ?? "null") +
+                ",MountedHero=" + state.IsMountedHero +
+                ",ExpectedMountAgentIndex=" + state.ExpectedMountAgentIndex +
+                ",RiderMaterialized=" + state.RiderMaterialized +
+                ",PeerBound=" + state.PeerBound +
+                ",EquipmentSynchronized=" + state.EquipmentSynchronized +
+                ",MountMaterialized=" + state.MountMaterialized +
+                ",MountLinkVerified=" + state.MountLinkVerified +
+                ",ExactVisualQueued=" + state.ExactVisualQueued +
+                ",ExactVisualApplied=" + state.ExactVisualApplied +
+                ",DeathObserved=" + state.DeathObserved +
+                ",BlockedReason=" + (state.LastBlockedReason ?? "null") +
+                ",FailureReason=" + (state.LastFailureReason ?? "null") + "}";
         }
 
         /// <summary>Після читання файлу — список troop ID з кампанії для обмеження вибору юнітів клієнтами (варіант A).</summary>
@@ -5066,6 +5421,8 @@ namespace CoopSpectator.MissionBehaviors
             RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
             if (entryState == null)
                 return false;
+            if (IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                UpdateStrictExactHeroTransferEntryState(agent.Index, entryId, entryState, source ?? "client exact visual queue");
 
             RefreshClientExactCampaignVisualOverlayAgentIndexState(
                 agent,
@@ -5099,6 +5456,7 @@ namespace CoopSpectator.MissionBehaviors
                 Source = source ?? "client exact visual queue",
                 IncludeWeaponsForRefresh = includeWeaponsForRefresh
             };
+            UpdateStrictExactHeroTransferVisualQueuedState(agent.Index, entryId, source ?? "client exact visual queue");
             ModLogger.Info(
                 "CoopMissionSpawnLogic: queued client exact visual overlay refresh. " +
                 "AgentIndex=" + agent.Index +
@@ -5127,8 +5485,10 @@ namespace CoopSpectator.MissionBehaviors
             bool hadPending = _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agentIndex);
             bool hadWatchdogFirstSeen = _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Remove(agentIndex);
             bool hadWatchdogLastAttempt = _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Remove(agentIndex);
+            bool hadStrictTransferState = _strictExactHeroTransferStateByRiderAgentIndex.ContainsKey(agentIndex);
+            ClearStrictExactHeroTransferState(agentIndex, source, reason, logClear: false);
             if (logClear &&
-                (hadTrackedAgent || hadApplied || hadIncludesWeapons || hadEntryId || hadTrackedMount || hadPending || hadWatchdogFirstSeen || hadWatchdogLastAttempt))
+                (hadTrackedAgent || hadApplied || hadIncludesWeapons || hadEntryId || hadTrackedMount || hadPending || hadWatchdogFirstSeen || hadWatchdogLastAttempt || hadStrictTransferState))
             {
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: cleared client exact visual overlay agent-index state. " +
@@ -5141,6 +5501,7 @@ namespace CoopSpectator.MissionBehaviors
                     " HadEntryId=" + hadEntryId +
                     " HadTrackedMount=" + hadTrackedMount +
                     " HadPending=" + hadPending +
+                    " HadStrictTransferState=" + hadStrictTransferState +
                     " HadWatchdogFirstSeen=" + hadWatchdogFirstSeen +
                     " HadWatchdogLastAttempt=" + hadWatchdogLastAttempt);
             }
@@ -5245,6 +5606,9 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             TrackClientMountedHeroMountAgentIndex(riderAgent.Index, mountAgent.Index, entryId);
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            UpdateStrictExactHeroTransferEntryState(riderAgent.Index, entryId, entryState, "track-mounted-hero-mount-live");
+            UpdateStrictExactHeroTransferMountLinkState(riderAgent, entryState, "track-mounted-hero-mount-live");
         }
 
         internal static void TryTrackClientMountedHeroMountAgentIndex(Agent riderAgent)
@@ -5282,6 +5646,9 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             TrackClientMountedHeroMountAgentIndex(riderAgent.Index, mountAgentIndex, entryId);
+            UpdateStrictExactHeroTransferEntryState(riderAgent.Index, entryId, entryState, "track-mounted-hero-mount-index");
+            UpdateStrictExactHeroTransferPayloadState(riderAgent.Index, mountAgentIndex, "track-mounted-hero-mount-index");
+            UpdateStrictExactHeroTransferMountLinkState(riderAgent, entryState, "track-mounted-hero-mount-index");
         }
 
         internal static void TryTrackClientMountedHeroMountAgentIndexFromPayload(int riderAgentIndex, int mountAgentIndex)
@@ -5290,6 +5657,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             RememberClientMountedHeroMountPayloadIndex(riderAgentIndex, mountAgentIndex);
+            UpdateStrictExactHeroTransferPayloadState(riderAgentIndex, mountAgentIndex, "track-mounted-hero-payload");
         }
 
         internal static bool HasTrackedClientMountedHeroMountAgentIndex(int riderAgentIndex)
@@ -5451,6 +5819,11 @@ namespace CoopSpectator.MissionBehaviors
                     TrackClientMountedHeroMountAgentIndex(riderAgent.Index, mountAgent.Index, entryId);
 
                 repairReason = "mounted-hero-link-repaired:" + mountAgent.Index;
+                RosterEntryState entryState = !string.IsNullOrWhiteSpace(entryId)
+                    ? BattleSnapshotRuntimeState.GetEntryState(entryId)
+                    : null;
+                UpdateStrictExactHeroTransferEntryState(riderAgent.Index, entryId, entryState, source ?? "client mount-link repair");
+                UpdateStrictExactHeroTransferMountLinkState(riderAgent, entryState, source ?? "client mount-link repair");
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: repaired tracked client mounted-hero rider-to-mount link. " +
                     "AgentIndex=" + riderAgent.Index +
@@ -5497,6 +5870,7 @@ namespace CoopSpectator.MissionBehaviors
                     source,
                     out string repairReason))
             {
+                UpdateStrictExactHeroTransferMountLinkState(riderAgent, entryState, source, repairReason);
                 reason = repairReason;
                 return true;
             }
@@ -5504,6 +5878,7 @@ namespace CoopSpectator.MissionBehaviors
             reason = string.IsNullOrWhiteSpace(repairReason)
                 ? missingReason
                 : missingReason + " | " + repairReason;
+            UpdateStrictExactHeroTransferMountLinkState(riderAgent, entryState, source, reason);
             return false;
         }
 
@@ -5903,6 +6278,7 @@ namespace CoopSpectator.MissionBehaviors
             RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
             if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
                 return false;
+            UpdateStrictExactHeroTransferEntryState(agent.Index, entryId, entryState, source ?? "client exact-visual finalize");
 
             TrackClientMountedHeroMountAgentIndex(agent, entryId);
             bool mountLinkReady = TryEnsureTrackedClientMountedHeroMountLinkReady(
@@ -5919,7 +6295,7 @@ namespace CoopSpectator.MissionBehaviors
                     " EntryId=" + entryId +
                     " Reason=" + (mountLinkReason ?? "unknown") +
                     " Source=" + (source ?? "unknown"));
-                return TryQueueClientExactCampaignVisualOverlay(
+                TryQueueClientExactCampaignVisualOverlay(
                     mission,
                     agent,
                     entryId,
@@ -5927,7 +6303,9 @@ namespace CoopSpectator.MissionBehaviors
                     delaySeconds: 0.12d,
                     force: true,
                     includeWeaponsForRefresh: includeWeaponsForClientRefresh);
+                return false;
             }
+            UpdateStrictExactHeroTransferMountLinkState(agent, entryState, source ?? "client exact-visual finalize");
 
             _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = entryId;
             if (_exactNativeClientVisualOverlayAppliedAgentIndices.Contains(agent.Index) &&
@@ -5939,7 +6317,7 @@ namespace CoopSpectator.MissionBehaviors
 
             if (!allowImmediateApply)
             {
-                return TryQueueClientExactCampaignVisualOverlay(
+                TryQueueClientExactCampaignVisualOverlay(
                     mission,
                     agent,
                     entryId,
@@ -5947,6 +6325,7 @@ namespace CoopSpectator.MissionBehaviors
                     delaySeconds: 0.35,
                     force: true,
                     includeWeaponsForRefresh: includeWeaponsForClientRefresh);
+                return false;
             }
 
             if (agent.IsActive() && agent.Team != null && agent.Team.Side != BattleSideEnum.None)
@@ -5963,15 +6342,22 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     return true;
                 }
+
+                AdvanceStrictExactHeroTransferStage(
+                    EnsureStrictExactHeroTransferState(agent.Index),
+                    StrictExactHeroTransferStage.MountLinkVerified,
+                    source ?? "client exact-visual finalize",
+                    failureReason: "client-exact-visual-apply-returned-false");
             }
 
-            return TryQueueClientExactCampaignVisualOverlay(
+            TryQueueClientExactCampaignVisualOverlay(
                 mission,
                 agent,
                 entryId,
                 source ?? "client exact-visual finalize",
                 delaySeconds: 0.35,
                 includeWeaponsForRefresh: includeWeaponsForClientRefresh);
+            return false;
         }
 
         public static bool TryHandleClientExactCampaignSpawnEquipmentSync(
@@ -6793,7 +7179,11 @@ namespace CoopSpectator.MissionBehaviors
                     : TryApplyClientVisualOnlyCombatProfile(agent, entryState);
             appliedAgentIndices.Add(agent.Index);
             if (clientVisualOnly)
+            {
                 _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex[agent.Index] = includeWeaponsForOverlayRefresh;
+                if (IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                    UpdateStrictExactHeroTransferVisualAppliedState(agent.Index, entryId, includeWeaponsForOverlayRefresh, source ?? "client exact visual apply");
+            }
             if (enforceServerAuthoritativeOverlayContract)
             {
                 TraceNativeExactAgentOverlayDecision(
@@ -15284,6 +15674,16 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             TrackClientMountedHeroMountAgentIndex(agent, entryId);
+            UpdateStrictExactHeroTransferEntryState(agent.Index, entryId, entryState, source ?? "client-mounted-hero-contract");
+            if (string.Equals(eventName, "client-set-agent-health", StringComparison.Ordinal) && agent.Health <= 0f)
+                UpdateStrictExactHeroTransferDeathState(agent.Index, source ?? "client-mounted-hero-contract");
+            else if (string.Equals(eventName, "client-set-agent-peer", StringComparison.Ordinal) ||
+                     string.Equals(eventName, "client-set-agent-peer-remote", StringComparison.Ordinal))
+                UpdateStrictExactHeroTransferPeerBoundState(agent, source ?? "client-mounted-hero-contract");
+            else if (string.Equals(eventName, "client-synchronize-agent-equipment", StringComparison.Ordinal))
+                UpdateStrictExactHeroTransferEquipmentSyncState(agent, source ?? "client-mounted-hero-contract");
+            else if (string.Equals(eventName, "client-create-agent", StringComparison.Ordinal))
+                UpdateStrictExactHeroTransferMaterializedState(agent, source ?? "client-mounted-hero-contract");
 
             ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
             string details =
@@ -15301,6 +15701,7 @@ namespace CoopSpectator.MissionBehaviors
                 " " + BuildExactBattleAgentSpawnTraceContractSummary(diagnostic) +
                 " " + BuildClientMountedHeroMountRepairSummary(agent, entryState) +
                 " " + BuildClientExactVisualOverlayStateSummary(agent.Index) +
+                " " + BuildStrictExactHeroTransferStateSummary(agent.Index) +
                 " Source=" + (source ?? "unknown") +
                 (string.IsNullOrWhiteSpace(payloadSummary) ? string.Empty : " " + payloadSummary);
             ModLogger.Info(
