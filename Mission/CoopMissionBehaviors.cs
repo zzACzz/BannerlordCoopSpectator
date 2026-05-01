@@ -3652,6 +3652,10 @@ namespace CoopSpectator.MissionBehaviors
             new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _clientMountedHeroRiderAgentIndexByMountAgentIndex =
             new Dictionary<int, int>();
+        private static readonly Dictionary<int, int> _clientMountedHeroPayloadMountAgentIndexByRiderAgentIndex =
+            new Dictionary<int, int>();
+        private static readonly Dictionary<int, int> _clientMountedHeroPayloadRiderAgentIndexByMountAgentIndex =
+            new Dictionary<int, int>();
         private static readonly Dictionary<int, string> _clientMountedHeroEntryIdByMountAgentIndex =
             new Dictionary<int, string>();
         private static readonly Dictionary<int, PendingClientExactVisualOverlayState> _pendingExactNativeClientVisualOverlaysByAgentIndex =
@@ -4103,6 +4107,8 @@ namespace CoopSpectator.MissionBehaviors
             _exactNativeClientVisualOverlayAgentByIndex.Clear();
             _clientMountedHeroMountAgentIndexByRiderAgentIndex.Clear();
             _clientMountedHeroRiderAgentIndexByMountAgentIndex.Clear();
+            _clientMountedHeroPayloadMountAgentIndexByRiderAgentIndex.Clear();
+            _clientMountedHeroPayloadRiderAgentIndexByMountAgentIndex.Clear();
             _clientMountedHeroEntryIdByMountAgentIndex.Clear();
             _pendingExactNativeClientVisualOverlaysByAgentIndex.Clear();
             _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Clear();
@@ -5170,10 +5176,49 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private static bool ClearClientMountedHeroPayloadMountAgentIndexState(int riderAgentIndex)
+        {
+            if (riderAgentIndex < 0)
+                return false;
+
+            bool hadTrackedMount =
+                _clientMountedHeroPayloadMountAgentIndexByRiderAgentIndex.TryGetValue(riderAgentIndex, out int trackedMountAgentIndex);
+            if (!hadTrackedMount)
+                return false;
+
+            _clientMountedHeroPayloadMountAgentIndexByRiderAgentIndex.Remove(riderAgentIndex);
+            if (_clientMountedHeroPayloadRiderAgentIndexByMountAgentIndex.TryGetValue(trackedMountAgentIndex, out int trackedRiderAgentIndex) &&
+                trackedRiderAgentIndex == riderAgentIndex)
+            {
+                _clientMountedHeroPayloadRiderAgentIndexByMountAgentIndex.Remove(trackedMountAgentIndex);
+            }
+
+            return true;
+        }
+
+        private static void RememberClientMountedHeroMountPayloadIndex(int riderAgentIndex, int mountAgentIndex)
+        {
+            if (riderAgentIndex < 0 || mountAgentIndex < 0)
+                return;
+
+            if (_clientMountedHeroPayloadMountAgentIndexByRiderAgentIndex.TryGetValue(riderAgentIndex, out int previousMountAgentIndex) &&
+                previousMountAgentIndex != mountAgentIndex &&
+                _clientMountedHeroPayloadRiderAgentIndexByMountAgentIndex.TryGetValue(previousMountAgentIndex, out int previousRiderAgentIndex) &&
+                previousRiderAgentIndex == riderAgentIndex)
+            {
+                _clientMountedHeroPayloadRiderAgentIndexByMountAgentIndex.Remove(previousMountAgentIndex);
+            }
+
+            _clientMountedHeroPayloadMountAgentIndexByRiderAgentIndex[riderAgentIndex] = mountAgentIndex;
+            _clientMountedHeroPayloadRiderAgentIndexByMountAgentIndex[mountAgentIndex] = riderAgentIndex;
+        }
+
         private static void TrackClientMountedHeroMountAgentIndex(int riderAgentIndex, int mountAgentIndex, string entryId)
         {
             if (riderAgentIndex < 0 || mountAgentIndex < 0)
                 return;
+
+            RememberClientMountedHeroMountPayloadIndex(riderAgentIndex, mountAgentIndex);
 
             if (_clientMountedHeroMountAgentIndexByRiderAgentIndex.TryGetValue(riderAgentIndex, out int previousMountAgentIndex) &&
                 previousMountAgentIndex != mountAgentIndex &&
@@ -5244,7 +5289,18 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsServer || riderAgentIndex < 0 || mountAgentIndex < 0)
                 return;
 
-            TrackClientMountedHeroMountAgentIndex(riderAgentIndex, mountAgentIndex, entryId: null);
+            RememberClientMountedHeroMountPayloadIndex(riderAgentIndex, mountAgentIndex);
+        }
+
+        internal static bool HasTrackedClientMountedHeroMountAgentIndex(int riderAgentIndex)
+        {
+            if (riderAgentIndex < 0)
+                return false;
+
+            return (_clientMountedHeroMountAgentIndexByRiderAgentIndex.TryGetValue(riderAgentIndex, out int trackedMountAgentIndex) &&
+                    trackedMountAgentIndex >= 0) ||
+                   (_clientMountedHeroPayloadMountAgentIndexByRiderAgentIndex.TryGetValue(riderAgentIndex, out trackedMountAgentIndex) &&
+                    trackedMountAgentIndex >= 0);
         }
 
         private static bool TryGetTrackedClientMountedHeroMountAgentIndex(
@@ -5257,8 +5313,10 @@ namespace CoopSpectator.MissionBehaviors
             if (riderAgentIndex < 0)
                 return false;
 
-            if (!_clientMountedHeroMountAgentIndexByRiderAgentIndex.TryGetValue(riderAgentIndex, out mountAgentIndex) ||
-                mountAgentIndex < 0)
+            if ((!_clientMountedHeroMountAgentIndexByRiderAgentIndex.TryGetValue(riderAgentIndex, out mountAgentIndex) ||
+                 mountAgentIndex < 0) &&
+                (!_clientMountedHeroPayloadMountAgentIndexByRiderAgentIndex.TryGetValue(riderAgentIndex, out mountAgentIndex) ||
+                 mountAgentIndex < 0))
             {
                 mountAgentIndex = -1;
                 return false;
@@ -5459,7 +5517,11 @@ namespace CoopSpectator.MissionBehaviors
             if (missingMountAgentIndex < 0)
                 return false;
 
-            if (!_clientMountedHeroRiderAgentIndexByMountAgentIndex.TryGetValue(missingMountAgentIndex, out riderAgentIndex))
+            bool hasResolvedRider = _clientMountedHeroRiderAgentIndexByMountAgentIndex.TryGetValue(missingMountAgentIndex, out riderAgentIndex);
+            bool hasPayloadRider = false;
+            if (!hasResolvedRider)
+                hasPayloadRider = _clientMountedHeroPayloadRiderAgentIndexByMountAgentIndex.TryGetValue(missingMountAgentIndex, out riderAgentIndex);
+            if (!hasResolvedRider && !hasPayloadRider)
                 return false;
 
             Agent riderAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(riderAgentIndex, canBeNull: true);
@@ -5467,7 +5529,8 @@ namespace CoopSpectator.MissionBehaviors
                 riderAgent.MountAgent != null &&
                 riderAgent.MountAgent.Index != missingMountAgentIndex)
             {
-                if (_clientMountedHeroRiderAgentIndexByMountAgentIndex.TryGetValue(missingMountAgentIndex, out int trackedRiderAgentIndex) &&
+                if (hasResolvedRider &&
+                    _clientMountedHeroRiderAgentIndexByMountAgentIndex.TryGetValue(missingMountAgentIndex, out int trackedRiderAgentIndex) &&
                     trackedRiderAgentIndex == riderAgentIndex)
                 {
                     _clientMountedHeroRiderAgentIndexByMountAgentIndex.Remove(missingMountAgentIndex);
@@ -5475,6 +5538,14 @@ namespace CoopSpectator.MissionBehaviors
                 }
 
                 _clientMountedHeroMountAgentIndexByRiderAgentIndex.Remove(riderAgentIndex);
+                if (hasPayloadRider &&
+                    _clientMountedHeroPayloadRiderAgentIndexByMountAgentIndex.TryGetValue(missingMountAgentIndex, out int payloadTrackedRiderAgentIndex) &&
+                    payloadTrackedRiderAgentIndex == riderAgentIndex)
+                {
+                    _clientMountedHeroPayloadRiderAgentIndexByMountAgentIndex.Remove(missingMountAgentIndex);
+                }
+
+                _clientMountedHeroPayloadMountAgentIndexByRiderAgentIndex.Remove(riderAgentIndex);
                 riderAgentIndex = -1;
                 return false;
             }
@@ -5488,7 +5559,7 @@ namespace CoopSpectator.MissionBehaviors
             if (string.IsNullOrWhiteSpace(entryId))
                 _materializedArmyEntryIdByAgentIndex.TryGetValue(riderAgentIndex, out entryId);
 
-            return !string.IsNullOrWhiteSpace(entryId);
+            return riderAgentIndex >= 0;
         }
 
         private static void RefreshClientExactCampaignVisualOverlayAgentIndexState(
@@ -10603,6 +10674,7 @@ namespace CoopSpectator.MissionBehaviors
                 _materializedBattleResultRemovedAgentIndices.Remove(agentIndex);
             _exactNativeSnapshotOverlayAppliedAgentIndices.Remove(agentIndex);
             ClearClientExactCampaignVisualOverlayAgentIndexState(agentIndex, "clear-materialized-agent-index-runtime-caches");
+            ClearClientMountedHeroPayloadMountAgentIndexState(agentIndex);
         }
 
         private static bool TryRefreshMaterializedAgentIdentityCache(

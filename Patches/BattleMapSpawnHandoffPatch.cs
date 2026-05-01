@@ -569,7 +569,8 @@ namespace CoopSpectator.Patches
                 {
                     bool remoteDeferImmediateExactVisualFinalize =
                         agent.SpawnEquipment == null ||
-                        agent.MountAgent != null;
+                        agent.MountAgent != null ||
+                        CoopMissionSpawnLogic.HasTrackedClientMountedHeroMountAgentIndex(agent.Index);
                     CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent);
                     bool remoteExactVisualFinalized = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
                         mission,
@@ -627,7 +628,8 @@ namespace CoopSpectator.Patches
 
                 bool deferImmediateExactVisualFinalize =
                     agent.SpawnEquipment == null ||
-                    agent.MountAgent != null;
+                    agent.MountAgent != null ||
+                    CoopMissionSpawnLogic.HasTrackedClientMountedHeroMountAgentIndex(agent.Index);
                 bool exactVisualFinalized = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
                     mission,
                     agent,
@@ -755,7 +757,8 @@ namespace CoopSpectator.Patches
 
                 bool deferImmediateExactVisualFinalize =
                     agent.MissionPeer != null &&
-                    agent.MountAgent != null;
+                    (agent.MountAgent != null ||
+                     CoopMissionSpawnLogic.HasTrackedClientMountedHeroMountAgentIndex(agent.Index));
                 bool applied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
                     mission,
                     agent,
