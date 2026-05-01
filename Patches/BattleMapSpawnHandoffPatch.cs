@@ -557,8 +557,47 @@ namespace CoopSpectator.Patches
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setAgentPeer.AgentIndex, canBeNull: true);
                 MissionPeer missionPeer = setAgentPeer.Peer?.GetComponent<MissionPeer>();
-                if (agent == null || missionPeer == null || !missionPeer.IsMine || !agent.IsActive())
+                if (agent == null || missionPeer == null || !agent.IsActive())
                     return;
+
+                if (!missionPeer.IsMine)
+                {
+                    bool remoteDeferImmediateExactVisualFinalize =
+                        agent.SpawnEquipment == null ||
+                        agent.MountAgent != null;
+                    CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent);
+                    bool remoteExactVisualFinalized = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
+                        mission,
+                        agent,
+                        preferredEntryId: null,
+                        source: "battle-map handoff SetAgentPeer remote",
+                        includeWeaponsForClientRefresh: true,
+                        allowImmediateApply: !remoteDeferImmediateExactVisualFinalize);
+                    if (remoteExactVisualFinalized && !remoteDeferImmediateExactVisualFinalize)
+                        agent.MountAgent?.UpdateAgentProperties();
+
+                    if (remoteExactVisualFinalized)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: finalized remote peer agent visuals after SetAgentPeer for battle-map handoff. " +
+                            "AgentIndex=" + agent.Index +
+                            " PeerIndex=" + (setAgentPeer.Peer?.Index.ToString() ?? "null") +
+                            " HasSpawnEquipment=" + (agent.SpawnEquipment != null) +
+                            " MountAgentIndex=" + (agent.MountAgent?.Index.ToString() ?? "null") +
+                            " ExactVisualFinalized=" + remoteExactVisualFinalized +
+                            " DeferredImmediateExactVisualFinalize=" + remoteDeferImmediateExactVisualFinalize +
+                            " Mission=" + (mission.SceneName ?? "null"));
+                    }
+
+                    CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                        agent,
+                        "client-set-agent-peer-remote",
+                        "battle-map handoff SetAgentPeer remote",
+                        "PayloadPeerIndex=" + (setAgentPeer.Peer?.Index.ToString() ?? "null") +
+                        " DeferredImmediateExactVisualFinalize=" + remoteDeferImmediateExactVisualFinalize +
+                        " ExactVisualFinalized=" + remoteExactVisualFinalized);
+                    return;
+                }
 
                 CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot selectionBridge =
                     CoopBattleSelectionBridgeFile.ReadCurrentSelection();
@@ -636,6 +675,8 @@ namespace CoopSpectator.Patches
                 if (agent == null || !agent.IsActive() || agent.IsMount || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
                     return;
 
+                if (createAgent.MountAgentIndex >= 0)
+                    CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent, createAgent.MountAgentIndex);
                 CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent);
                 bool exactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
                     mission,
