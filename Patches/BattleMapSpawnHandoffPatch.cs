@@ -889,6 +889,7 @@ namespace CoopSpectator.Patches
                 if (TrySuppressNonCommanderOrderUi(__instance))
                     return;
 
+                _lastSuppressedNonCommanderOrderUiKey = null;
                 TryFinalizePendingLocalCommanderOrderControl(__instance);
                 TryMaintainLocalCommanderOrderControl(__instance);
                 TryHandleExactCommanderOrderUiHotkeys(__instance);
@@ -1151,6 +1152,19 @@ namespace CoopSpectator.Patches
             if (isExactCommander || (!hasCommanderIdentity && hasCommanderControlCounts))
                 return false;
 
+            string suppressionStateKey =
+                myPeer.Index + "|" +
+                team.TeamIndex + "|" +
+                controlledAgent.Index + "|" +
+                (controlledEntryId ?? "none") + "|" +
+                (commanderEntryId ?? "none") + "|" +
+                myMissionPeer.BotsUnderControlTotal + "|" +
+                myMissionPeer.BotsUnderControlAlive;
+            // The order-control prefixes already keep the UI suppressed; avoid
+            // re-running the destructive clear/owner-reset path every tick.
+            if (string.Equals(_lastSuppressedNonCommanderOrderUiKey, suppressionStateKey, StringComparison.Ordinal))
+                return true;
+
             object dataSource = TryGetInstanceMemberValue(orderUiHandler, "_dataSource");
             bool troopPlacerSuspended = TryInvokeSingleBoolMethod(orderUiHandler, "SetSuspendTroopPlacer", value: true);
             bool? closeToggleResult = TryInvokeBoolMethod(dataSource, "TryCloseToggleOrder", false);
@@ -1253,18 +1267,7 @@ namespace CoopSpectator.Patches
             _pendingLocalCommanderOrderControlFinalization = null;
             _suppressExactCommanderOrderHotkeyFallbackUntilRelease = false;
 
-            string logKey =
-                myPeer.Index + "|" +
-                team.TeamIndex + "|" +
-                controlledAgent.Index + "|" +
-                (controlledEntryId ?? "none") + "|" +
-                (commanderEntryId ?? "none") + "|" +
-                myMissionPeer.BotsUnderControlTotal + "|" +
-                myMissionPeer.BotsUnderControlAlive;
-            if (string.Equals(_lastSuppressedNonCommanderOrderUiKey, logKey, StringComparison.Ordinal))
-                return true;
-
-            _lastSuppressedNonCommanderOrderUiKey = logKey;
+            _lastSuppressedNonCommanderOrderUiKey = suppressionStateKey;
             ModLogger.Info(
                 "BattleMapSpawnHandoffPatch: suppressed local commander order UI for non-commander controlled agent. " +
                 "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
