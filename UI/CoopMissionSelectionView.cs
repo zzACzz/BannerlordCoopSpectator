@@ -215,10 +215,13 @@ namespace CoopSpectator.UI
 
         private CoopSelectionScreen DetermineDesiredScreen(CoopSelectionUiSnapshot snapshot)
         {
-            if (snapshot == null || !snapshot.CanShowOverlay || _spectatorOverlayHidden || DateTime.UtcNow < _overlaySuppressedUntilUtc)
+            if (snapshot == null || !snapshot.CanShowOverlay || _spectatorOverlayHidden)
                 return CoopSelectionScreen.None;
 
             if (ShouldKeepOverlaySuppressedWhileAwaitingLocalSpawn(snapshot))
+                return CoopSelectionScreen.None;
+
+            if (DateTime.UtcNow < _overlaySuppressedUntilUtc)
                 return CoopSelectionScreen.None;
 
             if (!snapshot.BattleDataReady)
@@ -411,12 +414,20 @@ namespace CoopSpectator.UI
             _localSpawnPendingSide = BattleSideEnum.None;
             _localSpawnPendingLastRequestUtc = DateTime.MinValue;
             _localSpawnPendingRequestAttemptCount = 0;
+            _overlaySuppressedUntilUtc = DateTime.MinValue;
         }
 
         private bool ShouldKeepOverlaySuppressedWhileAwaitingLocalSpawn(CoopSelectionUiSnapshot snapshot)
         {
             if (!_localSpawnPending)
                 return false;
+
+            if (snapshot?.IsBattleEnded == true ||
+                string.Equals(snapshot?.BattleDataReadinessStage, "BattleEnded", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearLocalSpawnPending("battle-ended");
+                return false;
+            }
 
             if (snapshot?.HasLocalControlledAgent == true || snapshot?.Status?.HasAgent == true)
             {
@@ -449,18 +460,31 @@ namespace CoopSpectator.UI
                 return true;
             }
 
-            bool matchesPendingEntry =
+            bool hasExplicitPendingRequestForEntry =
                 !string.IsNullOrWhiteSpace(_localSpawnPendingEntryId) &&
                 (string.Equals(status.SpawnRequestEntryId, _localSpawnPendingEntryId, StringComparison.Ordinal) ||
-                 string.Equals(status.SelectionRequestEntryId, _localSpawnPendingEntryId, StringComparison.Ordinal) ||
-                 string.Equals(status.SelectedEntryId, _localSpawnPendingEntryId, StringComparison.Ordinal));
-            if (matchesPendingEntry ||
+                 string.Equals(status.SelectionRequestEntryId, _localSpawnPendingEntryId, StringComparison.Ordinal));
+            bool pendingEntryStillSelectable =
+                !string.IsNullOrWhiteSpace(_localSpawnPendingEntryId) &&
+                (snapshot?.EffectiveSelectableEntryIds?.Contains(_localSpawnPendingEntryId, StringComparer.OrdinalIgnoreCase) ?? false);
+            if (hasExplicitPendingRequestForEntry ||
                 string.Equals(lifecycle, "Waiting", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(lifecycle, "SpawnQueued", StringComparison.OrdinalIgnoreCase) ||
                 (!status.CanRespawn && !status.HasAgent))
             {
                 TryResendPendingSpawnRequestsIfStale(status, lifecycle, pendingTimedOut);
                 return true;
+            }
+
+            if (status.CanRespawn && !status.HasAgent)
+            {
+                if (pendingEntryStillSelectable && DateTime.UtcNow < _overlaySuppressedUntilUtc)
+                    return true;
+
+                ClearLocalSpawnPending(pendingEntryStillSelectable
+                    ? "server-ready-for-new-selection"
+                    : "pending-entry-no-longer-selectable");
+                return false;
             }
 
             if (pendingTimedOut)
