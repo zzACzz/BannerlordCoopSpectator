@@ -225,17 +225,20 @@ namespace CoopSpectator.Patches
             MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
                 "HandleServerEventSetAgentHealth",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetAgentHealth_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
             MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(MissionNetworkComponent_HandleServerEventSetAgentHealth_Postfix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || postfix == null)
+            if (target == null || prefix == null || postfix == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetAgentHealth not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to MissionNetworkComponent.HandleServerEventSetAgentHealth.");
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to MissionNetworkComponent.HandleServerEventSetAgentHealth.");
         }
 
         private static void PatchMissionNetworkComponentSetWieldedItemIndex(Harmony harmony)
@@ -633,6 +636,7 @@ namespace CoopSpectator.Patches
                 if (agent == null || !agent.IsActive() || agent.IsMount || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
                     return;
 
+                CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent);
                 bool exactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
                     mission,
                     agent,
@@ -717,10 +721,62 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void MissionNetworkComponent_HandleServerEventSetAgentHealth_Postfix(GameNetworkMessage baseMessage)
+        private static bool MissionNetworkComponent_HandleServerEventSetAgentHealth_Prefix(GameNetworkMessage baseMessage, ref bool __state)
+        {
+            __state = false;
+
+            try
+            {
+                if (!(baseMessage is SetAgentHealth setAgentHealth))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setAgentHealth.AgentIndex, canBeNull: true);
+                if (agent != null)
+                    return true;
+
+                if (!CoopMissionSpawnLogic.TryResolveTrackedClientMountedHeroMissingMountAgentHealth(
+                        setAgentHealth.AgentIndex,
+                        out int riderAgentIndex,
+                        out string entryId))
+                {
+                    return true;
+                }
+
+                __state = true;
+                string payloadSummary =
+                    "PayloadHealth=" + setAgentHealth.Health.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) +
+                    " MissingMountAgentIndex=" + setAgentHealth.AgentIndex +
+                    " RiderAgentIndex=" + riderAgentIndex +
+                    " EntryId=" + (entryId ?? "null") +
+                    " SuppressedReason=missing-tracked-hero-mount-agent";
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: suppressed SetAgentHealth for missing tracked mounted-hero agent. " +
+                    payloadSummary);
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-set-agent-health-suppressed-missing-mount",
+                    payloadSummary +
+                    " Source=battle-map handoff SetAgentHealth missing-mount guard");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetAgentHealth prefix failed open: " + ex.Message);
+                __state = false;
+                return true;
+            }
+        }
+
+        private static void MissionNetworkComponent_HandleServerEventSetAgentHealth_Postfix(GameNetworkMessage baseMessage, bool __state)
         {
             try
             {
+                if (__state)
+                    return;
+
                 if (!(baseMessage is SetAgentHealth setAgentHealth))
                     return;
 
@@ -732,6 +788,7 @@ namespace CoopSpectator.Patches
                 if (agent == null || agent.IsMount)
                     return;
 
+                CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent);
                 if (setAgentHealth.Health > 0 && agent.MountAgent == null && agent.MissionPeer == null)
                     return;
 

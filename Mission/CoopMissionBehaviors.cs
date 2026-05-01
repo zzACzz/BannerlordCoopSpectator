@@ -3648,6 +3648,12 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly HashSet<string> _exactNativeClientVisualOverlayLoggedEntryIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<int, string> _exactNativeClientVisualOverlayEntryIdByAgentIndex = new Dictionary<int, string>();
         private static readonly Dictionary<int, Agent> _exactNativeClientVisualOverlayAgentByIndex = new Dictionary<int, Agent>();
+        private static readonly Dictionary<int, int> _clientMountedHeroMountAgentIndexByRiderAgentIndex =
+            new Dictionary<int, int>();
+        private static readonly Dictionary<int, int> _clientMountedHeroRiderAgentIndexByMountAgentIndex =
+            new Dictionary<int, int>();
+        private static readonly Dictionary<int, string> _clientMountedHeroEntryIdByMountAgentIndex =
+            new Dictionary<int, string>();
         private static readonly Dictionary<int, PendingClientExactVisualOverlayState> _pendingExactNativeClientVisualOverlaysByAgentIndex =
             new Dictionary<int, PendingClientExactVisualOverlayState>();
         private static readonly Dictionary<int, DateTime> _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex =
@@ -4089,6 +4095,9 @@ namespace CoopSpectator.MissionBehaviors
             _exactNativeClientVisualOverlayLoggedEntryIds.Clear();
             _exactNativeClientVisualOverlayEntryIdByAgentIndex.Clear();
             _exactNativeClientVisualOverlayAgentByIndex.Clear();
+            _clientMountedHeroMountAgentIndexByRiderAgentIndex.Clear();
+            _clientMountedHeroRiderAgentIndexByMountAgentIndex.Clear();
+            _clientMountedHeroEntryIdByMountAgentIndex.Clear();
             _pendingExactNativeClientVisualOverlaysByAgentIndex.Clear();
             _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Clear();
             _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Clear();
@@ -4312,6 +4321,9 @@ namespace CoopSpectator.MissionBehaviors
             _exactNativeClientVisualOverlayLoggedEntryIds.Clear();
             _exactNativeClientVisualOverlayEntryIdByAgentIndex.Clear();
             _exactNativeClientVisualOverlayAgentByIndex.Clear();
+            _clientMountedHeroMountAgentIndexByRiderAgentIndex.Clear();
+            _clientMountedHeroRiderAgentIndexByMountAgentIndex.Clear();
+            _clientMountedHeroEntryIdByMountAgentIndex.Clear();
             _pendingExactNativeClientVisualOverlaysByAgentIndex.Clear();
             _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Clear();
             _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Clear();
@@ -4735,6 +4747,9 @@ namespace CoopSpectator.MissionBehaviors
             _exactNativeClientVisualOverlayLoggedEntryIds.Clear();
             _exactNativeClientVisualOverlayEntryIdByAgentIndex.Clear();
             _exactNativeClientVisualOverlayAgentByIndex.Clear();
+            _clientMountedHeroMountAgentIndexByRiderAgentIndex.Clear();
+            _clientMountedHeroRiderAgentIndexByMountAgentIndex.Clear();
+            _clientMountedHeroEntryIdByMountAgentIndex.Clear();
             _pendingExactNativeClientVisualOverlaysByAgentIndex.Clear();
             _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Clear();
             _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Clear();
@@ -5096,11 +5111,12 @@ namespace CoopSpectator.MissionBehaviors
             bool hadApplied = _exactNativeClientVisualOverlayAppliedAgentIndices.Remove(agentIndex);
             bool hadIncludesWeapons = _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.Remove(agentIndex);
             bool hadEntryId = _exactNativeClientVisualOverlayEntryIdByAgentIndex.Remove(agentIndex);
+            bool hadTrackedMount = ClearTrackedClientMountedHeroMountAgentIndexState(agentIndex);
             bool hadPending = _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agentIndex);
             bool hadWatchdogFirstSeen = _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Remove(agentIndex);
             bool hadWatchdogLastAttempt = _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Remove(agentIndex);
             if (logClear &&
-                (hadTrackedAgent || hadApplied || hadIncludesWeapons || hadEntryId || hadPending || hadWatchdogFirstSeen || hadWatchdogLastAttempt))
+                (hadTrackedAgent || hadApplied || hadIncludesWeapons || hadEntryId || hadTrackedMount || hadPending || hadWatchdogFirstSeen || hadWatchdogLastAttempt))
             {
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: cleared client exact visual overlay agent-index state. " +
@@ -5111,10 +5127,113 @@ namespace CoopSpectator.MissionBehaviors
                     " HadApplied=" + hadApplied +
                     " HadIncludesWeapons=" + hadIncludesWeapons +
                     " HadEntryId=" + hadEntryId +
+                    " HadTrackedMount=" + hadTrackedMount +
                     " HadPending=" + hadPending +
                     " HadWatchdogFirstSeen=" + hadWatchdogFirstSeen +
                     " HadWatchdogLastAttempt=" + hadWatchdogLastAttempt);
             }
+        }
+
+        private static bool ClearTrackedClientMountedHeroMountAgentIndexState(int riderAgentIndex)
+        {
+            if (riderAgentIndex < 0)
+                return false;
+
+            bool hadTrackedMount =
+                _clientMountedHeroMountAgentIndexByRiderAgentIndex.TryGetValue(riderAgentIndex, out int trackedMountAgentIndex);
+            if (!hadTrackedMount)
+                return false;
+
+            _clientMountedHeroMountAgentIndexByRiderAgentIndex.Remove(riderAgentIndex);
+            if (_clientMountedHeroRiderAgentIndexByMountAgentIndex.TryGetValue(trackedMountAgentIndex, out int trackedRiderAgentIndex) &&
+                trackedRiderAgentIndex == riderAgentIndex)
+            {
+                _clientMountedHeroRiderAgentIndexByMountAgentIndex.Remove(trackedMountAgentIndex);
+                _clientMountedHeroEntryIdByMountAgentIndex.Remove(trackedMountAgentIndex);
+            }
+
+            return true;
+        }
+
+        private static void TrackClientMountedHeroMountAgentIndex(Agent riderAgent, string entryId)
+        {
+            if (riderAgent == null || riderAgent.IsMount || riderAgent.Index < 0 || string.IsNullOrWhiteSpace(entryId))
+                return;
+
+            Agent mountAgent = riderAgent.MountAgent;
+            if (mountAgent == null || mountAgent.Index < 0)
+                return;
+
+            if (_clientMountedHeroMountAgentIndexByRiderAgentIndex.TryGetValue(riderAgent.Index, out int previousMountAgentIndex) &&
+                previousMountAgentIndex != mountAgent.Index &&
+                _clientMountedHeroRiderAgentIndexByMountAgentIndex.TryGetValue(previousMountAgentIndex, out int previousRiderAgentIndex) &&
+                previousRiderAgentIndex == riderAgent.Index)
+            {
+                _clientMountedHeroRiderAgentIndexByMountAgentIndex.Remove(previousMountAgentIndex);
+                _clientMountedHeroEntryIdByMountAgentIndex.Remove(previousMountAgentIndex);
+            }
+
+            _clientMountedHeroMountAgentIndexByRiderAgentIndex[riderAgent.Index] = mountAgent.Index;
+            _clientMountedHeroRiderAgentIndexByMountAgentIndex[mountAgent.Index] = riderAgent.Index;
+            _clientMountedHeroEntryIdByMountAgentIndex[mountAgent.Index] = entryId;
+        }
+
+        internal static void TryTrackClientMountedHeroMountAgentIndex(Agent riderAgent)
+        {
+            if (riderAgent == null || riderAgent.IsMount || riderAgent.MountAgent == null || GameNetwork.IsServer)
+                return;
+
+            string entryId = ResolveClientExactCampaignVisualOverlayEntryId(riderAgent);
+            if (string.IsNullOrWhiteSpace(entryId))
+                return;
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                return;
+
+            TrackClientMountedHeroMountAgentIndex(riderAgent, entryId);
+        }
+
+        internal static bool TryResolveTrackedClientMountedHeroMissingMountAgentHealth(
+            int missingMountAgentIndex,
+            out int riderAgentIndex,
+            out string entryId)
+        {
+            riderAgentIndex = -1;
+            entryId = null;
+            if (missingMountAgentIndex < 0)
+                return false;
+
+            if (!_clientMountedHeroRiderAgentIndexByMountAgentIndex.TryGetValue(missingMountAgentIndex, out riderAgentIndex))
+                return false;
+
+            Agent riderAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(riderAgentIndex, canBeNull: true);
+            if (riderAgent != null &&
+                riderAgent.MountAgent != null &&
+                riderAgent.MountAgent.Index != missingMountAgentIndex)
+            {
+                if (_clientMountedHeroRiderAgentIndexByMountAgentIndex.TryGetValue(missingMountAgentIndex, out int trackedRiderAgentIndex) &&
+                    trackedRiderAgentIndex == riderAgentIndex)
+                {
+                    _clientMountedHeroRiderAgentIndexByMountAgentIndex.Remove(missingMountAgentIndex);
+                    _clientMountedHeroEntryIdByMountAgentIndex.Remove(missingMountAgentIndex);
+                }
+
+                _clientMountedHeroMountAgentIndexByRiderAgentIndex.Remove(riderAgentIndex);
+                riderAgentIndex = -1;
+                return false;
+            }
+
+            if (!_clientMountedHeroEntryIdByMountAgentIndex.TryGetValue(missingMountAgentIndex, out entryId) ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                _exactNativeClientVisualOverlayEntryIdByAgentIndex.TryGetValue(riderAgentIndex, out entryId);
+            }
+
+            if (string.IsNullOrWhiteSpace(entryId))
+                _materializedArmyEntryIdByAgentIndex.TryGetValue(riderAgentIndex, out entryId);
+
+            return !string.IsNullOrWhiteSpace(entryId);
         }
 
         private static void RefreshClientExactCampaignVisualOverlayAgentIndexState(
@@ -5331,6 +5450,8 @@ namespace CoopSpectator.MissionBehaviors
                 if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
                     continue;
 
+                TrackClientMountedHeroMountAgentIndex(agent, entryId);
+
                 bool alreadyApplied =
                     _exactNativeClientVisualOverlayAppliedAgentIndices.Contains(agent.Index) &&
                     _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.TryGetValue(agent.Index, out bool appliedIncludesWeapons) &&
@@ -5449,6 +5570,8 @@ namespace CoopSpectator.MissionBehaviors
             RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
             if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
                 return false;
+
+            TrackClientMountedHeroMountAgentIndex(agent, entryId);
 
             _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = entryId;
             if (_exactNativeClientVisualOverlayAppliedAgentIndices.Contains(agent.Index) &&
@@ -6080,8 +6203,6 @@ namespace CoopSpectator.MissionBehaviors
             bool enforceServerAuthoritativeOverlayContract =
                 GameNetwork.IsServer &&
                 overlayMode == ExactCampaignSnapshotOverlayMode.ServerAuthoritative;
-            bool refreshedMountNativeVisuals = false;
-            bool refreshedMountExactVisuals = false;
             string clientMountVisualRepairReason = null;
             if (enforceServerAuthoritativeOverlayContract &&
                 !IsServerAuthoritativeNativeExactOverlaySupported(diagnostic))
@@ -6232,7 +6353,6 @@ namespace CoopSpectator.MissionBehaviors
                                 out string appliedMountVisuals,
                                 out string mountVisualRefreshIssue))
                         {
-                            refreshedMountExactVisuals = true;
                             if (!string.IsNullOrWhiteSpace(appliedMountVisuals) &&
                                 !string.Equals(appliedMountVisuals, "(none)", StringComparison.Ordinal))
                             {
@@ -6248,22 +6368,6 @@ namespace CoopSpectator.MissionBehaviors
                                     : equipmentMisses + ", " + mountVisualRefreshIssue;
                         }
                     }
-                    else if (clientVisualOnly && agent.MountAgent?.SpawnEquipment != null)
-                    {
-                        try
-                        {
-                            agent.MountAgent.UpdateSpawnEquipmentAndRefreshVisuals(agent.MountAgent.SpawnEquipment.Clone(false));
-                            refreshedMountNativeVisuals = true;
-                        }
-                        catch (Exception ex)
-                        {
-                            equipmentMisses =
-                                equipmentMisses == "(none)"
-                                    ? "mount-visual-cleanup-failed:" + ex.GetType().Name
-                                    : equipmentMisses + ", mount-visual-cleanup-failed:" + ex.GetType().Name;
-                        }
-                    }
-
                     try
                     {
                         if (clientVisualOnly)
@@ -6307,8 +6411,6 @@ namespace CoopSpectator.MissionBehaviors
                     }
                 }
 
-                if (clientVisualOnly && refreshedMountNativeVisuals && !refreshedMountExactVisuals)
-                    appliedEquipment += ", Mount=native-refresh";
             }
             else if (preSpawnExactLoadoutInjected)
             {
@@ -14798,6 +14900,8 @@ namespace CoopSpectator.MissionBehaviors
             RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
             if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
                 return;
+
+            TrackClientMountedHeroMountAgentIndex(agent, entryId);
 
             ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
             string details =
