@@ -559,11 +559,13 @@ namespace CoopSpectator.Patches
                     return;
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setAgentPeer.AgentIndex, canBeNull: true);
-                MissionPeer missionPeer = setAgentPeer.Peer?.GetComponent<MissionPeer>();
+                NetworkCommunicator payloadPeer = setAgentPeer.Peer;
+                MissionPeer missionPeer = payloadPeer?.GetComponent<MissionPeer>();
                 if (agent == null || missionPeer == null || !agent.IsActive())
                     return;
 
-                if (!missionPeer.IsMine)
+                bool isLocalPayloadPeer = payloadPeer?.IsMine == true;
+                if (!isLocalPayloadPeer)
                 {
                     bool remoteDeferImmediateExactVisualFinalize =
                         agent.SpawnEquipment == null ||
@@ -675,9 +677,6 @@ namespace CoopSpectator.Patches
                     return;
 
                 if (createAgent.MountAgentIndex < 0)
-                    return;
-
-                if (!createAgent.IsPlayerAgent && createAgent.Peer == null)
                     return;
 
                 CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndexFromPayload(
