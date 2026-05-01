@@ -70,19 +70,27 @@ namespace CoopSpectator.Patches
                 out exactEntryCompatibilitySummary,
                 out weaponDecisionReason);
             string capeDecisionReason;
-            bool includeCape;
+            bool includeCape = CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(
+                entryState,
+                out _,
+                out capeDecisionReason);
             if (isPlayerControlledOrigin)
             {
-                includeCape = false;
-                capeDecisionReason =
-                    "player-controlled origin keeps native template visual slots until local client exact overlay applies";
-            }
-            else
-            {
-                includeCape = CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(
-                    entryState,
-                    out _,
-                    out capeDecisionReason);
+                if (includeCape)
+                {
+                    capeDecisionReason = "player-controlled strict exact personal hero cape visual contract";
+                }
+                else if (!HasExactPersonalHeroIdentity(entryState))
+                {
+                    capeDecisionReason =
+                        "player-controlled origin keeps native template visual slots because entry is not an exact personal hero";
+                }
+                else
+                {
+                    capeDecisionReason =
+                        "player-controlled exact personal hero cape visual contract rejected: " +
+                        (capeDecisionReason ?? "unknown");
+                }
             }
             bool injectEquipment = includeWeapons || includeCape;
             Equipment exactEquipment = injectEquipment
@@ -160,20 +168,37 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (isPlayerControlledOrigin)
+            bool supportsStrictExactHeroContract = CoopMissionSpawnLogic.EvaluateExactRuntimePreSpawnWeaponInjectionContract(
+                entryState,
+                out exactEntryCompatibilitySummary,
+                out decisionReason);
+            if (supportsStrictExactHeroContract)
             {
-                decisionReason =
-                    "player-controlled origin keeps native template spawn equipment until remote CreateAgent contract is proven safe";
-                return false;
+                if (isPlayerControlledOrigin)
+                    decisionReason = "player-controlled strict exact personal hero contract";
+
+                return true;
             }
 
             // Only strict exact hero entries may carry pre-spawn weapons through Mission.SpawnAgent.
             // Bulk native MP agents must keep weapon injection disabled until their runtime path is
             // proven safe, otherwise CreateAgent / SetWieldedItemIndex can desync the client.
-            return CoopMissionSpawnLogic.EvaluateExactRuntimePreSpawnWeaponInjectionContract(
-                entryState,
-                out exactEntryCompatibilitySummary,
-                out decisionReason);
+            if (isPlayerControlledOrigin)
+            {
+                if (!HasExactPersonalHeroIdentity(entryState))
+                {
+                    decisionReason =
+                        "player-controlled origin keeps native template spawn equipment because entry is not an exact personal hero";
+                }
+                else
+                {
+                    decisionReason =
+                        "player-controlled exact personal hero contract rejected: " +
+                        (decisionReason ?? "unknown");
+                }
+            }
+
+            return false;
         }
 
         private static bool HasHeroIdentity(RosterEntryState entryState)
@@ -184,6 +209,14 @@ namespace CoopSpectator.Patches
                     !string.IsNullOrWhiteSpace(entryState.HeroRole) ||
                     !string.IsNullOrWhiteSpace(entryState.HeroTemplateId) ||
                     !string.IsNullOrWhiteSpace(entryState.HeroBodyProperties));
+        }
+
+        private static bool HasExactPersonalHeroIdentity(RosterEntryState entryState)
+        {
+            return entryState != null &&
+                   (entryState.IsHero ||
+                    !string.IsNullOrWhiteSpace(entryState.HeroId) ||
+                    string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
         }
 
         private static bool TryResolveEntryBodyProperties(
