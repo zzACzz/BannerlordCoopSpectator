@@ -6279,6 +6279,32 @@ namespace CoopSpectator.MissionBehaviors
                                 ? "agent-properties-refresh-failed:" + ex.GetType().Name
                                 : equipmentMisses + ", agent-properties-refresh-failed:" + ex.GetType().Name;
                     }
+
+                    if (clientVisualOnly && includeWeaponsForOverlayRefresh)
+                    {
+                        if (TryRefreshClientOverlayLiveWeaponWieldState(
+                                agent,
+                                spawnEquipment,
+                                entryId,
+                                source,
+                                out string appliedLiveWieldRefresh,
+                                out string liveWieldRefreshIssue))
+                        {
+                            if (!string.IsNullOrWhiteSpace(appliedLiveWieldRefresh) &&
+                                !string.Equals(appliedLiveWieldRefresh, "(none)", StringComparison.Ordinal))
+                            {
+                                appliedEquipment += ", " + appliedLiveWieldRefresh;
+                            }
+                        }
+                        else if (!string.IsNullOrWhiteSpace(liveWieldRefreshIssue) &&
+                                 !string.Equals(liveWieldRefreshIssue, "(none)", StringComparison.Ordinal))
+                        {
+                            equipmentMisses =
+                                equipmentMisses == "(none)"
+                                    ? liveWieldRefreshIssue
+                                    : equipmentMisses + ", " + liveWieldRefreshIssue;
+                        }
+                    }
                 }
 
                 if (clientVisualOnly && refreshedMountNativeVisuals && !refreshedMountExactVisuals)
@@ -6337,6 +6363,179 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return true;
+        }
+
+        private static bool TryRefreshClientOverlayLiveWeaponWieldState(
+            Agent agent,
+            Equipment overlaySpawnEquipment,
+            string entryId,
+            string source,
+            out string appliedWieldRefresh,
+            out string wieldRefreshIssue)
+        {
+            appliedWieldRefresh = "(none)";
+            wieldRefreshIssue = "(none)";
+            if (agent == null || overlaySpawnEquipment == null || agent.IsMount)
+                return false;
+
+            try
+            {
+                overlaySpawnEquipment.GetInitialWeaponIndicesToEquip(
+                    out EquipmentIndex desiredMainHandIndex,
+                    out EquipmentIndex desiredOffHandIndex,
+                    out bool mainNotUsableWithOneHand,
+                    Equipment.InitialWeaponEquipPreference.Any);
+
+                bool hasDesiredMainHand = IsUsableWeaponEquipmentIndex(overlaySpawnEquipment, desiredMainHandIndex);
+                bool hasDesiredOffHand = IsUsableWeaponEquipmentIndex(overlaySpawnEquipment, desiredOffHandIndex);
+                if (!hasDesiredMainHand && !hasDesiredOffHand)
+                {
+                    wieldRefreshIssue = "client-live-wield-refresh-skipped:no-weapon";
+                    return false;
+                }
+
+                EquipmentIndex preMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+                EquipmentIndex preOffHandIndex = agent.GetOffhandWieldedItemIndex();
+                int desiredMainHandUsageIndex = ResolveEquipmentCurrentUsageIndex(agent, overlaySpawnEquipment, desiredMainHandIndex);
+
+                if (preOffHandIndex != EquipmentIndex.None)
+                    agent.TryToSheathWeaponInHand(Agent.HandIndex.OffHand, Agent.WeaponWieldActionType.Instant);
+                if (preMainHandIndex != EquipmentIndex.None)
+                    agent.TryToSheathWeaponInHand(Agent.HandIndex.MainHand, Agent.WeaponWieldActionType.Instant);
+
+                if (hasDesiredOffHand)
+                {
+                    agent.SetWieldedItemIndexAsClient(
+                        Agent.HandIndex.OffHand,
+                        desiredOffHandIndex,
+                        isWieldedInstantly: true,
+                        isWieldedOnSpawn: false,
+                        desiredMainHandUsageIndex);
+                    agent.TryToWieldWeaponInSlot(
+                        desiredOffHandIndex,
+                        Agent.WeaponWieldActionType.InstantAfterPickUp,
+                        isWieldedOnSpawn: false);
+                }
+
+                if (hasDesiredMainHand)
+                {
+                    agent.SetWieldedItemIndexAsClient(
+                        Agent.HandIndex.MainHand,
+                        desiredMainHandIndex,
+                        isWieldedInstantly: true,
+                        isWieldedOnSpawn: false,
+                        desiredMainHandUsageIndex);
+                    agent.TryToWieldWeaponInSlot(
+                        desiredMainHandIndex,
+                        Agent.WeaponWieldActionType.InstantAfterPickUp,
+                        isWieldedOnSpawn: false);
+                    if (agent.GetPrimaryWieldedItemIndex() == EquipmentIndex.None)
+                    {
+                        agent.WieldNextWeapon(
+                            Agent.HandIndex.MainHand,
+                            Agent.WeaponWieldActionType.InstantAfterPickUp);
+                    }
+                }
+
+                EquipmentIndex postMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+                EquipmentIndex postOffHandIndex = agent.GetOffhandWieldedItemIndex();
+                string details =
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " DesiredMain=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredMainHandIndex) +
+                    " DesiredOff=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredOffHandIndex) +
+                    " MainNotUsableWithOneHand=" + mainNotUsableWithOneHand +
+                    " PreMain=" + FormatAgentWieldedEquipmentIndex(agent, preMainHandIndex) +
+                    " PreOff=" + FormatAgentWieldedEquipmentIndex(agent, preOffHandIndex) +
+                    " PostMain=" + FormatAgentWieldedEquipmentIndex(agent, postMainHandIndex) +
+                    " PostOff=" + FormatAgentWieldedEquipmentIndex(agent, postOffHandIndex) +
+                    " PostWieldedItem=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
+                    " PostOffhandItem=" + (agent.WieldedOffhandWeapon.Item?.StringId ?? "none") +
+                    " Source=" + (source ?? "unknown");
+                bool success = !hasDesiredMainHand || postMainHandIndex != EquipmentIndex.None;
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    success
+                        ? "client-live-wield-refresh"
+                        : "client-live-wield-refresh-failed",
+                    details);
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: client live wield refresh " +
+                    (success ? "completed. " : "failed. ") +
+                    details);
+
+                if (!success)
+                {
+                    wieldRefreshIssue = "client-live-wield-refresh-failed:primary-none";
+                    return false;
+                }
+
+                appliedWieldRefresh = "Wield=client-live-refresh";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                wieldRefreshIssue = "client-live-wield-refresh-failed:" + ex.GetType().Name;
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-live-wield-refresh-failed",
+                    "AgentIndex=" + (agent?.Index.ToString() ?? "null") +
+                    " EntryId=" + (entryId ?? "null") +
+                    " ExceptionType=" + ex.GetType().Name +
+                    " Source=" + (source ?? "unknown"));
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: client live wield refresh failed. " +
+                    "AgentIndex=" + (agent?.Index.ToString() ?? "null") +
+                    " EntryId=" + (entryId ?? "null") +
+                    " ExceptionType=" + ex.GetType().Name +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
+        }
+
+        private static bool IsUsableWeaponEquipmentIndex(Equipment equipment, EquipmentIndex equipmentIndex)
+        {
+            if (equipment == null)
+                return false;
+
+            if (equipmentIndex < EquipmentIndex.Weapon0 || equipmentIndex > EquipmentIndex.Weapon3)
+                return false;
+
+            return !equipment[equipmentIndex].IsEmpty && equipment[equipmentIndex].Item != null;
+        }
+
+        private static int ResolveEquipmentCurrentUsageIndex(Agent agent, Equipment overlaySpawnEquipment, EquipmentIndex equipmentIndex)
+        {
+            if (equipmentIndex < EquipmentIndex.Weapon0 || equipmentIndex > EquipmentIndex.Weapon3)
+                return 0;
+
+            try
+            {
+                if (agent?.Equipment != null &&
+                    !agent.Equipment[equipmentIndex].IsEmpty)
+                {
+                    return Math.Max(0, agent.Equipment[equipmentIndex].CurrentUsageIndex);
+                }
+            }
+            catch
+            {
+            }
+
+            return 0;
+        }
+
+        private static string FormatWeaponEquipmentIndex(Equipment equipment, EquipmentIndex equipmentIndex)
+        {
+            if (equipment == null || equipmentIndex < EquipmentIndex.Weapon0 || equipmentIndex > EquipmentIndex.Weapon3)
+                return "None";
+
+            return GetEquipmentSlotLabel(equipmentIndex) + "=" + (equipment[equipmentIndex].Item?.StringId ?? "empty");
+        }
+
+        private static string FormatAgentWieldedEquipmentIndex(Agent agent, EquipmentIndex equipmentIndex)
+        {
+            if (agent?.Equipment == null || equipmentIndex < EquipmentIndex.Weapon0 || equipmentIndex > EquipmentIndex.Weapon3)
+                return "None";
+
+            return GetEquipmentSlotLabel(equipmentIndex) + "=" + (agent.Equipment[equipmentIndex].Item?.StringId ?? "empty");
         }
 
         private static string TryApplyClientVisualOnlyCombatProfile(Agent agent, RosterEntryState entryState)
