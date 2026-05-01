@@ -200,16 +200,11 @@ Reset-Path $lightReleaseDir
 Reset-Path $lightReleaseZip
 
 New-Item -ItemType Directory -Path $lightReleaseDir -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $lightReleaseDir "Client") -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $lightReleaseDir "Host") -Force | Out-Null
 
-Copy-DirectoryContent $clientModuleSource (Join-Path $lightReleaseDir "Client\Modules\CoopSpectator")
-Copy-Item -LiteralPath $portableLauncher -Destination (Join-Path $lightReleaseDir "Client\run_mp_with_mod_from_game_root.bat") -Force
-Copy-HostPayload (Join-Path $lightReleaseDir "Host\Modules") $false
+Copy-DirectoryContent $clientModuleSource (Join-Path $lightReleaseDir "CoopSpectator")
+Copy-HostPayload $lightReleaseDir $false
 Remove-DebugSymbols $lightReleaseDir
 
-Copy-Item -LiteralPath $lightReleaseReadmeEnTemplate -Destination (Join-Path $lightReleaseDir "README_EN.md") -Force
-Copy-Item -LiteralPath $lightReleaseReadmeUaTemplate -Destination (Join-Path $lightReleaseDir "README_UA.md") -Force
 Compress-Archive -Path (Join-Path $lightReleaseDir "*") -DestinationPath $lightReleaseZip -CompressionLevel Optimal
 
 Write-Host ("Created light release package: {0}" -f $lightReleaseZip)
