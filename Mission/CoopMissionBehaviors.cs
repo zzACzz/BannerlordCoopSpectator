@@ -5172,7 +5172,7 @@ namespace CoopSpectator.MissionBehaviors
 
         private static void TrackClientMountedHeroMountAgentIndex(int riderAgentIndex, int mountAgentIndex, string entryId)
         {
-            if (riderAgentIndex < 0 || mountAgentIndex < 0 || string.IsNullOrWhiteSpace(entryId))
+            if (riderAgentIndex < 0 || mountAgentIndex < 0)
                 return;
 
             if (_clientMountedHeroMountAgentIndexByRiderAgentIndex.TryGetValue(riderAgentIndex, out int previousMountAgentIndex) &&
@@ -5186,7 +5186,8 @@ namespace CoopSpectator.MissionBehaviors
 
             _clientMountedHeroMountAgentIndexByRiderAgentIndex[riderAgentIndex] = mountAgentIndex;
             _clientMountedHeroRiderAgentIndexByMountAgentIndex[mountAgentIndex] = riderAgentIndex;
-            _clientMountedHeroEntryIdByMountAgentIndex[mountAgentIndex] = entryId;
+            if (!string.IsNullOrWhiteSpace(entryId))
+                _clientMountedHeroEntryIdByMountAgentIndex[mountAgentIndex] = entryId;
         }
 
         private static void TrackClientMountedHeroMountAgentIndex(Agent riderAgent, string entryId)
@@ -5236,6 +5237,14 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             TrackClientMountedHeroMountAgentIndex(riderAgent.Index, mountAgentIndex, entryId);
+        }
+
+        internal static void TryTrackClientMountedHeroMountAgentIndexFromPayload(int riderAgentIndex, int mountAgentIndex)
+        {
+            if (GameNetwork.IsServer || riderAgentIndex < 0 || mountAgentIndex < 0)
+                return;
+
+            TrackClientMountedHeroMountAgentIndex(riderAgentIndex, mountAgentIndex, entryId: null);
         }
 
         private static bool TryGetTrackedClientMountedHeroMountAgentIndex(
