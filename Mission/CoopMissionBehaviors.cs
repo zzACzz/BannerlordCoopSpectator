@@ -21,6 +21,7 @@ using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback
 using CoopSpectator.MissionModels;
 using CoopSpectator.Network.Messages;
+using NetworkMessages.FromServer;
 
 namespace CoopSpectator.MissionBehaviors
 {
@@ -20175,6 +20176,159 @@ namespace CoopSpectator.MissionBehaviors
                 " HeroCandidateCount=" + heroCandidates.Count +
                 " ExactSupportedCandidateCount=" + exactSupportedCandidates.Count);
             return false;
+        }
+
+        internal static bool TryResolveClientStrictExactHeroCreateAgentContract(
+            CreateAgent createAgent,
+            out string entryId,
+            out RosterEntryState entryState,
+            out ExactTransferSpawnContract contract,
+            out ExactTransferValidationResult validation,
+            out string resolutionSource)
+        {
+            entryId = null;
+            entryState = null;
+            contract = null;
+            validation = null;
+            resolutionSource = null;
+
+            if (GameNetwork.IsServer ||
+                createAgent == null ||
+                createAgent.Peer == null ||
+                createAgent.Peer.IsMine ||
+                createAgent.MountAgentIndex < 0)
+            {
+                return false;
+            }
+
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            if (runtimeState?.EntriesById == null || runtimeState.EntriesById.Count == 0)
+                return false;
+
+            BattleSideEnum payloadSide = ResolveCreateAgentPayloadBattleSide(createAgent.TeamIndex);
+            if (payloadSide == BattleSideEnum.None)
+                return false;
+
+            string payloadCharacterId = createAgent.Character?.StringId;
+            List<RosterEntryState> heroCandidates = runtimeState.EntriesById.Values
+                .Where(candidate =>
+                    candidate != null &&
+                    IsHeroEntryEligibleForExactPersonalPerks(candidate) &&
+                    candidate.IsMounted &&
+                    DoesClientVisualOverlayEntryMatchAgentSide(candidate, payloadSide) &&
+                    DoesClientStrictExactHeroCreateAgentEntryMatchPayload(candidate, payloadCharacterId))
+                .ToList();
+            if (heroCandidates.Count == 0)
+                return false;
+
+            List<RosterEntryState> exactSupportedCandidates = heroCandidates
+                .Where(candidate =>
+                {
+                    ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(candidate);
+                    return IsMaterializedExactEntryCharacterSupported(diagnostic);
+                })
+                .ToList();
+
+            if (exactSupportedCandidates.Count == 1)
+            {
+                entryState = exactSupportedCandidates[0];
+                resolutionSource = "unique-exact-supported-mounted-hero-payload-match";
+            }
+            else if (heroCandidates.Count == 1)
+            {
+                entryState = heroCandidates[0];
+                resolutionSource = "unique-mounted-hero-payload-match";
+            }
+            else
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: skipped strict client exact CreateAgent contract resolution because mounted remote hero payload was ambiguous. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " TeamIndex=" + createAgent.TeamIndex +
+                    " PayloadCharacterId=" + (payloadCharacterId ?? "null") +
+                    " HeroCandidateCount=" + heroCandidates.Count +
+                    " ExactSupportedCandidateCount=" + exactSupportedCandidates.Count);
+                return false;
+            }
+
+            entryId = entryState.EntryId;
+            contract = ExactTransferContractBuilder.Build(
+                entryState,
+                isPlayerControlledOrigin: false,
+                teamIndex: createAgent.TeamIndex,
+                formationIndex: createAgent.FormationIndex);
+            validation = ExactTransferContractValidator.Validate(contract);
+            ExactTransferContractRuntimeCache.RegisterClientObservedContract(
+                contract,
+                validation,
+                createAgent.AgentIndex,
+                createAgent.MountAgentIndex,
+                "client strict CreateAgent contract resolve: " + (resolutionSource ?? "unknown"));
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: resolved strict client exact CreateAgent contract. " +
+                "AgentIndex=" + createAgent.AgentIndex +
+                " MountAgentIndex=" + createAgent.MountAgentIndex +
+                " EntryId=" + (entryId ?? "null") +
+                " PayloadCharacterId=" + (payloadCharacterId ?? "null") +
+                " ResolutionSource=" + (resolutionSource ?? "null") +
+                " " + ExactTransferContractRuntimeCache.BuildContractSummary(entryId) +
+                " " + ExactTransferContractRuntimeCache.BuildValidationSummary(entryId) +
+                " " + ExactTransferContractRuntimeCache.BuildRuntimeStateSummary(entryId));
+            return true;
+        }
+
+        private static bool DoesClientStrictExactHeroCreateAgentEntryMatchPayload(
+            RosterEntryState entryState,
+            string payloadCharacterId)
+        {
+            if (entryState == null || string.IsNullOrWhiteSpace(payloadCharacterId))
+                return false;
+
+            foreach (string candidateCharacterId in EnumerateClientStrictExactHeroCreateAgentCandidateCharacterIds(entryState))
+            {
+                if (string.Equals(candidateCharacterId, payloadCharacterId, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static IEnumerable<string> EnumerateClientStrictExactHeroCreateAgentCandidateCharacterIds(RosterEntryState entryState)
+        {
+            if (entryState == null)
+                yield break;
+
+            var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string candidateCharacterId in new[]
+                     {
+                         BattleSnapshotRuntimeState.TryResolveCharacterObject(entryState.EntryId)?.StringId,
+                         entryState.SpawnTemplateId,
+                         entryState.CharacterId,
+                         entryState.OriginalCharacterId,
+                         entryState.HeroTemplateId
+                     })
+            {
+                if (string.IsNullOrWhiteSpace(candidateCharacterId) || !yielded.Add(candidateCharacterId))
+                    continue;
+
+                yield return candidateCharacterId;
+            }
+        }
+
+        private static BattleSideEnum ResolveCreateAgentPayloadBattleSide(int teamIndex)
+        {
+            Team missionTeam = Mission.MissionNetworkHelper.GetTeamFromTeamIndex(teamIndex);
+            if (missionTeam != null && missionTeam.Side != BattleSideEnum.None)
+                return missionTeam.Side;
+
+            if (teamIndex == 0)
+                return BattleSideEnum.Attacker;
+
+            if (teamIndex == 1)
+                return BattleSideEnum.Defender;
+
+            return BattleSideEnum.None;
         }
 
         private static bool DoesClientVisualOverlayEntryMatchAgentSide(RosterEntryState entryState, BattleSideEnum teamSide)

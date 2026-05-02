@@ -14,6 +14,7 @@ using TaleWorlds.Engine;
 using TaleWorlds.InputSystem;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Network.Messages;
+using TaleWorlds.ObjectSystem;
 
 namespace CoopSpectator.Patches
 {
@@ -574,6 +575,9 @@ namespace CoopSpectator.Patches
                 bool isLocalPayloadPeer = payloadPeer?.IsMine == true;
                 if (!isLocalPayloadPeer)
                 {
+                    ExactTransferContractRuntimeCache.ObserveClientPeerBound(
+                        agent.Index,
+                        "battle-map handoff SetAgentPeer remote");
                     bool remoteDeferImmediateExactVisualFinalize =
                         ShouldDeferImmediateClientExactVisualFinalize(agent);
                     CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent);
@@ -631,6 +635,9 @@ namespace CoopSpectator.Patches
                 if (string.Equals(_lastLocalVisualFinalizeKey, logKey, StringComparison.Ordinal))
                     return;
 
+                ExactTransferContractRuntimeCache.ObserveClientPeerBound(
+                    agent.Index,
+                    "battle-map handoff SetAgentPeer");
                 bool deferImmediateExactVisualFinalize =
                     ShouldDeferImmediateClientExactVisualFinalize(agent);
                 bool exactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
@@ -670,28 +677,43 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void MissionNetworkComponent_HandleServerEventCreateAgent_Prefix(GameNetworkMessage baseMessage)
+        private static bool MissionNetworkComponent_HandleServerEventCreateAgent_Prefix(GameNetworkMessage baseMessage)
         {
             try
             {
                 if (!(baseMessage is CreateAgent createAgent))
-                    return;
+                    return true;
 
                 Mission mission = Mission.Current;
                 if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
-                    return;
+                    return true;
 
-                if (createAgent.MountAgentIndex < 0)
-                    return;
+                bool hasMountPayload = createAgent.MountAgentIndex >= 0;
+                if (hasMountPayload)
+                {
+                    CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndexFromPayload(
+                        createAgent.AgentIndex,
+                        createAgent.MountAgentIndex);
+                }
 
-                CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndexFromPayload(
-                    createAgent.AgentIndex,
-                    createAgent.MountAgentIndex);
+                if (TryHandleStrictExactHeroCreateAgentViaContract(
+                        mission,
+                        createAgent,
+                        out bool strictExactCandidate))
+                {
+                    return false;
+                }
+
+                if (!hasMountPayload || strictExactCandidate)
+                    return true;
+
                 CanonicalizeCreateAgentPayloadForBattleMap(createAgent);
+                return true;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: CreateAgent prefix mount-payload tracking failed open: " + ex.Message);
+                return true;
             }
         }
 
@@ -710,6 +732,10 @@ namespace CoopSpectator.Patches
                 if (agent == null || !agent.IsActive() || agent.IsMount || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
                     return;
 
+                ExactTransferContractRuntimeCache.ObserveClientMaterialized(
+                    agent.Index,
+                    agent,
+                    "battle-map handoff CreateAgent");
                 if (createAgent.MountAgentIndex >= 0)
                     CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent, createAgent.MountAgentIndex);
                 CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent);
@@ -765,6 +791,11 @@ namespace CoopSpectator.Patches
                     createAgent.AgentIndex,
                     "battle-map handoff CreateAgent finalizer",
                     failureReason);
+                ExactTransferContractRuntimeCache.ReportClientFailure(
+                    createAgent.AgentIndex,
+                    ExactTransferFailureReason.CreateAgentHandlerException,
+                    failureReason,
+                    "battle-map handoff CreateAgent finalizer");
                 string payloadSummary =
                     "AgentIndex=" + createAgent.AgentIndex +
                     " MountAgentIndex=" + createAgent.MountAgentIndex +
@@ -784,6 +815,229 @@ namespace CoopSpectator.Patches
             }
 
             return __exception;
+        }
+
+        private static bool TryHandleStrictExactHeroCreateAgentViaContract(
+            Mission mission,
+            CreateAgent createAgent,
+            out bool strictExactCandidate)
+        {
+            strictExactCandidate = false;
+            if (mission == null || createAgent == null)
+                return false;
+
+            if (!CoopMissionSpawnLogic.TryResolveClientStrictExactHeroCreateAgentContract(
+                    createAgent,
+                    out string entryId,
+                    out RosterEntryState entryState,
+                    out ExactTransferSpawnContract contract,
+                    out ExactTransferValidationResult validation,
+                    out string resolutionSource))
+            {
+                return false;
+            }
+
+            strictExactCandidate = true;
+            if (contract == null || validation == null || !validation.IsValid)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: strict exact CreateAgent adapter skipped because contract validation failed. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " EntryId=" + (entryId ?? "null") +
+                    " ResolutionSource=" + (resolutionSource ?? "null") +
+                    " " + ExactTransferContractRuntimeCache.BuildValidationSummary(entryId));
+                return false;
+            }
+
+            if (contract.SpawnPolicy == null ||
+                !contract.SpawnPolicy.UseStrictExactHeroPath ||
+                !contract.SpawnPolicy.ForbidSurrogatePrimaryMaterialization)
+            {
+                return false;
+            }
+
+            BasicCharacterObject character = ResolveStrictExactHeroCreateAgentCharacter(createAgent, contract);
+            if (character == null)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: strict exact CreateAgent adapter skipped because contract character could not be resolved. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " EntryId=" + (entryId ?? "null") +
+                    " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null"));
+                return false;
+            }
+
+            Team teamFromTeamIndex = Mission.MissionNetworkHelper.GetTeamFromTeamIndex(createAgent.TeamIndex);
+            if (teamFromTeamIndex == null)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: strict exact CreateAgent adapter skipped because mission team was unavailable. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " TeamIndex=" + createAgent.TeamIndex +
+                    " EntryId=" + (entryId ?? "null"));
+                return false;
+            }
+
+            Formation formation = null;
+            if (createAgent.FormationIndex >= 0 && !GameNetwork.IsReplay)
+                formation = teamFromTeamIndex.GetFormation((FormationClass)createAgent.FormationIndex);
+
+            Banner banner = ResolveStrictExactHeroCreateAgentBanner(teamFromTeamIndex, formation);
+            Equipment createTimeSpawnEquipment = ResolveStrictExactHeroCreateAgentSpawnEquipment(contract, createAgent);
+            MissionEquipment createTimeMissionEquipment = ResolveStrictExactHeroCreateAgentMissionEquipment(
+                createTimeSpawnEquipment,
+                banner,
+                createAgent);
+            if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null)
+                return false;
+
+            try
+            {
+                AgentBuildData buildData = new AgentBuildData(character)
+                    .Monster(createAgent.Monster)
+                    .TroopOrigin(new BasicBattleAgentOrigin(character))
+                    .Equipment(createTimeSpawnEquipment)
+                    .EquipmentSeed(createAgent.BodyPropertiesSeed)
+                    .InitialPosition(createAgent.Position)
+                    .InitialDirection(createAgent.Direction.Normalized())
+                    .MissionEquipment(createTimeMissionEquipment)
+                    .Team(teamFromTeamIndex)
+                    .Index(createAgent.AgentIndex)
+                    .MountIndex(createAgent.MountAgentIndex)
+                    .IsFemale(contract.Body?.IsFemale ?? createAgent.IsFemale)
+                    .ClothingColor1(createAgent.ClothingColor1)
+                    .ClothingColor2(createAgent.ClothingColor2)
+                    .BodyProperties(contract.Body.BodyProperties);
+                if (contract?.Body?.Age is int exactAge)
+                    buildData.Age(exactAge);
+                if (formation != null)
+                    buildData.Formation(formation);
+                if (banner != null)
+                    buildData.Banner(banner);
+
+                Agent agent = mission.SpawnAgent(buildData);
+                if (agent == null)
+                {
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: strict exact CreateAgent adapter returned null agent. " +
+                        "AgentIndex=" + createAgent.AgentIndex +
+                        " EntryId=" + (entryId ?? "null"));
+                    return false;
+                }
+
+                ExactTransferContractRuntimeCache.ObserveClientMaterialized(
+                    agent.Index,
+                    agent,
+                    "battle-map handoff strict exact CreateAgent");
+                if (createAgent.MountAgentIndex >= 0)
+                    CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent, createAgent.MountAgentIndex, entryId);
+                CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent);
+
+                string payloadSummary =
+                    "EntryId=" + (entryId ?? "null") +
+                    " ResolutionSource=" + (resolutionSource ?? "null") +
+                    " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                    " ContractCharacter=" + (character.StringId ?? "null") +
+                    " MountAgentIndex=" + createAgent.MountAgentIndex +
+                    " FormationIndex=" + createAgent.FormationIndex +
+                    " StrippedRemotePeer=True" +
+                    " CanonicalizedCharacter=False";
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: handled strict exact CreateAgent via contract adapter. " +
+                    "AgentIndex=" + agent.Index +
+                    " TeamSide=" + agent.Team?.Side +
+                    " " + payloadSummary +
+                    " " + ExactTransferContractRuntimeCache.BuildRuntimeStateSummary(entryId));
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-create-agent-contract-adapter",
+                    "AgentIndex=" + agent.Index +
+                    " " + payloadSummary +
+                    " Source=battle-map handoff strict exact CreateAgent");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                string failureReason = "strict-create-agent-adapter-exception:" + ex.GetType().Name;
+                ExactTransferContractRuntimeCache.ReportClientFailure(
+                    createAgent.AgentIndex,
+                    ExactTransferFailureReason.CreateAgentHandlerException,
+                    failureReason,
+                    "battle-map handoff strict exact CreateAgent");
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: strict exact CreateAgent adapter failed. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " EntryId=" + (entryId ?? "null") +
+                    " ResolutionSource=" + (resolutionSource ?? "null") +
+                    " Message=" + ex.Message);
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-create-agent-contract-adapter-failed",
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " EntryId=" + (entryId ?? "null") +
+                    " FailureReason=" + failureReason +
+                    " Message=" + ex.Message +
+                    " Source=battle-map handoff strict exact CreateAgent");
+                return false;
+            }
+        }
+
+        private static BasicCharacterObject ResolveStrictExactHeroCreateAgentCharacter(
+            CreateAgent createAgent,
+            ExactTransferSpawnContract contract)
+        {
+            if (contract?.EntryId != null)
+            {
+                BasicCharacterObject contractCharacter = BattleSnapshotRuntimeState.TryResolveCharacterObject(contract.EntryId);
+                if (contractCharacter != null)
+                    return contractCharacter;
+            }
+
+            if (!string.IsNullOrWhiteSpace(contract?.Identity?.NativeMultiplayerCharacterId))
+            {
+                try
+                {
+                    BasicCharacterObject character =
+                        MBObjectManager.Instance.GetObject<BasicCharacterObject>(contract.Identity.NativeMultiplayerCharacterId);
+                    if (character != null)
+                        return character;
+                }
+                catch
+                {
+                }
+            }
+
+            return createAgent?.Character;
+        }
+
+        private static Equipment ResolveStrictExactHeroCreateAgentSpawnEquipment(
+            ExactTransferSpawnContract contract,
+            CreateAgent createAgent)
+        {
+            if (contract?.Equipment?.SpawnEquipment != null)
+                return contract.Equipment.SpawnEquipment.Clone(false);
+
+            return createAgent?.SpawnEquipment?.Clone(false);
+        }
+
+        private static MissionEquipment ResolveStrictExactHeroCreateAgentMissionEquipment(
+            Equipment createTimeSpawnEquipment,
+            Banner banner,
+            CreateAgent createAgent)
+        {
+            if (createTimeSpawnEquipment != null)
+                return new MissionEquipment(createTimeSpawnEquipment, banner);
+
+            return createAgent?.MissionEquipment;
+        }
+
+        private static Banner ResolveStrictExactHeroCreateAgentBanner(Team team, Formation formation)
+        {
+            if (team == null)
+                return null;
+
+            if (formation != null && !string.IsNullOrEmpty(formation.BannerCode))
+                return formation.Banner ?? (formation.Banner = new Banner(formation.BannerCode, team.Color, team.Color2));
+
+            return null;
         }
 
         private static void CanonicalizeCreateAgentPayloadForBattleMap(CreateAgent createAgent)
@@ -999,6 +1253,9 @@ namespace CoopSpectator.Patches
                 if (agent == null || !agent.IsActive() || agent.IsMount || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
                     return;
 
+                ExactTransferContractRuntimeCache.ObserveClientEquipmentSynchronized(
+                    agent.Index,
+                    "battle-map handoff SynchronizeAgentSpawnEquipment");
                 bool deferImmediateExactVisualFinalize =
                     agent.MissionPeer != null &&
                     ShouldDeferImmediateClientExactVisualFinalize(agent);

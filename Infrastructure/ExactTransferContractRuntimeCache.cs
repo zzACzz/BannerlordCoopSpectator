@@ -14,6 +14,10 @@ namespace CoopSpectator.Infrastructure
             new Dictionary<string, ExactTransferValidationResult>(StringComparer.Ordinal);
         private static readonly Dictionary<string, ExactTransferRuntimeState> RuntimeStateByEntryId =
             new Dictionary<string, ExactTransferRuntimeState>(StringComparer.Ordinal);
+        private static readonly Dictionary<int, string> EntryIdByRiderAgentIndex =
+            new Dictionary<int, string>();
+        private static readonly Dictionary<int, string> EntryIdByMountAgentIndex =
+            new Dictionary<int, string>();
 
         public static void Reset(string source)
         {
@@ -22,6 +26,8 @@ namespace CoopSpectator.Infrastructure
                 ContractsByEntryId.Clear();
                 ValidationByEntryId.Clear();
                 RuntimeStateByEntryId.Clear();
+                EntryIdByRiderAgentIndex.Clear();
+                EntryIdByMountAgentIndex.Clear();
             }
 
             string details = "Source=" + (source ?? "unknown");
@@ -120,6 +126,162 @@ namespace CoopSpectator.Infrastructure
                 return RuntimeStateByEntryId.TryGetValue(entryId ?? string.Empty, out runtimeState);
         }
 
+        public static bool TryGetEntryIdByRiderAgentIndex(int riderAgentIndex, out string entryId)
+        {
+            lock (Sync)
+                return EntryIdByRiderAgentIndex.TryGetValue(riderAgentIndex, out entryId);
+        }
+
+        public static void RegisterClientObservedContract(
+            ExactTransferSpawnContract contract,
+            ExactTransferValidationResult validation,
+            int riderAgentIndex,
+            int mountAgentIndex,
+            string source)
+        {
+            if (contract == null || string.IsNullOrWhiteSpace(contract.EntryId) || riderAgentIndex < 0)
+                return;
+
+            ExactTransferRuntimeState runtimeState;
+            lock (Sync)
+            {
+                ContractsByEntryId[contract.EntryId] = contract;
+                ValidationByEntryId[contract.EntryId] = validation ?? new ExactTransferValidationResult();
+                EntryIdByRiderAgentIndex[riderAgentIndex] = contract.EntryId;
+                if (mountAgentIndex >= 0)
+                    EntryIdByMountAgentIndex[mountAgentIndex] = contract.EntryId;
+
+                runtimeState = EnsureRuntimeStateLocked(contract.EntryId);
+                runtimeState.EntryId = contract.EntryId;
+                runtimeState.RiderAgentIndex = riderAgentIndex;
+                runtimeState.MountAgentIndex = mountAgentIndex >= 0
+                    ? (int?)mountAgentIndex
+                    : runtimeState.MountAgentIndex;
+                runtimeState.IsMountedContract = contract.Mount?.IsMounted ?? false;
+
+                TryAdvanceBaselineStagesLocked(runtimeState, validation, source);
+                if (runtimeState.Stage != ExactTransferStage.Failed)
+                {
+                    ExactTransferStageMachine.TryAdvance(
+                        runtimeState,
+                        ExactTransferStage.CreateAgentPayloadObserved,
+                        requiresMountLink: runtimeState.IsMountedContract,
+                        failureContext: source);
+                }
+            }
+
+            string details =
+                "EntryId=" + contract.EntryId +
+                " RiderAgentIndex=" + riderAgentIndex +
+                " MountAgentIndex=" + mountAgentIndex +
+                " Source=" + (source ?? "unknown") +
+                " " + BuildContractSummary(contract.EntryId) +
+                " " + BuildValidationSummary(contract.EntryId) +
+                " " + BuildRuntimeStateSummary(contract.EntryId);
+            ModLogger.Info("ExactTransferContractRuntimeCache: registered client observed contract. " + details);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent("exact-transfer-client-observed-contract", details);
+        }
+
+        public static void ObserveClientMaterialized(
+            int riderAgentIndex,
+            Agent riderAgent,
+            string source)
+        {
+            if (riderAgentIndex < 0 || riderAgent == null)
+                return;
+
+            string entryId;
+            lock (Sync)
+            {
+                if (!EntryIdByRiderAgentIndex.TryGetValue(riderAgentIndex, out entryId) ||
+                    string.IsNullOrWhiteSpace(entryId))
+                {
+                    return;
+                }
+
+                ExactTransferRuntimeState runtimeState = EnsureRuntimeStateLocked(entryId);
+                runtimeState.RiderAgentIndex = riderAgentIndex;
+                if (riderAgent.MountAgent != null && riderAgent.MountAgent.Index >= 0)
+                {
+                    runtimeState.MountAgentIndex = riderAgent.MountAgent.Index;
+                    EntryIdByMountAgentIndex[riderAgent.MountAgent.Index] = entryId;
+                }
+
+                ExactTransferStageMachine.TryAdvance(
+                    runtimeState,
+                    ExactTransferStage.RiderMaterialized,
+                    requiresMountLink: runtimeState.IsMountedContract,
+                    failureContext: source);
+                if (runtimeState.IsMountedContract && riderAgent.MountAgent != null)
+                {
+                    ExactTransferStageMachine.TryAdvance(
+                        runtimeState,
+                        ExactTransferStage.MountMaterialized,
+                        requiresMountLink: true,
+                        failureContext: source);
+                    ExactTransferStageMachine.TryAdvance(
+                        runtimeState,
+                        ExactTransferStage.MountLinkVerified,
+                        requiresMountLink: true,
+                        failureContext: source);
+                }
+            }
+
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                "exact-transfer-client-materialized",
+                "RiderAgentIndex=" + riderAgentIndex +
+                " MountAgentIndex=" + (riderAgent.MountAgent?.Index.ToString() ?? "null") +
+                " Source=" + (source ?? "unknown") +
+                " " + BuildRuntimeStateSummary(entryId));
+        }
+
+        public static void ObserveClientPeerBound(int riderAgentIndex, string source)
+        {
+            ObserveClientStage(riderAgentIndex, ExactTransferStage.PeerBound, source, "exact-transfer-client-peer-bound");
+        }
+
+        public static void ObserveClientEquipmentSynchronized(int riderAgentIndex, string source)
+        {
+            ObserveClientStage(
+                riderAgentIndex,
+                ExactTransferStage.EquipmentSynchronized,
+                source,
+                "exact-transfer-client-equipment-synchronized");
+        }
+
+        public static void ReportClientFailure(
+            int riderAgentIndex,
+            ExactTransferFailureReason failureReason,
+            string failureContext,
+            string source)
+        {
+            if (riderAgentIndex < 0)
+                return;
+
+            string entryId;
+            lock (Sync)
+            {
+                if (!EntryIdByRiderAgentIndex.TryGetValue(riderAgentIndex, out entryId) ||
+                    string.IsNullOrWhiteSpace(entryId))
+                {
+                    return;
+                }
+
+                ExactTransferRuntimeState runtimeState = EnsureRuntimeStateLocked(entryId);
+                runtimeState.RiderAgentIndex = riderAgentIndex;
+                runtimeState.MarkFailure(failureReason, failureContext);
+            }
+
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                "exact-transfer-client-failure",
+                "EntryId=" + (entryId ?? "null") +
+                " RiderAgentIndex=" + riderAgentIndex +
+                " FailureReason=" + failureReason +
+                " FailureContext=" + (failureContext ?? "null") +
+                " Source=" + (source ?? "unknown") +
+                " " + BuildRuntimeStateSummary(entryId));
+        }
+
         public static string BuildContractSummary(string entryId)
         {
             lock (Sync)
@@ -171,7 +333,16 @@ namespace CoopSpectator.Infrastructure
                     "ExactTransferRuntime={Stage=" + runtimeState.Stage +
                     ",FailureReason=" + runtimeState.FailureReason +
                     ",FailureContext=" + (runtimeState.FailureContext ?? "null") +
+                    ",RiderAgentIndex=" + (runtimeState.RiderAgentIndex?.ToString() ?? "null") +
+                    ",MountAgentIndex=" + (runtimeState.MountAgentIndex?.ToString() ?? "null") +
                     ",MountedContract=" + runtimeState.IsMountedContract +
+                    ",RiderMaterialized=" + runtimeState.RiderMaterialized +
+                    ",MountMaterialized=" + runtimeState.MountMaterialized +
+                    ",MountLinkVerified=" + runtimeState.MountLinkVerified +
+                    ",PeerBound=" + runtimeState.PeerBound +
+                    ",EquipmentSynchronized=" + runtimeState.EquipmentSynchronized +
+                    ",ExactVisualApplied=" + runtimeState.ExactVisualApplied +
+                    ",CommanderControlEnabled=" + runtimeState.CommanderControlEnabled +
                     ",LastTransitionUtc=" + runtimeState.LastTransitionUtc.ToString("O") + "}";
             }
         }
@@ -196,6 +367,78 @@ namespace CoopSpectator.Infrastructure
                 return "[]";
 
             return "[" + string.Join(" | ", values.Where(value => !string.IsNullOrWhiteSpace(value))) + "]";
+        }
+
+        private static void ObserveClientStage(
+            int riderAgentIndex,
+            ExactTransferStage stage,
+            string source,
+            string eventName)
+        {
+            if (riderAgentIndex < 0)
+                return;
+
+            string entryId;
+            lock (Sync)
+            {
+                if (!EntryIdByRiderAgentIndex.TryGetValue(riderAgentIndex, out entryId) ||
+                    string.IsNullOrWhiteSpace(entryId))
+                {
+                    return;
+                }
+
+                ExactTransferRuntimeState runtimeState = EnsureRuntimeStateLocked(entryId);
+                runtimeState.RiderAgentIndex = riderAgentIndex;
+                ExactTransferStageMachine.TryAdvance(
+                    runtimeState,
+                    stage,
+                    requiresMountLink: runtimeState.IsMountedContract,
+                    failureContext: source);
+            }
+
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                eventName,
+                "EntryId=" + (entryId ?? "null") +
+                " RiderAgentIndex=" + riderAgentIndex +
+                " Source=" + (source ?? "unknown") +
+                " " + BuildRuntimeStateSummary(entryId));
+        }
+
+        private static void TryAdvanceBaselineStagesLocked(
+            ExactTransferRuntimeState runtimeState,
+            ExactTransferValidationResult validation,
+            string source)
+        {
+            ExactTransferStageMachine.TryAdvance(
+                runtimeState,
+                ExactTransferStage.SnapshotResolved,
+                requiresMountLink: runtimeState.IsMountedContract,
+                failureContext: source);
+            ExactTransferStageMachine.TryAdvance(
+                runtimeState,
+                ExactTransferStage.ContractBuilt,
+                requiresMountLink: runtimeState.IsMountedContract,
+                failureContext: source);
+
+            if (validation?.IsValid == true)
+            {
+                ExactTransferStageMachine.TryAdvance(
+                    runtimeState,
+                    ExactTransferStage.ContractValidated,
+                    requiresMountLink: runtimeState.IsMountedContract,
+                    failureContext: source);
+                ExactTransferStageMachine.TryAdvance(
+                    runtimeState,
+                    ExactTransferStage.PreSpawnPrepared,
+                    requiresMountLink: runtimeState.IsMountedContract,
+                    failureContext: source);
+            }
+            else
+            {
+                runtimeState.MarkFailure(
+                    ExactTransferFailureReason.MissingContractField,
+                    BuildErrorList(validation?.Errors));
+            }
         }
     }
 }
