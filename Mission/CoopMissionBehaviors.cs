@@ -6350,36 +6350,6 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
-            if (ShouldSkipClientExactVisualOverlayForStrictPreSpawnLocalHero(
-                    agent,
-                    entryId,
-                    entryState,
-                    includeWeaponsForClientRefresh,
-                    out string skipReason))
-            {
-                _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agent.Index);
-                _exactNativeClientVisualOverlayAppliedAgentIndices.Add(agent.Index);
-                _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex[agent.Index] = includeWeaponsForClientRefresh;
-                UpdateStrictExactHeroTransferVisualAppliedState(
-                    agent.Index,
-                    entryId,
-                    includeWeaponsForClientRefresh,
-                    source ?? "client exact-visual finalize skip");
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: skipped duplicate client exact visual overlay for local strict pre-spawn hero. " +
-                    "AgentIndex=" + agent.Index +
-                    " EntryId=" + entryId +
-                    " Reason=" + (skipReason ?? "unknown") +
-                    " Source=" + (source ?? "unknown"));
-                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
-                    "client-exact-visual-skip-local-strict-pre-spawn",
-                    "AgentIndex=" + agent.Index +
-                    " EntryId=" + entryId +
-                    " Reason=" + (skipReason ?? "unknown") +
-                    " Source=" + (source ?? "unknown"));
-                return true;
-            }
-
             if (!allowImmediateApply)
             {
                 TryQueueClientExactCampaignVisualOverlay(
@@ -6423,46 +6393,6 @@ namespace CoopSpectator.MissionBehaviors
                 delaySeconds: 0.35,
                 includeWeaponsForRefresh: includeWeaponsForClientRefresh);
             return false;
-        }
-
-        private static bool ShouldSkipClientExactVisualOverlayForStrictPreSpawnLocalHero(
-            Agent agent,
-            string entryId,
-            RosterEntryState entryState,
-            bool includeWeaponsForClientRefresh,
-            out string reason)
-        {
-            reason = null;
-            if (agent == null || entryState == null || string.IsNullOrWhiteSpace(entryId))
-                return false;
-
-            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
-            if (localMissionPeer == null ||
-                !ReferenceEquals(agent.MissionPeer, localMissionPeer))
-            {
-                return false;
-            }
-
-            if (entryState.IsMounted)
-                return false;
-
-            if (!ExactTransferContractRuntimeCache.TryGetContract(entryId, out ExactTransferSpawnContract contract) ||
-                contract == null)
-            {
-                return false;
-            }
-
-            if (contract.SpawnPolicy?.UseStrictExactHeroPath != true ||
-                contract.Equipment?.IncludeWeaponsInPreSpawn != true ||
-                contract.PeerBinding?.RequiresReplaceBotWithPlayer != true)
-            {
-                return false;
-            }
-
-            reason =
-                "local-strict-pre-spawn-hero" +
-                (includeWeaponsForClientRefresh ? "-weapons-already-injected" : "-overlay-not-needed");
-            return true;
         }
 
         public static bool TryHandleClientExactCampaignSpawnEquipmentSync(
