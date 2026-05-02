@@ -269,7 +269,7 @@ namespace CoopSpectator.Infrastructure
             bool hasUnsafeRangedWeapon2Layout = DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment);
             if (!hasRanged && !hasAmmo && !DoesWeapon2ContainLiveCandidate(equipment))
             {
-                summary = BuildMountedLayoutSummary(slots, slots);
+                summary = BuildSourceMountedLayoutSummary(slots);
                 return true;
             }
 
@@ -281,7 +281,7 @@ namespace CoopSpectator.Infrastructure
 
             if (orderedSlots == null)
             {
-                summary = BuildMountedLayoutSummary(slots, slots);
+                summary = BuildSourceMountedLayoutSummary(slots);
                 return true;
             }
 
@@ -290,8 +290,8 @@ namespace CoopSpectator.Infrastructure
                 ApplyNormalizedMountedWeaponLayout(equipment, orderedSlots);
 
             summary =
-                "Before={" + BuildMountedLayoutSummary(slots, slots) +
-                "} After={" + BuildMountedLayoutSummary(slots, orderedSlots) + "}";
+                "Before={" + BuildSourceMountedLayoutSummary(slots) +
+                "} After={" + BuildTargetMountedLayoutSummary(orderedSlots) + "}";
             return true;
         }
 
@@ -679,9 +679,17 @@ namespace CoopSpectator.Infrastructure
             IReadOnlyList<MountedWeaponSlotState> before,
             IReadOnlyList<MountedWeaponSlotState> after)
         {
+            EquipmentIndex[] targetSlots =
+            {
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3
+            };
+
             for (int i = 0; i < 4; i++)
             {
-                string beforeItemId = before != null && i < before.Count ? before[i]?.ItemId : null;
+                string beforeItemId = GetSourceLayoutItemId(before, targetSlots[i]);
                 string afterItemId = after != null && i < after.Count ? after[i]?.ItemId : null;
                 if (!string.Equals(beforeItemId, afterItemId, StringComparison.Ordinal))
                     return false;
@@ -690,9 +698,32 @@ namespace CoopSpectator.Infrastructure
             return true;
         }
 
-        private static string BuildMountedLayoutSummary(
-            IReadOnlyList<MountedWeaponSlotState> sourceSlots,
-            IReadOnlyList<MountedWeaponSlotState> orderedSlots)
+        private static string BuildSourceMountedLayoutSummary(IReadOnlyList<MountedWeaponSlotState> sourceSlots)
+        {
+            EquipmentIndex[] targetSlots =
+            {
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3
+            };
+
+            var parts = new List<string>(4);
+            for (int i = 0; i < targetSlots.Length; i++)
+            {
+                string itemId = GetSourceLayoutItemId(sourceSlots, targetSlots[i]);
+                MountedWeaponRole role = GetSourceLayoutRole(sourceSlots, targetSlots[i]);
+                parts.Add(
+                    GetWeaponSlotLabel(targetSlots[i]) + "=" +
+                    (string.IsNullOrWhiteSpace(itemId)
+                        ? "empty"
+                        : itemId + ":" + role));
+            }
+
+            return string.Join(", ", parts);
+        }
+
+        private static string BuildTargetMountedLayoutSummary(IReadOnlyList<MountedWeaponSlotState> orderedSlots)
         {
             EquipmentIndex[] targetSlots =
             {
@@ -716,6 +747,25 @@ namespace CoopSpectator.Infrastructure
             }
 
             return string.Join(", ", parts);
+        }
+
+        private static string GetSourceLayoutItemId(
+            IReadOnlyList<MountedWeaponSlotState> sourceSlots,
+            EquipmentIndex targetSlot)
+        {
+            return sourceSlots?
+                .FirstOrDefault(slot => slot != null && slot.Slot == targetSlot)?
+                .ItemId;
+        }
+
+        private static MountedWeaponRole GetSourceLayoutRole(
+            IReadOnlyList<MountedWeaponSlotState> sourceSlots,
+            EquipmentIndex targetSlot)
+        {
+            return sourceSlots?
+                       .FirstOrDefault(slot => slot != null && slot.Slot == targetSlot)?
+                       .Role ??
+                   MountedWeaponRole.Other;
         }
 
         private static bool DoesWeapon2ContainLiveCandidate(Equipment equipment)
