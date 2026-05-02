@@ -1,0 +1,201 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using TaleWorlds.MountAndBlade;
+
+namespace CoopSpectator.Infrastructure
+{
+    internal static class ExactTransferContractRuntimeCache
+    {
+        private static readonly object Sync = new object();
+        private static readonly Dictionary<string, ExactTransferSpawnContract> ContractsByEntryId =
+            new Dictionary<string, ExactTransferSpawnContract>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, ExactTransferValidationResult> ValidationByEntryId =
+            new Dictionary<string, ExactTransferValidationResult>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, ExactTransferRuntimeState> RuntimeStateByEntryId =
+            new Dictionary<string, ExactTransferRuntimeState>(StringComparer.Ordinal);
+
+        public static void Reset(string source)
+        {
+            lock (Sync)
+            {
+                ContractsByEntryId.Clear();
+                ValidationByEntryId.Clear();
+                RuntimeStateByEntryId.Clear();
+            }
+
+            string details = "Source=" + (source ?? "unknown");
+            ModLogger.Info("ExactTransferContractRuntimeCache: reset. " + details);
+            if (GameNetwork.IsServer)
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent("exact-transfer-contract-cache-reset", details);
+        }
+
+        public static void RegisterPreSpawnContract(
+            ExactTransferSpawnContract contract,
+            ExactTransferValidationResult validation,
+            string source)
+        {
+            if (contract == null || string.IsNullOrWhiteSpace(contract.EntryId))
+                return;
+
+            ExactTransferRuntimeState runtimeState;
+            lock (Sync)
+            {
+                ContractsByEntryId[contract.EntryId] = contract;
+                ValidationByEntryId[contract.EntryId] = validation ?? new ExactTransferValidationResult();
+
+                runtimeState = EnsureRuntimeStateLocked(contract.EntryId);
+                runtimeState.EntryId = contract.EntryId;
+                runtimeState.IsMountedContract = contract.Mount?.IsMounted ?? false;
+
+                ExactTransferStageMachine.TryAdvance(
+                    runtimeState,
+                    ExactTransferStage.SnapshotResolved,
+                    requiresMountLink: runtimeState.IsMountedContract,
+                    failureContext: source);
+                ExactTransferStageMachine.TryAdvance(
+                    runtimeState,
+                    ExactTransferStage.ContractBuilt,
+                    requiresMountLink: runtimeState.IsMountedContract,
+                    failureContext: source);
+
+                if (validation?.IsValid == true)
+                {
+                    ExactTransferStageMachine.TryAdvance(
+                        runtimeState,
+                        ExactTransferStage.ContractValidated,
+                        requiresMountLink: runtimeState.IsMountedContract,
+                        failureContext: source);
+                    ExactTransferStageMachine.TryAdvance(
+                        runtimeState,
+                        ExactTransferStage.PreSpawnPrepared,
+                        requiresMountLink: runtimeState.IsMountedContract,
+                        failureContext: source);
+                }
+                else
+                {
+                    runtimeState.MarkFailure(
+                        ExactTransferFailureReason.MissingContractField,
+                        BuildErrorList(validation?.Errors));
+                }
+            }
+
+            string contractSummary = BuildContractSummary(contract.EntryId);
+            string validationSummary = BuildValidationSummary(contract.EntryId);
+            string runtimeSummary = BuildRuntimeStateSummary(contract.EntryId);
+            ModLogger.Info(
+                "ExactTransferContractRuntimeCache: registered pre-spawn contract. " +
+                "EntryId=" + contract.EntryId +
+                " Source=" + (source ?? "unknown") +
+                " " + contractSummary +
+                " " + validationSummary +
+                " " + runtimeSummary);
+            if (GameNetwork.IsServer)
+            {
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "exact-transfer-pre-spawn-contract",
+                    "EntryId=" + contract.EntryId +
+                    " Source=" + (source ?? "unknown") +
+                    " " + contractSummary +
+                    " " + validationSummary +
+                    " " + runtimeSummary);
+            }
+        }
+
+        public static bool TryGetContract(string entryId, out ExactTransferSpawnContract contract)
+        {
+            lock (Sync)
+                return ContractsByEntryId.TryGetValue(entryId ?? string.Empty, out contract);
+        }
+
+        public static bool TryGetValidation(string entryId, out ExactTransferValidationResult validation)
+        {
+            lock (Sync)
+                return ValidationByEntryId.TryGetValue(entryId ?? string.Empty, out validation);
+        }
+
+        public static bool TryGetRuntimeState(string entryId, out ExactTransferRuntimeState runtimeState)
+        {
+            lock (Sync)
+                return RuntimeStateByEntryId.TryGetValue(entryId ?? string.Empty, out runtimeState);
+        }
+
+        public static string BuildContractSummary(string entryId)
+        {
+            lock (Sync)
+            {
+                if (!ContractsByEntryId.TryGetValue(entryId ?? string.Empty, out ExactTransferSpawnContract contract) || contract == null)
+                    return "ExactTransferContract={State=absent}";
+
+                return
+                    "ExactTransferContract={StrictHeroPath=" + contract.SpawnPolicy?.UseStrictExactHeroPath +
+                    ",RequirePreSpawnInjection=" + contract.SpawnPolicy?.RequirePreSpawnInjection +
+                    ",ForbidSurrogatePrimaryMaterialization=" + contract.SpawnPolicy?.ForbidSurrogatePrimaryMaterialization +
+                    ",NativeCharacterId=" + (contract.Identity?.NativeMultiplayerCharacterId ?? "null") +
+                    ",Mounted=" + contract.Mount?.IsMounted +
+                    ",ExactBody=" + contract.Body?.HasExactBodyProperties +
+                    ",IncludeWeapons=" + contract.Equipment?.IncludeWeaponsInPreSpawn +
+                    ",IncludeArmorVisuals=" + contract.Equipment?.IncludeArmorVisualsInPreSpawn +
+                    ",IncludeCape=" + contract.Equipment?.IncludeCapeInPreSpawn +
+                    ",IncludeMountVisuals=" + contract.Equipment?.IncludeMountVisualsInPreSpawn +
+                    ",PeerDrivenBody=" + contract.PeerBinding?.AllowPeerDrivenBodyAtCreateAgentTime +
+                    ",PeerDrivenBanner=" + contract.PeerBinding?.AllowPeerDrivenBannerAtCreateAgentTime +
+                    ",UsePlayerAgentCreateBranch=" + contract.PeerBinding?.UsePlayerAgentCreateBranch + "}";
+            }
+        }
+
+        public static string BuildValidationSummary(string entryId)
+        {
+            lock (Sync)
+            {
+                if (!ValidationByEntryId.TryGetValue(entryId ?? string.Empty, out ExactTransferValidationResult validation) || validation == null)
+                    return "ExactTransferValidation={State=absent}";
+
+                return
+                    "ExactTransferValidation={Valid=" + validation.IsValid +
+                    ",ErrorCount=" + validation.Errors.Count +
+                    ",WarningCount=" + validation.Warnings.Count +
+                    ",Errors=" + BuildErrorList(validation.Errors) +
+                    ",Warnings=" + BuildErrorList(validation.Warnings) + "}";
+            }
+        }
+
+        public static string BuildRuntimeStateSummary(string entryId)
+        {
+            lock (Sync)
+            {
+                if (!RuntimeStateByEntryId.TryGetValue(entryId ?? string.Empty, out ExactTransferRuntimeState runtimeState) || runtimeState == null)
+                    return "ExactTransferRuntime={State=absent}";
+
+                return
+                    "ExactTransferRuntime={Stage=" + runtimeState.Stage +
+                    ",FailureReason=" + runtimeState.FailureReason +
+                    ",FailureContext=" + (runtimeState.FailureContext ?? "null") +
+                    ",MountedContract=" + runtimeState.IsMountedContract +
+                    ",LastTransitionUtc=" + runtimeState.LastTransitionUtc.ToString("O") + "}";
+            }
+        }
+
+        private static ExactTransferRuntimeState EnsureRuntimeStateLocked(string entryId)
+        {
+            if (!RuntimeStateByEntryId.TryGetValue(entryId, out ExactTransferRuntimeState runtimeState))
+            {
+                runtimeState = new ExactTransferRuntimeState
+                {
+                    EntryId = entryId
+                };
+                RuntimeStateByEntryId[entryId] = runtimeState;
+            }
+
+            return runtimeState;
+        }
+
+        private static string BuildErrorList(IReadOnlyCollection<string> values)
+        {
+            if (values == null || values.Count == 0)
+                return "[]";
+
+            return "[" + string.Join(" | ", values.Where(value => !string.IsNullOrWhiteSpace(value))) + "]";
+        }
+    }
+}

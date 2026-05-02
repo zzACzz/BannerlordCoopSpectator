@@ -72,6 +72,12 @@
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />
+    <Compile Include="..\Infrastructure\ExactTransferSpawnContract.cs" Link="Infrastructure\ExactTransferSpawnContract.cs" />
+    <Compile Include="..\Infrastructure\ExactTransferRuntimeState.cs" Link="Infrastructure\ExactTransferRuntimeState.cs" />
+    <Compile Include="..\Infrastructure\ExactTransferStageMachine.cs" Link="Infrastructure\ExactTransferStageMachine.cs" />
+    <Compile Include="..\Infrastructure\ExactTransferContractBuilder.cs" Link="Infrastructure\ExactTransferContractBuilder.cs" />
+    <Compile Include="..\Infrastructure\ExactTransferContractValidator.cs" Link="Infrastructure\ExactTransferContractValidator.cs" />
+    <Compile Include="..\Infrastructure\ExactTransferContractRuntimeCache.cs" Link="Infrastructure\ExactTransferContractRuntimeCache.cs" />
     <Compile Include="..\Infrastructure\ModulePathHelper.cs" Link="Infrastructure\ModulePathHelper.cs" />
     <Compile Include="..\Infrastructure\SceneRuntimeClassifier.cs" Link="Infrastructure\SceneRuntimeClassifier.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePhaseBridgeFile.cs" Link="Infrastructure\CoopBattlePhaseBridgeFile.cs" />
@@ -79,6 +85,7 @@
   <Compile Include="..\Infrastructure\BattleSnapshotRuntimeState.cs" Link="Infrastructure\BattleSnapshotRuntimeState.cs" />
   <Compile Include="..\Infrastructure\CoopBattleAuthorityState.cs" Link="Infrastructure\CoopBattleAuthorityState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleEntryPolicy.cs" Link="Infrastructure\CoopBattleEntryPolicy.cs" />
+    <Compile Include="..\Infrastructure\CoopBattlePeerSessionState.cs" Link="Infrastructure\CoopBattlePeerSessionState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleEntryStatusBridgeFile.cs" Link="Infrastructure\CoopBattleEntryStatusBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleResultBridgeFile.cs" Link="Infrastructure\CoopBattleResultBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSelectionBridgeFile.cs" Link="Infrastructure\CoopBattleSelectionBridgeFile.cs" />

@@ -4111,6 +4111,7 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsServer)
                 return;
 
+            ExactTransferContractRuntimeCache.Reset(source + " client-runtime-reset");
             _materializedArmyEntryIdByAgentIndex.Clear();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
@@ -5196,6 +5197,7 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattleSelectionBridgeFile.ClearAll(source + " init");
             CoopBattleSpawnBridgeFile.ClearPendingRequests(source + " init");
             _diagnosticAllowedAgent = null;
+            ExactTransferContractRuntimeCache.Reset((_lastServerRuntimeInitializationSource ?? source ?? "unknown") + " server-runtime-init");
 
             RefreshAllowedTroopsFromRoster(source);
             CampaignMapPatchMissionInit.TryRepairLiveMissionContract(
@@ -15656,7 +15658,10 @@ namespace CoopSpectator.MissionBehaviors
             bool includeCape,
             string weaponDecisionReason,
             string capeDecisionReason,
-            bool spawnFromAgentVisuals)
+            bool spawnFromAgentVisuals,
+            string exactTransferContractSummary = null,
+            string exactTransferValidationSummary = null,
+            string exactTransferRuntimeSummary = null)
         {
             if (!GameNetwork.IsServer || exactOrigin == null || entryState == null)
                 return;
@@ -15679,6 +15684,9 @@ namespace CoopSpectator.MissionBehaviors
                 " WeaponDecision=" + (weaponDecisionReason ?? "null") +
                 " CapeDecision=" + (capeDecisionReason ?? "null") +
                 " EquipmentSource=" + (exactEquipment != null ? "exact-snapshot" : "native-template") +
+                " " + (exactTransferContractSummary ?? "ExactTransferContract={State=absent}") +
+                " " + (exactTransferValidationSummary ?? "ExactTransferValidation={State=absent}") +
+                " " + (exactTransferRuntimeSummary ?? "ExactTransferRuntime={State=absent}") +
                 " " + BuildExactBattleAgentSpawnTraceEquipmentSummary(exactEquipment) +
                 " " + BuildExactBattleAgentSpawnTraceContractSummary(diagnostic);
             AppendExactBattleAgentSpawnTraceEvent("server-pre-spawn-contract", details);
