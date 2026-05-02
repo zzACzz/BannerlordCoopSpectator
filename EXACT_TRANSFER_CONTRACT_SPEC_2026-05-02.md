@@ -1,35 +1,36 @@
-# Exact Transfer Contract Spec
+# Специфікація Exact Transfer Contract
 
-Date: 2026-05-02
+Дата: 2026-05-02
 
-## Goal
+## Мета
 
-Define the exact transfer adapter contract that maps campaign battle snapshot data
-into the native Bannerlord multiplayer spawn contract for strict exact heroes.
+Визначити точний adapter-contract, який мапить дані battle snapshot із кампанії
+у native multiplayer spawn contract Bannerlord для strict exact hero.
 
-Selected strategy:
+Обрана стратегія:
 
-- do not build a custom multiplayer runtime
-- do not continue expanding surrogate runtime shims
-- adapt campaign data into the native multiplayer/TDM spawn lifecycle
-- implement only after the full contract is explicit
+- не будувати власний multiplayer runtime
+- не продовжувати розширювати surrogate runtime shim
+- адаптувати campaign data під native multiplayer / TDM lifecycle
+- починати нову реалізацію тільки після того, як контракт описаний повністю
 
-Immediate scope:
+Найближчий scope:
 
-- main hero
-- lords
-- companions / other exact personal hero entries
-- especially mounted remote hero client materialization
+- `main hero`
+- `lords`
+- `companions` / інші exact personal hero entry
+- особливо mounted remote hero materialization на клієнті
 
-Non-goals for this phase:
+Що не входить у цей етап:
 
-- bulk troop exact 1:1 rollout
-- more post-spawn visual repair as a primary path
-- more speculative guard/fallback patches without a contract-level reason
+- повний rollout exact 1:1 для bulk troops
+- нові post-spawn visual repair як primary path
+- нові speculative guard/fallback патчі без contract-level причини
 
-## Current conclusion
+## Поточний висновок
 
-The problem is not just field mismatch. The problem is:
+Проблема не зводиться до простого “не ті поля”.
+Проблема складається з:
 
 - field mapping
 - legal event sequence
@@ -38,13 +39,13 @@ The problem is not just field mismatch. The problem is:
 - commander-control ownership timing
 - death/respawn cleanup timing
 
-This is a contract problem, not a single bug.
+Тобто це проблема контракту, а не один окремий баг.
 
 ## Native multiplayer spawn contract
 
-### Client materialization sequence
+### Послідовність client materialization
 
-Observed native client-side sequence for spawned agents:
+На клієнті native послідовність для spawned agents виглядає так:
 
 1. `CreateAgent`
 2. `Mission.SpawnAgent(agentBuildData)`
@@ -52,13 +53,13 @@ Observed native client-side sequence for spawned agents:
 4. `SynchronizeAgentSpawnEquipment`
 5. `SetWieldedItemIndex`
 6. `SetWeaponNetworkData` / `SetWeaponAmmoData`
-7. `ReplaceBotWithPlayer` where applicable
+7. `ReplaceBotWithPlayer`, якщо це релевантно
 8. `SetAgentHealth` / death / remove lifecycle
 
-### Native `CreateAgent` contract
+### Контракт `CreateAgent`
 
-Decompiled `MissionNetworkComponent.HandleServerEventCreateAgent(...)` shows that
-the client builds `AgentBuildData` from the network payload with these core inputs:
+Decompiled `MissionNetworkComponent.HandleServerEventCreateAgent(...)` показує,
+що клієнт збирає `AgentBuildData` з такого payload:
 
 - `Character`
 - `Peer`
@@ -76,63 +77,63 @@ the client builds `AgentBuildData` from the network payload with these core inpu
 - `ClothingColor1`
 - `ClothingColor2`
 
-Important native branch behavior:
+Критично важлива branch-логіка:
 
-- if `IsPlayerAgent == true`, the client reads body properties from
+- якщо `IsPlayerAgent == true`, body properties беруться з
   `missionPeer.Peer.BodyProperties`
-- if `IsPlayerAgent == false`, the client derives body properties from
-  `character.GetBodyPropertiesMin/Max()` and `character.BodyPropertyRange`
-- if no formation is present and `missionPeer != null`, banner comes from
+- якщо `IsPlayerAgent == false`, body properties derivе-яться з
+  `character.GetBodyPropertiesMin/Max()` і `character.BodyPropertyRange`
+- якщо formation немає, але `missionPeer != null`, banner береться з
   `missionPeer.Peer.BannerCode`
-- the handler finishes by calling `Mission.SpawnAgent(agentBuildData)` and then
-  touching `.MountAgent`
+- в кінці handler викликає `Mission.SpawnAgent(agentBuildData)` і відразу торкає
+  `.MountAgent`
 
-This means `CreateAgent` is already a composite contract:
+Отже `CreateAgent` уже сам по собі є composite contract:
 
 - identity contract
 - body contract
 - formation/banner contract
 - mount-index contract
 
-### Native `Mission.SpawnAgent(...)` expectations
+### Очікування `Mission.SpawnAgent(...)`
 
-From decompiled `Mission.SpawnAgent(...)`:
+З decompiled `Mission.SpawnAgent(...)` видно:
 
-- `AgentCharacter` must be valid
-- age/body/gender are normalized before full spawn completes
-- team, colors, origin, formation, position, direction, equipment, and mount index
-  are consumed during spawn
-- body properties can be applied before the rest of the lifecycle continues
+- `AgentCharacter` повинен бути валідним
+- age / body / gender нормалізуються ще до завершення повного spawn
+- team, colors, origin, formation, position, direction, equipment і mount index
+  споживаються прямо під час spawn
+- body properties можуть бути застосовані ще до решти lifecycle
 
-This means that bad identity/body/equipment state is not just a visual problem.
-It can break native materialization before later recovery hooks even run.
+Тобто неправильний identity/body/equipment стан — це не просто visual bug.
+Він може зламати native materialization ще до того, як взагалі почнуть працювати
+пізніші recovery hook.
 
 ### Native post-spawn handlers
 
-Key decompiled handlers:
+Ключові decompiled handlers:
 
-- `SetAgentPeer` only binds `MissionPeer` to an already-existing agent
-- `SynchronizeAgentSpawnEquipment` calls
+- `SetAgentPeer` лише біндить `MissionPeer` до вже існуючого agent
+- `SynchronizeAgentSpawnEquipment` викликає
   `UpdateSpawnEquipmentAndRefreshVisuals(...)`
-- `ReplaceBotWithPlayer` reassigns a bot agent to a peer, formation, and health
-- `SetWieldedItemIndex` assumes the target agent and equipment state are already
-  valid
-- `SetAgentHealth` assumes the target agent index resolves to a live agent
+- `ReplaceBotWithPlayer` переприв’язує bot agent до peer, formation і health
+- `SetWieldedItemIndex` передбачає, що agent і equipment state уже валідні
+- `SetAgentHealth` передбачає, що target agent index розв’язується в живий agent
 
-Therefore:
+Отже:
 
-- `CreateAgent` materialization failure cannot be reliably repaired later by
-  treating `SetAgentPeer` or visual refresh as if they were spawn success
-- later handlers are consumers of spawn success, not substitutes for it
+- якщо `CreateAgent` не materialized коректно, пізніший `SetAgentPeer` або visual
+  refresh не є заміною spawn success
+- пізніші handler — це consumers of success, а не спосіб заднім числом створити success
 
 ## Campaign-side contract
 
 ### Authoritative entry model
 
-The current authoritative battle snapshot entry is
+Поточна authoritative battle snapshot entry — це
 `Infrastructure/BattleSnapshotRuntimeState.cs::RosterEntryState`.
 
-Core fields already available:
+Поля, які вже є:
 
 - identity:
   - `EntryId`
@@ -161,7 +162,9 @@ Core fields already available:
   - `BaseHitPoints`
   - `PerkIds`
 - stats:
-  - attributes and weapon/riding/athletics skills
+  - attributes
+  - weapon skills
+  - riding / athletics
 - exact combat equipment:
   - `CombatItem0Id..CombatItem3Id`
   - `CombatItem0Amount..CombatItem3Amount`
@@ -173,50 +176,48 @@ Core fields already available:
   - `CombatHorseId`
   - `CombatHorseHarnessId`
 
-This is enough to describe the exact personal hero state, but not yet enough to
-guarantee that each piece is fed to the native multiplayer runtime at the correct
-time and in the correct shape.
+Цього достатньо, щоб описати exact personal hero state, але цього ще недостатньо,
+щоб гарантувати коректну подачу цих даних у native multiplayer runtime у
+правильний момент і в правильній формі.
 
 ### Runtime exact object layer
 
-`Infrastructure/ExactCampaignRuntimeObjectRegistry.cs` already creates:
+`Infrastructure/ExactCampaignRuntimeObjectRegistry.cs` уже вміє створювати:
 
-- runtime `BasicCharacterObject` per `EntryId`
-- runtime `MPHeroClass` wrapper per `EntryId`
+- runtime `BasicCharacterObject` на `EntryId`
+- runtime `MPHeroClass` wrapper на `EntryId`
 
-That layer can:
+Цей шар уже вміє:
 
-- inject battle equipment
-- inject exact body properties
-- derive mounted/ranged/runtime formation traits
+- інжектити battle equipment
+- інжектити exact body properties
+- виводити mounted/ranged/runtime formation traits
 
-This is an important building block for the selected strategy:
+Це важливий будівельний блок для обраної стратегії:
 
-- we should prefer exact runtime objects and explicit adapter contracts
-- we should not continue mutating native payloads into troop surrogates as a
-  long-term primary mechanism
+- треба спиратися на exact runtime objects і явні adapter contract
+- не треба лишати payload mutation у troop surrogate як довгостроковий primary path
 
-### Current direct-spawn reference path
+### Поточний direct-spawn reference path
 
-`Mission/CoopMissionBehaviors.cs::SpawnCoopControlledAgent(...)` is useful as a
-reference implementation because it already demonstrates a more explicit local
-construction path:
+`Mission/CoopMissionBehaviors.cs::SpawnCoopControlledAgent(...)` корисний як
+reference implementation, бо вже показує чистіший локальний construction path:
 
-- resolve authoritative team
-- compute spawn frame
-- build exact snapshot equipment
-- build `AgentBuildData`
-- apply entry identity/body
-- call `Mission.SpawnAgent(...)`
-- bind ownership and mission peer
-- optionally refresh visuals / wield initial weapons
+- резолв authoritative team
+- обчислити spawn frame
+- зібрати exact snapshot equipment
+- побудувати `AgentBuildData`
+- застосувати entry identity / body
+- викликати `Mission.SpawnAgent(...)`
+- забіндити ownership і mission peer
+- опційно оновити visuals / wield initial weapons
 
-This is not the final solution for multiplayer hero transfer, but it is the best
-existing reference inside the repo for a clean adapter-style construction path.
+Це ще не фінальне рішення для multiplayer hero transfer, але це найкращий уже
+наявний reference path у репо для чистого adapter-style construction.
 
 ## Mapping matrix
 
-### Identity and class
+### Identity і class
 
 Native requirement:
 
@@ -224,7 +225,7 @@ Native requirement:
 - multiplayer-valid `AgentOrigin`
 - multiplayer-valid class semantics
 
-Campaign sources:
+Campaign source:
 
 - `CharacterId`
 - `OriginalCharacterId`
@@ -232,31 +233,30 @@ Campaign sources:
 - `HeroTemplateId`
 - runtime exact object registry
 
-Adapter decision:
+Adapter rule:
 
-- strict exact heroes should resolve to an explicit runtime exact character/class
-  contract
-- this resolution must be stable before spawn
-- runtime spawn must not degrade to troop surrogate as a final architecture
+- strict exact hero повинен резолвитись у явний runtime exact character/class contract
+- цей resolution має бути стабільний до spawn
+- runtime spawn не має деградувати до troop surrogate як фінальна архітектура
 
 ### Body contract
 
 Native requirement:
 
-- valid body properties at `CreateAgent`
-- valid age / gender consistency
-- valid `BodyPropertyRange` if native random-body branch is used
+- валідні body properties на `CreateAgent`
+- узгоджений age / gender
+- валідний `BodyPropertyRange`, якщо native іде random-body branch
 
-Campaign sources:
+Campaign source:
 
 - `HeroBodyProperties`
 - `HeroAge`
 - `HeroIsFemale`
 
-Adapter decision:
+Adapter rule:
 
-- strict exact heroes should avoid native random-body derivation whenever possible
-- exact body must be part of the pre-spawn contract, not a late visual patch
+- strict exact hero повинен по можливості уникати native random-body derivation
+- exact body має бути частиною pre-spawn contract, а не пізнім visual patch
 
 ### Equipment contract
 
@@ -264,141 +264,141 @@ Native requirement:
 
 - `SpawnEquipment`
 - `MissionEquipment`
-- stable weapon slots
-- valid horse / harness slot semantics
+- стабільні weapon slots
+- валідна horse / harness semantics
 
-Campaign sources:
+Campaign source:
 
 - `CombatItem0..3`
 - armor slots
 - `CombatHorseId`
 - `CombatHorseHarnessId`
 
-Adapter decision:
+Adapter rule:
 
-- exact personal heroes should build one canonical snapshot equipment contract
-- slot policy must be explicit:
-  - pre-spawn-safe
-  - post-bind-sync-only
-  - unsafe / deferred
+- exact personal hero повинен мати один canonical snapshot equipment contract
+- для кожного slot має бути явна policy:
+  - `safe pre-spawn`
+  - `safe post-bind sync`
+  - `unsafe / deferred`
 
 ### Mount contract
 
 Native requirement:
 
 - rider `MountAgentIndex`
-- mount materializes as a native agent
-- rider/mount link must exist before exact-ready state
+- mount materialized як native agent
+- rider/mount link існує до exact-ready state
 
-Campaign sources:
+Campaign source:
 
 - `IsMounted`
 - `CombatHorseId`
 - `CombatHorseHarnessId`
 
-Adapter decision:
+Adapter rule:
 
-- mount contract is first-class, not just part of visuals
-- `ExactReady` is illegal until rider and mount are both materialized and linked
+- mount contract є first-class частиною spawn, а не просто visual detail
+- `ExactReady` незаконний, поки rider і mount не materialized та не linked
 
 ### Peer binding contract
 
 Native requirement:
 
-- `SetAgentPeer` after agent exists
-- peer body/banner/team semantics become valid only after a real peer bind
+- `SetAgentPeer` після того, як agent уже існує
+- peer body/banner/team semantics стають валідними лише після реального peer bind
 
-Campaign sources:
+Campaign source:
 
-- player/peer ownership from battle/session state
-- entry claim and commander ownership data
+- player/peer ownership із battle/session state
+- entry claim і commander ownership data
 
-Adapter decision:
+Adapter rule:
 
-- peer binding must be modeled as a separate stage
-- no commander-ready state before peer-bound state is valid
+- peer binding має бути окремим stage
+- `CommanderReady` не може настати до валідного `PeerBound`
 
 ### Wield contract
 
 Native requirement:
 
-- weapon slots exist and are synchronized
-- wield operations happen only after valid agent/equipment state
+- weapon slots існують і synchronized
+- wield відбувається лише після валідного agent/equipment state
 
-Campaign sources:
+Campaign source:
 
 - exact equipment
 - derived initial wield preference
 
-Adapter decision:
+Adapter rule:
 
-- initial wield must be derived once into an explicit sub-contract
-- no more heuristic “refresh until it looks right” as primary behavior
+- initial wield треба один раз derivе-ити в окремий sub-contract
+- primary behavior більше не може базуватись на “оновлювати, поки візуально не схоже”
 
 ### Commander-control contract
 
 Native requirement:
 
-- controlled agent identity is stable
-- formation ownership and order UI semantics bind to the right agent
+- identity controlled agent стабільна
+- formation ownership і order UI semantics біндяться до правильного agent
 
-Campaign sources:
+Campaign source:
 
 - entry ownership
 - peer selection / selected entry
 - side / party / commander identity
 
-Adapter decision:
+Adapter rule:
 
-- commander-control enablement is a later stage than spawn
-- remote hero may not enter commander-control semantics while transfer is incomplete
+- commander-control enablement — це пізніший stage, ніж spawn
+- remote hero не може входити в commander-control semantics, поки transfer incomplete
 
 ### Cleanup contract
 
 Native requirement:
 
-- death/remove/update messages target valid rider and mount indices
-- respawn/index reuse does not leak prior state
+- death/remove/update message приходять на валідні rider і mount index
+- respawn/index reuse не протікає старим state у новий lifecycle
 
-Campaign sources:
+Campaign source:
 
 - entry identity
 - mounted pair identity
 - respawn claims / selected entry state
 
-Adapter decision:
+Adapter rule:
 
-- rider+mount cleanup must be one lifecycle unit
-- state clear must happen at pair scope, not per-agent cache fragment
+- rider+mount cleanup повинні бути однією lifecycle unit
+- state clear має бути на рівні pair, а не набору розкиданих cache
 
-## Hard invariants for implementation
+## Жорсткі інваріанти для майбутньої реалізації
 
-For mounted strict exact heroes:
+Для mounted strict exact hero:
 
-- `CreateAgentAccepted` is not the same as `RiderMaterialized`
-- `RiderMaterialized` is not the same as `MountMaterialized`
-- `MountMaterialized` is not the same as `MountLinked`
-- `ExactReady` is illegal while `MountLinked == false`
-- `CommanderReady` is illegal while `ExactReady == false`
-- queued refresh is never equivalent to applied state
-- death cleanup must clear rider and mount state together
+- `CreateAgentAccepted` не дорівнює `RiderMaterialized`
+- `RiderMaterialized` не дорівнює `MountMaterialized`
+- `MountMaterialized` не дорівнює `MountLinked`
+- `ExactReady` незаконний, поки `MountLinked == false`
+- `CommanderReady` незаконний, поки `ExactReady == false`
+- queued refresh ніколи не дорівнює applied state
+- death cleanup повинна чистити state rider і mount разом
 
-## What the latest failed runs prove
+## Що доводять останні невдалі прогони
 
-1. Server-side strict exact hero pre-spawn injection can already produce the right
-   exact equipment contract for the host hero.
-2. The local client still fails earlier, inside native `CreateAgent`, before a
-   valid rider/mount pair exists.
-3. Surrogate payload mutation degrades visuals and semantics while still not
-   fixing the root failure.
-4. Therefore the next safe step is not another runtime shim. It is a clean
-   contract-first redesign of the exact transfer adapter.
+1. Server-side strict exact hero pre-spawn injection уже здатний побудувати
+   правильний exact equipment contract для host hero.
+2. Локальний клієнт усе ще ламається раніше, всередині native `CreateAgent`,
+   до того, як існує валідна rider/mount pair.
+3. Surrogate payload mutation погіршує visuals і semantics, але не прибирає
+   кореневу поломку.
+4. Отже наступний безпечний крок — не новий runtime shim, а чистий
+   contract-first redesign exact transfer adapter.
 
-## Analysis work packages before implementation
+## Analysis work package до нової імплементації
 
-### Package A: Complete native lifecycle spec
+### Пакет A: повна native lifecycle spec
 
-Document, with code references, the exact legal order and assumptions for:
+Задокументувати з code reference точний legal order і припущення для:
 
 - `CreateAgent`
 - `Mission.SpawnAgent`
@@ -411,24 +411,24 @@ Document, with code references, the exact legal order and assumptions for:
 
 Deliverable:
 
-- one native lifecycle diagram
-- one list of “must already be valid at this stage”
+- одна native lifecycle diagram
+- один список `що вже має бути валідним на цьому stage`
 
-### Package B: Complete campaign-source matrix
+### Пакет B: повна campaign-source matrix
 
-For each field consumed by the native lifecycle, document:
+Для кожного field, який споживає native lifecycle, задокументувати:
 
-- source in `RosterEntryState`
-- whether direct / derived / missing
-- whether safe pre-spawn / safe post-bind / unsafe
+- джерело в `RosterEntryState`
+- direct / derived / missing
+- safe pre-spawn / safe post-bind / unsafe
 
 Deliverable:
 
-- one mapping matrix with no blank rows
+- одна mapping matrix без порожніх рядків
 
-### Package C: Explicit adapter contract object
+### Пакет C: явний adapter contract object
 
-Define the shape of the new adapter object before code:
+До коду визначити форму нового adapter object:
 
 - `IdentityContract`
 - `BodyContract`
@@ -441,59 +441,87 @@ Define the shape of the new adapter object before code:
 
 Deliverable:
 
-- one C#-oriented structural spec
+- одна C#-орієнтована структурна специфікація
 
-### Package D: Exact hero state machine
+### Пакет D: exact hero state machine
 
-Define the legal stages and transitions:
+До імплементації визначити legal stages і transitions:
 
-- `SnapshotResolved`
-- `ClassResolved`
-- `PreSpawnPrepared`
-- `CreateAgentAccepted`
-- `RiderMaterialized`
-- `MountMaterialized`
-- `MountLinked`
-- `PeerBound`
-- `EquipmentSynchronized`
-- `ExactReady`
-- `CommanderReady`
-- `DeathCleaned`
+1. `SnapshotResolved`
+2. `ClassResolved`
+3. `PreSpawnPrepared`
+4. `CreateAgentAccepted`
+5. `RiderMaterialized`
+6. `MountMaterialized`
+7. `MountLinked`
+8. `PeerBound`
+9. `EquipmentSynchronized`
+10. `ExactReady`
+11. `CommanderReady`
+12. `DeathCleaned`
 
 Deliverable:
 
-- one transition table
-- one list of forbidden transitions
+- transition table
+- список forbidden transition
+- окремий список `blocked reasons`
 
-### Package E: Implementation gate review
+### Пакет E: implementation gate review
 
-No new hero spawn implementation starts until all are true:
+Нова hero-first імплементація не починається, поки всі пункти нижче не істинні:
 
-- every native field has a campaign source or an explicit derivation rule
-- every lifecycle stage has an owner and preconditions
-- every mounted-hero failure mode has a contract-level policy
-- no surrogate troop fallback remains part of the target hero path
+- кожне native field має campaign source або явне derivation rule
+- кожен lifecycle stage має owner і preconditions
+- кожен mounted-hero failure mode має contract-level policy
+- surrogate troop fallback не входить у target hero path
 
-## Planned implementation sequence after analysis gate
+## Transition table, яку ще треба реалізувати кодом
 
-1. remove surrogate-as-primary-path from strict exact hero design
-2. introduce the explicit exact transfer adapter object
-3. implement hero-first server-side contract assembly
-4. implement client stage machine without fake applied states
-5. enable only:
-   - main hero
-   - lords
-   - companions
-6. run multi-death / multi-respawn validation
-7. only then expand to safer troop subsets
+| Stage | Вхідні умови | Що заборонено |
+| --- | --- | --- |
+| `SnapshotResolved` | є валідний `RosterEntryState` | переходити до spawn без identity/body/equipment validation |
+| `ClassResolved` | є runtime exact character/class | підміняти troop surrogate як фінальний target |
+| `PreSpawnPrepared` | зібрано adapter contract для spawn | запускати hero path без явного mount contract |
+| `CreateAgentAccepted` | native handler прийняв payload без exception | вважати rider materialized автоматично |
+| `RiderMaterialized` | rider agent реально існує локально | вважати mount materialized автоматично |
+| `MountMaterialized` | mount agent реально існує локально | вважати link готовим без верифікації |
+| `MountLinked` | rider має валідний `MountAgent` | робити `ExactReady`, якщо peer/equipment ще не готові |
+| `PeerBound` | `SetAgentPeer` відбувся на живому agent | включати commander-control без exact-ready |
+| `EquipmentSynchronized` | spawn equipment synchronized | робити wield до валідного equipment state |
+| `ExactReady` | rider/mount/peer/equipment пройшли базовий контракт | маскувати queued refresh під applied |
+| `CommanderReady` | identity і exact-ready стабільні | підсаджувати героя у formation semantics раніше |
+| `DeathCleaned` | rider+mount state очищені разом | лишати старий pair state на index reuse |
 
-## Current status
+## Невідомі точки, які треба закрити до коду
 
-Analysis has confirmed the direction:
+Ось що ще треба довизначити перед новою реалізацією:
 
-- selected path: adapter to native multiplayer contract
-- rejected path: keep expanding surrogate runtime shims
-- implementation status: blocked on completing the full contract spec
+1. Які поля exact hero безпечно подавати прямо в `CreateAgent`, а які треба
+   переносити лише в `SetAgentPeer` / `SynchronizeAgentSpawnEquipment`.
+2. Який canonical source of truth має бути для `BodyProperties`:
+   - runtime exact character
+   - `AgentBuildData.BodyProperties(...)`
+   - окремий `BodyContract`
+3. Як саме поводитись із `ReplaceBotWithPlayer` для exact hero path:
+   - це частина primary contract
+   - чи тільки TDM/Troop-controller layer поверх already-correct agent
+4. Який мінімальний exact-ready набір потрібен до `CommanderReady`.
+5. Який degraded state вважати допустимим тимчасово під час розробки, але не
+   фінальною архітектурою.
 
-No further speculative runtime repair work should be added until this analysis gate
-is closed.
+## Наступна послідовність роботи
+
+1. Не додавати нових runtime-shim patch без contract-level причини.
+2. Закрити `Package D` і `Package E` у документах.
+3. Описати `ExactTransferSpawnContract` як набір конкретних C#-структур.
+4. Лише після цього почати нову hero-first реалізацію.
+
+## Поточний статус
+
+Напрямок уже визначено:
+
+- обраний шлях: adapter до native multiplayer contract
+- відкинутий шлях: подальше розширення surrogate runtime shim
+- стан імплементації: зупинена до закриття analysis gate
+
+До завершення цього gate не треба додавати нову speculative runtime-repair логіку.

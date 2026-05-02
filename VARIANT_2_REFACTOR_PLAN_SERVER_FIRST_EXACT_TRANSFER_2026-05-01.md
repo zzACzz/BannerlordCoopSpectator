@@ -1,46 +1,48 @@
-## Goal
+## Мета
 
-Finish variant 2 by replacing the current hybrid symptom-repair approach with a
-safer server-first exact-transfer core for strict exact heroes.
+Довести `variant 2` до кінця, замінивши поточний hybrid
+symptom-repair підхід на безпечніше server-first ядро exact-transfer для
+strict exact hero.
 
-The immediate target is not "all units". The immediate target is:
+Найближча ціль — не “всі юніти”.
+Найближча ціль:
 
-- main hero
-- lords
-- other exact personal hero entries
+- `main hero`
+- `lords`
+- інші exact personal hero entry
 
-especially the failing remote mounted hero path on clients.
+і насамперед проблемний шлях `remote mounted hero` на клієнті.
 
-## Refactor Principle
+## Принцип рефакторингу
 
-The next phase must stop treating post-spawn client repair as the main path.
+Наступна фаза повинна перестати трактувати post-spawn client repair як
+основний шлях.
 
-Repair/fallback code may remain, but only as:
+Repair/fallback код може лишитися, але тільки як:
 
-- diagnostics
+- діагностика
 - crash guards
-- last-resort temporary recovery
+- останній тимчасовий recovery
 
-The primary path must become an explicit transfer state machine with stage
-invariants.
+Основний шлях має стати явною transfer state machine з інваріантами.
 
-## Current Problem To Solve First
+## Поточна проблема, яку треба вирішити першою
 
-The most important broken path is:
+Найважливіший зламаний шлях зараз такий:
 
-server exact mounted hero is valid ->
-client receives `CreateAgent` for rider with mount index ->
-client fails native materialization during or before normal mount linkage ->
-later overlay code treats rider as if materialization had succeeded ->
-remote hero appears as infantry or disappears ->
-command/control observes wrong semantics ->
-later lifecycle churn crashes the client.
+server exact mounted hero валідний ->
+клієнт отримує `CreateAgent` для rider із mount index ->
+клієнт ламає native materialization до нормального mount linkage ->
+пізніше overlay-код трактує rider так, ніби materialization уже успішна ->
+remote hero виглядає як infantry або зникає ->
+command/control бачить неправильну semantics ->
+через певний lifecycle churn клієнт падає
 
-## Target Architecture
+## Цільова архітектура
 
 ### Transfer stages
 
-For strict exact heroes, the runtime should model these stages explicitly:
+Для strict exact hero runtime повинен явно моделювати такі stages:
 
 1. `EntryResolved`
 2. `ClassResolved`
@@ -54,27 +56,27 @@ For strict exact heroes, the runtime should model these stages explicitly:
 10. `CommanderControlEnabled`
 11. `DeathCleanupComplete`
 
-No later stage should be marked complete if an earlier required stage is still
-missing.
+Жоден пізніший stage не має відмічатися completed, якщо ранній обов’язковий
+stage ще відсутній.
 
-### Hard invariants
+### Жорсткі інваріанти
 
-For mounted strict exact heroes:
+Для mounted strict exact hero:
 
-- `ExactVisualApplied` is illegal while `MountLinkVerified` is false.
-- `CommanderControlEnabled` is illegal while hero identity is unresolved.
-- a remote hero may not participate in formation-selection semantics while its
-  personal hero transfer state is incomplete.
-- a queued refresh is never equivalent to applied state.
-- death-time cleanup must clear both rider and mount transfer state together.
+- `ExactVisualApplied` незаконний, поки `MountLinkVerified == false`
+- `CommanderControlEnabled` незаконний, поки hero identity не завершена
+- remote hero не може входити у formation-selection semantics, поки його
+  personal transfer state неповний
+- queued refresh ніколи не дорівнює applied state
+- death-time cleanup повинна очищати стан rider і mount разом
 
-## Proposed Refactor Work Packages
+## Запропоновані work package
 
-### Work package 1: Introduce a dedicated transfer-state model
+### Work package 1: окрема transfer-state model
 
-Create one explicit runtime state object for strict exact hero transfer.
+Створити один явний runtime state object для strict exact hero transfer.
 
-Suggested contents:
+Пропонований вміст:
 
 - `EntryId`
 - `AgentIndex`
@@ -89,185 +91,178 @@ Suggested contents:
 - `CommanderControlEnabled`
 - timestamps / retries / failure reason
 
-This state must become the source of truth for exact hero transfer progress.
+Цей state має стати source of truth для exact hero transfer progress.
 
-Current scattered caches should become implementation details behind this model,
-not peer-level truth on their own.
+Поточні розкидані cache мають перетворитися лише на implementation detail за
+цим state model, а не бути truth самі по собі.
 
-### Work package 2: Split payload observation from materialization success
+### Work package 2: розділити payload observation і materialization success
 
-Right now we frequently know mount payload data before we know whether the mount
-really exists locally.
+Зараз ми часто знаємо mount payload data раніше, ніж знаємо, чи mount взагалі
+існує локально як native object.
 
-That distinction must become explicit:
+Цю відмінність треба зробити явною:
 
 - payload observed
 - native object materialized
 
-Do not let payload knowledge imply success.
+Payload knowledge не повинно означати success.
 
-### Work package 3: Make `CreateAgent` the primary mount-contract checkpoint
+### Work package 3: зробити `CreateAgent` головним mount-contract checkpoint
 
-The current logs show that the real break happens at or before client
+Логи вже показують, що справжня поломка сидить на або до client
 `HandleServerEventCreateAgent`.
 
-That means future logic should branch from this fact:
+Отже майбутня логіка повинна відштовхуватися від такого правила:
 
-- if mounted exact hero reaches `CreateAgent` but local mount is not materialized,
-  transition to `MaterializationFailed`
-- do not allow later stages to masquerade as success
+- якщо mounted exact hero дійшов до `CreateAgent`, але локальний mount не
+  materialized, стан переходить у `MaterializationFailed`
+- пізніші stages не мають маскувати це під success
 
-This is the right place to decide whether:
+Саме тут треба вирішувати:
 
-- we can recover safely
-- or we must degrade the hero path in a controlled way
+- чи можемо ми recover safely
+- чи повинні перейти у контрольований degraded state
 
-### Work package 4: Gate exact finalize on stage completion, not heuristics
+### Work package 4: gate exact finalize по stage completion, а не по евристиках
 
-`TryFinalizeClientExactCampaignVisualForAgent(...)` should not decide from a mix
-of `SpawnEquipment`, `MountAgent`, pending queue state, and local observations.
+`TryFinalizeClientExactCampaignVisualForAgent(...)` не повинен приймати рішення
+з мішанини:
 
-Instead:
+- `SpawnEquipment`
+- `MountAgent`
+- pending queue state
+- локальні спостереження
 
-- it should consult the explicit transfer state
-- for mounted strict exact heroes it should refuse finalization until
-  `MountLinkVerified`
+Натомість він має:
 
-### Work package 5: Decouple commander-control enablement from unstable spawn state
+- консультуватися з explicit transfer state
+- для mounted strict exact hero відмовляти finalize, поки
+  `MountLinkVerified == false`
 
-The order UI, formation ownership, general promotion, and selection suppression
-must depend on transfer-stage readiness.
+### Work package 5: відчепити commander-control enablement від нестабільного spawn state
 
-For strict exact heroes:
+Order UI, formation ownership, general promotion і selection suppression повинні
+залежати від transfer-stage readiness.
 
-- if transfer state is incomplete, commander-control enablement is blocked
-- if blocked, the runtime should use a clear degraded state rather than mixing
-  troop semantics with commander semantics
+Для strict exact hero:
 
-This should remove the current symptom where the remote host becomes formation-like
-and can be selected together with troops.
+- якщо transfer state incomplete, commander-control blocked
+- якщо blocked, runtime має мати явний degraded state, а не змішувати troop
+  semantics із commander semantics
 
-### Work package 6: Redesign cleanup around rider+mount as one lifecycle unit
+Це повинно прибрати симптом, де remote host стає “майже troop” і
+підсвічується разом із formation.
 
-Death, despawn, respawn, and agent-index reuse must clear the transfer state for
-the whole mounted pair, not only whichever index was observed first.
+### Work package 6: cleanup навколо rider+mount як єдиної lifecycle unit
 
-That includes:
+Death, despawn, respawn і agent-index reuse повинні чистити transfer state для
+всього mounted pair, а не лише для того індексу, який ми побачили першим.
+
+Сюди входить:
 
 - rider -> mount mapping
 - mount -> rider mapping
 - entry binding
 - applied flags
 - pending refresh state
-- commander-control state if tied to that hero
+- commander-control state, якщо він прив’язаний до цього hero
 
-### Work package 7: Reduce runtime diagnostics to invariant-based logs
+### Work package 7: звести діагностику до invariant-based log
 
-The current diagnostics are useful but too fragmented.
+Поточна діагностика корисна, але занадто фрагментована.
 
-The next iteration should log stage transitions, for example:
+Наступна ітерація повинна логувати stage transition напряму, наприклад:
 
 - `StrictHeroTransfer Stage=ClientCreateAgentObserved`
 - `StrictHeroTransfer Stage=MountMaterialized`
 - `StrictHeroTransfer Stage=MountLinkVerified`
 - `StrictHeroTransfer Stage=Blocked Reason=CreateAgentExceptionBeforeMountMaterialization`
 
-This gives far better signal per run than many low-level logs that still require
-manual reconstruction.
+Це дає набагато кращий сигнал з одного прогона, ніж розкидані low-level логи,
+які ще треба вручну зводити.
 
-## Recommended Implementation Sequence
+## Рекомендована послідовність імплементації
 
-### Phase A: Architecture scaffold
+### Фаза A: архітектурний каркас
 
-1. add the transfer-state runtime object
-2. route current rider/mount payload tracking into it
-3. add stage transition logging
-4. do not change behavior yet except where needed for consistency
+1. додати transfer-state runtime object
+2. завести поточний rider/mount payload tracking у нього
+3. додати stage transition logging
+4. не міняти behavior, окрім того, що потрібно для консистентності
 
-Expected result:
+Очікуваний результат:
 
-we can describe every strict exact hero by stage instead of by scattered logs.
+кожен strict exact hero можна описати одним stage state, а не шматками логів.
 
-### Phase B: Remote mounted hero gating
+### Фаза B: gating для remote mounted hero
 
-1. make remote mounted hero finalization depend on transfer state
-2. block `ExactVisualApplied` until mount link is verified
-3. block commander-control enablement while transfer incomplete
-4. keep existing repair code only as optional transition attempts
+1. зробити remote mounted hero finalization залежним від transfer state
+2. заборонити `ExactVisualApplied`, поки mount link не verified
+3. блокувати commander-control enablement, поки transfer incomplete
+4. лишити наявний repair код лише як optional transition attempt
 
-Expected result:
+Очікуваний результат:
 
-the client should stop "pretending success" for broken remote mounted hero spawn.
+клієнт перестає “вдавати успіх” для зламаного remote mounted hero spawn.
 
-### Phase C: Controlled degradation policy
+### Фаза C: контрольована деградація
 
-If remote mounted hero materialization still fails at native `CreateAgent`, add one
-explicit degraded state rather than many implicit half-states.
+Якщо remote mounted hero materialization усе ще валиться в native `CreateAgent`,
+потрібен один явний degraded state, а не багато implicit half-state.
 
-For example:
+Наприклад:
 
 - `StrictHeroTransfer State=MaterializationFailed`
-- remote commander is not exposed to commander-control path
-- visual overlay is not marked applied
-- later death/health guards use this state directly
+- remote commander не пропускається у commander-control path
+- visual overlay не позначається applied
+- death/health guard використовують цей state напряму
 
-This is safer than partial success.
+Це безпечніше за частковий удаваний success.
 
-### Phase D: True server-first completion
+### Фаза D: справжнє server-first завершення
 
-Once the strict exact hero state machine is stable:
+Коли state machine для strict exact hero стабільна:
 
-1. reduce dependency on client visual recovery
-2. confirm mounted heroes stabilize across several death/respawn cycles
-3. then extend the same model to safer troop subsets
+1. зменшити залежність від client visual recovery
+2. підтвердити стабільність mounted hero через кілька death/respawn циклів
+3. лише після цього розширювати ту саму модель на safer troop subset
 
-## Why This Is Safer
+## Чому цей шлях безпечніший
 
-This path is safer because it replaces:
+Бо він замінює:
 
-- hidden assumptions
-- overlapping caches
+- приховані припущення
+- overlapping cache
 - post-hoc repair
-- queued-vs-applied ambiguity
+- двозначність queued-vs-applied
 
-with:
+на:
 
-- explicit stage progression
-- explicit blocking conditions
-- explicit degraded states
-- one place to reason about correctness
+- явну stage progression
+- явні blocking condition
+- явні degraded state
+- одне місце, де взагалі можна міркувати про correctness
 
-## What Not To Do Next
+## Чого не треба робити далі
 
-Do not spend many more runs on small local fixes such as:
+Не треба витрачати ще багато прогонів на дрібні локальні фікси типу:
 
-- one more mount refresh tweak
-- one more wield guard
-- one more delayed retry
-- one more order UI suppression change
+- ще один mount refresh tweak
+- ще один wield guard
+- ще одна delayed retry
+- ще один order UI suppression fix
 
-unless the change is directly part of the state-machine refactor above.
+якщо ця зміна не є прямою частиною state-machine refactor вище.
 
-That pattern already gave diminishing returns.
+Цей патерн уже дав diminishing returns.
 
-## Definition Of Success For This Refactor Phase
+## Визначення успіху для цієї фази
 
-This phase is successful when strict exact hero transfer satisfies all of:
+Ця фаза вважається успішною, коли strict exact hero transfer виконує все:
 
-- remote mounted hero on client is either fully mounted and visible or explicitly
-  marked degraded, never half-materialized
-- no remote exact hero reaches `ExactVisualApplied` without verified mount link
-- no commander-control path activates on an unresolved hero transfer
-- repeated death/respawn cycles do not crash the client
-- logs describe failures by stage, not by forensic reconstruction
-
-## Deliverables
-
-1. transfer-state core
-2. invariant-based logs
-3. remote mounted hero gating
-4. commander-control gating on transfer readiness
-5. cleanup and reuse rules for rider+mount lifecycle
-
-Only after these are stable should the project expand the same model toward full
-1:1 transfer for ordinary troops.
+- remote mounted hero на клієнті або повністю mounted і видимий, або явно
+  позначений degraded, але ніколи не напів-materialized
+- жоден remote exact hero не доходить до `ExactVisualApplied` без verified
+  mount link
+- жоден commander-control path не активується на unresolved hero transfer

@@ -1,190 +1,189 @@
-## Scope
+## Обсяг аудиту
 
-This audit covers the exact transfer pipeline for campaign hero entries that become
-multiplayer-controlled agents in battle scenes, with focus on the failing remote
-mounted hero path observed on the client.
+Цей аудит покриває exact-transfer pipeline для campaign hero-entry, які в бойовій
+сцені стають multiplayer-контрольованими агентами. Основний фокус:
+проблемний шлях `remote mounted hero` на клієнті.
 
-This is not a full audit of the whole mod. It is a focused audit of the transfer
-contract:
+Це не аудит усього моду. Це вузький аудит саме transfer-контракту:
 
-1. Snapshot entry state
-2. Multiplayer class resolution
-3. Server pre-spawn exact equipment injection
-4. Native mission spawn
-5. Client network materialization
-6. Peer binding, mount linkage, exact visual finalize
-7. Replace-bot, commander control, death, respawn
+1. стан entry у snapshot
+2. резолв multiplayer class
+3. server pre-spawn exact equipment injection
+4. native mission spawn
+5. client network materialization
+6. peer binding, mount linkage, exact visual finalize
+7. replace-bot, commander control, death, respawn
 
-## Current Intended Architecture
+## Поточна задумана архітектура
 
-### 1. Entry state is authoritative
+### 1. Authoritative truth живе в entry state
 
-`BattleSnapshotRuntimeState` owns the campaign-derived `RosterEntryState`.
-That state is supposed to be the single gameplay truth for:
+`BattleSnapshotRuntimeState` володіє campaign-derived `RosterEntryState`.
+Саме цей стан має бути єдиною authoritative gameplay truth для:
 
-- character id
+- `character id`
 - exact equipment
-- body and hero identity
-- mount and harness
-- exact hero flags and perks
+- body / hero identity
+- horse / harness
+- hero flags і perks
 
-### 2. Hero class resolution maps campaign identity to MP native classes
+### 2. Hero class resolution мапить campaign identity у native MP class
 
-`Infrastructure/CampaignMultiplayerHeroClassResolver.cs` maps a campaign-origin
-character into a native MP class so the runtime can pass through the multiplayer
-spawn contract.
+`Infrastructure/CampaignMultiplayerHeroClassResolver.cs` мапить
+campaign-origin character у native MP class, щоб runtime міг пройти через
+multiplayer spawn contract.
 
-Important current detail:
+Важлива поточна деталь:
 
-- already-MP hero ids such as `mp_light_cavalry_battania_hero` are now tried as
-  direct candidates first
-- surrogate troop/hero templates are only fallback candidates
+- already-MP hero id, наприклад `mp_light_cavalry_battania_hero`, тепер
+  пробуються як direct candidate першими
+- surrogate troop/hero template лишається тільки fallback-кандидатом
 
-### 3. Server pre-spawn injection is the target architecture for strict exact heroes
+### 3. Server pre-spawn injection є цільовою архітектурою для strict exact hero
 
-`Patches/ExactCampaignPreSpawnLoadoutPatch.cs` patches `Mission.SpawnAgent`.
+`Patches/ExactCampaignPreSpawnLoadoutPatch.cs` патчить `Mission.SpawnAgent`.
 
-For entries that satisfy the strict exact personal hero contract, the server injects:
+Для entry, які проходять strict exact personal hero contract, сервер інжектить:
 
 - exact weapons
-- exact visual slots that are considered safe
+- ті visual slots, які вважаються safe для pre-spawn
 - body properties
 
-For bulk AI troops, native template equipment is intentionally kept in place.
+Для bulk AI troops native template equipment навмисно лишається без exact
+injection.
 
-This means the architecture already distinguishes between:
+Тобто архітектура вже зараз розрізняє:
 
-- strict exact heroes: intended server-first path
-- bulk troops: intentionally degraded native-template path
+- `strict exact hero`: цільовий server-first path
+- `bulk troop`: навмисно degraded native-template path
 
-### 4. Client network path is still a hybrid contract
+### 4. Client network path все ще лишається hybrid contract
 
-`Patches/BattleMapSpawnHandoffPatch.cs` hooks:
+`Patches/BattleMapSpawnHandoffPatch.cs` хукає:
 
 - `HandleServerEventCreateAgent`
 - `HandleServerEventSetAgentPeer`
 - `HandleServerEventSynchronizeAgentEquipment`
 - `HandleServerEventSetAgentHealth`
 - `HandleServerEventSetWieldedItemIndex`
-- formation assignment and commander-control handoff
+- formation assignment і commander-control handoff
 
-`Mission/CoopMissionBehaviors.cs` then tries to resolve the exact entry id and
-apply or queue client exact visual overlay.
+Після цього `Mission/CoopMissionBehaviors.cs` пробує резолвити exact entry id і
+застосувати або поставити в чергу client exact visual overlay.
 
-This layer currently does two jobs at once:
+Зараз цей шар робить одразу дві роботи:
 
-1. recovery from native MP spawn mismatch
-2. the practical mechanism that completes hero exact materialization on clients
+1. recovery після native MP spawn mismatch
+2. фактичне завершення hero exact materialization на клієнті
 
-That is the core architectural tension.
+Саме тут і лежить головна архітектурна напруга.
 
-### 5. Commander possession and formation control are coupled to agent identity
+### 5. Commander possession і formation control занадто прив’язані до agent identity
 
-`Mission/CoopMissionBehaviors.cs` uses `ReplaceBotWithPlayer`, formation ownership
-normalization, controlled bot counts, and delayed general-control promotion.
+`Mission/CoopMissionBehaviors.cs` використовує `ReplaceBotWithPlayer`,
+formation ownership normalization, controlled bot counts і delayed
+general-control promotion.
 
-This means that if the player-facing hero agent is mis-materialized, command/control
-logic will also observe a bad identity and can treat the wrong thing as a normal
-formation unit.
+Через це, якщо player-facing hero materialized погано, command/control логіка
+теж бачить неправильну identity і може трактувати героя як звичайного formation
+unit.
 
-This matches the observed symptom where the host appears as infantry and gets
-selected together with formations.
+Це повністю збігається з симптомом, де хост виглядає як піхотинець і
+підсвічується разом із formation.
 
-## What The Logs Prove
+## Що доводять логи
 
-Recent runs show a stable asymmetry:
+Останні прогони показують стабільну асиметрію:
 
-1. Server/host side usually has a valid mounted pair for the host hero.
-2. The failing local client sees `CreateAgent` for remote hero rider `222` with
-   mount `223`.
-3. The same local client throws `Exception in handler of CreateAgent`.
-4. After that, the local client still receives later network messages for the rider.
-5. The local client often reaches `SetAgentPeer` and exact visual finalize with
-   rider data, but without a live `MountAgent`.
-6. The result is:
-   - remote host appears as infantry or partially materialized
-   - later disappears
-   - command/selection logic observes wrong agent semantics
-   - crash occurs later after enough lifecycle churn
+1. На server/host стороні mounted pair для host hero зазвичай валідний.
+2. Проблемний локальний клієнт бачить `CreateAgent` для rider `222` і mount `223`.
+3. Той самий клієнт падає `Exception in handler of CreateAgent`.
+4. Після цього клієнт усе одно продовжує отримувати пізніші network message для rider.
+5. Часто клієнт доходить до `SetAgentPeer` і exact visual finalize уже з rider data,
+   але без живого `MountAgent`.
+6. У результаті:
+   - remote host з’являється як infantry або частково materialized
+   - потім зникає
+   - selection / command логіка спостерігає неправильну agent semantics
+   - пізніше через lifecycle churn приходить client crash
 
-This means the main failing point is not a late visual mismatch. The main failing
-point is earlier:
+Головний висновок: основна поломка не в пізньому visual mismatch.
+Основна поломка відбувається раніше:
 
-the local client does not reliably complete native materialization of the remote
-mounted commander path.
+локальний клієнт ненадійно завершує native materialization для remote mounted
+commander path.
 
-## Structural Problems In The Current Design
+## Структурні проблеми поточного дизайну
 
-### A. "Finalize" currently means two different things
+### A. `Finalize` зараз означає дві різні речі
 
-The current client finalize path mixes:
+Поточний client finalize path змішує:
 
-- "queued for later"
-- "overlay actually applied"
+- `queued for later`
+- `overlay реально applied`
 
-That makes progress logs look better than the runtime really is and encourages
-symptom-driven interpretation.
+Через це прогрес у логах виглядає кращим, ніж реальний runtime-state.
 
-### B. State is scattered across many partial caches
+### B. Стан розмазаний по багатьох часткових кешах
 
-Mounted hero state is distributed across:
+Mounted hero state зараз розкиданий по:
 
-- tracked rider -> mount mappings
-- payload rider -> mount mappings
-- entry id caches
-- pending overlay queues
+- tracked rider -> mount mapping
+- payload rider -> mount mapping
+- entry id cache
+- pending overlay queue
 - applied overlay flags
-- materialized army caches
+- materialized army cache
 
-This creates too many ways to have "almost correct" state after partial failure.
+Це породжує занадто багато сценаріїв “майже правильно”, але не насправді правильно.
 
-### C. Post-spawn repair became a primary mechanism
+### C. Post-spawn repair став майже окремою архітектурою
 
-Client overlay, mount visual refresh, manual fallback, live wield refresh, and
-death guards were all useful for diagnosis and stabilization.
+Client overlay, mount visual refresh, manual fallback, live wield refresh і
+death guards були корисними для діагностики і часткової стабілізації.
 
-But together they became a second architecture layered on top of the intended
-server-first architecture.
+Але разом вони перетворилися на другу архітектуру поверх задуманої
+server-first архітектури.
 
-That is acceptable as temporary instrumentation. It is not a reliable long-term
-core.
+Для тимчасової інструментації це прийнятно.
+Для довгострокового ядра моду — ні.
 
-### D. Command/control is too close to unstable spawn identity
+### D. Command/control сидить занадто близько до нестабільного spawn identity
 
-Formation ownership, selected formations, followed agent, controlled agent, and
-general-control promotion still sit close to the same unstable hero materialization
-path.
+Formation ownership, selected formations, followed agent, controlled agent і
+general-control promotion досі дуже близько прив’язані до того ж нестабільного
+hero materialization path.
 
-That is why a bad hero spawn can leak into order UI behavior instead of staying
-isolated inside visuals.
+Саме тому поганий hero spawn протікає в order UI, а не ізолюється всередині
+spawn/visual підсистеми.
 
-### E. We do not have an explicit stage machine with invariants
+### E. У нас немає явної stage machine з інваріантами
 
-The transfer path behaves like a state machine, but the code does not model it as
-one. That is why many fixes were added as local guards instead of stage-checked
-transitions.
+Transfer path поводиться як state machine, але код не моделює його явно.
+Через це багато фіксів додавались як локальні guard-и, а не як stage-checked
+transition.
 
-## Self-Critique Of The Current Implementation Strategy
+## Самокритика поточної стратегії
 
-### What was correct
+### Що було правильним
 
-The diagnostic and stabilization work was not wasted.
+Діагностична і стабілізаційна робота не була даремною.
 
-It gave us:
+Вона дала:
 
-- reproducible logs
-- narrow failing agent ids
-- proof that server and client do not fail in the same place
-- proof that the root issue is the remote mounted hero path
-- proof that many post-death crashes are downstream, not primary
+- відтворювані логи
+- вузькі failing agent id
+- доказ, що сервер і клієнт падають не в одній точці
+- доказ, що корінь проблеми саме в remote mounted hero path
+- доказ, що багато post-death crash — це downstream, а не primary issue
 
-Without that work, a large architecture refactor would still be blind.
+Без цього великий архітектурний refactor теж був би сліпим.
 
-### What was incorrect
+### Що було неправильним
 
-The implementation strategy stayed in symptom-repair mode for too long.
+Стратегія занадто довго лишалася в режимі symptom-repair.
 
-I kept trying to improve:
+Я занадто довго пробував покращувати:
 
 - mount visual repair
 - live wield refresh
@@ -192,60 +191,63 @@ I kept trying to improve:
 - stale cache cleanup
 - selection/control guards
 
-before forcing a hard architectural checkpoint.
+замість того, щоб раніше зробити жорсткий архітектурний pivot.
 
-That was reasonable early, but after repeated runs showed the same core
-`CreateAgent -> remote mounted host hero -> missing mount` asymmetry, I should have
-pivoted earlier.
+На ранніх ітераціях це було виправдано, але після кількох прогонів, де
+повторювався один і той самий core pattern
+`CreateAgent -> remote mounted host hero -> missing mount`,
+pivot треба було робити швидше.
 
-### The most important mistake
+### Найбільша помилка
 
-I overestimated how much of the problem still lived in post-spawn visual recovery.
+Я переоцінив, яка частина проблеми ще живе в post-spawn visual recovery.
 
-The logs now show the opposite:
+Зараз логи показують протилежне:
 
-- by the time overlay code runs, the local client may already have lost the mount
+- до моменту запуску overlay-коду клієнт уже міг втратити native mount
   materialization contract
-- a repair layer cannot reliably restore a native object lifecycle that did not
-  complete cleanly
+- repair layer не здатен надійно відновити native object lifecycle, який не
+  завершився коректно
 
-### Secondary mistake
+### Друга помилка
 
-I allowed "queued/deferred/applied" signals to remain too ambiguous for too long.
+Я надто довго терпів двозначність між `queued`, `deferred` і `applied`.
 
-That made some iterations look like progress even when the local client still
-ended up with the same broken mounted-host outcome.
+Через це частина ітерацій виглядала як прогрес, хоча на локальному клієнті
+кінцевий результат лишався тим самим.
 
-## Critique Of The User's Diagnosis
+## Критика діагнозу користувача
 
-The user is mostly right.
+Користувач у головному правий.
 
-It is fair to say that many runs taught us how the system actually behaves rather
-than moving the feature to completion.
+Справедливо сказати, що велика частина прогонів не так просувала фічу до
+завершення, як навчала нас тому, як система реально поводиться.
 
-It is also fair to say that this reveals an incomplete mental model of the transfer
-contract.
+Так само справедливо сказати, що це виявило неповну mental model transfer
+контракту.
 
-The user is only slightly wrong if this is interpreted as "all recent work was a
-mistake". That would be too strong.
+Користувач лише трохи помиляється, якщо трактувати це як
+“усі попередні прогони були помилкою”.
+Це занадто сильне формулювання.
 
-The recent work was necessary to isolate the contract boundary. The real issue is
-that the strategy was not pivoted soon enough after that boundary became clear.
+Попередня робота була потрібна, щоб локалізувати межу контракту.
+Реальна проблема в іншому: після того, як ця межа стала очевидною,
+стратегія не змінилася достатньо швидко.
 
-## Recommended Safe Path Forward
+## Рекомендований безпечний шлях далі
 
-Do not continue with another long sequence of local guard fixes first.
+Не продовжувати ще одну довгу серію локальних guard-фіксів.
 
-The safer path is now:
+Безпечніший шлях тепер такий:
 
-1. write an explicit stage model for exact hero transfer
-2. define invariants for each stage
-3. redesign the remote mounted hero client path around those invariants
-4. keep current repair logic only as diagnostics and guard rails
+1. формалізувати явну stage model для exact hero transfer
+2. визначити інваріанти для кожного stage
+3. перебудувати remote mounted hero client path навколо цих інваріантів
+4. лишити поточну repair-логіку лише як діагностику і crash-guards
 
-### Required stage model
+### Потрібна stage model
 
-For strict exact heroes, the pipeline should be modeled as:
+Для strict exact hero pipeline має моделюватися так:
 
 1. entry resolved
 2. class resolved
@@ -258,33 +260,5 @@ For strict exact heroes, the pipeline should be modeled as:
 9. commander control allowed
 10. death cleanup complete
 
-Any stage that fails should block later stages, not pretend success.
-
-### Required invariants
-
-Examples:
-
-- mounted exact hero may not enter "exact visual applied" while mount link is absent
-- commander-control promotion may not happen while hero identity is unresolved
-- remote mounted hero may not be treated as a formation-selectable troop while its
-  personal hero contract is incomplete
-- queued refresh may not be logged as equivalent to applied refresh
-
-### Required refactor target
-
-The next implementation phase should focus on a narrower and more architectural
-change:
-
-make remote mounted hero spawn on the client a first-class staged contract,
-instead of trying to infer a correct final state from whatever survives after the
-native handler fails.
-
-## Bottom Line
-
-Yes: a broader architecture audit of this transfer pipeline is the correct move now.
-
-No: continuing with many more small reactive fixes before that audit would not be
-the safest path.
-
-The current state of the project is good enough to justify this pivot because the
-core failing boundary is now known.
+Жоден пізніший stage не має вважатися completed, якщо один із ранніх
+обов’язкових stage ще відсутній.
