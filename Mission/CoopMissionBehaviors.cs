@@ -15121,18 +15121,25 @@ namespace CoopSpectator.MissionBehaviors
                 !string.Equals(slot.ResolutionSource, "direct", StringComparison.Ordinal));
             diagnostic.HasEquipmentMisses = diagnostic.Slots.Any(slot => slot != null && slot.Missing);
 
+            ExactTransferSpawnContract contract = ExactTransferContractBuilder.Build(
+                entryState,
+                isPlayerControlledOrigin: false,
+                teamIndex: 0,
+                formationIndex: 0);
             List<ExactEntryEquipmentSlotDiagnostic> weaponSlots = diagnostic.Slots
                 .Where(slot => slot != null && slot.SourceSlotLabel != null && slot.SourceSlotLabel.StartsWith("Item", StringComparison.Ordinal))
                 .ToList();
             diagnostic.HasMountedRangedSequentialLayout =
                 entryState.IsMounted &&
                 weaponSlots.Any(slot => string.Equals(slot.ItemRole, "ranged", StringComparison.OrdinalIgnoreCase)) &&
-                weaponSlots.Any(slot => string.Equals(slot.ItemRole, "ammo", StringComparison.OrdinalIgnoreCase));
+                weaponSlots.Any(slot => string.Equals(slot.ItemRole, "ammo", StringComparison.OrdinalIgnoreCase)) &&
+                contract?.Equipment?.MountedWeaponLayoutNormalized != true;
 
-            Equipment exactEquipment = BuildSnapshotEquipmentForExactRuntime(
-                entryState,
-                includeWeapons: true,
-                honorExactVisualContracts: false);
+            Equipment exactEquipment = contract?.Equipment?.SpawnEquipment?.Clone(false) ??
+                                       BuildSnapshotEquipmentForExactRuntime(
+                                           entryState,
+                                           includeWeapons: true,
+                                           honorExactVisualContracts: false);
             diagnostic.ExactEquipmentBuilt = exactEquipment != null;
             diagnostic.BuiltWeaponOrderSummary = BuildExactEntryEquipmentSummary(
                 exactEquipment,
@@ -15146,9 +15153,9 @@ namespace CoopSpectator.MissionBehaviors
                 EquipmentIndex.HorseHarness);
             diagnostic.InitialWieldSummary = BuildExactEntryInitialWieldSummary(exactEquipment);
             diagnostic.MountedEntryMissingHorse = entryState.IsMounted && (exactEquipment == null || exactEquipment[EquipmentIndex.Horse].Item == null);
-            diagnostic.HasWeapon2WieldReplicationRisk =
-                diagnostic.HasMountedRangedSequentialLayout &&
-                DoesEquipmentContainLiveWeapon2WieldCandidate(exactEquipment);
+            diagnostic.HasWeapon2WieldReplicationRisk = contract?.InitialWield?.HasWeapon2Risk == true ||
+                                                        (diagnostic.HasMountedRangedSequentialLayout &&
+                                                         DoesEquipmentContainLiveWeapon2WieldCandidate(exactEquipment));
         }
 
         private static void FinalizeExactEntryCompatibilityDiagnostic(
@@ -20196,8 +20203,6 @@ namespace CoopSpectator.MissionBehaviors
 
             if (GameNetwork.IsServer ||
                 createAgent == null ||
-                createAgent.Peer == null ||
-                createAgent.Peer.IsMine ||
                 createAgent.MountAgentIndex < 0)
             {
                 return false;
@@ -20235,6 +20240,14 @@ namespace CoopSpectator.MissionBehaviors
             {
                 entryState = exactSupportedCandidates[0];
                 resolutionSource = "unique-exact-supported-mounted-hero-payload-match";
+            }
+            else if (TryResolveLocalSelectedStrictExactHeroCreateAgentEntry(
+                         heroCandidates,
+                         exactSupportedCandidates,
+                         out RosterEntryState localSelectedEntry))
+            {
+                entryState = localSelectedEntry;
+                resolutionSource = "local-selected-mounted-hero-payload-match";
             }
             else if (heroCandidates.Count == 1)
             {
@@ -20278,6 +20291,68 @@ namespace CoopSpectator.MissionBehaviors
                 " " + ExactTransferContractRuntimeCache.BuildValidationSummary(entryId) +
                 " " + ExactTransferContractRuntimeCache.BuildRuntimeStateSummary(entryId));
             return true;
+        }
+
+        private static bool TryResolveLocalSelectedStrictExactHeroCreateAgentEntry(
+            IReadOnlyCollection<RosterEntryState> heroCandidates,
+            IReadOnlyCollection<RosterEntryState> exactSupportedCandidates,
+            out RosterEntryState entryState)
+        {
+            entryState = null;
+            if ((heroCandidates == null || heroCandidates.Count == 0) &&
+                (exactSupportedCandidates == null || exactSupportedCandidates.Count == 0))
+            {
+                return false;
+            }
+
+            if (!TryResolveLocalSelectedEntryIdForStrictCreateAgent(out string selectedEntryId))
+                return false;
+
+            entryState = exactSupportedCandidates?.FirstOrDefault(candidate =>
+                candidate != null &&
+                string.Equals(candidate.EntryId, selectedEntryId, StringComparison.Ordinal));
+            if (entryState != null)
+                return true;
+
+            entryState = heroCandidates?.FirstOrDefault(candidate =>
+                candidate != null &&
+                string.Equals(candidate.EntryId, selectedEntryId, StringComparison.Ordinal));
+            return entryState != null;
+        }
+
+        private static bool TryResolveLocalSelectedEntryIdForStrictCreateAgent(out string entryId)
+        {
+            entryId = null;
+
+            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            if (localMissionPeer != null)
+            {
+                if (CoopBattleAuthorityState.TryGetExplicitSelectedEntryId(localMissionPeer, out string explicitEntryId) &&
+                    TryResolveKnownEntryIdForClientVisualOverlay(explicitEntryId, out entryId))
+                {
+                    return true;
+                }
+
+                if (TryResolveKnownEntryIdForClientVisualOverlay(
+                        CoopBattleAuthorityState.GetSelectedEntryId(localMissionPeer),
+                        out entryId))
+                {
+                    return true;
+                }
+            }
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            if (TryResolveKnownEntryIdForClientVisualOverlay(status?.SpawnRequestEntryId, out entryId) ||
+                TryResolveKnownEntryIdForClientVisualOverlay(status?.SelectionRequestEntryId, out entryId) ||
+                TryResolveKnownEntryIdForClientVisualOverlay(status?.SelectedEntryId, out entryId) ||
+                TryResolveKnownEntryIdForClientVisualOverlay(status?.IntentTroopOrEntryId, out entryId))
+            {
+                return true;
+            }
+
+            CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot currentSelection =
+                CoopBattleSelectionBridgeFile.ReadCurrentSelection();
+            return TryResolveKnownEntryIdForClientVisualOverlay(currentSelection?.TroopOrEntryId, out entryId);
         }
 
         private static bool DoesClientStrictExactHeroCreateAgentEntryMatchPayload(
