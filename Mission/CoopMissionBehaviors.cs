@@ -13906,6 +13906,16 @@ namespace CoopSpectator.MissionBehaviors
                 TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon2, entryState.CombatItem2Id, "Item2", entryState, appliedSlots, missedSlots, trackCoverage);
                 TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Weapon3, entryState.CombatItem3Id, "Item3", entryState, appliedSlots, missedSlots, trackCoverage);
             }
+            if (includeWeapons &&
+                ExactTransferContractBuilder.TryNormalizeStrictHeroWeaponLayoutInPlace(
+                    spawnEquipment,
+                    entryState,
+                    out bool strictHeroWeaponLayoutNormalized,
+                    out _)
+                && strictHeroWeaponLayoutNormalized)
+            {
+                RewriteAppliedWeaponSlotSummary(spawnEquipment, appliedSlots);
+            }
             if (includeArmorVisuals)
             {
                 TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.Head, entryState.CombatHeadId, "Head", entryState, appliedSlots, missedSlots, trackCoverage);
@@ -13922,6 +13932,27 @@ namespace CoopSpectator.MissionBehaviors
                 TryApplyMaterializedArmorOverride(spawnEquipment, EquipmentIndex.HorseHarness, entryState.CombatHorseHarnessId, "HorseHarness", entryState, appliedSlots, missedSlots, trackCoverage);
             }
             return appliedSlots.Count > 0 ? string.Join(", ", appliedSlots) : "(none)";
+        }
+
+        private static void RewriteAppliedWeaponSlotSummary(Equipment spawnEquipment, List<string> appliedSlots)
+        {
+            if (spawnEquipment == null || appliedSlots == null)
+                return;
+
+            appliedSlots.RemoveAll(slotSummary =>
+                slotSummary.StartsWith("Item0=", StringComparison.Ordinal) ||
+                slotSummary.StartsWith("Item1=", StringComparison.Ordinal) ||
+                slotSummary.StartsWith("Item2=", StringComparison.Ordinal) ||
+                slotSummary.StartsWith("Item3=", StringComparison.Ordinal));
+
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                ItemObject item = spawnEquipment[slot].Item;
+                if (item == null)
+                    continue;
+
+                appliedSlots.Add(GetEquipmentSlotLabel(slot) + "=" + item.StringId);
+            }
         }
 
         private static bool ShouldAttemptClientMountedHeroMountVisualRepair(
@@ -16696,6 +16727,16 @@ namespace CoopSpectator.MissionBehaviors
                 if (authoritativeSide == BattleSideEnum.None)
                     continue;
 
+                if (!ValidatePendingSpawnEntryStillSelectable(
+                        mission,
+                        missionPeer,
+                        authoritativeSide,
+                        pendingRequest,
+                        source + " army-possession"))
+                {
+                    continue;
+                }
+
                 Agent candidateAgent = FindEligibleMaterializedArmyAgent(mission, authoritativeSide, pendingRequest.EntryId, pendingRequest.TroopId);
                 if (candidateAgent == null)
                 {
@@ -16849,6 +16890,57 @@ namespace CoopSpectator.MissionBehaviors
                 " EntryMatches=" + entryMatches +
                 " TroopMatches=" + troopMatches +
                 " Source=" + (source ?? "unknown"));
+        }
+
+        private static bool ValidatePendingSpawnEntryStillSelectable(
+            Mission mission,
+            MissionPeer missionPeer,
+            BattleSideEnum authoritativeSide,
+            CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest,
+            string source)
+        {
+            if (mission == null || missionPeer == null || string.IsNullOrWhiteSpace(pendingRequest.EntryId))
+                return true;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase < CoopBattlePhase.BattleActive)
+                return true;
+
+            IReadOnlyList<string> selectableEntryIds = ResolveSelectableEntryIdsForStatus(
+                mission,
+                authoritativeSide,
+                currentPhase,
+                missionPeer,
+                out string selectableSource);
+            if (selectableEntryIds != null &&
+                selectableEntryIds.Contains(pendingRequest.EntryId, StringComparer.Ordinal))
+            {
+                return true;
+            }
+
+            string rejectSource = (source ?? "unknown") + " pending-entry-not-selectable";
+            string reason =
+                "pending exact entry no longer selectable" +
+                " | entryId=" + pendingRequest.EntryId +
+                " | troopId=" + (pendingRequest.TroopId ?? "null") +
+                " | selectableSource=" + selectableSource +
+                " | phase=" + currentPhase;
+            NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+            CoopBattleSelectionRequestState.Clear(missionPeer, rejectSource);
+            CoopBattleSpawnRequestState.Clear(missionPeer, rejectSource);
+            CoopBattleSpawnRuntimeState.MarkRejected(missionPeer, rejectSource, reason);
+            AdvanceLifecycleAfterSpawnWaitOrReject(mission, missionPeer, reason, rejectSource);
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: rejected pending army possession spawn because entry is no longer selectable. " +
+                "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                " Side=" + authoritativeSide +
+                " EntryId=" + pendingRequest.EntryId +
+                " TroopId=" + (pendingRequest.TroopId ?? "null") +
+                " SelectableSource=" + selectableSource +
+                " SelectableCount=" + (selectableEntryIds?.Count ?? 0) +
+                " Phase=" + currentPhase +
+                " Source=" + (source ?? "unknown"));
+            return false;
         }
 
         private static bool ShouldSeedExactScenePossessionCandidate(Mission mission, BattleSideEnum side)
@@ -17398,6 +17490,25 @@ namespace CoopSpectator.MissionBehaviors
                 : entryId;
         }
 
+        private static bool ShouldForceInitialWieldAfterStrictPreSpawnExactLoadout(RosterEntryState entryState)
+        {
+            if (entryState == null)
+                return false;
+
+            bool isStrictHeroEntry =
+                entryState.IsHero ||
+                !string.IsNullOrWhiteSpace(entryState.HeroId) ||
+                string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase);
+            if (!isStrictHeroEntry)
+                return false;
+
+            return
+                !string.IsNullOrWhiteSpace(entryState.CombatItem0Id) ||
+                !string.IsNullOrWhiteSpace(entryState.CombatItem1Id) ||
+                !string.IsNullOrWhiteSpace(entryState.CombatItem2Id) ||
+                !string.IsNullOrWhiteSpace(entryState.CombatItem3Id);
+        }
+
         private static string ReapplyMaterializedAgentStateAfterReplaceBot(
             Agent replacedAgent,
             RosterEntryState entryState)
@@ -17416,6 +17527,9 @@ namespace CoopSpectator.MissionBehaviors
             Equipment seedEquipment = replacedAgent.SpawnEquipment?.Clone(false);
             bool includeWeaponsForReplaceBotRefresh = !preSpawnExactLoadoutInjected;
             bool forceInitialWieldAfterReplaceBotRefresh = !preSpawnExactLoadoutInjected;
+            bool forceInitialWieldAfterStrictPreSpawnExactLoadout =
+                preSpawnExactLoadoutInjected &&
+                ShouldForceInitialWieldAfterStrictPreSpawnExactLoadout(entryState);
             bool clearedTemplateCapeVisual = false;
             Equipment spawnEquipment = runtimeExactCharacter
                 ? null
@@ -17434,7 +17548,26 @@ namespace CoopSpectator.MissionBehaviors
             {
                 appliedEquipment = "pre-spawn-exact-loadout-keep";
                 equipmentMisses = "replace-bot-visual-refresh-skipped";
-                reapplyWield = "skipped-for-pre-spawn-exact-loadout";
+                if (forceInitialWieldAfterStrictPreSpawnExactLoadout)
+                {
+                    try
+                    {
+                        replacedAgent.WieldInitialWeapons(
+                            Agent.WeaponWieldActionType.Instant,
+                            Equipment.InitialWeaponEquipPreference.Any);
+                        replacedAgent.MountAgent?.UpdateAgentProperties();
+                        reapplyWield = "forced-for-strict-pre-spawn-exact-loadout";
+                    }
+                    catch (Exception ex)
+                    {
+                        reapplyWield = "failed-for-strict-pre-spawn-exact-loadout";
+                        equipmentMisses += ", initial-wield-failed:" + ex.GetType().Name;
+                    }
+                }
+                else
+                {
+                    reapplyWield = "skipped-for-pre-spawn-exact-loadout";
+                }
             }
             else if (spawnEquipment != null)
             {

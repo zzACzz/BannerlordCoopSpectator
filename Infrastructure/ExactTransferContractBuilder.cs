@@ -249,6 +249,52 @@ namespace CoopSpectator.Infrastructure
                     !string.IsNullOrWhiteSpace(entryState.CombatItem3Id));
         }
 
+        internal static bool TryNormalizeStrictHeroWeaponLayoutInPlace(
+            Equipment equipment,
+            RosterEntryState entryState,
+            out bool normalized,
+            out string summary)
+        {
+            normalized = false;
+            summary = "(none)";
+            if (equipment == null || entryState == null || !IsStrictHeroEntry(entryState))
+                return false;
+
+            List<MountedWeaponSlotState> slots = ResolveMountedWeaponSlots(equipment);
+            if (slots.Count == 0)
+                return false;
+
+            bool hasRanged = slots.Any(slot => slot.Role == MountedWeaponRole.Ranged);
+            bool hasAmmo = slots.Any(slot => slot.Role == MountedWeaponRole.Ammo);
+            bool hasUnsafeRangedWeapon2Layout = DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment);
+            if (!hasRanged && !hasAmmo && !DoesWeapon2ContainLiveCandidate(equipment))
+            {
+                summary = BuildMountedLayoutSummary(slots, slots);
+                return true;
+            }
+
+            List<MountedWeaponSlotState> orderedSlots = null;
+            if (hasRanged && hasAmmo && hasUnsafeRangedWeapon2Layout)
+                orderedSlots = BuildCanonicalStrictHeroRangedWeaponLayout(slots);
+            else if (entryState.IsMounted && (hasRanged || hasAmmo || DoesWeapon2ContainLiveCandidate(equipment)))
+                orderedSlots = BuildCanonicalMountedWeaponLayout(slots, hasAmmo);
+
+            if (orderedSlots == null)
+            {
+                summary = BuildMountedLayoutSummary(slots, slots);
+                return true;
+            }
+
+            normalized = !DoMountedLayoutsMatch(slots, orderedSlots);
+            if (normalized)
+                ApplyNormalizedMountedWeaponLayout(equipment, orderedSlots);
+
+            summary =
+                "Before={" + BuildMountedLayoutSummary(slots, slots) +
+                "} After={" + BuildMountedLayoutSummary(slots, orderedSlots) + "}";
+            return true;
+        }
+
         private static void NormalizeStrictHeroWeaponLayout(
             ExactTransferEquipmentContract equipment,
             RosterEntryState entryState,
@@ -257,38 +303,17 @@ namespace CoopSpectator.Infrastructure
             if (equipment?.SpawnEquipment == null || entryState == null || !isStrictHeroEntry)
                 return;
 
-            List<MountedWeaponSlotState> slots = ResolveMountedWeaponSlots(entryState);
-            if (slots.Count == 0)
-                return;
-
-            bool hasRanged = slots.Any(slot => slot.Role == MountedWeaponRole.Ranged);
-            bool hasAmmo = slots.Any(slot => slot.Role == MountedWeaponRole.Ammo);
-            bool hasUnsafeRangedWeapon2Layout = DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment.SpawnEquipment);
-            if (!hasRanged && !hasAmmo && !DoesWeapon2ContainLiveCandidate(equipment.SpawnEquipment))
+            if (!TryNormalizeStrictHeroWeaponLayoutInPlace(
+                    equipment.SpawnEquipment,
+                    entryState,
+                    out bool normalized,
+                    out string summary))
             {
-                equipment.MountedWeaponLayoutNormalized = false;
-                equipment.MountedWeaponLayoutSummary = BuildMountedLayoutSummary(slots, slots);
                 return;
             }
 
-            List<MountedWeaponSlotState> normalized = null;
-            if (hasRanged && hasAmmo && hasUnsafeRangedWeapon2Layout)
-                normalized = BuildCanonicalStrictHeroRangedWeaponLayout(slots);
-            else if (entryState.IsMounted && (hasRanged || hasAmmo || DoesWeapon2ContainLiveCandidate(equipment.SpawnEquipment)))
-                normalized = BuildCanonicalMountedWeaponLayout(slots, hasAmmo);
-
-            if (normalized == null)
-            {
-                equipment.MountedWeaponLayoutNormalized = false;
-                equipment.MountedWeaponLayoutSummary = BuildMountedLayoutSummary(slots, slots);
-                return;
-            }
-
-            ApplyNormalizedMountedWeaponLayout(equipment, normalized);
-            equipment.MountedWeaponLayoutNormalized = !DoMountedLayoutsMatch(slots, normalized);
-            equipment.MountedWeaponLayoutSummary =
-                "Before={" + BuildMountedLayoutSummary(slots, slots) +
-                "} After={" + BuildMountedLayoutSummary(slots, normalized) + "}";
+            equipment.MountedWeaponLayoutNormalized = normalized;
+            equipment.MountedWeaponLayoutSummary = summary;
         }
 
         private static List<MountedWeaponSlotState> BuildCanonicalStrictHeroRangedWeaponLayout(
@@ -334,6 +359,16 @@ namespace CoopSpectator.Infrastructure
             return slots;
         }
 
+        private static List<MountedWeaponSlotState> ResolveMountedWeaponSlots(Equipment equipment)
+        {
+            var slots = new List<MountedWeaponSlotState>();
+            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon0, equipment?[EquipmentIndex.Weapon0].Item);
+            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon1, equipment?[EquipmentIndex.Weapon1].Item);
+            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon2, equipment?[EquipmentIndex.Weapon2].Item);
+            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon3, equipment?[EquipmentIndex.Weapon3].Item);
+            return slots;
+        }
+
         private static void TryAddMountedWeaponSlot(
             List<MountedWeaponSlotState> slots,
             EquipmentIndex slot,
@@ -352,6 +387,24 @@ namespace CoopSpectator.Infrastructure
                 Slot = slot,
                 SlotLabel = slotLabel,
                 ItemId = itemId,
+                Item = item,
+                Role = ResolveMountedWeaponRole(item)
+            });
+        }
+
+        private static void TryAddMountedWeaponSlot(
+            List<MountedWeaponSlotState> slots,
+            EquipmentIndex slot,
+            ItemObject item)
+        {
+            if (slots == null || item == null)
+                return;
+
+            slots.Add(new MountedWeaponSlotState
+            {
+                Slot = slot,
+                SlotLabel = slot.ToString(),
+                ItemId = item.StringId,
                 Item = item,
                 Role = ResolveMountedWeaponRole(item)
             });
@@ -589,6 +642,36 @@ namespace CoopSpectator.Infrastructure
                     slotContract.IsEmpty = false;
                     slotContract.MustExistAtCreateAgentTime = true;
                 }
+            }
+        }
+
+        private static void ApplyNormalizedMountedWeaponLayout(
+            Equipment equipment,
+            List<MountedWeaponSlotState> orderedSlots)
+        {
+            if (equipment == null)
+                return;
+
+            EquipmentIndex[] targetSlots =
+            {
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3
+            };
+
+            foreach (EquipmentIndex targetSlot in targetSlots)
+                equipment[targetSlot] = default;
+
+            for (int i = 0; i < targetSlots.Length; i++)
+            {
+                MountedWeaponSlotState normalizedSlot = orderedSlots != null && i < orderedSlots.Count
+                    ? orderedSlots[i]
+                    : null;
+                if (normalizedSlot?.Item == null)
+                    continue;
+
+                equipment[targetSlots[i]] = new EquipmentElement(normalizedSlot.Item, null, null, false);
             }
         }
 
