@@ -15125,7 +15125,8 @@ namespace CoopSpectator.MissionBehaviors
                 entryState,
                 isPlayerControlledOrigin: false,
                 teamIndex: 0,
-                formationIndex: 0);
+                formationIndex: 0,
+                buildMode: ExactTransferContractBuilder.BuildMode.Diagnostic);
             List<ExactEntryEquipmentSlotDiagnostic> weaponSlots = diagnostic.Slots
                 .Where(slot => slot != null && slot.SourceSlotLabel != null && slot.SourceSlotLabel.StartsWith("Item", StringComparison.Ordinal))
                 .ToList();

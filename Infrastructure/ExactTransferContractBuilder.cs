@@ -10,6 +10,12 @@ namespace CoopSpectator.Infrastructure
 {
     internal static class ExactTransferContractBuilder
     {
+        internal enum BuildMode
+        {
+            Runtime = 0,
+            Diagnostic = 1
+        }
+
         private enum MountedWeaponRole
         {
             Other = 0,
@@ -33,7 +39,8 @@ namespace CoopSpectator.Infrastructure
             RosterEntryState entryState,
             bool isPlayerControlledOrigin,
             int teamIndex,
-            int formationIndex)
+            int formationIndex,
+            BuildMode buildMode = BuildMode.Runtime)
         {
             if (entryState == null)
                 return null;
@@ -46,7 +53,7 @@ namespace CoopSpectator.Infrastructure
             bool isStrictHeroEntry = IsStrictHeroEntry(entryState);
             PopulateIdentity(contract.Identity, entryState, isPlayerControlledOrigin);
             PopulateBody(contract.Body, entryState);
-            PopulateEquipment(contract.Equipment, entryState, isStrictHeroEntry);
+            PopulateEquipment(contract.Equipment, entryState, isStrictHeroEntry, buildMode);
             PopulateMount(contract.Mount, entryState);
             PopulatePeerBinding(contract.PeerBinding, entryState, isPlayerControlledOrigin);
             PopulateInitialWield(contract.InitialWield, entryState, contract.Equipment);
@@ -105,7 +112,8 @@ namespace CoopSpectator.Infrastructure
         private static void PopulateEquipment(
             ExactTransferEquipmentContract equipment,
             RosterEntryState entryState,
-            bool isStrictHeroEntry)
+            bool isStrictHeroEntry,
+            BuildMode buildMode)
         {
             equipment.SpawnEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
                 entryState,
@@ -113,12 +121,15 @@ namespace CoopSpectator.Infrastructure
                 honorExactVisualContracts: false,
                 includeArmorVisuals: true,
                 includeMountVisuals: true);
-            equipment.IncludeWeaponsInPreSpawn = isStrictHeroEntry
-                ? HasAnyWeaponItem(entryState)
-                : CoopMissionSpawnLogic.EvaluateExactRuntimePreSpawnWeaponInjectionContract(entryState, out _, out _);
+            equipment.IncludeWeaponsInPreSpawn = buildMode == BuildMode.Diagnostic
+                ? isStrictHeroEntry && HasAnyWeaponItem(entryState)
+                : isStrictHeroEntry
+                    ? HasAnyWeaponItem(entryState)
+                    : CoopMissionSpawnLogic.EvaluateExactRuntimePreSpawnWeaponInjectionContract(entryState, out _, out _);
             equipment.IncludeArmorVisualsInPreSpawn = true;
-            equipment.IncludeCapeInPreSpawn =
-                CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(entryState, out _, out _);
+            equipment.IncludeCapeInPreSpawn = buildMode == BuildMode.Diagnostic
+                ? false
+                : CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(entryState, out _, out _);
             equipment.IncludeMountVisualsInPreSpawn = entryState.IsMounted;
 
             AddSlot(equipment, EquipmentIndex.Weapon0, "Item0", entryState.CombatItem0Id, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem0Id));
