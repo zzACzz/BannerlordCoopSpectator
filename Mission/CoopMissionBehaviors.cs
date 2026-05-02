@@ -10438,7 +10438,7 @@ namespace CoopSpectator.MissionBehaviors
 
                     int currentAmount = missionWeapon.Amount;
                     int roundedAmmoBonus = Math.Max(0, MathF.Round(ammoBonus));
-                    int? snapshotBaseAmount = GetSnapshotCombatItemBaseAmount(entryState, index);
+                    int? snapshotBaseAmount = GetSnapshotCombatItemBaseAmount(entryState, index, item.StringId);
                     int targetAmount = snapshotBaseAmount.HasValue && snapshotBaseAmount.Value > 0
                         ? Math.Max(0, snapshotBaseAmount.Value + roundedAmmoBonus)
                         : Math.Max(0, currentAmount + roundedAmmoBonus);
@@ -10490,7 +10490,30 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
-        private static int? GetSnapshotCombatItemBaseAmount(RosterEntryState entryState, EquipmentIndex index)
+        private static int? GetSnapshotCombatItemBaseAmount(
+            RosterEntryState entryState,
+            EquipmentIndex index,
+            string currentItemId = null)
+        {
+            if (entryState == null)
+                return null;
+
+            if (!string.IsNullOrWhiteSpace(currentItemId))
+            {
+                string directItemId = GetSnapshotCombatItemId(entryState, index);
+                int? directAmount = GetSnapshotCombatItemBaseAmountByIndex(entryState, index);
+                if (string.Equals(directItemId, currentItemId, StringComparison.OrdinalIgnoreCase))
+                    return directAmount;
+
+                int? matchedAmount = GetSnapshotCombatItemBaseAmountByItemId(entryState, currentItemId);
+                if (matchedAmount.HasValue)
+                    return matchedAmount;
+            }
+
+            return GetSnapshotCombatItemBaseAmountByIndex(entryState, index);
+        }
+
+        private static int? GetSnapshotCombatItemBaseAmountByIndex(RosterEntryState entryState, EquipmentIndex index)
         {
             if (entryState == null)
                 return null;
@@ -10508,6 +10531,43 @@ namespace CoopSpectator.MissionBehaviors
                 default:
                     return null;
             }
+        }
+
+        private static string GetSnapshotCombatItemId(RosterEntryState entryState, EquipmentIndex index)
+        {
+            if (entryState == null)
+                return null;
+
+            switch (index)
+            {
+                case EquipmentIndex.Weapon0:
+                    return entryState.CombatItem0Id;
+                case EquipmentIndex.Weapon1:
+                    return entryState.CombatItem1Id;
+                case EquipmentIndex.Weapon2:
+                    return entryState.CombatItem2Id;
+                case EquipmentIndex.Weapon3:
+                    return entryState.CombatItem3Id;
+                default:
+                    return null;
+            }
+        }
+
+        private static int? GetSnapshotCombatItemBaseAmountByItemId(RosterEntryState entryState, string itemId)
+        {
+            if (entryState == null || string.IsNullOrWhiteSpace(itemId))
+                return null;
+
+            if (string.Equals(entryState.CombatItem0Id, itemId, StringComparison.OrdinalIgnoreCase))
+                return entryState.CombatItem0Amount;
+            if (string.Equals(entryState.CombatItem1Id, itemId, StringComparison.OrdinalIgnoreCase))
+                return entryState.CombatItem1Amount;
+            if (string.Equals(entryState.CombatItem2Id, itemId, StringComparison.OrdinalIgnoreCase))
+                return entryState.CombatItem2Amount;
+            if (string.Equals(entryState.CombatItem3Id, itemId, StringComparison.OrdinalIgnoreCase))
+                return entryState.CombatItem3Amount;
+
+            return null;
         }
 
         private static bool TryApplyExactCampaignHeroFlags(Agent agent, RosterEntryState entryState, out string summary)
@@ -19973,6 +20033,32 @@ namespace CoopSpectator.MissionBehaviors
                 return applied;
             }
 
+            BattleSideEnum selectionValidationSide = requestedSide != BattleSideEnum.None
+                ? requestedSide
+                : (committedSide != BattleSideEnum.None
+                    ? committedSide
+                    : ResolveAuthoritativeSide(missionPeer, mission, source + " select-entry-validation"));
+            if (!TryValidateRequestedSelectionTargetIsSelectable(
+                    mission,
+                    missionPeer,
+                    selectionValidationSide,
+                    troopOrEntryId,
+                    source,
+                    out string selectionValidationReason))
+            {
+                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected selection request because target is not currently selectable. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " RequestedTarget=" + troopOrEntryId +
+                    " Side=" + selectionValidationSide +
+                    " Reason=" + selectionValidationReason +
+                    " Source=" + source);
+                CoopBattleSelectionRequestState.Clear(missionPeer, source + " invalid-selection-target");
+                CoopBattleSpawnRequestState.Clear(missionPeer, source + " invalid-selection-target");
+                return applied;
+            }
+
             if (LooksLikeEntryId(troopOrEntryId) && IsEntryClaimedByAnotherPeer(troopOrEntryId, missionPeer))
             {
                 NetworkCommunicator peer = missionPeer.GetNetworkPeer();
@@ -20012,6 +20098,68 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return applied;
+        }
+
+        private static bool TryValidateRequestedSelectionTargetIsSelectable(
+            Mission mission,
+            MissionPeer missionPeer,
+            BattleSideEnum side,
+            string troopOrEntryId,
+            string source,
+            out string reason)
+        {
+            reason = string.Empty;
+            if (mission == null || missionPeer == null || string.IsNullOrWhiteSpace(troopOrEntryId))
+                return false;
+
+            if (!LooksLikeEntryId(troopOrEntryId))
+            {
+                reason = "non-entry-target";
+                return true;
+            }
+
+            if (side == BattleSideEnum.None)
+            {
+                reason = "peer side not assigned";
+                return false;
+            }
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            IReadOnlyList<string> selectableEntryIds = ResolveSelectableEntryIdsForStatus(
+                mission,
+                side,
+                currentPhase,
+                missionPeer,
+                out string selectableSource);
+            if (selectableEntryIds == null || selectableEntryIds.Count == 0)
+            {
+                reason =
+                    "no selectable entries available" +
+                    " | selectableSource=" + selectableSource +
+                    " | phase=" + currentPhase;
+                return false;
+            }
+
+            if (!IsExplicitSelectableSourceReady(currentPhase, selectableSource))
+            {
+                reason =
+                    "selectable source not ready" +
+                    " | selectableSource=" + selectableSource +
+                    " | phase=" + currentPhase;
+                return false;
+            }
+
+            if (!selectableEntryIds.Contains(troopOrEntryId, StringComparer.Ordinal))
+            {
+                reason =
+                    "entry not present in live selectable set" +
+                    " | selectableSource=" + selectableSource +
+                    " | phase=" + currentPhase +
+                    " | selectableCount=" + selectableEntryIds.Count;
+                return false;
+            }
+
+            return true;
         }
 
         private static bool TryQueueSpawnIntentForPeer(Mission mission, MissionPeer missionPeer, string source)
