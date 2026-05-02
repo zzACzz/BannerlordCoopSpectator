@@ -11103,6 +11103,8 @@ namespace CoopSpectator.MissionBehaviors
             _exactNativeSnapshotOverlayAppliedAgentIndices.Remove(agentIndex);
             ClearClientExactCampaignVisualOverlayAgentIndexState(agentIndex, "clear-materialized-agent-index-runtime-caches");
             if (!preserveClientMountedHeroPayloadState)
+                ExactTransferContractRuntimeCache.TryCompleteCleanupForAgentIndex(agentIndex, "clear-materialized-agent-index-runtime-caches");
+            if (!preserveClientMountedHeroPayloadState)
                 ClearClientMountedHeroPayloadMountAgentIndexState(agentIndex);
         }
 

@@ -1,11 +1,34 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using TaleWorlds.Core;
 using CoopSpectator.MissionBehaviors;
+using TaleWorlds.MountAndBlade;
+using TaleWorlds.ObjectSystem;
 
 namespace CoopSpectator.Infrastructure
 {
     internal static class ExactTransferContractBuilder
     {
+        private enum MountedWeaponRole
+        {
+            Other = 0,
+            Melee = 1,
+            Polearm = 2,
+            Shield = 3,
+            Ranged = 4,
+            Ammo = 5
+        }
+
+        private sealed class MountedWeaponSlotState
+        {
+            public EquipmentIndex Slot { get; set; }
+            public string SlotLabel { get; set; }
+            public string ItemId { get; set; }
+            public ItemObject Item { get; set; }
+            public MountedWeaponRole Role { get; set; }
+        }
+
         public static ExactTransferSpawnContract Build(
             RosterEntryState entryState,
             bool isPlayerControlledOrigin,
@@ -20,15 +43,16 @@ namespace CoopSpectator.Infrastructure
                 EntryId = entryState.EntryId
             };
 
+            bool isStrictHeroEntry = IsStrictHeroEntry(entryState);
             PopulateIdentity(contract.Identity, entryState, isPlayerControlledOrigin);
             PopulateBody(contract.Body, entryState);
-            PopulateEquipment(contract.Equipment, entryState);
+            PopulateEquipment(contract.Equipment, entryState, isStrictHeroEntry);
             PopulateMount(contract.Mount, entryState);
             PopulatePeerBinding(contract.PeerBinding, entryState, isPlayerControlledOrigin);
             PopulateInitialWield(contract.InitialWield, entryState, contract.Equipment);
             PopulateControl(contract.Control, entryState, teamIndex, formationIndex);
             PopulateCleanup(contract.Cleanup);
-            PopulateSpawnPolicy(contract.SpawnPolicy, entryState);
+            PopulateSpawnPolicy(contract.SpawnPolicy, isStrictHeroEntry);
 
             return contract;
         }
@@ -78,7 +102,10 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        private static void PopulateEquipment(ExactTransferEquipmentContract equipment, RosterEntryState entryState)
+        private static void PopulateEquipment(
+            ExactTransferEquipmentContract equipment,
+            RosterEntryState entryState,
+            bool isStrictHeroEntry)
         {
             equipment.SpawnEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
                 entryState,
@@ -86,8 +113,9 @@ namespace CoopSpectator.Infrastructure
                 honorExactVisualContracts: false,
                 includeArmorVisuals: true,
                 includeMountVisuals: true);
-            equipment.IncludeWeaponsInPreSpawn =
-                CoopMissionSpawnLogic.EvaluateExactRuntimePreSpawnWeaponInjectionContract(entryState, out _, out _);
+            equipment.IncludeWeaponsInPreSpawn = isStrictHeroEntry
+                ? HasAnyWeaponItem(entryState)
+                : CoopMissionSpawnLogic.EvaluateExactRuntimePreSpawnWeaponInjectionContract(entryState, out _, out _);
             equipment.IncludeArmorVisualsInPreSpawn = true;
             equipment.IncludeCapeInPreSpawn =
                 CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(entryState, out _, out _);
@@ -104,6 +132,8 @@ namespace CoopSpectator.Infrastructure
             AddSlot(equipment, EquipmentIndex.Cape, "Cape", entryState.CombatCapeId, mustExistAtCreateAgentTime: false, canBeLateSynchronized: true);
             AddSlot(equipment, EquipmentIndex.Horse, "Horse", entryState.CombatHorseId, mustExistAtCreateAgentTime: entryState.IsMounted, canBeLateSynchronized: false, isMountedCritical: entryState.IsMounted);
             AddSlot(equipment, EquipmentIndex.HorseHarness, "HorseHarness", entryState.CombatHorseHarnessId, mustExistAtCreateAgentTime: entryState.IsMounted && !string.IsNullOrWhiteSpace(entryState.CombatHorseHarnessId), canBeLateSynchronized: false, isMountedCritical: entryState.IsMounted);
+
+            NormalizeMountedWeaponLayout(equipment, entryState);
         }
 
         private static void PopulateMount(ExactTransferMountContract mount, RosterEntryState entryState)
@@ -181,15 +211,410 @@ namespace CoopSpectator.Infrastructure
             cleanup.RejectAgentIndexReuseWithoutIdentityMatch = true;
         }
 
-        private static void PopulateSpawnPolicy(ExactTransferSpawnPolicyContract spawnPolicy, RosterEntryState entryState)
+        private static void PopulateSpawnPolicy(ExactTransferSpawnPolicyContract spawnPolicy, bool isStrictHero)
         {
-            bool isStrictHero = entryState.IsHero ||
-                                !string.IsNullOrWhiteSpace(entryState.HeroId) ||
-                                string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase);
             spawnPolicy.UseStrictExactHeroPath = isStrictHero;
             spawnPolicy.RequirePreSpawnInjection = isStrictHero;
             spawnPolicy.AllowClientVisualOverlayAsRecoveryOnly = true;
             spawnPolicy.ForbidSurrogatePrimaryMaterialization = true;
+        }
+
+        private static bool IsStrictHeroEntry(RosterEntryState entryState)
+        {
+            return entryState != null &&
+                   (entryState.IsHero ||
+                    !string.IsNullOrWhiteSpace(entryState.HeroId) ||
+                    string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool HasAnyWeaponItem(RosterEntryState entryState)
+        {
+            return entryState != null &&
+                   (!string.IsNullOrWhiteSpace(entryState.CombatItem0Id) ||
+                    !string.IsNullOrWhiteSpace(entryState.CombatItem1Id) ||
+                    !string.IsNullOrWhiteSpace(entryState.CombatItem2Id) ||
+                    !string.IsNullOrWhiteSpace(entryState.CombatItem3Id));
+        }
+
+        private static void NormalizeMountedWeaponLayout(
+            ExactTransferEquipmentContract equipment,
+            RosterEntryState entryState)
+        {
+            if (equipment?.SpawnEquipment == null || entryState == null || !entryState.IsMounted)
+                return;
+
+            List<MountedWeaponSlotState> slots = ResolveMountedWeaponSlots(entryState);
+            if (slots.Count == 0)
+                return;
+
+            bool hasRanged = slots.Any(slot => slot.Role == MountedWeaponRole.Ranged);
+            bool hasAmmo = slots.Any(slot => slot.Role == MountedWeaponRole.Ammo);
+            if (!hasRanged && !hasAmmo && !DoesWeapon2ContainLiveCandidate(equipment.SpawnEquipment))
+            {
+                equipment.MountedWeaponLayoutNormalized = false;
+                equipment.MountedWeaponLayoutSummary = BuildMountedLayoutSummary(slots, slots);
+                return;
+            }
+
+            List<MountedWeaponSlotState> normalized = BuildCanonicalMountedWeaponLayout(slots, hasAmmo);
+            ApplyNormalizedMountedWeaponLayout(equipment, normalized);
+            equipment.MountedWeaponLayoutNormalized = !DoMountedLayoutsMatch(slots, normalized);
+            equipment.MountedWeaponLayoutSummary =
+                "Before={" + BuildMountedLayoutSummary(slots, slots) +
+                "} After={" + BuildMountedLayoutSummary(slots, normalized) + "}";
+        }
+
+        private static List<MountedWeaponSlotState> ResolveMountedWeaponSlots(RosterEntryState entryState)
+        {
+            var slots = new List<MountedWeaponSlotState>();
+            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon0, "Item0", entryState.CombatItem0Id);
+            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon1, "Item1", entryState.CombatItem1Id);
+            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon2, "Item2", entryState.CombatItem2Id);
+            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon3, "Item3", entryState.CombatItem3Id);
+            return slots;
+        }
+
+        private static void TryAddMountedWeaponSlot(
+            List<MountedWeaponSlotState> slots,
+            EquipmentIndex slot,
+            string slotLabel,
+            string itemId)
+        {
+            if (slots == null || string.IsNullOrWhiteSpace(itemId))
+                return;
+
+            ItemObject item = ResolveItem(itemId);
+            if (item == null)
+                return;
+
+            slots.Add(new MountedWeaponSlotState
+            {
+                Slot = slot,
+                SlotLabel = slotLabel,
+                ItemId = itemId,
+                Item = item,
+                Role = ResolveMountedWeaponRole(item)
+            });
+        }
+
+        private static ItemObject ResolveItem(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return null;
+
+            try
+            {
+                MBObjectManager objectManager = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
+                return objectManager?.GetObject<ItemObject>(itemId);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static List<MountedWeaponSlotState> BuildCanonicalMountedWeaponLayout(
+            List<MountedWeaponSlotState> sourceSlots,
+            bool hasAmmo)
+        {
+            var remaining = new List<MountedWeaponSlotState>(sourceSlots ?? Enumerable.Empty<MountedWeaponSlotState>());
+            var ordered = new List<MountedWeaponSlotState>(4);
+
+            MountedWeaponSlotState primaryMelee = TakeFirst(remaining, MountedWeaponRole.Polearm)
+                                                  ?? TakeFirst(remaining, MountedWeaponRole.Melee);
+            MountedWeaponSlotState primaryRanged = TakeFirst(remaining, MountedWeaponRole.Ranged);
+            MountedWeaponSlotState shield = TakeFirst(remaining, MountedWeaponRole.Shield);
+            MountedWeaponSlotState ammo = TakeFirst(remaining, MountedWeaponRole.Ammo);
+
+            if (primaryMelee != null)
+                ordered.Add(primaryMelee);
+            else if (primaryRanged != null)
+            {
+                ordered.Add(primaryRanged);
+                primaryRanged = null;
+            }
+
+            if (hasAmmo)
+            {
+                if (shield != null)
+                {
+                    ordered.Add(shield);
+                    shield = null;
+                }
+                else if (primaryRanged != null)
+                {
+                    ordered.Add(primaryRanged);
+                    primaryRanged = null;
+                }
+                else
+                {
+                    AddNextPreferred(ordered, remaining, preferLiveCandidate: true);
+                }
+
+                if (ammo != null)
+                {
+                    ordered.Add(ammo);
+                    ammo = null;
+                }
+                else
+                {
+                    AddNextPreferred(ordered, remaining, preferLiveCandidate: false);
+                }
+            }
+            else
+            {
+                if (primaryRanged != null)
+                {
+                    ordered.Add(primaryRanged);
+                    primaryRanged = null;
+                }
+                else if (shield != null)
+                {
+                    ordered.Add(shield);
+                    shield = null;
+                }
+                else
+                {
+                    AddNextPreferred(ordered, remaining, preferLiveCandidate: true);
+                }
+
+                if (shield != null)
+                {
+                    ordered.Add(shield);
+                    shield = null;
+                }
+                else if (ammo != null)
+                {
+                    ordered.Add(ammo);
+                    ammo = null;
+                }
+                else
+                {
+                    AddNextPreferred(ordered, remaining, preferLiveCandidate: false);
+                }
+            }
+
+            if (primaryRanged != null)
+                ordered.Add(primaryRanged);
+            if (shield != null)
+                ordered.Add(shield);
+            if (ammo != null)
+                ordered.Add(ammo);
+
+            while (ordered.Count < 4 && remaining.Count > 0)
+            {
+                ordered.Add(remaining[0]);
+                remaining.RemoveAt(0);
+            }
+
+            return ordered.Take(4).ToList();
+        }
+
+        private static void AddNextPreferred(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining,
+            bool preferLiveCandidate)
+        {
+            if (remaining == null || remaining.Count == 0)
+                return;
+
+            MountedWeaponSlotState match = preferLiveCandidate
+                ? remaining.FirstOrDefault(slot =>
+                    slot.Role == MountedWeaponRole.Polearm ||
+                    slot.Role == MountedWeaponRole.Melee ||
+                    slot.Role == MountedWeaponRole.Ranged)
+                : remaining.FirstOrDefault(slot =>
+                    slot.Role == MountedWeaponRole.Ammo ||
+                    slot.Role == MountedWeaponRole.Shield ||
+                    slot.Role == MountedWeaponRole.Other);
+
+            if (match == null)
+                match = remaining[0];
+            ordered.Add(match);
+            remaining.Remove(match);
+        }
+
+        private static MountedWeaponSlotState TakeFirst(List<MountedWeaponSlotState> remaining, MountedWeaponRole role)
+        {
+            if (remaining == null || remaining.Count == 0)
+                return null;
+
+            MountedWeaponSlotState match = remaining.FirstOrDefault(slot => slot.Role == role);
+            if (match == null)
+                return null;
+
+            remaining.Remove(match);
+            return match;
+        }
+
+        private static void ApplyNormalizedMountedWeaponLayout(
+            ExactTransferEquipmentContract equipment,
+            List<MountedWeaponSlotState> orderedSlots)
+        {
+            if (equipment?.SpawnEquipment == null)
+                return;
+
+            EquipmentIndex[] targetSlots =
+            {
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3
+            };
+
+            foreach (EquipmentIndex targetSlot in targetSlots)
+                equipment.SpawnEquipment[targetSlot] = default;
+
+            for (int i = 0; i < targetSlots.Length; i++)
+            {
+                MountedWeaponSlotState normalizedSlot = orderedSlots != null && i < orderedSlots.Count
+                    ? orderedSlots[i]
+                    : null;
+                ExactTransferEquipmentSlotContract slotContract = equipment.Slots.FirstOrDefault(slot => slot.Slot == targetSlots[i]);
+                if (normalizedSlot?.Item == null)
+                {
+                    if (slotContract != null)
+                    {
+                        slotContract.ItemId = null;
+                        slotContract.IsEmpty = true;
+                        slotContract.MustExistAtCreateAgentTime = false;
+                    }
+
+                    continue;
+                }
+
+                equipment.SpawnEquipment[targetSlots[i]] = new EquipmentElement(normalizedSlot.Item, null, null, false);
+                if (slotContract != null)
+                {
+                    slotContract.ItemId = normalizedSlot.ItemId;
+                    slotContract.IsEmpty = false;
+                    slotContract.MustExistAtCreateAgentTime = true;
+                }
+            }
+        }
+
+        private static bool DoMountedLayoutsMatch(
+            IReadOnlyList<MountedWeaponSlotState> before,
+            IReadOnlyList<MountedWeaponSlotState> after)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                string beforeItemId = before != null && i < before.Count ? before[i]?.ItemId : null;
+                string afterItemId = after != null && i < after.Count ? after[i]?.ItemId : null;
+                if (!string.Equals(beforeItemId, afterItemId, StringComparison.Ordinal))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static string BuildMountedLayoutSummary(
+            IReadOnlyList<MountedWeaponSlotState> sourceSlots,
+            IReadOnlyList<MountedWeaponSlotState> orderedSlots)
+        {
+            EquipmentIndex[] targetSlots =
+            {
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3
+            };
+
+            var parts = new List<string>(4);
+            for (int i = 0; i < targetSlots.Length; i++)
+            {
+                MountedWeaponSlotState slot = orderedSlots != null && i < orderedSlots.Count
+                    ? orderedSlots[i]
+                    : null;
+                parts.Add(
+                    GetWeaponSlotLabel(targetSlots[i]) + "=" +
+                    (slot == null
+                        ? "empty"
+                        : (slot.ItemId ?? "empty") + ":" + slot.Role));
+            }
+
+            return string.Join(", ", parts);
+        }
+
+        private static bool DoesWeapon2ContainLiveCandidate(Equipment equipment)
+        {
+            ItemObject item = equipment?[EquipmentIndex.Weapon2].Item;
+            if (item == null)
+                return false;
+
+            MountedWeaponRole role = ResolveMountedWeaponRole(item);
+            return role == MountedWeaponRole.Melee ||
+                   role == MountedWeaponRole.Polearm ||
+                   role == MountedWeaponRole.Ranged ||
+                   role == MountedWeaponRole.Other;
+        }
+
+        private static MountedWeaponRole ResolveMountedWeaponRole(ItemObject item)
+        {
+            if (item == null)
+                return MountedWeaponRole.Other;
+
+            WeaponComponentData primaryWeapon = item.PrimaryWeapon;
+            if (primaryWeapon != null)
+            {
+                if (primaryWeapon.IsShield)
+                    return MountedWeaponRole.Shield;
+                if (primaryWeapon.IsPolearm)
+                    return MountedWeaponRole.Polearm;
+                if (primaryWeapon.IsAmmo)
+                    return MountedWeaponRole.Ammo;
+                if (primaryWeapon.IsRangedWeapon ||
+                    primaryWeapon.WeaponClass == WeaponClass.Javelin ||
+                    primaryWeapon.WeaponClass == WeaponClass.ThrowingAxe ||
+                    primaryWeapon.WeaponClass == WeaponClass.ThrowingKnife ||
+                    primaryWeapon.WeaponClass == WeaponClass.Stone ||
+                    primaryWeapon.WeaponClass == WeaponClass.SlingStone)
+                {
+                    return MountedWeaponRole.Ranged;
+                }
+
+                if (primaryWeapon.IsOneHanded || primaryWeapon.IsTwoHanded || primaryWeapon.IsMeleeWeapon)
+                    return MountedWeaponRole.Melee;
+            }
+
+            switch (item.ItemType)
+            {
+                case ItemObject.ItemTypeEnum.Shield:
+                    return MountedWeaponRole.Shield;
+                case ItemObject.ItemTypeEnum.Polearm:
+                    return MountedWeaponRole.Polearm;
+                case ItemObject.ItemTypeEnum.Bow:
+                case ItemObject.ItemTypeEnum.Crossbow:
+                case ItemObject.ItemTypeEnum.Sling:
+                case ItemObject.ItemTypeEnum.Thrown:
+                    return MountedWeaponRole.Ranged;
+                case ItemObject.ItemTypeEnum.Arrows:
+                case ItemObject.ItemTypeEnum.Bolts:
+                case ItemObject.ItemTypeEnum.SlingStones:
+                    return MountedWeaponRole.Ammo;
+                case ItemObject.ItemTypeEnum.OneHandedWeapon:
+                case ItemObject.ItemTypeEnum.TwoHandedWeapon:
+                    return MountedWeaponRole.Melee;
+                default:
+                    return MountedWeaponRole.Other;
+            }
+        }
+
+        private static string GetWeaponSlotLabel(EquipmentIndex slot)
+        {
+            switch (slot)
+            {
+                case EquipmentIndex.Weapon0:
+                    return "Item0";
+                case EquipmentIndex.Weapon1:
+                    return "Item1";
+                case EquipmentIndex.Weapon2:
+                    return "Item2";
+                case EquipmentIndex.Weapon3:
+                    return "Item3";
+                default:
+                    return slot.ToString();
+            }
         }
 
         private static void AddSlot(

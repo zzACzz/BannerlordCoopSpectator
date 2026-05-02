@@ -73,6 +73,8 @@ namespace CoopSpectator.Infrastructure
         public bool IncludeArmorVisualsInPreSpawn { get; set; }
         public bool IncludeCapeInPreSpawn { get; set; }
         public bool IncludeMountVisualsInPreSpawn { get; set; }
+        public bool MountedWeaponLayoutNormalized { get; set; }
+        public string MountedWeaponLayoutSummary { get; set; }
     }
 
     public sealed class ExactTransferEquipmentSlotContract

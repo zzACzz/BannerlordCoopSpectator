@@ -320,6 +320,9 @@ namespace CoopSpectator.Patches
         {
             if (useStrictContractPath && contract?.Equipment != null)
             {
+                if (contract.Equipment.SpawnEquipment != null)
+                    return contract.Equipment.SpawnEquipment.Clone(false);
+
                 return CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
                     entryState,
                     includeWeapons: includeWeapons,

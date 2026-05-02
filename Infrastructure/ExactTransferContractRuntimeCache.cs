@@ -282,6 +282,84 @@ namespace CoopSpectator.Infrastructure
                 " " + BuildRuntimeStateSummary(entryId));
         }
 
+        public static void TryCompleteCleanupForAgentIndex(int agentIndex, string source)
+        {
+            if (agentIndex < 0)
+                return;
+
+            string entryId = null;
+            string runtimeSummary = null;
+            bool hadRiderMapping = false;
+            bool hadMountMapping = false;
+            bool removedRuntimeState = false;
+
+            lock (Sync)
+            {
+                if (EntryIdByRiderAgentIndex.TryGetValue(agentIndex, out string riderEntryId) &&
+                    !string.IsNullOrWhiteSpace(riderEntryId))
+                {
+                    entryId = riderEntryId;
+                    hadRiderMapping = true;
+                }
+                else if (EntryIdByMountAgentIndex.TryGetValue(agentIndex, out string mountEntryId) &&
+                         !string.IsNullOrWhiteSpace(mountEntryId))
+                {
+                    entryId = mountEntryId;
+                    hadMountMapping = true;
+                }
+
+                if (string.IsNullOrWhiteSpace(entryId))
+                    return;
+
+                if (RuntimeStateByEntryId.TryGetValue(entryId, out ExactTransferRuntimeState runtimeState) &&
+                    runtimeState != null)
+                {
+                    runtimeSummary = BuildRuntimeStateSummaryLocked(runtimeState);
+                    RuntimeStateByEntryId.Remove(entryId);
+                    removedRuntimeState = true;
+
+                    if (runtimeState.RiderAgentIndex.HasValue &&
+                        EntryIdByRiderAgentIndex.TryGetValue(runtimeState.RiderAgentIndex.Value, out string trackedRiderEntryId) &&
+                        string.Equals(trackedRiderEntryId, entryId, StringComparison.Ordinal))
+                    {
+                        EntryIdByRiderAgentIndex.Remove(runtimeState.RiderAgentIndex.Value);
+                    }
+
+                    if (runtimeState.MountAgentIndex.HasValue &&
+                        EntryIdByMountAgentIndex.TryGetValue(runtimeState.MountAgentIndex.Value, out string trackedMountEntryId) &&
+                        string.Equals(trackedMountEntryId, entryId, StringComparison.Ordinal))
+                    {
+                        EntryIdByMountAgentIndex.Remove(runtimeState.MountAgentIndex.Value);
+                    }
+                }
+
+                if (EntryIdByRiderAgentIndex.TryGetValue(agentIndex, out string remainingRiderEntryId) &&
+                    string.Equals(remainingRiderEntryId, entryId, StringComparison.Ordinal))
+                {
+                    EntryIdByRiderAgentIndex.Remove(agentIndex);
+                    hadRiderMapping = true;
+                }
+
+                if (EntryIdByMountAgentIndex.TryGetValue(agentIndex, out string remainingMountEntryId) &&
+                    string.Equals(remainingMountEntryId, entryId, StringComparison.Ordinal))
+                {
+                    EntryIdByMountAgentIndex.Remove(agentIndex);
+                    hadMountMapping = true;
+                }
+            }
+
+            string details =
+                "AgentIndex=" + agentIndex +
+                " EntryId=" + (entryId ?? "null") +
+                " Source=" + (source ?? "unknown") +
+                " HadRiderMapping=" + hadRiderMapping +
+                " HadMountMapping=" + hadMountMapping +
+                " RemovedRuntimeState=" + removedRuntimeState +
+                " PreviousRuntime=" + (runtimeSummary ?? "ExactTransferRuntime={State=absent}");
+            ModLogger.Info("ExactTransferContractRuntimeCache: completed agent cleanup. " + details);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent("exact-transfer-agent-cleanup", details);
+        }
+
         public static string BuildContractSummary(string entryId)
         {
             lock (Sync)
@@ -300,6 +378,8 @@ namespace CoopSpectator.Infrastructure
                     ",IncludeArmorVisuals=" + contract.Equipment?.IncludeArmorVisualsInPreSpawn +
                     ",IncludeCape=" + contract.Equipment?.IncludeCapeInPreSpawn +
                     ",IncludeMountVisuals=" + contract.Equipment?.IncludeMountVisualsInPreSpawn +
+                    ",MountedWeaponLayoutNormalized=" + contract.Equipment?.MountedWeaponLayoutNormalized +
+                    ",MountedWeaponLayout=" + (contract.Equipment?.MountedWeaponLayoutSummary ?? "null") +
                     ",PeerDrivenBody=" + contract.PeerBinding?.AllowPeerDrivenBodyAtCreateAgentTime +
                     ",PeerDrivenBanner=" + contract.PeerBinding?.AllowPeerDrivenBannerAtCreateAgentTime +
                     ",UsePlayerAgentCreateBranch=" + contract.PeerBinding?.UsePlayerAgentCreateBranch + "}";
@@ -367,6 +447,28 @@ namespace CoopSpectator.Infrastructure
                 return "[]";
 
             return "[" + string.Join(" | ", values.Where(value => !string.IsNullOrWhiteSpace(value))) + "]";
+        }
+
+        private static string BuildRuntimeStateSummaryLocked(ExactTransferRuntimeState runtimeState)
+        {
+            if (runtimeState == null)
+                return "ExactTransferRuntime={State=absent}";
+
+            return
+                "ExactTransferRuntime={Stage=" + runtimeState.Stage +
+                ",FailureReason=" + runtimeState.FailureReason +
+                ",FailureContext=" + (runtimeState.FailureContext ?? "null") +
+                ",RiderAgentIndex=" + (runtimeState.RiderAgentIndex?.ToString() ?? "null") +
+                ",MountAgentIndex=" + (runtimeState.MountAgentIndex?.ToString() ?? "null") +
+                ",MountedContract=" + runtimeState.IsMountedContract +
+                ",RiderMaterialized=" + runtimeState.RiderMaterialized +
+                ",MountMaterialized=" + runtimeState.MountMaterialized +
+                ",MountLinkVerified=" + runtimeState.MountLinkVerified +
+                ",PeerBound=" + runtimeState.PeerBound +
+                ",EquipmentSynchronized=" + runtimeState.EquipmentSynchronized +
+                ",ExactVisualApplied=" + runtimeState.ExactVisualApplied +
+                ",CommanderControlEnabled=" + runtimeState.CommanderControlEnabled +
+                ",LastTransitionUtc=" + runtimeState.LastTransitionUtc.ToString("O") + "}";
         }
 
         private static void ObserveClientStage(
