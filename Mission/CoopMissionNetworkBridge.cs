@@ -212,6 +212,7 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsServer)
             {
                 registerer.RegisterBaseHandler<CoopBattleSelectionClientRequestMessage>(HandleClientSelectionRequest);
+                registerer.RegisterBaseHandler<CoopBattleSnapshotChunkRequestMessage>(HandleClientBattleSnapshotChunkRequest);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotRangeAckMessage>(HandleClientBattleSnapshotRangeAck);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotCompleteAckMessage>(HandleClientBattleSnapshotCompleteAck);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotAbortMessage>(HandleClientBattleSnapshotAbort);
@@ -253,10 +254,10 @@ namespace CoopSpectator.MissionBehaviors
             TryPersistHostedLocalPeerMarker();
 
             if (GameNetwork.IsClient && Mission != null)
-                TryResendClientBattleSnapshotRangeAcks();
+                TryResendClientBattleSnapshotChunkRequests();
         }
 
-        private void TryResendClientBattleSnapshotRangeAcks()
+        private void TryResendClientBattleSnapshotChunkRequests()
         {
             if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive || _clientBattleSnapshotAssembliesByTransmission.Count <= 0)
                 return;
@@ -270,15 +271,15 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 bool receiveStalled = nowUtc - assemblyState.LastChunkReceivedUtc >= BattleSnapshotRangeAckStallDelay;
-                bool ackCooldownElapsed =
-                    assemblyState.LastRangeAckSentUtc == DateTime.MinValue ||
-                    nowUtc - assemblyState.LastRangeAckSentUtc >= BattleSnapshotRangeAckStallDelay;
-                if (!receiveStalled || !ackCooldownElapsed)
+                bool requestCooldownElapsed =
+                    assemblyState.LastChunkRequestSentUtc == DateTime.MinValue ||
+                    nowUtc - assemblyState.LastChunkRequestSentUtc >= BattleSnapshotRangeAckStallDelay;
+                if (!receiveStalled || !requestCooldownElapsed)
                     continue;
 
-                SendClientBattleSnapshotRangeAck(assemblyState, CoopBattleSnapshotAssemblyStateKind.Receiving);
+                SendClientBattleSnapshotChunkRequest(assemblyState, CoopBattleSnapshotAssemblyStateKind.Stalled, "stalled-retry");
                 ModLogger.Info(
-                    "CoopMissionNetworkBridge: resent stalled client V2 battle snapshot range ack. " +
+                    "CoopMissionNetworkBridge: resent stalled client V2 battle snapshot chunk request. " +
                     "TransmissionId=" + assemblyState.TransmissionId +
                     " HighestContiguous=" + assemblyState.HighestContiguousChunkIndex +
                     " ReceivedChunkCount=" + assemblyState.ReceivedChunkCount +
@@ -414,6 +415,23 @@ namespace CoopSpectator.MissionBehaviors
             {
                 ModLogger.Info("CoopMissionNetworkBridge: server payload chunk handling failed: " + ex.Message);
             }
+        }
+
+        private bool HandleClientBattleSnapshotChunkRequest(NetworkCommunicator peer, GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopBattleSnapshotChunkRequestMessage message))
+                return false;
+
+            try
+            {
+                AcceptClientBattleSnapshotChunkRequest(peer, message);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionNetworkBridge: client battle snapshot chunk request handling failed: " + ex.Message);
+            }
+
+            return true;
         }
 
         private bool HandleClientBattleSnapshotRangeAck(NetworkCommunicator peer, GameNetworkMessage baseMessage)
@@ -655,7 +673,7 @@ namespace CoopSpectator.MissionBehaviors
             int concurrentHeavyPeers = 0;
             foreach (BattleSnapshotTransportState transportState in activeStates
                 .OrderBy(state => state.ManifestSent ? 1 : 0)
-                .ThenBy(state => state.HasPendingResends ? 0 : 1)
+                .ThenBy(state => state.HasPendingChunkRequests ? 0 : 1)
                 .ThenBy(state => state.LastProgressUtc))
             {
                 if (!_battleSnapshotTransportStatesByPeer.TryGetValue(transportState.PeerIndex, out BattleSnapshotTransportState currentState))
@@ -763,7 +781,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             DateTime nowUtc = DateTime.UtcNow;
-            bool shouldSendManifest = transportState.AckedChunkCount <= 0 &&
+            bool shouldSendManifest = !transportState.HasObservedClientRequest &&
                                       (!transportState.ManifestSent ||
                                        nowUtc - transportState.LastManifestSentUtc >= BattleSnapshotManifestRetryDelay);
             if (shouldSendManifest)
@@ -771,34 +789,12 @@ namespace CoopSpectator.MissionBehaviors
                 SendBattleSnapshotManifest(peer, transportState);
             }
 
-            if (nowUtc - transportState.LastProgressUtc >= BattleSnapshotRangeAckStallDelay)
-            {
-                transportState.MarkStalled(nowUtc);
-                ModLogger.Info(
-                    "CoopMissionNetworkBridge: V2 battle snapshot transport stalled, scheduling resend window. " +
-                    "Peer=" + (peer.UserName ?? "null") +
-                    " TransmissionId=" + transportState.TransmissionId +
-                    " HighestContiguous=" + transportState.HighestContiguousChunkIndex +
-                    " NextSequential=" + transportState.NextSequentialChunkIndex +
-                    " AckedChunkCount=" + transportState.AckedChunkCount +
-                    " SentChunkCount=" + transportState.SentChunkCount +
-                    " InflightChunkCount=" + transportState.InflightChunkCount +
-                    " PendingResends=" + transportState.PendingResendChunkCount);
-            }
-
             int chunksSentThisTick = 0;
             while (chunksSentThisTick < MaxBattleSnapshotChunksPerPayloadPerTick &&
-                   (transportState.CanSendQueuedResends || transportState.CanSendSequentialChunks))
+                   transportState.CanSendRequestedChunks)
             {
                 int nextChunkIndex;
-                if (transportState.TryDequeueResendChunk(out nextChunkIndex))
-                {
-                    SendBattleSnapshotChunkV2(peer, transportState, nextChunkIndex);
-                    chunksSentThisTick++;
-                    continue;
-                }
-
-                if (transportState.TryReserveNextSequentialChunk(out nextChunkIndex))
+                if (transportState.TryDequeueRequestedChunk(out nextChunkIndex))
                 {
                     SendBattleSnapshotChunkV2(peer, transportState, nextChunkIndex);
                     chunksSentThisTick++;
@@ -861,7 +857,7 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private void AcceptClientBattleSnapshotRangeAck(NetworkCommunicator peer, CoopBattleSnapshotRangeAckMessage message)
+        private void AcceptClientBattleSnapshotChunkRequest(NetworkCommunicator peer, CoopBattleSnapshotChunkRequestMessage message)
         {
             if (peer == null || message == null)
                 return;
@@ -871,25 +867,40 @@ namespace CoopSpectator.MissionBehaviors
                 transportState.TransmissionId != message.TransmissionId)
             {
                 ModLogger.Info(
-                    "CoopMissionNetworkBridge: ignored V2 battle snapshot range ack with unknown transmission. " +
+                    "CoopMissionNetworkBridge: ignored V2 battle snapshot chunk request with unknown transmission. " +
                     "Peer=" + (peer.UserName ?? "null") +
-                    " TransmissionId=" + message.TransmissionId);
+                    " TransmissionId=" + message.TransmissionId +
+                    " Range=" + message.StartChunkIndex + "-" + message.EndChunkIndex);
                 return;
             }
 
-            transportState.ApplyRangeAck(
+            transportState.QueueRequestedRange(
+                message.StartChunkIndex,
+                message.EndChunkIndex,
                 message.HighestContiguousChunkIndex,
-                ParseChunkRanges(message.ReceivedRanges),
-                ParseChunkRanges(message.MissingRanges),
+                message.ReceivedChunkCount,
                 DateTime.UtcNow);
             ModLogger.Info(
-                "CoopMissionNetworkBridge: applied V2 battle snapshot range ack. " +
+                "CoopMissionNetworkBridge: accepted V2 battle snapshot chunk request. " +
+                "Peer=" + (peer.UserName ?? "null") +
+                " TransmissionId=" + message.TransmissionId +
+                " Range=" + message.StartChunkIndex + "-" + message.EndChunkIndex +
+                " HighestContiguous=" + message.HighestContiguousChunkIndex +
+                " ReceivedChunkCount=" + message.ReceivedChunkCount +
+                " PendingRequestedChunks=" + transportState.PendingRequestedChunkCount);
+        }
+
+        private void AcceptClientBattleSnapshotRangeAck(NetworkCommunicator peer, CoopBattleSnapshotRangeAckMessage message)
+        {
+            if (peer == null || message == null)
+                return;
+
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: ignored legacy V2 battle snapshot range ack. " +
                 "Peer=" + (peer.UserName ?? "null") +
                 " TransmissionId=" + message.TransmissionId +
                 " HighestContiguous=" + message.HighestContiguousChunkIndex +
-                " ReceivedChunkCount=" + message.ReceivedChunkCount +
-                " MissingRanges=" + (message.MissingRanges ?? string.Empty) +
-                " AckedChunkCount=" + transportState.AckedChunkCount);
+                " ReceivedChunkCount=" + message.ReceivedChunkCount);
         }
 
         private void AcceptClientBattleSnapshotCompleteAck(NetworkCommunicator peer, CoopBattleSnapshotCompleteAckMessage message)
@@ -961,6 +972,8 @@ namespace CoopSpectator.MissionBehaviors
                 string.Equals(existingState.PayloadHash, message.PayloadHash, StringComparison.Ordinal))
             {
                 existingState.MarkManifestObserved(DateTime.UtcNow);
+                if (!existingState.IsComplete)
+                    SendClientBattleSnapshotChunkRequest(existingState, CoopBattleSnapshotAssemblyStateKind.Receiving, "manifest-repeat");
                 return;
             }
 
@@ -980,6 +993,7 @@ namespace CoopSpectator.MissionBehaviors
                 " ChunkCount=" + message.ChunkCount +
                 " WireBytes=" + message.WireBytes +
                 " LogicalBytes=" + message.LogicalBytes);
+            SendClientBattleSnapshotChunkRequest(assemblyState, CoopBattleSnapshotAssemblyStateKind.Receiving, "manifest-initial");
         }
 
         private void AcceptServerBattleSnapshotChunkV2(CoopBattleSnapshotChunkV2Message message)
@@ -1007,10 +1021,9 @@ namespace CoopSpectator.MissionBehaviors
                     " ChunkCount=" + message.ChunkCount +
                     " Bytes=" + (message.PayloadBytes?.Length ?? 0));
             }
-            if (assemblyState.ShouldSendProgressAck(BattleSnapshotRangeAckEveryNewChunks))
-            {
-                SendClientBattleSnapshotRangeAck(assemblyState, CoopBattleSnapshotAssemblyStateKind.Receiving);
-            }
+
+            if (!assemblyState.IsComplete && assemblyState.ShouldRequestNextWindow(BattleSnapshotInitialWindowChunks))
+                SendClientBattleSnapshotChunkRequest(assemblyState, CoopBattleSnapshotAssemblyStateKind.Receiving, "window-advance");
 
             if (!assemblyState.IsComplete)
                 return;
@@ -1032,7 +1045,6 @@ namespace CoopSpectator.MissionBehaviors
 
             BattleSnapshotRuntimeState.SetCurrent(snapshot, "CoopMissionNetworkBridge.V2");
             _clientBattleSnapshotAssembliesByTransmission.Remove(assemblyState.TransmissionId);
-            SendClientBattleSnapshotRangeAck(assemblyState, CoopBattleSnapshotAssemblyStateKind.Complete);
             SendClientBattleSnapshotCompleteAck(assemblyState.TransmissionId, assemblyState.PayloadHash, appliedSuccessfully: true);
             ModLogger.Info(
                 "CoopMissionNetworkBridge: applied V2 battle snapshot payload on client. " +
@@ -1678,31 +1690,41 @@ namespace CoopSpectator.MissionBehaviors
             return ranges;
         }
 
-        private static void SendClientBattleSnapshotRangeAck(
+        private static void SendClientBattleSnapshotChunkRequest(
             BattleSnapshotClientAssemblyState assemblyState,
-            CoopBattleSnapshotAssemblyStateKind assemblyStateKind)
+            CoopBattleSnapshotAssemblyStateKind assemblyStateKind,
+            string source)
         {
             if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive || assemblyState == null)
                 return;
 
             try
             {
-                List<ChunkRange> receivedRanges = assemblyState.GetReceivedRanges();
-                List<ChunkRange> missingRanges = assemblyState.GetMissingRangesWithinWindow();
+                if (!assemblyState.TryGetDesiredRequestRange(BattleSnapshotInitialWindowChunks, out int startChunkIndex, out int endChunkIndex))
+                    return;
+
                 GameNetwork.BeginModuleEventAsClient();
-                GameNetwork.WriteMessage(new CoopBattleSnapshotRangeAckMessage(
+                GameNetwork.WriteMessage(new CoopBattleSnapshotChunkRequestMessage(
                     assemblyState.TransmissionId,
+                    startChunkIndex,
+                    endChunkIndex,
                     assemblyState.HighestContiguousChunkIndex,
                     assemblyState.ReceivedChunkCount,
-                    BuildChunkRangesString(receivedRanges),
-                    BuildChunkRangesString(missingRanges),
                     assemblyStateKind));
                 GameNetwork.EndModuleEventAsClient();
-                assemblyState.MarkRangeAckSent();
+                assemblyState.MarkChunkRequestSent(startChunkIndex, endChunkIndex, DateTime.UtcNow);
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: sent client V2 battle snapshot chunk request. " +
+                    "TransmissionId=" + assemblyState.TransmissionId +
+                    " Range=" + startChunkIndex + "-" + endChunkIndex +
+                    " HighestContiguous=" + assemblyState.HighestContiguousChunkIndex +
+                    " ReceivedChunkCount=" + assemblyState.ReceivedChunkCount +
+                    " State=" + assemblyStateKind +
+                    " Source=" + (source ?? "unknown"));
             }
             catch (Exception ex)
             {
-                ModLogger.Info("CoopMissionNetworkBridge: client V2 battle snapshot range ack send failed. Error=" + ex.Message);
+                ModLogger.Info("CoopMissionNetworkBridge: client V2 battle snapshot chunk request send failed. Error=" + ex.Message);
             }
         }
 
@@ -2098,8 +2120,8 @@ namespace CoopSpectator.MissionBehaviors
 
         private sealed class BattleSnapshotTransportState
         {
-            private readonly Queue<int> _pendingResendChunkIndexes = new Queue<int>();
-            private readonly HashSet<int> _queuedResendChunkIndexes = new HashSet<int>();
+            private readonly Queue<int> _pendingRequestedChunkIndexes = new Queue<int>();
+            private readonly HashSet<int> _queuedRequestedChunkIndexes = new HashSet<int>();
 
             private BattleSnapshotTransportState(
                 int peerIndex,
@@ -2122,12 +2144,11 @@ namespace CoopSpectator.MissionBehaviors
                 Chunks = chunks ?? Array.Empty<byte[]>();
                 TotalBytes = totalBytes;
                 SentChunkFlags = new bool[Chunks.Length];
-                AckedChunkFlags = new bool[Chunks.Length];
                 CreatedUtc = DateTime.UtcNow;
                 LastProgressUtc = CreatedUtc;
-                HighestContiguousChunkIndex = -1;
-                InitialWindowChunks = Math.Max(1, initialWindowChunks);
-                MaxInflightChunks = Math.Max(1, maxInflightChunks);
+                HighestClientContiguousChunkIndex = -1;
+                LastRequestedStartChunkIndex = -1;
+                LastRequestedEndChunkIndex = -1;
             }
 
             public int PeerIndex { get; }
@@ -2140,32 +2161,26 @@ namespace CoopSpectator.MissionBehaviors
             public int TotalBytes { get; }
             public int ChunkCount => Chunks.Length;
             public bool[] SentChunkFlags { get; }
-            public bool[] AckedChunkFlags { get; }
             public int SentChunkCount { get; private set; }
-            public int AckedChunkCount { get; private set; }
-            public int NextSequentialChunkIndex { get; private set; }
-            public int HighestContiguousChunkIndex { get; private set; }
+            public int HighestClientContiguousChunkIndex { get; private set; }
+            public int ClientReceivedChunkCount { get; private set; }
+            public int LastRequestedStartChunkIndex { get; private set; }
+            public int LastRequestedEndChunkIndex { get; private set; }
             public DateTime CreatedUtc { get; }
             public DateTime LastManifestSentUtc { get; private set; }
             public DateTime LastChunkSentUtc { get; private set; }
             public DateTime LastProgressUtc { get; private set; }
-            public DateTime LastRangeAckUtc { get; private set; }
+            public DateTime LastClientRequestUtc { get; private set; }
             public bool ManifestSent { get; private set; }
             public bool CompleteAckReceived { get; private set; }
             public bool AppliedSuccessfully { get; private set; }
-            public int InitialWindowChunks { get; }
-            public int MaxInflightChunks { get; }
-            public bool HasPendingResends => _pendingResendChunkIndexes.Count > 0;
-            public int PendingResendChunkCount => _pendingResendChunkIndexes.Count;
+            public bool HasObservedClientRequest => LastClientRequestUtc != DateTime.MinValue;
+            public bool HasPendingChunkRequests => _pendingRequestedChunkIndexes.Count > 0;
+            public int PendingRequestedChunkCount => _pendingRequestedChunkIndexes.Count;
             public bool IsCompleted => CompleteAckReceived;
-            public int InflightChunkCount => Math.Max(0, SentChunkCount - AckedChunkCount);
-            public bool CanSendQueuedResends => !IsCompleted &&
-                                                ManifestSent &&
-                                                _pendingResendChunkIndexes.Count > 0;
-            public bool CanSendSequentialChunks => !IsCompleted &&
-                                                   ManifestSent &&
-                                                   InflightChunkCount < MaxInflightChunks &&
-                                                   NextSequentialChunkIndex < ChunkCount;
+            public bool CanSendRequestedChunks => !IsCompleted &&
+                                                  ManifestSent &&
+                                                  _pendingRequestedChunkIndexes.Count > 0;
 
             public static BattleSnapshotTransportState Create(
                 int peerIndex,
@@ -2237,15 +2252,43 @@ namespace CoopSpectator.MissionBehaviors
                 LastProgressUtc = nowUtc;
             }
 
-            public bool TryDequeueResendChunk(out int chunkIndex)
+            public void QueueRequestedRange(
+                int startChunkIndex,
+                int endChunkIndex,
+                int highestContiguousChunkIndex,
+                int receivedChunkCount,
+                DateTime nowUtc)
             {
-                while (_pendingResendChunkIndexes.Count > 0)
+                LastClientRequestUtc = nowUtc;
+                LastProgressUtc = nowUtc;
+                HighestClientContiguousChunkIndex = Math.Max(
+                    HighestClientContiguousChunkIndex,
+                    Math.Min(ChunkCount - 1, highestContiguousChunkIndex));
+                ClientReceivedChunkCount = Math.Max(
+                    ClientReceivedChunkCount,
+                    Math.Min(ChunkCount, Math.Max(0, receivedChunkCount)));
+
+                int clampedStart = Math.Max(0, startChunkIndex);
+                int clampedEnd = Math.Min(ChunkCount - 1, endChunkIndex);
+                if (ChunkCount <= 0 || clampedEnd < clampedStart)
+                    return;
+
+                LastRequestedStartChunkIndex = clampedStart;
+                LastRequestedEndChunkIndex = clampedEnd;
+                for (int chunkIndex = clampedStart; chunkIndex <= clampedEnd; chunkIndex++)
                 {
-                    int candidate = _pendingResendChunkIndexes.Dequeue();
-                    _queuedResendChunkIndexes.Remove(candidate);
+                    if (_queuedRequestedChunkIndexes.Add(chunkIndex))
+                        _pendingRequestedChunkIndexes.Enqueue(chunkIndex);
+                }
+            }
+
+            public bool TryDequeueRequestedChunk(out int chunkIndex)
+            {
+                while (_pendingRequestedChunkIndexes.Count > 0)
+                {
+                    int candidate = _pendingRequestedChunkIndexes.Dequeue();
+                    _queuedRequestedChunkIndexes.Remove(candidate);
                     if (candidate < 0 || candidate >= ChunkCount)
-                        continue;
-                    if (AckedChunkFlags[candidate])
                         continue;
 
                     chunkIndex = candidate;
@@ -2256,68 +2299,11 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            public bool TryReserveNextSequentialChunk(out int chunkIndex)
-            {
-                int upperBoundExclusive = Math.Min(ChunkCount, HighestContiguousChunkIndex + 1 + InitialWindowChunks);
-                if (NextSequentialChunkIndex >= ChunkCount)
-                {
-                    chunkIndex = -1;
-                    return false;
-                }
-
-                if (NextSequentialChunkIndex >= upperBoundExclusive && InflightChunkCount >= InitialWindowChunks)
-                {
-                    chunkIndex = -1;
-                    return false;
-                }
-
-                chunkIndex = NextSequentialChunkIndex;
-                NextSequentialChunkIndex++;
-                return true;
-            }
-
-            public void ApplyRangeAck(
-                int highestContiguousChunkIndex,
-                List<ChunkRange> receivedRanges,
-                List<ChunkRange> missingRanges,
-                DateTime nowUtc)
-            {
-                LastRangeAckUtc = nowUtc;
-                LastProgressUtc = nowUtc;
-
-                if (highestContiguousChunkIndex > HighestContiguousChunkIndex)
-                    HighestContiguousChunkIndex = Math.Min(highestContiguousChunkIndex, ChunkCount - 1);
-
-                MarkRangeAcknowledged(0, HighestContiguousChunkIndex);
-
-                if (receivedRanges != null)
-                {
-                    foreach (ChunkRange range in receivedRanges)
-                        MarkRangeAcknowledged(range.StartIndex, range.EndIndex);
-                }
-
-                if (missingRanges != null)
-                {
-                    foreach (ChunkRange range in missingRanges)
-                        QueueMissingRange(range.StartIndex, range.EndIndex);
-                }
-            }
-
             public void MarkCompleted(bool appliedSuccessfully, DateTime nowUtc)
             {
                 CompleteAckReceived = true;
                 AppliedSuccessfully = appliedSuccessfully;
                 LastProgressUtc = nowUtc;
-                LastRangeAckUtc = nowUtc;
-                MarkRangeAcknowledged(0, ChunkCount - 1);
-            }
-
-            public void MarkStalled(DateTime nowUtc)
-            {
-                LastProgressUtc = nowUtc;
-                int stalledStartIndex = HighestContiguousChunkIndex + 1;
-                int stalledEndIndex = Math.Min(ChunkCount - 1, NextSequentialChunkIndex - 1);
-                QueueMissingRange(stalledStartIndex, stalledEndIndex);
             }
 
             public void ResetForRestart(DateTime nowUtc)
@@ -2326,55 +2312,22 @@ namespace CoopSpectator.MissionBehaviors
                 LastManifestSentUtc = DateTime.MinValue;
                 LastChunkSentUtc = DateTime.MinValue;
                 LastProgressUtc = nowUtc;
-                LastRangeAckUtc = DateTime.MinValue;
                 SentChunkCount = 0;
-                AckedChunkCount = 0;
-                NextSequentialChunkIndex = 0;
-                HighestContiguousChunkIndex = -1;
+                HighestClientContiguousChunkIndex = -1;
+                ClientReceivedChunkCount = 0;
+                LastRequestedStartChunkIndex = -1;
+                LastRequestedEndChunkIndex = -1;
+                LastClientRequestUtc = DateTime.MinValue;
                 CompleteAckReceived = false;
                 AppliedSuccessfully = false;
                 Array.Clear(SentChunkFlags, 0, SentChunkFlags.Length);
-                Array.Clear(AckedChunkFlags, 0, AckedChunkFlags.Length);
-                _pendingResendChunkIndexes.Clear();
-                _queuedResendChunkIndexes.Clear();
-            }
-
-            private void MarkRangeAcknowledged(int startIndex, int endIndex)
-            {
-                if (ChunkCount <= 0)
-                    return;
-
-                int clampedStart = Math.Max(0, startIndex);
-                int clampedEnd = Math.Min(ChunkCount - 1, endIndex);
-                for (int index = clampedStart; index <= clampedEnd; index++)
-                {
-                    if (AckedChunkFlags[index])
-                        continue;
-
-                    AckedChunkFlags[index] = true;
-                    AckedChunkCount++;
-                }
-            }
-
-            private void QueueMissingRange(int startIndex, int endIndex)
-            {
-                if (ChunkCount <= 0)
-                    return;
-
-                int clampedStart = Math.Max(0, startIndex);
-                int clampedEnd = Math.Min(ChunkCount - 1, endIndex);
-                for (int index = clampedStart; index <= clampedEnd; index++)
-                {
-                    if (!AckedChunkFlags[index] && _queuedResendChunkIndexes.Add(index))
-                        _pendingResendChunkIndexes.Enqueue(index);
-                }
+                _pendingRequestedChunkIndexes.Clear();
+                _queuedRequestedChunkIndexes.Clear();
             }
         }
 
         private sealed class BattleSnapshotClientAssemblyState
         {
-            private int _newChunksSinceLastRangeAck;
-
             public BattleSnapshotClientAssemblyState(
                 int transmissionId,
                 int chunkCount,
@@ -2400,6 +2353,8 @@ namespace CoopSpectator.MissionBehaviors
                 LastChunkReceivedUtc = CreatedUtc;
                 HighestContiguousChunkIndex = -1;
                 HighestObservedChunkIndex = -1;
+                LastRequestedStartChunkIndex = -1;
+                LastRequestedEndChunkIndex = -1;
             }
 
             public int TransmissionId { get; }
@@ -2418,7 +2373,9 @@ namespace CoopSpectator.MissionBehaviors
             public DateTime CreatedUtc { get; }
             public DateTime LastManifestObservedUtc { get; private set; }
             public DateTime LastChunkReceivedUtc { get; private set; }
-            public DateTime LastRangeAckSentUtc { get; private set; }
+            public DateTime LastChunkRequestSentUtc { get; private set; }
+            public int LastRequestedStartChunkIndex { get; private set; }
+            public int LastRequestedEndChunkIndex { get; private set; }
             public bool IsComplete => ReceivedChunkCount >= ChunkCount;
 
             public void MarkManifestObserved(DateTime nowUtc)
@@ -2436,7 +2393,6 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     ReceivedChunkFlags[chunkIndex] = true;
                     ReceivedChunkCount++;
-                    _newChunksSinceLastRangeAck++;
                 }
 
                 Chunks[chunkIndex] = payloadBytes ?? Array.Empty<byte>();
@@ -2445,31 +2401,43 @@ namespace CoopSpectator.MissionBehaviors
                 UpdateHighestContiguousChunkIndex();
             }
 
-            public bool ShouldSendProgressAck(int ackEveryNewChunks)
+            public bool ShouldRequestNextWindow(int requestWindowChunks)
             {
                 if (IsComplete)
                     return false;
 
-                if (LastRangeAckSentUtc == DateTime.MinValue)
+                if (!TryGetDesiredRequestRange(requestWindowChunks, out int desiredStartChunkIndex, out int desiredEndChunkIndex))
+                    return false;
+
+                if (LastChunkRequestSentUtc == DateTime.MinValue)
                     return true;
 
-                return _newChunksSinceLastRangeAck >= Math.Max(1, ackEveryNewChunks);
+                return desiredStartChunkIndex != LastRequestedStartChunkIndex ||
+                       desiredEndChunkIndex != LastRequestedEndChunkIndex;
             }
 
-            public void MarkRangeAckSent()
+            public bool TryGetDesiredRequestRange(int requestWindowChunks, out int startChunkIndex, out int endChunkIndex)
             {
-                LastRangeAckSentUtc = DateTime.UtcNow;
-                _newChunksSinceLastRangeAck = 0;
+                startChunkIndex = -1;
+                endChunkIndex = -1;
+                if (IsComplete || ChunkCount <= 0)
+                    return false;
+
+                int clampedWindowSize = Math.Max(1, requestWindowChunks);
+                int nextStartChunkIndex = Math.Max(0, HighestContiguousChunkIndex + 1);
+                if (nextStartChunkIndex >= ChunkCount)
+                    return false;
+
+                startChunkIndex = nextStartChunkIndex;
+                endChunkIndex = Math.Min(ChunkCount - 1, nextStartChunkIndex + clampedWindowSize - 1);
+                return endChunkIndex >= startChunkIndex;
             }
 
-            public List<ChunkRange> GetReceivedRanges()
+            public void MarkChunkRequestSent(int startChunkIndex, int endChunkIndex, DateTime nowUtc)
             {
-                return BuildRanges(includeReceived: true);
-            }
-
-            public List<ChunkRange> GetMissingRangesWithinWindow()
-            {
-                return BuildRanges(includeReceived: false);
+                LastChunkRequestSentUtc = nowUtc;
+                LastRequestedStartChunkIndex = startChunkIndex;
+                LastRequestedEndChunkIndex = endChunkIndex;
             }
 
             public byte[] Combine()
@@ -2497,38 +2465,6 @@ namespace CoopSpectator.MissionBehaviors
                     index++;
 
                 HighestContiguousChunkIndex = index - 1;
-            }
-
-            private List<ChunkRange> BuildRanges(bool includeReceived)
-            {
-                var ranges = new List<ChunkRange>();
-                int upperBound = includeReceived
-                    ? HighestObservedChunkIndex
-                    : Math.Max(HighestObservedChunkIndex, HighestContiguousChunkIndex);
-                if (upperBound < 0)
-                    return ranges;
-
-                int startIndex = -1;
-                for (int index = 0; index <= upperBound; index++)
-                {
-                    bool matches = ReceivedChunkFlags[index] == includeReceived;
-                    if (matches && startIndex < 0)
-                    {
-                        startIndex = index;
-                        continue;
-                    }
-
-                    if (!matches && startIndex >= 0)
-                    {
-                        ranges.Add(new ChunkRange(startIndex, index - 1));
-                        startIndex = -1;
-                    }
-                }
-
-                if (startIndex >= 0)
-                    ranges.Add(new ChunkRange(startIndex, upperBound));
-
-                return ranges;
             }
         }
     }

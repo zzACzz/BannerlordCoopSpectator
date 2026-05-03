@@ -382,6 +382,84 @@ namespace CoopSpectator.Network.Messages
     }
 
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
+    public sealed class CoopBattleSnapshotChunkRequestMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer TransmissionCompressionInfo = new CompressionInfo.Integer(0, 1048575, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer ChunkIndexCompressionInfo = new CompressionInfo.Integer(-1, CoopBattleSnapshotChunkV2Message.MaxChunkCount, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer ChunkCountCompressionInfo = new CompressionInfo.Integer(0, CoopBattleSnapshotChunkV2Message.MaxChunkCount, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer AssemblyStateCompressionInfo = new CompressionInfo.Integer(0, 3, maximumValueGiven: true);
+
+        public CoopBattleSnapshotChunkRequestMessage(
+            int transmissionId,
+            int startChunkIndex,
+            int endChunkIndex,
+            int highestContiguousChunkIndex,
+            int receivedChunkCount,
+            CoopBattleSnapshotAssemblyStateKind assemblyState)
+        {
+            TransmissionId = transmissionId;
+            StartChunkIndex = startChunkIndex;
+            EndChunkIndex = endChunkIndex;
+            HighestContiguousChunkIndex = highestContiguousChunkIndex;
+            ReceivedChunkCount = receivedChunkCount;
+            AssemblyState = assemblyState;
+        }
+
+        public CoopBattleSnapshotChunkRequestMessage()
+        {
+            TransmissionId = 0;
+            StartChunkIndex = 0;
+            EndChunkIndex = 0;
+            HighestContiguousChunkIndex = -1;
+            ReceivedChunkCount = 0;
+            AssemblyState = CoopBattleSnapshotAssemblyStateKind.Receiving;
+        }
+
+        public int TransmissionId { get; private set; }
+        public int StartChunkIndex { get; private set; }
+        public int EndChunkIndex { get; private set; }
+        public int HighestContiguousChunkIndex { get; private set; }
+        public int ReceivedChunkCount { get; private set; }
+        public CoopBattleSnapshotAssemblyStateKind AssemblyState { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool bufferReadValid = true;
+            TransmissionId = ReadIntFromPacket(TransmissionCompressionInfo, ref bufferReadValid);
+            StartChunkIndex = ReadIntFromPacket(ChunkIndexCompressionInfo, ref bufferReadValid);
+            EndChunkIndex = ReadIntFromPacket(ChunkIndexCompressionInfo, ref bufferReadValid);
+            HighestContiguousChunkIndex = ReadIntFromPacket(ChunkIndexCompressionInfo, ref bufferReadValid);
+            ReceivedChunkCount = ReadIntFromPacket(ChunkCountCompressionInfo, ref bufferReadValid);
+            AssemblyState = (CoopBattleSnapshotAssemblyStateKind)ReadIntFromPacket(AssemblyStateCompressionInfo, ref bufferReadValid);
+            return bufferReadValid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(TransmissionId, TransmissionCompressionInfo);
+            WriteIntToPacket(StartChunkIndex, ChunkIndexCompressionInfo);
+            WriteIntToPacket(EndChunkIndex, ChunkIndexCompressionInfo);
+            WriteIntToPacket(HighestContiguousChunkIndex, ChunkIndexCompressionInfo);
+            WriteIntToPacket(ReceivedChunkCount, ChunkCountCompressionInfo);
+            WriteIntToPacket((int)AssemblyState, AssemblyStateCompressionInfo);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter()
+        {
+            return MultiplayerMessageFilter.Mission;
+        }
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopBattleSnapshotChunkRequest TransmissionId=" + TransmissionId +
+                " Range=" + StartChunkIndex + "-" + EndChunkIndex +
+                " HighestContiguous=" + HighestContiguousChunkIndex +
+                " ReceivedChunkCount=" + ReceivedChunkCount +
+                " State=" + AssemblyState;
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
     public sealed class CoopBattleSnapshotRangeAckMessage : GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer TransmissionCompressionInfo = new CompressionInfo.Integer(0, 1048575, maximumValueGiven: true);
