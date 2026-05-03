@@ -101,7 +101,7 @@ namespace CoopSpectator.Network.Messages
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
     public sealed class CoopBattlePayloadChunkMessage : GameNetworkMessage
     {
-        public const int MaxChunkBytes = 1024;
+        public const int MaxChunkBytes = 256;
         public const int MaxChunkCount = 8191;
 
         private static readonly CompressionInfo.Integer PayloadKindCompressionInfo = new CompressionInfo.Integer(0, 1, maximumValueGiven: true);

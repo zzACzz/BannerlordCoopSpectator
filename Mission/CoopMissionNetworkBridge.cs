@@ -718,6 +718,15 @@ namespace CoopSpectator.MissionBehaviors
                 chunkBytes));
             GameNetwork.EndModuleEventAsServer();
             transportState.MarkChunkSent(chunkIndex, DateTime.UtcNow);
+            if (chunkIndex == 0)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: sent first V2 battle snapshot chunk. " +
+                    "Peer=" + (peer.UserName ?? "null") +
+                    " TransmissionId=" + transportState.TransmissionId +
+                    " ChunkCount=" + transportState.ChunkCount +
+                    " Bytes=" + chunkBytes.Length);
+            }
         }
 
         private void AcceptClientBattleSnapshotRangeAck(NetworkCommunicator peer, CoopBattleSnapshotRangeAckMessage message)
@@ -858,6 +867,14 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             assemblyState.AcceptChunk(message.ChunkIndex, message.PayloadBytes ?? Array.Empty<byte>(), DateTime.UtcNow);
+            if (message.ChunkIndex == 0)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: received first V2 battle snapshot chunk. " +
+                    "TransmissionId=" + message.TransmissionId +
+                    " ChunkCount=" + message.ChunkCount +
+                    " Bytes=" + (message.PayloadBytes?.Length ?? 0));
+            }
             if (assemblyState.ShouldSendProgressAck(BattleSnapshotRangeAckEveryNewChunks))
             {
                 SendClientBattleSnapshotRangeAck(assemblyState, CoopBattleSnapshotAssemblyStateKind.Receiving);
