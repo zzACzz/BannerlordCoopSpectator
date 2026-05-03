@@ -2412,6 +2412,9 @@ namespace CoopSpectator.MissionBehaviors
                 if (LastChunkRequestSentUtc == DateTime.MinValue)
                     return true;
 
+                if (HasIncompleteRequestedWindow)
+                    return false;
+
                 return desiredStartChunkIndex != LastRequestedStartChunkIndex ||
                        desiredEndChunkIndex != LastRequestedEndChunkIndex;
             }
@@ -2424,7 +2427,16 @@ namespace CoopSpectator.MissionBehaviors
                     return false;
 
                 int clampedWindowSize = Math.Max(1, requestWindowChunks);
-                int nextStartChunkIndex = Math.Max(0, HighestContiguousChunkIndex + 1);
+                if (HasIncompleteRequestedWindow)
+                {
+                    startChunkIndex = LastRequestedStartChunkIndex;
+                    endChunkIndex = LastRequestedEndChunkIndex;
+                    return endChunkIndex >= startChunkIndex;
+                }
+
+                int nextStartChunkIndex = LastRequestedEndChunkIndex >= 0
+                    ? LastRequestedEndChunkIndex + 1
+                    : Math.Max(0, HighestContiguousChunkIndex + 1);
                 if (nextStartChunkIndex >= ChunkCount)
                     return false;
 
@@ -2439,6 +2451,10 @@ namespace CoopSpectator.MissionBehaviors
                 LastRequestedStartChunkIndex = startChunkIndex;
                 LastRequestedEndChunkIndex = endChunkIndex;
             }
+
+            private bool HasIncompleteRequestedWindow =>
+                LastRequestedEndChunkIndex >= 0 &&
+                HighestContiguousChunkIndex < LastRequestedEndChunkIndex;
 
             public byte[] Combine()
             {
