@@ -651,8 +651,10 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             DateTime nowUtc = DateTime.UtcNow;
-            if (!transportState.ManifestSent ||
-                nowUtc - transportState.LastManifestSentUtc >= BattleSnapshotManifestRetryDelay)
+            bool shouldSendManifest = !transportState.ManifestSent ||
+                                      (transportState.AckedChunkCount <= 0 &&
+                                       nowUtc - transportState.LastManifestSentUtc >= BattleSnapshotManifestRetryDelay);
+            if (shouldSendManifest)
             {
                 SendBattleSnapshotManifest(peer, transportState);
             }
@@ -662,11 +664,17 @@ namespace CoopSpectator.MissionBehaviors
 
             int chunksSentThisTick = 0;
             while (chunksSentThisTick < MaxBattleSnapshotChunksPerPayloadPerTick &&
-                   transportState.CanSendMoreChunks)
+                   (transportState.CanSendQueuedResends || transportState.CanSendSequentialChunks))
             {
                 int nextChunkIndex;
-                if (transportState.TryDequeueResendChunk(out nextChunkIndex) ||
-                    transportState.TryReserveNextSequentialChunk(out nextChunkIndex))
+                if (transportState.TryDequeueResendChunk(out nextChunkIndex))
+                {
+                    SendBattleSnapshotChunkV2(peer, transportState, nextChunkIndex);
+                    chunksSentThisTick++;
+                    continue;
+                }
+
+                if (transportState.TryReserveNextSequentialChunk(out nextChunkIndex))
                 {
                     SendBattleSnapshotChunkV2(peer, transportState, nextChunkIndex);
                     chunksSentThisTick++;
@@ -1967,6 +1975,7 @@ namespace CoopSpectator.MissionBehaviors
         private sealed class BattleSnapshotTransportState
         {
             private readonly Queue<int> _pendingResendChunkIndexes = new Queue<int>();
+            private readonly HashSet<int> _queuedResendChunkIndexes = new HashSet<int>();
 
             private BattleSnapshotTransportState(
                 int peerIndex,
@@ -2025,10 +2034,13 @@ namespace CoopSpectator.MissionBehaviors
             public bool HasPendingResends => _pendingResendChunkIndexes.Count > 0;
             public bool IsCompleted => CompleteAckReceived;
             public int InflightChunkCount => Math.Max(0, SentChunkCount - AckedChunkCount);
-            public bool CanSendMoreChunks => !IsCompleted &&
-                                             ManifestSent &&
-                                             InflightChunkCount < MaxInflightChunks &&
-                                             (NextSequentialChunkIndex < ChunkCount || _pendingResendChunkIndexes.Count > 0);
+            public bool CanSendQueuedResends => !IsCompleted &&
+                                                ManifestSent &&
+                                                _pendingResendChunkIndexes.Count > 0;
+            public bool CanSendSequentialChunks => !IsCompleted &&
+                                                   ManifestSent &&
+                                                   InflightChunkCount < MaxInflightChunks &&
+                                                   NextSequentialChunkIndex < ChunkCount;
 
             public static BattleSnapshotTransportState Create(
                 int peerIndex,
@@ -2105,6 +2117,7 @@ namespace CoopSpectator.MissionBehaviors
                 while (_pendingResendChunkIndexes.Count > 0)
                 {
                     int candidate = _pendingResendChunkIndexes.Dequeue();
+                    _queuedResendChunkIndexes.Remove(candidate);
                     if (candidate < 0 || candidate >= ChunkCount)
                         continue;
                     if (AckedChunkFlags[candidate])
@@ -2177,11 +2190,9 @@ namespace CoopSpectator.MissionBehaviors
             public void MarkStalled(DateTime nowUtc)
             {
                 LastProgressUtc = nowUtc;
-                for (int chunkIndex = HighestContiguousChunkIndex + 1; chunkIndex < Math.Min(ChunkCount, NextSequentialChunkIndex); chunkIndex++)
-                {
-                    if (chunkIndex >= 0 && chunkIndex < ChunkCount && !AckedChunkFlags[chunkIndex])
-                        _pendingResendChunkIndexes.Enqueue(chunkIndex);
-                }
+                int stalledStartIndex = HighestContiguousChunkIndex + 1;
+                int stalledEndIndex = Math.Min(ChunkCount - 1, NextSequentialChunkIndex - 1);
+                QueueMissingRange(stalledStartIndex, stalledEndIndex);
             }
 
             public void ResetForRestart(DateTime nowUtc)
@@ -2200,6 +2211,7 @@ namespace CoopSpectator.MissionBehaviors
                 Array.Clear(SentChunkFlags, 0, SentChunkFlags.Length);
                 Array.Clear(AckedChunkFlags, 0, AckedChunkFlags.Length);
                 _pendingResendChunkIndexes.Clear();
+                _queuedResendChunkIndexes.Clear();
             }
 
             private void MarkRangeAcknowledged(int startIndex, int endIndex)
@@ -2228,7 +2240,7 @@ namespace CoopSpectator.MissionBehaviors
                 int clampedEnd = Math.Min(ChunkCount - 1, endIndex);
                 for (int index = clampedStart; index <= clampedEnd; index++)
                 {
-                    if (!AckedChunkFlags[index])
+                    if (!AckedChunkFlags[index] && _queuedResendChunkIndexes.Add(index))
                         _pendingResendChunkIndexes.Enqueue(index);
                 }
             }
