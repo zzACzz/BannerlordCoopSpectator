@@ -234,10 +234,20 @@ namespace CoopSpectator.MissionBehaviors
             TrySyncEntryStatusPayloads();
         }
 
+        public override void OnPreMissionTick(float dt)
+        {
+            base.OnPreMissionTick(dt);
+            TryRunClientBattleSnapshotRecoveryTick();
+        }
+
         public override void OnMissionTick(float dt)
         {
             base.OnMissionTick(dt);
+            TryRunClientBattleSnapshotRecoveryTick();
+        }
 
+        private void TryRunClientBattleSnapshotRecoveryTick()
+        {
             TryPersistHostedLocalPeerMarker();
 
             if (GameNetwork.IsClient && Mission != null)
