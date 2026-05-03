@@ -116,6 +116,59 @@ function Remove-DebugSymbols([string]$rootDir)
     Get-ChildItem -Path $rootDir -Recurse -File -Filter "*.pdb" | Remove-Item -Force
 }
 
+function Get-ProductVersion([string]$filePath)
+{
+    if (-not (Test-Path $filePath))
+    {
+        throw "Cannot read ProductVersion because file does not exist: $filePath"
+    }
+
+    return [System.Diagnostics.FileVersionInfo]::GetVersionInfo($filePath).ProductVersion
+}
+
+function Assert-PathExists([string]$targetPath, [string]$label)
+{
+    if (-not (Test-Path $targetPath))
+    {
+        throw "Release payload validation failed: missing $label at $targetPath"
+    }
+}
+
+function Assert-ProductVersionMatches([string]$expectedVersion, [string]$targetFile, [string]$label)
+{
+    $actualVersion = Get-ProductVersion $targetFile
+    if (-not [string]::Equals($expectedVersion, $actualVersion, [System.StringComparison]::Ordinal))
+    {
+        throw "Release payload validation failed: $label version mismatch. Expected=$expectedVersion Actual=$actualVersion File=$targetFile"
+    }
+}
+
+function Validate-LightReleasePayload([string]$lightRoot)
+{
+    $clientDll = Join-Path $lightRoot "CoopSpectator\bin\Win64_Shipping_Client\CoopSpectator.dll"
+    $dedicatedServerDll = Join-Path $lightRoot "CoopSpectatorDedicated\bin\Win64_Shipping_Server\CoopSpectator.dll"
+    $dedicatedClientDll = Join-Path $lightRoot "CoopSpectatorDedicated\bin\Win64_Shipping_Client\CoopSpectator.dll"
+    $dedicatedMultiplayerDll = Join-Path $lightRoot "CoopSpectatorDedicated\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll"
+
+    Assert-PathExists $clientDll "client CoopSpectator.dll"
+    Assert-PathExists $dedicatedServerDll "dedicated server CoopSpectator.dll"
+    Assert-PathExists $dedicatedClientDll "dedicated client CoopSpectator.dll"
+    Assert-PathExists $dedicatedMultiplayerDll "dedicated client TaleWorlds.MountAndBlade.Multiplayer.dll"
+
+    $expectedClientVersion = Get-ProductVersion (Join-Path $clientModuleSource "bin\Win64_Shipping_Client\CoopSpectator.dll")
+    $expectedDedicatedVersion = Get-ProductVersion (Join-Path $dedicatedModuleSource "bin\Win64_Shipping_Server\CoopSpectator.dll")
+    if (-not [string]::Equals($expectedClientVersion, $expectedDedicatedVersion, [System.StringComparison]::Ordinal))
+    {
+        throw "Release payload validation failed: source client/dedicated product versions do not match. Client=$expectedClientVersion Dedicated=$expectedDedicatedVersion"
+    }
+
+    Assert-ProductVersionMatches $expectedClientVersion $clientDll "client CoopSpectator.dll"
+    Assert-ProductVersionMatches $expectedDedicatedVersion $dedicatedServerDll "dedicated server CoopSpectator.dll"
+    Assert-ProductVersionMatches $expectedDedicatedVersion $dedicatedClientDll "dedicated client CoopSpectator.dll"
+
+    Write-Host ("Validated light release payload. ProductVersion={0}" -f $expectedClientVersion)
+}
+
 function Copy-HostPayload([string]$hostModulesDir, [bool]$includeBaseSceneModules)
 {
     $hostDedicatedModuleDir = Join-Path $hostModulesDir "CoopSpectatorDedicated"
@@ -204,6 +257,7 @@ New-Item -ItemType Directory -Path $lightReleaseDir -Force | Out-Null
 Copy-DirectoryContent $clientModuleSource (Join-Path $lightReleaseDir "CoopSpectator")
 Copy-HostPayload $lightReleaseDir $false
 Remove-DebugSymbols $lightReleaseDir
+Validate-LightReleasePayload $lightReleaseDir
 
 Compress-Archive -Path (Join-Path $lightReleaseDir "*") -DestinationPath $lightReleaseZip -CompressionLevel Optimal
 

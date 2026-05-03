@@ -1113,6 +1113,17 @@ namespace CoopSpectator.MissionBehaviors
             if (message == null || message.ChunkCount <= 0 || message.ChunkIndex < 0 || message.ChunkIndex >= message.ChunkCount)
                 return;
 
+            if (UseBattleSnapshotTransportV2 &&
+                message.PayloadKind == CoopBattlePayloadKind.BattleSnapshot &&
+                message.ChunkIndex == 0)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: legacy battle snapshot payload received while V2 transport is enabled. " +
+                    "TransmissionId=" + message.TransmissionId +
+                    " ChunkCount=" + message.ChunkCount +
+                    " Bytes=" + (message.PayloadBytes?.Length ?? 0));
+            }
+
             string assemblyKey = BuildAssemblyKey(message.PayloadKind, message.TransmissionId);
             bool createdAssembly = false;
             if (!_clientPayloadAssemblies.TryGetValue(assemblyKey, out PayloadAssemblyState assemblyState) ||
