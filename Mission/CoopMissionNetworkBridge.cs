@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.Network.Messages;
@@ -111,9 +112,18 @@ namespace CoopSpectator.MissionBehaviors
             NullValueHandling = NullValueHandling.Ignore,
             DefaultValueHandling = DefaultValueHandling.Ignore
         };
+        private static readonly bool UseBattleSnapshotTransportV2 = true;
+        private const int BattleSnapshotTransportSchemaVersion = 1;
         private const int MaxStatusChunksPerPayloadPerTick = 2;
         private const int MaxBattleSnapshotChunksPerPayloadPerTick = 8;
         private static readonly TimeSpan BattleSnapshotAckRetryDelay = TimeSpan.FromSeconds(6);
+        private static readonly TimeSpan BattleSnapshotManifestRetryDelay = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan BattleSnapshotRangeAckStallDelay = TimeSpan.FromSeconds(3);
+        private static readonly TimeSpan BattleSnapshotAssemblyIdleTimeout = TimeSpan.FromSeconds(15);
+        private const int BattleSnapshotInitialWindowChunks = 16;
+        private const int BattleSnapshotMaxInflightChunksPerPeer = 32;
+        private const int BattleSnapshotRangeAckEveryNewChunks = 8;
+        private const int BattleSnapshotMaxConcurrentHeavyPeers = 8;
 
         private readonly Dictionary<int, string> _lastSentStatusPayloadByPeer = new Dictionary<int, string>();
         private readonly Dictionary<int, string> _lastSentBattleSnapshotPayloadByPeer = new Dictionary<int, string>();
@@ -121,11 +131,15 @@ namespace CoopSpectator.MissionBehaviors
         private readonly Dictionary<int, DateTime> _lastBattleSnapshotRetryUtcByPeer = new Dictionary<int, DateTime>();
         private readonly Dictionary<string, PendingPayloadTransmission> _pendingPayloadsByKey = new Dictionary<string, PendingPayloadTransmission>(StringComparer.Ordinal);
         private readonly Dictionary<string, PayloadAssemblyState> _clientPayloadAssemblies = new Dictionary<string, PayloadAssemblyState>(StringComparer.Ordinal);
+        private readonly Dictionary<int, BattleSnapshotTransportState> _battleSnapshotTransportStatesByPeer = new Dictionary<int, BattleSnapshotTransportState>();
+        private readonly Dictionary<int, BattleSnapshotClientAssemblyState> _clientBattleSnapshotAssembliesByTransmission = new Dictionary<int, BattleSnapshotClientAssemblyState>();
         private static readonly Dictionary<int, int> _expectedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _acknowledgedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private string _cachedBattleSnapshotComparisonKey = string.Empty;
         private byte[] _cachedBattleSnapshotPayloadBytes = Array.Empty<byte>();
         private int _cachedBattleSnapshotLogicalBytes;
+        private string _cachedBattleSnapshotPayloadHash = string.Empty;
+        private CoopBattleSnapshotCompressionKind _cachedBattleSnapshotCompressionKind = CoopBattleSnapshotCompressionKind.None;
         private int _nextTransmissionId = 1;
         private bool _persistedHostedLocalPeerMarker;
 
@@ -134,12 +148,17 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsServer)
             {
                 registerer.RegisterBaseHandler<CoopBattleSelectionClientRequestMessage>(HandleClientSelectionRequest);
+                registerer.RegisterBaseHandler<CoopBattleSnapshotRangeAckMessage>(HandleClientBattleSnapshotRangeAck);
+                registerer.RegisterBaseHandler<CoopBattleSnapshotCompleteAckMessage>(HandleClientBattleSnapshotCompleteAck);
+                registerer.RegisterBaseHandler<CoopBattleSnapshotAbortMessage>(HandleClientBattleSnapshotAbort);
                 ModLogger.Info("CoopMissionNetworkBridge: registered server selection request handler.");
             }
 
             if (GameNetwork.IsClient)
             {
                 registerer.RegisterBaseHandler<CoopBattlePayloadChunkMessage>(HandleServerPayloadChunk);
+                registerer.RegisterBaseHandler<CoopBattleSnapshotManifestMessage>(HandleServerBattleSnapshotManifest);
+                registerer.RegisterBaseHandler<CoopBattleSnapshotChunkV2Message>(HandleServerBattleSnapshotChunkV2);
                 ModLogger.Info("CoopMissionNetworkBridge: registered client payload chunk handler.");
             }
         }
@@ -202,6 +221,7 @@ namespace CoopSpectator.MissionBehaviors
             _lastBattleSnapshotRetryUtcByPeer.Remove(networkPeer.Index);
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.EntryStatusSnapshot));
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.BattleSnapshot));
+            _battleSnapshotTransportStatesByPeer.Remove(networkPeer.Index);
             ClearPeerBattleSnapshotSyncState(networkPeer.Index);
         }
 
@@ -213,6 +233,8 @@ namespace CoopSpectator.MissionBehaviors
             _lastBattleSnapshotRetryUtcByPeer.Clear();
             _pendingPayloadsByKey.Clear();
             _clientPayloadAssemblies.Clear();
+            _battleSnapshotTransportStatesByPeer.Clear();
+            _clientBattleSnapshotAssembliesByTransmission.Clear();
             _expectedBattleSnapshotTransmissionIdByPeer.Clear();
             _acknowledgedBattleSnapshotTransmissionIdByPeer.Clear();
             base.OnRemoveBehavior();
@@ -279,6 +301,87 @@ namespace CoopSpectator.MissionBehaviors
             catch (Exception ex)
             {
                 ModLogger.Info("CoopMissionNetworkBridge: server payload chunk handling failed: " + ex.Message);
+            }
+        }
+
+        private bool HandleClientBattleSnapshotRangeAck(NetworkCommunicator peer, GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopBattleSnapshotRangeAckMessage message))
+                return false;
+
+            try
+            {
+                AcceptClientBattleSnapshotRangeAck(peer, message);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionNetworkBridge: client battle snapshot range ack handling failed: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private bool HandleClientBattleSnapshotCompleteAck(NetworkCommunicator peer, GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopBattleSnapshotCompleteAckMessage message))
+                return false;
+
+            try
+            {
+                AcceptClientBattleSnapshotCompleteAck(peer, message);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionNetworkBridge: client battle snapshot complete ack handling failed: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private bool HandleClientBattleSnapshotAbort(NetworkCommunicator peer, GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopBattleSnapshotAbortMessage message))
+                return false;
+
+            try
+            {
+                AcceptClientBattleSnapshotAbort(peer, message);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionNetworkBridge: client battle snapshot abort handling failed: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private void HandleServerBattleSnapshotManifest(GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopBattleSnapshotManifestMessage message))
+                return;
+
+            try
+            {
+                AcceptServerBattleSnapshotManifest(message);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionNetworkBridge: server battle snapshot manifest handling failed: " + ex.Message);
+            }
+        }
+
+        private void HandleServerBattleSnapshotChunkV2(GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopBattleSnapshotChunkV2Message message))
+                return;
+
+            try
+            {
+                AcceptServerBattleSnapshotChunkV2(message);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionNetworkBridge: server battle snapshot chunk V2 handling failed: " + ex.Message);
             }
         }
 
@@ -385,6 +488,12 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.NetworkPeers == null)
                 return;
 
+            if (UseBattleSnapshotTransportV2)
+            {
+                TrySyncBattleSnapshotPayloadsV2();
+                return;
+            }
+
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
                 if (!IsEligibleRemotePeer(peer))
@@ -394,6 +503,64 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 TrySendBattleSnapshotToPeer(peer, force: false);
+            }
+        }
+
+        private void TrySyncBattleSnapshotPayloadsV2()
+        {
+            BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            if (snapshot?.Sides == null || snapshot.Sides.Count <= 0)
+                return;
+
+            if (!TryGetBattleSnapshotTransmissionPayloadDescriptor(
+                    snapshot,
+                    out byte[] payloadBytes,
+                    out int logicalByteCount,
+                    out string comparisonKey,
+                    out string payloadHash,
+                    out CoopBattleSnapshotCompressionKind compressionKind))
+            {
+                return;
+            }
+
+            List<BattleSnapshotTransportState> activeStates = new List<BattleSnapshotTransportState>();
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (!IsEligibleRemotePeer(peer))
+                    continue;
+
+                BattleSnapshotTransportState transportState = GetOrCreateBattleSnapshotTransportState(
+                    peer,
+                    payloadBytes,
+                    logicalByteCount,
+                    comparisonKey,
+                    payloadHash,
+                    compressionKind);
+                if (transportState != null && !transportState.IsCompleted)
+                    activeStates.Add(transportState);
+            }
+
+            int concurrentHeavyPeers = 0;
+            foreach (BattleSnapshotTransportState transportState in activeStates
+                .OrderBy(state => state.ManifestSent ? 1 : 0)
+                .ThenBy(state => state.HasPendingResends ? 0 : 1)
+                .ThenBy(state => state.LastProgressUtc))
+            {
+                if (!_battleSnapshotTransportStatesByPeer.TryGetValue(transportState.PeerIndex, out BattleSnapshotTransportState currentState))
+                    continue;
+
+                NetworkCommunicator peer = GameNetwork.NetworkPeers.FirstOrDefault(candidate => candidate != null && candidate.Index == currentState.PeerIndex);
+                if (!IsEligibleRemotePeer(peer))
+                    continue;
+
+                if (!currentState.IsCompleted)
+                {
+                    concurrentHeavyPeers++;
+                    if (concurrentHeavyPeers > BattleSnapshotMaxConcurrentHeavyPeers)
+                        continue;
+                }
+
+                TryAdvanceBattleSnapshotTransportState(peer, currentState);
             }
         }
 
@@ -423,6 +590,306 @@ namespace CoopSpectator.MissionBehaviors
                 comparisonKey,
                 force,
                 _lastSentBattleSnapshotPayloadByPeer);
+        }
+
+        private BattleSnapshotTransportState GetOrCreateBattleSnapshotTransportState(
+            NetworkCommunicator peer,
+            byte[] payloadBytes,
+            int logicalByteCount,
+            string comparisonKey,
+            string payloadHash,
+            CoopBattleSnapshotCompressionKind compressionKind)
+        {
+            if (!IsEligibleRemotePeer(peer) ||
+                payloadBytes == null ||
+                payloadBytes.Length <= 0 ||
+                string.IsNullOrWhiteSpace(comparisonKey))
+            {
+                return null;
+            }
+
+            if (_battleSnapshotTransportStatesByPeer.TryGetValue(peer.Index, out BattleSnapshotTransportState existingState) &&
+                existingState != null &&
+                string.Equals(existingState.ComparisonKey, comparisonKey, StringComparison.Ordinal))
+            {
+                return existingState;
+            }
+
+            BattleSnapshotTransportState newState = BattleSnapshotTransportState.Create(
+                peer.Index,
+                payloadBytes,
+                logicalByteCount,
+                comparisonKey,
+                payloadHash,
+                compressionKind,
+                NextTransmissionId(),
+                BattleSnapshotInitialWindowChunks,
+                BattleSnapshotMaxInflightChunksPerPeer);
+            if (newState == null)
+                return null;
+
+            _battleSnapshotTransportStatesByPeer[peer.Index] = newState;
+            RegisterExpectedBattleSnapshotTransmission(peer.Index, newState.TransmissionId);
+            _acknowledgedBattleSnapshotTransmissionIdByPeer.Remove(peer.Index);
+            _lastCompletedBattleSnapshotTransmissionUtcByPeer.Remove(peer.Index);
+            _lastBattleSnapshotRetryUtcByPeer.Remove(peer.Index);
+            _lastSentBattleSnapshotPayloadByPeer[peer.Index] = comparisonKey;
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: initialized V2 battle snapshot transport state. " +
+                "Peer=" + (peer.UserName ?? "null") +
+                " TransmissionId=" + newState.TransmissionId +
+                " LogicalBytes=" + newState.LogicalBytes +
+                " WireBytes=" + newState.TotalBytes +
+                " ChunkCount=" + newState.ChunkCount +
+                " ChunkBytes=" + CoopBattleSnapshotChunkV2Message.MaxChunkBytes);
+            return newState;
+        }
+
+        private void TryAdvanceBattleSnapshotTransportState(NetworkCommunicator peer, BattleSnapshotTransportState transportState)
+        {
+            if (!IsEligibleRemotePeer(peer) || transportState == null || transportState.IsCompleted)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (!transportState.ManifestSent ||
+                nowUtc - transportState.LastManifestSentUtc >= BattleSnapshotManifestRetryDelay)
+            {
+                SendBattleSnapshotManifest(peer, transportState);
+            }
+
+            if (nowUtc - transportState.LastProgressUtc >= BattleSnapshotRangeAckStallDelay)
+                transportState.MarkStalled(nowUtc);
+
+            int chunksSentThisTick = 0;
+            while (chunksSentThisTick < MaxBattleSnapshotChunksPerPayloadPerTick &&
+                   transportState.CanSendMoreChunks)
+            {
+                int nextChunkIndex;
+                if (transportState.TryDequeueResendChunk(out nextChunkIndex) ||
+                    transportState.TryReserveNextSequentialChunk(out nextChunkIndex))
+                {
+                    SendBattleSnapshotChunkV2(peer, transportState, nextChunkIndex);
+                    chunksSentThisTick++;
+                    continue;
+                }
+
+                break;
+            }
+        }
+
+        private static void SendBattleSnapshotManifest(NetworkCommunicator peer, BattleSnapshotTransportState transportState)
+        {
+            if (peer == null || transportState == null)
+                return;
+
+            GameNetwork.BeginModuleEventAsServer(peer);
+            GameNetwork.WriteMessage(new CoopBattleSnapshotManifestMessage(
+                transportState.TransmissionId,
+                BattleSnapshotTransportSchemaVersion,
+                CoopBattleSnapshotPayloadEncoding.JsonUtf8,
+                transportState.CompressionKind,
+                transportState.LogicalBytes,
+                transportState.TotalBytes,
+                CoopBattleSnapshotChunkV2Message.MaxChunkBytes,
+                transportState.ChunkCount,
+                transportState.ComparisonKey,
+                transportState.PayloadHash));
+            GameNetwork.EndModuleEventAsServer();
+            transportState.MarkManifestSent(DateTime.UtcNow);
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: sent V2 battle snapshot manifest. " +
+                "Peer=" + (peer.UserName ?? "null") +
+                " TransmissionId=" + transportState.TransmissionId +
+                " ChunkCount=" + transportState.ChunkCount +
+                " WireBytes=" + transportState.TotalBytes);
+        }
+
+        private static void SendBattleSnapshotChunkV2(NetworkCommunicator peer, BattleSnapshotTransportState transportState, int chunkIndex)
+        {
+            if (peer == null || transportState == null || chunkIndex < 0 || chunkIndex >= transportState.ChunkCount)
+                return;
+
+            byte[] chunkBytes = transportState.Chunks[chunkIndex] ?? Array.Empty<byte>();
+            GameNetwork.BeginModuleEventAsServer(peer);
+            GameNetwork.WriteMessage(new CoopBattleSnapshotChunkV2Message(
+                transportState.TransmissionId,
+                chunkIndex,
+                transportState.ChunkCount,
+                chunkBytes));
+            GameNetwork.EndModuleEventAsServer();
+            transportState.MarkChunkSent(chunkIndex, DateTime.UtcNow);
+        }
+
+        private void AcceptClientBattleSnapshotRangeAck(NetworkCommunicator peer, CoopBattleSnapshotRangeAckMessage message)
+        {
+            if (peer == null || message == null)
+                return;
+
+            if (!_battleSnapshotTransportStatesByPeer.TryGetValue(peer.Index, out BattleSnapshotTransportState transportState) ||
+                transportState == null ||
+                transportState.TransmissionId != message.TransmissionId)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: ignored V2 battle snapshot range ack with unknown transmission. " +
+                    "Peer=" + (peer.UserName ?? "null") +
+                    " TransmissionId=" + message.TransmissionId);
+                return;
+            }
+
+            transportState.ApplyRangeAck(
+                message.HighestContiguousChunkIndex,
+                ParseChunkRanges(message.ReceivedRanges),
+                ParseChunkRanges(message.MissingRanges),
+                DateTime.UtcNow);
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: applied V2 battle snapshot range ack. " +
+                "Peer=" + (peer.UserName ?? "null") +
+                " TransmissionId=" + message.TransmissionId +
+                " HighestContiguous=" + message.HighestContiguousChunkIndex +
+                " ReceivedChunkCount=" + message.ReceivedChunkCount +
+                " MissingRanges=" + (message.MissingRanges ?? string.Empty) +
+                " AckedChunkCount=" + transportState.AckedChunkCount);
+        }
+
+        private void AcceptClientBattleSnapshotCompleteAck(NetworkCommunicator peer, CoopBattleSnapshotCompleteAckMessage message)
+        {
+            if (peer == null || message == null)
+                return;
+
+            if (!_battleSnapshotTransportStatesByPeer.TryGetValue(peer.Index, out BattleSnapshotTransportState transportState) ||
+                transportState == null ||
+                transportState.TransmissionId != message.TransmissionId)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: ignored V2 battle snapshot complete ack with unknown transmission. " +
+                    "Peer=" + (peer.UserName ?? "null") +
+                    " TransmissionId=" + message.TransmissionId);
+                return;
+            }
+
+            bool hashMatched = string.IsNullOrWhiteSpace(message.PayloadHash) ||
+                               string.Equals(message.PayloadHash, transportState.PayloadHash, StringComparison.Ordinal);
+            transportState.MarkCompleted(message.AppliedSuccessfully && hashMatched, DateTime.UtcNow);
+            _acknowledgedBattleSnapshotTransmissionIdByPeer[peer.Index] = message.TransmissionId;
+            _lastCompletedBattleSnapshotTransmissionUtcByPeer.Remove(peer.Index);
+            _lastBattleSnapshotRetryUtcByPeer.Remove(peer.Index);
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: acknowledged V2 battle snapshot completion. " +
+                "Peer=" + (peer.UserName ?? "null") +
+                " TransmissionId=" + message.TransmissionId +
+                " AppliedSuccessfully=" + message.AppliedSuccessfully +
+                " HashMatched=" + hashMatched);
+            TrySendEntryStatusToPeer(peer, force: true);
+        }
+
+        private void AcceptClientBattleSnapshotAbort(NetworkCommunicator peer, CoopBattleSnapshotAbortMessage message)
+        {
+            if (peer == null || message == null)
+                return;
+
+            if (!_battleSnapshotTransportStatesByPeer.TryGetValue(peer.Index, out BattleSnapshotTransportState transportState) ||
+                transportState == null ||
+                transportState.TransmissionId != message.TransmissionId)
+            {
+                return;
+            }
+
+            transportState.ResetForRestart(DateTime.UtcNow);
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: client aborted V2 battle snapshot transport. " +
+                "Peer=" + (peer.UserName ?? "null") +
+                " TransmissionId=" + message.TransmissionId +
+                " Reason=" + (message.Reason ?? string.Empty));
+        }
+
+        private void AcceptServerBattleSnapshotManifest(CoopBattleSnapshotManifestMessage message)
+        {
+            if (message == null || message.TransmissionId <= 0)
+                return;
+
+            foreach (int staleTransmissionId in _clientBattleSnapshotAssembliesByTransmission.Keys
+                .Where(existingTransmissionId => existingTransmissionId != message.TransmissionId)
+                .ToArray())
+            {
+                _clientBattleSnapshotAssembliesByTransmission.Remove(staleTransmissionId);
+            }
+
+            if (_clientBattleSnapshotAssembliesByTransmission.TryGetValue(message.TransmissionId, out BattleSnapshotClientAssemblyState existingState) &&
+                existingState != null &&
+                existingState.ChunkCount == message.ChunkCount &&
+                string.Equals(existingState.PayloadHash, message.PayloadHash, StringComparison.Ordinal))
+            {
+                existingState.MarkManifestObserved(DateTime.UtcNow);
+                return;
+            }
+
+            BattleSnapshotClientAssemblyState assemblyState = new BattleSnapshotClientAssemblyState(
+                message.TransmissionId,
+                message.ChunkCount,
+                message.LogicalBytes,
+                message.WireBytes,
+                message.ComparisonKey,
+                message.PayloadHash,
+                message.PayloadEncoding,
+                message.CompressionKind);
+            _clientBattleSnapshotAssembliesByTransmission[message.TransmissionId] = assemblyState;
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: received V2 battle snapshot manifest. " +
+                "TransmissionId=" + message.TransmissionId +
+                " ChunkCount=" + message.ChunkCount +
+                " WireBytes=" + message.WireBytes +
+                " LogicalBytes=" + message.LogicalBytes);
+        }
+
+        private void AcceptServerBattleSnapshotChunkV2(CoopBattleSnapshotChunkV2Message message)
+        {
+            if (message == null || message.TransmissionId <= 0 || message.ChunkCount <= 0)
+                return;
+
+            if (!_clientBattleSnapshotAssembliesByTransmission.TryGetValue(message.TransmissionId, out BattleSnapshotClientAssemblyState assemblyState) ||
+                assemblyState == null)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: received V2 battle snapshot chunk before manifest. " +
+                    "TransmissionId=" + message.TransmissionId +
+                    " ChunkIndex=" + message.ChunkIndex +
+                    " ChunkCount=" + message.ChunkCount);
+                return;
+            }
+
+            assemblyState.AcceptChunk(message.ChunkIndex, message.PayloadBytes ?? Array.Empty<byte>(), DateTime.UtcNow);
+            if (assemblyState.ShouldSendProgressAck(BattleSnapshotRangeAckEveryNewChunks))
+            {
+                SendClientBattleSnapshotRangeAck(assemblyState, CoopBattleSnapshotAssemblyStateKind.Receiving);
+            }
+
+            if (!assemblyState.IsComplete)
+                return;
+
+            byte[] payloadBytes = assemblyState.Combine();
+            if (!TryDecodeBattleSnapshotPayloadJson(assemblyState, payloadBytes, out string payloadJson))
+            {
+                SendClientBattleSnapshotAbort(assemblyState.TransmissionId, "decode-failed");
+                return;
+            }
+
+            BattleSnapshotMessage snapshot =
+                JsonConvert.DeserializeObject<BattleSnapshotMessage>(payloadJson, JsonSettings);
+            if (snapshot == null)
+            {
+                SendClientBattleSnapshotAbort(assemblyState.TransmissionId, "deserialize-failed");
+                return;
+            }
+
+            BattleSnapshotRuntimeState.SetCurrent(snapshot, "CoopMissionNetworkBridge.V2");
+            _clientBattleSnapshotAssembliesByTransmission.Remove(assemblyState.TransmissionId);
+            SendClientBattleSnapshotRangeAck(assemblyState, CoopBattleSnapshotAssemblyStateKind.Complete);
+            SendClientBattleSnapshotCompleteAck(assemblyState.TransmissionId, assemblyState.PayloadHash, appliedSuccessfully: true);
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: applied V2 battle snapshot payload on client. " +
+                "TransmissionId=" + assemblyState.TransmissionId +
+                " BattleId=" + (snapshot.BattleId ?? string.Empty) +
+                " Sides=" + (snapshot.Sides?.Count ?? 0));
         }
 
         private void TryQueueOrContinuePayloadTransmission(
@@ -805,8 +1272,27 @@ namespace CoopSpectator.MissionBehaviors
             out int logicalByteCount,
             out string comparisonKey)
         {
+            return TryGetBattleSnapshotTransmissionPayloadDescriptor(
+                snapshot,
+                out payloadBytes,
+                out logicalByteCount,
+                out comparisonKey,
+                out _,
+                out _);
+        }
+
+        private bool TryGetBattleSnapshotTransmissionPayloadDescriptor(
+            BattleSnapshotMessage snapshot,
+            out byte[] payloadBytes,
+            out int logicalByteCount,
+            out string comparisonKey,
+            out string payloadHash,
+            out CoopBattleSnapshotCompressionKind compressionKind)
+        {
             payloadBytes = Array.Empty<byte>();
             logicalByteCount = 0;
+            payloadHash = string.Empty;
+            compressionKind = CoopBattleSnapshotCompressionKind.None;
             comparisonKey = BuildBattleSnapshotComparisonKey(snapshot, BattleSnapshotRuntimeState.GetUpdatedUtc());
             if (string.IsNullOrWhiteSpace(comparisonKey))
                 return false;
@@ -817,6 +1303,8 @@ namespace CoopSpectator.MissionBehaviors
             {
                 payloadBytes = _cachedBattleSnapshotPayloadBytes;
                 logicalByteCount = _cachedBattleSnapshotLogicalBytes;
+                payloadHash = _cachedBattleSnapshotPayloadHash;
+                compressionKind = _cachedBattleSnapshotCompressionKind;
                 return true;
             }
 
@@ -831,10 +1319,14 @@ namespace CoopSpectator.MissionBehaviors
             byte[] wireBytes = CompressPayload(rawBytes, out bool compressed);
             payloadBytes = wireBytes ?? rawBytes;
             logicalByteCount = rawBytes.Length;
+            compressionKind = compressed ? CoopBattleSnapshotCompressionKind.Gzip : CoopBattleSnapshotCompressionKind.None;
+            payloadHash = ComputePayloadHash(payloadBytes);
 
             _cachedBattleSnapshotComparisonKey = comparisonKey;
             _cachedBattleSnapshotPayloadBytes = payloadBytes;
             _cachedBattleSnapshotLogicalBytes = logicalByteCount;
+            _cachedBattleSnapshotPayloadHash = payloadHash;
+            _cachedBattleSnapshotCompressionKind = compressionKind;
 
             int chunkCount = Math.Max(1, (payloadBytes.Length + CoopBattlePayloadChunkMessage.MaxChunkBytes - 1) / CoopBattlePayloadChunkMessage.MaxChunkBytes);
             ModLogger.Info(
@@ -905,6 +1397,21 @@ namespace CoopSpectator.MissionBehaviors
             return rawBytes;
         }
 
+        private static string ComputePayloadHash(byte[] payloadBytes)
+        {
+            if (payloadBytes == null || payloadBytes.Length <= 0)
+                return string.Empty;
+
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                byte[] hashBytes = sha256.ComputeHash(payloadBytes);
+                var builder = new StringBuilder(hashBytes.Length * 2);
+                for (int i = 0; i < hashBytes.Length; i++)
+                    builder.Append(hashBytes[i].ToString("x2"));
+                return builder.ToString();
+            }
+        }
+
         private static bool TryDecodePayloadJson(CoopBattlePayloadKind payloadKind, byte[] payloadBytes, out string payloadJson)
         {
             payloadJson = string.Empty;
@@ -933,6 +1440,144 @@ namespace CoopSpectator.MissionBehaviors
 
             payloadJson = decodedBytes.Length <= 0 ? string.Empty : Encoding.UTF8.GetString(decodedBytes);
             return !string.IsNullOrWhiteSpace(payloadJson);
+        }
+
+        private static bool TryDecodeBattleSnapshotPayloadJson(
+            BattleSnapshotClientAssemblyState assemblyState,
+            byte[] payloadBytes,
+            out string payloadJson)
+        {
+            payloadJson = string.Empty;
+            if (assemblyState == null || payloadBytes == null || payloadBytes.Length <= 0)
+                return false;
+
+            byte[] decodedBytes = payloadBytes;
+            if (assemblyState.CompressionKind == CoopBattleSnapshotCompressionKind.Gzip)
+            {
+                try
+                {
+                    using (var input = new MemoryStream(payloadBytes))
+                    using (var gzip = new GZipStream(input, CompressionMode.Decompress))
+                    using (var output = new MemoryStream())
+                    {
+                        gzip.CopyTo(output);
+                        decodedBytes = output.ToArray();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("CoopMissionNetworkBridge: V2 battle snapshot decompression failed. Error=" + ex.Message);
+                    return false;
+                }
+            }
+
+            payloadJson = decodedBytes.Length <= 0 ? string.Empty : Encoding.UTF8.GetString(decodedBytes);
+            return !string.IsNullOrWhiteSpace(payloadJson);
+        }
+
+        private static string BuildChunkRangesString(IEnumerable<ChunkRange> ranges)
+        {
+            if (ranges == null)
+                return string.Empty;
+
+            return string.Join(",",
+                ranges
+                    .Where(range => range.EndIndex >= range.StartIndex)
+                    .Select(range => range.StartIndex == range.EndIndex
+                        ? range.StartIndex.ToString()
+                        : range.StartIndex + "-" + range.EndIndex));
+        }
+
+        private static List<ChunkRange> ParseChunkRanges(string rawValue)
+        {
+            var ranges = new List<ChunkRange>();
+            if (string.IsNullOrWhiteSpace(rawValue))
+                return ranges;
+
+            string[] parts = rawValue.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string rawPart in parts)
+            {
+                string part = rawPart.Trim();
+                if (part.Length <= 0)
+                    continue;
+
+                int separatorIndex = part.IndexOf('-');
+                if (separatorIndex < 0)
+                {
+                    if (int.TryParse(part, out int singleIndex))
+                        ranges.Add(new ChunkRange(singleIndex, singleIndex));
+                    continue;
+                }
+
+                string startRaw = part.Substring(0, separatorIndex);
+                string endRaw = part.Substring(separatorIndex + 1);
+                if (int.TryParse(startRaw, out int startIndex) && int.TryParse(endRaw, out int endIndex))
+                    ranges.Add(new ChunkRange(startIndex, endIndex));
+            }
+
+            return ranges;
+        }
+
+        private static void SendClientBattleSnapshotRangeAck(
+            BattleSnapshotClientAssemblyState assemblyState,
+            CoopBattleSnapshotAssemblyStateKind assemblyStateKind)
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive || assemblyState == null)
+                return;
+
+            try
+            {
+                List<ChunkRange> receivedRanges = assemblyState.GetReceivedRanges();
+                List<ChunkRange> missingRanges = assemblyState.GetMissingRangesWithinWindow();
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(new CoopBattleSnapshotRangeAckMessage(
+                    assemblyState.TransmissionId,
+                    assemblyState.HighestContiguousChunkIndex,
+                    assemblyState.ReceivedChunkCount,
+                    BuildChunkRangesString(receivedRanges),
+                    BuildChunkRangesString(missingRanges),
+                    assemblyStateKind));
+                GameNetwork.EndModuleEventAsClient();
+                assemblyState.MarkRangeAckSent();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionNetworkBridge: client V2 battle snapshot range ack send failed. Error=" + ex.Message);
+            }
+        }
+
+        private static void SendClientBattleSnapshotCompleteAck(int transmissionId, string payloadHash, bool appliedSuccessfully)
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive || transmissionId <= 0)
+                return;
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(new CoopBattleSnapshotCompleteAckMessage(transmissionId, appliedSuccessfully, payloadHash));
+                GameNetwork.EndModuleEventAsClient();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionNetworkBridge: client V2 battle snapshot complete ack send failed. Error=" + ex.Message);
+            }
+        }
+
+        private static void SendClientBattleSnapshotAbort(int transmissionId, string reason)
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive || transmissionId <= 0)
+                return;
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(new CoopBattleSnapshotAbortMessage(transmissionId, reason));
+                GameNetwork.EndModuleEventAsClient();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionNetworkBridge: client V2 battle snapshot abort send failed. Error=" + ex.Message);
+            }
         }
 
         private PendingPayloadTransmission CreateEntryStatusPendingTransmission(
@@ -1276,6 +1921,449 @@ namespace CoopSpectator.MissionBehaviors
                     comparisonKey,
                     chunks,
                     payloadBytes.Length);
+            }
+        }
+
+        private readonly struct ChunkRange
+        {
+            public ChunkRange(int startIndex, int endIndex)
+            {
+                StartIndex = startIndex;
+                EndIndex = endIndex;
+            }
+
+            public int StartIndex { get; }
+            public int EndIndex { get; }
+        }
+
+        private sealed class BattleSnapshotTransportState
+        {
+            private readonly Queue<int> _pendingResendChunkIndexes = new Queue<int>();
+
+            private BattleSnapshotTransportState(
+                int peerIndex,
+                int transmissionId,
+                int logicalBytes,
+                string comparisonKey,
+                string payloadHash,
+                CoopBattleSnapshotCompressionKind compressionKind,
+                byte[][] chunks,
+                int totalBytes,
+                int initialWindowChunks,
+                int maxInflightChunks)
+            {
+                PeerIndex = peerIndex;
+                TransmissionId = transmissionId;
+                LogicalBytes = logicalBytes;
+                ComparisonKey = comparisonKey ?? string.Empty;
+                PayloadHash = payloadHash ?? string.Empty;
+                CompressionKind = compressionKind;
+                Chunks = chunks ?? Array.Empty<byte[]>();
+                TotalBytes = totalBytes;
+                SentChunkFlags = new bool[Chunks.Length];
+                AckedChunkFlags = new bool[Chunks.Length];
+                CreatedUtc = DateTime.UtcNow;
+                LastProgressUtc = CreatedUtc;
+                HighestContiguousChunkIndex = -1;
+                InitialWindowChunks = Math.Max(1, initialWindowChunks);
+                MaxInflightChunks = Math.Max(1, maxInflightChunks);
+            }
+
+            public int PeerIndex { get; }
+            public int TransmissionId { get; }
+            public int LogicalBytes { get; }
+            public string ComparisonKey { get; }
+            public string PayloadHash { get; }
+            public CoopBattleSnapshotCompressionKind CompressionKind { get; }
+            public byte[][] Chunks { get; }
+            public int TotalBytes { get; }
+            public int ChunkCount => Chunks.Length;
+            public bool[] SentChunkFlags { get; }
+            public bool[] AckedChunkFlags { get; }
+            public int SentChunkCount { get; private set; }
+            public int AckedChunkCount { get; private set; }
+            public int NextSequentialChunkIndex { get; private set; }
+            public int HighestContiguousChunkIndex { get; private set; }
+            public DateTime CreatedUtc { get; }
+            public DateTime LastManifestSentUtc { get; private set; }
+            public DateTime LastChunkSentUtc { get; private set; }
+            public DateTime LastProgressUtc { get; private set; }
+            public DateTime LastRangeAckUtc { get; private set; }
+            public bool ManifestSent { get; private set; }
+            public bool CompleteAckReceived { get; private set; }
+            public bool AppliedSuccessfully { get; private set; }
+            public int InitialWindowChunks { get; }
+            public int MaxInflightChunks { get; }
+            public bool HasPendingResends => _pendingResendChunkIndexes.Count > 0;
+            public bool IsCompleted => CompleteAckReceived;
+            public int InflightChunkCount => Math.Max(0, SentChunkCount - AckedChunkCount);
+            public bool CanSendMoreChunks => !IsCompleted &&
+                                             ManifestSent &&
+                                             InflightChunkCount < MaxInflightChunks &&
+                                             (NextSequentialChunkIndex < ChunkCount || _pendingResendChunkIndexes.Count > 0);
+
+            public static BattleSnapshotTransportState Create(
+                int peerIndex,
+                byte[] payloadBytes,
+                int logicalByteCount,
+                string comparisonKey,
+                string payloadHash,
+                CoopBattleSnapshotCompressionKind compressionKind,
+                int transmissionId,
+                int initialWindowChunks,
+                int maxInflightChunks)
+            {
+                if (payloadBytes == null || payloadBytes.Length <= 0)
+                    return null;
+
+                int chunkCount = Math.Max(1, (payloadBytes.Length + CoopBattleSnapshotChunkV2Message.MaxChunkBytes - 1) / CoopBattleSnapshotChunkV2Message.MaxChunkBytes);
+                if (chunkCount > CoopBattleSnapshotChunkV2Message.MaxChunkCount)
+                {
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: V2 battle snapshot payload too large for chunk transport. " +
+                        "PeerIndex=" + peerIndex +
+                        " Bytes=" + payloadBytes.Length +
+                        " Chunks=" + chunkCount);
+                    return null;
+                }
+
+                byte[][] chunks = new byte[chunkCount][];
+                for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+                {
+                    int chunkOffset = chunkIndex * CoopBattleSnapshotChunkV2Message.MaxChunkBytes;
+                    int chunkLength = Math.Min(CoopBattleSnapshotChunkV2Message.MaxChunkBytes, payloadBytes.Length - chunkOffset);
+                    byte[] chunkBytes = chunkLength > 0 ? new byte[chunkLength] : Array.Empty<byte>();
+                    if (chunkLength > 0)
+                        Buffer.BlockCopy(payloadBytes, chunkOffset, chunkBytes, 0, chunkLength);
+                    chunks[chunkIndex] = chunkBytes;
+                }
+
+                return new BattleSnapshotTransportState(
+                    peerIndex,
+                    transmissionId,
+                    logicalByteCount,
+                    comparisonKey,
+                    payloadHash,
+                    compressionKind,
+                    chunks,
+                    payloadBytes.Length,
+                    initialWindowChunks,
+                    maxInflightChunks);
+            }
+
+            public void MarkManifestSent(DateTime nowUtc)
+            {
+                ManifestSent = true;
+                LastManifestSentUtc = nowUtc;
+            }
+
+            public void MarkChunkSent(int chunkIndex, DateTime nowUtc)
+            {
+                if (chunkIndex < 0 || chunkIndex >= ChunkCount)
+                    return;
+
+                if (!SentChunkFlags[chunkIndex])
+                {
+                    SentChunkFlags[chunkIndex] = true;
+                    SentChunkCount++;
+                }
+
+                LastChunkSentUtc = nowUtc;
+                LastProgressUtc = nowUtc;
+            }
+
+            public bool TryDequeueResendChunk(out int chunkIndex)
+            {
+                while (_pendingResendChunkIndexes.Count > 0)
+                {
+                    int candidate = _pendingResendChunkIndexes.Dequeue();
+                    if (candidate < 0 || candidate >= ChunkCount)
+                        continue;
+                    if (AckedChunkFlags[candidate])
+                        continue;
+
+                    chunkIndex = candidate;
+                    return true;
+                }
+
+                chunkIndex = -1;
+                return false;
+            }
+
+            public bool TryReserveNextSequentialChunk(out int chunkIndex)
+            {
+                int upperBoundExclusive = Math.Min(ChunkCount, HighestContiguousChunkIndex + 1 + InitialWindowChunks);
+                if (NextSequentialChunkIndex >= ChunkCount)
+                {
+                    chunkIndex = -1;
+                    return false;
+                }
+
+                if (NextSequentialChunkIndex >= upperBoundExclusive && InflightChunkCount >= InitialWindowChunks)
+                {
+                    chunkIndex = -1;
+                    return false;
+                }
+
+                chunkIndex = NextSequentialChunkIndex;
+                NextSequentialChunkIndex++;
+                return true;
+            }
+
+            public void ApplyRangeAck(
+                int highestContiguousChunkIndex,
+                List<ChunkRange> receivedRanges,
+                List<ChunkRange> missingRanges,
+                DateTime nowUtc)
+            {
+                LastRangeAckUtc = nowUtc;
+                LastProgressUtc = nowUtc;
+
+                if (highestContiguousChunkIndex > HighestContiguousChunkIndex)
+                    HighestContiguousChunkIndex = Math.Min(highestContiguousChunkIndex, ChunkCount - 1);
+
+                MarkRangeAcknowledged(0, HighestContiguousChunkIndex);
+
+                if (receivedRanges != null)
+                {
+                    foreach (ChunkRange range in receivedRanges)
+                        MarkRangeAcknowledged(range.StartIndex, range.EndIndex);
+                }
+
+                if (missingRanges != null)
+                {
+                    foreach (ChunkRange range in missingRanges)
+                        QueueMissingRange(range.StartIndex, range.EndIndex);
+                }
+            }
+
+            public void MarkCompleted(bool appliedSuccessfully, DateTime nowUtc)
+            {
+                CompleteAckReceived = true;
+                AppliedSuccessfully = appliedSuccessfully;
+                LastProgressUtc = nowUtc;
+                LastRangeAckUtc = nowUtc;
+                MarkRangeAcknowledged(0, ChunkCount - 1);
+            }
+
+            public void MarkStalled(DateTime nowUtc)
+            {
+                LastProgressUtc = nowUtc;
+                for (int chunkIndex = HighestContiguousChunkIndex + 1; chunkIndex < Math.Min(ChunkCount, NextSequentialChunkIndex); chunkIndex++)
+                {
+                    if (chunkIndex >= 0 && chunkIndex < ChunkCount && !AckedChunkFlags[chunkIndex])
+                        _pendingResendChunkIndexes.Enqueue(chunkIndex);
+                }
+            }
+
+            public void ResetForRestart(DateTime nowUtc)
+            {
+                ManifestSent = false;
+                LastManifestSentUtc = DateTime.MinValue;
+                LastChunkSentUtc = DateTime.MinValue;
+                LastProgressUtc = nowUtc;
+                LastRangeAckUtc = DateTime.MinValue;
+                SentChunkCount = 0;
+                AckedChunkCount = 0;
+                NextSequentialChunkIndex = 0;
+                HighestContiguousChunkIndex = -1;
+                CompleteAckReceived = false;
+                AppliedSuccessfully = false;
+                Array.Clear(SentChunkFlags, 0, SentChunkFlags.Length);
+                Array.Clear(AckedChunkFlags, 0, AckedChunkFlags.Length);
+                _pendingResendChunkIndexes.Clear();
+            }
+
+            private void MarkRangeAcknowledged(int startIndex, int endIndex)
+            {
+                if (ChunkCount <= 0)
+                    return;
+
+                int clampedStart = Math.Max(0, startIndex);
+                int clampedEnd = Math.Min(ChunkCount - 1, endIndex);
+                for (int index = clampedStart; index <= clampedEnd; index++)
+                {
+                    if (AckedChunkFlags[index])
+                        continue;
+
+                    AckedChunkFlags[index] = true;
+                    AckedChunkCount++;
+                }
+            }
+
+            private void QueueMissingRange(int startIndex, int endIndex)
+            {
+                if (ChunkCount <= 0)
+                    return;
+
+                int clampedStart = Math.Max(0, startIndex);
+                int clampedEnd = Math.Min(ChunkCount - 1, endIndex);
+                for (int index = clampedStart; index <= clampedEnd; index++)
+                {
+                    if (!AckedChunkFlags[index])
+                        _pendingResendChunkIndexes.Enqueue(index);
+                }
+            }
+        }
+
+        private sealed class BattleSnapshotClientAssemblyState
+        {
+            private int _newChunksSinceLastRangeAck;
+
+            public BattleSnapshotClientAssemblyState(
+                int transmissionId,
+                int chunkCount,
+                int logicalBytes,
+                int wireBytes,
+                string comparisonKey,
+                string payloadHash,
+                CoopBattleSnapshotPayloadEncoding payloadEncoding,
+                CoopBattleSnapshotCompressionKind compressionKind)
+            {
+                TransmissionId = transmissionId;
+                ChunkCount = Math.Max(1, chunkCount);
+                LogicalBytes = Math.Max(0, logicalBytes);
+                WireBytes = Math.Max(0, wireBytes);
+                ComparisonKey = comparisonKey ?? string.Empty;
+                PayloadHash = payloadHash ?? string.Empty;
+                PayloadEncoding = payloadEncoding;
+                CompressionKind = compressionKind;
+                Chunks = new byte[ChunkCount][];
+                ReceivedChunkFlags = new bool[ChunkCount];
+                CreatedUtc = DateTime.UtcNow;
+                LastManifestObservedUtc = CreatedUtc;
+                LastChunkReceivedUtc = CreatedUtc;
+                HighestContiguousChunkIndex = -1;
+                HighestObservedChunkIndex = -1;
+            }
+
+            public int TransmissionId { get; }
+            public int ChunkCount { get; }
+            public int LogicalBytes { get; }
+            public int WireBytes { get; }
+            public string ComparisonKey { get; }
+            public string PayloadHash { get; }
+            public CoopBattleSnapshotPayloadEncoding PayloadEncoding { get; }
+            public CoopBattleSnapshotCompressionKind CompressionKind { get; }
+            public byte[][] Chunks { get; }
+            public bool[] ReceivedChunkFlags { get; }
+            public int ReceivedChunkCount { get; private set; }
+            public int HighestContiguousChunkIndex { get; private set; }
+            public int HighestObservedChunkIndex { get; private set; }
+            public DateTime CreatedUtc { get; }
+            public DateTime LastManifestObservedUtc { get; private set; }
+            public DateTime LastChunkReceivedUtc { get; private set; }
+            public DateTime LastRangeAckSentUtc { get; private set; }
+            public bool IsComplete => ReceivedChunkCount >= ChunkCount;
+
+            public void MarkManifestObserved(DateTime nowUtc)
+            {
+                LastManifestObservedUtc = nowUtc;
+            }
+
+            public void AcceptChunk(int chunkIndex, byte[] payloadBytes, DateTime nowUtc)
+            {
+                if (chunkIndex < 0 || chunkIndex >= ChunkCount)
+                    return;
+
+                LastChunkReceivedUtc = nowUtc;
+                if (!ReceivedChunkFlags[chunkIndex])
+                {
+                    ReceivedChunkFlags[chunkIndex] = true;
+                    ReceivedChunkCount++;
+                    _newChunksSinceLastRangeAck++;
+                }
+
+                Chunks[chunkIndex] = payloadBytes ?? Array.Empty<byte>();
+                if (chunkIndex > HighestObservedChunkIndex)
+                    HighestObservedChunkIndex = chunkIndex;
+                UpdateHighestContiguousChunkIndex();
+            }
+
+            public bool ShouldSendProgressAck(int ackEveryNewChunks)
+            {
+                if (IsComplete)
+                    return false;
+
+                if (LastRangeAckSentUtc == DateTime.MinValue)
+                    return true;
+
+                return _newChunksSinceLastRangeAck >= Math.Max(1, ackEveryNewChunks);
+            }
+
+            public void MarkRangeAckSent()
+            {
+                LastRangeAckSentUtc = DateTime.UtcNow;
+                _newChunksSinceLastRangeAck = 0;
+            }
+
+            public List<ChunkRange> GetReceivedRanges()
+            {
+                return BuildRanges(includeReceived: true);
+            }
+
+            public List<ChunkRange> GetMissingRangesWithinWindow()
+            {
+                return BuildRanges(includeReceived: false);
+            }
+
+            public byte[] Combine()
+            {
+                int totalBytes = Chunks.Where(chunk => chunk != null).Sum(chunk => chunk.Length);
+                byte[] combined = totalBytes > 0 ? new byte[totalBytes] : Array.Empty<byte>();
+                int offset = 0;
+                for (int i = 0; i < Chunks.Length; i++)
+                {
+                    byte[] chunk = Chunks[i];
+                    if (chunk == null || chunk.Length <= 0)
+                        continue;
+
+                    Buffer.BlockCopy(chunk, 0, combined, offset, chunk.Length);
+                    offset += chunk.Length;
+                }
+
+                return combined;
+            }
+
+            private void UpdateHighestContiguousChunkIndex()
+            {
+                int index = HighestContiguousChunkIndex + 1;
+                while (index < ChunkCount && ReceivedChunkFlags[index])
+                    index++;
+
+                HighestContiguousChunkIndex = index - 1;
+            }
+
+            private List<ChunkRange> BuildRanges(bool includeReceived)
+            {
+                var ranges = new List<ChunkRange>();
+                int upperBound = includeReceived
+                    ? HighestObservedChunkIndex
+                    : Math.Max(HighestObservedChunkIndex, HighestContiguousChunkIndex);
+                if (upperBound < 0)
+                    return ranges;
+
+                int startIndex = -1;
+                for (int index = 0; index <= upperBound; index++)
+                {
+                    bool matches = ReceivedChunkFlags[index] == includeReceived;
+                    if (matches && startIndex < 0)
+                    {
+                        startIndex = index;
+                        continue;
+                    }
+
+                    if (!matches && startIndex >= 0)
+                    {
+                        ranges.Add(new ChunkRange(startIndex, index - 1));
+                        startIndex = -1;
+                    }
+                }
+
+                if (startIndex >= 0)
+                    ranges.Add(new ChunkRange(startIndex, upperBound));
+
+                return ranges;
             }
         }
     }
