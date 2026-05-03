@@ -162,6 +162,10 @@ namespace CoopSpectator.MissionBehaviors
         private readonly Dictionary<int, BattleSnapshotClientAssemblyState> _clientBattleSnapshotAssembliesByTransmission = new Dictionary<int, BattleSnapshotClientAssemblyState>();
         private static readonly Dictionary<int, int> _expectedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _acknowledgedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
+        private static int _clientObservedBattleSnapshotTransmissionId;
+        private static string _clientObservedBattleSnapshotPayloadHash = string.Empty;
+        private static int _clientAppliedBattleSnapshotTransmissionId;
+        private static string _clientAppliedBattleSnapshotPayloadHash = string.Empty;
         private string _cachedBattleSnapshotComparisonKey = string.Empty;
         private byte[] _cachedBattleSnapshotPayloadBytes = Array.Empty<byte>();
         private int _cachedBattleSnapshotLogicalBytes;
@@ -362,6 +366,7 @@ namespace CoopSpectator.MissionBehaviors
             _clientBattleSnapshotAssembliesByTransmission.Clear();
             _expectedBattleSnapshotTransmissionIdByPeer.Clear();
             _acknowledgedBattleSnapshotTransmissionIdByPeer.Clear();
+            ClearClientBattleSnapshotApplicationState("CoopMissionNetworkBridge.OnRemoveBehavior");
             base.OnRemoveBehavior();
         }
 
@@ -1014,6 +1019,8 @@ namespace CoopSpectator.MissionBehaviors
             if (message == null || message.TransmissionId <= 0)
                 return;
 
+            ObserveClientBattleSnapshotManifest(message.TransmissionId, message.PayloadHash);
+
             foreach (int staleTransmissionId in _clientBattleSnapshotAssembliesByTransmission.Keys
                 .Where(existingTransmissionId => existingTransmissionId != message.TransmissionId)
                 .ToArray())
@@ -1103,6 +1110,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             BattleSnapshotRuntimeState.SetCurrent(snapshot, "CoopMissionNetworkBridge.V2");
+            MarkClientBattleSnapshotApplied(assemblyState.TransmissionId, assemblyState.PayloadHash);
             _clientBattleSnapshotAssembliesByTransmission.Remove(assemblyState.TransmissionId);
             SendClientBattleSnapshotCompleteAck(assemblyState.TransmissionId, assemblyState.PayloadHash, appliedSuccessfully: true);
             ModLogger.Info(
@@ -1956,6 +1964,55 @@ namespace CoopSpectator.MissionBehaviors
             return expectedTransmissionId > 0 && acknowledgedTransmissionId >= expectedTransmissionId;
         }
 
+        internal static bool IsClientCurrentBattleSnapshotApplied(out string readinessSummary)
+        {
+            readinessSummary = string.Empty;
+
+            if (!GameNetwork.IsClient)
+            {
+                readinessSummary = "not-client";
+                return true;
+            }
+
+            Mission mission = Mission.Current;
+            if (mission == null)
+            {
+                readinessSummary = "mission-null";
+                return false;
+            }
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null)
+            {
+                readinessSummary = "bridge-null";
+                return false;
+            }
+
+            int observedTransmissionId = _clientObservedBattleSnapshotTransmissionId;
+            string observedPayloadHash = _clientObservedBattleSnapshotPayloadHash ?? string.Empty;
+            int appliedTransmissionId = _clientAppliedBattleSnapshotTransmissionId;
+            string appliedPayloadHash = _clientAppliedBattleSnapshotPayloadHash ?? string.Empty;
+            bool hasPendingObservedAssembly =
+                observedTransmissionId > 0 &&
+                bridge._clientBattleSnapshotAssembliesByTransmission.TryGetValue(
+                    observedTransmissionId,
+                    out BattleSnapshotClientAssemblyState observedAssemblyState) &&
+                observedAssemblyState != null;
+            bool applied =
+                observedTransmissionId > 0 &&
+                appliedTransmissionId == observedTransmissionId &&
+                string.Equals(appliedPayloadHash, observedPayloadHash, StringComparison.Ordinal) &&
+                !hasPendingObservedAssembly;
+
+            readinessSummary =
+                "ObservedTransmissionId=" + observedTransmissionId +
+                " AppliedTransmissionId=" + appliedTransmissionId +
+                " ObservedPayloadHash=" + (string.IsNullOrWhiteSpace(observedPayloadHash) ? "null" : observedPayloadHash) +
+                " AppliedPayloadHash=" + (string.IsNullOrWhiteSpace(appliedPayloadHash) ? "null" : appliedPayloadHash) +
+                " HasPendingObservedAssembly=" + hasPendingObservedAssembly;
+            return applied;
+        }
+
         private static void RegisterExpectedBattleSnapshotTransmission(int peerIndex, int transmissionId)
         {
             if (peerIndex < 0 || transmissionId <= 0)
@@ -1999,6 +2056,38 @@ namespace CoopSpectator.MissionBehaviors
                 " ExpectedTransmissionId=" + expectedTransmissionId +
                 " SnapshotReady=" + snapshotReady);
             return true;
+        }
+
+        private static void ObserveClientBattleSnapshotManifest(int transmissionId, string payloadHash)
+        {
+            string normalizedPayloadHash = payloadHash ?? string.Empty;
+            bool observedSignatureChanged =
+                _clientObservedBattleSnapshotTransmissionId != transmissionId ||
+                !string.Equals(_clientObservedBattleSnapshotPayloadHash, normalizedPayloadHash, StringComparison.Ordinal);
+            _clientObservedBattleSnapshotTransmissionId = transmissionId;
+            _clientObservedBattleSnapshotPayloadHash = normalizedPayloadHash;
+            if (!observedSignatureChanged)
+                return;
+
+            _clientAppliedBattleSnapshotTransmissionId = 0;
+            _clientAppliedBattleSnapshotPayloadHash = string.Empty;
+            BattleSnapshotRuntimeState.Clear(
+                "CoopMissionNetworkBridge.V2 manifest observed TransmissionId=" + transmissionId);
+        }
+
+        private static void MarkClientBattleSnapshotApplied(int transmissionId, string payloadHash)
+        {
+            _clientAppliedBattleSnapshotTransmissionId = transmissionId;
+            _clientAppliedBattleSnapshotPayloadHash = payloadHash ?? string.Empty;
+        }
+
+        private static void ClearClientBattleSnapshotApplicationState(string source)
+        {
+            _clientObservedBattleSnapshotTransmissionId = 0;
+            _clientObservedBattleSnapshotPayloadHash = string.Empty;
+            _clientAppliedBattleSnapshotTransmissionId = 0;
+            _clientAppliedBattleSnapshotPayloadHash = string.Empty;
+            BattleSnapshotRuntimeState.Clear(source ?? "CoopMissionNetworkBridge.ClearClientBattleSnapshotApplicationState");
         }
 
         private static bool IsEligibleRemotePeer(NetworkCommunicator peer)

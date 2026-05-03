@@ -6303,6 +6303,16 @@ namespace CoopSpectator.MissionBehaviors
             if (!IsMissionPeerAgentEligibleForClientExactVisualOverlay(agent))
                 return false;
 
+            if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: deferred client exact visual finalize until current battle snapshot is applied. " +
+                    "AgentIndex=" + agent.Index +
+                    " Source=" + (source ?? "unknown") +
+                    " Reason=" + snapshotReadinessSummary);
+                return false;
+            }
+
             string entryId = preferredEntryId;
             if (string.IsNullOrWhiteSpace(entryId) || BattleSnapshotRuntimeState.GetEntryState(entryId) == null)
                 entryId = ResolveClientExactCampaignVisualOverlayEntryId(agent);
@@ -20487,6 +20497,17 @@ namespace CoopSpectator.MissionBehaviors
                 createAgent == null ||
                 createAgent.MountAgentIndex < 0)
             {
+                return false;
+            }
+
+            if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+            {
+                resolutionSource = "battle-snapshot-not-applied";
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: deferred strict client exact CreateAgent contract resolution until current battle snapshot is applied. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " MountAgentIndex=" + createAgent.MountAgentIndex +
+                    " Reason=" + snapshotReadinessSummary);
                 return false;
             }
 

@@ -696,26 +696,42 @@ namespace CoopSpectator.Patches
                         createAgent.MountAgentIndex);
                 }
 
-                if (TryHandleStrictExactHeroCreateAgentViaContract(
-                        mission,
-                        createAgent,
-                        out bool strictExactCandidate))
+                bool snapshotReadyForExactHeroHandoff =
+                    CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary);
+                bool strictExactCandidate = false;
+                bool mountedHeroPayloadCandidate = IsMountedHeroTemplatePayload(createAgent);
+                if (snapshotReadyForExactHeroHandoff)
                 {
-                    return false;
-                }
+                    if (TryHandleStrictExactHeroCreateAgentViaContract(
+                            mission,
+                            createAgent,
+                            out strictExactCandidate))
+                    {
+                        return false;
+                    }
 
-                if (TryHandleMountedHeroCreateAgentViaPayloadAdapter(
-                        mission,
-                        createAgent,
-                        out bool mountedHeroPayloadCandidate))
+                    if (TryHandleMountedHeroCreateAgentViaPayloadAdapter(
+                            mission,
+                            createAgent,
+                            out mountedHeroPayloadCandidate))
+                    {
+                        return false;
+                    }
+                }
+                else if (mountedHeroPayloadCandidate)
                 {
-                    return false;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred snapshot-dependent mounted hero CreateAgent handoff until current battle snapshot is applied. " +
+                        "AgentIndex=" + createAgent.AgentIndex +
+                        " MountAgentIndex=" + createAgent.MountAgentIndex +
+                        " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                        " Reason=" + snapshotReadinessSummary);
                 }
 
                 if (!hasMountPayload || strictExactCandidate)
                     return true;
 
-                if (!mountedHeroPayloadCandidate)
+                if (!mountedHeroPayloadCandidate || !snapshotReadyForExactHeroHandoff)
                     CanonicalizeCreateAgentPayloadForBattleMap(createAgent);
                 return true;
             }
@@ -748,12 +764,15 @@ namespace CoopSpectator.Patches
                 if (createAgent.MountAgentIndex >= 0)
                     CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent, createAgent.MountAgentIndex);
                 CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent);
-                bool exactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
-                    mission,
-                    agent,
-                    preferredEntryId: null,
-                    source: "battle-map handoff CreateAgent",
-                    allowImmediateApply: false);
+                bool snapshotReadyForExactVisual =
+                    CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary);
+                bool exactVisualApplied = snapshotReadyForExactVisual &&
+                    CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
+                        mission,
+                        agent,
+                        preferredEntryId: null,
+                        source: "battle-map handoff CreateAgent",
+                        allowImmediateApply: false);
                 CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
                     agent,
                     "client-create-agent",
@@ -762,6 +781,8 @@ namespace CoopSpectator.Patches
                     " PayloadMount={" + BuildEquipmentSummary(createAgent.SpawnEquipment, EquipmentIndex.Horse, EquipmentIndex.HorseHarness) + "}" +
                     " PayloadMountAgentIndex=" + createAgent.MountAgentIndex +
                     " PayloadIsPlayerAgent=" + createAgent.IsPlayerAgent +
+                    " SnapshotReadyForExactVisual=" + snapshotReadyForExactVisual +
+                    " SnapshotReadinessReason=" + (snapshotReadinessSummary ?? "unknown") +
                     " ExactVisualApplied=" + exactVisualApplied);
                 if (!exactVisualApplied)
                     return;
