@@ -20602,6 +20602,11 @@ namespace CoopSpectator.MissionBehaviors
             return entryState != null;
         }
 
+        internal static bool TryResolveLocalSelectedEntryIdForBattleMapCommander(out string entryId)
+        {
+            return TryResolveLocalSelectedEntryIdForStrictCreateAgent(out entryId);
+        }
+
         private static bool TryResolveLocalSelectedEntryIdForStrictCreateAgent(out string entryId)
         {
             entryId = null;
@@ -21185,7 +21190,8 @@ namespace CoopSpectator.MissionBehaviors
             {
                 RosterEntryState trackedEntryState = BattleSnapshotRuntimeState.GetEntryState(trackedEntryId);
                 if (trackedEntryState != null &&
-                    DoesClientVisualOverlayEntryMatchAgentTroop(trackedEntryState, agent.Character?.StringId))
+                    (DoesClientVisualOverlayEntryMatchAgentTroop(trackedEntryState, agent.Character?.StringId) ||
+                     ShouldPreserveStrictExactHeroEntryMapping(agent.Index, trackedEntryId)))
                 {
                     entryId = trackedEntryId;
                     return true;
@@ -21226,7 +21232,8 @@ namespace CoopSpectator.MissionBehaviors
             {
                 RosterEntryState overlayEntryState = BattleSnapshotRuntimeState.GetEntryState(clientOverlayEntryId);
                 if (overlayEntryState != null &&
-                    DoesClientVisualOverlayEntryMatchAgentTroop(overlayEntryState, agent?.Character?.StringId))
+                    (DoesClientVisualOverlayEntryMatchAgentTroop(overlayEntryState, agent?.Character?.StringId) ||
+                     ShouldPreserveStrictExactHeroEntryMapping(agent?.Index ?? -1, clientOverlayEntryId)))
                 {
                     entryId = clientOverlayEntryId;
                     return true;
@@ -21240,6 +21247,28 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return false;
+        }
+
+        private static bool ShouldPreserveStrictExactHeroEntryMapping(int riderAgentIndex, string entryId)
+        {
+            if (riderAgentIndex < 0 || string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            if (!_strictExactHeroTransferStateByRiderAgentIndex.TryGetValue(riderAgentIndex, out StrictExactHeroTransferRuntimeState state) ||
+                state == null)
+            {
+                return false;
+            }
+
+            if (!string.Equals(state.EntryId, entryId, StringComparison.Ordinal) ||
+                state.ExactVisualApplied ||
+                state.Stage >= StrictExactHeroTransferStage.ExactVisualApplied)
+            {
+                return false;
+            }
+
+            return state.IsMountedHero ||
+                   state.Stage >= StrictExactHeroTransferStage.CreateAgentPayloadObserved;
         }
 
         public static bool TryResolveExactDisplayNameForAgent(Agent agent, out string entryId, out TextObject exactName)

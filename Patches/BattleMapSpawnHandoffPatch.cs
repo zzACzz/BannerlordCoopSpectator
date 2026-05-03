@@ -704,10 +704,19 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (TryHandleMountedHeroCreateAgentViaPayloadAdapter(
+                        mission,
+                        createAgent,
+                        out bool mountedHeroPayloadCandidate))
+                {
+                    return false;
+                }
+
                 if (!hasMountPayload || strictExactCandidate)
                     return true;
 
-                CanonicalizeCreateAgentPayloadForBattleMap(createAgent);
+                if (!mountedHeroPayloadCandidate)
+                    CanonicalizeCreateAgentPayloadForBattleMap(createAgent);
                 return true;
             }
             catch (Exception ex)
@@ -978,6 +987,99 @@ namespace CoopSpectator.Patches
                     " Source=battle-map handoff strict exact CreateAgent");
                 return false;
             }
+        }
+
+        private static bool TryHandleMountedHeroCreateAgentViaPayloadAdapter(
+            Mission mission,
+            CreateAgent createAgent,
+            out bool mountedHeroPayloadCandidate)
+        {
+            mountedHeroPayloadCandidate = IsMountedHeroTemplatePayload(createAgent);
+            if (!mountedHeroPayloadCandidate || mission == null || createAgent == null)
+                return false;
+
+            Team teamFromTeamIndex = Mission.MissionNetworkHelper.GetTeamFromTeamIndex(createAgent.TeamIndex);
+            if (teamFromTeamIndex == null)
+                return false;
+
+            Formation formation = null;
+            if (createAgent.FormationIndex >= 0 && !GameNetwork.IsReplay)
+                formation = teamFromTeamIndex.GetFormation((FormationClass)createAgent.FormationIndex);
+
+            Banner banner = ResolveStrictExactHeroCreateAgentBanner(teamFromTeamIndex, formation);
+            Equipment createTimeSpawnEquipment = createAgent.SpawnEquipment?.Clone(false);
+            MissionEquipment createTimeMissionEquipment =
+                createAgent.MissionEquipment ??
+                (createTimeSpawnEquipment != null ? new MissionEquipment(createTimeSpawnEquipment, banner) : null);
+            if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null || createAgent.Character == null)
+                return false;
+
+            try
+            {
+                AgentBuildData buildData = new AgentBuildData(createAgent.Character)
+                    .Monster(createAgent.Monster)
+                    .TroopOrigin(new BasicBattleAgentOrigin(createAgent.Character))
+                    .Equipment(createTimeSpawnEquipment)
+                    .EquipmentSeed(createAgent.BodyPropertiesSeed)
+                    .InitialPosition(createAgent.Position)
+                    .InitialDirection(createAgent.Direction.Normalized())
+                    .MissionEquipment(createTimeMissionEquipment)
+                    .Team(teamFromTeamIndex)
+                    .Index(createAgent.AgentIndex)
+                    .MountIndex(createAgent.MountAgentIndex)
+                    .IsFemale(createAgent.IsFemale)
+                    .ClothingColor1(createAgent.ClothingColor1)
+                    .ClothingColor2(createAgent.ClothingColor2)
+                    .BodyProperties(createAgent.BodyPropertiesValue);
+                if (formation != null)
+                    buildData.Formation(formation);
+                if (banner != null)
+                    buildData.Banner(banner);
+
+                Agent agent = mission.SpawnAgent(buildData);
+                if (agent == null)
+                    return false;
+
+                if (createAgent.MountAgentIndex >= 0)
+                    CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent, createAgent.MountAgentIndex);
+                CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent);
+
+                string payloadSummary =
+                    "PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                    " MountAgentIndex=" + createAgent.MountAgentIndex +
+                    " FormationIndex=" + createAgent.FormationIndex +
+                    " PayloadMissionWeapons={" + BuildMissionEquipmentWeaponSummary(createTimeMissionEquipment) + "}" +
+                    " PayloadMount={" + BuildEquipmentSummary(createTimeSpawnEquipment, EquipmentIndex.Horse, EquipmentIndex.HorseHarness) + "}" +
+                    " Source=battle-map payload mounted hero CreateAgent";
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: handled mounted hero CreateAgent via payload adapter. " +
+                    "AgentIndex=" + agent.Index +
+                    " TeamSide=" + (agent.Team?.Side.ToString() ?? "None") +
+                    " " + payloadSummary);
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-create-agent-payload-mounted-hero-adapter",
+                    "AgentIndex=" + agent.Index + " " + payloadSummary);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: mounted hero CreateAgent payload adapter failed. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                    " Message=" + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool IsMountedHeroTemplatePayload(CreateAgent createAgent)
+        {
+            if (createAgent?.Character == null || createAgent.MountAgentIndex < 0)
+                return false;
+
+            string characterId = createAgent.Character.StringId ?? string.Empty;
+            return createAgent.Character.IsHero ||
+                   characterId.EndsWith("_hero", StringComparison.Ordinal);
         }
 
         private static BasicCharacterObject ResolveStrictExactHeroCreateAgentCharacter(
@@ -2071,6 +2173,23 @@ namespace CoopSpectator.Patches
                     resolutionSource,
                     bridgeTroopOrEntryId,
                     spawnState,
+                    status: null);
+                return controlledEntryId;
+            }
+
+            if (networkPeer?.IsMine == true &&
+                CoopMissionSpawnLogic.TryResolveLocalSelectedEntryIdForBattleMapCommander(out controlledEntryId) &&
+                !string.IsNullOrWhiteSpace(controlledEntryId))
+            {
+                resolutionSource = "local-selected-entry";
+                LogResolvedControlledEntryIdFallback(
+                    networkPeer,
+                    controlledAgent,
+                    mission,
+                    controlledEntryId,
+                    resolutionSource,
+                    bridgeTroopOrEntryId,
+                    spawnState: default,
                     status: null);
                 return controlledEntryId;
             }
