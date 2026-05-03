@@ -57,6 +57,8 @@ namespace CoopSpectator.Patches
         private static bool _suppressExactCommanderOrderHotkeyFallbackUntilRelease;
         private static object _activeExactCommanderMissionOrderVm;
         private static PendingLocalCommanderOrderControlFinalization _pendingLocalCommanderOrderControlFinalization;
+        private static readonly Dictionary<int, DeferredMountedHeroCreateAgentPayload> DeferredMountedHeroCreateAgentPayloads =
+            new Dictionary<int, DeferredMountedHeroCreateAgentPayload>();
 
         private sealed class PendingLocalCommanderOrderControlFinalization
         {
@@ -66,6 +68,15 @@ namespace CoopSpectator.Patches
             public string EntryId;
             public DateTime QueuedUtc;
             public int Attempts;
+        }
+
+        private sealed class DeferredMountedHeroCreateAgentPayload
+        {
+            public CreateAgent Message;
+            public DateTime DeferredUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+            public string DeferralReason;
         }
 
         public static void Apply(Harmony harmony)
@@ -720,12 +731,14 @@ namespace CoopSpectator.Patches
                 }
                 else if (mountedHeroPayloadCandidate)
                 {
+                    RegisterDeferredMountedHeroCreateAgentPayload(createAgent, snapshotReadinessSummary);
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: deferred snapshot-dependent mounted hero CreateAgent handoff until current battle snapshot is applied. " +
                         "AgentIndex=" + createAgent.AgentIndex +
                         " MountAgentIndex=" + createAgent.MountAgentIndex +
                         " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
                         " Reason=" + snapshotReadinessSummary);
+                    return false;
                 }
 
                 if (!hasMountPayload || strictExactCandidate)
@@ -739,6 +752,152 @@ namespace CoopSpectator.Patches
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: CreateAgent prefix mount-payload tracking failed open: " + ex.Message);
                 return true;
+            }
+        }
+
+        internal static void ClearDeferredClientMountedHeroCreateAgents(string source)
+        {
+            int clearedCount;
+            lock (DeferredMountedHeroCreateAgentPayloads)
+            {
+                clearedCount = DeferredMountedHeroCreateAgentPayloads.Count;
+                DeferredMountedHeroCreateAgentPayloads.Clear();
+            }
+
+            if (clearedCount <= 0)
+                return;
+
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: cleared deferred mounted hero CreateAgent payloads. " +
+                "Count=" + clearedCount +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        internal static void TryProcessDeferredClientMountedHeroCreateAgents(Mission mission, string source)
+        {
+            if (!GameNetwork.IsClient ||
+                mission == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                return;
+            }
+
+            if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                return;
+
+            List<DeferredMountedHeroCreateAgentPayload> deferredPayloads;
+            lock (DeferredMountedHeroCreateAgentPayloads)
+            {
+                if (DeferredMountedHeroCreateAgentPayloads.Count <= 0)
+                    return;
+
+                deferredPayloads = new List<DeferredMountedHeroCreateAgentPayload>(DeferredMountedHeroCreateAgentPayloads.Values);
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DeferredMountedHeroCreateAgentPayload deferredPayload in deferredPayloads)
+            {
+                CreateAgent createAgent = deferredPayload?.Message;
+                if (createAgent == null)
+                    continue;
+
+                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
+                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(250))
+                {
+                    continue;
+                }
+                Agent existingAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(createAgent.AgentIndex, canBeNull: true);
+                if (existingAgent != null && existingAgent.IsActive())
+                {
+                    RemoveDeferredMountedHeroCreateAgentPayload(createAgent.AgentIndex);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: dropped deferred mounted hero CreateAgent because agent already exists. " +
+                        "AgentIndex=" + createAgent.AgentIndex +
+                        " Source=" + (source ?? "unknown"));
+                    continue;
+                }
+
+                deferredPayload.LastAttemptUtc = nowUtc;
+                deferredPayload.Attempts++;
+
+                bool strictExactCandidate = false;
+                bool handled = TryHandleStrictExactHeroCreateAgentViaContract(
+                    mission,
+                    createAgent,
+                    out strictExactCandidate);
+                if (!handled && !strictExactCandidate)
+                {
+                    handled = TryHandleMountedHeroCreateAgentViaPayloadAdapter(
+                        mission,
+                        createAgent,
+                        out bool _);
+                }
+                if (!handled)
+                {
+                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred mounted hero CreateAgent still waiting for safe materialization path. " +
+                            "AgentIndex=" + createAgent.AgentIndex +
+                            " MountAgentIndex=" + createAgent.MountAgentIndex +
+                            " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " StrictExactCandidate=" + strictExactCandidate +
+                            " SnapshotReadiness=" + snapshotReadinessSummary +
+                            " Source=" + (source ?? "unknown"));
+                    }
+
+                    continue;
+                }
+
+                RemoveDeferredMountedHeroCreateAgentPayload(createAgent.AgentIndex);
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: materialized deferred mounted hero CreateAgent after battle snapshot apply. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " MountAgentIndex=" + createAgent.MountAgentIndex +
+                    " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                    " Attempts=" + deferredPayload.Attempts +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private static void RegisterDeferredMountedHeroCreateAgentPayload(CreateAgent createAgent, string snapshotReadinessSummary)
+        {
+            if (createAgent == null)
+                return;
+
+            lock (DeferredMountedHeroCreateAgentPayloads)
+            {
+                if (DeferredMountedHeroCreateAgentPayloads.TryGetValue(
+                        createAgent.AgentIndex,
+                        out DeferredMountedHeroCreateAgentPayload existingPayload) &&
+                    existingPayload != null)
+                {
+                    existingPayload.Message = createAgent;
+                    existingPayload.DeferralReason = snapshotReadinessSummary;
+                    return;
+                }
+
+                DeferredMountedHeroCreateAgentPayloads[createAgent.AgentIndex] =
+                    new DeferredMountedHeroCreateAgentPayload
+                    {
+                        Message = createAgent,
+                        DeferredUtc = DateTime.UtcNow,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0,
+                        DeferralReason = snapshotReadinessSummary
+                    };
+            }
+        }
+
+        private static void RemoveDeferredMountedHeroCreateAgentPayload(int agentIndex)
+        {
+            if (agentIndex < 0)
+                return;
+
+            lock (DeferredMountedHeroCreateAgentPayloads)
+            {
+                DeferredMountedHeroCreateAgentPayloads.Remove(agentIndex);
             }
         }
 

@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.Network.Messages;
+using CoopSpectator.Patches;
 using Newtonsoft.Json;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -264,7 +265,12 @@ namespace CoopSpectator.MissionBehaviors
             TryPersistHostedLocalPeerMarker();
 
             if (GameNetwork.IsClient && Mission != null)
+            {
                 TryResendClientBattleSnapshotChunkRequests();
+                BattleMapSpawnHandoffPatch.TryProcessDeferredClientMountedHeroCreateAgents(
+                    Mission,
+                    "CoopMissionNetworkBridge.TryRunClientBattleSnapshotRecoveryTick");
+            }
         }
 
         private void TryResendClientBattleSnapshotChunkRequests()
@@ -1120,6 +1126,9 @@ namespace CoopSpectator.MissionBehaviors
 
             BattleSnapshotRuntimeState.SetCurrent(snapshot, "CoopMissionNetworkBridge.V2");
             MarkClientBattleSnapshotApplied(assemblyState.TransmissionId, assemblyState.PayloadHash);
+            BattleMapSpawnHandoffPatch.TryProcessDeferredClientMountedHeroCreateAgents(
+                Mission,
+                "CoopMissionNetworkBridge.V2 applied");
             _clientBattleSnapshotAssembliesByTransmission.Remove(assemblyState.TransmissionId);
             SendClientBattleSnapshotCompleteAck(assemblyState.TransmissionId, assemblyState.PayloadHash, appliedSuccessfully: true);
             ModLogger.Info(
@@ -2191,6 +2200,8 @@ namespace CoopSpectator.MissionBehaviors
             _clientObservedBattleSnapshotPayloadHash = string.Empty;
             _clientAppliedBattleSnapshotTransmissionId = 0;
             _clientAppliedBattleSnapshotPayloadHash = string.Empty;
+            BattleMapSpawnHandoffPatch.ClearDeferredClientMountedHeroCreateAgents(
+                (source ?? "CoopMissionNetworkBridge.ClearClientBattleSnapshotApplicationState") + " deferred-mounted-hero-clear");
             BattleSnapshotRuntimeState.Clear(source ?? "CoopMissionNetworkBridge.ClearClientBattleSnapshotApplicationState");
         }
 
