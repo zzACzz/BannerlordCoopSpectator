@@ -185,6 +185,8 @@ namespace CoopSpectator.MissionBehaviors
             if (bridge == null || bridge._clientBattleSnapshotAssembliesByTransmission.Count <= 0)
                 return false;
 
+            bridge.TryRunClientBattleSnapshotRecoveryTick();
+
             BattleSnapshotClientAssemblyState assemblyState = bridge._clientBattleSnapshotAssembliesByTransmission.Values
                 .Where(state => state != null)
                 .OrderByDescending(state => state.LastChunkReceivedUtc)
