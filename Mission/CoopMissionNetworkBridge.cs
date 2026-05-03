@@ -229,11 +229,44 @@ namespace CoopSpectator.MissionBehaviors
         {
             TryPersistHostedLocalPeerMarker();
 
+            if (GameNetwork.IsClient && Mission != null)
+                TryResendClientBattleSnapshotRangeAcks();
+
             if (!GameNetwork.IsServer || Mission == null)
                 return;
 
             TrySyncBattleSnapshotPayloads();
             TrySyncEntryStatusPayloads();
+        }
+
+        private void TryResendClientBattleSnapshotRangeAcks()
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive || _clientBattleSnapshotAssembliesByTransmission.Count <= 0)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (BattleSnapshotClientAssemblyState assemblyState in _clientBattleSnapshotAssembliesByTransmission.Values
+                .Where(state => state != null)
+                .ToArray())
+            {
+                if (assemblyState.IsComplete || assemblyState.ReceivedChunkCount <= 0)
+                    continue;
+
+                bool receiveStalled = nowUtc - assemblyState.LastChunkReceivedUtc >= BattleSnapshotRangeAckStallDelay;
+                bool ackCooldownElapsed =
+                    assemblyState.LastRangeAckSentUtc == DateTime.MinValue ||
+                    nowUtc - assemblyState.LastRangeAckSentUtc >= BattleSnapshotRangeAckStallDelay;
+                if (!receiveStalled || !ackCooldownElapsed)
+                    continue;
+
+                SendClientBattleSnapshotRangeAck(assemblyState, CoopBattleSnapshotAssemblyStateKind.Receiving);
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: resent stalled client V2 battle snapshot range ack. " +
+                    "TransmissionId=" + assemblyState.TransmissionId +
+                    " HighestContiguous=" + assemblyState.HighestContiguousChunkIndex +
+                    " ReceivedChunkCount=" + assemblyState.ReceivedChunkCount +
+                    " ChunkCount=" + assemblyState.ChunkCount);
+            }
         }
 
         private void TryPersistHostedLocalPeerMarker()
