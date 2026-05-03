@@ -171,6 +171,12 @@ namespace CoopSpectator.MissionBehaviors
         private int _cachedBattleSnapshotLogicalBytes;
         private string _cachedBattleSnapshotPayloadHash = string.Empty;
         private CoopBattleSnapshotCompressionKind _cachedBattleSnapshotCompressionKind = CoopBattleSnapshotCompressionKind.None;
+        private string _cachedBattleSnapshotV2ComparisonKey = string.Empty;
+        private byte[] _cachedBattleSnapshotV2PayloadBytes = Array.Empty<byte>();
+        private int _cachedBattleSnapshotV2LogicalBytes;
+        private string _cachedBattleSnapshotV2PayloadHash = string.Empty;
+        private CoopBattleSnapshotCompressionKind _cachedBattleSnapshotV2CompressionKind = CoopBattleSnapshotCompressionKind.None;
+        private CoopBattleSnapshotPayloadEncoding _cachedBattleSnapshotV2PayloadEncoding = CoopBattleSnapshotPayloadEncoding.JsonUtf8;
         private int _nextTransmissionId = 1;
         private bool _persistedHostedLocalPeerMarker;
 
@@ -659,13 +665,14 @@ namespace CoopSpectator.MissionBehaviors
             if (snapshot?.Sides == null || snapshot.Sides.Count <= 0)
                 return;
 
-            if (!TryGetBattleSnapshotTransmissionPayloadDescriptor(
+            if (!TryGetBattleSnapshotTransmissionPayloadDescriptorV2(
                     snapshot,
                     out byte[] payloadBytes,
                     out int logicalByteCount,
                     out string comparisonKey,
                     out string payloadHash,
-                    out CoopBattleSnapshotCompressionKind compressionKind))
+                    out CoopBattleSnapshotCompressionKind compressionKind,
+                    out CoopBattleSnapshotPayloadEncoding payloadEncoding))
             {
                 return;
             }
@@ -682,7 +689,8 @@ namespace CoopSpectator.MissionBehaviors
                     logicalByteCount,
                     comparisonKey,
                     payloadHash,
-                    compressionKind);
+                    compressionKind,
+                    payloadEncoding);
                 if (transportState != null && !transportState.IsCompleted)
                     activeStates.Add(transportState);
             }
@@ -745,7 +753,8 @@ namespace CoopSpectator.MissionBehaviors
             int logicalByteCount,
             string comparisonKey,
             string payloadHash,
-            CoopBattleSnapshotCompressionKind compressionKind)
+            CoopBattleSnapshotCompressionKind compressionKind,
+            CoopBattleSnapshotPayloadEncoding payloadEncoding)
         {
             if (!IsEligibleRemotePeer(peer) ||
                 payloadBytes == null ||
@@ -769,6 +778,7 @@ namespace CoopSpectator.MissionBehaviors
                 comparisonKey,
                 payloadHash,
                 compressionKind,
+                payloadEncoding,
                 NextTransmissionId(),
                 BattleSnapshotInitialWindowChunks,
                 BattleSnapshotMaxInflightChunksPerPeer);
@@ -787,6 +797,7 @@ namespace CoopSpectator.MissionBehaviors
                 " TransmissionId=" + newState.TransmissionId +
                 " LogicalBytes=" + newState.LogicalBytes +
                 " WireBytes=" + newState.TotalBytes +
+                " Encoding=" + newState.PayloadEncoding +
                 " ChunkCount=" + newState.ChunkCount +
                 " ChunkBytes=" + CoopBattleSnapshotChunkV2Message.MaxChunkBytes);
             return newState;
@@ -855,7 +866,7 @@ namespace CoopSpectator.MissionBehaviors
             GameNetwork.WriteMessage(new CoopBattleSnapshotManifestMessage(
                 transportState.TransmissionId,
                 BattleSnapshotTransportSchemaVersion,
-                CoopBattleSnapshotPayloadEncoding.JsonUtf8,
+                transportState.PayloadEncoding,
                 transportState.CompressionKind,
                 transportState.LogicalBytes,
                 transportState.TotalBytes,
@@ -869,6 +880,7 @@ namespace CoopSpectator.MissionBehaviors
                 "CoopMissionNetworkBridge: sent V2 battle snapshot manifest. " +
                 "Peer=" + (peer.UserName ?? "null") +
                 " TransmissionId=" + transportState.TransmissionId +
+                " Encoding=" + transportState.PayloadEncoding +
                 " ChunkCount=" + transportState.ChunkCount +
                 " WireBytes=" + transportState.TotalBytes);
         }
@@ -1095,14 +1107,11 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             byte[] payloadBytes = assemblyState.Combine();
-            if (!TryDecodeBattleSnapshotPayloadJson(assemblyState, payloadBytes, out string payloadJson))
+            if (!TryDecodeBattleSnapshotPayload(assemblyState, payloadBytes, out BattleSnapshotMessage snapshot))
             {
                 SendClientBattleSnapshotAbort(assemblyState.TransmissionId, "decode-failed");
                 return;
             }
-
-            BattleSnapshotMessage snapshot =
-                JsonConvert.DeserializeObject<BattleSnapshotMessage>(payloadJson, JsonSettings);
             if (snapshot == null)
             {
                 SendClientBattleSnapshotAbort(assemblyState.TransmissionId, "deserialize-failed");
@@ -1520,6 +1529,65 @@ namespace CoopSpectator.MissionBehaviors
                 out _);
         }
 
+        private bool TryGetBattleSnapshotTransmissionPayloadDescriptorV2(
+            BattleSnapshotMessage snapshot,
+            out byte[] payloadBytes,
+            out int logicalByteCount,
+            out string comparisonKey,
+            out string payloadHash,
+            out CoopBattleSnapshotCompressionKind compressionKind,
+            out CoopBattleSnapshotPayloadEncoding payloadEncoding)
+        {
+            payloadBytes = Array.Empty<byte>();
+            logicalByteCount = 0;
+            payloadHash = string.Empty;
+            compressionKind = CoopBattleSnapshotCompressionKind.None;
+            payloadEncoding = CoopBattleSnapshotPayloadEncoding.JsonUtf8;
+            comparisonKey = BuildBattleSnapshotComparisonKey(snapshot, BattleSnapshotRuntimeState.GetUpdatedUtc());
+            if (string.IsNullOrWhiteSpace(comparisonKey))
+                return false;
+
+            if (string.Equals(_cachedBattleSnapshotV2ComparisonKey, comparisonKey, StringComparison.Ordinal) &&
+                _cachedBattleSnapshotV2PayloadBytes != null &&
+                _cachedBattleSnapshotV2PayloadBytes.Length > 0)
+            {
+                payloadBytes = _cachedBattleSnapshotV2PayloadBytes;
+                logicalByteCount = _cachedBattleSnapshotV2LogicalBytes;
+                payloadHash = _cachedBattleSnapshotV2PayloadHash;
+                compressionKind = _cachedBattleSnapshotV2CompressionKind;
+                payloadEncoding = _cachedBattleSnapshotV2PayloadEncoding;
+                return true;
+            }
+
+            if (!TrySerializeBattleSnapshotPayloadV2(snapshot, out byte[] rawBytes, out payloadEncoding))
+                return false;
+
+            byte[] wireBytes = CompressPayload(rawBytes, out bool compressed);
+            payloadBytes = wireBytes ?? rawBytes;
+            logicalByteCount = rawBytes.Length;
+            compressionKind = compressed ? CoopBattleSnapshotCompressionKind.Gzip : CoopBattleSnapshotCompressionKind.None;
+            payloadHash = ComputePayloadHash(payloadBytes);
+
+            _cachedBattleSnapshotV2ComparisonKey = comparisonKey;
+            _cachedBattleSnapshotV2PayloadBytes = payloadBytes;
+            _cachedBattleSnapshotV2LogicalBytes = logicalByteCount;
+            _cachedBattleSnapshotV2PayloadHash = payloadHash;
+            _cachedBattleSnapshotV2CompressionKind = compressionKind;
+            _cachedBattleSnapshotV2PayloadEncoding = payloadEncoding;
+
+            int chunkCount = Math.Max(1, (payloadBytes.Length + CoopBattleSnapshotChunkV2Message.MaxChunkBytes - 1) / CoopBattleSnapshotChunkV2Message.MaxChunkBytes);
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: prepared V2 battle snapshot transport payload. " +
+                "ComparisonKey=" + comparisonKey +
+                " Encoding=" + payloadEncoding +
+                " RawBytes=" + rawBytes.Length +
+                " WireBytes=" + payloadBytes.Length +
+                " Compressed=" + compressed +
+                " Chunks=" + chunkCount +
+                " Entries=" + GetBattleSnapshotEntryCount(snapshot));
+            return true;
+        }
+
         private bool TryGetBattleSnapshotTransmissionPayloadDescriptor(
             BattleSnapshotMessage snapshot,
             out byte[] payloadBytes,
@@ -1681,12 +1749,12 @@ namespace CoopSpectator.MissionBehaviors
             return !string.IsNullOrWhiteSpace(payloadJson);
         }
 
-        private static bool TryDecodeBattleSnapshotPayloadJson(
+        private static bool TryDecodeBattleSnapshotPayload(
             BattleSnapshotClientAssemblyState assemblyState,
             byte[] payloadBytes,
-            out string payloadJson)
+            out BattleSnapshotMessage snapshot)
         {
-            payloadJson = string.Empty;
+            snapshot = null;
             if (assemblyState == null || payloadBytes == null || payloadBytes.Length <= 0)
                 return false;
 
@@ -1710,8 +1778,18 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            payloadJson = decodedBytes.Length <= 0 ? string.Empty : Encoding.UTF8.GetString(decodedBytes);
-            return !string.IsNullOrWhiteSpace(payloadJson);
+            if (decodedBytes.Length <= 0)
+                return false;
+
+            if (assemblyState.PayloadEncoding == CoopBattleSnapshotPayloadEncoding.BinaryV1)
+                return BattleSnapshotBinarySerializer.TryDeserialize(decodedBytes, out snapshot);
+
+            string payloadJson = Encoding.UTF8.GetString(decodedBytes);
+            if (string.IsNullOrWhiteSpace(payloadJson))
+                return false;
+
+            snapshot = JsonConvert.DeserializeObject<BattleSnapshotMessage>(payloadJson, JsonSettings);
+            return snapshot != null;
         }
 
         private static string BuildChunkRangesString(IEnumerable<ChunkRange> ranges)
@@ -2058,6 +2136,32 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private bool TrySerializeBattleSnapshotPayloadV2(
+            BattleSnapshotMessage snapshot,
+            out byte[] rawBytes,
+            out CoopBattleSnapshotPayloadEncoding payloadEncoding)
+        {
+            rawBytes = Array.Empty<byte>();
+            payloadEncoding = CoopBattleSnapshotPayloadEncoding.JsonUtf8;
+
+            if (BattleSnapshotBinarySerializer.TrySerialize(snapshot, out rawBytes) &&
+                rawBytes != null &&
+                rawBytes.Length > 0)
+            {
+                payloadEncoding = CoopBattleSnapshotPayloadEncoding.BinaryV1;
+                return true;
+            }
+
+            string payloadJson = SerializePayload(snapshot);
+            if (string.IsNullOrWhiteSpace(payloadJson))
+                return false;
+
+            rawBytes = Encoding.UTF8.GetBytes(payloadJson);
+            payloadEncoding = CoopBattleSnapshotPayloadEncoding.JsonUtf8;
+            ModLogger.Info("CoopMissionNetworkBridge: falling back to JSON V2 battle snapshot payload encoding.");
+            return rawBytes.Length > 0;
+        }
+
         private static void ObserveClientBattleSnapshotManifest(int transmissionId, string payloadHash)
         {
             string normalizedPayloadHash = payloadHash ?? string.Empty;
@@ -2311,6 +2415,7 @@ namespace CoopSpectator.MissionBehaviors
                 string comparisonKey,
                 string payloadHash,
                 CoopBattleSnapshotCompressionKind compressionKind,
+                CoopBattleSnapshotPayloadEncoding payloadEncoding,
                 byte[][] chunks,
                 int totalBytes,
                 int initialWindowChunks,
@@ -2322,6 +2427,7 @@ namespace CoopSpectator.MissionBehaviors
                 ComparisonKey = comparisonKey ?? string.Empty;
                 PayloadHash = payloadHash ?? string.Empty;
                 CompressionKind = compressionKind;
+                PayloadEncoding = payloadEncoding;
                 Chunks = chunks ?? Array.Empty<byte[]>();
                 TotalBytes = totalBytes;
                 SentChunkFlags = new bool[Chunks.Length];
@@ -2340,6 +2446,7 @@ namespace CoopSpectator.MissionBehaviors
             public string ComparisonKey { get; }
             public string PayloadHash { get; }
             public CoopBattleSnapshotCompressionKind CompressionKind { get; }
+            public CoopBattleSnapshotPayloadEncoding PayloadEncoding { get; }
             public byte[][] Chunks { get; }
             public int TotalBytes { get; }
             public int ChunkCount => Chunks.Length;
@@ -2383,6 +2490,7 @@ namespace CoopSpectator.MissionBehaviors
                 string comparisonKey,
                 string payloadHash,
                 CoopBattleSnapshotCompressionKind compressionKind,
+                CoopBattleSnapshotPayloadEncoding payloadEncoding,
                 int transmissionId,
                 int initialWindowChunks,
                 int maxInflightChunks)
@@ -2419,6 +2527,7 @@ namespace CoopSpectator.MissionBehaviors
                     comparisonKey,
                     payloadHash,
                     compressionKind,
+                    payloadEncoding,
                     chunks,
                     payloadBytes.Length,
                     initialWindowChunks,
