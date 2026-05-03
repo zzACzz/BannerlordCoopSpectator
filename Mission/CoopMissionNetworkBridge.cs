@@ -115,15 +115,15 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly bool UseBattleSnapshotTransportV2 = true;
         private const int BattleSnapshotTransportSchemaVersion = 1;
         private const int MaxStatusChunksPerPayloadPerTick = 2;
-        private const int MaxBattleSnapshotChunksPerPayloadPerTick = 8;
+        private const int MaxBattleSnapshotChunksPerPayloadPerTick = 2;
         private static readonly TimeSpan BattleSnapshotAckRetryDelay = TimeSpan.FromSeconds(6);
         private static readonly TimeSpan BattleSnapshotManifestRetryDelay = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan BattleSnapshotRangeAckStallDelay = TimeSpan.FromSeconds(3);
         private static readonly TimeSpan BattleSnapshotAssemblyIdleTimeout = TimeSpan.FromSeconds(15);
-        private const int BattleSnapshotInitialWindowChunks = 16;
-        private const int BattleSnapshotMaxInflightChunksPerPeer = 32;
-        private const int BattleSnapshotRangeAckEveryNewChunks = 8;
-        private const int BattleSnapshotMaxConcurrentHeavyPeers = 8;
+        private const int BattleSnapshotInitialWindowChunks = 4;
+        private const int BattleSnapshotMaxInflightChunksPerPeer = 8;
+        private const int BattleSnapshotRangeAckEveryNewChunks = 4;
+        private const int BattleSnapshotMaxConcurrentHeavyPeers = 4;
 
         private readonly Dictionary<int, string> _lastSentStatusPayloadByPeer = new Dictionary<int, string>();
         private readonly Dictionary<int, string> _lastSentBattleSnapshotPayloadByPeer = new Dictionary<int, string>();
