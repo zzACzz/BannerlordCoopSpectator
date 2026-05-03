@@ -111,7 +111,8 @@ namespace CoopSpectator.MissionBehaviors
             NullValueHandling = NullValueHandling.Ignore,
             DefaultValueHandling = DefaultValueHandling.Ignore
         };
-        private const int MaxChunksPerPayloadPerTick = 2;
+        private const int MaxStatusChunksPerPayloadPerTick = 2;
+        private const int MaxBattleSnapshotChunksPerPayloadPerTick = 8;
         private static readonly TimeSpan BattleSnapshotAckRetryDelay = TimeSpan.FromSeconds(6);
 
         private readonly Dictionary<int, string> _lastSentStatusPayloadByPeer = new Dictionary<int, string>();
@@ -541,7 +542,12 @@ namespace CoopSpectator.MissionBehaviors
 
         private static int ResolveChunkBudgetPerTick(PendingPayloadTransmission pendingTransmission)
         {
-            return MaxChunksPerPayloadPerTick;
+            if (pendingTransmission == null)
+                return MaxStatusChunksPerPayloadPerTick;
+
+            return pendingTransmission.PayloadKind == CoopBattlePayloadKind.BattleSnapshot
+                ? MaxBattleSnapshotChunksPerPayloadPerTick
+                : MaxStatusChunksPerPayloadPerTick;
         }
 
         private bool TryFinalizePendingPayloadTransmission(
