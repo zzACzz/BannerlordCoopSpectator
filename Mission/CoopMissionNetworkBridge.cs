@@ -197,7 +197,7 @@ namespace CoopSpectator.MissionBehaviors
 
             bool isStalled =
                 !assemblyState.IsComplete &&
-                DateTime.UtcNow - assemblyState.LastChunkReceivedUtc >= BattleSnapshotRangeAckStallDelay;
+                DateTime.UtcNow - assemblyState.LastUsefulChunkReceivedUtc >= BattleSnapshotRangeAckStallDelay;
             progress = new ClientBattleSnapshotProgressInfo(
                 assemblyState.TransmissionId,
                 assemblyState.ChunkCount,
@@ -270,7 +270,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (assemblyState.IsComplete || assemblyState.ReceivedChunkCount <= 0)
                     continue;
 
-                bool receiveStalled = nowUtc - assemblyState.LastChunkReceivedUtc >= BattleSnapshotRangeAckStallDelay;
+                bool receiveStalled = nowUtc - assemblyState.LastUsefulChunkReceivedUtc >= BattleSnapshotRangeAckStallDelay;
                 bool requestCooldownElapsed =
                     assemblyState.LastChunkRequestSentUtc == DateTime.MinValue ||
                     nowUtc - assemblyState.LastChunkRequestSentUtc >= BattleSnapshotRangeAckStallDelay;
@@ -2267,6 +2267,7 @@ namespace CoopSpectator.MissionBehaviors
                 ClientReceivedChunkCount = Math.Max(
                     ClientReceivedChunkCount,
                     Math.Min(ChunkCount, Math.Max(0, receivedChunkCount)));
+                DiscardObsoletePendingChunks(HighestClientContiguousChunkIndex);
 
                 int clampedStart = Math.Max(0, startChunkIndex);
                 int clampedEnd = Math.Min(ChunkCount - 1, endChunkIndex);
@@ -2297,6 +2298,28 @@ namespace CoopSpectator.MissionBehaviors
 
                 chunkIndex = -1;
                 return false;
+            }
+
+            private void DiscardObsoletePendingChunks(int highestClientContiguousChunkIndex)
+            {
+                if (highestClientContiguousChunkIndex < 0 || _pendingRequestedChunkIndexes.Count <= 0)
+                    return;
+
+                Queue<int> filteredQueue = new Queue<int>(_pendingRequestedChunkIndexes.Count);
+                while (_pendingRequestedChunkIndexes.Count > 0)
+                {
+                    int candidate = _pendingRequestedChunkIndexes.Dequeue();
+                    if (candidate <= highestClientContiguousChunkIndex)
+                    {
+                        _queuedRequestedChunkIndexes.Remove(candidate);
+                        continue;
+                    }
+
+                    filteredQueue.Enqueue(candidate);
+                }
+
+                while (filteredQueue.Count > 0)
+                    _pendingRequestedChunkIndexes.Enqueue(filteredQueue.Dequeue());
             }
 
             public void MarkCompleted(bool appliedSuccessfully, DateTime nowUtc)
@@ -2351,6 +2374,7 @@ namespace CoopSpectator.MissionBehaviors
                 CreatedUtc = DateTime.UtcNow;
                 LastManifestObservedUtc = CreatedUtc;
                 LastChunkReceivedUtc = CreatedUtc;
+                LastUsefulChunkReceivedUtc = CreatedUtc;
                 HighestContiguousChunkIndex = -1;
                 HighestObservedChunkIndex = -1;
                 LastRequestedStartChunkIndex = -1;
@@ -2373,6 +2397,7 @@ namespace CoopSpectator.MissionBehaviors
             public DateTime CreatedUtc { get; }
             public DateTime LastManifestObservedUtc { get; private set; }
             public DateTime LastChunkReceivedUtc { get; private set; }
+            public DateTime LastUsefulChunkReceivedUtc { get; private set; }
             public DateTime LastChunkRequestSentUtc { get; private set; }
             public int LastRequestedStartChunkIndex { get; private set; }
             public int LastRequestedEndChunkIndex { get; private set; }
@@ -2393,6 +2418,7 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     ReceivedChunkFlags[chunkIndex] = true;
                     ReceivedChunkCount++;
+                    LastUsefulChunkReceivedUtc = nowUtc;
                 }
 
                 Chunks[chunkIndex] = payloadBytes ?? Array.Empty<byte>();
