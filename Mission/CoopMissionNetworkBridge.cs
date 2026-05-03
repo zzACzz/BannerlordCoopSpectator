@@ -651,8 +651,8 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             DateTime nowUtc = DateTime.UtcNow;
-            bool shouldSendManifest = !transportState.ManifestSent ||
-                                      (transportState.AckedChunkCount <= 0 &&
+            bool shouldSendManifest = transportState.AckedChunkCount <= 0 &&
+                                      (!transportState.ManifestSent ||
                                        nowUtc - transportState.LastManifestSentUtc >= BattleSnapshotManifestRetryDelay);
             if (shouldSendManifest)
             {
@@ -660,7 +660,19 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             if (nowUtc - transportState.LastProgressUtc >= BattleSnapshotRangeAckStallDelay)
+            {
                 transportState.MarkStalled(nowUtc);
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: V2 battle snapshot transport stalled, scheduling resend window. " +
+                    "Peer=" + (peer.UserName ?? "null") +
+                    " TransmissionId=" + transportState.TransmissionId +
+                    " HighestContiguous=" + transportState.HighestContiguousChunkIndex +
+                    " NextSequential=" + transportState.NextSequentialChunkIndex +
+                    " AckedChunkCount=" + transportState.AckedChunkCount +
+                    " SentChunkCount=" + transportState.SentChunkCount +
+                    " InflightChunkCount=" + transportState.InflightChunkCount +
+                    " PendingResends=" + transportState.PendingResendChunkCount);
+            }
 
             int chunksSentThisTick = 0;
             while (chunksSentThisTick < MaxBattleSnapshotChunksPerPayloadPerTick &&
@@ -2032,6 +2044,7 @@ namespace CoopSpectator.MissionBehaviors
             public int InitialWindowChunks { get; }
             public int MaxInflightChunks { get; }
             public bool HasPendingResends => _pendingResendChunkIndexes.Count > 0;
+            public int PendingResendChunkCount => _pendingResendChunkIndexes.Count;
             public bool IsCompleted => CompleteAckReceived;
             public int InflightChunkCount => Math.Max(0, SentChunkCount - AckedChunkCount);
             public bool CanSendQueuedResends => !IsCompleted &&
