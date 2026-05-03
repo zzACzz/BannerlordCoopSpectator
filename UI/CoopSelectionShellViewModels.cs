@@ -18,6 +18,7 @@ namespace CoopSpectator.UI
         private string _subtitleText = "Coop Battle";
         private string _statusText = string.Empty;
         private string _hintText = string.Empty;
+        private string _loadingProgressText = string.Empty;
         private bool _canAutoAssign;
         private bool _canSpectate = true;
 
@@ -37,6 +38,7 @@ namespace CoopSpectator.UI
         [DataSourceProperty] public string SubtitleText { get => _subtitleText; private set => SetField(ref _subtitleText, value, nameof(SubtitleText)); }
         [DataSourceProperty] public string StatusText { get => _statusText; private set => SetField(ref _statusText, value, nameof(StatusText)); }
         [DataSourceProperty] public string HintText { get => _hintText; private set => SetField(ref _hintText, value, nameof(HintText)); }
+        [DataSourceProperty] public string LoadingProgressText { get => _loadingProgressText; private set => SetField(ref _loadingProgressText, value, nameof(LoadingProgressText)); }
         [DataSourceProperty] public bool CanAutoAssign { get => _canAutoAssign; private set => SetField(ref _canAutoAssign, value, nameof(CanAutoAssign)); }
         [DataSourceProperty] public bool CanSpectate { get => _canSpectate; private set => SetField(ref _canSpectate, value, nameof(CanSpectate)); }
         [DataSourceProperty] public CoopTeamSelectionSideVM Team1 { get => _team1; private set => SetField(ref _team1, value, nameof(Team1)); }
@@ -52,6 +54,7 @@ namespace CoopSpectator.UI
                 : "Coop Battle";
             StatusText = CoopSelectionUiHelpers.BuildTeamStatusText(snapshot);
             HintText = CoopSelectionUiHelpers.BuildTeamHintText(snapshot);
+            LoadingProgressText = CoopSelectionUiHelpers.BuildBattleDataProgressText(snapshot);
             Team1 = BuildSideVm(snapshot, BattleSideEnum.Attacker, snapshot?.AttackerSelectableEntryCount ?? 0);
             Team2 = BuildSideVm(snapshot, BattleSideEnum.Defender, snapshot?.DefenderSelectableEntryCount ?? 0);
             CanAutoAssign = (Team1?.IsEnabled == true) || (Team2?.IsEnabled == true);

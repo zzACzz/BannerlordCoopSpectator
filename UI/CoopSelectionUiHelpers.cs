@@ -30,6 +30,7 @@ namespace CoopSpectator.UI
         public bool BattleDataReady { get; set; }
         public string BattleDataReadinessStage { get; set; }
         public string BattleDataReadinessReason { get; set; }
+        public string BattleDataLoadingProgressText { get; set; } = string.Empty;
         public bool CanSpawn { get; set; }
         public bool CanShowOverlay { get; set; }
         public string TeamRefreshKey { get; set; } = string.Empty;
@@ -96,6 +97,9 @@ namespace CoopSpectator.UI
             CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot currentSelection = CoopBattleSelectionBridgeFile.ReadCurrentSelection();
             BattleRuntimeState battleState = BattleSnapshotRuntimeState.GetState();
             bool battleDataReady = status?.BattleDataReady == true;
+            string battleDataLoadingProgressText = battleDataReady
+                ? string.Empty
+                : BuildBattleDataLoadingProgressText();
             string[] attackerSelectableEntryIds = battleDataReady
                 ? ResolveSelectableEntryIds(status, BattleSideEnum.Attacker)
                 : Array.Empty<string>();
@@ -157,6 +161,7 @@ namespace CoopSpectator.UI
                 BattleDataReady = battleDataReady,
                 BattleDataReadinessStage = status?.BattleDataReadinessStage ?? string.Empty,
                 BattleDataReadinessReason = status?.BattleDataReadinessReason ?? string.Empty,
+                BattleDataLoadingProgressText = battleDataLoadingProgressText,
                 CanSpawn = battleDataReady && (status?.CanRespawn ?? false) && !string.IsNullOrWhiteSpace(selectedEntryId),
                 CanShowOverlay = ShouldOverlayBeVisible(status, hasLocalControlledAgent)
             };
@@ -202,6 +207,14 @@ namespace CoopSpectator.UI
             return snapshot.CanSpawn
                 ? "Deploy into the selected living unit."
                 : "Choose a living unit, then deploy.";
+        }
+
+        public static string BuildBattleDataProgressText(CoopSelectionUiSnapshot snapshot)
+        {
+            if (snapshot == null || snapshot.BattleDataReady)
+                return string.Empty;
+
+            return snapshot.BattleDataLoadingProgressText ?? string.Empty;
         }
 
         public static string BuildUnitEmptyText(CoopSelectionUiSnapshot snapshot)
@@ -777,6 +790,7 @@ namespace CoopSpectator.UI
                 snapshot.BattleDataReadinessStage ?? string.Empty,
                 snapshot.BattlePhase ?? string.Empty,
                 snapshot.Lifecycle ?? string.Empty,
+                snapshot.BattleDataLoadingProgressText ?? string.Empty,
                 snapshot.EffectiveSide.ToString(),
                 BuildSideRefreshDescriptor(attackerPresentation, snapshot.AttackerSelectableEntryCount),
                 BuildSideRefreshDescriptor(defenderPresentation, snapshot.DefenderSelectableEntryCount)
@@ -828,6 +842,25 @@ namespace CoopSpectator.UI
                 presentation?.BannerCodeText ?? string.Empty,
                 selectableEntryCount.ToString()
             });
+        }
+
+        private static string BuildBattleDataLoadingProgressText()
+        {
+            if (!CoopMissionNetworkBridge.TryGetClientBattleSnapshotProgress(out CoopMissionNetworkBridge.ClientBattleSnapshotProgressInfo progress))
+                return "Waiting for first data chunk...";
+
+            string prefix =
+                "Progress: " +
+                progress.ReceivedChunkCount +
+                " / " +
+                progress.ChunkCount +
+                " (" +
+                progress.PercentComplete +
+                "%)";
+            if (progress.IsStalled)
+                return prefix + " - waiting for next chunk...";
+
+            return prefix;
         }
 
         private static string ResolveSideBannerCode(BattleRuntimeState battleState, BattleSideEnum side)

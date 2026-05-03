@@ -106,6 +106,33 @@ namespace CoopSpectator.MissionBehaviors
 
     public sealed class CoopMissionNetworkBridge : MissionNetwork
     {
+        internal readonly struct ClientBattleSnapshotProgressInfo
+        {
+            public ClientBattleSnapshotProgressInfo(
+                int transmissionId,
+                int chunkCount,
+                int receivedChunkCount,
+                int highestContiguousChunkIndex,
+                bool isStalled)
+            {
+                TransmissionId = transmissionId;
+                ChunkCount = Math.Max(0, chunkCount);
+                ReceivedChunkCount = Math.Max(0, receivedChunkCount);
+                HighestContiguousChunkIndex = Math.Max(-1, highestContiguousChunkIndex);
+                IsStalled = isStalled;
+            }
+
+            public int TransmissionId { get; }
+            public int ChunkCount { get; }
+            public int ReceivedChunkCount { get; }
+            public int HighestContiguousChunkIndex { get; }
+            public bool IsStalled { get; }
+            public int PercentComplete =>
+                ChunkCount <= 0
+                    ? 0
+                    : Math.Max(0, Math.Min(100, (int)Math.Round((double)ReceivedChunkCount * 100d / ChunkCount)));
+        }
+
         private static readonly JsonSerializerSettings JsonSettings = new JsonSerializerSettings
         {
             Formatting = Formatting.None,
@@ -142,6 +169,41 @@ namespace CoopSpectator.MissionBehaviors
         private CoopBattleSnapshotCompressionKind _cachedBattleSnapshotCompressionKind = CoopBattleSnapshotCompressionKind.None;
         private int _nextTransmissionId = 1;
         private bool _persistedHostedLocalPeerMarker;
+
+        internal static bool TryGetClientBattleSnapshotProgress(out ClientBattleSnapshotProgressInfo progress)
+        {
+            progress = default(ClientBattleSnapshotProgressInfo);
+
+            if (!GameNetwork.IsClient)
+                return false;
+
+            Mission mission = Mission.Current;
+            if (mission == null)
+                return false;
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null || bridge._clientBattleSnapshotAssembliesByTransmission.Count <= 0)
+                return false;
+
+            BattleSnapshotClientAssemblyState assemblyState = bridge._clientBattleSnapshotAssembliesByTransmission.Values
+                .Where(state => state != null)
+                .OrderByDescending(state => state.LastChunkReceivedUtc)
+                .ThenByDescending(state => state.LastManifestObservedUtc)
+                .FirstOrDefault();
+            if (assemblyState == null)
+                return false;
+
+            bool isStalled =
+                !assemblyState.IsComplete &&
+                DateTime.UtcNow - assemblyState.LastChunkReceivedUtc >= BattleSnapshotRangeAckStallDelay;
+            progress = new ClientBattleSnapshotProgressInfo(
+                assemblyState.TransmissionId,
+                assemblyState.ChunkCount,
+                assemblyState.ReceivedChunkCount,
+                assemblyState.HighestContiguousChunkIndex,
+                isStalled);
+            return true;
+        }
 
         protected override void AddRemoveMessageHandlers(GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
         {

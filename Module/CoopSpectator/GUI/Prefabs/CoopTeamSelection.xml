@@ -68,6 +68,7 @@
                 </ButtonWidget>
 
                 <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="640" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginBottom="255" DoNotAcceptEvents="true" DoNotPassEventsToChildren="true" Brush="MPEndOfRound.Description" Text="@HintText" />
+                <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="640" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginBottom="225" DoNotAcceptEvents="true" DoNotPassEventsToChildren="true" Brush="MPEndOfRound.Description" Text="@LoadingProgressText" />
               </Children>
             </Widget>
           </Children>
