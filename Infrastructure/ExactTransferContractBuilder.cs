@@ -51,15 +51,16 @@ namespace CoopSpectator.Infrastructure
             };
 
             bool isStrictHeroEntry = IsStrictHeroEntry(entryState);
+            bool isFirstWaveExactRangedEntry = CoopMissionSpawnLogic.IsFirstWaveExactRangedEntry(entryState);
             PopulateIdentity(contract.Identity, entryState, isPlayerControlledOrigin);
             PopulateBody(contract.Body, entryState);
-            PopulateEquipment(contract.Equipment, entryState, isStrictHeroEntry, buildMode);
+            PopulateEquipment(contract.Equipment, entryState, isStrictHeroEntry, isFirstWaveExactRangedEntry, buildMode);
             PopulateMount(contract.Mount, entryState);
             PopulatePeerBinding(contract.PeerBinding, entryState, isPlayerControlledOrigin);
             PopulateInitialWield(contract.InitialWield, entryState, contract.Equipment);
             PopulateControl(contract.Control, entryState, teamIndex, formationIndex);
             PopulateCleanup(contract.Cleanup);
-            PopulateSpawnPolicy(contract.SpawnPolicy, isStrictHeroEntry);
+            PopulateSpawnPolicy(contract.SpawnPolicy, isStrictHeroEntry, isFirstWaveExactRangedEntry);
 
             return contract;
         }
@@ -113,6 +114,7 @@ namespace CoopSpectator.Infrastructure
             ExactTransferEquipmentContract equipment,
             RosterEntryState entryState,
             bool isStrictHeroEntry,
+            bool isFirstWaveExactRangedEntry,
             BuildMode buildMode)
         {
             equipment.SpawnEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
@@ -121,14 +123,15 @@ namespace CoopSpectator.Infrastructure
                 honorExactVisualContracts: false,
                 includeArmorVisuals: true,
                 includeMountVisuals: true);
+            bool exactPreSpawnWeaponCandidate = isStrictHeroEntry || isFirstWaveExactRangedEntry;
             equipment.IncludeWeaponsInPreSpawn = buildMode == BuildMode.Diagnostic
-                ? isStrictHeroEntry && HasAnyWeaponItem(entryState)
-                : isStrictHeroEntry
+                ? exactPreSpawnWeaponCandidate && HasAnyWeaponItem(entryState)
+                : exactPreSpawnWeaponCandidate
                     ? HasAnyWeaponItem(entryState)
                     : CoopMissionSpawnLogic.EvaluateExactRuntimePreSpawnWeaponInjectionContract(entryState, out _, out _);
             equipment.IncludeArmorVisualsInPreSpawn = true;
             equipment.IncludeCapeInPreSpawn = buildMode == BuildMode.Diagnostic
-                ? false
+                ? exactPreSpawnWeaponCandidate
                 : CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(entryState, out _, out _);
             equipment.IncludeMountVisualsInPreSpawn = entryState.IsMounted;
 
@@ -224,10 +227,13 @@ namespace CoopSpectator.Infrastructure
             cleanup.RejectAgentIndexReuseWithoutIdentityMatch = true;
         }
 
-        private static void PopulateSpawnPolicy(ExactTransferSpawnPolicyContract spawnPolicy, bool isStrictHero)
+        private static void PopulateSpawnPolicy(
+            ExactTransferSpawnPolicyContract spawnPolicy,
+            bool isStrictHero,
+            bool isFirstWaveExactRangedEntry)
         {
             spawnPolicy.UseStrictExactHeroPath = isStrictHero;
-            spawnPolicy.RequirePreSpawnInjection = isStrictHero;
+            spawnPolicy.RequirePreSpawnInjection = isStrictHero || isFirstWaveExactRangedEntry;
             spawnPolicy.AllowClientVisualOverlayAsRecoveryOnly = true;
             spawnPolicy.ForbidSurrogatePrimaryMaterialization = true;
         }

@@ -15143,6 +15143,9 @@ namespace CoopSpectator.MissionBehaviors
             if (entryState == null)
                 return null;
 
+            bool exactPersonalHeroIdentity = HasEntryExactPersonalPerkHeroIdentity(entryState);
+            bool exactRangedRolloutEntry = IsFirstWaveExactRangedEntry(entryState);
+
             var diagnostic = new ExactEntryCompatibilityDiagnostic
             {
                 EntryId = entryState.EntryId,
@@ -15151,8 +15154,8 @@ namespace CoopSpectator.MissionBehaviors
                 RequestedOriginalCharacterId = entryState.OriginalCharacterId,
                 RequestedHeroTemplateId = entryState.HeroTemplateId,
                 RequestedSpawnTemplateId = entryState.SpawnTemplateId,
-                CurrentRuntimePreSpawnIncludesWeapons = HasEntryExactPersonalPerkHeroIdentity(entryState),
-                CurrentRuntimePreSpawnIncludesCapeVisual = HasEntryExactPersonalPerkHeroIdentity(entryState)
+                CurrentRuntimePreSpawnIncludesWeapons = exactPersonalHeroIdentity || exactRangedRolloutEntry,
+                CurrentRuntimePreSpawnIncludesCapeVisual = exactPersonalHeroIdentity || exactRangedRolloutEntry
             };
 
             TryResolveExactEntryCharacterContract(entryState, diagnostic);
@@ -15723,10 +15726,12 @@ namespace CoopSpectator.MissionBehaviors
         {
             ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
             exactEntryCompatibilitySummary = BuildExactEntryCompatibilityShortSummary(diagnostic);
+            bool exactPersonalHeroIdentity = HasEntryExactPersonalPerkHeroIdentity(entryState);
+            bool exactRangedRolloutEntry = IsFirstWaveExactRangedEntry(entryState);
 
-            if (!HasEntryExactPersonalPerkHeroIdentity(entryState))
+            if (!exactPersonalHeroIdentity && !exactRangedRolloutEntry)
             {
-                decisionReason = "entry lacks exact personal hero identity";
+                decisionReason = "entry is not enrolled in exact pre-spawn weapon rollout";
                 return false;
             }
 
@@ -15737,7 +15742,9 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            decisionReason = "strict exact personal hero contract";
+            decisionReason = exactPersonalHeroIdentity
+                ? "strict exact personal hero contract"
+                : "first-wave exact ranged troop contract";
             return true;
         }
 
@@ -15748,6 +15755,8 @@ namespace CoopSpectator.MissionBehaviors
         {
             ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
             exactEntryCompatibilitySummary = BuildExactEntryCompatibilityShortSummary(diagnostic);
+            bool exactPersonalHeroIdentity = HasEntryExactPersonalPerkHeroIdentity(entryState);
+            bool exactRangedRolloutEntry = IsFirstWaveExactRangedEntry(entryState);
 
             if (diagnostic == null)
             {
@@ -15757,9 +15766,9 @@ namespace CoopSpectator.MissionBehaviors
 
             if (!diagnostic.CurrentRuntimePreSpawnIncludesCapeVisual)
             {
-                if (!HasEntryExactPersonalPerkHeroIdentity(entryState))
+                if (!exactPersonalHeroIdentity && !exactRangedRolloutEntry)
                 {
-                    decisionReason = "entry lacks exact personal hero identity; template cape visuals stay in place";
+                    decisionReason = "entry is not enrolled in exact pre-spawn cape rollout; template cape visuals stay in place";
                     return false;
                 }
 
@@ -15769,8 +15778,71 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            decisionReason = "strict exact personal hero cape visual contract";
+            decisionReason = exactPersonalHeroIdentity
+                ? "strict exact personal hero cape visual contract"
+                : "first-wave exact ranged troop cape contract";
             return true;
+        }
+
+        internal static bool IsFirstWaveExactRangedEntry(RosterEntryState entryState)
+        {
+            if (entryState == null ||
+                entryState.IsMounted ||
+                HasEntryExactPersonalPerkHeroIdentity(entryState))
+            {
+                return false;
+            }
+
+            string normalizedTroopId =
+                (entryState.CharacterId ??
+                 entryState.OriginalCharacterId ??
+                 entryState.SpawnTemplateId ??
+                 entryState.HeroTemplateId ??
+                 string.Empty)
+                .Trim();
+            if (normalizedTroopId.StartsWith("mp_coop_", StringComparison.Ordinal))
+                normalizedTroopId = "mp_" + normalizedTroopId.Substring("mp_coop_".Length);
+            bool roleSuggestsRanged =
+                string.Equals(GetTroopRole(normalizedTroopId), "ranged", StringComparison.Ordinal);
+
+            Equipment exactEquipment = BuildSnapshotEquipmentForExactRuntime(
+                entryState,
+                includeWeapons: true,
+                honorExactVisualContracts: false,
+                includeArmorVisuals: true,
+                includeMountVisuals: false);
+            bool loadoutIsFootRanged = DoesEquipmentRepresentFootRangedLoadout(exactEquipment);
+
+            return roleSuggestsRanged && loadoutIsFootRanged;
+        }
+
+        private static bool DoesEquipmentRepresentFootRangedLoadout(Equipment equipment)
+        {
+            if (equipment == null)
+                return false;
+
+            bool hasRangedWeapon = false;
+            bool hasAmmo = false;
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                ItemObject item = equipment[slot].Item;
+                if (item == null)
+                    continue;
+
+                switch (item.ItemType)
+                {
+                    case ItemObject.ItemTypeEnum.Bow:
+                    case ItemObject.ItemTypeEnum.Crossbow:
+                        hasRangedWeapon = true;
+                        break;
+                    case ItemObject.ItemTypeEnum.Arrows:
+                    case ItemObject.ItemTypeEnum.Bolts:
+                        hasAmmo = true;
+                        break;
+                }
+            }
+
+            return hasRangedWeapon && hasAmmo;
         }
 
         private static void ResetExactBattleAgentSpawnTrace(Mission mission, string source)
@@ -17645,11 +17717,10 @@ namespace CoopSpectator.MissionBehaviors
             if (entryState == null)
                 return false;
 
-            bool isStrictHeroEntry =
-                entryState.IsHero ||
-                !string.IsNullOrWhiteSpace(entryState.HeroId) ||
-                string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase);
-            if (!isStrictHeroEntry)
+            bool exactPreSpawnEntry =
+                HasEntryExactPersonalPerkHeroIdentity(entryState) ||
+                IsFirstWaveExactRangedEntry(entryState);
+            if (!exactPreSpawnEntry)
                 return false;
 
             return

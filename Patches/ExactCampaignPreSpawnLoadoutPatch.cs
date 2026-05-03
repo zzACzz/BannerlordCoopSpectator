@@ -78,15 +78,22 @@ namespace CoopSpectator.Patches
             bool includeCape = exactTransferContract?.Equipment?.IncludeCapeInPreSpawn ?? false;
             bool includeArmorVisuals = exactTransferContract?.Equipment?.IncludeArmorVisualsInPreSpawn ?? false;
             bool includeMountVisuals = exactTransferContract?.Equipment?.IncludeMountVisualsInPreSpawn ?? false;
-            bool useStrictContractPath =
-                exactTransferContract?.SpawnPolicy?.UseStrictExactHeroPath == true &&
+            bool useContractDrivenPreSpawnPath =
+                exactTransferContract?.SpawnPolicy?.RequirePreSpawnInjection == true &&
                 exactTransferValidation?.IsValid == true;
-            if (useStrictContractPath)
+            if (useContractDrivenPreSpawnPath)
             {
-                exactEntryCompatibilitySummary = "ExactEntryContract=contract-driven-strict-hero";
+                bool strictHeroPath = exactTransferContract?.SpawnPolicy?.UseStrictExactHeroPath == true;
+                exactEntryCompatibilitySummary = strictHeroPath
+                    ? "ExactEntryContract=contract-driven-strict-hero"
+                    : "ExactEntryContract=contract-driven-ranged-rollout";
                 weaponDecisionReason = includeWeapons
-                    ? "contract-driven strict exact hero weapon policy"
-                    : "contract-driven strict exact hero weapon policy disabled";
+                    ? (strictHeroPath
+                        ? "contract-driven strict exact hero weapon policy"
+                        : "contract-driven first-wave exact ranged weapon policy")
+                    : (strictHeroPath
+                        ? "contract-driven strict exact hero weapon policy disabled"
+                        : "contract-driven first-wave exact ranged weapon policy disabled");
             }
             else
             {
@@ -98,11 +105,16 @@ namespace CoopSpectator.Patches
                     out weaponDecisionReason);
             }
             string capeDecisionReason;
-            if (useStrictContractPath)
+            if (useContractDrivenPreSpawnPath)
             {
+                bool strictHeroPath = exactTransferContract?.SpawnPolicy?.UseStrictExactHeroPath == true;
                 capeDecisionReason = includeCape
-                    ? "contract-driven strict exact hero cape policy"
-                    : "contract-driven strict exact hero cape policy disabled";
+                    ? (strictHeroPath
+                        ? "contract-driven strict exact hero cape policy"
+                        : "contract-driven first-wave exact ranged cape policy")
+                    : (strictHeroPath
+                        ? "contract-driven strict exact hero cape policy disabled"
+                        : "contract-driven first-wave exact ranged cape policy disabled");
             }
             else
             {
@@ -111,7 +123,7 @@ namespace CoopSpectator.Patches
                     out _,
                     out capeDecisionReason);
             }
-            if (!useStrictContractPath && isPlayerControlledOrigin)
+            if (!useContractDrivenPreSpawnPath && isPlayerControlledOrigin)
             {
                 if (includeCape)
                 {
@@ -129,12 +141,12 @@ namespace CoopSpectator.Patches
                         (capeDecisionReason ?? "unknown");
                 }
             }
-            bool injectEquipment = useStrictContractPath
+            bool injectEquipment = useContractDrivenPreSpawnPath
                 ? exactTransferContract.SpawnPolicy.RequirePreSpawnInjection &&
                   (includeWeapons || includeCape || includeArmorVisuals || includeMountVisuals)
                 : includeWeapons || includeCape;
             Equipment exactEquipment = injectEquipment
-                ? BuildPreSpawnEquipment(entryState, exactTransferContract, useStrictContractPath, includeWeapons)
+                ? BuildPreSpawnEquipment(entryState, exactTransferContract, useContractDrivenPreSpawnPath, includeWeapons)
                 : null;
             EquipmentInjectedByEntryId[exactOrigin.EntryId] = injectEquipment && exactEquipment != null;
             if (exactEquipment != null)
@@ -154,7 +166,7 @@ namespace CoopSpectator.Patches
                 ExactTransferContractRuntimeCache.BuildValidationSummary(exactOrigin.EntryId),
                 ExactTransferContractRuntimeCache.BuildRuntimeStateSummary(exactOrigin.EntryId));
 
-            bool hasBody = useStrictContractPath
+            bool hasBody = useContractDrivenPreSpawnPath
                 ? TryResolveContractBodyProperties(exactTransferContract, out BodyProperties bodyProperties)
                 : TryResolveEntryBodyProperties(entryState, out bodyProperties);
             if (hasBody)
@@ -162,10 +174,10 @@ namespace CoopSpectator.Patches
 
             if (HasHeroIdentity(entryState))
             {
-                bool isFemale = useStrictContractPath
+                bool isFemale = useContractDrivenPreSpawnPath
                     ? exactTransferContract?.Body?.IsFemale ?? entryState.HeroIsFemale
                     : entryState.HeroIsFemale;
-                int? age = useStrictContractPath
+                int? age = useContractDrivenPreSpawnPath
                     ? exactTransferContract?.Body?.Age
                     : entryState.HeroAge > 0.01f
                         ? (int?)Math.Max(1, Math.Min(120, (int)Math.Round(entryState.HeroAge)))
@@ -191,7 +203,7 @@ namespace CoopSpectator.Patches
                 " WeaponDecision=" + weaponDecisionReason +
                 " IncludeCape=" + includeCape +
                 " CapeDecision=" + capeDecisionReason +
-                " UseStrictContractPath=" + useStrictContractPath +
+                " UseContractDrivenPreSpawnPath=" + useContractDrivenPreSpawnPath +
                 " " + ExactTransferContractRuntimeCache.BuildValidationSummary(exactOrigin.EntryId) +
                 " " + exactEntryCompatibilitySummary +
                 " SpawnFromAgentVisuals=" + spawnFromAgentVisuals +
