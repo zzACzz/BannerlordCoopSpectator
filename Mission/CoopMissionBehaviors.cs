@@ -6457,6 +6457,86 @@ namespace CoopSpectator.MissionBehaviors
             return false;
         }
 
+        public static bool TryFinalizeClientExactCampaignTroopVisualForPeerAgent(
+            Mission mission,
+            Agent agent,
+            string source,
+            bool includeWeaponsForClientRefresh = true)
+        {
+            if (mission == null || agent == null || agent.IsMount || !agent.IsActive() || GameNetwork.IsServer)
+                return false;
+
+            if (!IsClientExactCampaignVisualOverlayRuntime(mission))
+                return false;
+
+            if (!IsMissionPeerAgentEligibleForClientExactVisualOverlay(agent))
+                return false;
+
+            if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: deferred client troop exact visual finalize until current battle snapshot is applied. " +
+                    "AgentIndex=" + agent.Index +
+                    " Source=" + (source ?? "unknown") +
+                    " Reason=" + snapshotReadinessSummary);
+                return false;
+            }
+
+            string entryId = ResolveClientExactCampaignVisualOverlayEntryId(agent);
+            if (string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (entryState == null || IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                return false;
+
+            if (_exactNativeClientVisualOverlayAppliedAgentIndices.Contains(agent.Index) &&
+                _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.TryGetValue(agent.Index, out bool appliedIncludesWeapons) &&
+                (!includeWeaponsForClientRefresh || appliedIncludesWeapons))
+            {
+                return true;
+            }
+
+            bool applied = TryApplyExactCampaignSnapshotOverlayToNativeAgent(
+                agent,
+                entryId,
+                source ?? "client troop exact visual finalize",
+                ExactCampaignSnapshotOverlayMode.ClientVisualOnly,
+                includeWeaponsForClientRefresh: includeWeaponsForClientRefresh);
+            if (applied)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: applied client troop exact campaign visual overlay to peer-controlled agent. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " TroopId=" + (agent.Character?.StringId ?? "null") +
+                    " MissionPeer=" + (agent.MissionPeer?.Peer?.UserName ?? "null") +
+                    " Source=" + (source ?? "unknown"));
+                return true;
+            }
+
+            bool queued = TryQueueClientExactCampaignVisualOverlay(
+                mission,
+                agent,
+                entryId,
+                source ?? "client troop exact visual finalize",
+                delaySeconds: 0.08d,
+                force: true,
+                includeWeaponsForRefresh: includeWeaponsForClientRefresh);
+            if (queued)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: queued delayed client troop exact visual refresh for peer-controlled agent. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " TroopId=" + (agent.Character?.StringId ?? "null") +
+                    " MissionPeer=" + (agent.MissionPeer?.Peer?.UserName ?? "null") +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            return false;
+        }
+
         private static void TryEnsureExactCampaignNativeArmyBootstrap(Mission mission, string source)
         {
             if (mission == null || !GameNetwork.IsServer)

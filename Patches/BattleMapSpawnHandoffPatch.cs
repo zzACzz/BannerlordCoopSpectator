@@ -1541,13 +1541,22 @@ namespace CoopSpectator.Patches
                 bool deferImmediateExactVisualFinalize =
                     agent.MissionPeer != null &&
                     ShouldDeferImmediateClientExactVisualFinalize(agent);
-                bool applied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
+                bool heroExactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
                     mission,
                     agent,
                     preferredEntryId: null,
                     source: "battle-map handoff SynchronizeAgentSpawnEquipment",
                     includeWeaponsForClientRefresh: true,
                     allowImmediateApply: !deferImmediateExactVisualFinalize);
+                bool troopExactVisualApplied = false;
+                if (!heroExactVisualApplied)
+                {
+                    troopExactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignTroopVisualForPeerAgent(
+                        mission,
+                        agent,
+                        "battle-map handoff SynchronizeAgentSpawnEquipment",
+                        includeWeaponsForClientRefresh: true);
+                }
                 CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
                     agent,
                     "client-synchronize-agent-equipment",
@@ -1561,8 +1570,9 @@ namespace CoopSpectator.Patches
                         EquipmentIndex.Horse,
                         EquipmentIndex.HorseHarness) + "}" +
                     " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
-                    " ExactVisualApplied=" + applied);
-                if (applied)
+                    " ExactVisualApplied=" + heroExactVisualApplied +
+                    " TroopExactVisualApplied=" + troopExactVisualApplied);
+                if (heroExactVisualApplied || troopExactVisualApplied)
                     return;
 
                 CoopMissionSpawnLogic.TryHandleClientExactCampaignSpawnEquipmentSync(
