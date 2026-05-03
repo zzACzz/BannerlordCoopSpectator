@@ -227,16 +227,21 @@ namespace CoopSpectator.MissionBehaviors
 
         protected override void OnUdpNetworkHandlerTick()
         {
-            TryPersistHostedLocalPeerMarker();
-
-            if (GameNetwork.IsClient && Mission != null)
-                TryResendClientBattleSnapshotRangeAcks();
-
             if (!GameNetwork.IsServer || Mission == null)
                 return;
 
             TrySyncBattleSnapshotPayloads();
             TrySyncEntryStatusPayloads();
+        }
+
+        public override void OnMissionTick(float dt)
+        {
+            base.OnMissionTick(dt);
+
+            TryPersistHostedLocalPeerMarker();
+
+            if (GameNetwork.IsClient && Mission != null)
+                TryResendClientBattleSnapshotRangeAcks();
         }
 
         private void TryResendClientBattleSnapshotRangeAcks()
