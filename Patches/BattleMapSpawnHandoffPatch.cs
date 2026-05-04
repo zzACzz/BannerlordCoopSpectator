@@ -599,10 +599,19 @@ namespace CoopSpectator.Patches
                         source: "battle-map handoff SetAgentPeer remote",
                         includeWeaponsForClientRefresh: true,
                         allowImmediateApply: !remoteDeferImmediateExactVisualFinalize);
+                    bool remoteTroopExactVisualApplied = false;
+                    if (!remoteExactVisualApplied)
+                    {
+                        remoteTroopExactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignTroopVisualForPeerAgent(
+                            mission,
+                            agent,
+                            "battle-map handoff SetAgentPeer remote",
+                            includeWeaponsForClientRefresh: true);
+                    }
                     if (remoteExactVisualApplied && !remoteDeferImmediateExactVisualFinalize)
                         agent.MountAgent?.UpdateAgentProperties();
 
-                    if (remoteExactVisualApplied)
+                    if (remoteExactVisualApplied || remoteTroopExactVisualApplied)
                     {
                         ModLogger.Info(
                             "BattleMapSpawnHandoffPatch: applied remote peer agent exact visuals after SetAgentPeer for battle-map handoff. " +
@@ -611,6 +620,7 @@ namespace CoopSpectator.Patches
                             " HasSpawnEquipment=" + (agent.SpawnEquipment != null) +
                             " MountAgentIndex=" + (agent.MountAgent?.Index.ToString() ?? "null") +
                             " ExactVisualApplied=" + remoteExactVisualApplied +
+                            " TroopExactVisualApplied=" + remoteTroopExactVisualApplied +
                             " DeferredImmediateExactVisualFinalize=" + remoteDeferImmediateExactVisualFinalize +
                             " Mission=" + (mission.SceneName ?? "null"));
                     }
@@ -621,7 +631,8 @@ namespace CoopSpectator.Patches
                         "battle-map handoff SetAgentPeer remote",
                         "PayloadPeerIndex=" + (setAgentPeer.Peer?.Index.ToString() ?? "null") +
                         " DeferredImmediateExactVisualFinalize=" + remoteDeferImmediateExactVisualFinalize +
-                        " ExactVisualApplied=" + remoteExactVisualApplied);
+                        " ExactVisualApplied=" + remoteExactVisualApplied +
+                        " TroopExactVisualApplied=" + remoteTroopExactVisualApplied);
                     return;
                 }
 
@@ -658,6 +669,15 @@ namespace CoopSpectator.Patches
                     "battle-map handoff SetAgentPeer",
                     includeWeaponsForClientRefresh: true,
                     allowImmediateApply: !deferImmediateExactVisualFinalize);
+                bool troopExactVisualApplied = false;
+                if (!exactVisualApplied)
+                {
+                    troopExactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignTroopVisualForPeerAgent(
+                        mission,
+                        agent,
+                        "battle-map handoff SetAgentPeer",
+                        includeWeaponsForClientRefresh: true);
+                }
                 if (exactVisualApplied && !deferImmediateExactVisualFinalize)
                     agent.MountAgent?.UpdateAgentProperties();
 
@@ -668,6 +688,7 @@ namespace CoopSpectator.Patches
                     " HasSpawnEquipment=" + (agent.SpawnEquipment != null) +
                     " MountAgentIndex=" + (agent.MountAgent?.Index.ToString() ?? "null") +
                     " ExactVisualApplied=" + exactVisualApplied +
+                    " TroopExactVisualApplied=" + troopExactVisualApplied +
                     " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
                     " PreferredEntryId=" + (preferredEntryId ?? "null") +
                     " EntryResolutionSource=" + (entryResolutionSource ?? "null") +
@@ -680,7 +701,8 @@ namespace CoopSpectator.Patches
                     "PayloadPeerIndex=" + (setAgentPeer.Peer?.Index.ToString() ?? "null") +
                     " PreferredEntryId=" + (preferredEntryId ?? "null") +
                     " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
-                    " ExactVisualApplied=" + exactVisualApplied);
+                    " ExactVisualApplied=" + exactVisualApplied +
+                    " TroopExactVisualApplied=" + troopExactVisualApplied);
             }
             catch (Exception ex)
             {
