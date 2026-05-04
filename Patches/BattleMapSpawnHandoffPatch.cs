@@ -579,11 +579,16 @@ namespace CoopSpectator.Patches
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setAgentPeer.AgentIndex, canBeNull: true);
                 NetworkCommunicator payloadPeer = setAgentPeer.Peer;
-                MissionPeer missionPeer = payloadPeer?.GetComponent<MissionPeer>();
-                if (agent == null || missionPeer == null || !agent.IsActive())
+                MissionPeer payloadMissionPeer = payloadPeer?.GetComponent<MissionPeer>();
+                MissionPeer agentMissionPeer = agent?.MissionPeer;
+                MissionPeer effectiveMissionPeer = payloadMissionPeer ?? agentMissionPeer;
+                if (agent == null || !agent.IsActive())
                     return;
 
-                bool isLocalPayloadPeer = payloadPeer?.IsMine == true;
+                MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+                bool isLocalPayloadPeer =
+                    payloadPeer?.IsMine == true ||
+                    (effectiveMissionPeer != null && ReferenceEquals(effectiveMissionPeer, localMissionPeer));
                 if (!isLocalPayloadPeer)
                 {
                     ExactTransferContractRuntimeCache.ObserveClientPeerBound(
@@ -642,6 +647,18 @@ namespace CoopSpectator.Patches
                     CoopBattleEntryPolicy.BuildClientSnapshot(mission, selectionBridge);
                 if (entryPolicy == null || !entryPolicy.UseAuthoritativeTroopPath)
                     return;
+
+                MissionPeer missionPeer = effectiveMissionPeer ?? localMissionPeer;
+                if (missionPeer == null)
+                {
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: skipped local SetAgentPeer exact visual finalization because no local MissionPeer could be resolved. " +
+                        "AgentIndex=" + agent.Index +
+                        " PayloadPeerIndex=" + (payloadPeer?.Index.ToString() ?? "null") +
+                        " AgentMissionPeer=" + (agentMissionPeer?.Peer?.Index.ToString() ?? "null") +
+                        " Mission=" + (mission.SceneName ?? "null"));
+                    return;
+                }
 
                 string preferredEntryId = ResolveControlledEntryId(
                     missionPeer,
