@@ -60,9 +60,15 @@ namespace CoopSpectator.Patches
                 return;
 
             bool isPlayerControlledOrigin = ((IAgentOriginBase)exactOrigin).IsUnderPlayersCommand;
+            bool contractPlayerControlledOrigin =
+                isPlayerControlledOrigin &&
+                entryState != null &&
+                (entryState.IsHero ||
+                 !string.IsNullOrWhiteSpace(entryState.HeroId) ||
+                 string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
             ExactTransferSpawnContract exactTransferContract = ExactTransferContractBuilder.Build(
                 entryState,
-                isPlayerControlledOrigin,
+                contractPlayerControlledOrigin,
                 (int)exactOrigin.Side,
                 ResolveFormationIndex(entryState));
             ExactTransferValidationResult exactTransferValidation =
@@ -86,20 +92,20 @@ namespace CoopSpectator.Patches
                 bool strictHeroPath = exactTransferContract?.SpawnPolicy?.UseStrictExactHeroPath == true;
                 exactEntryCompatibilitySummary = strictHeroPath
                     ? "ExactEntryContract=contract-driven-strict-hero"
-                    : "ExactEntryContract=contract-driven-ranged-rollout";
+                    : "ExactEntryContract=contract-driven-full-army";
                 weaponDecisionReason = includeWeapons
                     ? (strictHeroPath
                         ? "contract-driven strict exact hero weapon policy"
-                        : "contract-driven first-wave exact ranged weapon policy")
+                        : "contract-driven full-army exact weapon policy")
                     : (strictHeroPath
                         ? "contract-driven strict exact hero weapon policy disabled"
-                        : "contract-driven first-wave exact ranged weapon policy disabled");
+                        : "contract-driven full-army exact weapon policy disabled");
             }
             else
             {
                 includeWeapons = ShouldIncludeWeaponsForPreSpawnInjection(
                     exactOrigin,
-                    isPlayerControlledOrigin,
+                    contractPlayerControlledOrigin,
                     entryState,
                     out exactEntryCompatibilitySummary,
                     out weaponDecisionReason);
@@ -111,10 +117,10 @@ namespace CoopSpectator.Patches
                 capeDecisionReason = includeCape
                     ? (strictHeroPath
                         ? "contract-driven strict exact hero cape policy"
-                        : "contract-driven first-wave exact ranged cape policy")
+                        : "contract-driven full-army exact cape policy")
                     : (strictHeroPath
                         ? "contract-driven strict exact hero cape policy disabled"
-                        : "contract-driven first-wave exact ranged cape policy disabled");
+                        : "contract-driven full-army exact cape policy disabled");
             }
             else
             {
@@ -123,7 +129,7 @@ namespace CoopSpectator.Patches
                     out _,
                     out capeDecisionReason);
             }
-            if (!useContractDrivenPreSpawnPath && isPlayerControlledOrigin)
+            if (!useContractDrivenPreSpawnPath && contractPlayerControlledOrigin)
             {
                 if (includeCape)
                 {
@@ -198,6 +204,7 @@ namespace CoopSpectator.Patches
                 " TroopId=" + exactOrigin.TroopId +
                 " Hero=" + entryState.IsHero +
                 " PlayerControlledOrigin=" + isPlayerControlledOrigin +
+                " ContractPlayerControlledOrigin=" + contractPlayerControlledOrigin +
                 " InjectEquipment=" + (exactEquipment != null) +
                 " IncludeWeapons=" + includeWeapons +
                 " WeaponDecision=" + weaponDecisionReason +

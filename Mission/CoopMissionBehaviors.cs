@@ -7029,12 +7029,24 @@ namespace CoopSpectator.MissionBehaviors
             if (!ExperimentalFeatures.EnableExactCampaignPreSpawnLoadoutInjection ||
                 !GameNetwork.IsServer ||
                 !CoopSpectator.Patches.ExactCampaignPreSpawnLoadoutPatch.IsOperationalOnCurrentProcess ||
-                !(agent?.Origin is ExactCampaignSnapshotAgentOrigin exactOrigin))
+                agent == null)
             {
                 return false;
             }
 
-            return CoopSpectator.Patches.ExactCampaignPreSpawnLoadoutPatch.WasEquipmentInjectedForEntry(exactOrigin.EntryId);
+            string entryId = null;
+            if (agent.Origin is ExactCampaignSnapshotAgentOrigin exactOrigin)
+            {
+                entryId = exactOrigin.EntryId;
+            }
+
+            if (string.IsNullOrWhiteSpace(entryId))
+                ExactCampaignArmyBootstrap.TryGetEntryId(agent, out entryId);
+
+            if (string.IsNullOrWhiteSpace(entryId))
+                _materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out entryId);
+
+            return CoopSpectator.Patches.ExactCampaignPreSpawnLoadoutPatch.WasEquipmentInjectedForEntry(entryId);
         }
 
         private static bool TryApplyExactCampaignSnapshotOverlayToNativeAgent(
@@ -15143,9 +15155,6 @@ namespace CoopSpectator.MissionBehaviors
             if (entryState == null)
                 return null;
 
-            bool exactPersonalHeroIdentity = HasEntryExactPersonalPerkHeroIdentity(entryState);
-            bool exactRangedRolloutEntry = IsFirstWaveExactRangedEntry(entryState);
-
             var diagnostic = new ExactEntryCompatibilityDiagnostic
             {
                 EntryId = entryState.EntryId,
@@ -15154,8 +15163,12 @@ namespace CoopSpectator.MissionBehaviors
                 RequestedOriginalCharacterId = entryState.OriginalCharacterId,
                 RequestedHeroTemplateId = entryState.HeroTemplateId,
                 RequestedSpawnTemplateId = entryState.SpawnTemplateId,
-                CurrentRuntimePreSpawnIncludesWeapons = exactPersonalHeroIdentity || exactRangedRolloutEntry,
-                CurrentRuntimePreSpawnIncludesCapeVisual = exactPersonalHeroIdentity || exactRangedRolloutEntry
+                CurrentRuntimePreSpawnIncludesWeapons =
+                    !string.IsNullOrWhiteSpace(entryState.CombatItem0Id) ||
+                    !string.IsNullOrWhiteSpace(entryState.CombatItem1Id) ||
+                    !string.IsNullOrWhiteSpace(entryState.CombatItem2Id) ||
+                    !string.IsNullOrWhiteSpace(entryState.CombatItem3Id),
+                CurrentRuntimePreSpawnIncludesCapeVisual = true
             };
 
             TryResolveExactEntryCharacterContract(entryState, diagnostic);
@@ -15727,13 +15740,6 @@ namespace CoopSpectator.MissionBehaviors
             ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
             exactEntryCompatibilitySummary = BuildExactEntryCompatibilityShortSummary(diagnostic);
             bool exactPersonalHeroIdentity = HasEntryExactPersonalPerkHeroIdentity(entryState);
-            bool exactRangedRolloutEntry = IsFirstWaveExactRangedEntry(entryState);
-
-            if (!exactPersonalHeroIdentity && !exactRangedRolloutEntry)
-            {
-                decisionReason = "entry is not enrolled in exact pre-spawn weapon rollout";
-                return false;
-            }
 
             if (!IsStrictExactEntryContractSupported(diagnostic))
             {
@@ -15742,9 +15748,15 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (!diagnostic.CurrentRuntimePreSpawnIncludesWeapons)
+            {
+                decisionReason = "entry has no exact pre-spawn weapon slots to inject";
+                return false;
+            }
+
             decisionReason = exactPersonalHeroIdentity
                 ? "strict exact personal hero contract"
-                : "first-wave exact ranged troop contract";
+                : "full-army exact troop contract";
             return true;
         }
 
@@ -15756,7 +15768,6 @@ namespace CoopSpectator.MissionBehaviors
             ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
             exactEntryCompatibilitySummary = BuildExactEntryCompatibilityShortSummary(diagnostic);
             bool exactPersonalHeroIdentity = HasEntryExactPersonalPerkHeroIdentity(entryState);
-            bool exactRangedRolloutEntry = IsFirstWaveExactRangedEntry(entryState);
 
             if (diagnostic == null)
             {
@@ -15764,24 +15775,27 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (!IsStrictExactEntryContractSupported(diagnostic))
+            {
+                decisionReason = "degraded or unsupported entry keeps template cape visuals to avoid cloth mesh artifacts";
+                return false;
+            }
+
             if (!diagnostic.CurrentRuntimePreSpawnIncludesCapeVisual)
             {
-                if (!exactPersonalHeroIdentity && !exactRangedRolloutEntry)
-                {
-                    decisionReason = "entry is not enrolled in exact pre-spawn cape rollout; template cape visuals stay in place";
-                    return false;
-                }
-
-                decisionReason = !IsStrictExactEntryContractSupported(diagnostic)
-                    ? "degraded or unsupported entry keeps template cape visuals to avoid cloth mesh artifacts"
-                    : "hosted bulk-AI path keeps template cape visuals to avoid cloth mesh artifacts";
+                decisionReason = "exact pre-spawn cape visuals are disabled for this entry";
                 return false;
             }
 
             decisionReason = exactPersonalHeroIdentity
                 ? "strict exact personal hero cape visual contract"
-                : "first-wave exact ranged troop cape contract";
+                : "full-army exact troop cape contract";
             return true;
+        }
+
+        internal static bool IsCurrentRuntimeExactEntryContractSupported(RosterEntryState entryState)
+        {
+            return IsStrictExactEntryContractSupported(GetExactEntryCompatibilityDiagnostic(entryState));
         }
 
         internal static bool IsFirstWaveExactRangedEntry(RosterEntryState entryState)
@@ -17717,10 +17731,7 @@ namespace CoopSpectator.MissionBehaviors
             if (entryState == null)
                 return false;
 
-            bool exactPreSpawnEntry =
-                HasEntryExactPersonalPerkHeroIdentity(entryState) ||
-                IsFirstWaveExactRangedEntry(entryState);
-            if (!exactPreSpawnEntry)
+            if (!IsCurrentRuntimeExactEntryContractSupported(entryState))
                 return false;
 
             return

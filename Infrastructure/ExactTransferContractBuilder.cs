@@ -51,16 +51,18 @@ namespace CoopSpectator.Infrastructure
             };
 
             bool isStrictHeroEntry = IsStrictHeroEntry(entryState);
-            bool isFirstWaveExactRangedEntry = CoopMissionSpawnLogic.IsFirstWaveExactRangedEntry(entryState);
+            bool isRuntimeExactSupported =
+                buildMode == BuildMode.Diagnostic ||
+                CoopMissionSpawnLogic.IsCurrentRuntimeExactEntryContractSupported(entryState);
             PopulateIdentity(contract.Identity, entryState, isPlayerControlledOrigin);
             PopulateBody(contract.Body, entryState);
-            PopulateEquipment(contract.Equipment, entryState, isStrictHeroEntry, isFirstWaveExactRangedEntry, buildMode);
+            PopulateEquipment(contract.Equipment, entryState, isStrictHeroEntry, isRuntimeExactSupported, buildMode);
             PopulateMount(contract.Mount, entryState);
             PopulatePeerBinding(contract.PeerBinding, entryState, isPlayerControlledOrigin);
             PopulateInitialWield(contract.InitialWield, entryState, contract.Equipment);
             PopulateControl(contract.Control, entryState, teamIndex, formationIndex);
             PopulateCleanup(contract.Cleanup);
-            PopulateSpawnPolicy(contract.SpawnPolicy, isStrictHeroEntry, isFirstWaveExactRangedEntry);
+            PopulateSpawnPolicy(contract.SpawnPolicy, isStrictHeroEntry, isRuntimeExactSupported);
 
             return contract;
         }
@@ -114,7 +116,7 @@ namespace CoopSpectator.Infrastructure
             ExactTransferEquipmentContract equipment,
             RosterEntryState entryState,
             bool isStrictHeroEntry,
-            bool isFirstWaveExactRangedEntry,
+            bool isRuntimeExactSupported,
             BuildMode buildMode)
         {
             equipment.SpawnEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
@@ -123,17 +125,16 @@ namespace CoopSpectator.Infrastructure
                 honorExactVisualContracts: false,
                 includeArmorVisuals: true,
                 includeMountVisuals: true);
-            bool exactPreSpawnWeaponCandidate = isStrictHeroEntry || isFirstWaveExactRangedEntry;
+            bool exactPreSpawnWeaponCandidate = isStrictHeroEntry || isRuntimeExactSupported;
             equipment.IncludeWeaponsInPreSpawn = buildMode == BuildMode.Diagnostic
                 ? exactPreSpawnWeaponCandidate && HasAnyWeaponItem(entryState)
-                : exactPreSpawnWeaponCandidate
-                    ? HasAnyWeaponItem(entryState)
-                    : CoopMissionSpawnLogic.EvaluateExactRuntimePreSpawnWeaponInjectionContract(entryState, out _, out _);
-            equipment.IncludeArmorVisualsInPreSpawn = true;
+                : isRuntimeExactSupported && HasAnyWeaponItem(entryState);
+            equipment.IncludeArmorVisualsInPreSpawn = buildMode == BuildMode.Diagnostic || isRuntimeExactSupported;
             equipment.IncludeCapeInPreSpawn = buildMode == BuildMode.Diagnostic
                 ? exactPreSpawnWeaponCandidate
                 : CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(entryState, out _, out _);
-            equipment.IncludeMountVisualsInPreSpawn = entryState.IsMounted;
+            equipment.IncludeMountVisualsInPreSpawn =
+                entryState.IsMounted && (buildMode == BuildMode.Diagnostic || isRuntimeExactSupported);
 
             AddSlot(equipment, EquipmentIndex.Weapon0, "Item0", entryState.CombatItem0Id, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem0Id));
             AddSlot(equipment, EquipmentIndex.Weapon1, "Item1", entryState.CombatItem1Id, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem1Id));
@@ -147,7 +148,7 @@ namespace CoopSpectator.Infrastructure
             AddSlot(equipment, EquipmentIndex.Horse, "Horse", entryState.CombatHorseId, mustExistAtCreateAgentTime: entryState.IsMounted, canBeLateSynchronized: false, isMountedCritical: entryState.IsMounted);
             AddSlot(equipment, EquipmentIndex.HorseHarness, "HorseHarness", entryState.CombatHorseHarnessId, mustExistAtCreateAgentTime: entryState.IsMounted && !string.IsNullOrWhiteSpace(entryState.CombatHorseHarnessId), canBeLateSynchronized: false, isMountedCritical: entryState.IsMounted);
 
-            NormalizeStrictHeroWeaponLayout(equipment, entryState, isStrictHeroEntry);
+            NormalizeStrictHeroWeaponLayout(equipment, entryState, isStrictHeroEntry || isRuntimeExactSupported);
         }
 
         private static void PopulateMount(ExactTransferMountContract mount, RosterEntryState entryState)
@@ -230,10 +231,10 @@ namespace CoopSpectator.Infrastructure
         private static void PopulateSpawnPolicy(
             ExactTransferSpawnPolicyContract spawnPolicy,
             bool isStrictHero,
-            bool isFirstWaveExactRangedEntry)
+            bool isRuntimeExactSupported)
         {
             spawnPolicy.UseStrictExactHeroPath = isStrictHero;
-            spawnPolicy.RequirePreSpawnInjection = isStrictHero || isFirstWaveExactRangedEntry;
+            spawnPolicy.RequirePreSpawnInjection = isStrictHero || isRuntimeExactSupported;
             spawnPolicy.AllowClientVisualOverlayAsRecoveryOnly = true;
             spawnPolicy.ForbidSurrogatePrimaryMaterialization = true;
         }
@@ -263,7 +264,7 @@ namespace CoopSpectator.Infrastructure
         {
             normalized = false;
             summary = "(none)";
-            if (equipment == null || entryState == null || !IsStrictHeroEntry(entryState))
+            if (equipment == null || entryState == null)
                 return false;
 
             List<MountedWeaponSlotState> slots = ResolveMountedWeaponSlots(equipment);
