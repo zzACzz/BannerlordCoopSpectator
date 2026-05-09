@@ -94,6 +94,7 @@
     <Compile Include="..\Infrastructure\CoopBattleSelectionBridgeFile.cs" Link="Infrastructure\CoopBattleSelectionBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CustomGameJoinContextState.cs" Link="Infrastructure\CustomGameJoinContextState.cs" />
     <Compile Include="..\Infrastructure\HostSelfJoinRedirectState.cs" Link="Infrastructure\HostSelfJoinRedirectState.cs" />
+    <Compile Include="..\Infrastructure\PendingBattleMissionStartupState.cs" Link="Infrastructure\PendingBattleMissionStartupState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSelectionIntentState.cs" Link="Infrastructure\CoopBattleSelectionIntentState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSpawnBridgeFile.cs" Link="Infrastructure\CoopBattleSpawnBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSpawnIntentState.cs" Link="Infrastructure\CoopBattleSpawnIntentState.cs" />
@@ -113,6 +114,8 @@
     <Compile Include="..\Patches\ExactCampaignPreSpawnLoadoutPatch.cs" Link="Patches\ExactCampaignPreSpawnLoadoutPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" Link="Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" />
     <Compile Include="..\Patches\BattleMapSpawnHandoffPatch.cs" Link="Patches\BattleMapSpawnHandoffPatch.cs" />
+    <Compile Include="..\Patches\LateJoinPeerBootstrapGatePatch.cs" Link="Patches\LateJoinPeerBootstrapGatePatch.cs" />
+    <Compile Include="..\Patches\FinishedLoadingMissionReadyGatePatch.cs" Link="Patches\FinishedLoadingMissionReadyGatePatch.cs" />
     <Compile Include="..\Patches\BattleShellSuppressionPatch.cs" Link="Patches\BattleShellSuppressionPatch.cs" />
     <Compile Include="..\Patches\MultiplayerCharacterClassFallbackPatch.cs" Link="Patches\MultiplayerCharacterClassFallbackPatch.cs" />
     <Compile Include="..\Patches\ServerChangeCultureCanonicalizationPatch.cs" Link="Patches\ServerChangeCultureCanonicalizationPatch.cs" />

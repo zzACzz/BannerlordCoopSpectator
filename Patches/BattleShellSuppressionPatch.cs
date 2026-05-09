@@ -19,6 +19,7 @@ namespace CoopSpectator.Patches
     {
         private static string _lastSuppressionLogKey;
         private static string _lastEndTransitionPassThroughLogKey;
+        private static string _lastClientBootstrapPassThroughLogKey;
         private static string _lastWarmupAfterStartObservationKey;
         private static string _lastOfficialBattleStartupObservationKey;
         private static string _lastFinishMissionLoadingObservationKey;
@@ -532,6 +533,27 @@ namespace CoopSpectator.Patches
                         " Scene=" + (mission?.SceneName ?? "unknown") +
                         " LobbyState=" + (lobbyState?.ToString() ?? "null") +
                         " BattlePhase=" + currentPhase + ".");
+                }
+
+                return false;
+            }
+
+            if (GameNetwork.IsClient &&
+                !GameNetwork.IsServer &&
+                !CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+            {
+                string passThroughKey =
+                    (source ?? "unknown") + "|" +
+                    (mission?.SceneName ?? "unknown") + "|" +
+                    (snapshotReadinessSummary ?? "unknown");
+                if (!string.Equals(_lastClientBootstrapPassThroughLogKey, passThroughKey, StringComparison.Ordinal))
+                {
+                    _lastClientBootstrapPassThroughLogKey = passThroughKey;
+                    ModLogger.Info(
+                        "BattleShellSuppressionPatch: allowed native battle shell path while client battle snapshot bootstrap is pending. " +
+                        "Source=" + (source ?? "unknown") +
+                        " Scene=" + (mission?.SceneName ?? "unknown") +
+                        " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") + ".");
                 }
 
                 return false;

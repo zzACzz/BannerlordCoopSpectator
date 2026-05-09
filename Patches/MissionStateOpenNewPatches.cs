@@ -78,6 +78,9 @@ namespace CoopSpectator.Patches
 
             bool isOfficialBattleMission = string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal);
             bool isCoopBattleFactory = IsCoopBattleBehaviorFactory(handler);
+            if (GameNetwork.IsServer && isOfficialBattleMission)
+                PendingBattleMissionStartupState.Arm(rec.SceneName, "MissionState.OpenNew prefix");
+
             if (isOfficialBattleMission && !isCoopBattleFactory)
             {
                 string runtimeScene = rec.SceneName ?? string.Empty;

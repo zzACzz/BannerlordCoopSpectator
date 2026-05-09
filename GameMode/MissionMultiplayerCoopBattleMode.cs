@@ -212,16 +212,16 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ModLogger.Info("CoopBattle server: retained recent players, match history, equipment leave logic, preload helper, panic handler, and human AI for battle-map native peer-sync compatibility.");
             }
 
+            list.Add(new CoopMissionNetworkBridge());
             if (isDedicated)
             {
                 ModLogger.Info(
-                    "CoopBattle server: deferred CoopMissionNetworkBridge/CoopMissionSpawnLogic initial mission behavior injection for dedicated process. " +
-                    "They will be attached after native mission-ready state stabilization.");
+                    "CoopBattle server: injected CoopMissionNetworkBridge into the initial dedicated mission stack so first-entry peers can bootstrap battle snapshot transport before synchronized. " +
+                    "CoopMissionSpawnLogic remains on deferred observer attach until native mission-ready state stabilizes.");
             }
             else
             {
                 list.Add(new MissionBehaviorDiagnostic());
-                list.Add(new CoopMissionNetworkBridge());
                 list.Add(new CoopMissionSpawnLogic());
             }
             return list;
