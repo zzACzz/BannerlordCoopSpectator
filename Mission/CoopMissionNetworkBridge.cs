@@ -71,6 +71,42 @@ namespace CoopSpectator.MissionBehaviors
                 source);
         }
 
+        private static bool ShouldSuppressClientSelectionOrSpawnRequest(
+            CoopBattleSelectionRequestKind requestKind,
+            out string reason)
+        {
+            reason = null;
+            if (requestKind != CoopBattleSelectionRequestKind.SelectEntry &&
+                requestKind != CoopBattleSelectionRequestKind.SpawnNow)
+            {
+                return false;
+            }
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            if (status == null)
+                return false;
+
+            string spawnStatus = status.SpawnStatus?.Trim();
+            if (string.Equals(spawnStatus, CoopBattleSpawnStatus.Pending.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(spawnStatus, CoopBattleSpawnStatus.Validating.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(spawnStatus, CoopBattleSpawnStatus.Validated.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                reason = "spawn-transition-in-flight:" + spawnStatus;
+                return true;
+            }
+
+            string lifecycleState = status.LifecycleState?.Trim();
+            if (status.HasAgent &&
+                !status.CanRespawn &&
+                string.Equals(lifecycleState, CoopBattlePeerLifecycleStatus.Alive.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                reason = "peer-still-occupies-active-life";
+                return true;
+            }
+
+            return false;
+        }
+
         private static bool TrySendClientRequest(
             CoopBattleSelectionRequestKind requestKind,
             BattleSideEnum requestedSide,
@@ -79,6 +115,18 @@ namespace CoopSpectator.MissionBehaviors
         {
             if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
                 return false;
+
+            if (ShouldSuppressClientSelectionOrSpawnRequest(requestKind, out string suppressionReason))
+            {
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: suppressed client request while local spawn handoff is still in flight. " +
+                    "Kind=" + requestKind +
+                    " Side=" + requestedSide +
+                    " SelectionId=" + (selectionId ?? string.Empty) +
+                    " Reason=" + (suppressionReason ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
 
             try
             {
@@ -154,6 +202,7 @@ namespace CoopSpectator.MissionBehaviors
         private const int BattleSnapshotMaxConcurrentHeavyPeers = 4;
 
         private readonly Dictionary<int, string> _lastSentStatusPayloadByPeer = new Dictionary<int, string>();
+        private readonly Dictionary<int, string> _lastSentMaterializedAgentEntryPayloadByPeer = new Dictionary<int, string>();
         private readonly Dictionary<int, string> _lastSentBattleSnapshotPayloadByPeer = new Dictionary<int, string>();
         private readonly Dictionary<int, DateTime> _lastCompletedBattleSnapshotTransmissionUtcByPeer = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, DateTime> _lastBattleSnapshotRetryUtcByPeer = new Dictionary<int, DateTime>();
@@ -245,6 +294,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             TrySyncBattleSnapshotPayloads();
+            TrySyncMaterializedAgentEntryPayloads();
             TrySyncEntryStatusPayloads();
         }
 
@@ -267,6 +317,9 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsClient && Mission != null)
             {
                 TryResendClientBattleSnapshotChunkRequests();
+                BattleMapSpawnHandoffPatch.TryProcessDeferredClientCreateAgentMessages(
+                    Mission,
+                    "CoopMissionNetworkBridge.TryRunClientBattleSnapshotRecoveryTick");
                 BattleMapSpawnHandoffPatch.TryProcessDeferredClientMountedHeroCreateAgents(
                     Mission,
                     "CoopMissionNetworkBridge.TryRunClientBattleSnapshotRecoveryTick");
@@ -357,9 +410,11 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             _lastSentStatusPayloadByPeer.Remove(networkPeer.Index);
+            _lastSentMaterializedAgentEntryPayloadByPeer.Remove(networkPeer.Index);
             _lastSentBattleSnapshotPayloadByPeer.Remove(networkPeer.Index);
             _lastCompletedBattleSnapshotTransmissionUtcByPeer.Remove(networkPeer.Index);
             _lastBattleSnapshotRetryUtcByPeer.Remove(networkPeer.Index);
+            _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot));
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.EntryStatusSnapshot));
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.BattleSnapshot));
             _battleSnapshotTransportStatesByPeer.Remove(networkPeer.Index);
@@ -369,6 +424,7 @@ namespace CoopSpectator.MissionBehaviors
         public override void OnRemoveBehavior()
         {
             _lastSentStatusPayloadByPeer.Clear();
+            _lastSentMaterializedAgentEntryPayloadByPeer.Clear();
             _lastSentBattleSnapshotPayloadByPeer.Clear();
             _lastCompletedBattleSnapshotTransmissionUtcByPeer.Clear();
             _lastBattleSnapshotRetryUtcByPeer.Clear();
@@ -393,7 +449,7 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     bool acknowledged = TryAcknowledgePeerBattleSnapshot(peer, message.SelectionId);
                     if (acknowledged)
-                        TrySendEntryStatusToPeer(peer, force: true);
+                        TrySendImmediatePeerStatusPayloads(peer);
                     return true;
                 }
 
@@ -421,7 +477,7 @@ namespace CoopSpectator.MissionBehaviors
                      message.RequestKind == CoopBattleSelectionRequestKind.SelectEntry ||
                      message.RequestKind == CoopBattleSelectionRequestKind.SpawnNow);
                 if ((applied && shouldForceImmediateStatus) || shouldForceStatusAfterRejectedInteractiveRequest)
-                    TrySendEntryStatusToPeer(peer, force: true);
+                    TrySendImmediatePeerStatusPayloads(peer);
             }
             catch (Exception ex)
             {
@@ -556,6 +612,110 @@ namespace CoopSpectator.MissionBehaviors
 
                 TrySendEntryStatusToPeer(peer, force: false);
             }
+        }
+
+        private void TrySyncMaterializedAgentEntryPayloads()
+        {
+            if (GameNetwork.NetworkPeers == null)
+                return;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (!IsEligibleRemotePeer(peer))
+                    continue;
+
+                TrySendMaterializedAgentEntrySnapshotToPeer(peer, force: false);
+            }
+        }
+
+        private void TrySendImmediatePeerStatusPayloads(NetworkCommunicator peer)
+        {
+            if (!IsEligibleRemotePeer(peer))
+                return;
+
+            TrySendMaterializedAgentEntrySnapshotToPeer(peer, force: true);
+            TrySendEntryStatusToPeer(peer, force: true);
+        }
+
+        private void TrySendMaterializedAgentEntrySnapshotToPeer(NetworkCommunicator peer, bool force)
+        {
+            if (!IsEligibleRemotePeer(peer) || Mission == null)
+                return;
+
+            CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot snapshot =
+                CoopMissionSpawnLogic.BuildAuthoritativeMaterializedAgentEntrySnapshot(Mission, "CoopMissionNetworkBridge");
+            if (snapshot == null)
+                return;
+
+            string comparisonJson = SerializeComparableMaterializedAgentEntryPayload(snapshot);
+            if (string.IsNullOrWhiteSpace(comparisonJson))
+                return;
+
+            string transmissionKey = BuildPendingTransmissionKey(peer.Index, CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot);
+            bool hasPending = _pendingPayloadsByKey.TryGetValue(transmissionKey, out PendingPayloadTransmission pendingTransmission) &&
+                pendingTransmission != null;
+
+            if (hasPending &&
+                TryFinalizePendingPayloadTransmission(
+                    peer,
+                    transmissionKey,
+                    _lastSentMaterializedAgentEntryPayloadByPeer,
+                    ref pendingTransmission,
+                    out bool pendingStillInFlight))
+            {
+                hasPending = pendingTransmission != null;
+                if (pendingStillInFlight)
+                    return;
+            }
+
+            if (!force &&
+                !hasPending &&
+                _lastSentMaterializedAgentEntryPayloadByPeer.TryGetValue(peer.Index, out string previousPayload) &&
+                string.Equals(previousPayload, comparisonJson, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (!hasPending ||
+                !string.Equals(pendingTransmission.ComparisonKey, comparisonJson, StringComparison.Ordinal))
+            {
+                pendingTransmission = CreateMaterializedAgentEntryPendingTransmission(snapshot, comparisonJson);
+                if (pendingTransmission == null)
+                    return;
+
+                _pendingPayloadsByKey[transmissionKey] = pendingTransmission;
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: queued payload transmission. " +
+                    "Peer=" + (peer.UserName ?? "null") +
+                    " Kind=" + CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot +
+                    " TransmissionId=" + pendingTransmission.TransmissionId +
+                    " Bytes=" + pendingTransmission.TotalBytes +
+                    (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
+                        ? " LogicalBytes=" + pendingTransmission.LogicalBytes
+                        : string.Empty) +
+                    " Chunks=" + pendingTransmission.ChunkCount +
+                    " ChunkBytes=" + CoopBattlePayloadChunkMessage.MaxChunkBytes);
+            }
+
+            if (!TryFlushPendingPayload(peer, pendingTransmission))
+                return;
+
+            if (!pendingTransmission.IsCompleted)
+                return;
+
+            _pendingPayloadsByKey.Remove(transmissionKey);
+            _lastSentMaterializedAgentEntryPayloadByPeer[peer.Index] = comparisonJson;
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: completed payload transmission. " +
+                "Peer=" + (peer.UserName ?? "null") +
+                " Kind=" + CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot +
+                " TransmissionId=" + pendingTransmission.TransmissionId +
+                " Bytes=" + pendingTransmission.TotalBytes +
+                (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
+                    ? " LogicalBytes=" + pendingTransmission.LogicalBytes
+                    : string.Empty) +
+                " Chunks=" + pendingTransmission.ChunkCount +
+                " EntryCount=" + snapshot.EntryCount);
         }
 
         private void TrySendEntryStatusToPeer(NetworkCommunicator peer, bool force)
@@ -1009,7 +1169,7 @@ namespace CoopSpectator.MissionBehaviors
                 " TransmissionId=" + message.TransmissionId +
                 " AppliedSuccessfully=" + message.AppliedSuccessfully +
                 " HashMatched=" + hashMatched);
-            TrySendEntryStatusToPeer(peer, force: true);
+            TrySendImmediatePeerStatusPayloads(peer);
         }
 
         private void AcceptClientBattleSnapshotAbort(NetworkCommunicator peer, CoopBattleSnapshotAbortMessage message)
@@ -1126,6 +1286,9 @@ namespace CoopSpectator.MissionBehaviors
 
             BattleSnapshotRuntimeState.SetCurrent(snapshot, "CoopMissionNetworkBridge.V2");
             MarkClientBattleSnapshotApplied(assemblyState.TransmissionId, assemblyState.PayloadHash);
+            BattleMapSpawnHandoffPatch.TryProcessDeferredClientCreateAgentMessages(
+                Mission,
+                "CoopMissionNetworkBridge.V2 applied");
             BattleMapSpawnHandoffPatch.TryProcessDeferredClientMountedHeroCreateAgents(
                 Mission,
                 "CoopMissionNetworkBridge.V2 applied");
@@ -1420,6 +1583,26 @@ namespace CoopSpectator.MissionBehaviors
 
             switch (payloadKind)
             {
+                case CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot:
+                {
+                    CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot snapshot =
+                        JsonConvert.DeserializeObject<CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot>(payloadJson, JsonSettings);
+                    if (snapshot != null)
+                    {
+                        CoopMissionSpawnLogic.ObserveClientAuthoritativeMaterializedAgentEntrySnapshot(
+                            snapshot,
+                            "CoopMissionNetworkBridge.ApplyCompletedPayload");
+                        ModLogger.Info(
+                            "CoopMissionNetworkBridge: applied client payload. " +
+                            "Kind=" + payloadKind +
+                            " BattleId=" + (snapshot.BattleId ?? string.Empty) +
+                            " MissionName=" + (snapshot.MissionName ?? string.Empty) +
+                            " UseStringIdExactEquipmentPath=" + snapshot.UseStringIdExactEquipmentPath +
+                            " EntryCount=" + snapshot.EntryCount +
+                            " Source=" + (snapshot.Source ?? string.Empty));
+                    }
+                    break;
+                }
                 case CoopBattlePayloadKind.EntryStatusSnapshot:
                 {
                     CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot =
@@ -1446,6 +1629,7 @@ namespace CoopSpectator.MissionBehaviors
                             " SelectableEntrySource=" + (snapshot.SelectableEntrySource ?? string.Empty) +
                             " AttackerSelectableEntryCount=" + attackerSelectableEntryCount +
                             " DefenderSelectableEntryCount=" + defenderSelectableEntryCount +
+                            " AuthoritativeMaterializedAgentEntryCount=" + snapshot.AuthoritativeMaterializedAgentEntryCount +
                             " CanRespawn=" + snapshot.CanRespawn +
                             " CanStartBattle=" + snapshot.CanStartBattle +
                             " HasAgent=" + snapshot.HasAgent +
@@ -1520,6 +1704,27 @@ namespace CoopSpectator.MissionBehaviors
                 snapshot.BattlePhaseSource = originalBattlePhaseSource;
                 snapshot.LifecycleSource = originalLifecycleSource;
                 snapshot.SpawnReason = originalSpawnReason;
+            }
+        }
+
+        private static string SerializeComparableMaterializedAgentEntryPayload(
+            CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot snapshot)
+        {
+            if (snapshot == null)
+                return string.Empty;
+
+            DateTime originalUpdatedUtc = snapshot.UpdatedUtc;
+            string originalSource = snapshot.Source;
+            try
+            {
+                snapshot.UpdatedUtc = DateTime.MinValue;
+                snapshot.Source = string.Empty;
+                return SerializePayload(snapshot);
+            }
+            finally
+            {
+                snapshot.UpdatedUtc = originalUpdatedUtc;
+                snapshot.Source = originalSource;
             }
         }
 
@@ -1995,6 +2200,43 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private PendingPayloadTransmission CreateMaterializedAgentEntryPendingTransmission(
+            CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot snapshot,
+            string comparisonJson)
+        {
+            if (snapshot == null || string.IsNullOrWhiteSpace(comparisonJson))
+                return null;
+
+            string payloadJson = SerializePayload(snapshot);
+            if (string.IsNullOrWhiteSpace(payloadJson))
+                return null;
+
+            byte[] rawBytes = Encoding.UTF8.GetBytes(payloadJson);
+            if (rawBytes.Length <= 0)
+                return null;
+
+            byte[] wireBytes = CompressPayload(rawBytes, out bool compressed);
+            PendingPayloadTransmission transmission = PendingPayloadTransmission.Create(
+                CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot,
+                wireBytes ?? rawBytes,
+                rawBytes.Length,
+                comparisonJson,
+                NextTransmissionId());
+            if (transmission == null)
+                return null;
+
+            if (compressed)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: compressed materialized-agent-entry transport payload. " +
+                    "RawBytes=" + rawBytes.Length +
+                    " WireBytes=" + transmission.TotalBytes +
+                    " Chunks=" + transmission.ChunkCount);
+            }
+
+            return transmission;
+        }
+
         private static int CountSerializedIdList(string rawValue)
         {
             return CoopBattleEntryStatusBridgeFile.DeserializeIdList(rawValue)?.Length ?? 0;
@@ -2017,6 +2259,8 @@ namespace CoopSpectator.MissionBehaviors
             EntryStatusTransportFieldState state = EntryStatusTransportFieldState.Capture(snapshot);
             snapshot.AllowedTroopIds = string.Empty;
             snapshot.AllowedEntryIds = string.Empty;
+            snapshot.AuthoritativeMaterializedAgentEntryCount = 0;
+            snapshot.AuthoritativeMaterializedAgentEntries = string.Empty;
             snapshot.AttackerAllowedTroopIds = string.Empty;
             snapshot.AttackerAllowedEntryIds = string.Empty;
             snapshot.AttackerSelectableEntryIds = string.Empty;
@@ -2049,6 +2293,66 @@ namespace CoopSpectator.MissionBehaviors
             _expectedBattleSnapshotTransmissionIdByPeer.TryGetValue(peer.Index, out expectedTransmissionId);
             _acknowledgedBattleSnapshotTransmissionIdByPeer.TryGetValue(peer.Index, out acknowledgedTransmissionId);
             return expectedTransmissionId > 0 && acknowledgedTransmissionId >= expectedTransmissionId;
+        }
+
+        internal static bool HaveAllEligiblePeersAcknowledgedCurrentBattleSnapshot(
+            Mission mission,
+            out string readinessSummary)
+        {
+            readinessSummary = string.Empty;
+            if (!GameNetwork.IsServer)
+            {
+                readinessSummary = "not-server";
+                return true;
+            }
+
+            if (mission == null)
+            {
+                readinessSummary = "mission-null";
+                return false;
+            }
+
+            int eligiblePeerCount = 0;
+            int acknowledgedPeerCount = 0;
+            string blockingPeer = "none";
+            int blockingExpectedTransmissionId = 0;
+            int blockingAcknowledgedTransmissionId = 0;
+
+            if (GameNetwork.NetworkPeers != null)
+            {
+                foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+                {
+                    if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                        continue;
+
+                    eligiblePeerCount++;
+                    _expectedBattleSnapshotTransmissionIdByPeer.TryGetValue(peer.Index, out int expectedTransmissionId);
+                    _acknowledgedBattleSnapshotTransmissionIdByPeer.TryGetValue(peer.Index, out int acknowledgedTransmissionId);
+                    bool acknowledged =
+                        expectedTransmissionId > 0 &&
+                        acknowledgedTransmissionId >= expectedTransmissionId;
+                    if (acknowledged)
+                    {
+                        acknowledgedPeerCount++;
+                        continue;
+                    }
+
+                    if (!string.Equals(blockingPeer, "none", StringComparison.Ordinal))
+                        continue;
+
+                    blockingPeer = peer.UserName ?? peer.Index.ToString();
+                    blockingExpectedTransmissionId = expectedTransmissionId;
+                    blockingAcknowledgedTransmissionId = acknowledgedTransmissionId;
+                }
+            }
+
+            readinessSummary =
+                "EligiblePeers=" + eligiblePeerCount +
+                " AcknowledgedPeers=" + acknowledgedPeerCount +
+                " BlockingPeer=" + blockingPeer +
+                " ExpectedTransmissionId=" + blockingExpectedTransmissionId +
+                " AcknowledgedTransmissionId=" + blockingAcknowledgedTransmissionId;
+            return eligiblePeerCount <= 0 || acknowledgedPeerCount >= eligiblePeerCount;
         }
 
         internal static bool IsClientCurrentBattleSnapshotApplied(out string readinessSummary)
@@ -2264,6 +2568,8 @@ namespace CoopSpectator.MissionBehaviors
             private EntryStatusTransportFieldState(
                 string allowedTroopIds,
                 string allowedEntryIds,
+                int authoritativeMaterializedAgentEntryCount,
+                string authoritativeMaterializedAgentEntries,
                 string attackerAllowedTroopIds,
                 string attackerAllowedEntryIds,
                 string attackerSelectableEntryIds,
@@ -2273,6 +2579,8 @@ namespace CoopSpectator.MissionBehaviors
             {
                 AllowedTroopIds = allowedTroopIds;
                 AllowedEntryIds = allowedEntryIds;
+                AuthoritativeMaterializedAgentEntryCount = authoritativeMaterializedAgentEntryCount;
+                AuthoritativeMaterializedAgentEntries = authoritativeMaterializedAgentEntries;
                 AttackerAllowedTroopIds = attackerAllowedTroopIds;
                 AttackerAllowedEntryIds = attackerAllowedEntryIds;
                 AttackerSelectableEntryIds = attackerSelectableEntryIds;
@@ -2284,6 +2592,10 @@ namespace CoopSpectator.MissionBehaviors
             public string AllowedTroopIds { get; }
 
             public string AllowedEntryIds { get; }
+
+            public int AuthoritativeMaterializedAgentEntryCount { get; }
+
+            public string AuthoritativeMaterializedAgentEntries { get; }
 
             public string AttackerAllowedTroopIds { get; }
 
@@ -2304,6 +2616,8 @@ namespace CoopSpectator.MissionBehaviors
                     : new EntryStatusTransportFieldState(
                         snapshot.AllowedTroopIds,
                         snapshot.AllowedEntryIds,
+                        snapshot.AuthoritativeMaterializedAgentEntryCount,
+                        snapshot.AuthoritativeMaterializedAgentEntries,
                         snapshot.AttackerAllowedTroopIds,
                         snapshot.AttackerAllowedEntryIds,
                         snapshot.AttackerSelectableEntryIds,
@@ -2319,6 +2633,8 @@ namespace CoopSpectator.MissionBehaviors
 
                 snapshot.AllowedTroopIds = AllowedTroopIds;
                 snapshot.AllowedEntryIds = AllowedEntryIds;
+                snapshot.AuthoritativeMaterializedAgentEntryCount = AuthoritativeMaterializedAgentEntryCount;
+                snapshot.AuthoritativeMaterializedAgentEntries = AuthoritativeMaterializedAgentEntries;
                 snapshot.AttackerAllowedTroopIds = AttackerAllowedTroopIds;
                 snapshot.AttackerAllowedEntryIds = AttackerAllowedEntryIds;
                 snapshot.AttackerSelectableEntryIds = AttackerSelectableEntryIds;

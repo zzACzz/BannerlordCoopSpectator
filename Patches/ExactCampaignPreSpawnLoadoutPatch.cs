@@ -12,12 +12,15 @@ namespace CoopSpectator.Patches
     {
         private static readonly HashSet<string> LoggedEntryIds = new HashSet<string>(StringComparer.Ordinal);
         private static readonly Dictionary<string, bool> EquipmentInjectedByEntryId = new Dictionary<string, bool>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, ExactCreateAgentPayloadDiagnosticDecision> PayloadDiagnosticByEntryId =
+            new Dictionary<string, ExactCreateAgentPayloadDiagnosticDecision>(StringComparer.Ordinal);
         public static bool IsOperationalOnCurrentProcess { get; private set; }
 
         public static void Apply(Harmony harmony)
         {
             IsOperationalOnCurrentProcess = false;
             EquipmentInjectedByEntryId.Clear();
+            PayloadDiagnosticByEntryId.Clear();
             try
             {
                 var target = AccessTools.Method(
@@ -27,15 +30,18 @@ namespace CoopSpectator.Patches
                 var prefix = AccessTools.Method(
                     typeof(ExactCampaignPreSpawnLoadoutPatch),
                     nameof(Mission_SpawnAgent_Prefix));
-                if (target == null || prefix == null)
+                var postfix = AccessTools.Method(
+                    typeof(ExactCampaignPreSpawnLoadoutPatch),
+                    nameof(Mission_SpawnAgent_Postfix));
+                if (target == null || prefix == null || postfix == null)
                 {
                     ModLogger.Info("ExactCampaignPreSpawnLoadoutPatch: Mission.SpawnAgent target not found. Skip.");
                     return;
                 }
 
-                harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+                harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
                 IsOperationalOnCurrentProcess = true;
-                ModLogger.Info("ExactCampaignPreSpawnLoadoutPatch: prefix applied to Mission.SpawnAgent.");
+                ModLogger.Info("ExactCampaignPreSpawnLoadoutPatch: prefix/postfix applied to Mission.SpawnAgent.");
             }
             catch (Exception ex)
             {
@@ -129,6 +135,28 @@ namespace CoopSpectator.Patches
                     out _,
                     out capeDecisionReason);
             }
+            bool canInjectBodyPropertiesAtCreateAgentTime = useContractDrivenPreSpawnPath
+                ? exactTransferContract?.Body?.HasExactBodyProperties == true
+                : !string.IsNullOrWhiteSpace(entryState?.HeroBodyProperties);
+            ExactCreateAgentPayloadDiagnosticDecision payloadDiagnostic =
+                ExactCreateAgentPayloadDiagnostics.Resolve(
+                    entryState,
+                    exactTransferContract,
+                    useContractDrivenPreSpawnPath,
+                    includeWeapons,
+                    includeArmorVisuals,
+                    includeCape,
+                    includeMountVisuals,
+                    canInjectBodyPropertiesAtCreateAgentTime);
+            PayloadDiagnosticByEntryId[exactOrigin.EntryId] = payloadDiagnostic;
+            if (payloadDiagnostic.IsActive)
+            {
+                includeWeapons = payloadDiagnostic.IncludeWeapons;
+                includeArmorVisuals = payloadDiagnostic.IncludeArmorVisuals;
+                includeCape = payloadDiagnostic.IncludeCape;
+                includeMountVisuals = payloadDiagnostic.IncludeMountVisuals;
+                canInjectBodyPropertiesAtCreateAgentTime = payloadDiagnostic.IncludeBodyProperties;
+            }
             if (!useContractDrivenPreSpawnPath && contractPlayerControlledOrigin)
             {
                 if (includeCape)
@@ -151,12 +179,30 @@ namespace CoopSpectator.Patches
                 ? exactTransferContract.SpawnPolicy.RequirePreSpawnInjection &&
                   (includeWeapons || includeCape || includeArmorVisuals || includeMountVisuals)
                 : includeWeapons || includeCape;
+            bool useDedicatedSafeStringIdExactEquipmentPath =
+                CoopMissionSpawnLogic.UseDedicatedSafeStringIdExactEquipmentPathOnServer();
+            if (useDedicatedSafeStringIdExactEquipmentPath)
+                injectEquipment = false;
             Equipment exactEquipment = injectEquipment
-                ? BuildPreSpawnEquipment(entryState, exactTransferContract, useContractDrivenPreSpawnPath, includeWeapons)
+                ? BuildPreSpawnEquipment(
+                    entryState,
+                    includeWeapons,
+                    includeArmorVisuals,
+                    includeCape,
+                    includeMountVisuals)
                 : null;
             EquipmentInjectedByEntryId[exactOrigin.EntryId] = injectEquipment && exactEquipment != null;
             if (exactEquipment != null)
                 agentBuildData.Equipment(exactEquipment);
+
+            ExactCreateAgentCorridorDiagnostics.ObserveServerPreSpawnPayload(
+                exactOrigin,
+                entryState,
+                exactTransferContract,
+                payloadDiagnostic,
+                exactEquipment,
+                injectEquipment,
+                spawnFromAgentVisuals);
 
             CoopMissionSpawnLogic.TraceServerPreSpawnExactHeroContract(
                 exactOrigin,
@@ -168,17 +214,18 @@ namespace CoopSpectator.Patches
                 weaponDecisionReason,
                 capeDecisionReason,
                 spawnFromAgentVisuals,
-                ExactTransferContractRuntimeCache.BuildContractSummary(exactOrigin.EntryId),
+                ExactTransferContractRuntimeCache.BuildContractSummary(exactOrigin.EntryId) + " " + payloadDiagnostic.ToSummary(),
                 ExactTransferContractRuntimeCache.BuildValidationSummary(exactOrigin.EntryId),
                 ExactTransferContractRuntimeCache.BuildRuntimeStateSummary(exactOrigin.EntryId));
 
-            bool hasBody = useContractDrivenPreSpawnPath
-                ? TryResolveContractBodyProperties(exactTransferContract, out BodyProperties bodyProperties)
-                : TryResolveEntryBodyProperties(entryState, out bodyProperties);
+            BodyProperties bodyProperties = default;
+            bool hasBody = canInjectBodyPropertiesAtCreateAgentTime && (useContractDrivenPreSpawnPath
+                ? TryResolveContractBodyProperties(exactTransferContract, out bodyProperties)
+                : TryResolveEntryBodyProperties(entryState, out bodyProperties));
             if (hasBody)
                 agentBuildData.BodyProperties(bodyProperties);
 
-            if (HasHeroIdentity(entryState))
+            if (hasBody && HasHeroIdentity(entryState))
             {
                 bool isFemale = useContractDrivenPreSpawnPath
                     ? exactTransferContract?.Body?.IsFemale ?? entryState.HeroIsFemale
@@ -206,16 +253,58 @@ namespace CoopSpectator.Patches
                 " PlayerControlledOrigin=" + isPlayerControlledOrigin +
                 " ContractPlayerControlledOrigin=" + contractPlayerControlledOrigin +
                 " InjectEquipment=" + (exactEquipment != null) +
+                " UseDedicatedSafeStringIdExactEquipmentPath=" + useDedicatedSafeStringIdExactEquipmentPath +
                 " IncludeWeapons=" + includeWeapons +
                 " WeaponDecision=" + weaponDecisionReason +
                 " IncludeCape=" + includeCape +
                 " CapeDecision=" + capeDecisionReason +
                 " UseContractDrivenPreSpawnPath=" + useContractDrivenPreSpawnPath +
+                " " + payloadDiagnostic.ToSummary() +
                 " " + ExactTransferContractRuntimeCache.BuildValidationSummary(exactOrigin.EntryId) +
                 " " + exactEntryCompatibilitySummary +
                 " SpawnFromAgentVisuals=" + spawnFromAgentVisuals +
                 " Equipment=" + (exactEquipment != null ? SummarizeEquipment(exactEquipment) : "(native-template)") +
                 " Body=" + (!bodyProperties.Equals(default(BodyProperties))));
+        }
+
+        private static void Mission_SpawnAgent_Postfix(AgentBuildData agentBuildData, bool spawnFromAgentVisuals, Agent __result)
+        {
+            if (!ExperimentalFeatures.EnableExactCampaignPreSpawnLoadoutInjection || !GameNetwork.IsServer)
+                return;
+
+            if (!(agentBuildData?.AgentOrigin is ExactCampaignSnapshotAgentOrigin exactOrigin))
+                return;
+
+            if (string.IsNullOrWhiteSpace(exactOrigin.EntryId))
+                return;
+
+            if (!PayloadDiagnosticByEntryId.TryGetValue(exactOrigin.EntryId, out ExactCreateAgentPayloadDiagnosticDecision payloadDiagnostic))
+            {
+                payloadDiagnostic = new ExactCreateAgentPayloadDiagnosticDecision
+                {
+                    IsActive = false,
+                    Reason = "postfix-no-diagnostic-state",
+                    EntryId = exactOrigin.EntryId,
+                    TroopId = exactOrigin.TroopId
+                };
+            }
+
+            string details =
+                "EntryId=" + exactOrigin.EntryId +
+                " TroopId=" + exactOrigin.TroopId +
+                " AgentIndex=" + (__result?.Index.ToString() ?? "null") +
+                " SpawnFromAgentVisuals=" + spawnFromAgentVisuals +
+                " EquipmentInjected=" + WasEquipmentInjectedForEntry(exactOrigin.EntryId) +
+                " " + payloadDiagnostic.ToSummary();
+            ModLogger.Info("ExactCampaignPreSpawnLoadoutPatch: Mission.SpawnAgent result. " + details);
+            ExactCreateAgentCorridorDiagnostics.ObserveServerSpawnResult(
+                exactOrigin,
+                payloadDiagnostic,
+                __result,
+                spawnFromAgentVisuals,
+                WasEquipmentInjectedForEntry(exactOrigin.EntryId));
+            ExactBattleAgentSpawnTraceBridgeFile.AppendRecord("pre-spawn-payload-result|" + details);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent("server-pre-spawn-payload-result", details);
         }
 
         public static bool WasEquipmentInjectedForEntry(string entryId)
@@ -333,26 +422,38 @@ namespace CoopSpectator.Patches
 
         private static Equipment BuildPreSpawnEquipment(
             RosterEntryState entryState,
-            ExactTransferSpawnContract contract,
-            bool useStrictContractPath,
-            bool includeWeapons)
+            bool includeWeapons,
+            bool includeArmorVisuals,
+            bool includeCape,
+            bool includeMountVisuals)
         {
-            if (useStrictContractPath && contract?.Equipment != null)
-            {
-                if (contract.Equipment.SpawnEquipment != null)
-                    return contract.Equipment.SpawnEquipment.Clone(false);
+            Equipment equipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
+                entryState,
+                includeWeapons: includeWeapons,
+                honorExactVisualContracts: false,
+                includeArmorVisuals: includeArmorVisuals || includeCape,
+                includeMountVisuals: includeMountVisuals);
+            if (equipment == null)
+                return null;
 
-                return CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
-                    entryState,
-                    includeWeapons: includeWeapons,
-                    honorExactVisualContracts: false,
-                    includeArmorVisuals: contract.Equipment.IncludeArmorVisualsInPreSpawn,
-                    includeMountVisuals: contract.Equipment.IncludeMountVisualsInPreSpawn);
+            if (!includeArmorVisuals)
+            {
+                equipment[EquipmentIndex.Head] = default(EquipmentElement);
+                equipment[EquipmentIndex.Body] = default(EquipmentElement);
+                equipment[EquipmentIndex.Leg] = default(EquipmentElement);
+                equipment[EquipmentIndex.Gloves] = default(EquipmentElement);
             }
 
-            return CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
-                entryState,
-                includeWeapons: includeWeapons);
+            if (!includeCape)
+                equipment[EquipmentIndex.Cape] = default(EquipmentElement);
+
+            if (!includeMountVisuals)
+            {
+                equipment[EquipmentIndex.Horse] = default(EquipmentElement);
+                equipment[EquipmentIndex.HorseHarness] = default(EquipmentElement);
+            }
+
+            return equipment;
         }
 
         private static string SummarizeEquipment(Equipment equipment)

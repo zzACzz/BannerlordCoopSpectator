@@ -307,6 +307,7 @@ namespace CoopSpectator
                     TryApplyMissionStateOpenNewPatches();
                     TryApplyExactCampaignArmyBootstrapPatch();
                     TryApplyExactCampaignPreSpawnLoadoutPatch();
+                    TryApplyExactCampaignNetworkObjectBootstrapPatch();
                     TryApplyBattleMapSpawnHandoffPatch();
                     TryApplyBattleShellSuppressionPatch();
                     TryApplyMultiplayerHeroClassOverridePatch();
@@ -425,6 +426,20 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: ExactCampaignPreSpawnLoadout patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyExactCampaignNetworkObjectBootstrapPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                ExactCampaignNetworkObjectBootstrapPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: ExactCampaignNetworkObjectBootstrap patch apply failed: " + ex.Message);
             }
         }
 

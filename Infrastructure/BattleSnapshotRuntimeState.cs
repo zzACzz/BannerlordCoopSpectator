@@ -279,6 +279,7 @@ namespace CoopSpectator.Infrastructure
                 _updatedUtc = DateTime.UtcNow;
             }
 
+            ExactCampaignObjectCatalogBootstrap.EnsureLoaded("battle-snapshot-runtime:" + (_source ?? "unknown"));
             ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(runtimeState, _source);
             ExactCampaignRuntimeObjectRegistry.SyncFromState(runtimeState, _source);
 

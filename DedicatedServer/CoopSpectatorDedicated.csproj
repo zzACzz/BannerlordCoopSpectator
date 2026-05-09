@@ -73,6 +73,8 @@
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />
+    <Compile Include="..\Infrastructure\ExactCreateAgentCorridorDiagnostics.cs" Link="Infrastructure\ExactCreateAgentCorridorDiagnostics.cs" />
+    <Compile Include="..\Infrastructure\ExactCreateAgentPayloadDiagnostics.cs" Link="Infrastructure\ExactCreateAgentPayloadDiagnostics.cs" />
     <Compile Include="..\Infrastructure\ExactTransferSpawnContract.cs" Link="Infrastructure\ExactTransferSpawnContract.cs" />
     <Compile Include="..\Infrastructure\ExactTransferRuntimeState.cs" Link="Infrastructure\ExactTransferRuntimeState.cs" />
     <Compile Include="..\Infrastructure\ExactTransferStageMachine.cs" Link="Infrastructure\ExactTransferStageMachine.cs" />
@@ -109,6 +111,7 @@
     <Compile Include="..\Patches\MissionStateOpenNewPatches.cs" Link="Patches\MissionStateOpenNewPatches.cs" />
     <Compile Include="..\Patches\ExactCampaignArmyBootstrapPatch.cs" Link="Patches\ExactCampaignArmyBootstrapPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignPreSpawnLoadoutPatch.cs" Link="Patches\ExactCampaignPreSpawnLoadoutPatch.cs" />
+    <Compile Include="..\Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" Link="Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" />
     <Compile Include="..\Patches\BattleMapSpawnHandoffPatch.cs" Link="Patches\BattleMapSpawnHandoffPatch.cs" />
     <Compile Include="..\Patches\BattleShellSuppressionPatch.cs" Link="Patches\BattleShellSuppressionPatch.cs" />
     <Compile Include="..\Patches\MultiplayerCharacterClassFallbackPatch.cs" Link="Patches\MultiplayerCharacterClassFallbackPatch.cs" />

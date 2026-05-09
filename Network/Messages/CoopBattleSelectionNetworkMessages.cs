@@ -19,7 +19,8 @@ namespace CoopSpectator.Network.Messages
     public enum CoopBattlePayloadKind
     {
         EntryStatusSnapshot = 0,
-        BattleSnapshot = 1
+        BattleSnapshot = 1,
+        AuthoritativeMaterializedAgentEntrySnapshot = 2
     }
 
     public enum CoopBattleSnapshotPayloadEncoding
@@ -104,7 +105,7 @@ namespace CoopSpectator.Network.Messages
         public const int MaxChunkBytes = 256;
         public const int MaxChunkCount = 8191;
 
-        private static readonly CompressionInfo.Integer PayloadKindCompressionInfo = new CompressionInfo.Integer(0, 1, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer PayloadKindCompressionInfo = new CompressionInfo.Integer(0, 2, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer TransmissionCompressionInfo = new CompressionInfo.Integer(0, 1048575, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer ChunkIndexCompressionInfo = new CompressionInfo.Integer(0, MaxChunkCount, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer ChunkCountCompressionInfo = new CompressionInfo.Integer(1, MaxChunkCount, maximumValueGiven: true);

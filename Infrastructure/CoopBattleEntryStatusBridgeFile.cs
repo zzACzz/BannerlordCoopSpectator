@@ -49,6 +49,14 @@ namespace CoopSpectator.Infrastructure
             public string AllowedEntryIds { get; set; }
             public string SelectableEntryIds { get; set; }
             public string SelectableEntrySource { get; set; }
+            public string AuthoritativeCompatibilityEntryId { get; set; }
+            public string AuthoritativeCompatibilityEntrySource { get; set; }
+            public string AuthoritativeCompatibilityStatus { get; set; }
+            public bool AuthoritativeWeaponContractSupported { get; set; }
+            public bool AuthoritativeVisualContractSupported { get; set; }
+            public string AuthoritativeCompatibilitySummary { get; set; }
+            public int AuthoritativeMaterializedAgentEntryCount { get; set; }
+            public string AuthoritativeMaterializedAgentEntries { get; set; }
             public string AttackerAllowedTroopIds { get; set; }
             public string AttackerAllowedEntryIds { get; set; }
             public int AttackerSelectableEntryCount { get; set; }
@@ -59,6 +67,17 @@ namespace CoopSpectator.Infrastructure
             public int DefenderSelectableEntryCount { get; set; }
             public string DefenderSelectableEntryIds { get; set; }
             public string DefenderSelectableEntrySource { get; set; }
+            public DateTime UpdatedUtc { get; set; }
+        }
+
+        public sealed class AuthoritativeMaterializedAgentEntrySnapshot
+        {
+            public string BattleId { get; set; }
+            public string MissionName { get; set; }
+            public string Source { get; set; }
+            public bool UseStringIdExactEquipmentPath { get; set; }
+            public int EntryCount { get; set; }
+            public string AgentEntries { get; set; }
             public DateTime UpdatedUtc { get; set; }
         }
 
@@ -112,6 +131,47 @@ namespace CoopSpectator.Infrastructure
                 .ToArray();
         }
 
+        public static string SerializeAgentEntryMap(IEnumerable<KeyValuePair<int, string>> values)
+        {
+            if (values == null)
+                return string.Empty;
+
+            List<string> encodedValues = values
+                .Where(pair => pair.Key >= 0 && !string.IsNullOrWhiteSpace(pair.Value))
+                .GroupBy(pair => pair.Key)
+                .OrderBy(group => group.Key)
+                .Select(group => group.Last())
+                .Select(pair => Uri.EscapeDataString(pair.Key.ToString() + ":" + pair.Value.Trim()))
+                .ToList();
+            return encodedValues.Count == 0
+                ? string.Empty
+                : string.Join(EncodedListSeparator.ToString(), encodedValues);
+        }
+
+        public static Dictionary<int, string> DeserializeAgentEntryMap(string rawValue)
+        {
+            var mappings = new Dictionary<int, string>();
+            foreach (string token in DeserializeIdList(rawValue))
+            {
+                int separatorIndex = token.IndexOf(':');
+                if (separatorIndex <= 0 || separatorIndex >= token.Length - 1)
+                    continue;
+
+                string indexText = token.Substring(0, separatorIndex).Trim();
+                string entryId = token.Substring(separatorIndex + 1).Trim();
+                if (!int.TryParse(indexText, out int agentIndex) ||
+                    agentIndex < 0 ||
+                    string.IsNullOrWhiteSpace(entryId))
+                {
+                    continue;
+                }
+
+                mappings[agentIndex] = entryId;
+            }
+
+            return mappings;
+        }
+
         public static void WriteStatus(EntryStatusSnapshot snapshot)
         {
             if (snapshot == null)
@@ -158,6 +218,14 @@ namespace CoopSpectator.Infrastructure
                     "AllowedEntryIds=" + (snapshot.AllowedEntryIds ?? string.Empty),
                     "SelectableEntryIds=" + (snapshot.SelectableEntryIds ?? string.Empty),
                     "SelectableEntrySource=" + (snapshot.SelectableEntrySource ?? string.Empty),
+                    "AuthoritativeCompatibilityEntryId=" + (snapshot.AuthoritativeCompatibilityEntryId ?? string.Empty),
+                    "AuthoritativeCompatibilityEntrySource=" + (snapshot.AuthoritativeCompatibilityEntrySource ?? string.Empty),
+                    "AuthoritativeCompatibilityStatus=" + (snapshot.AuthoritativeCompatibilityStatus ?? string.Empty),
+                    "AuthoritativeWeaponContractSupported=" + snapshot.AuthoritativeWeaponContractSupported,
+                    "AuthoritativeVisualContractSupported=" + snapshot.AuthoritativeVisualContractSupported,
+                    "AuthoritativeCompatibilitySummary=" + (snapshot.AuthoritativeCompatibilitySummary ?? string.Empty),
+                    "AuthoritativeMaterializedAgentEntryCount=" + snapshot.AuthoritativeMaterializedAgentEntryCount,
+                    "AuthoritativeMaterializedAgentEntries=" + (snapshot.AuthoritativeMaterializedAgentEntries ?? string.Empty),
                     "AttackerAllowedTroopIds=" + (snapshot.AttackerAllowedTroopIds ?? string.Empty),
                     "AttackerAllowedEntryIds=" + (snapshot.AttackerAllowedEntryIds ?? string.Empty),
                     "AttackerSelectableEntryCount=" + snapshot.AttackerSelectableEntryCount,
@@ -239,6 +307,14 @@ namespace CoopSpectator.Infrastructure
                     AllowedEntryIds = string.Empty,
                     SelectableEntryIds = string.Empty,
                     SelectableEntrySource = string.Empty,
+                    AuthoritativeCompatibilityEntryId = string.Empty,
+                    AuthoritativeCompatibilityEntrySource = string.Empty,
+                    AuthoritativeCompatibilityStatus = string.Empty,
+                    AuthoritativeWeaponContractSupported = false,
+                    AuthoritativeVisualContractSupported = false,
+                    AuthoritativeCompatibilitySummary = string.Empty,
+                    AuthoritativeMaterializedAgentEntryCount = 0,
+                    AuthoritativeMaterializedAgentEntries = string.Empty,
                     AttackerAllowedTroopIds = string.Empty,
                     AttackerAllowedEntryIds = string.Empty,
                     AttackerSelectableEntryIds = string.Empty,
@@ -377,6 +453,33 @@ namespace CoopSpectator.Infrastructure
                             break;
                         case "SelectableEntrySource":
                             snapshot.SelectableEntrySource = value;
+                            break;
+                        case "AuthoritativeCompatibilityEntryId":
+                            snapshot.AuthoritativeCompatibilityEntryId = value;
+                            break;
+                        case "AuthoritativeCompatibilityEntrySource":
+                            snapshot.AuthoritativeCompatibilityEntrySource = value;
+                            break;
+                        case "AuthoritativeCompatibilityStatus":
+                            snapshot.AuthoritativeCompatibilityStatus = value;
+                            break;
+                        case "AuthoritativeWeaponContractSupported":
+                            if (bool.TryParse(value, out bool authoritativeWeaponContractSupported))
+                                snapshot.AuthoritativeWeaponContractSupported = authoritativeWeaponContractSupported;
+                            break;
+                        case "AuthoritativeVisualContractSupported":
+                            if (bool.TryParse(value, out bool authoritativeVisualContractSupported))
+                                snapshot.AuthoritativeVisualContractSupported = authoritativeVisualContractSupported;
+                            break;
+                        case "AuthoritativeCompatibilitySummary":
+                            snapshot.AuthoritativeCompatibilitySummary = value;
+                            break;
+                        case "AuthoritativeMaterializedAgentEntryCount":
+                            if (int.TryParse(value, out int authoritativeMaterializedAgentEntryCount))
+                                snapshot.AuthoritativeMaterializedAgentEntryCount = authoritativeMaterializedAgentEntryCount;
+                            break;
+                        case "AuthoritativeMaterializedAgentEntries":
+                            snapshot.AuthoritativeMaterializedAgentEntries = value;
                             break;
                         case "AttackerAllowedTroopIds":
                             snapshot.AttackerAllowedTroopIds = value;
