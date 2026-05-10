@@ -28,8 +28,17 @@ namespace CoopSpectator.Patches
         private static readonly FieldInfo FollowedAgentField =
             typeof(MissionPeer).GetField("_followedAgent", BindingFlags.Instance | BindingFlags.NonPublic);
         private static MethodInfo _missionNetworkComponentHandleServerEventCreateAgentMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventSetAgentActionSetMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSynchronizeAgentEquipmentMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventAttachWeaponToWeaponInAgentEquipmentSlotMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventSetWeaponNetworkDataMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventSetWeaponAmmoDataMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventSetWeaponReloadPhaseMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventStartSwitchingWeaponUsageIndexMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventWeaponUsageIndexChangeMessageMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSetWieldedItemIndexMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventSetAgentHealthMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventMakeAgentDeadMethod;
 
         private static string _lastSuppressedFollowSwitchKey;
         private static string _lastLocalVisualFinalizeKey;
@@ -66,15 +75,42 @@ namespace CoopSpectator.Patches
             new Dictionary<int, DeferredMountedHeroCreateAgentPayload>();
         private static readonly List<DeferredClientCreateAgentPayload> DeferredClientCreateAgentPayloads =
             new List<DeferredClientCreateAgentPayload>();
+        private static readonly List<DeferredClientSetAgentActionSetPayload> DeferredClientSetAgentActionSetPayloads =
+            new List<DeferredClientSetAgentActionSetPayload>();
         private static readonly List<DeferredClientSynchronizeAgentEquipmentPayload> DeferredClientSynchronizeAgentEquipmentPayloads =
             new List<DeferredClientSynchronizeAgentEquipmentPayload>();
+        private static readonly List<DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload> DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads =
+            new List<DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload>();
+        private static readonly List<DeferredClientSetWeaponNetworkDataPayload> DeferredClientSetWeaponNetworkDataPayloads =
+            new List<DeferredClientSetWeaponNetworkDataPayload>();
+        private static readonly List<DeferredClientSetWeaponAmmoDataPayload> DeferredClientSetWeaponAmmoDataPayloads =
+            new List<DeferredClientSetWeaponAmmoDataPayload>();
+        private static readonly List<DeferredClientSetWeaponReloadPhasePayload> DeferredClientSetWeaponReloadPhasePayloads =
+            new List<DeferredClientSetWeaponReloadPhasePayload>();
+        private static readonly List<DeferredClientStartSwitchingWeaponUsageIndexPayload> DeferredClientStartSwitchingWeaponUsageIndexPayloads =
+            new List<DeferredClientStartSwitchingWeaponUsageIndexPayload>();
+        private static readonly List<DeferredClientWeaponUsageIndexChangePayload> DeferredClientWeaponUsageIndexChangePayloads =
+            new List<DeferredClientWeaponUsageIndexChangePayload>();
         private static readonly List<DeferredClientSetWieldedItemIndexPayload> DeferredClientSetWieldedItemIndexPayloads =
             new List<DeferredClientSetWieldedItemIndexPayload>();
+        private static readonly List<DeferredClientSetAgentHealthPayload> DeferredClientSetAgentHealthPayloads =
+            new List<DeferredClientSetAgentHealthPayload>();
+        private static readonly List<DeferredClientMakeAgentDeadPayload> DeferredClientMakeAgentDeadPayloads =
+            new List<DeferredClientMakeAgentDeadPayload>();
         private static readonly HashSet<string> _strictExactHeroOnSpawnWieldRefreshAppliedKeys =
             new HashSet<string>(StringComparer.Ordinal);
         private static long _nextDeferredClientCreateAgentSequence;
+        private static long _nextDeferredClientSetAgentActionSetSequence;
         private static long _nextDeferredClientSynchronizeAgentEquipmentSequence;
+        private static long _nextDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotSequence;
+        private static long _nextDeferredClientSetWeaponNetworkDataSequence;
+        private static long _nextDeferredClientSetWeaponAmmoDataSequence;
+        private static long _nextDeferredClientSetWeaponReloadPhaseSequence;
+        private static long _nextDeferredClientStartSwitchingWeaponUsageIndexSequence;
+        private static long _nextDeferredClientWeaponUsageIndexChangeSequence;
         private static long _nextDeferredClientSetWieldedItemIndexSequence;
+        private static long _nextDeferredClientSetAgentHealthSequence;
+        private static long _nextDeferredClientMakeAgentDeadSequence;
 
         private sealed class PendingLocalCommanderOrderControlFinalization
         {
@@ -105,10 +141,80 @@ namespace CoopSpectator.Patches
             public string DeferralReason;
         }
 
+        private sealed class DeferredClientSetAgentActionSetPayload
+        {
+            public long Sequence;
+            public SetAgentActionSet Message;
+            public DateTime DeferredUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+            public string DeferralReason;
+        }
+
         private sealed class DeferredClientSynchronizeAgentEquipmentPayload
         {
             public long Sequence;
             public SynchronizeAgentSpawnEquipment Message;
+            public DateTime DeferredUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+            public string DeferralReason;
+        }
+
+        private sealed class DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload
+        {
+            public long Sequence;
+            public AttachWeaponToWeaponInAgentEquipmentSlot Message;
+            public DateTime DeferredUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+            public string DeferralReason;
+        }
+
+        private sealed class DeferredClientSetWeaponNetworkDataPayload
+        {
+            public long Sequence;
+            public SetWeaponNetworkData Message;
+            public DateTime DeferredUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+            public string DeferralReason;
+        }
+
+        private sealed class DeferredClientSetWeaponAmmoDataPayload
+        {
+            public long Sequence;
+            public SetWeaponAmmoData Message;
+            public DateTime DeferredUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+            public string DeferralReason;
+        }
+
+        private sealed class DeferredClientSetWeaponReloadPhasePayload
+        {
+            public long Sequence;
+            public SetWeaponReloadPhase Message;
+            public DateTime DeferredUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+            public string DeferralReason;
+        }
+
+        private sealed class DeferredClientStartSwitchingWeaponUsageIndexPayload
+        {
+            public long Sequence;
+            public StartSwitchingWeaponUsageIndex Message;
+            public DateTime DeferredUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+            public string DeferralReason;
+        }
+
+        private sealed class DeferredClientWeaponUsageIndexChangePayload
+        {
+            public long Sequence;
+            public WeaponUsageIndexChangeMessage Message;
             public DateTime DeferredUtc;
             public DateTime LastAttemptUtc;
             public int Attempts;
@@ -125,13 +231,41 @@ namespace CoopSpectator.Patches
             public string DeferralReason;
         }
 
+        private sealed class DeferredClientSetAgentHealthPayload
+        {
+            public long Sequence;
+            public SetAgentHealth Message;
+            public DateTime DeferredUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+            public string DeferralReason;
+        }
+
+        private sealed class DeferredClientMakeAgentDeadPayload
+        {
+            public long Sequence;
+            public MakeAgentDead Message;
+            public DateTime DeferredUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+            public string DeferralReason;
+        }
+
         public static void Apply(Harmony harmony)
         {
             TryApplyPatchStep(nameof(PatchMissionPeerFollowedAgent), () => PatchMissionPeerFollowedAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateAgent), () => PatchMissionNetworkComponentCreateAgent(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentActionSet), () => PatchMissionNetworkComponentSetAgentActionSet(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSynchronizeAgentEquipment), () => PatchMissionNetworkComponentSynchronizeAgentEquipment(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentAttachWeaponToWeaponInAgentEquipmentSlot), () => PatchMissionNetworkComponentAttachWeaponToWeaponInAgentEquipmentSlot(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponNetworkData), () => PatchMissionNetworkComponentSetWeaponNetworkData(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponAmmoData), () => PatchMissionNetworkComponentSetWeaponAmmoData(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponReloadPhase), () => PatchMissionNetworkComponentSetWeaponReloadPhase(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentStartSwitchingWeaponUsageIndex), () => PatchMissionNetworkComponentStartSwitchingWeaponUsageIndex(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentWeaponUsageIndexChangeMessage), () => PatchMissionNetworkComponentWeaponUsageIndexChangeMessage(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentPeer), () => PatchMissionNetworkComponentSetAgentPeer(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentHealth), () => PatchMissionNetworkComponentSetAgentHealth(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentMakeAgentDead), () => PatchMissionNetworkComponentMakeAgentDead(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWieldedItemIndex), () => PatchMissionNetworkComponentSetWieldedItemIndex(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAssignFormationToPlayer), () => PatchMissionNetworkComponentAssignFormationToPlayer(harmony));
             TryApplyPatchStep(nameof(PatchOrderControllerSelectAllFormations), () => PatchOrderControllerSelectAllFormations(harmony));
@@ -170,17 +304,62 @@ namespace CoopSpectator.Patches
             {
                 DeferredClientCreateAgentPayloads.Clear();
             }
+            lock (DeferredClientSetAgentActionSetPayloads)
+            {
+                DeferredClientSetAgentActionSetPayloads.Clear();
+            }
             lock (DeferredClientSynchronizeAgentEquipmentPayloads)
             {
                 DeferredClientSynchronizeAgentEquipmentPayloads.Clear();
+            }
+            lock (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads)
+            {
+                DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Clear();
+            }
+            lock (DeferredClientSetWeaponNetworkDataPayloads)
+            {
+                DeferredClientSetWeaponNetworkDataPayloads.Clear();
+            }
+            lock (DeferredClientSetWeaponAmmoDataPayloads)
+            {
+                DeferredClientSetWeaponAmmoDataPayloads.Clear();
+            }
+            lock (DeferredClientSetWeaponReloadPhasePayloads)
+            {
+                DeferredClientSetWeaponReloadPhasePayloads.Clear();
+            }
+            lock (DeferredClientStartSwitchingWeaponUsageIndexPayloads)
+            {
+                DeferredClientStartSwitchingWeaponUsageIndexPayloads.Clear();
+            }
+            lock (DeferredClientWeaponUsageIndexChangePayloads)
+            {
+                DeferredClientWeaponUsageIndexChangePayloads.Clear();
             }
             lock (DeferredClientSetWieldedItemIndexPayloads)
             {
                 DeferredClientSetWieldedItemIndexPayloads.Clear();
             }
+            lock (DeferredClientSetAgentHealthPayloads)
+            {
+                DeferredClientSetAgentHealthPayloads.Clear();
+            }
+            lock (DeferredClientMakeAgentDeadPayloads)
+            {
+                DeferredClientMakeAgentDeadPayloads.Clear();
+            }
             _nextDeferredClientCreateAgentSequence = 0;
+            _nextDeferredClientSetAgentActionSetSequence = 0;
             _nextDeferredClientSynchronizeAgentEquipmentSequence = 0;
+            _nextDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotSequence = 0;
+            _nextDeferredClientSetWeaponNetworkDataSequence = 0;
+            _nextDeferredClientSetWeaponAmmoDataSequence = 0;
+            _nextDeferredClientSetWeaponReloadPhaseSequence = 0;
+            _nextDeferredClientStartSwitchingWeaponUsageIndexSequence = 0;
+            _nextDeferredClientWeaponUsageIndexChangeSequence = 0;
             _nextDeferredClientSetWieldedItemIndexSequence = 0;
+            _nextDeferredClientSetAgentHealthSequence = 0;
+            _nextDeferredClientMakeAgentDeadSequence = 0;
             _lastSuppressedFollowSwitchKey = null;
             _lastLocalVisualFinalizeKey = null;
             _lastSuppressedAssignFormationKey = null;
@@ -294,6 +473,25 @@ namespace CoopSpectator.Patches
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix/finalizer applied to MissionNetworkComponent.HandleServerEventCreateAgent.");
         }
 
+        private static void PatchMissionNetworkComponentSetAgentActionSet(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetAgentActionSet",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetAgentActionSet_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetAgentActionSet not found. Skip.");
+                return;
+            }
+
+            _missionNetworkComponentHandleServerEventSetAgentActionSetMethod = target;
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetAgentActionSet.");
+        }
+
         private static void PatchMissionNetworkComponentSynchronizeAgentEquipment(Harmony harmony)
         {
             MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
@@ -317,6 +515,120 @@ namespace CoopSpectator.Patches
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to MissionNetworkComponent.HandleServerEventSynchronizeAgentEquipment.");
         }
 
+        private static void PatchMissionNetworkComponentAttachWeaponToWeaponInAgentEquipmentSlot(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventAttachWeaponToWeaponInAgentEquipmentSlot",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventAttachWeaponToWeaponInAgentEquipmentSlot_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventAttachWeaponToWeaponInAgentEquipmentSlot not found. Skip.");
+                return;
+            }
+
+            _missionNetworkComponentHandleServerEventAttachWeaponToWeaponInAgentEquipmentSlotMethod = target;
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventAttachWeaponToWeaponInAgentEquipmentSlot.");
+        }
+
+        private static void PatchMissionNetworkComponentSetWeaponNetworkData(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetWeaponNetworkData",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetWeaponNetworkData_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetWeaponNetworkData not found. Skip.");
+                return;
+            }
+
+            _missionNetworkComponentHandleServerEventSetWeaponNetworkDataMethod = target;
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetWeaponNetworkData.");
+        }
+
+        private static void PatchMissionNetworkComponentSetWeaponAmmoData(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetWeaponAmmoData",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetWeaponAmmoData_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetWeaponAmmoData not found. Skip.");
+                return;
+            }
+
+            _missionNetworkComponentHandleServerEventSetWeaponAmmoDataMethod = target;
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetWeaponAmmoData.");
+        }
+
+        private static void PatchMissionNetworkComponentSetWeaponReloadPhase(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetWeaponReloadPhase",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetWeaponReloadPhase_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetWeaponReloadPhase not found. Skip.");
+                return;
+            }
+
+            _missionNetworkComponentHandleServerEventSetWeaponReloadPhaseMethod = target;
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetWeaponReloadPhase.");
+        }
+
+        private static void PatchMissionNetworkComponentStartSwitchingWeaponUsageIndex(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventStartSwitchingWeaponUsageIndex",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventStartSwitchingWeaponUsageIndex_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventStartSwitchingWeaponUsageIndex not found. Skip.");
+                return;
+            }
+
+            _missionNetworkComponentHandleServerEventStartSwitchingWeaponUsageIndexMethod = target;
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventStartSwitchingWeaponUsageIndex.");
+        }
+
+        private static void PatchMissionNetworkComponentWeaponUsageIndexChangeMessage(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventWeaponUsageIndexChangeMessage",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventWeaponUsageIndexChangeMessage_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventWeaponUsageIndexChangeMessage not found. Skip.");
+                return;
+            }
+
+            _missionNetworkComponentHandleServerEventWeaponUsageIndexChangeMessageMethod = target;
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventWeaponUsageIndexChangeMessage.");
+        }
+
         private static void PatchMissionNetworkComponentSetAgentHealth(Harmony harmony)
         {
             MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
@@ -334,8 +646,28 @@ namespace CoopSpectator.Patches
                 return;
             }
 
+            _missionNetworkComponentHandleServerEventSetAgentHealthMethod = target;
             harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to MissionNetworkComponent.HandleServerEventSetAgentHealth.");
+        }
+
+        private static void PatchMissionNetworkComponentMakeAgentDead(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventMakeAgentDead",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventMakeAgentDead_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventMakeAgentDead not found. Skip.");
+                return;
+            }
+
+            _missionNetworkComponentHandleServerEventMakeAgentDeadMethod = target;
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventMakeAgentDead.");
         }
 
         private static void PatchMissionNetworkComponentSetWieldedItemIndex(Harmony harmony)
@@ -918,6 +1250,55 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool MissionNetworkComponent_HandleServerEventSetAgentActionSet_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is SetAgentActionSet setAgentActionSet))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                    return true;
+
+                if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                {
+                    RegisterDeferredClientSetAgentActionSetPayload(
+                        setAgentActionSet,
+                        "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetAgentActionSet until current battle snapshot is applied. " +
+                        "AgentIndex=" + setAgentActionSet.AgentIndex +
+                        " Reason=" + (snapshotReadinessSummary ?? "unknown"));
+                    return false;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setAgentActionSet.AgentIndex, canBeNull: true);
+                if (agent == null &&
+                    (HasDeferredClientCreateAgentPayload(setAgentActionSet.AgentIndex) ||
+                     HasAnyDeferredClientAgentBootstrapPayload(setAgentActionSet.AgentIndex)))
+                {
+                    RegisterDeferredClientSetAgentActionSetPayload(
+                        setAgentActionSet,
+                        "agent-bootstrap-deferred");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetAgentActionSet because agent bootstrap is still deferred. " +
+                        "AgentIndex=" + setAgentActionSet.AgentIndex);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetAgentActionSet prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static bool ShouldUseSafeStringIdCreateAgentPathOnClient(Mission mission)
         {
             if (GameNetwork.IsServer || mission == null)
@@ -930,6 +1311,74 @@ namespace CoopSpectator.Patches
             return
                 MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(sceneName) &&
                 SceneRuntimeClassifier.IsCampaignBattleScene(sceneName);
+        }
+
+        private static bool HasAnyDeferredClientAgentBootstrapPayload(int agentIndex)
+        {
+            if (agentIndex < 0)
+                return false;
+
+            lock (DeferredClientSetAgentActionSetPayloads)
+            {
+                if (DeferredClientSetAgentActionSetPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
+                    return true;
+            }
+
+            lock (DeferredClientSynchronizeAgentEquipmentPayloads)
+            {
+                if (DeferredClientSynchronizeAgentEquipmentPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
+                    return true;
+            }
+
+            lock (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads)
+            {
+                if (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
+                    return true;
+            }
+
+            lock (DeferredClientSetWeaponNetworkDataPayloads)
+            {
+                if (DeferredClientSetWeaponNetworkDataPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
+                    return true;
+            }
+
+            lock (DeferredClientSetWeaponAmmoDataPayloads)
+            {
+                if (DeferredClientSetWeaponAmmoDataPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
+                    return true;
+            }
+
+            lock (DeferredClientSetWeaponReloadPhasePayloads)
+            {
+                if (DeferredClientSetWeaponReloadPhasePayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
+                    return true;
+            }
+
+            lock (DeferredClientStartSwitchingWeaponUsageIndexPayloads)
+            {
+                if (DeferredClientStartSwitchingWeaponUsageIndexPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
+                    return true;
+            }
+
+            lock (DeferredClientWeaponUsageIndexChangePayloads)
+            {
+                if (DeferredClientWeaponUsageIndexChangePayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
+                    return true;
+            }
+
+            lock (DeferredClientSetWieldedItemIndexPayloads)
+            {
+                if (DeferredClientSetWieldedItemIndexPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
+                    return true;
+            }
+
+            lock (DeferredClientMakeAgentDeadPayloads)
+            {
+                if (DeferredClientMakeAgentDeadPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
+                    return true;
+            }
+
+            return false;
         }
 
         internal static void ClearDeferredClientMountedHeroCreateAgents(string source)
@@ -963,8 +1412,17 @@ namespace CoopSpectator.Patches
                 return;
 
             TryReplayDeferredClientCreateAgents(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientSetAgentActionSet(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSynchronizeAgentEquipment(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientAttachWeaponToWeaponInAgentEquipmentSlot(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientSetWeaponNetworkData(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientSetWeaponAmmoData(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientSetWeaponReloadPhase(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSetWieldedItemIndex(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientStartSwitchingWeaponUsageIndex(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientWeaponUsageIndexChangeMessage(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientSetAgentHealth(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientMakeAgentDead(mission, source, snapshotReadinessSummary);
         }
 
         internal static void TryProcessDeferredClientMountedHeroCreateAgents(Mission mission, string source)
@@ -1126,6 +1584,37 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void RegisterDeferredClientSetAgentActionSetPayload(
+            SetAgentActionSet setAgentActionSet,
+            string deferralReason)
+        {
+            if (setAgentActionSet == null)
+                return;
+
+            lock (DeferredClientSetAgentActionSetPayloads)
+            {
+                DeferredClientSetAgentActionSetPayload existingPayload = DeferredClientSetAgentActionSetPayloads
+                    .FirstOrDefault(candidate => candidate?.Message?.AgentIndex == setAgentActionSet.AgentIndex);
+                if (existingPayload != null)
+                {
+                    existingPayload.Message = setAgentActionSet;
+                    existingPayload.DeferralReason = deferralReason;
+                    return;
+                }
+
+                DeferredClientSetAgentActionSetPayloads.Add(
+                    new DeferredClientSetAgentActionSetPayload
+                    {
+                        Sequence = ++_nextDeferredClientSetAgentActionSetSequence,
+                        Message = setAgentActionSet,
+                        DeferredUtc = DateTime.UtcNow,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0,
+                        DeferralReason = deferralReason
+                    });
+            }
+        }
+
         private static void RegisterDeferredClientSetWieldedItemIndexPayload(
             SetWieldedItemIndex setWieldedItemIndex,
             string deferralReason)
@@ -1152,6 +1641,270 @@ namespace CoopSpectator.Patches
                     {
                         Sequence = ++_nextDeferredClientSetWieldedItemIndexSequence,
                         Message = setWieldedItemIndex,
+                        DeferredUtc = DateTime.UtcNow,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0,
+                        DeferralReason = deferralReason
+                    });
+            }
+        }
+
+        private static void RegisterDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload(
+            AttachWeaponToWeaponInAgentEquipmentSlot attachWeapon,
+            string deferralReason)
+        {
+            if (attachWeapon == null)
+                return;
+
+            lock (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads)
+            {
+                DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload existingPayload =
+                    DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.FirstOrDefault(
+                        candidate =>
+                            candidate?.Message?.AgentIndex == attachWeapon.AgentIndex &&
+                            candidate.Message.SlotIndex == attachWeapon.SlotIndex);
+                if (existingPayload != null)
+                {
+                    existingPayload.Message = attachWeapon;
+                    existingPayload.DeferralReason = deferralReason;
+                    return;
+                }
+
+                DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Add(
+                    new DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload
+                    {
+                        Sequence = ++_nextDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotSequence,
+                        Message = attachWeapon,
+                        DeferredUtc = DateTime.UtcNow,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0,
+                        DeferralReason = deferralReason
+                    });
+            }
+        }
+
+        private static void RegisterDeferredClientSetWeaponNetworkDataPayload(
+            SetWeaponNetworkData setWeaponNetworkData,
+            string deferralReason)
+        {
+            if (setWeaponNetworkData == null)
+                return;
+
+            lock (DeferredClientSetWeaponNetworkDataPayloads)
+            {
+                DeferredClientSetWeaponNetworkDataPayload existingPayload = DeferredClientSetWeaponNetworkDataPayloads
+                    .FirstOrDefault(candidate =>
+                        candidate?.Message?.AgentIndex == setWeaponNetworkData.AgentIndex &&
+                        candidate.Message.WeaponEquipmentIndex == setWeaponNetworkData.WeaponEquipmentIndex);
+                if (existingPayload != null)
+                {
+                    existingPayload.Message = setWeaponNetworkData;
+                    existingPayload.DeferralReason = deferralReason;
+                    return;
+                }
+
+                DeferredClientSetWeaponNetworkDataPayloads.Add(
+                    new DeferredClientSetWeaponNetworkDataPayload
+                    {
+                        Sequence = ++_nextDeferredClientSetWeaponNetworkDataSequence,
+                        Message = setWeaponNetworkData,
+                        DeferredUtc = DateTime.UtcNow,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0,
+                        DeferralReason = deferralReason
+                    });
+            }
+        }
+
+        private static void RegisterDeferredClientSetWeaponAmmoDataPayload(
+            SetWeaponAmmoData setWeaponAmmoData,
+            string deferralReason)
+        {
+            if (setWeaponAmmoData == null)
+                return;
+
+            lock (DeferredClientSetWeaponAmmoDataPayloads)
+            {
+                DeferredClientSetWeaponAmmoDataPayload existingPayload = DeferredClientSetWeaponAmmoDataPayloads
+                    .FirstOrDefault(candidate =>
+                        candidate?.Message?.AgentIndex == setWeaponAmmoData.AgentIndex &&
+                        candidate.Message.WeaponEquipmentIndex == setWeaponAmmoData.WeaponEquipmentIndex &&
+                        candidate.Message.AmmoEquipmentIndex == setWeaponAmmoData.AmmoEquipmentIndex);
+                if (existingPayload != null)
+                {
+                    existingPayload.Message = setWeaponAmmoData;
+                    existingPayload.DeferralReason = deferralReason;
+                    return;
+                }
+
+                DeferredClientSetWeaponAmmoDataPayloads.Add(
+                    new DeferredClientSetWeaponAmmoDataPayload
+                    {
+                        Sequence = ++_nextDeferredClientSetWeaponAmmoDataSequence,
+                        Message = setWeaponAmmoData,
+                        DeferredUtc = DateTime.UtcNow,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0,
+                        DeferralReason = deferralReason
+                    });
+            }
+        }
+
+        private static void RegisterDeferredClientSetWeaponReloadPhasePayload(
+            SetWeaponReloadPhase setWeaponReloadPhase,
+            string deferralReason)
+        {
+            if (setWeaponReloadPhase == null)
+                return;
+
+            lock (DeferredClientSetWeaponReloadPhasePayloads)
+            {
+                DeferredClientSetWeaponReloadPhasePayload existingPayload = DeferredClientSetWeaponReloadPhasePayloads
+                    .FirstOrDefault(candidate =>
+                        candidate?.Message?.AgentIndex == setWeaponReloadPhase.AgentIndex &&
+                        candidate.Message.EquipmentIndex == setWeaponReloadPhase.EquipmentIndex);
+                if (existingPayload != null)
+                {
+                    existingPayload.Message = setWeaponReloadPhase;
+                    existingPayload.DeferralReason = deferralReason;
+                    return;
+                }
+
+                DeferredClientSetWeaponReloadPhasePayloads.Add(
+                    new DeferredClientSetWeaponReloadPhasePayload
+                    {
+                        Sequence = ++_nextDeferredClientSetWeaponReloadPhaseSequence,
+                        Message = setWeaponReloadPhase,
+                        DeferredUtc = DateTime.UtcNow,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0,
+                        DeferralReason = deferralReason
+                    });
+            }
+        }
+
+        private static void RegisterDeferredClientStartSwitchingWeaponUsageIndexPayload(
+            StartSwitchingWeaponUsageIndex startSwitchingWeaponUsageIndex,
+            string deferralReason)
+        {
+            if (startSwitchingWeaponUsageIndex == null)
+                return;
+
+            lock (DeferredClientStartSwitchingWeaponUsageIndexPayloads)
+            {
+                DeferredClientStartSwitchingWeaponUsageIndexPayload existingPayload =
+                    DeferredClientStartSwitchingWeaponUsageIndexPayloads.FirstOrDefault(candidate =>
+                        candidate?.Message?.AgentIndex == startSwitchingWeaponUsageIndex.AgentIndex &&
+                        candidate.Message.EquipmentIndex == startSwitchingWeaponUsageIndex.EquipmentIndex &&
+                        candidate.Message.UsageIndex == startSwitchingWeaponUsageIndex.UsageIndex);
+                if (existingPayload != null)
+                {
+                    existingPayload.Message = startSwitchingWeaponUsageIndex;
+                    existingPayload.DeferralReason = deferralReason;
+                    return;
+                }
+
+                DeferredClientStartSwitchingWeaponUsageIndexPayloads.Add(
+                    new DeferredClientStartSwitchingWeaponUsageIndexPayload
+                    {
+                        Sequence = ++_nextDeferredClientStartSwitchingWeaponUsageIndexSequence,
+                        Message = startSwitchingWeaponUsageIndex,
+                        DeferredUtc = DateTime.UtcNow,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0,
+                        DeferralReason = deferralReason
+                    });
+            }
+        }
+
+        private static void RegisterDeferredClientWeaponUsageIndexChangePayload(
+            WeaponUsageIndexChangeMessage weaponUsageIndexChangeMessage,
+            string deferralReason)
+        {
+            if (weaponUsageIndexChangeMessage == null)
+                return;
+
+            lock (DeferredClientWeaponUsageIndexChangePayloads)
+            {
+                DeferredClientWeaponUsageIndexChangePayload existingPayload =
+                    DeferredClientWeaponUsageIndexChangePayloads.FirstOrDefault(candidate =>
+                        candidate?.Message?.AgentIndex == weaponUsageIndexChangeMessage.AgentIndex &&
+                        candidate.Message.SlotIndex == weaponUsageIndexChangeMessage.SlotIndex &&
+                        candidate.Message.UsageIndex == weaponUsageIndexChangeMessage.UsageIndex);
+                if (existingPayload != null)
+                {
+                    existingPayload.Message = weaponUsageIndexChangeMessage;
+                    existingPayload.DeferralReason = deferralReason;
+                    return;
+                }
+
+                DeferredClientWeaponUsageIndexChangePayloads.Add(
+                    new DeferredClientWeaponUsageIndexChangePayload
+                    {
+                        Sequence = ++_nextDeferredClientWeaponUsageIndexChangeSequence,
+                        Message = weaponUsageIndexChangeMessage,
+                        DeferredUtc = DateTime.UtcNow,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0,
+                        DeferralReason = deferralReason
+                    });
+            }
+        }
+
+        private static void RegisterDeferredClientSetAgentHealthPayload(
+            SetAgentHealth setAgentHealth,
+            string deferralReason)
+        {
+            if (setAgentHealth == null)
+                return;
+
+            lock (DeferredClientSetAgentHealthPayloads)
+            {
+                DeferredClientSetAgentHealthPayload existingPayload = DeferredClientSetAgentHealthPayloads
+                    .FirstOrDefault(candidate => candidate?.Message?.AgentIndex == setAgentHealth.AgentIndex);
+                if (existingPayload != null)
+                {
+                    existingPayload.Message = setAgentHealth;
+                    existingPayload.DeferralReason = deferralReason;
+                    return;
+                }
+
+                DeferredClientSetAgentHealthPayloads.Add(
+                    new DeferredClientSetAgentHealthPayload
+                    {
+                        Sequence = ++_nextDeferredClientSetAgentHealthSequence,
+                        Message = setAgentHealth,
+                        DeferredUtc = DateTime.UtcNow,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0,
+                        DeferralReason = deferralReason
+                    });
+            }
+        }
+
+        private static void RegisterDeferredClientMakeAgentDeadPayload(
+            MakeAgentDead makeAgentDead,
+            string deferralReason)
+        {
+            if (makeAgentDead == null)
+                return;
+
+            lock (DeferredClientMakeAgentDeadPayloads)
+            {
+                DeferredClientMakeAgentDeadPayload existingPayload = DeferredClientMakeAgentDeadPayloads
+                    .FirstOrDefault(candidate => candidate?.Message?.AgentIndex == makeAgentDead.AgentIndex);
+                if (existingPayload != null)
+                {
+                    existingPayload.Message = makeAgentDead;
+                    existingPayload.DeferralReason = deferralReason;
+                    return;
+                }
+
+                DeferredClientMakeAgentDeadPayloads.Add(
+                    new DeferredClientMakeAgentDeadPayload
+                    {
+                        Sequence = ++_nextDeferredClientMakeAgentDeadSequence,
+                        Message = makeAgentDead,
                         DeferredUtc = DateTime.UtcNow,
                         LastAttemptUtc = DateTime.MinValue,
                         Attempts = 0,
@@ -1234,6 +1987,75 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void TryReplayDeferredClientSetAgentActionSet(
+            Mission mission,
+            string source,
+            string snapshotReadinessSummary)
+        {
+            if (_missionNetworkComponentHandleServerEventSetAgentActionSetMethod == null)
+                return;
+
+            List<DeferredClientSetAgentActionSetPayload> deferredPayloads;
+            lock (DeferredClientSetAgentActionSetPayloads)
+            {
+                if (DeferredClientSetAgentActionSetPayloads.Count <= 0)
+                    return;
+
+                deferredPayloads = DeferredClientSetAgentActionSetPayloads
+                    .OrderBy(candidate => candidate.Sequence)
+                    .ToList();
+            }
+
+            MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DeferredClientSetAgentActionSetPayload deferredPayload in deferredPayloads)
+            {
+                SetAgentActionSet setAgentActionSet = deferredPayload?.Message;
+                if (setAgentActionSet == null)
+                    continue;
+
+                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
+                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                {
+                    continue;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setAgentActionSet.AgentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                deferredPayload.LastAttemptUtc = nowUtc;
+                deferredPayload.Attempts++;
+                try
+                {
+                    _missionNetworkComponentHandleServerEventSetAgentActionSetMethod.Invoke(
+                        missionNetworkComponent,
+                        new object[] { setAgentActionSet });
+                    RemoveDeferredClientSetAgentActionSetPayload(setAgentActionSet.AgentIndex);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: replayed deferred client SetAgentActionSet after battle snapshot apply. " +
+                        "AgentIndex=" + setAgentActionSet.AgentIndex +
+                        " Attempts=" + deferredPayload.Attempts +
+                        " Source=" + (source ?? "unknown"));
+                }
+                catch (Exception ex)
+                {
+                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred client SetAgentActionSet replay failed open. " +
+                            "AgentIndex=" + setAgentActionSet.AgentIndex +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
+                            " Message=" + ex.GetBaseException().Message);
+                    }
+                }
+            }
+        }
+
         private static void TryReplayDeferredClientSynchronizeAgentEquipment(
             Mission mission,
             string source,
@@ -1295,6 +2117,300 @@ namespace CoopSpectator.Patches
                         ModLogger.Info(
                             "BattleMapSpawnHandoffPatch: deferred client SynchronizeAgentSpawnEquipment replay failed open. " +
                             "AgentIndex=" + synchronizeAgentSpawnEquipment.AgentIndex +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
+                            " Message=" + ex.GetBaseException().Message);
+                    }
+                }
+            }
+        }
+
+        private static void TryReplayDeferredClientAttachWeaponToWeaponInAgentEquipmentSlot(
+            Mission mission,
+            string source,
+            string snapshotReadinessSummary)
+        {
+            if (_missionNetworkComponentHandleServerEventAttachWeaponToWeaponInAgentEquipmentSlotMethod == null)
+                return;
+
+            List<DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload> deferredPayloads;
+            lock (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads)
+            {
+                if (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Count <= 0)
+                    return;
+
+                deferredPayloads = DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads
+                    .OrderBy(candidate => candidate.Sequence)
+                    .ToList();
+            }
+
+            MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload deferredPayload in deferredPayloads)
+            {
+                AttachWeaponToWeaponInAgentEquipmentSlot attachWeapon = deferredPayload?.Message;
+                if (attachWeapon == null)
+                    continue;
+
+                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
+                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                {
+                    continue;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(attachWeapon.AgentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                deferredPayload.LastAttemptUtc = nowUtc;
+                deferredPayload.Attempts++;
+                try
+                {
+                    _missionNetworkComponentHandleServerEventAttachWeaponToWeaponInAgentEquipmentSlotMethod.Invoke(
+                        missionNetworkComponent,
+                        new object[] { attachWeapon });
+                    RemoveDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload(
+                        attachWeapon.AgentIndex,
+                        attachWeapon);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: replayed deferred client AttachWeaponToWeaponInAgentEquipmentSlot after battle snapshot apply. " +
+                        "AgentIndex=" + attachWeapon.AgentIndex +
+                        " SlotIndex=" + attachWeapon.SlotIndex +
+                        " Attempts=" + deferredPayload.Attempts +
+                        " Source=" + (source ?? "unknown"));
+                }
+                catch (Exception ex)
+                {
+                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred client AttachWeaponToWeaponInAgentEquipmentSlot replay failed open. " +
+                            "AgentIndex=" + attachWeapon.AgentIndex +
+                            " SlotIndex=" + attachWeapon.SlotIndex +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
+                            " Message=" + ex.GetBaseException().Message);
+                    }
+                }
+            }
+        }
+
+        private static void TryReplayDeferredClientSetWeaponNetworkData(
+            Mission mission,
+            string source,
+            string snapshotReadinessSummary)
+        {
+            if (_missionNetworkComponentHandleServerEventSetWeaponNetworkDataMethod == null)
+                return;
+
+            List<DeferredClientSetWeaponNetworkDataPayload> deferredPayloads;
+            lock (DeferredClientSetWeaponNetworkDataPayloads)
+            {
+                if (DeferredClientSetWeaponNetworkDataPayloads.Count <= 0)
+                    return;
+
+                deferredPayloads = DeferredClientSetWeaponNetworkDataPayloads
+                    .OrderBy(candidate => candidate.Sequence)
+                    .ToList();
+            }
+
+            MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DeferredClientSetWeaponNetworkDataPayload deferredPayload in deferredPayloads)
+            {
+                SetWeaponNetworkData setWeaponNetworkData = deferredPayload?.Message;
+                if (setWeaponNetworkData == null)
+                    continue;
+
+                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
+                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                {
+                    continue;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWeaponNetworkData.AgentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                deferredPayload.LastAttemptUtc = nowUtc;
+                deferredPayload.Attempts++;
+                try
+                {
+                    _missionNetworkComponentHandleServerEventSetWeaponNetworkDataMethod.Invoke(
+                        missionNetworkComponent,
+                        new object[] { setWeaponNetworkData });
+                    RemoveDeferredClientSetWeaponNetworkDataPayload(
+                        setWeaponNetworkData.AgentIndex,
+                        setWeaponNetworkData);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: replayed deferred client SetWeaponNetworkData after battle snapshot apply. " +
+                        "AgentIndex=" + setWeaponNetworkData.AgentIndex +
+                        " WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex +
+                        " Attempts=" + deferredPayload.Attempts +
+                        " Source=" + (source ?? "unknown"));
+                }
+                catch (Exception ex)
+                {
+                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred client SetWeaponNetworkData replay failed open. " +
+                            "AgentIndex=" + setWeaponNetworkData.AgentIndex +
+                            " WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
+                            " Message=" + ex.GetBaseException().Message);
+                    }
+                }
+            }
+        }
+
+        private static void TryReplayDeferredClientSetWeaponAmmoData(
+            Mission mission,
+            string source,
+            string snapshotReadinessSummary)
+        {
+            if (_missionNetworkComponentHandleServerEventSetWeaponAmmoDataMethod == null)
+                return;
+
+            List<DeferredClientSetWeaponAmmoDataPayload> deferredPayloads;
+            lock (DeferredClientSetWeaponAmmoDataPayloads)
+            {
+                if (DeferredClientSetWeaponAmmoDataPayloads.Count <= 0)
+                    return;
+
+                deferredPayloads = DeferredClientSetWeaponAmmoDataPayloads
+                    .OrderBy(candidate => candidate.Sequence)
+                    .ToList();
+            }
+
+            MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DeferredClientSetWeaponAmmoDataPayload deferredPayload in deferredPayloads)
+            {
+                SetWeaponAmmoData setWeaponAmmoData = deferredPayload?.Message;
+                if (setWeaponAmmoData == null)
+                    continue;
+
+                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
+                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                {
+                    continue;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWeaponAmmoData.AgentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                deferredPayload.LastAttemptUtc = nowUtc;
+                deferredPayload.Attempts++;
+                try
+                {
+                    _missionNetworkComponentHandleServerEventSetWeaponAmmoDataMethod.Invoke(
+                        missionNetworkComponent,
+                        new object[] { setWeaponAmmoData });
+                    RemoveDeferredClientSetWeaponAmmoDataPayload(
+                        setWeaponAmmoData.AgentIndex,
+                        setWeaponAmmoData);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: replayed deferred client SetWeaponAmmoData after battle snapshot apply. " +
+                        "AgentIndex=" + setWeaponAmmoData.AgentIndex +
+                        " WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
+                        " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex +
+                        " Attempts=" + deferredPayload.Attempts +
+                        " Source=" + (source ?? "unknown"));
+                }
+                catch (Exception ex)
+                {
+                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred client SetWeaponAmmoData replay failed open. " +
+                            "AgentIndex=" + setWeaponAmmoData.AgentIndex +
+                            " WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
+                            " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
+                            " Message=" + ex.GetBaseException().Message);
+                    }
+                }
+            }
+        }
+
+        private static void TryReplayDeferredClientSetWeaponReloadPhase(
+            Mission mission,
+            string source,
+            string snapshotReadinessSummary)
+        {
+            if (_missionNetworkComponentHandleServerEventSetWeaponReloadPhaseMethod == null)
+                return;
+
+            List<DeferredClientSetWeaponReloadPhasePayload> deferredPayloads;
+            lock (DeferredClientSetWeaponReloadPhasePayloads)
+            {
+                if (DeferredClientSetWeaponReloadPhasePayloads.Count <= 0)
+                    return;
+
+                deferredPayloads = DeferredClientSetWeaponReloadPhasePayloads
+                    .OrderBy(candidate => candidate.Sequence)
+                    .ToList();
+            }
+
+            MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DeferredClientSetWeaponReloadPhasePayload deferredPayload in deferredPayloads)
+            {
+                SetWeaponReloadPhase setWeaponReloadPhase = deferredPayload?.Message;
+                if (setWeaponReloadPhase == null)
+                    continue;
+
+                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
+                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                {
+                    continue;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWeaponReloadPhase.AgentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                deferredPayload.LastAttemptUtc = nowUtc;
+                deferredPayload.Attempts++;
+                try
+                {
+                    _missionNetworkComponentHandleServerEventSetWeaponReloadPhaseMethod.Invoke(
+                        missionNetworkComponent,
+                        new object[] { setWeaponReloadPhase });
+                    RemoveDeferredClientSetWeaponReloadPhasePayload(
+                        setWeaponReloadPhase.AgentIndex,
+                        setWeaponReloadPhase);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: replayed deferred client SetWeaponReloadPhase after battle snapshot apply. " +
+                        "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
+                        " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
+                        " Attempts=" + deferredPayload.Attempts +
+                        " Source=" + (source ?? "unknown"));
+                }
+                catch (Exception ex)
+                {
+                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred client SetWeaponReloadPhase replay failed open. " +
+                            "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
+                            " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
                             " Attempts=" + deferredPayload.Attempts +
                             " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
                             " Message=" + ex.GetBaseException().Message);
@@ -1374,6 +2490,298 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void TryReplayDeferredClientStartSwitchingWeaponUsageIndex(
+            Mission mission,
+            string source,
+            string snapshotReadinessSummary)
+        {
+            if (_missionNetworkComponentHandleServerEventStartSwitchingWeaponUsageIndexMethod == null)
+                return;
+
+            List<DeferredClientStartSwitchingWeaponUsageIndexPayload> deferredPayloads;
+            lock (DeferredClientStartSwitchingWeaponUsageIndexPayloads)
+            {
+                if (DeferredClientStartSwitchingWeaponUsageIndexPayloads.Count <= 0)
+                    return;
+
+                deferredPayloads = DeferredClientStartSwitchingWeaponUsageIndexPayloads
+                    .OrderBy(candidate => candidate.Sequence)
+                    .ToList();
+            }
+
+            MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DeferredClientStartSwitchingWeaponUsageIndexPayload deferredPayload in deferredPayloads)
+            {
+                StartSwitchingWeaponUsageIndex startSwitchingWeaponUsageIndex = deferredPayload?.Message;
+                if (startSwitchingWeaponUsageIndex == null)
+                    continue;
+
+                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
+                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                {
+                    continue;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(startSwitchingWeaponUsageIndex.AgentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                deferredPayload.LastAttemptUtc = nowUtc;
+                deferredPayload.Attempts++;
+                try
+                {
+                    _missionNetworkComponentHandleServerEventStartSwitchingWeaponUsageIndexMethod.Invoke(
+                        missionNetworkComponent,
+                        new object[] { startSwitchingWeaponUsageIndex });
+                    RemoveDeferredClientStartSwitchingWeaponUsageIndexPayload(
+                        startSwitchingWeaponUsageIndex.AgentIndex,
+                        startSwitchingWeaponUsageIndex);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: replayed deferred client StartSwitchingWeaponUsageIndex after battle snapshot apply. " +
+                        "AgentIndex=" + startSwitchingWeaponUsageIndex.AgentIndex +
+                        " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
+                        " UsageIndex=" + startSwitchingWeaponUsageIndex.UsageIndex +
+                        " Attempts=" + deferredPayload.Attempts +
+                        " Source=" + (source ?? "unknown"));
+                }
+                catch (Exception ex)
+                {
+                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred client StartSwitchingWeaponUsageIndex replay failed open. " +
+                            "AgentIndex=" + startSwitchingWeaponUsageIndex.AgentIndex +
+                            " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
+                            " UsageIndex=" + startSwitchingWeaponUsageIndex.UsageIndex +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
+                            " Message=" + ex.GetBaseException().Message);
+                    }
+                }
+            }
+        }
+
+        private static void TryReplayDeferredClientWeaponUsageIndexChangeMessage(
+            Mission mission,
+            string source,
+            string snapshotReadinessSummary)
+        {
+            if (_missionNetworkComponentHandleServerEventWeaponUsageIndexChangeMessageMethod == null)
+                return;
+
+            List<DeferredClientWeaponUsageIndexChangePayload> deferredPayloads;
+            lock (DeferredClientWeaponUsageIndexChangePayloads)
+            {
+                if (DeferredClientWeaponUsageIndexChangePayloads.Count <= 0)
+                    return;
+
+                deferredPayloads = DeferredClientWeaponUsageIndexChangePayloads
+                    .OrderBy(candidate => candidate.Sequence)
+                    .ToList();
+            }
+
+            MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DeferredClientWeaponUsageIndexChangePayload deferredPayload in deferredPayloads)
+            {
+                WeaponUsageIndexChangeMessage weaponUsageIndexChangeMessage = deferredPayload?.Message;
+                if (weaponUsageIndexChangeMessage == null)
+                    continue;
+
+                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
+                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                {
+                    continue;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(weaponUsageIndexChangeMessage.AgentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                deferredPayload.LastAttemptUtc = nowUtc;
+                deferredPayload.Attempts++;
+                try
+                {
+                    _missionNetworkComponentHandleServerEventWeaponUsageIndexChangeMessageMethod.Invoke(
+                        missionNetworkComponent,
+                        new object[] { weaponUsageIndexChangeMessage });
+                    RemoveDeferredClientWeaponUsageIndexChangePayload(
+                        weaponUsageIndexChangeMessage.AgentIndex,
+                        weaponUsageIndexChangeMessage);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: replayed deferred client WeaponUsageIndexChangeMessage after battle snapshot apply. " +
+                        "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
+                        " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
+                        " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex +
+                        " Attempts=" + deferredPayload.Attempts +
+                        " Source=" + (source ?? "unknown"));
+                }
+                catch (Exception ex)
+                {
+                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred client WeaponUsageIndexChangeMessage replay failed open. " +
+                            "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
+                            " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
+                            " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
+                            " Message=" + ex.GetBaseException().Message);
+                    }
+                }
+            }
+        }
+
+        private static void TryReplayDeferredClientSetAgentHealth(
+            Mission mission,
+            string source,
+            string snapshotReadinessSummary)
+        {
+            if (_missionNetworkComponentHandleServerEventSetAgentHealthMethod == null)
+                return;
+
+            List<DeferredClientSetAgentHealthPayload> deferredPayloads;
+            lock (DeferredClientSetAgentHealthPayloads)
+            {
+                if (DeferredClientSetAgentHealthPayloads.Count <= 0)
+                    return;
+
+                deferredPayloads = DeferredClientSetAgentHealthPayloads
+                    .OrderBy(candidate => candidate.Sequence)
+                    .ToList();
+            }
+
+            MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DeferredClientSetAgentHealthPayload deferredPayload in deferredPayloads)
+            {
+                SetAgentHealth setAgentHealth = deferredPayload?.Message;
+                if (setAgentHealth == null)
+                    continue;
+
+                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
+                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                {
+                    continue;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setAgentHealth.AgentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                deferredPayload.LastAttemptUtc = nowUtc;
+                deferredPayload.Attempts++;
+                try
+                {
+                    _missionNetworkComponentHandleServerEventSetAgentHealthMethod.Invoke(
+                        missionNetworkComponent,
+                        new object[] { setAgentHealth });
+                    RemoveDeferredClientSetAgentHealthPayload(setAgentHealth.AgentIndex);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: replayed deferred client SetAgentHealth after battle snapshot apply. " +
+                        "AgentIndex=" + setAgentHealth.AgentIndex +
+                        " Health=" + setAgentHealth.Health +
+                        " Attempts=" + deferredPayload.Attempts +
+                        " Source=" + (source ?? "unknown"));
+                }
+                catch (Exception ex)
+                {
+                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred client SetAgentHealth replay failed open. " +
+                            "AgentIndex=" + setAgentHealth.AgentIndex +
+                            " Health=" + setAgentHealth.Health +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
+                            " Message=" + ex.GetBaseException().Message);
+                    }
+                }
+            }
+        }
+
+        private static void TryReplayDeferredClientMakeAgentDead(
+            Mission mission,
+            string source,
+            string snapshotReadinessSummary)
+        {
+            if (_missionNetworkComponentHandleServerEventMakeAgentDeadMethod == null)
+                return;
+
+            List<DeferredClientMakeAgentDeadPayload> deferredPayloads;
+            lock (DeferredClientMakeAgentDeadPayloads)
+            {
+                if (DeferredClientMakeAgentDeadPayloads.Count <= 0)
+                    return;
+
+                deferredPayloads = DeferredClientMakeAgentDeadPayloads
+                    .OrderBy(candidate => candidate.Sequence)
+                    .ToList();
+            }
+
+            MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DeferredClientMakeAgentDeadPayload deferredPayload in deferredPayloads)
+            {
+                MakeAgentDead makeAgentDead = deferredPayload?.Message;
+                if (makeAgentDead == null)
+                    continue;
+
+                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
+                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                {
+                    continue;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(makeAgentDead.AgentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                deferredPayload.LastAttemptUtc = nowUtc;
+                deferredPayload.Attempts++;
+                try
+                {
+                    _missionNetworkComponentHandleServerEventMakeAgentDeadMethod.Invoke(
+                        missionNetworkComponent,
+                        new object[] { makeAgentDead });
+                    RemoveDeferredClientMakeAgentDeadPayload(makeAgentDead.AgentIndex);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: replayed deferred client MakeAgentDead after battle snapshot apply. " +
+                        "AgentIndex=" + makeAgentDead.AgentIndex +
+                        " IsKilled=" + makeAgentDead.IsKilled +
+                        " Attempts=" + deferredPayload.Attempts +
+                        " Source=" + (source ?? "unknown"));
+                }
+                catch (Exception ex)
+                {
+                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred client MakeAgentDead replay failed open. " +
+                            "AgentIndex=" + makeAgentDead.AgentIndex +
+                            " IsKilled=" + makeAgentDead.IsKilled +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
+                            " Message=" + ex.GetBaseException().Message);
+                    }
+                }
+            }
+        }
+
         private static void RemoveDeferredClientCreateAgentPayload(int agentIndex)
         {
             if (agentIndex < 0)
@@ -1385,6 +2793,17 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void RemoveDeferredClientSetAgentActionSetPayload(int agentIndex)
+        {
+            if (agentIndex < 0)
+                return;
+
+            lock (DeferredClientSetAgentActionSetPayloads)
+            {
+                DeferredClientSetAgentActionSetPayloads.RemoveAll(candidate => candidate?.Message?.AgentIndex == agentIndex);
+            }
+        }
+
         private static void RemoveDeferredClientSynchronizeAgentEquipmentPayload(int agentIndex)
         {
             if (agentIndex < 0)
@@ -1393,6 +2812,102 @@ namespace CoopSpectator.Patches
             lock (DeferredClientSynchronizeAgentEquipmentPayloads)
             {
                 DeferredClientSynchronizeAgentEquipmentPayloads.RemoveAll(candidate => candidate?.Message?.AgentIndex == agentIndex);
+            }
+        }
+
+        private static void RemoveDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload(
+            int agentIndex,
+            AttachWeaponToWeaponInAgentEquipmentSlot referenceMessage)
+        {
+            if (agentIndex < 0)
+                return;
+
+            lock (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads)
+            {
+                DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.RemoveAll(candidate =>
+                    candidate?.Message?.AgentIndex == agentIndex &&
+                    (referenceMessage == null || candidate.Message.SlotIndex == referenceMessage.SlotIndex));
+            }
+        }
+
+        private static void RemoveDeferredClientSetWeaponNetworkDataPayload(
+            int agentIndex,
+            SetWeaponNetworkData referenceMessage)
+        {
+            if (agentIndex < 0)
+                return;
+
+            lock (DeferredClientSetWeaponNetworkDataPayloads)
+            {
+                DeferredClientSetWeaponNetworkDataPayloads.RemoveAll(candidate =>
+                    candidate?.Message?.AgentIndex == agentIndex &&
+                    (referenceMessage == null || candidate.Message.WeaponEquipmentIndex == referenceMessage.WeaponEquipmentIndex));
+            }
+        }
+
+        private static void RemoveDeferredClientSetWeaponAmmoDataPayload(
+            int agentIndex,
+            SetWeaponAmmoData referenceMessage)
+        {
+            if (agentIndex < 0)
+                return;
+
+            lock (DeferredClientSetWeaponAmmoDataPayloads)
+            {
+                DeferredClientSetWeaponAmmoDataPayloads.RemoveAll(candidate =>
+                    candidate?.Message?.AgentIndex == agentIndex &&
+                    (referenceMessage == null ||
+                     (candidate.Message.WeaponEquipmentIndex == referenceMessage.WeaponEquipmentIndex &&
+                      candidate.Message.AmmoEquipmentIndex == referenceMessage.AmmoEquipmentIndex)));
+            }
+        }
+
+        private static void RemoveDeferredClientSetWeaponReloadPhasePayload(
+            int agentIndex,
+            SetWeaponReloadPhase referenceMessage)
+        {
+            if (agentIndex < 0)
+                return;
+
+            lock (DeferredClientSetWeaponReloadPhasePayloads)
+            {
+                DeferredClientSetWeaponReloadPhasePayloads.RemoveAll(candidate =>
+                    candidate?.Message?.AgentIndex == agentIndex &&
+                    (referenceMessage == null || candidate.Message.EquipmentIndex == referenceMessage.EquipmentIndex));
+            }
+        }
+
+        private static void RemoveDeferredClientStartSwitchingWeaponUsageIndexPayload(
+            int agentIndex,
+            StartSwitchingWeaponUsageIndex referenceMessage)
+        {
+            if (agentIndex < 0)
+                return;
+
+            lock (DeferredClientStartSwitchingWeaponUsageIndexPayloads)
+            {
+                DeferredClientStartSwitchingWeaponUsageIndexPayloads.RemoveAll(candidate =>
+                    candidate?.Message?.AgentIndex == agentIndex &&
+                    (referenceMessage == null ||
+                     (candidate.Message.EquipmentIndex == referenceMessage.EquipmentIndex &&
+                      candidate.Message.UsageIndex == referenceMessage.UsageIndex)));
+            }
+        }
+
+        private static void RemoveDeferredClientWeaponUsageIndexChangePayload(
+            int agentIndex,
+            WeaponUsageIndexChangeMessage referenceMessage)
+        {
+            if (agentIndex < 0)
+                return;
+
+            lock (DeferredClientWeaponUsageIndexChangePayloads)
+            {
+                DeferredClientWeaponUsageIndexChangePayloads.RemoveAll(candidate =>
+                    candidate?.Message?.AgentIndex == agentIndex &&
+                    (referenceMessage == null ||
+                     (candidate.Message.SlotIndex == referenceMessage.SlotIndex &&
+                      candidate.Message.UsageIndex == referenceMessage.UsageIndex)));
             }
         }
 
@@ -1409,6 +2924,28 @@ namespace CoopSpectator.Patches
                      (candidate.Message.WieldedItemIndex == referenceMessage.WieldedItemIndex &&
                       candidate.Message.IsWieldedOnSpawn == referenceMessage.IsWieldedOnSpawn &&
                       candidate.Message.IsLeftHand == referenceMessage.IsLeftHand)));
+            }
+        }
+
+        private static void RemoveDeferredClientSetAgentHealthPayload(int agentIndex)
+        {
+            if (agentIndex < 0)
+                return;
+
+            lock (DeferredClientSetAgentHealthPayloads)
+            {
+                DeferredClientSetAgentHealthPayloads.RemoveAll(candidate => candidate?.Message?.AgentIndex == agentIndex);
+            }
+        }
+
+        private static void RemoveDeferredClientMakeAgentDeadPayload(int agentIndex)
+        {
+            if (agentIndex < 0)
+                return;
+
+            lock (DeferredClientMakeAgentDeadPayloads)
+            {
+                DeferredClientMakeAgentDeadPayloads.RemoveAll(candidate => candidate?.Message?.AgentIndex == agentIndex);
             }
         }
 
@@ -2149,6 +3686,318 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool MissionNetworkComponent_HandleServerEventAttachWeaponToWeaponInAgentEquipmentSlot_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is AttachWeaponToWeaponInAgentEquipmentSlot attachWeapon))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                    return true;
+
+                if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                {
+                    RegisterDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload(
+                        attachWeapon,
+                        "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client AttachWeaponToWeaponInAgentEquipmentSlot until current battle snapshot is applied. " +
+                        "AgentIndex=" + attachWeapon.AgentIndex +
+                        " SlotIndex=" + attachWeapon.SlotIndex +
+                        " Reason=" + (snapshotReadinessSummary ?? "unknown"));
+                    return false;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(attachWeapon.AgentIndex, canBeNull: true);
+                if (agent == null &&
+                    (HasDeferredClientCreateAgentPayload(attachWeapon.AgentIndex) ||
+                     HasAnyDeferredClientAgentBootstrapPayload(attachWeapon.AgentIndex)))
+                {
+                    RegisterDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload(
+                        attachWeapon,
+                        "agent-bootstrap-deferred");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client AttachWeaponToWeaponInAgentEquipmentSlot because agent bootstrap is still deferred. " +
+                        "AgentIndex=" + attachWeapon.AgentIndex +
+                        " SlotIndex=" + attachWeapon.SlotIndex);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: AttachWeaponToWeaponInAgentEquipmentSlot prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventSetWeaponNetworkData_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is SetWeaponNetworkData setWeaponNetworkData))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                    return true;
+
+                if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                {
+                    RegisterDeferredClientSetWeaponNetworkDataPayload(
+                        setWeaponNetworkData,
+                        "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetWeaponNetworkData until current battle snapshot is applied. " +
+                        "AgentIndex=" + setWeaponNetworkData.AgentIndex +
+                        " WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex +
+                        " Reason=" + (snapshotReadinessSummary ?? "unknown"));
+                    return false;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWeaponNetworkData.AgentIndex, canBeNull: true);
+                if (agent == null &&
+                    (HasDeferredClientCreateAgentPayload(setWeaponNetworkData.AgentIndex) ||
+                     HasAnyDeferredClientAgentBootstrapPayload(setWeaponNetworkData.AgentIndex)))
+                {
+                    RegisterDeferredClientSetWeaponNetworkDataPayload(
+                        setWeaponNetworkData,
+                        "agent-bootstrap-deferred");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetWeaponNetworkData because agent bootstrap is still deferred. " +
+                        "AgentIndex=" + setWeaponNetworkData.AgentIndex +
+                        " WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetWeaponNetworkData prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventSetWeaponAmmoData_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is SetWeaponAmmoData setWeaponAmmoData))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                    return true;
+
+                if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                {
+                    RegisterDeferredClientSetWeaponAmmoDataPayload(
+                        setWeaponAmmoData,
+                        "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetWeaponAmmoData until current battle snapshot is applied. " +
+                        "AgentIndex=" + setWeaponAmmoData.AgentIndex +
+                        " WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
+                        " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex +
+                        " Reason=" + (snapshotReadinessSummary ?? "unknown"));
+                    return false;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWeaponAmmoData.AgentIndex, canBeNull: true);
+                if (agent == null &&
+                    (HasDeferredClientCreateAgentPayload(setWeaponAmmoData.AgentIndex) ||
+                     HasAnyDeferredClientAgentBootstrapPayload(setWeaponAmmoData.AgentIndex)))
+                {
+                    RegisterDeferredClientSetWeaponAmmoDataPayload(
+                        setWeaponAmmoData,
+                        "agent-bootstrap-deferred");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetWeaponAmmoData because agent bootstrap is still deferred. " +
+                        "AgentIndex=" + setWeaponAmmoData.AgentIndex +
+                        " WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
+                        " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetWeaponAmmoData prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventSetWeaponReloadPhase_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is SetWeaponReloadPhase setWeaponReloadPhase))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                    return true;
+
+                if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                {
+                    RegisterDeferredClientSetWeaponReloadPhasePayload(
+                        setWeaponReloadPhase,
+                        "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetWeaponReloadPhase until current battle snapshot is applied. " +
+                        "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
+                        " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
+                        " Reason=" + (snapshotReadinessSummary ?? "unknown"));
+                    return false;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWeaponReloadPhase.AgentIndex, canBeNull: true);
+                if (agent == null &&
+                    (HasDeferredClientCreateAgentPayload(setWeaponReloadPhase.AgentIndex) ||
+                     HasAnyDeferredClientAgentBootstrapPayload(setWeaponReloadPhase.AgentIndex)))
+                {
+                    RegisterDeferredClientSetWeaponReloadPhasePayload(
+                        setWeaponReloadPhase,
+                        "agent-bootstrap-deferred");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetWeaponReloadPhase because agent bootstrap is still deferred. " +
+                        "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
+                        " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetWeaponReloadPhase prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventStartSwitchingWeaponUsageIndex_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is StartSwitchingWeaponUsageIndex startSwitchingWeaponUsageIndex))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                    return true;
+
+                if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                {
+                    RegisterDeferredClientStartSwitchingWeaponUsageIndexPayload(
+                        startSwitchingWeaponUsageIndex,
+                        "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client StartSwitchingWeaponUsageIndex until current battle snapshot is applied. " +
+                        "AgentIndex=" + startSwitchingWeaponUsageIndex.AgentIndex +
+                        " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
+                        " UsageIndex=" + startSwitchingWeaponUsageIndex.UsageIndex +
+                        " Reason=" + (snapshotReadinessSummary ?? "unknown"));
+                    return false;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(startSwitchingWeaponUsageIndex.AgentIndex, canBeNull: true);
+                if (agent == null &&
+                    (HasDeferredClientCreateAgentPayload(startSwitchingWeaponUsageIndex.AgentIndex) ||
+                     HasAnyDeferredClientAgentBootstrapPayload(startSwitchingWeaponUsageIndex.AgentIndex)))
+                {
+                    RegisterDeferredClientStartSwitchingWeaponUsageIndexPayload(
+                        startSwitchingWeaponUsageIndex,
+                        "agent-bootstrap-deferred");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client StartSwitchingWeaponUsageIndex because agent bootstrap is still deferred. " +
+                        "AgentIndex=" + startSwitchingWeaponUsageIndex.AgentIndex +
+                        " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
+                        " UsageIndex=" + startSwitchingWeaponUsageIndex.UsageIndex);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: StartSwitchingWeaponUsageIndex prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventWeaponUsageIndexChangeMessage_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is WeaponUsageIndexChangeMessage weaponUsageIndexChangeMessage))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                    return true;
+
+                if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                {
+                    RegisterDeferredClientWeaponUsageIndexChangePayload(
+                        weaponUsageIndexChangeMessage,
+                        "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client WeaponUsageIndexChangeMessage until current battle snapshot is applied. " +
+                        "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
+                        " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
+                        " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex +
+                        " Reason=" + (snapshotReadinessSummary ?? "unknown"));
+                    return false;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(weaponUsageIndexChangeMessage.AgentIndex, canBeNull: true);
+                if (agent == null &&
+                    (HasDeferredClientCreateAgentPayload(weaponUsageIndexChangeMessage.AgentIndex) ||
+                     HasAnyDeferredClientAgentBootstrapPayload(weaponUsageIndexChangeMessage.AgentIndex)))
+                {
+                    RegisterDeferredClientWeaponUsageIndexChangePayload(
+                        weaponUsageIndexChangeMessage,
+                        "agent-bootstrap-deferred");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client WeaponUsageIndexChangeMessage because agent bootstrap is still deferred. " +
+                        "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
+                        " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
+                        " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: WeaponUsageIndexChangeMessage prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static void MissionNetworkComponent_HandleServerEventSynchronizeAgentEquipment_Postfix(GameNetworkMessage baseMessage)
         {
             try
@@ -2235,7 +4084,38 @@ namespace CoopSpectator.Patches
                 if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                     return true;
 
+                if (ShouldUseSafeStringIdCreateAgentPathOnClient(mission) &&
+                    !CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                {
+                    RegisterDeferredClientSetAgentHealthPayload(
+                        setAgentHealth,
+                        "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
+                    __state = true;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetAgentHealth until current battle snapshot is applied. " +
+                        "AgentIndex=" + setAgentHealth.AgentIndex +
+                        " Health=" + setAgentHealth.Health +
+                        " Reason=" + (snapshotReadinessSummary ?? "unknown"));
+                    return false;
+                }
+
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setAgentHealth.AgentIndex, canBeNull: true);
+                if (agent == null &&
+                    ShouldUseSafeStringIdCreateAgentPathOnClient(mission) &&
+                    (HasDeferredClientCreateAgentPayload(setAgentHealth.AgentIndex) ||
+                     HasAnyDeferredClientAgentBootstrapPayload(setAgentHealth.AgentIndex)))
+                {
+                    RegisterDeferredClientSetAgentHealthPayload(
+                        setAgentHealth,
+                        "agent-bootstrap-deferred");
+                    __state = true;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetAgentHealth because agent bootstrap is still deferred. " +
+                        "AgentIndex=" + setAgentHealth.AgentIndex +
+                        " Health=" + setAgentHealth.Health);
+                    return false;
+                }
+
                 if (agent != null)
                     return true;
 
@@ -2320,6 +4200,57 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: SetAgentHealth contract trace failed: " + ex.Message);
+            }
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventMakeAgentDead_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is MakeAgentDead makeAgentDead))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                    return true;
+
+                if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                {
+                    RegisterDeferredClientMakeAgentDeadPayload(
+                        makeAgentDead,
+                        "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client MakeAgentDead until current battle snapshot is applied. " +
+                        "AgentIndex=" + makeAgentDead.AgentIndex +
+                        " IsKilled=" + makeAgentDead.IsKilled +
+                        " Reason=" + (snapshotReadinessSummary ?? "unknown"));
+                    return false;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(makeAgentDead.AgentIndex, canBeNull: true);
+                if (agent == null &&
+                    (HasDeferredClientCreateAgentPayload(makeAgentDead.AgentIndex) ||
+                     HasAnyDeferredClientAgentBootstrapPayload(makeAgentDead.AgentIndex)))
+                {
+                    RegisterDeferredClientMakeAgentDeadPayload(
+                        makeAgentDead,
+                        "agent-bootstrap-deferred");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client MakeAgentDead because agent bootstrap is still deferred. " +
+                        "AgentIndex=" + makeAgentDead.AgentIndex +
+                        " IsKilled=" + makeAgentDead.IsKilled);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MakeAgentDead prefix failed open: " + ex.Message);
+                return true;
             }
         }
 
