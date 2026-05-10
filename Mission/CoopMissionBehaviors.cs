@@ -7874,6 +7874,8 @@ namespace CoopSpectator.MissionBehaviors
             ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
             string appliedEquipment = "(none)";
             string equipmentMisses = "(none)";
+            string clientLiveWeaponPreservationSummary = null;
+            bool clientOverlayLiveWeaponsClearedByRefresh = false;
             bool runtimeExactCharacter = ExactCampaignRuntimeObjectRegistry.IsRuntimeCharacter(agent.Character as BasicCharacterObject);
             bool preSpawnExactLoadoutInjected = HasExactCampaignPreSpawnLoadoutInjected(agent);
             bool enforceServerAuthoritativeOverlayContract =
@@ -8040,6 +8042,16 @@ namespace CoopSpectator.MissionBehaviors
                             : equipmentMisses + ", " + keptNativeSlots;
                 }
 
+                if (clientVisualOnly &&
+                    !includeWeaponsForOverlayRefresh &&
+                    TryPreserveEquipmentWeaponSlotsFromMissionEquipment(
+                        spawnEquipment,
+                        agent.Equipment,
+                        out string preservedLiveWeapons))
+                {
+                    clientLiveWeaponPreservationSummary = preservedLiveWeapons;
+                }
+
                 string clientOverlayPreRefreshSnapshot = null;
                 string clientOverlayBeforeMissionWeapons = null;
                 bool clientOverlayBeforeMissionHadWeapons = false;
@@ -8070,7 +8082,8 @@ namespace CoopSpectator.MissionBehaviors
                             EquipmentIndex.Weapon0,
                             EquipmentIndex.Weapon1,
                             EquipmentIndex.Weapon2,
-                            EquipmentIndex.Weapon3) + "}";
+                            EquipmentIndex.Weapon3) + "}" +
+                        " PreservedLiveWeapons={" + (clientLiveWeaponPreservationSummary ?? "(none)") + "}";
                     clientOverlayBeforeMissionWeapons = BuildMissionEquipmentSummary(
                         agent.Equipment,
                         EquipmentIndex.Weapon0,
@@ -8129,6 +8142,9 @@ namespace CoopSpectator.MissionBehaviors
                         EquipmentIndex.Weapon1,
                         EquipmentIndex.Weapon2,
                         EquipmentIndex.Weapon3);
+                    clientOverlayLiveWeaponsClearedByRefresh =
+                        clientOverlayBeforeMissionHadWeapons &&
+                        !afterMissionHasWeapons;
                     ModLogger.Info(
                         "CoopMissionSpawnLogic: client exact visual overlay refresh post-state. " +
                         "AgentIndex=" + agent.Index +
@@ -8138,10 +8154,11 @@ namespace CoopSpectator.MissionBehaviors
                         " IncludeWeapons=" + includeWeaponsForOverlayRefresh +
                         " BeforeMissionHadWeapons=" + clientOverlayBeforeMissionHadWeapons +
                         " AfterMissionHadWeapons=" + afterMissionHasWeapons +
-                        " LiveWeaponsClearedByRefresh=" + (clientOverlayBeforeMissionHadWeapons && !afterMissionHasWeapons) +
+                        " LiveWeaponsClearedByRefresh=" + clientOverlayLiveWeaponsClearedByRefresh +
                         " BeforeMissionWeapons={" + (clientOverlayBeforeMissionWeapons ?? "(none)") + "}" +
                         " AfterSpawnWeapons={" + afterSpawnWeapons + "}" +
                         " AfterMissionWeapons={" + afterMissionWeapons + "}" +
+                        " PreservedLiveWeapons={" + (clientLiveWeaponPreservationSummary ?? "(none)") + "}" +
                         " Source=" + (source ?? "unknown"));
                 }
 
@@ -8279,6 +8296,35 @@ namespace CoopSpectator.MissionBehaviors
                 equipmentMisses = includeWeaponsForOverlayRefresh
                     ? "Horse/HorseHarness=kept-native, client-refresh-equipment-unavailable"
                     : "Weapons/Horse/HorseHarness=kept-native, client-refresh-equipment-unavailable";
+            }
+
+            if (clientVisualOnly &&
+                clientOverlayLiveWeaponsClearedByRefresh)
+            {
+                equipmentMisses =
+                    equipmentMisses == "(none)"
+                        ? "live-weapons-cleared-by-refresh"
+                        : equipmentMisses + ", live-weapons-cleared-by-refresh";
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-exact-visual-refresh-cleared-live-weapons",
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " Hero=" + clientHeroEntry +
+                    " IncludeWeapons=" + includeWeaponsForOverlayRefresh +
+                    " PreservedLiveWeapons={" + (clientLiveWeaponPreservationSummary ?? "(none)") + "}" +
+                    " Source=" + (source ?? "unknown"));
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: deferred client exact final materialization because visual refresh cleared live weapons. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " TroopId=" + (agent.Character?.StringId ?? "null") +
+                    " Hero=" + clientHeroEntry +
+                    " IncludeWeapons=" + includeWeaponsForOverlayRefresh +
+                    " AppliedEquipment=" + appliedEquipment +
+                    " EquipmentMisses=" + equipmentMisses +
+                    " PreservedLiveWeapons={" + (clientLiveWeaponPreservationSummary ?? "(none)") + "}" +
+                    " Source=" + (source ?? "unknown"));
+                return false;
             }
 
             if (clientVisualOnly &&
@@ -16847,6 +16893,37 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             hydrationSummary = string.Join(", ", hydratedSlots);
+            return true;
+        }
+
+        private static bool TryPreserveEquipmentWeaponSlotsFromMissionEquipment(
+            Equipment targetEquipment,
+            MissionEquipment missionEquipment,
+            out string preservationSummary)
+        {
+            preservationSummary = "(none)";
+            if (targetEquipment == null || missionEquipment == null)
+                return false;
+
+            var preservedSlots = new List<string>();
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                MissionWeapon missionWeapon = missionEquipment[slot];
+                ItemObject item = missionWeapon.Item;
+                if (item == null || missionWeapon.IsEmpty)
+                    continue;
+
+                targetEquipment[slot] = new EquipmentElement(item, null, null, false);
+                preservedSlots.Add(GetEquipmentSlotLabel(slot) + "=" + item.StringId);
+            }
+
+            if (preservedSlots.Count == 0)
+            {
+                preservationSummary = "no-live-mission-weapons";
+                return false;
+            }
+
+            preservationSummary = string.Join(", ", preservedSlots);
             return true;
         }
 

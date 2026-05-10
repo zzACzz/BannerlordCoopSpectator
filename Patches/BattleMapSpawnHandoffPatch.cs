@@ -41,6 +41,7 @@ namespace CoopSpectator.Patches
         private static MethodInfo _missionNetworkComponentHandleServerEventMakeAgentDeadMethod;
 
         private static string _lastSuppressedFollowSwitchKey;
+        private static string _lastSuppressedWeaponDropKey;
         private static string _lastLocalVisualFinalizeKey;
         private static string _lastSuppressedAssignFormationKey;
         private static string _lastSuppressedLocalSelectAllFormationsKey;
@@ -267,6 +268,7 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentHealth), () => PatchMissionNetworkComponentSetAgentHealth(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentMakeAgentDead), () => PatchMissionNetworkComponentMakeAgentDead(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWieldedItemIndex), () => PatchMissionNetworkComponentSetWieldedItemIndex(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent), () => PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAssignFormationToPlayer), () => PatchMissionNetworkComponentAssignFormationToPlayer(harmony));
             TryApplyPatchStep(nameof(PatchOrderControllerSelectAllFormations), () => PatchOrderControllerSelectAllFormations(harmony));
             TryApplyPatchStep(nameof(PatchOrderTroopPlacerMissionScreenTick), () => PatchOrderTroopPlacerMissionScreenTick(harmony));
@@ -361,6 +363,7 @@ namespace CoopSpectator.Patches
             _nextDeferredClientSetAgentHealthSequence = 0;
             _nextDeferredClientMakeAgentDeadSequence = 0;
             _lastSuppressedFollowSwitchKey = null;
+            _lastSuppressedWeaponDropKey = null;
             _lastLocalVisualFinalizeKey = null;
             _lastSuppressedAssignFormationKey = null;
             _lastSuppressedLocalSelectAllFormationsKey = null;
@@ -698,6 +701,24 @@ namespace CoopSpectator.Patches
                 postfix: new HarmonyMethod(postfix),
                 finalizer: new HarmonyMethod(finalizer));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix/finalizer applied to MissionNetworkComponent.HandleServerEventSetWieldedItemIndex.");
+        }
+
+        private static void PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSpawnWeaponAsDropFromAgent",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSpawnWeaponAsDropFromAgent_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSpawnWeaponAsDropFromAgent not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSpawnWeaponAsDropFromAgent.");
         }
 
         private static void PatchMissionNetworkComponentAssignFormationToPlayer(Harmony harmony)
@@ -4512,6 +4533,74 @@ namespace CoopSpectator.Patches
             }
 
             return __exception;
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventSpawnWeaponAsDropFromAgent_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is SpawnWeaponAsDropFromAgent spawnWeaponAsDropFromAgent))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null ||
+                    GameNetwork.IsServer ||
+                    !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                    !ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                {
+                    return true;
+                }
+
+                if (spawnWeaponAsDropFromAgent.EquipmentIndex < EquipmentIndex.Weapon0 ||
+                    spawnWeaponAsDropFromAgent.EquipmentIndex > EquipmentIndex.Weapon3)
+                {
+                    return true;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(spawnWeaponAsDropFromAgent.AgentIndex, canBeNull: true);
+                bool suppress =
+                    agent == null ||
+                    ((agent.Equipment == null ||
+                      agent.Equipment[spawnWeaponAsDropFromAgent.EquipmentIndex].IsEmpty ||
+                      agent.Equipment[spawnWeaponAsDropFromAgent.EquipmentIndex].Item == null) &&
+                     (agent.SpawnEquipment == null ||
+                      agent.SpawnEquipment[spawnWeaponAsDropFromAgent.EquipmentIndex].IsEmpty ||
+                      agent.SpawnEquipment[spawnWeaponAsDropFromAgent.EquipmentIndex].Item == null));
+                if (!suppress)
+                    return true;
+
+                string logKey =
+                    (mission.SceneName ?? "null") + "|" +
+                    spawnWeaponAsDropFromAgent.AgentIndex + "|" +
+                    spawnWeaponAsDropFromAgent.EquipmentIndex + "|" +
+                    spawnWeaponAsDropFromAgent.ForcedIndex;
+                if (!string.Equals(_lastSuppressedWeaponDropKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedWeaponDropKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed client SpawnWeaponAsDropFromAgent because local weapon slot is unavailable. " +
+                        "AgentIndex=" + spawnWeaponAsDropFromAgent.AgentIndex +
+                        " EquipmentIndex=" + spawnWeaponAsDropFromAgent.EquipmentIndex +
+                        " ForcedIndex=" + spawnWeaponAsDropFromAgent.ForcedIndex +
+                        " AgentNull=" + (agent == null) +
+                        " AgentCharacter=" + (agent?.Character?.StringId ?? "null") +
+                        " MissionWeapons={" + BuildMissionEquipmentWeaponSummary(agent?.Equipment) + "}" +
+                        " SpawnWeapons={" + BuildEquipmentSummary(
+                            agent?.SpawnEquipment,
+                            EquipmentIndex.Weapon0,
+                            EquipmentIndex.Weapon1,
+                            EquipmentIndex.Weapon2,
+                            EquipmentIndex.Weapon3) + "}" +
+                        " Scene=" + (mission.SceneName ?? "null"));
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SpawnWeaponAsDropFromAgent prefix failed open: " + ex.Message);
+                return true;
+            }
         }
 
         private static string BuildMissionEquipmentWeaponSummary(MissionEquipment equipment)
