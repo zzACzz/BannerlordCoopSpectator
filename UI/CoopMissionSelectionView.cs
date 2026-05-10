@@ -3,6 +3,7 @@ using System.Linq;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Patches;
 using TaleWorlds.Core;
 using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.InputSystem;
@@ -651,6 +652,7 @@ namespace CoopSpectator.UI
 
         private void ReleaseCurrentMovie()
         {
+            bool releasedClassLoadoutMovie = _currentScreen == CoopSelectionScreen.ClassLoadout;
             if (_gauntletLayer != null && _movie != null)
             {
                 _gauntletLayer.ReleaseMovie(_movie);
@@ -662,6 +664,9 @@ namespace CoopSpectator.UI
             _screenViewModel = null;
             _currentScreen = CoopSelectionScreen.None;
             _lastAppliedRefreshKey = string.Empty;
+
+            if (releasedClassLoadoutMovie)
+                CampaignVisualResetPatch.TryResetSharedCharacterTableaus("CoopMissionSelectionView.ReleaseCurrentMovie ClassLoadout");
         }
 
         private static string GetRefreshKey(CoopSelectionUiSnapshot snapshot, CoopSelectionScreen desiredScreen)

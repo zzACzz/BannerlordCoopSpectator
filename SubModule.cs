@@ -128,7 +128,7 @@ namespace CoopSpectator // Використовуємо кореневий names
                 ClientChangeCultureCanonicalizationPatch.Apply(harmony);
                 MultiplayerCharacterClassFallbackPatch.Apply(harmony);
                 CampaignCombatProfileAgentStatsPatch.Apply(harmony);
-                ModLogger.Info("CampaignVisualResetPatch: disabled in this build (safe rollback while investigating campaign mannequin/crash path).");
+                CampaignVisualResetPatch.Apply(harmony);
                 AppDomain.CurrentDomain.AssemblyLoad += (_, e) => // Коли підвантажиться нова збірка (наприклад Lobby)
                 { // Перевіряємо чи це Lobby — тоді застосуємо патч
                     string loadedAssemblyName = e.LoadedAssembly.GetName().Name;

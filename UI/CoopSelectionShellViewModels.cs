@@ -141,7 +141,6 @@ namespace CoopSpectator.UI
         private readonly Action _onSpawn;
         private readonly Action _onBack;
         private MBBindingList<CoopClassLoadoutUnitVM> _units = new MBBindingList<CoopClassLoadoutUnitVM>();
-        private CoopCharacterVisualVM _selectedVisual = new CoopCharacterVisualVM(CoopCharacterVisualData.Empty);
         private string _sideTitleText = "Select Unit";
         private string _statusText = string.Empty;
         private string _hintText = string.Empty;
@@ -150,13 +149,15 @@ namespace CoopSpectator.UI
         private string _selectedDetailText = string.Empty;
         private string _selectedSummaryText = string.Empty;
         private string _selectedCommanderBadgeText = string.Empty;
+        private string _selectedCultureId = "empire";
+        private string _selectedIconType = string.Empty;
         private bool _isAttacker;
         private bool _showEmptyText = true;
         private bool _canSpawn;
+        private bool _hasSelectedCard;
         private bool _showSelectedCommanderBadge;
         private string _lastUnitListSignature = string.Empty;
         private string _lastSelectedEntryId = string.Empty;
-        private string _lastSelectedVisualSignature = string.Empty;
 
         public CoopClassLoadoutVM(
             CoopSelectionUiSnapshot snapshot,
@@ -171,7 +172,6 @@ namespace CoopSpectator.UI
         }
 
         [DataSourceProperty] public MBBindingList<CoopClassLoadoutUnitVM> Units { get => _units; private set => SetField(ref _units, value, nameof(Units)); }
-        [DataSourceProperty] public CoopCharacterVisualVM SelectedVisual { get => _selectedVisual; private set => SetField(ref _selectedVisual, value, nameof(SelectedVisual)); }
         [DataSourceProperty] public string SideTitleText { get => _sideTitleText; private set => SetField(ref _sideTitleText, value, nameof(SideTitleText)); }
         [DataSourceProperty] public string StatusText { get => _statusText; private set => SetField(ref _statusText, value, nameof(StatusText)); }
         [DataSourceProperty] public string HintText { get => _hintText; private set => SetField(ref _hintText, value, nameof(HintText)); }
@@ -180,9 +180,12 @@ namespace CoopSpectator.UI
         [DataSourceProperty] public string SelectedDetailText { get => _selectedDetailText; private set => SetField(ref _selectedDetailText, value, nameof(SelectedDetailText)); }
         [DataSourceProperty] public string SelectedSummaryText { get => _selectedSummaryText; private set => SetField(ref _selectedSummaryText, value, nameof(SelectedSummaryText)); }
         [DataSourceProperty] public string SelectedCommanderBadgeText { get => _selectedCommanderBadgeText; private set => SetField(ref _selectedCommanderBadgeText, value, nameof(SelectedCommanderBadgeText)); }
+        [DataSourceProperty] public string SelectedCultureId { get => _selectedCultureId; private set => SetField(ref _selectedCultureId, value, nameof(SelectedCultureId)); }
+        [DataSourceProperty] public string SelectedIconType { get => _selectedIconType; private set => SetField(ref _selectedIconType, value, nameof(SelectedIconType)); }
         [DataSourceProperty] public bool IsAttacker { get => _isAttacker; private set => SetField(ref _isAttacker, value, nameof(IsAttacker)); }
         [DataSourceProperty] public bool ShowEmptyText { get => _showEmptyText; private set => SetField(ref _showEmptyText, value, nameof(ShowEmptyText)); }
         [DataSourceProperty] public bool CanSpawn { get => _canSpawn; private set => SetField(ref _canSpawn, value, nameof(CanSpawn)); }
+        [DataSourceProperty] public bool HasSelectedCard { get => _hasSelectedCard; private set => SetField(ref _hasSelectedCard, value, nameof(HasSelectedCard)); }
         [DataSourceProperty] public bool ShowSelectedCommanderBadge { get => _showSelectedCommanderBadge; private set => SetField(ref _showSelectedCommanderBadge, value, nameof(ShowSelectedCommanderBadge)); }
 
         public void Refresh(CoopSelectionUiSnapshot snapshot, bool force)
@@ -200,7 +203,7 @@ namespace CoopSpectator.UI
             SelectedSummaryText = CoopSelectionUiHelpers.BuildSelectedSummaryText(snapshot);
             SelectedCommanderBadgeText = CoopSelectionUiHelpers.ResolveCommanderBadgeText(snapshot, snapshot?.SelectedEntryId);
             ShowSelectedCommanderBadge = !string.IsNullOrWhiteSpace(SelectedCommanderBadgeText);
-            RefreshSelectedVisual(snapshot);
+            RefreshSelectedCard(snapshot);
             IsAttacker = snapshot?.EffectiveSide == BattleSideEnum.Attacker;
             CanSpawn = snapshot?.CanSpawn == true;
             string selectedEntryId = snapshot?.SelectedEntryId ?? string.Empty;
@@ -232,19 +235,14 @@ namespace CoopSpectator.UI
             _onBack?.Invoke();
         }
 
-        private void RefreshSelectedVisual(CoopSelectionUiSnapshot snapshot)
+        private void RefreshSelectedCard(CoopSelectionUiSnapshot snapshot)
         {
-            CoopCharacterVisualData visualData = CoopSelectionUiHelpers.BuildSelectedVisualData(snapshot);
-            string visualSignature = BuildVisualSignature(visualData);
-            if (SelectedVisual == null || !string.Equals(_lastSelectedVisualSignature, visualSignature, StringComparison.Ordinal))
-            {
-                SelectedVisual = new CoopCharacterVisualVM(visualData);
-                _lastSelectedVisualSignature = visualSignature;
-                return;
-            }
-
-            if (SelectedVisual != null)
-                SelectedVisual.Refresh(visualData);
+            RosterEntryState entryState = CoopSelectionUiHelpers.ResolveEntryState(
+                snapshot?.EffectiveSide ?? BattleSideEnum.None,
+                snapshot?.SelectedEntryId);
+            HasSelectedCard = entryState != null;
+            SelectedCultureId = CoopSelectionUiHelpers.ResolveEntryCultureBrushId(snapshot, snapshot?.SelectedEntryId);
+            SelectedIconType = CoopSelectionUiHelpers.ResolveEntryIconType(entryState);
         }
 
         private void RefreshUnitItems(CoopSelectionUiSnapshot snapshot, IReadOnlyList<string> orderedEntryIds)
@@ -391,25 +389,6 @@ namespace CoopSpectator.UI
             }
 
             return string.Join("\n", parts);
-        }
-
-        private static string BuildVisualSignature(CoopCharacterVisualData visualData)
-        {
-            CoopCharacterVisualData source = visualData ?? CoopCharacterVisualData.Empty;
-            return string.Join("|", new[]
-            {
-                source.HasVisual.ToString(),
-                source.BannerCodeText ?? string.Empty,
-                source.BodyProperties ?? string.Empty,
-                source.CharStringId ?? string.Empty,
-                source.Race.ToString(),
-                source.EquipmentCode ?? string.Empty,
-                source.IsFemale.ToString(),
-                source.MountCreationKey ?? string.Empty,
-                source.StanceIndex.ToString(),
-                source.ArmorColor1.ToString(),
-                source.ArmorColor2.ToString()
-            });
         }
     }
 

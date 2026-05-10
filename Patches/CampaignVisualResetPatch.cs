@@ -4,7 +4,6 @@ using System.Linq;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
 using HarmonyLib;
-using SandBox.View.Map;
 using TaleWorlds.Engine;
 using TaleWorlds.MountAndBlade;
 using TWCampaign = TaleWorlds.CampaignSystem.Campaign;
@@ -14,38 +13,15 @@ namespace CoopSpectator.Patches
     public static class CampaignVisualResetPatch
     {
         private static readonly HashSet<string> LoggedTargets = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly object ResetSync = new object();
+        private static readonly TimeSpan ResetDebounce = TimeSpan.FromMilliseconds(250);
+        private static DateTime _lastResetUtc = DateTime.MinValue;
+        private static string _lastResetSource = string.Empty;
 
         public static void Apply(Harmony harmony)
         {
-            TryPatchMapScreenMethod(harmony, "OnResume");
-            TryPatchMapScreenMethod(harmony, "OnActivate");
             TryPatchHelperMethodBySimpleTypeName(harmony, "InventoryScreenHelper", "OpenScreenAsInventory");
             TryPatchHelperMethodBySimpleTypeName(harmony, "PartyScreenHelper", "OpenScreenAsNormal");
-        }
-
-        private static void TryPatchMapScreenMethod(Harmony harmony, string methodName)
-        {
-            try
-            {
-                MethodInfo target = typeof(MapScreen).GetMethod(
-                    methodName,
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                MethodInfo postfix = typeof(CampaignVisualResetPatch).GetMethod(
-                    nameof(MapScreenLifecycle_Postfix),
-                    BindingFlags.Static | BindingFlags.NonPublic);
-                if (target == null || postfix == null)
-                {
-                    ModLogger.Info("CampaignVisualResetPatch: skip patch, MapScreen target not found. Method=" + methodName);
-                    return;
-                }
-
-                harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-                LogPatchedTarget("MapScreen." + methodName);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("CampaignVisualResetPatch: failed to patch MapScreen." + methodName + ": " + ex.Message);
-            }
         }
 
         private static void TryPatchHelperMethodBySimpleTypeName(Harmony harmony, string simpleTypeName, string methodName)
@@ -110,16 +86,33 @@ namespace CoopSpectator.Patches
             return null;
         }
 
-        private static void MapScreenLifecycle_Postfix()
-        {
-            TrySoftResetCampaignCharacterTableaus("MapScreen lifecycle");
-            TryValidateCampaignAgentVisuals("MapScreen lifecycle");
-        }
-
         private static void HelperOpenScreen_Prefix()
         {
-            TrySoftResetCampaignCharacterTableaus("Campaign screen helper");
-            TryValidateCampaignAgentVisuals("Campaign screen helper");
+            TryResetSharedCharacterTableaus("Campaign screen helper");
+        }
+
+        internal static void TryResetSharedCharacterTableaus(string source)
+        {
+            if (TWCampaign.Current == null)
+                return;
+
+            string normalizedSource = string.IsNullOrWhiteSpace(source) ? "unknown" : source.Trim();
+            DateTime nowUtc = DateTime.UtcNow;
+            lock (ResetSync)
+            {
+                if (_lastResetUtc != DateTime.MinValue &&
+                    nowUtc - _lastResetUtc < ResetDebounce &&
+                    string.Equals(_lastResetSource, normalizedSource, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                _lastResetUtc = nowUtc;
+                _lastResetSource = normalizedSource;
+            }
+
+            TrySoftResetCampaignCharacterTableaus(normalizedSource);
+            TryValidateCampaignAgentVisuals(normalizedSource);
         }
 
         private static void TrySoftResetCampaignCharacterTableaus(string source)

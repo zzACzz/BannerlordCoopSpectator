@@ -87,6 +87,16 @@ namespace CoopSpectator.UI
         private const uint BanditSecondaryColor = 0xFF8B7C73u;
         private const uint DeserterPrimaryColor = 0xFF95A9CCu;
         private const uint DeserterSecondaryColor = 0xFF2F2A2Bu;
+        private const string DefaultTroopCardCultureId = "empire";
+        private static readonly HashSet<string> SupportedTroopCardCultureIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "vlandia",
+            "sturgia",
+            "battania",
+            "empire",
+            "aserai",
+            "khuzait"
+        };
 
         public static CoopSelectionUiSnapshot BuildSnapshot(
             BattleSideEnum selectedSideOverride,
@@ -355,6 +365,19 @@ namespace CoopSpectator.UI
             return IsCommanderEntry(snapshot?.BattleState, snapshot?.EffectiveSide ?? BattleSideEnum.None, entryState)
                 ? "COMMANDER"
                 : string.Empty;
+        }
+
+        public static string ResolveEntryCultureBrushId(CoopSelectionUiSnapshot snapshot, string entryId)
+        {
+            RosterEntryState entryState = ResolveEntryState(snapshot?.EffectiveSide ?? BattleSideEnum.None, entryId);
+            string cultureId = ResolveCultureBrushId(entryState);
+            if (!string.IsNullOrWhiteSpace(cultureId))
+                return cultureId;
+
+            string sideCultureId = ResolveSideCultureBrushId(snapshot?.BattleState, snapshot?.EffectiveSide ?? BattleSideEnum.None);
+            return !string.IsNullOrWhiteSpace(sideCultureId)
+                ? sideCultureId
+                : DefaultTroopCardCultureId;
         }
 
         public static CoopCharacterVisualData BuildSelectedVisualData(CoopSelectionUiSnapshot snapshot)
@@ -1157,6 +1180,52 @@ namespace CoopSpectator.UI
                     hash = (hash * 31) + ch;
                 return hash == int.MinValue ? int.MaxValue : Math.Abs(hash);
             }
+        }
+
+        private static string ResolveSideCultureBrushId(BattleRuntimeState battleState, BattleSideEnum side)
+        {
+            string commanderCultureId = ResolveCultureBrushId(BattleCommanderResolver.ResolveCommanderEntry(battleState, side));
+            if (!string.IsNullOrWhiteSpace(commanderCultureId))
+                return commanderCultureId;
+
+            BattleSideState sideState = ResolveSideState(battleState, side);
+            if (sideState?.Entries != null)
+            {
+                foreach (RosterEntryState entryState in sideState.Entries)
+                {
+                    string entryCultureId = ResolveCultureBrushId(entryState);
+                    if (!string.IsNullOrWhiteSpace(entryCultureId))
+                        return entryCultureId;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string ResolveCultureBrushId(RosterEntryState entryState)
+        {
+            string normalizedEntryCultureId = NormalizeCultureBrushId(entryState?.CultureId);
+            if (!string.IsNullOrWhiteSpace(normalizedEntryCultureId))
+                return normalizedEntryCultureId;
+
+            BasicCharacterObject character = BattleSnapshotRuntimeState.TryResolveCharacterObject(entryState?.EntryId);
+            return NormalizeCultureBrushId(character?.Culture?.StringId);
+        }
+
+        private static string NormalizeCultureBrushId(string rawCultureId)
+        {
+            if (string.IsNullOrWhiteSpace(rawCultureId))
+                return string.Empty;
+
+            string cultureId = rawCultureId.Trim();
+            int separatorIndex = cultureId.LastIndexOf('.');
+            if (separatorIndex >= 0 && separatorIndex < cultureId.Length - 1)
+                cultureId = cultureId.Substring(separatorIndex + 1);
+
+            cultureId = cultureId.ToLowerInvariant();
+            return SupportedTroopCardCultureIds.Contains(cultureId)
+                ? cultureId
+                : string.Empty;
         }
 
         private static string ResolveEntryTypeLabel(RosterEntryState entryState)
