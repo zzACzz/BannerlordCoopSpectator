@@ -20,8 +20,7 @@ namespace CoopSpectator.Patches
 
         public static void Apply(Harmony harmony)
         {
-            TryPatchHelperMethodBySimpleTypeName(harmony, "InventoryScreenHelper", "OpenScreenAsInventory");
-            TryPatchHelperMethodBySimpleTypeName(harmony, "PartyScreenHelper", "OpenScreenAsNormal");
+            ModLogger.Info("CampaignVisualResetPatch: disabled while campaign tableau recovery path is reworked.");
         }
 
         private static void TryPatchHelperMethodBySimpleTypeName(Harmony harmony, string simpleTypeName, string methodName)

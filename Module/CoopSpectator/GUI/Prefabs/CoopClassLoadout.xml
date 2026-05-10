@@ -27,34 +27,7 @@
         </Widget>
 
         <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="620" SuggestedHeight="860" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginBottom="5" DoNotAcceptEvents="true">
-          <Children>
-            <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="460" SuggestedHeight="360" HorizontalAlignment="Center" VerticalAlignment="Center" MarginTop="25" IsVisible="@HasSelectedCard">
-              <Children>
-                <MultiplayerClassLoadoutTroopCardBrushWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="420" SuggestedHeight="210" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginBottom="40" Brush="MPClassLoadout.TroopCard.Canvas" CultureID="@SelectedCultureId" Border="CardOutline" ClassBorder="..\TroopClassBorder" ClassFrame="..\TroopClassBorder\TroopClassFrame">
-                  <Children>
-                    <BrushWidget Id="CardOutline" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" HorizontalAlignment="Center" Brush="MPClassLoadout.TroopCard.Frame">
-                      <Children>
-                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" VerticalAlignment="Top" MarginTop="42" MarginLeft="120" MarginRight="120" Brush="MPClassLoadout.ItemText" Text="@SelectedNameText" />
-                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" VerticalAlignment="Center" MarginLeft="36" MarginRight="36" Brush="MPClassLoadout.SubclassGoldText" Text="@SelectedCommanderBadgeText" IsVisible="@ShowSelectedCommanderBadge" />
-                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginLeft="34" MarginRight="34" MarginBottom="34" Brush="MPClassLoadout.ClassStatText" Text="@SelectedDetailText" />
-                      </Children>
-                    </BrushWidget>
-                  </Children>
-                </MultiplayerClassLoadoutTroopCardBrushWidget>
-                <BrushWidget Id="TroopClassBorder" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="110" SuggestedHeight="110" HorizontalAlignment="Center" MarginTop="18" Brush="MPClassLoadout.TroopClass.Canvas">
-                  <Children>
-                    <BrushWidget Id="TroopClassFrame" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Brush="MPClassLoadout.TroopClass.Frame" ExtendLeft="5" ExtendRight="5" ExtendBottom="5" ExtendTop="5" DoNotAcceptEvents="true" />
-                    <MultiplayerTroopTypeIconWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="100" SuggestedHeight="100" HorizontalAlignment="Center" VerticalAlignment="Center" ForegroundWidget="IconForeground" IconSpriteType="@SelectedIconType" UseOriginalSize="false">
-                      <Children>
-                        <Widget Id="IconForeground" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Color="#F4E1C4FF" />
-                      </Children>
-                    </MultiplayerTroopTypeIconWidget>
-                  </Children>
-                </BrushWidget>
-                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginLeft="35" MarginRight="35" MarginBottom="10" Brush="MPClassLoadout.ClassStatText" Text="@SelectedSummaryText" />
-              </Children>
-            </Widget>
-          </Children>
+          <Children />
         </Widget>
 
         <ListPanel WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="489" SuggestedHeight="200" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginBottom="10" Sprite="MPClassLoadout\stats_bg" Color="#000000FF" StackLayout.LayoutMethod="VerticalBottomToTop">

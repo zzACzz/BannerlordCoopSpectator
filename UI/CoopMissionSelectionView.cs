@@ -3,7 +3,6 @@ using System.Linq;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
-using CoopSpectator.Patches;
 using TaleWorlds.Core;
 using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.InputSystem;
@@ -26,6 +25,8 @@ namespace CoopSpectator.UI
         private static readonly TimeSpan LocalSpawnPendingTimeout = TimeSpan.FromSeconds(20);
         private static readonly TimeSpan LocalSpawnPendingResendInterval = TimeSpan.FromSeconds(1.5);
         private const int LocalSpawnPendingMaxRequestAttempts = 8;
+        private static int _activeCameraPreviewAgentIndex = -1;
+        private static string _activeCameraPreviewEntryId = string.Empty;
 
         private GauntletLayer _gauntletLayer;
         private GauntletMovieIdentifier _movie;
@@ -52,6 +53,7 @@ namespace CoopSpectator.UI
         private BattleSideEnum _localSpawnPendingSide = BattleSideEnum.None;
         private DateTime _localSpawnPendingLastRequestUtc = DateTime.MinValue;
         private int _localSpawnPendingRequestAttemptCount;
+        private string _lastCameraPreviewLogKey = string.Empty;
 
         public override void OnBehaviorInitialize()
         {
@@ -198,6 +200,7 @@ namespace CoopSpectator.UI
             if (desiredScreen == CoopSelectionScreen.None)
             {
                 ReleaseCurrentMovie();
+                ClearCameraPreviewTarget("overlay-hidden");
                 UpdateOverlayInputState(false);
                 return;
             }
@@ -211,6 +214,7 @@ namespace CoopSpectator.UI
             if (needsRefresh)
                 _lastAppliedRefreshKey = refreshKey;
 
+            UpdateCameraPreviewTarget(snapshot, desiredScreen, hasLocalControlledAgent);
             UpdateOverlayInputState(true);
         }
 
@@ -652,7 +656,6 @@ namespace CoopSpectator.UI
 
         private void ReleaseCurrentMovie()
         {
-            bool releasedClassLoadoutMovie = _currentScreen == CoopSelectionScreen.ClassLoadout;
             if (_gauntletLayer != null && _movie != null)
             {
                 _gauntletLayer.ReleaseMovie(_movie);
@@ -664,9 +667,247 @@ namespace CoopSpectator.UI
             _screenViewModel = null;
             _currentScreen = CoopSelectionScreen.None;
             _lastAppliedRefreshKey = string.Empty;
+            ClearCameraPreviewTarget("release-movie");
+        }
 
-            if (releasedClassLoadoutMovie)
-                CampaignVisualResetPatch.TryResetSharedCharacterTableaus("CoopMissionSelectionView.ReleaseCurrentMovie ClassLoadout");
+        private void UpdateCameraPreviewTarget(
+            CoopSelectionUiSnapshot snapshot,
+            CoopSelectionScreen desiredScreen,
+            bool hasLocalControlledAgent)
+        {
+            if (!GameNetwork.IsClient ||
+                hasLocalControlledAgent ||
+                desiredScreen != CoopSelectionScreen.ClassLoadout ||
+                snapshot == null ||
+                snapshot.EffectiveSide == BattleSideEnum.None ||
+                string.IsNullOrWhiteSpace(snapshot.SelectedEntryId))
+            {
+                ClearCameraPreviewTarget("camera-preview-not-applicable");
+                return;
+            }
+
+            if (!TryResolveCameraPreviewAgent(snapshot, out Agent previewAgent))
+            {
+                ClearCameraPreviewTarget("camera-preview-target-missing");
+                return;
+            }
+
+            ScreenBase missionScreen = MissionScreen;
+            if (missionScreen == null || !TrySetMissionScreenPreviewFollowTarget(missionScreen, previewAgent))
+            {
+                ClearCameraPreviewTarget("camera-preview-screen-unavailable");
+                return;
+            }
+
+            SetActiveCameraPreviewTarget(previewAgent, snapshot.SelectedEntryId);
+            LogCameraPreviewState(
+                "focus:" + previewAgent.Index + ":" + snapshot.SelectedEntryId,
+                "focused camera preview on selected live unit. " +
+                "AgentIndex=" + previewAgent.Index +
+                " EntryId=" + snapshot.SelectedEntryId +
+                " Side=" + snapshot.EffectiveSide);
+        }
+
+        private bool TryResolveCameraPreviewAgent(CoopSelectionUiSnapshot snapshot, out Agent previewAgent)
+        {
+            previewAgent = null;
+            Mission mission = Mission;
+            if (snapshot == null ||
+                mission?.AllAgents == null ||
+                snapshot.EffectiveSide == BattleSideEnum.None ||
+                string.IsNullOrWhiteSpace(snapshot.SelectedEntryId))
+            {
+                return false;
+            }
+
+            for (int agentIndex = 0; agentIndex < mission.AllAgents.Count; agentIndex++)
+            {
+                Agent candidate = mission.AllAgents[agentIndex];
+                if (!IsCameraPreviewCandidate(candidate, snapshot.EffectiveSide))
+                    continue;
+
+                if (!CoopMissionSpawnLogic.TryResolveSelectableEntryId(candidate, out string candidateEntryId) ||
+                    !string.Equals(candidateEntryId, snapshot.SelectedEntryId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                previewAgent = candidate;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsCameraPreviewCandidate(Agent candidate, BattleSideEnum side)
+        {
+            return candidate != null &&
+                   candidate.IsActive() &&
+                   !candidate.IsMount &&
+                   candidate.IsCameraAttachable() &&
+                   candidate.Team?.Side == side;
+        }
+
+        private void ClearCameraPreviewTarget(string source)
+        {
+            ScreenBase missionScreen = MissionScreen;
+            if (missionScreen != null)
+                TryResetMissionScreenCameraPreviewState(missionScreen);
+
+            ClearActiveCameraPreviewTarget();
+
+            LogCameraPreviewState(
+                "clear:" + (source ?? "unknown"),
+                "cleared local camera preview target. Source=" + (source ?? "unknown"));
+        }
+
+        internal static bool TryGetActiveCameraPreviewAgent(out Agent previewAgent)
+        {
+            previewAgent = null;
+            int activeAgentIndex = _activeCameraPreviewAgentIndex;
+            if (activeAgentIndex < 0)
+                return false;
+
+            Mission mission = Mission.Current;
+            if (mission?.AllAgents == null)
+                return false;
+
+            for (int agentIndex = 0; agentIndex < mission.AllAgents.Count; agentIndex++)
+            {
+                Agent candidate = mission.AllAgents[agentIndex];
+                if (candidate == null || candidate.Index != activeAgentIndex)
+                    continue;
+
+                if (!candidate.IsActive() || candidate.IsMount || !candidate.IsCameraAttachable())
+                    return false;
+
+                previewAgent = candidate;
+                return true;
+            }
+
+            return false;
+        }
+
+        internal static bool ShouldSuppressLocalPreviewFollowedAgentEcho(MissionPeer missionPeer, Agent followedAgent)
+        {
+            if (!GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive ||
+                missionPeer == null)
+            {
+                return false;
+            }
+
+            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            if (localMissionPeer == null || !ReferenceEquals(localMissionPeer, missionPeer))
+                return false;
+
+            if (followedAgent == null)
+                return _activeCameraPreviewAgentIndex >= 0;
+
+            if (!followedAgent.IsActive())
+                return false;
+
+            return TryGetActiveCameraPreviewAgent(out Agent previewAgent) &&
+                   previewAgent != null &&
+                   previewAgent.Index == followedAgent.Index;
+        }
+
+        private static void SetActiveCameraPreviewTarget(Agent previewAgent, string entryId)
+        {
+            _activeCameraPreviewAgentIndex = previewAgent?.Index ?? -1;
+            _activeCameraPreviewEntryId = entryId ?? string.Empty;
+        }
+
+        private static void ClearActiveCameraPreviewTarget()
+        {
+            _activeCameraPreviewAgentIndex = -1;
+            _activeCameraPreviewEntryId = string.Empty;
+        }
+
+        private static bool TrySetMissionScreenPreviewFollowTarget(ScreenBase missionScreen, Agent agent)
+        {
+            if (missionScreen == null || agent == null)
+                return false;
+
+            if (TrySetMissionScreenLastFollowedAgent(missionScreen, agent))
+            {
+                TrySetInstanceProperty(missionScreen, "LastFollowedAgentVisuals", null);
+                return true;
+            }
+
+            return TrySetMissionScreenAgentToFollowOverride(missionScreen, agent);
+        }
+
+        private static bool TrySetMissionScreenLastFollowedAgent(ScreenBase missionScreen, Agent agent)
+        {
+            if (missionScreen == null)
+                return false;
+
+            try
+            {
+                PropertyInfo property = missionScreen.GetType().GetProperty(
+                    "LastFollowedAgent",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                MethodInfo setter = property?.GetSetMethod(true);
+                if (setter == null)
+                    return false;
+
+                setter.Invoke(missionScreen, new object[] { agent });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TrySetMissionScreenAgentToFollowOverride(ScreenBase missionScreen, Agent agent)
+        {
+            if (missionScreen == null)
+                return false;
+
+            try
+            {
+                MethodInfo method = missionScreen.GetType().GetMethod(
+                    "SetAgentToFollow",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(Agent) },
+                    null);
+                if (method == null)
+                    return false;
+
+                method.Invoke(missionScreen, new object[] { agent });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void TryResetMissionScreenCameraPreviewState(ScreenBase missionScreen)
+        {
+            if (missionScreen == null)
+                return;
+
+            TrySetMissionScreenLastFollowedAgent(missionScreen, null);
+            TrySetMissionScreenAgentToFollowOverride(missionScreen, null);
+            TrySetInstanceField(missionScreen, "_agentToFollowOverride", null);
+            TrySetInstanceField(missionScreen, "_lastFollowedAgent", null);
+            TrySetInstanceProperty(missionScreen, "LastFollowedAgentVisuals", null);
+        }
+
+        private void LogCameraPreviewState(string key, string message)
+        {
+            if (string.IsNullOrWhiteSpace(key) ||
+                string.Equals(_lastCameraPreviewLogKey, key, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastCameraPreviewLogKey = key;
+            ModLogger.Info("CoopMissionSelectionView: " + message);
         }
 
         private static string GetRefreshKey(CoopSelectionUiSnapshot snapshot, CoopSelectionScreen desiredScreen)
@@ -890,6 +1131,21 @@ namespace CoopSpectator.UI
             {
                 PropertyInfo property = target.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 property?.GetSetMethod(true)?.Invoke(target, new[] { value });
+            }
+            catch
+            {
+            }
+        }
+
+        internal static void TrySetInstanceField(object target, string fieldName, object value)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(fieldName))
+                return;
+
+            try
+            {
+                FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                field?.SetValue(target, value);
             }
             catch
             {
