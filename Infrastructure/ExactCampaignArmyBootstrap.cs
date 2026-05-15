@@ -1917,6 +1917,23 @@ namespace CoopSpectator.Infrastructure
                 }
             }
 
+            string missionSafeFallbackCharacterId =
+                BattleSnapshotRuntimeState.TryResolveMissionSafeFallbackCharacterId(
+                    entryState,
+                    entryState.SpawnTemplateId ?? entryState.CharacterId);
+            if (!string.IsNullOrWhiteSpace(missionSafeFallbackCharacterId))
+            {
+                try
+                {
+                    BasicCharacterObject fallbackCharacter = MBObjectManager.Instance.GetObject<BasicCharacterObject>(missionSafeFallbackCharacterId);
+                    if (fallbackCharacter != null)
+                        return fallbackCharacter;
+                }
+                catch
+                {
+                }
+            }
+
             return null;
         }
 

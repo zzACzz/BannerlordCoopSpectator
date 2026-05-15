@@ -98,6 +98,9 @@ namespace CoopSpectator.Infrastructure
             if (_allowedTroopIdsBySide.TryGetValue(side, out List<string> sideTroopIds) && sideTroopIds.Count > 0)
                 return sideTroopIds.ToArray();
 
+            if (side != BattleSideEnum.None)
+                return Array.Empty<string>();
+
             if (_fallbackAllowedTroopIds.Count > 0)
                 return _fallbackAllowedTroopIds.ToArray();
 
@@ -108,6 +111,9 @@ namespace CoopSpectator.Infrastructure
         {
             if (_allowedEntryIdsBySide.TryGetValue(side, out List<string> sideEntryIds) && sideEntryIds.Count > 0)
                 return sideEntryIds.ToArray();
+
+            if (side != BattleSideEnum.None)
+                return Array.Empty<string>();
 
             if (_fallbackAllowedEntryIds.Count > 0)
                 return _fallbackAllowedEntryIds.ToArray();
@@ -449,7 +455,7 @@ namespace CoopSpectator.Infrastructure
         {
             IReadOnlyList<string> allowedTroopIds = GetAllowedTroopIds(side);
             if (allowedTroopIds.Count == 0)
-                return _fallbackSelectedTroopId;
+                return side == BattleSideEnum.None ? _fallbackSelectedTroopId : null;
 
             if (networkPeer != null &&
                 _selectedEntryIdByPeer.TryGetValue(networkPeer.Index, out string selectedEntryId) &&

@@ -4152,12 +4152,148 @@ namespace CoopSpectator.Patches
                     synchronizeAgentSpawnEquipment,
                     agent);
 
+                if (agent != null &&
+                    ShouldSuppressCorruptedClientSynchronizeAgentEquipmentPayload(
+                        synchronizeAgentSpawnEquipment,
+                        out string corruptionReason))
+                {
+                    ExactTransferContractRuntimeCache.ObserveClientEquipmentSynchronized(
+                        agent.Index,
+                        "battle-map handoff SynchronizeAgentSpawnEquipment suppressed-corrupt");
+                    CoopMissionSpawnLogic.ObserveClientSynchronizeAgentEquipment(
+                        agent.Index,
+                        "battle-map handoff SynchronizeAgentSpawnEquipment suppressed-corrupt");
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientSynchronizeAgentEquipment(
+                        synchronizeAgentSpawnEquipment,
+                        agent,
+                        "battle-map handoff SynchronizeAgentSpawnEquipment suppressed-corrupt");
+
+                    bool heroExactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
+                        mission,
+                        agent,
+                        preferredEntryId: null,
+                        source: "battle-map handoff SynchronizeAgentSpawnEquipment suppressed-corrupt",
+                        includeWeaponsForClientRefresh: true,
+                        allowImmediateApply: true);
+                    bool troopExactVisualApplied = false;
+                    if (!heroExactVisualApplied)
+                    {
+                        troopExactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignTroopVisualForPeerAgent(
+                            mission,
+                            agent,
+                            "battle-map handoff SynchronizeAgentSpawnEquipment suppressed-corrupt",
+                            includeWeaponsForClientRefresh: true,
+                            allowImmediateApply: true);
+                    }
+
+                    string payloadSummary = BuildEquipmentSummary(
+                        synchronizeAgentSpawnEquipment.SpawnEquipment,
+                        EquipmentIndex.Weapon0,
+                        EquipmentIndex.Weapon1,
+                        EquipmentIndex.Weapon2,
+                        EquipmentIndex.Weapon3,
+                        EquipmentIndex.Head,
+                        EquipmentIndex.Body,
+                        EquipmentIndex.Leg,
+                        EquipmentIndex.Gloves,
+                        EquipmentIndex.Cape,
+                        EquipmentIndex.Horse,
+                        EquipmentIndex.HorseHarness);
+                    CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                        agent,
+                        "client-synchronize-agent-equipment-suppressed-corrupt",
+                        "battle-map handoff SynchronizeAgentSpawnEquipment suppressed-corrupt",
+                        "PayloadEquipment={" + payloadSummary + "}" +
+                        " CorruptionReason=" + (corruptionReason ?? "unknown") +
+                        " ExactVisualApplied=" + heroExactVisualApplied +
+                        " TroopExactVisualApplied=" + troopExactVisualApplied);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed corrupt client SynchronizeAgentSpawnEquipment payload before native handler. " +
+                        "AgentIndex=" + agent.Index +
+                        " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                        " Reason=" + (corruptionReason ?? "unknown") +
+                        " ExactVisualApplied=" + heroExactVisualApplied +
+                        " TroopExactVisualApplied=" + troopExactVisualApplied +
+                        " PayloadEquipment={" + payloadSummary + "}");
+                    ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                        "client-synchronize-agent-equipment-suppressed-corrupt",
+                        "AgentIndex=" + agent.Index +
+                        " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                        " Reason=" + (corruptionReason ?? "unknown") +
+                        " ExactVisualApplied=" + heroExactVisualApplied +
+                        " TroopExactVisualApplied=" + troopExactVisualApplied +
+                        " PayloadEquipment={" + payloadSummary + "}" +
+                        " Source=battle-map handoff SynchronizeAgentSpawnEquipment suppressed-corrupt");
+                    return false;
+                }
+
                 return true;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: SynchronizeAgentSpawnEquipment prefix failed open: " + ex.Message);
                 return true;
+            }
+        }
+
+        private static bool ShouldSuppressCorruptedClientSynchronizeAgentEquipmentPayload(
+            SynchronizeAgentSpawnEquipment synchronizeAgentSpawnEquipment,
+            out string reason)
+        {
+            reason = null;
+            Equipment spawnEquipment = synchronizeAgentSpawnEquipment?.SpawnEquipment;
+            if (spawnEquipment == null)
+                return false;
+
+            var corruptionReasons = new List<string>();
+            AppendCorruptedWeaponSlotReasons(spawnEquipment, corruptionReasons);
+            AppendCorruptedMountSlotReasons(spawnEquipment, corruptionReasons);
+            if (corruptionReasons.Count == 0)
+                return false;
+
+            reason = string.Join(" | ", corruptionReasons);
+            return true;
+        }
+
+        private static void AppendCorruptedWeaponSlotReasons(Equipment spawnEquipment, List<string> corruptionReasons)
+        {
+            if (spawnEquipment == null || corruptionReasons == null)
+                return;
+
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                ItemObject item = spawnEquipment.GetEquipmentFromSlot(slot).Item;
+                if (item == null)
+                    continue;
+
+                if (item.PrimaryWeapon != null)
+                    continue;
+
+                corruptionReasons.Add(
+                    slot + "=" + item.StringId +
+                    "(non-weapon:" + item.Type + ")");
+            }
+        }
+
+        private static void AppendCorruptedMountSlotReasons(Equipment spawnEquipment, List<string> corruptionReasons)
+        {
+            if (spawnEquipment == null || corruptionReasons == null)
+                return;
+
+            ItemObject horse = spawnEquipment.GetEquipmentFromSlot(EquipmentIndex.Horse).Item;
+            if (horse != null && horse.Type != ItemObject.ItemTypeEnum.Horse)
+            {
+                corruptionReasons.Add(
+                    EquipmentIndex.Horse + "=" + horse.StringId +
+                    "(invalid-mount:" + horse.Type + ")");
+            }
+
+            ItemObject harness = spawnEquipment.GetEquipmentFromSlot(EquipmentIndex.HorseHarness).Item;
+            if (harness != null && harness.Type != ItemObject.ItemTypeEnum.HorseHarness)
+            {
+                corruptionReasons.Add(
+                    EquipmentIndex.HorseHarness + "=" + harness.StringId +
+                    "(invalid-harness:" + harness.Type + ")");
             }
         }
 

@@ -822,6 +822,15 @@ namespace CoopSpectator.Infrastructure
         {
             var candidateIds = new List<string>();
             var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string[] genericCultureFallbackTokens =
+            {
+                "empire",
+                "vlandia",
+                "battania",
+                "sturgia",
+                "khuzait",
+                "aserai"
+            };
             string cultureToken = ExtractFallbackCultureToken(entry, spawnTemplateId);
             bool preferHeroVariant =
                 !string.IsNullOrWhiteSpace(spawnTemplateId) &&
@@ -889,6 +898,41 @@ namespace CoopSpectator.Infrastructure
                 {
                     AddRolePair("mp_shock_infantry_" + cultureToken);
                     AddRolePair("mp_light_infantry_" + cultureToken);
+                }
+            }
+
+            foreach (string fallbackCultureToken in genericCultureFallbackTokens)
+            {
+                if (string.Equals(fallbackCultureToken, cultureToken, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (wantsSkirmisherFallback || (hasThrown && !isMounted && !isRanged))
+                {
+                    AddRolePair("mp_light_infantry_" + fallbackCultureToken);
+                    AddRolePair("mp_shock_infantry_" + fallbackCultureToken);
+                }
+
+                if (isMounted)
+                {
+                    AddRolePair("mp_light_cavalry_" + fallbackCultureToken);
+                    AddRolePair("mp_heavy_cavalry_" + fallbackCultureToken);
+                }
+
+                if (isRanged)
+                {
+                    AddRolePair("mp_heavy_ranged_" + fallbackCultureToken);
+                    AddRolePair("mp_light_ranged_" + fallbackCultureToken);
+                }
+
+                if (hasShield)
+                {
+                    AddRolePair("mp_light_infantry_" + fallbackCultureToken);
+                    AddRolePair("mp_heavy_infantry_" + fallbackCultureToken);
+                }
+                else
+                {
+                    AddRolePair("mp_shock_infantry_" + fallbackCultureToken);
+                    AddRolePair("mp_light_infantry_" + fallbackCultureToken);
                 }
             }
 

@@ -21501,21 +21501,11 @@ namespace CoopSpectator.MissionBehaviors
             if (entryProjection == null || string.IsNullOrWhiteSpace(entryProjection.EntryId) || string.IsNullOrWhiteSpace(spawnTemplateId))
                 return false;
 
+            EnsureAllowedControlEntryIdsRegistered(side, entryProjection, spawnTemplateId);
+
             BasicCharacterObject resolvedCharacter = TryResolveEntryPreferredCharacter(entryProjection.EntryId, spawnTemplateId);
             if (resolvedCharacter == null)
-                return false;
-
-            if (!AllowedControlEntryIdsBySide.TryGetValue(side, out List<string> sideEntryIds))
-            {
-                sideEntryIds = new List<string>();
-                AllowedControlEntryIdsBySide[side] = sideEntryIds;
-            }
-
-            if (!AllowedControlEntriesBySide.TryGetValue(side, out List<BattleRosterEntryProjectionState> sideEntries))
-            {
-                sideEntries = new List<BattleRosterEntryProjectionState>();
-                AllowedControlEntriesBySide[side] = sideEntries;
-            }
+                return true;
 
             if (!AllowedControlCharactersBySide.TryGetValue(side, out List<BasicCharacterObject> sideCharacters))
             {
@@ -21523,26 +21513,9 @@ namespace CoopSpectator.MissionBehaviors
                 AllowedControlCharactersBySide[side] = sideCharacters;
             }
 
-            if (!AllowedControlEntryIds.Contains(entryProjection.EntryId))
-                AllowedControlEntryIds.Add(entryProjection.EntryId);
-            if (!sideEntryIds.Contains(entryProjection.EntryId))
-                sideEntryIds.Add(entryProjection.EntryId);
-            if (!sideEntries.Any(entry => string.Equals(entry?.EntryId, entryProjection.EntryId, StringComparison.Ordinal)))
-                sideEntries.Add(entryProjection);
-
-            if (!AllowedControlTroopIds.Contains(spawnTemplateId))
-                AllowedControlTroopIds.Add(spawnTemplateId);
             if (!AllowedControlCharacters.Contains(resolvedCharacter))
                 AllowedControlCharacters.Add(resolvedCharacter);
 
-            if (!AllowedControlTroopIdsBySide.TryGetValue(side, out List<string> sideTroopIds))
-            {
-                sideTroopIds = new List<string>();
-                AllowedControlTroopIdsBySide[side] = sideTroopIds;
-            }
-
-            if (!sideTroopIds.Contains(spawnTemplateId))
-                sideTroopIds.Add(spawnTemplateId);
             if (!sideCharacters.Contains(resolvedCharacter))
                 sideCharacters.Add(resolvedCharacter);
 
@@ -23440,6 +23413,49 @@ namespace CoopSpectator.MissionBehaviors
                 " " + ExactTransferContractRuntimeCache.BuildValidationSummary(entryId) +
                 " " + ExactTransferContractRuntimeCache.BuildRuntimeStateSummary(entryId));
             return true;
+        }
+
+        private static void EnsureAllowedControlEntryIdsRegistered(
+            BattleSideEnum side,
+            BattleRosterEntryProjectionState entryProjection,
+            string spawnTemplateId)
+        {
+            if (entryProjection == null || string.IsNullOrWhiteSpace(entryProjection.EntryId))
+                return;
+
+            if (!AllowedControlEntryIdsBySide.TryGetValue(side, out List<string> sideEntryIds))
+            {
+                sideEntryIds = new List<string>();
+                AllowedControlEntryIdsBySide[side] = sideEntryIds;
+            }
+
+            if (!AllowedControlEntriesBySide.TryGetValue(side, out List<BattleRosterEntryProjectionState> sideEntries))
+            {
+                sideEntries = new List<BattleRosterEntryProjectionState>();
+                AllowedControlEntriesBySide[side] = sideEntries;
+            }
+
+            if (!AllowedControlEntryIds.Contains(entryProjection.EntryId))
+                AllowedControlEntryIds.Add(entryProjection.EntryId);
+            if (!sideEntryIds.Contains(entryProjection.EntryId))
+                sideEntryIds.Add(entryProjection.EntryId);
+            if (!sideEntries.Any(entry => string.Equals(entry?.EntryId, entryProjection.EntryId, StringComparison.Ordinal)))
+                sideEntries.Add(entryProjection);
+
+            if (string.IsNullOrWhiteSpace(spawnTemplateId))
+                return;
+
+            if (!AllowedControlTroopIds.Contains(spawnTemplateId))
+                AllowedControlTroopIds.Add(spawnTemplateId);
+
+            if (!AllowedControlTroopIdsBySide.TryGetValue(side, out List<string> sideTroopIds))
+            {
+                sideTroopIds = new List<string>();
+                AllowedControlTroopIdsBySide[side] = sideTroopIds;
+            }
+
+            if (!sideTroopIds.Contains(spawnTemplateId))
+                sideTroopIds.Add(spawnTemplateId);
         }
 
         private static bool TryResolveClientStrictExactHeroCreateAgentEntryFromPayloadDiagnostics(
