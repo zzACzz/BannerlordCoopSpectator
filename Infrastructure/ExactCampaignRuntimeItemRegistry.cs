@@ -1146,10 +1146,18 @@ namespace CoopSpectator.Infrastructure
 
         private static List<string> CollectSupportExactItemIds()
         {
-            return DefinitionsById.Keys
-                .Where(itemId => itemId.StartsWith("cs_exact_", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(itemId => itemId, StringComparer.Ordinal)
-                .ToList();
+            // Do not bulk-register every synthetic `cs_exact_*` item globally.
+            // Campaign UI preview chains such as Party/Inventory use the shared
+            // item catalog when building CharacterTableau equipment lookups; if
+            // we pre-load all exact stand-in horses/armor there, vanilla preview
+            // code starts seeing synthetic items like `cs_exact_sumpter_horse`
+            // in fresh campaigns before any battle exact-transfer path is active.
+            //
+            // The runtime registry still loads every exact item that is actually
+            // referenced by the current battle snapshot via CollectBattleEquipmentItemIds().
+            // Crafted-item dependencies are resolved inside TryRegisterExactCraftedItem(),
+            // so keeping this support list empty is the narrowest safe baseline.
+            return new List<string>();
         }
 
         private static IEnumerable<string> EnumerateEntryEquipmentSlots(RosterEntryState entryState)

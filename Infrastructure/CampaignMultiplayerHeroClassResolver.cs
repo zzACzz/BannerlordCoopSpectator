@@ -23,6 +23,8 @@ namespace CoopSpectator.Infrastructure
             new Dictionary<string, Resolution>(StringComparer.Ordinal);
         private static readonly HashSet<string> LoggedCharacterIds =
             new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> LoggedBlockedContextKeys =
+            new HashSet<string>(StringComparer.Ordinal);
 
         public static bool TryResolve(
             BasicCharacterObject character,
@@ -37,6 +39,13 @@ namespace CoopSpectator.Infrastructure
                 return false;
 
             string characterId = character.StringId ?? string.Empty;
+            if (!ShouldAllowSurrogateResolution(characterId, out string blockedContextDiagnostics))
+            {
+                diagnostics = blockedContextDiagnostics;
+                LogBlockedContextOnce(characterId, blockedContextDiagnostics);
+                return false;
+            }
+
             bool isHero =
                 TryGetBoolProperty(character, "IsHero") ||
                 characterId.EndsWith("_hero", StringComparison.Ordinal);
@@ -154,6 +163,37 @@ namespace CoopSpectator.Infrastructure
             treatAsTroop = resolvedTreatAsTroop;
             diagnostics = resolvedDiagnostics;
             return heroClass != null;
+        }
+
+        private static bool ShouldAllowSurrogateResolution(string characterId, out string diagnostics)
+        {
+            Mission mission = Mission.Current;
+            string sceneName = mission?.SceneName ?? string.Empty;
+            bool isBattleRuntimeScene = SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(sceneName);
+            diagnostics =
+                "blocked-non-battle-context" +
+                " Character=" + (string.IsNullOrWhiteSpace(characterId) ? "null" : characterId) +
+                " HasMission=" + (mission != null) +
+                " Scene=" + (string.IsNullOrWhiteSpace(sceneName) ? "null" : sceneName) +
+                " IsBattleRuntimeScene=" + isBattleRuntimeScene +
+                " IsClient=" + GameNetwork.IsClient +
+                " IsServer=" + GameNetwork.IsServer;
+            return mission != null && isBattleRuntimeScene;
+        }
+
+        private static void LogBlockedContextOnce(string characterId, string diagnostics)
+        {
+            string normalizedCharacterId = string.IsNullOrWhiteSpace(characterId) ? "null" : characterId;
+            string logKey = normalizedCharacterId + "|" + diagnostics;
+            lock (Sync)
+            {
+                if (!LoggedBlockedContextKeys.Add(logKey))
+                    return;
+            }
+
+            ModLogger.Info(
+                "CampaignMultiplayerHeroClassResolver: skipped surrogate MPHeroClass resolution outside battle runtime. " +
+                diagnostics);
         }
 
         private static bool ShouldPreferClientMountedHeroTroopSurrogate(bool isHero, bool isMounted)

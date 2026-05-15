@@ -656,6 +656,11 @@ namespace CoopSpectator.UI
 
         private void ReleaseCurrentMovie()
         {
+            bool hadPresentation =
+                _movie != null ||
+                _viewModel != null ||
+                _screenViewModel != null ||
+                _currentScreen != CoopSelectionScreen.None;
             if (_gauntletLayer != null && _movie != null)
             {
                 _gauntletLayer.ReleaseMovie(_movie);
@@ -667,7 +672,8 @@ namespace CoopSpectator.UI
             _screenViewModel = null;
             _currentScreen = CoopSelectionScreen.None;
             _lastAppliedRefreshKey = string.Empty;
-            ClearCameraPreviewTarget("release-movie");
+            if (hadPresentation)
+                ClearCameraPreviewTarget("release-movie");
         }
 
         private void UpdateCameraPreviewTarget(
@@ -750,6 +756,12 @@ namespace CoopSpectator.UI
 
         private void ClearCameraPreviewTarget(string source)
         {
+            bool hadActivePreviewTarget =
+                _activeCameraPreviewAgentIndex >= 0 ||
+                !string.IsNullOrWhiteSpace(_activeCameraPreviewEntryId);
+            if (!hadActivePreviewTarget)
+                return;
+
             ScreenBase missionScreen = MissionScreen;
             if (missionScreen != null)
                 TryResetMissionScreenCameraPreviewState(missionScreen);

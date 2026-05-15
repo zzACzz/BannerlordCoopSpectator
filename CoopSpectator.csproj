@@ -51,6 +51,7 @@
     <Compile Remove="GameMode\**\*" />
     <Compile Remove="**\obj\**\*" />
     <Compile Remove="**\bin\**\*" />
+    <Compile Remove="tmp_decompile_*\**\*.cs" />
   </ItemGroup>
   <Target Name="IncludeGameModeWhenHasMultiplayerDll" BeforeTargets="CoreCompile" Condition="'$(HasGameModeDll)'=='true'">
     <ItemGroup>

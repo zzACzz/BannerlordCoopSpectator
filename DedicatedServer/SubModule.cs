@@ -21,6 +21,10 @@ namespace CoopSpectator
         /// <summary>ТЗ A: true = тільки proof-of-load, без Harmony і без реєстрації game mode. false = реєструємо TdmClone + Harmony (для Етапу 3.3 — тест з нашими mission behaviors і логуванням; UseTdmCloneForListedTest у Launcher має бути true).</summary>
         private const bool CleanModuleLoadOnly = false;
         private const bool EnableFixedTestCultures = true;
+        // Disabled after 2026-05-15 reconnect/load-crash triage:
+        // BattleShellSuppressionPatch manually bypasses native dedicated mission loading and
+        // correlates with access-violation crashes during battle scene startup.
+        private const bool EnableBattleShellSuppressionPatch = false;
         private const string FixedAttackerCultureId = "empire";
         private const string FixedDefenderCultureId = "vlandia";
 
@@ -291,6 +295,7 @@ namespace CoopSpectator
                 try { AssemblyDiagnostics.LogRuntimeLoadPaths(); AssemblyDiagnostics.WarnIfAssemblyPathUnexpected(); } catch (Exception ex) { ModLogger.Info("[DedicatedDiag] AssemblyDiagnostics failed: " + ex.Message); }
 
                 base.OnSubModuleLoad();
+                CoopBattlePeerReconnectState.EnsureHooksInstalled();
                 LogDedicatedStartupInfo();
 
                 try { DedicatedSceneContractProbe.RunStartupProbe(); } catch (Exception ex) { ModLogger.Info("CoopSpectatorDedicated: scene contract startup probe failed: " + ex.Message); }
@@ -311,7 +316,10 @@ namespace CoopSpectator
                     TryApplyBattleMapSpawnHandoffPatch();
                     TryApplyLateJoinPeerBootstrapGatePatch();
                     TryApplyFinishedLoadingMissionReadyGatePatch();
-                    TryApplyBattleShellSuppressionPatch();
+                    if (EnableBattleShellSuppressionPatch)
+                        TryApplyBattleShellSuppressionPatch();
+                    else
+                        ModLogger.Info("CoopSpectatorDedicated: skipped BattleShellSuppressionPatch after mission-load crash triage.");
                     TryApplyMultiplayerHeroClassOverridePatch();
                     TryApplyMultiplayerCharacterClassFallbackPatch();
                     TryApplyServerChangeCultureCanonicalizationPatch();
@@ -479,7 +487,11 @@ namespace CoopSpectator
             {
                 if (_harmony == null)
                     _harmony = new Harmony("com.coopspectator.dedicated");
-                LateJoinPeerBootstrapGatePatch.Apply(_harmony);
+                LateJoinPeerBootstrapGatePatch.Apply(
+                    _harmony,
+                    patchHandleLateNewClientAfterLoadingFinished: false,
+                    patchSendAgentsToPeer: false,
+                    patchSendMissilesToPeer: false);
             }
             catch (Exception ex)
             {

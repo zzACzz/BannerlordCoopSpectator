@@ -10,6 +10,8 @@ namespace CoopSpectator.Infrastructure
         private const string CoopSpectatorSubFolder = "CoopSpectator";
         private const string StatusFileName = "battle_entry_status.txt";
         private const char EncodedListSeparator = '|';
+        private static readonly object SnapshotCacheLock = new object();
+        private static EntryStatusSnapshot _lastValidSnapshot;
 
         public sealed class EntryStatusSnapshot
         {
@@ -238,13 +240,7 @@ namespace CoopSpectator.Infrastructure
                     "DefenderSelectableEntrySource=" + (snapshot.DefenderSelectableEntrySource ?? string.Empty),
                     "UpdatedUtc=" + snapshot.UpdatedUtc.ToString("O")
                 };
-                string path = GetStatusFilePath();
-                using (FileStream stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
-                using (StreamWriter writer = new StreamWriter(stream))
-                {
-                    foreach (string line in lines)
-                        writer.WriteLine(line);
-                }
+                AtomicBridgeFileIO.WriteAllLines(GetStatusFilePath(), lines);
             }
             catch (Exception ex)
             {
@@ -260,15 +256,7 @@ namespace CoopSpectator.Infrastructure
                 if (!File.Exists(path))
                     return null;
 
-                string[] lines;
-                using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                using (StreamReader reader = new StreamReader(stream))
-                {
-                    List<string> collectedLines = new List<string>();
-                    while (!reader.EndOfStream)
-                        collectedLines.Add(reader.ReadLine());
-                    lines = collectedLines.ToArray();
-                }
+                string[] lines = AtomicBridgeFileIO.ReadAllLinesShared(path);
                 EntryStatusSnapshot snapshot = new EntryStatusSnapshot
                 {
                     MissionName = string.Empty,
@@ -520,13 +508,110 @@ namespace CoopSpectator.Infrastructure
                     }
                 }
 
+                if (!IsValidSnapshot(snapshot))
+                    return GetLastValidSnapshot();
+
+                RememberSnapshot(snapshot);
                 return snapshot;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("CoopBattleEntryStatusBridgeFile: failed to read status file: " + ex.Message);
-                return null;
+                return GetLastValidSnapshot();
             }
+        }
+
+        private static bool IsValidSnapshot(EntryStatusSnapshot snapshot)
+        {
+            return snapshot != null &&
+                   snapshot.UpdatedUtc != DateTime.MinValue &&
+                   (!string.IsNullOrWhiteSpace(snapshot.Source) ||
+                    !string.IsNullOrWhiteSpace(snapshot.BattlePhase) ||
+                    snapshot.PeerIndex >= 0);
+        }
+
+        private static void RememberSnapshot(EntryStatusSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return;
+
+            lock (SnapshotCacheLock)
+            {
+                _lastValidSnapshot = CloneSnapshot(snapshot);
+            }
+        }
+
+        private static EntryStatusSnapshot GetLastValidSnapshot()
+        {
+            lock (SnapshotCacheLock)
+            {
+                return CloneSnapshot(_lastValidSnapshot);
+            }
+        }
+
+        private static EntryStatusSnapshot CloneSnapshot(EntryStatusSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return null;
+
+            return new EntryStatusSnapshot
+            {
+                MissionName = snapshot.MissionName,
+                Source = snapshot.Source,
+                BattlePhase = snapshot.BattlePhase,
+                BattlePhaseSource = snapshot.BattlePhaseSource,
+                WinnerSide = snapshot.WinnerSide,
+                BattleCompletionReason = snapshot.BattleCompletionReason,
+                PeerName = snapshot.PeerName,
+                PeerIndex = snapshot.PeerIndex,
+                HasPeer = snapshot.HasPeer,
+                HasAgent = snapshot.HasAgent,
+                BattleDataReady = snapshot.BattleDataReady,
+                BattleDataReadinessStage = snapshot.BattleDataReadinessStage,
+                BattleDataReadinessReason = snapshot.BattleDataReadinessReason,
+                CanRespawn = snapshot.CanRespawn,
+                CanStartBattle = snapshot.CanStartBattle,
+                LifecycleState = snapshot.LifecycleState,
+                LifecycleSource = snapshot.LifecycleSource,
+                DeathCount = snapshot.DeathCount,
+                RequestedSide = snapshot.RequestedSide,
+                AssignedSide = snapshot.AssignedSide,
+                SelectedTroopId = snapshot.SelectedTroopId,
+                SelectedEntryId = snapshot.SelectedEntryId,
+                IntentSide = snapshot.IntentSide,
+                IntentTroopOrEntryId = snapshot.IntentTroopOrEntryId,
+                SelectionRequestSide = snapshot.SelectionRequestSide,
+                SelectionRequestTroopId = snapshot.SelectionRequestTroopId,
+                SelectionRequestEntryId = snapshot.SelectionRequestEntryId,
+                SpawnRequestSide = snapshot.SpawnRequestSide,
+                SpawnRequestTroopId = snapshot.SpawnRequestTroopId,
+                SpawnRequestEntryId = snapshot.SpawnRequestEntryId,
+                SpawnStatus = snapshot.SpawnStatus,
+                SpawnReason = snapshot.SpawnReason,
+                AllowedTroopIds = snapshot.AllowedTroopIds,
+                AllowedEntryIds = snapshot.AllowedEntryIds,
+                SelectableEntryIds = snapshot.SelectableEntryIds,
+                SelectableEntrySource = snapshot.SelectableEntrySource,
+                AuthoritativeCompatibilityEntryId = snapshot.AuthoritativeCompatibilityEntryId,
+                AuthoritativeCompatibilityEntrySource = snapshot.AuthoritativeCompatibilityEntrySource,
+                AuthoritativeCompatibilityStatus = snapshot.AuthoritativeCompatibilityStatus,
+                AuthoritativeWeaponContractSupported = snapshot.AuthoritativeWeaponContractSupported,
+                AuthoritativeVisualContractSupported = snapshot.AuthoritativeVisualContractSupported,
+                AuthoritativeCompatibilitySummary = snapshot.AuthoritativeCompatibilitySummary,
+                AuthoritativeMaterializedAgentEntryCount = snapshot.AuthoritativeMaterializedAgentEntryCount,
+                AuthoritativeMaterializedAgentEntries = snapshot.AuthoritativeMaterializedAgentEntries,
+                AttackerAllowedTroopIds = snapshot.AttackerAllowedTroopIds,
+                AttackerAllowedEntryIds = snapshot.AttackerAllowedEntryIds,
+                AttackerSelectableEntryCount = snapshot.AttackerSelectableEntryCount,
+                AttackerSelectableEntryIds = snapshot.AttackerSelectableEntryIds,
+                AttackerSelectableEntrySource = snapshot.AttackerSelectableEntrySource,
+                DefenderAllowedTroopIds = snapshot.DefenderAllowedTroopIds,
+                DefenderAllowedEntryIds = snapshot.DefenderAllowedEntryIds,
+                DefenderSelectableEntryCount = snapshot.DefenderSelectableEntryCount,
+                DefenderSelectableEntryIds = snapshot.DefenderSelectableEntryIds,
+                DefenderSelectableEntrySource = snapshot.DefenderSelectableEntrySource,
+                UpdatedUtc = snapshot.UpdatedUtc
+            };
         }
 
         public static string GetStatusFilePath()

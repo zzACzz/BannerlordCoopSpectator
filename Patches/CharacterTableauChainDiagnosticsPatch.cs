@@ -4,6 +4,8 @@ using System.Reflection;
 using CoopSpectator.Infrastructure;
 using HarmonyLib;
 using TaleWorlds.Core;
+using TaleWorlds.Engine;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade.View.Tableaus;
 
 namespace CoopSpectator.Patches
@@ -22,6 +24,9 @@ namespace CoopSpectator.Patches
             public int LastWidth;
             public int LastHeight;
             public bool FirstInitLogged;
+            public int LifecycleSequence;
+            public string LastLifecycleSignature;
+            public int LoggedLifecycleCount;
         }
 
         private sealed class ProviderTraceState
@@ -63,6 +68,14 @@ namespace CoopSpectator.Patches
             typeof(CharacterTableau).GetField("_stanceIndex", AnyInstance);
         private static readonly FieldInfo CtIsCharacterMountPlacesSwappedField =
             typeof(CharacterTableau).GetField("_isCharacterMountPlacesSwapped", AnyInstance);
+        private static readonly FieldInfo CtInitialSpawnFrameField =
+            typeof(CharacterTableau).GetField("_initialSpawnFrame", AnyInstance);
+        private static readonly FieldInfo CtMountSpawnPointField =
+            typeof(CharacterTableau).GetField("_mountSpawnPoint", AnyInstance);
+        private static readonly FieldInfo CtCharacterMountPositionFrameField =
+            typeof(CharacterTableau).GetField("_characterMountPositionFrame", AnyInstance);
+        private static readonly FieldInfo CtMountCharacterPositionFrameField =
+            typeof(CharacterTableau).GetField("_mountCharacterPositionFrame", AnyInstance);
         private static readonly FieldInfo CtAgentRendererSceneControllerField =
             typeof(CharacterTableau).GetField("_agentRendererSceneController", AnyInstance);
         private static readonly FieldInfo CtMountVisualsField =
@@ -76,6 +89,9 @@ namespace CoopSpectator.Patches
 
         private static readonly FieldInfo ThumbnailInventorySceneBeingUsedField =
             typeof(ThumbnailCacheManager).GetField("_inventorySceneBeingUsed", AnyInstance);
+
+        private static readonly FieldInfo CharacterViewModelEquipmentField =
+            AccessTools.Field("TaleWorlds.Core.ViewModelCollection.CharacterViewModel:_equipment");
 
         private static Type _characterTableauTextureProviderType;
         private static FieldInfo _cttpCharacterTableauField;
@@ -110,6 +126,7 @@ namespace CoopSpectator.Patches
             PatchWithPostfix(harmony, typeof(CharacterTableau), "SetStanceIndex", nameof(CharacterTableau_SetStanceIndex_Postfix));
             PatchWithPostfix(harmony, typeof(CharacterTableau), "UpdateMount", nameof(CharacterTableau_UpdateMount_Postfix));
             PatchWithPrefix(harmony, typeof(CharacterTableau), "RefreshCharacterTableau", nameof(CharacterTableau_RefreshCharacterTableau_Prefix));
+            PatchWithPostfix(harmony, typeof(CharacterTableau), "RefreshCharacterTableau", nameof(CharacterTableau_RefreshCharacterTableau_Postfix));
             PatchWithPrefix(harmony, typeof(CharacterTableau), "OnFinalize", nameof(CharacterTableau_OnFinalize_Prefix));
         }
 
@@ -252,6 +269,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                LogLifecycleEvent(__instance, "SetEquipmentCode", equipmentCode);
                 LogPotentialSelectionSource(__instance, "SetEquipmentCode", equipmentCode);
             }
             catch (Exception ex)
@@ -264,6 +282,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                LogLifecycleEvent(__instance, "SetMountCreationKey", value);
                 LogPotentialSelectionSource(__instance, "SetMountCreationKey", value);
             }
             catch (Exception ex)
@@ -276,6 +295,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                LogLifecycleEvent(__instance, "SetCharStringID", charStringId);
                 LogPotentialSelectionSource(__instance, "SetCharStringID", charStringId);
             }
             catch (Exception ex)
@@ -288,6 +308,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                LogLifecycleEvent(__instance, "SetBodyProperties", Shorten(bodyPropertiesCode, 42));
                 LogPotentialSelectionSource(__instance, "SetBodyProperties", Shorten(bodyPropertiesCode, 42));
             }
             catch (Exception ex)
@@ -300,6 +321,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                LogLifecycleEvent(__instance, "SetStanceIndex", index.ToString());
                 LogPotentialSelectionSource(__instance, "SetStanceIndex", index.ToString());
             }
             catch (Exception ex)
@@ -315,19 +337,29 @@ namespace CoopSpectator.Patches
                 Equipment equipment = CtEquipmentField?.GetValue(__instance) as Equipment;
                 bool hasMountSlot = HasMountSlot(equipment);
                 bool hasMountVisuals = CtMountVisualsField?.GetValue(__instance) != null;
-                if (hasMountSlot == hasMountVisuals)
+                bool shouldLog = hasMountSlot || hasMountVisuals;
+                if (!shouldLog)
                     return;
 
-                ModLogger.Info(
-                    "CharacterTableauChainDiagnosticsPatch: mount visual mismatch in CharacterTableau.UpdateMount. " +
+                string message =
+                    "CharacterTableauChainDiagnosticsPatch: CharacterTableau.UpdateMount. " +
                     "Instance=" + RuntimeHelpersHash(__instance) +
+                    " MountedFlag=" + isRiderAgentMounted +
                     " HasMountSlot=" + hasMountSlot +
                     " HasMountVisuals=" + hasMountVisuals +
-                    " MountedFlag=" + isRiderAgentMounted +
                     " Horse=" + ResolveEquipmentItemId(equipment, EquipmentIndex.ArmorItemEndSlot) +
                     " HorseHarness=" + ResolveEquipmentItemId(equipment, EquipmentIndex.HorseHarness) +
                     " Stance=" + SafeReadField(CtStanceIndexField, __instance) +
-                    " MountCreationKey=" + Shorten(CtMountCreationKeyField?.GetValue(__instance) as string, 48));
+                    " MountCreationKey=" + Shorten(CtMountCreationKeyField?.GetValue(__instance) as string, 48) + " " +
+                    BuildPlacementSummary(__instance);
+
+                if (hasMountSlot != hasMountVisuals)
+                {
+                    ModLogger.Info(message + " MountStateMismatch=True");
+                    return;
+                }
+
+                LogLifecycleEvent(__instance, "UpdateMount", isRiderAgentMounted ? "mounted" : "not-mounted", force: true, extra: BuildPlacementSummary(__instance));
             }
             catch (Exception ex)
             {
@@ -388,11 +420,28 @@ namespace CoopSpectator.Patches
                     " HasAgentVisuals=" + hasAgentVisuals +
                     " HasMountVisuals=" + hasMountVisuals +
                     " SwapPlaces=" + isSwapped +
-                    " BodyPropertiesLen=" + bodyPropertiesCode.Length);
+                    " BodyPropertiesLen=" + bodyPropertiesCode.Length + " " +
+                    BuildPlacementSummary(__instance));
             }
             catch (Exception ex)
             {
                 ModLogger.Info("CharacterTableauChainDiagnosticsPatch: RefreshCharacterTableau prefix failed open: " + ex.Message);
+            }
+        }
+
+        private static void CharacterTableau_RefreshCharacterTableau_Postfix(CharacterTableau __instance)
+        {
+            try
+            {
+                Equipment equipment = CtEquipmentField?.GetValue(__instance) as Equipment;
+                if (!HasMountSlot(equipment) && CtMountVisualsField?.GetValue(__instance) == null)
+                    return;
+
+                LogLifecycleEvent(__instance, "RefreshCharacterTableau.Post", null, force: true, extra: BuildPlacementSummary(__instance));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CharacterTableauChainDiagnosticsPatch: RefreshCharacterTableau postfix failed open: " + ex.Message);
             }
         }
 
@@ -422,7 +471,8 @@ namespace CoopSpectator.Patches
                     " Horse=" + horse +
                     " HorseHarness=" + horseHarness +
                     " HasAgentVisuals=" + hasAgentVisuals +
-                    " HasMountVisuals=" + hasMountVisuals);
+                    " HasMountVisuals=" + hasMountVisuals + " " +
+                    BuildPlacementSummary(__instance));
             }
             catch (Exception ex)
             {
@@ -644,14 +694,18 @@ namespace CoopSpectator.Patches
 
                 string currentName = ReadProperty(currentCharacter, "Name");
                 string currentId = ReadNestedProperty(currentCharacter, "Character", "StringId");
+                Equipment currentCharacterEquipment = ReadNestedEquipmentProperty(currentCharacter, "Character", "Equipment");
+                Equipment selectedEquipment = ReadCharacterViewModelEquipment(selectedCharacter);
                 string key = "PartyVM.RefreshCurrentCharacterInformation|" + (currentId ?? "null") + "|" + SafeLength(ReadProperty(selectedCharacter, "EquipmentCode"));
                 LogOnce(
                     key,
                     "CharacterTableauChainDiagnosticsPatch: Party preview VM input. " +
                     "CurrentCharacterId=" + (currentId ?? "null") +
                     " CurrentCharacterName=" + (currentName ?? "null") +
+                    " CurrentCharacterEquipment={" + BuildEquipmentPreviewSummary(currentCharacterEquipment) + "}" +
                     " Selected.CharStringId=" + ReadProperty(selectedCharacter, "CharStringId") +
                     " Selected.EquipmentCodeLen=" + SafeLength(ReadProperty(selectedCharacter, "EquipmentCode")) +
+                    " SelectedEquipment={" + BuildEquipmentPreviewSummary(selectedEquipment) + "}" +
                     " Selected.HasMount=" + ReadProperty(selectedCharacter, "HasMount") +
                     " Selected.MountCreationKey=" + Shorten(ReadProperty(selectedCharacter, "MountCreationKey"), 48) +
                     " Selected.StanceIndex=" + ReadProperty(selectedCharacter, "StanceIndex") +
@@ -689,6 +743,61 @@ namespace CoopSpectator.Patches
                 " Value=" + Shorten(value, 48));
         }
 
+        private static void LogLifecycleEvent(CharacterTableau tableau, string eventName, string valueHint, bool force = false, string extra = null)
+        {
+            TableauTraceState state = GetState(tableau);
+            state.LifecycleSequence++;
+
+            Equipment equipment = CtEquipmentField?.GetValue(tableau) as Equipment;
+            bool usesPrivateScene = CtAgentRendererSceneControllerField?.GetValue(tableau) != null;
+            bool hasMountVisuals = CtMountVisualsField?.GetValue(tableau) != null;
+            bool hasAgentVisuals = CtAgentVisualsField?.GetValue(tableau) != null;
+            bool isSwapped = (bool?)CtIsCharacterMountPlacesSwappedField?.GetValue(tableau) ?? false;
+            string charId = CtCharStringIdField?.GetValue(tableau) as string ?? string.Empty;
+            string equipmentCode = CtEquipmentCodeField?.GetValue(tableau) as string ?? string.Empty;
+            string mountCreationKey = CtMountCreationKeyField?.GetValue(tableau) as string ?? string.Empty;
+            string horse = ResolveEquipmentItemId(equipment, EquipmentIndex.ArmorItemEndSlot);
+            string horseHarness = ResolveEquipmentItemId(equipment, EquipmentIndex.HorseHarness);
+            string signature =
+                eventName + "|" +
+                Shorten(valueHint, 32) + "|" +
+                charId + "|" +
+                equipmentCode.Length + "|" +
+                mountCreationKey + "|" +
+                SafeReadField(CtStanceIndexField, tableau) + "|" +
+                hasMountVisuals + "|" +
+                isSwapped + "|" +
+                horse + "|" +
+                horseHarness;
+
+            bool shouldLog = force || state.LoggedLifecycleCount < 16 || !string.Equals(state.LastLifecycleSignature, signature, StringComparison.Ordinal);
+            if (!shouldLog)
+                return;
+
+            state.LastLifecycleSignature = signature;
+            state.LoggedLifecycleCount++;
+
+            ModLogger.Info(
+                "CharacterTableauChainDiagnosticsPatch: CharacterTableau lifecycle. " +
+                "Instance=" + RuntimeHelpersHash(tableau) +
+                " Seq=" + state.LifecycleSequence +
+                " Event=" + eventName +
+                " Value=" + Shorten(valueHint, 64) +
+                " SceneMode=" + (usesPrivateScene ? "private-scene" : "cached-inventory-scene") +
+                " WidgetSize=" + state.LastWidth + "x" + state.LastHeight +
+                " CharStringId=" + (string.IsNullOrWhiteSpace(charId) ? "empty" : charId) +
+                " EquipmentCodeLen=" + equipmentCode.Length +
+                " MountCreationKey=" + Shorten(mountCreationKey, 48) +
+                " Stance=" + SafeReadField(CtStanceIndexField, tableau) +
+                " HasMountSlot=" + HasMountSlot(equipment) +
+                " Horse=" + horse +
+                " HorseHarness=" + horseHarness +
+                " HasAgentVisuals=" + hasAgentVisuals +
+                " HasMountVisuals=" + hasMountVisuals +
+                " SwapPlaces=" + isSwapped +
+                (string.IsNullOrWhiteSpace(extra) ? string.Empty : " " + extra));
+        }
+
         private static TableauTraceState GetState(CharacterTableau tableau)
         {
             int key = RuntimeHelpersHash(tableau);
@@ -722,6 +831,50 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static string BuildEquipmentPreviewSummary(Equipment equipment)
+        {
+            if (equipment == null)
+                return "null";
+
+            return
+                "Head=" + ResolveEquipmentItemId(equipment, EquipmentIndex.Head) +
+                ",Gloves=" + ResolveEquipmentItemId(equipment, EquipmentIndex.Gloves) +
+                ",Body=" + ResolveEquipmentItemId(equipment, EquipmentIndex.Body) +
+                ",Leg=" + ResolveEquipmentItemId(equipment, EquipmentIndex.Leg) +
+                ",Cape=" + ResolveEquipmentItemId(equipment, EquipmentIndex.Cape) +
+                ",Horse=" + ResolveEquipmentItemId(equipment, EquipmentIndex.ArmorItemEndSlot) +
+                ",Harness=" + ResolveEquipmentItemId(equipment, EquipmentIndex.HorseHarness) +
+                ",W0=" + ResolveEquipmentItemId(equipment, EquipmentIndex.WeaponItemBeginSlot) +
+                ",W1=" + ResolveEquipmentItemId(equipment, EquipmentIndex.Weapon1) +
+                ",W2=" + ResolveEquipmentItemId(equipment, EquipmentIndex.Weapon2) +
+                ",W3=" + ResolveEquipmentItemId(equipment, EquipmentIndex.Weapon3);
+        }
+
+        private static string BuildPlacementSummary(CharacterTableau tableau)
+        {
+            bool isSwapped = (bool?)CtIsCharacterMountPlacesSwappedField?.GetValue(tableau) ?? false;
+            MatrixFrame? initialSpawn = ReadFrame(CtInitialSpawnFrameField, tableau);
+            MatrixFrame? mountSpawn = ReadFrame(CtMountSpawnPointField, tableau);
+            MatrixFrame? characterMount = ReadFrame(CtCharacterMountPositionFrameField, tableau);
+            MatrixFrame? mountCharacter = ReadFrame(CtMountCharacterPositionFrameField, tableau);
+            GameEntity agentEntity = ReadVisualEntity(CtAgentVisualsField?.GetValue(tableau));
+            GameEntity mountEntity = ReadVisualEntity(CtMountVisualsField?.GetValue(tableau));
+            MatrixFrame? actualAgent = ReadEntityFrame(agentEntity);
+            MatrixFrame? actualMount = ReadEntityFrame(mountEntity);
+            MatrixFrame? expectedAgent = isSwapped ? characterMount : initialSpawn;
+            MatrixFrame? expectedMount = isSwapped ? mountCharacter : mountSpawn;
+
+            return
+                "ExpectedAgentOrigin=" + FormatFrameOrigin(expectedAgent) +
+                " ExpectedMountOrigin=" + FormatFrameOrigin(expectedMount) +
+                " ActualAgentOrigin=" + FormatFrameOrigin(actualAgent) +
+                " ActualMountOrigin=" + FormatFrameOrigin(actualMount) +
+                " InitialOrigin=" + FormatFrameOrigin(initialSpawn) +
+                " HorseOrigin=" + FormatFrameOrigin(mountSpawn) +
+                " CharOnMountOrigin=" + FormatFrameOrigin(characterMount) +
+                " MountOnCharOrigin=" + FormatFrameOrigin(mountCharacter);
+        }
+
         private static bool HasMountSlot(Equipment equipment)
         {
             if (equipment == null)
@@ -736,6 +889,65 @@ namespace CoopSpectator.Patches
             {
                 return false;
             }
+        }
+
+        private static MatrixFrame? ReadFrame(FieldInfo field, object instance)
+        {
+            try
+            {
+                if (field == null || instance == null)
+                    return null;
+
+                object value = field.GetValue(instance);
+                if (value == null)
+                    return null;
+
+                return (MatrixFrame)value;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static GameEntity ReadVisualEntity(object visuals)
+        {
+            try
+            {
+                if (visuals == null)
+                    return null;
+
+                MethodInfo getEntity = visuals.GetType().GetMethod("GetEntity", AnyInstance);
+                return getEntity?.Invoke(visuals, null) as GameEntity;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static MatrixFrame? ReadEntityFrame(GameEntity entity)
+        {
+            try
+            {
+                if (entity == null)
+                    return null;
+
+                return entity.GetFrame();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string FormatFrameOrigin(MatrixFrame? frame)
+        {
+            if (!frame.HasValue)
+                return "null";
+
+            Vec3 origin = frame.Value.origin;
+            return origin.x.ToString("0.###") + "," + origin.y.ToString("0.###") + "," + origin.z.ToString("0.###");
         }
 
         private static object SafeReadField(FieldInfo field, object instance)
@@ -789,6 +1001,34 @@ namespace CoopSpectator.Patches
             catch
             {
                 return "error";
+            }
+        }
+
+        private static Equipment ReadNestedEquipmentProperty(object instance, string firstProperty, string secondProperty)
+        {
+            try
+            {
+                object first = AccessTools.Property(instance.GetType(), firstProperty)?.GetValue(instance, null);
+                if (first == null)
+                    return null;
+
+                return AccessTools.Property(first.GetType(), secondProperty)?.GetValue(first, null) as Equipment;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Equipment ReadCharacterViewModelEquipment(object instance)
+        {
+            try
+            {
+                return CharacterViewModelEquipmentField?.GetValue(instance) as Equipment;
+            }
+            catch
+            {
+                return null;
             }
         }
 

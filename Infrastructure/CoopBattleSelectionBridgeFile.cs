@@ -10,6 +10,8 @@ namespace CoopSpectator.Infrastructure
         private const string SelectTroopRequestFileName = "battle_select_troop.request";
         private const string SpectatorRequestFileName = "battle_select_spectator.request";
         private const string CurrentSelectionFileName = "battle_selection_current.txt";
+        private static readonly object CurrentSelectionCacheLock = new object();
+        private static SelectionBridgeSnapshot _lastValidCurrentSelection;
 
         public sealed class SelectionBridgeSnapshot
         {
@@ -55,7 +57,7 @@ namespace CoopSpectator.Infrastructure
                     "Source=" + (source ?? "unknown"),
                     "RequestedUtc=" + DateTime.UtcNow.ToString("O")
                 };
-                File.WriteAllLines(GetSpectatorRequestFilePath(), lines);
+                AtomicBridgeFileIO.WriteAllLines(GetSpectatorRequestFilePath(), lines);
                 return true;
             }
             catch (Exception ex)
@@ -89,7 +91,7 @@ namespace CoopSpectator.Infrastructure
                 if (!File.Exists(path))
                     return false;
 
-                string[] lines = File.ReadAllLines(path);
+                string[] lines = AtomicBridgeFileIO.ReadAllLinesShared(path);
                 foreach (string rawLine in lines)
                 {
                     if (string.IsNullOrWhiteSpace(rawLine))
@@ -123,7 +125,7 @@ namespace CoopSpectator.Infrastructure
                 if (!File.Exists(path))
                     return null;
 
-                string[] lines = File.ReadAllLines(path);
+                string[] lines = AtomicBridgeFileIO.ReadAllLinesShared(path);
                 SelectionBridgeSnapshot snapshot = new SelectionBridgeSnapshot
                 {
                     Side = null,
@@ -154,12 +156,16 @@ namespace CoopSpectator.Infrastructure
                         snapshot.UpdatedUtc = updatedUtc;
                 }
 
+                if (!IsValidCurrentSelection(snapshot))
+                    return GetLastValidCurrentSelection();
+
+                RememberCurrentSelection(snapshot);
                 return snapshot;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("CoopBattleSelectionBridgeFile: failed to read current selection file: " + ex.Message);
-                return null;
+                return GetLastValidCurrentSelection();
             }
         }
 
@@ -183,7 +189,7 @@ namespace CoopSpectator.Infrastructure
                     "Source=" + (source ?? "unknown"),
                     "RequestedUtc=" + DateTime.UtcNow.ToString("O")
                 };
-                File.WriteAllLines(path, lines);
+                AtomicBridgeFileIO.WriteAllLines(path, lines);
                 return true;
             }
             catch (Exception ex)
@@ -204,7 +210,7 @@ namespace CoopSpectator.Infrastructure
                 if (!File.Exists(path))
                     return false;
 
-                string[] lines = File.ReadAllLines(path);
+                string[] lines = AtomicBridgeFileIO.ReadAllLinesShared(path);
                 foreach (string rawLine in lines)
                 {
                     if (string.IsNullOrWhiteSpace(rawLine))
@@ -294,12 +300,55 @@ namespace CoopSpectator.Infrastructure
                     "Source=" + (snapshot.Source ?? string.Empty),
                     "UpdatedUtc=" + snapshot.UpdatedUtc.ToString("O")
                 };
-                File.WriteAllLines(GetCurrentSelectionFilePath(), lines);
+                AtomicBridgeFileIO.WriteAllLines(GetCurrentSelectionFilePath(), lines);
+                RememberCurrentSelection(snapshot);
             }
             catch (Exception ex)
             {
                 ModLogger.Info("CoopBattleSelectionBridgeFile: failed to update current selection file: " + ex.Message);
             }
+        }
+
+        private static bool IsValidCurrentSelection(SelectionBridgeSnapshot snapshot)
+        {
+            return snapshot != null &&
+                   snapshot.UpdatedUtc != DateTime.MinValue &&
+                   (!string.IsNullOrWhiteSpace(snapshot.Side) ||
+                    !string.IsNullOrWhiteSpace(snapshot.TroopOrEntryId) ||
+                    !string.IsNullOrWhiteSpace(snapshot.Source));
+        }
+
+        private static void RememberCurrentSelection(SelectionBridgeSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return;
+
+            lock (CurrentSelectionCacheLock)
+            {
+                _lastValidCurrentSelection = CloneCurrentSelection(snapshot);
+            }
+        }
+
+        private static SelectionBridgeSnapshot GetLastValidCurrentSelection()
+        {
+            lock (CurrentSelectionCacheLock)
+            {
+                return CloneCurrentSelection(_lastValidCurrentSelection);
+            }
+        }
+
+        private static SelectionBridgeSnapshot CloneCurrentSelection(SelectionBridgeSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return null;
+
+            return new SelectionBridgeSnapshot
+            {
+                Side = snapshot.Side,
+                TroopOrEntryId = snapshot.TroopOrEntryId,
+                Source = snapshot.Source,
+                UpdatedUtc = snapshot.UpdatedUtc
+            };
         }
 
         private static string GetCoopFolderPath()

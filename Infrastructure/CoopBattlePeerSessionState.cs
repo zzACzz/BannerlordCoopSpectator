@@ -225,6 +225,19 @@ namespace CoopSpectator.Infrastructure
                 " Source=" + (source ?? "unknown"));
         }
 
+        public static bool TryMigratePeerIndex(int previousPeerIndex, int currentPeerIndex, string source)
+        {
+            if (previousPeerIndex < 0 || currentPeerIndex < 0 || previousPeerIndex == currentPeerIndex)
+                return false;
+
+            if (!_lastLoggedTransitionKeyByPeer.TryGetValue(previousPeerIndex, out string previousTransitionKey))
+                return false;
+
+            _lastLoggedTransitionKeyByPeer.Remove(previousPeerIndex);
+            _lastLoggedTransitionKeyByPeer[currentPeerIndex] = previousTransitionKey;
+            return true;
+        }
+
         public static CoopBattlePeerLifecycleStatus ResolvePassiveLifecycleStatus(
             CoopBattlePeerSessionSnapshot snapshot,
             BattleSideEnum authoritativeSide,

@@ -212,7 +212,6 @@ namespace CoopSpectator.MissionBehaviors
         private readonly Dictionary<int, BattleSnapshotClientAssemblyState> _clientBattleSnapshotAssembliesByTransmission = new Dictionary<int, BattleSnapshotClientAssemblyState>();
         private static readonly Dictionary<int, int> _expectedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _acknowledgedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
-        private static readonly HashSet<int> _loadingFinishedBattleSnapshotBootstrapPeerIndices = new HashSet<int>();
         private static int _clientObservedBattleSnapshotTransmissionId;
         private static string _clientObservedBattleSnapshotPayloadHash = string.Empty;
         private static int _clientAppliedBattleSnapshotTransmissionId;
@@ -386,30 +385,6 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        protected override void HandleEarlyNewClientAfterLoadingFinished(NetworkCommunicator networkPeer)
-        {
-            base.HandleEarlyNewClientAfterLoadingFinished(networkPeer);
-            ArmPeerBattleSnapshotBootstrapAfterLoadingFinished(
-                networkPeer,
-                "CoopMissionNetworkBridge.HandleEarlyNewClientAfterLoadingFinished");
-        }
-
-        protected override void HandleNewClientAfterLoadingFinished(NetworkCommunicator networkPeer)
-        {
-            base.HandleNewClientAfterLoadingFinished(networkPeer);
-            ArmPeerBattleSnapshotBootstrapAfterLoadingFinished(
-                networkPeer,
-                "CoopMissionNetworkBridge.HandleNewClientAfterLoadingFinished");
-        }
-
-        protected override void HandleLateNewClientAfterLoadingFinished(NetworkCommunicator networkPeer)
-        {
-            base.HandleLateNewClientAfterLoadingFinished(networkPeer);
-            ArmPeerBattleSnapshotBootstrapAfterLoadingFinished(
-                networkPeer,
-                "CoopMissionNetworkBridge.HandleLateNewClientAfterLoadingFinished");
-        }
-
         protected override void HandleNewClientAfterSynchronized(NetworkCommunicator networkPeer)
         {
             base.HandleNewClientAfterSynchronized(networkPeer);
@@ -425,28 +400,6 @@ namespace CoopSpectator.MissionBehaviors
                 "CoopMissionNetworkBridge: deferred initial payload sync to UDP tick. " +
                 "Peer=" + (networkPeer.UserName ?? "null") +
                 " Reason=post-synchronize callback safety.");
-        }
-
-        private void ArmPeerBattleSnapshotBootstrapAfterLoadingFinished(
-            NetworkCommunicator networkPeer,
-            string source)
-        {
-            if (!GameNetwork.IsServer || networkPeer == null || networkPeer.IsServerPeer)
-                return;
-
-            bool addedLoadingFinishedEligibility = _loadingFinishedBattleSnapshotBootstrapPeerIndices.Add(networkPeer.Index);
-            _expectedBattleSnapshotTransmissionIdByPeer.TryGetValue(networkPeer.Index, out int expectedTransmissionId);
-            _acknowledgedBattleSnapshotTransmissionIdByPeer.TryGetValue(networkPeer.Index, out int acknowledgedTransmissionId);
-
-            ModLogger.Info(
-                "CoopMissionNetworkBridge: armed peer battle snapshot bootstrap from loading-finished callback. " +
-                "Peer=" + (networkPeer.UserName ?? "null") +
-                " Source=" + (source ?? "unknown") +
-                " IsSynchronized=" + networkPeer.IsSynchronized +
-                " AddedLoadingFinishedEligibility=" + addedLoadingFinishedEligibility +
-                " HasTransportState=" + _battleSnapshotTransportStatesByPeer.ContainsKey(networkPeer.Index) +
-                " ExpectedTransmissionId=" + expectedTransmissionId +
-                " AcknowledgedTransmissionId=" + acknowledgedTransmissionId);
         }
 
         protected override void HandlePlayerDisconnect(NetworkCommunicator networkPeer)
@@ -466,6 +419,9 @@ namespace CoopSpectator.MissionBehaviors
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.BattleSnapshot));
             _battleSnapshotTransportStatesByPeer.Remove(networkPeer.Index);
             ClearPeerBattleSnapshotSyncState(networkPeer.Index);
+            CoopBattlePeerReconnectState.ObserveDisconnect(
+                networkPeer,
+                "CoopMissionNetworkBridge.HandlePlayerDisconnect");
             LateJoinPeerBootstrapGatePatch.ClearDeferredPeerBootstrap(
                 networkPeer,
                 "CoopMissionNetworkBridge.HandlePlayerDisconnect");
@@ -484,7 +440,7 @@ namespace CoopSpectator.MissionBehaviors
             _clientBattleSnapshotAssembliesByTransmission.Clear();
             _expectedBattleSnapshotTransmissionIdByPeer.Clear();
             _acknowledgedBattleSnapshotTransmissionIdByPeer.Clear();
-            _loadingFinishedBattleSnapshotBootstrapPeerIndices.Clear();
+            CoopBattlePeerReconnectState.Reset("CoopMissionNetworkBridge.OnRemoveBehavior");
             LateJoinPeerBootstrapGatePatch.ClearAllDeferredPeerBootstrap(
                 "CoopMissionNetworkBridge.OnRemoveBehavior");
             ClearClientBattleSnapshotApplicationState("CoopMissionNetworkBridge.OnRemoveBehavior");
@@ -2531,7 +2487,6 @@ namespace CoopSpectator.MissionBehaviors
 
             _expectedBattleSnapshotTransmissionIdByPeer.Remove(peerIndex);
             _acknowledgedBattleSnapshotTransmissionIdByPeer.Remove(peerIndex);
-            _loadingFinishedBattleSnapshotBootstrapPeerIndices.Remove(peerIndex);
         }
 
         private bool TryAcknowledgePeerBattleSnapshot(NetworkCommunicator peer, string rawTransmissionId)
@@ -2633,7 +2588,7 @@ namespace CoopSpectator.MissionBehaviors
             return peer != null &&
                 !peer.IsServerPeer &&
                 peer.IsConnectionActive &&
-                (peer.IsSynchronized || _loadingFinishedBattleSnapshotBootstrapPeerIndices.Contains(peer.Index));
+                peer.IsSynchronized;
         }
 
         private static string BuildAssemblyKey(CoopBattlePayloadKind payloadKind, int transmissionId)

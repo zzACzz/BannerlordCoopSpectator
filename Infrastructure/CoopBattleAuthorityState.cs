@@ -342,6 +342,31 @@ namespace CoopSpectator.Infrastructure
                 " Source=" + source);
         }
 
+        public static bool TryMigratePeerIndex(int previousPeerIndex, int currentPeerIndex, string source)
+        {
+            if (previousPeerIndex < 0 || currentPeerIndex < 0 || previousPeerIndex == currentPeerIndex)
+                return false;
+
+            bool movedRequestedSide = TryMovePeerValue(_requestedSideByPeer, previousPeerIndex, currentPeerIndex);
+            bool movedAssignedSide = TryMovePeerValue(_assignedSideByPeer, previousPeerIndex, currentPeerIndex);
+            bool movedTroopId = TryMovePeerValue(_selectedTroopIdByPeer, previousPeerIndex, currentPeerIndex);
+            bool movedEntryId = TryMovePeerValue(_selectedEntryIdByPeer, previousPeerIndex, currentPeerIndex);
+            bool migrated = movedRequestedSide || movedAssignedSide || movedTroopId || movedEntryId;
+            if (!migrated)
+                return false;
+
+            ModLogger.Info(
+                "CoopBattleAuthorityState: migrated reconnect peer state. " +
+                "PreviousPeerIndex=" + previousPeerIndex +
+                " CurrentPeerIndex=" + currentPeerIndex +
+                " MovedRequestedSide=" + movedRequestedSide +
+                " MovedAssignedSide=" + movedAssignedSide +
+                " MovedTroopId=" + movedTroopId +
+                " MovedEntryId=" + movedEntryId +
+                " Source=" + (source ?? "unknown"));
+            return true;
+        }
+
         private static List<string> NormalizeTroopIds(IEnumerable<string> troopIds)
         {
             if (troopIds == null)
@@ -374,6 +399,16 @@ namespace CoopSpectator.Infrastructure
         private static string NormalizeEntryId(string entryId)
         {
             return string.IsNullOrWhiteSpace(entryId) ? null : entryId.Trim();
+        }
+
+        private static bool TryMovePeerValue<T>(Dictionary<int, T> statesByPeer, int previousPeerIndex, int currentPeerIndex)
+        {
+            if (statesByPeer == null || !statesByPeer.TryGetValue(previousPeerIndex, out T value))
+                return false;
+
+            statesByPeer.Remove(previousPeerIndex);
+            statesByPeer[currentPeerIndex] = value;
+            return true;
         }
 
         private static bool ContainsTroopId(IEnumerable<string> troopIds, string troopId)

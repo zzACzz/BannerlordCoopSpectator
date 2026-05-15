@@ -41,6 +41,7 @@ namespace CoopSpectator.Patches
         private static MethodInfo _missionNetworkComponentHandleServerEventMakeAgentDeadMethod;
 
         private static string _lastSuppressedFollowSwitchKey;
+        private static string _lastArmedLocalFollowSuppressionWindowKey;
         private static string _lastSuppressedWeaponDropKey;
         private static string _lastLocalVisualFinalizeKey;
         private static string _lastSuppressedAssignFormationKey;
@@ -112,6 +113,9 @@ namespace CoopSpectator.Patches
         private static long _nextDeferredClientSetWieldedItemIndexSequence;
         private static long _nextDeferredClientSetAgentHealthSequence;
         private static long _nextDeferredClientMakeAgentDeadSequence;
+        private static readonly TimeSpan LocalFollowEchoSuppressionWindow = TimeSpan.FromSeconds(2);
+        private static DateTime _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
+        private static int _localFollowEchoSuppressionAgentIndex = -1;
 
         private sealed class PendingLocalCommanderOrderControlFinalization
         {
@@ -363,6 +367,9 @@ namespace CoopSpectator.Patches
             _nextDeferredClientSetAgentHealthSequence = 0;
             _nextDeferredClientMakeAgentDeadSequence = 0;
             _lastSuppressedFollowSwitchKey = null;
+            _lastArmedLocalFollowSuppressionWindowKey = null;
+            _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
+            _localFollowEchoSuppressionAgentIndex = -1;
             _lastSuppressedWeaponDropKey = null;
             _lastLocalVisualFinalizeKey = null;
             _lastSuppressedAssignFormationKey = null;
@@ -1096,6 +1103,8 @@ namespace CoopSpectator.Patches
                         " Mission=" + (mission.SceneName ?? "null"));
                     return;
                 }
+
+                ArmLocalFollowEchoSuppressionWindow(agent, "battle-map handoff SetAgentPeer local");
 
                 string preferredEntryId = ResolveControlledEntryId(
                     missionPeer,
@@ -6177,6 +6186,9 @@ namespace CoopSpectator.Patches
             if (!isFollowSwitchToLocalPlayerAgent)
                 return false;
 
+            if (!IsWithinLocalFollowEchoSuppressionWindow(followedAgent, controlledAgent))
+                return false;
+
             CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot selectionBridge =
                 CoopBattleSelectionBridgeFile.ReadCurrentSelection();
             CoopBattleEntryPolicy.ClientSnapshot entryPolicy =
@@ -6200,12 +6212,52 @@ namespace CoopSpectator.Patches
                 "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
                 " FollowedAgentIndex=" + followedAgent.Index +
                 " ControlledAgentIndex=" + (controlledAgent?.Index.ToString() ?? "null") +
+                " WindowUntilUtc=" + (_localFollowEchoSuppressionUntilUtc == DateTime.MinValue ? "inactive" : _localFollowEchoSuppressionUntilUtc.ToString("O")) +
                 " SpawnStatus=" + (status?.SpawnStatus ?? "null") +
                 " LifecycleState=" + (status?.LifecycleState ?? "null") +
                 " StatusHasAgent=" + (status?.HasAgent.ToString() ?? "null") +
                 " BridgeTroop=" + (entryPolicy.BridgeTroopOrEntryId ?? "null") +
                 " Mission=" + (mission.SceneName ?? "null");
             return true;
+        }
+
+        private static void ArmLocalFollowEchoSuppressionWindow(Agent agent, string source)
+        {
+            if (agent == null || agent.Index < 0)
+                return;
+
+            _localFollowEchoSuppressionAgentIndex = agent.Index;
+            _localFollowEchoSuppressionUntilUtc = DateTime.UtcNow + LocalFollowEchoSuppressionWindow;
+            string logKey =
+                agent.Index + "|" +
+                (_localFollowEchoSuppressionUntilUtc == DateTime.MinValue
+                    ? "inactive"
+                    : _localFollowEchoSuppressionUntilUtc.ToString("O")) + "|" +
+                (source ?? "unknown");
+            if (string.Equals(_lastArmedLocalFollowSuppressionWindowKey, logKey, StringComparison.Ordinal))
+                return;
+
+            _lastArmedLocalFollowSuppressionWindowKey = logKey;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: armed local MissionPeer.FollowedAgent echo suppression window. " +
+                "AgentIndex=" + agent.Index +
+                " UntilUtc=" + _localFollowEchoSuppressionUntilUtc.ToString("O") +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        private static bool IsWithinLocalFollowEchoSuppressionWindow(Agent followedAgent, Agent controlledAgent)
+        {
+            if (followedAgent == null)
+                return false;
+
+            DateTime untilUtc = _localFollowEchoSuppressionUntilUtc;
+            if (untilUtc == DateTime.MinValue || DateTime.UtcNow > untilUtc)
+                return false;
+
+            int trackedAgentIndex = _localFollowEchoSuppressionAgentIndex;
+            int controlledAgentIndex = controlledAgent?.Index ?? -1;
+            return followedAgent.Index == trackedAgentIndex ||
+                   followedAgent.Index == controlledAgentIndex;
         }
 
         private static void LogObservedLocalSelectAllFormations(OrderController orderController, Agent selectorAgent)

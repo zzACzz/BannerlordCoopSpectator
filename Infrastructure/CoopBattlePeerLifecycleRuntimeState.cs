@@ -140,6 +140,38 @@ namespace CoopSpectator.Infrastructure
             Apply(missionPeer, side, troopId, entryId, CoopBattlePeerLifecycleStatus.Waiting, source, incrementDeathCount: false);
         }
 
+        public static bool TryMigratePeerIndex(int previousPeerIndex, int currentPeerIndex, string source)
+        {
+            if (previousPeerIndex < 0 || currentPeerIndex < 0 || previousPeerIndex == currentPeerIndex)
+                return false;
+
+            if (!_statesByPeer.TryGetValue(previousPeerIndex, out PeerLifecycleRuntimeState previousState))
+                return false;
+
+            PeerLifecycleRuntimeState migratedState = new PeerLifecycleRuntimeState(
+                currentPeerIndex,
+                previousState.Side,
+                previousState.TroopId,
+                previousState.EntryId,
+                previousState.Status,
+                previousState.Source,
+                previousState.DeathCount,
+                previousState.UpdatedUtc);
+            _statesByPeer.Remove(previousPeerIndex);
+            _statesByPeer[currentPeerIndex] = migratedState;
+
+            ModLogger.Info(
+                "CoopBattlePeerLifecycleRuntimeState: migrated reconnect peer state. " +
+                "PreviousPeerIndex=" + previousPeerIndex +
+                " CurrentPeerIndex=" + currentPeerIndex +
+                " Status=" + migratedState.Status +
+                " Side=" + migratedState.Side +
+                " EntryId=" + (migratedState.EntryId ?? "null") +
+                " Deaths=" + migratedState.DeathCount +
+                " Source=" + (source ?? "unknown"));
+            return true;
+        }
+
         private static void SetState(
             MissionPeer missionPeer,
             BattleSideEnum side,

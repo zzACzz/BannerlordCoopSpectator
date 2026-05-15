@@ -3599,7 +3599,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 message.Snapshot.ReinforcementWaveCount = message.ReinforcementWaveCount;
                 message.Snapshot.BattleSizeBudgetSource = message.BattleSizeBudgetSource;
             }
-            BattleSnapshotRuntimeState.SetCurrent(message.Snapshot, "host-battle-detector");
+            if (ShouldPublishHostBattleDetectorRuntimeSnapshot(message.Snapshot))
+            {
+                BattleSnapshotRuntimeState.SetCurrent(message.Snapshot, "host-battle-detector");
+            }
+            else
+            {
+                ModLogger.Info(
+                    "BattleDetector: skipped BattleSnapshotRuntimeState.SetCurrent for non-authoritative fallback snapshot. " +
+                    "BattleId=" + (message.Snapshot?.BattleId ?? "null") +
+                    " Sides=" + (message.Snapshot?.Sides?.Count ?? 0) + ".");
+            }
 
             ModLogger.Info(
                 "BattleDetector: campaign scene context resolved. " +
@@ -3708,6 +3718,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         {
             return !string.IsNullOrWhiteSpace(battleScene) &&
                    battleScene.IndexOf("siege", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool ShouldPublishHostBattleDetectorRuntimeSnapshot(BattleSnapshotMessage snapshot)
+        {
+            if (snapshot?.Sides == null || snapshot.Sides.Count == 0)
+                return false;
+
+            return !string.Equals(snapshot.BattleId, "fallback", StringComparison.OrdinalIgnoreCase);
         }
 
         private static int TryGetSnapshotTotalManCount(BattleSnapshotMessage snapshot)
