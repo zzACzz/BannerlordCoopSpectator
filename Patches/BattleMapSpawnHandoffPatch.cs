@@ -1215,7 +1215,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (!safeStringIdCreateAgentPathActive && snapshotReadyForExactHeroHandoff)
+                if (snapshotReadyForExactHeroHandoff)
                 {
                     if (TryHandleStrictExactHeroCreateAgentViaContract(
                             mission,
@@ -1241,7 +1241,7 @@ namespace CoopSpectator.Patches
                         return false;
                     }
                 }
-                else if (!safeStringIdCreateAgentPathActive && mountedHeroPayloadCandidate)
+                else if (mountedHeroPayloadCandidate)
                 {
                     RegisterDeferredMountedHeroCreateAgentPayload(createAgent, snapshotReadinessSummary);
                     ModLogger.Info(
@@ -1257,7 +1257,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (!hasMountPayload || strictExactCandidate)
+                if (!hasMountPayload)
                     return true;
 
                 if (!mountedHeroPayloadCandidate || !snapshotReadyForExactHeroHandoff)
@@ -1498,7 +1498,7 @@ namespace CoopSpectator.Patches
                     mission,
                     createAgent,
                     out strictExactCandidate);
-                if (!handled && !strictExactCandidate)
+                if (!handled)
                 {
                     handled = TryHandleMountedHeroCreateAgentViaPayloadAdapter(
                         mission,
@@ -3192,7 +3192,7 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            Team teamFromTeamIndex = Mission.MissionNetworkHelper.GetTeamFromTeamIndex(createAgent.TeamIndex);
+            Team teamFromTeamIndex = ResolveCreateAgentMissionTeam(mission, createAgent.TeamIndex);
             if (teamFromTeamIndex == null)
             {
                 ModLogger.Info(
@@ -3216,6 +3216,9 @@ namespace CoopSpectator.Patches
             if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null)
                 return false;
 
+            TaleWorlds.Localization.TextObject originalTroopName = null;
+            bool hasTemporaryNameOverride =
+                CoopMissionSpawnLogic.TryApplyEntryNameToSpawnCharacter(character, entryState, out originalTroopName);
             try
             {
                 AgentBuildData buildData = new AgentBuildData(character)
@@ -3250,6 +3253,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                CoopMissionSpawnLogic.TryApplyEntryIdentityToAgent(agent, entryState);
                 ExactTransferContractRuntimeCache.ObserveClientMaterialized(
                     agent.Index,
                     agent,
@@ -3303,6 +3307,10 @@ namespace CoopSpectator.Patches
                     " Source=battle-map handoff strict exact CreateAgent");
                 return false;
             }
+            finally
+            {
+                CoopMissionSpawnLogic.RestoreSpawnCharacterName(character, hasTemporaryNameOverride, originalTroopName);
+            }
         }
 
         private static bool TryHandleMountedHeroCreateAgentViaPayloadAdapter(
@@ -3314,27 +3322,58 @@ namespace CoopSpectator.Patches
             if (!mountedHeroPayloadCandidate || mission == null || createAgent == null)
                 return false;
 
-            Team teamFromTeamIndex = Mission.MissionNetworkHelper.GetTeamFromTeamIndex(createAgent.TeamIndex);
+            Team teamFromTeamIndex = ResolveCreateAgentMissionTeam(mission, createAgent.TeamIndex);
             if (teamFromTeamIndex == null)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: mounted hero CreateAgent payload adapter skipped because mission team was unavailable. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " TeamIndex=" + createAgent.TeamIndex +
+                    " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null"));
                 return false;
+            }
 
             Formation formation = null;
             if (createAgent.FormationIndex >= 0 && !GameNetwork.IsReplay)
                 formation = teamFromTeamIndex.GetFormation((FormationClass)createAgent.FormationIndex);
 
             Banner banner = ResolveStrictExactHeroCreateAgentBanner(teamFromTeamIndex, formation);
-            Equipment createTimeSpawnEquipment = createAgent.SpawnEquipment?.Clone(false);
+            bool resolvedStrictExactContract = TryResolveMountedHeroCreateAgentContractForPayloadAdapter(
+                createAgent,
+                out string entryId,
+                out RosterEntryState entryState,
+                out ExactTransferSpawnContract contract,
+                out ExactTransferValidationResult validation,
+                out string resolutionSource);
+            bool exactVisualHybridEligible =
+                resolvedStrictExactContract &&
+                entryState != null &&
+                contract != null &&
+                HasOnlyStrictHeroWeapon2RiskValidationFailure(validation);
+            BasicCharacterObject createTimeCharacter = createAgent.Character;
+            if (resolvedStrictExactContract && contract != null)
+                createTimeCharacter = ResolveStrictExactHeroCreateAgentCharacter(createAgent, contract) ?? createTimeCharacter;
+
+            Equipment createTimeSpawnEquipment =
+                exactVisualHybridEligible
+                    ? BuildMountedHeroExactVisualHybridSpawnEquipment(contract, createAgent)
+                    : createAgent.SpawnEquipment?.Clone(false);
             MissionEquipment createTimeMissionEquipment =
-                createAgent.MissionEquipment ??
-                (createTimeSpawnEquipment != null ? new MissionEquipment(createTimeSpawnEquipment, banner) : null);
-            if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null || createAgent.Character == null)
+                exactVisualHybridEligible
+                    ? BuildMountedHeroExactVisualHybridMissionEquipment(createTimeSpawnEquipment, createAgent, banner)
+                    : createAgent.MissionEquipment ??
+                      (createTimeSpawnEquipment != null ? new MissionEquipment(createTimeSpawnEquipment, banner) : null);
+            if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null || createTimeCharacter == null)
                 return false;
 
+            TaleWorlds.Localization.TextObject originalTroopName = null;
+            bool hasTemporaryNameOverride =
+                CoopMissionSpawnLogic.TryApplyEntryNameToSpawnCharacter(createTimeCharacter, entryState, out originalTroopName);
             try
             {
-                AgentBuildData buildData = new AgentBuildData(createAgent.Character)
+                AgentBuildData buildData = new AgentBuildData(createTimeCharacter)
                     .Monster(createAgent.Monster)
-                    .TroopOrigin(new BasicBattleAgentOrigin(createAgent.Character))
+                    .TroopOrigin(new BasicBattleAgentOrigin(createTimeCharacter))
                     .Equipment(createTimeSpawnEquipment)
                     .EquipmentSeed(createAgent.BodyPropertiesSeed)
                     .InitialPosition(createAgent.Position)
@@ -3343,10 +3382,12 @@ namespace CoopSpectator.Patches
                     .Team(teamFromTeamIndex)
                     .Index(createAgent.AgentIndex)
                     .MountIndex(createAgent.MountAgentIndex)
-                    .IsFemale(createAgent.IsFemale)
+                    .IsFemale(contract?.Body?.HasExactBodyProperties == true ? contract.Body.IsFemale : createAgent.IsFemale)
                     .ClothingColor1(createAgent.ClothingColor1)
                     .ClothingColor2(createAgent.ClothingColor2)
-                    .BodyProperties(createAgent.BodyPropertiesValue);
+                    .BodyProperties(contract?.Body?.HasExactBodyProperties == true ? contract.Body.BodyProperties : createAgent.BodyPropertiesValue);
+                if (contract?.Body?.Age is int exactAge)
+                    buildData.Age(exactAge);
                 if (formation != null)
                     buildData.Formation(formation);
                 if (banner != null)
@@ -3356,14 +3397,27 @@ namespace CoopSpectator.Patches
                 if (agent == null)
                     return false;
 
+                CoopMissionSpawnLogic.TryApplyEntryIdentityToAgent(agent, entryState);
+                if (resolvedStrictExactContract)
+                    ExactTransferContractRuntimeCache.ObserveClientMaterialized(
+                        agent.Index,
+                        agent,
+                        "battle-map mounted-hero payload adapter");
                 if (createAgent.MountAgentIndex >= 0)
-                    CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent, createAgent.MountAgentIndex);
+                    CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(
+                        agent,
+                        createAgent.MountAgentIndex,
+                        entryId);
                 CoopMissionSpawnLogic.TryTrackClientMountedHeroMountAgentIndex(agent);
 
                 string payloadSummary =
+                    "EntryId=" + (entryId ?? "null") +
+                    " ResolutionSource=" + (resolutionSource ?? "null") +
                     "PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                    " ContractCharacter=" + (createTimeCharacter?.StringId ?? "null") +
                     " MountAgentIndex=" + createAgent.MountAgentIndex +
                     " FormationIndex=" + createAgent.FormationIndex +
+                    " ExactVisualHybridEligible=" + exactVisualHybridEligible +
                     " PayloadMissionWeapons={" + BuildMissionEquipmentWeaponSummary(createTimeMissionEquipment) + "}" +
                     " PayloadMount={" + BuildEquipmentSummary(createTimeSpawnEquipment, EquipmentIndex.Horse, EquipmentIndex.HorseHarness) + "}" +
                     " Source=battle-map payload mounted hero CreateAgent";
@@ -3386,6 +3440,393 @@ namespace CoopSpectator.Patches
                     " Message=" + ex.Message);
                 return false;
             }
+            finally
+            {
+                CoopMissionSpawnLogic.RestoreSpawnCharacterName(createTimeCharacter, hasTemporaryNameOverride, originalTroopName);
+            }
+        }
+
+        private static bool HasOnlyStrictHeroWeapon2RiskValidationFailure(ExactTransferValidationResult validation)
+        {
+            return validation != null &&
+                   !validation.IsValid &&
+                   validation.Errors.Count > 0 &&
+                   validation.Errors.All(error =>
+                       string.Equals(
+                           error,
+                           "strict hero path still has live weapon2 risk",
+                           StringComparison.Ordinal));
+        }
+
+        private static bool TryResolveMountedHeroCreateAgentContractForPayloadAdapter(
+            CreateAgent createAgent,
+            out string entryId,
+            out RosterEntryState entryState,
+            out ExactTransferSpawnContract contract,
+            out ExactTransferValidationResult validation,
+            out string resolutionSource)
+        {
+            if (CoopMissionSpawnLogic.TryResolveClientStrictExactHeroCreateAgentContract(
+                    createAgent,
+                    out entryId,
+                    out entryState,
+                    out contract,
+                    out validation,
+                    out resolutionSource))
+            {
+                return true;
+            }
+
+            entryId = null;
+            entryState = null;
+            contract = null;
+            validation = null;
+            resolutionSource = null;
+
+            if (!TryResolveMountedHeroCreateAgentEntryFromPayloadFallback(
+                    createAgent,
+                    out entryId,
+                    out entryState,
+                    out resolutionSource))
+            {
+                return false;
+            }
+
+            contract = ExactTransferContractBuilder.Build(
+                entryState,
+                isPlayerControlledOrigin: false,
+                teamIndex: createAgent.TeamIndex,
+                formationIndex: createAgent.FormationIndex);
+            validation = ExactTransferContractValidator.Validate(contract);
+            ExactTransferContractRuntimeCache.RegisterClientObservedContract(
+                contract,
+                validation,
+                createAgent.AgentIndex,
+                createAgent.MountAgentIndex,
+                "client mounted hero payload adapter fallback: " + (resolutionSource ?? "unknown"));
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: resolved mounted hero CreateAgent contract via payload fallback. " +
+                "AgentIndex=" + createAgent.AgentIndex +
+                " MountAgentIndex=" + createAgent.MountAgentIndex +
+                " EntryId=" + (entryId ?? "null") +
+                " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                " ResolutionSource=" + (resolutionSource ?? "null") +
+                " " + ExactTransferContractRuntimeCache.BuildContractSummary(entryId) +
+                " " + ExactTransferContractRuntimeCache.BuildValidationSummary(entryId) +
+                " " + ExactTransferContractRuntimeCache.BuildRuntimeStateSummary(entryId));
+            return true;
+        }
+
+        private static bool TryResolveMountedHeroCreateAgentEntryFromPayloadFallback(
+            CreateAgent createAgent,
+            out string entryId,
+            out RosterEntryState entryState,
+            out string resolutionSource)
+        {
+            entryId = null;
+            entryState = null;
+            resolutionSource = null;
+
+            if (createAgent == null || createAgent.MountAgentIndex < 0)
+                return false;
+
+            if (!ExactCreateAgentCorridorDiagnostics.TryResolveClientCreateAgentPayloadEntryId(
+                    createAgent,
+                    out string candidateEntryId,
+                    out string resolutionState,
+                    out string _))
+            {
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(candidateEntryId))
+                return false;
+
+            RosterEntryState candidateEntryState = BattleSnapshotRuntimeState.GetEntryState(candidateEntryId);
+            if (candidateEntryState == null ||
+                !candidateEntryState.IsHero ||
+                !candidateEntryState.IsMounted)
+            {
+                return false;
+            }
+
+            entryId = candidateEntryId;
+            entryState = candidateEntryState;
+            resolutionSource = "payload-candidate-" + (resolutionState ?? "resolved");
+            return true;
+        }
+
+        private static Equipment BuildMountedHeroExactVisualHybridSpawnEquipment(
+            ExactTransferSpawnContract contract,
+            CreateAgent createAgent)
+        {
+            Equipment hybridEquipment = contract?.Equipment?.SpawnEquipment?.Clone(false);
+            if (hybridEquipment == null)
+                return createAgent?.SpawnEquipment?.Clone(false);
+
+            Equipment payloadSpawnEquipment = createAgent?.SpawnEquipment;
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                if (hybridEquipment[slot].Item != null)
+                    continue;
+
+                hybridEquipment[slot] =
+                    payloadSpawnEquipment != null
+                        ? payloadSpawnEquipment.GetEquipmentFromSlot(slot)
+                        : default;
+            }
+
+            return hybridEquipment;
+        }
+
+        private static MissionEquipment BuildMountedHeroExactVisualHybridMissionEquipment(
+            Equipment hybridSpawnEquipment,
+            CreateAgent createAgent,
+            Banner banner)
+        {
+            if (hybridSpawnEquipment == null)
+                return createAgent?.MissionEquipment;
+
+            MissionEquipment hybridMissionEquipment = new MissionEquipment(hybridSpawnEquipment, banner);
+            return hybridMissionEquipment;
+        }
+
+        private static void TryCanonicalizeStrictMountedHeroSynchronizeAgentEquipmentPayload(
+            SynchronizeAgentSpawnEquipment synchronizeAgentSpawnEquipment,
+            Agent agent)
+        {
+            try
+            {
+                if (synchronizeAgentSpawnEquipment?.SpawnEquipment == null || agent == null || agent.IsMount)
+                    return;
+
+                string entryId = null;
+                if (!CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                    !CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId) &&
+                    !ExactTransferContractRuntimeCache.TryGetEntryIdByRiderAgentIndex(agent.Index, out entryId))
+                {
+                    return;
+                }
+
+                RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+                if (entryState == null || !entryState.IsHero || !entryState.IsMounted)
+                    return;
+
+                if (!ExactTransferContractRuntimeCache.TryGetContract(entryId, out ExactTransferSpawnContract contract) ||
+                    contract?.SpawnPolicy?.UseStrictExactHeroPath != true)
+                {
+                    return;
+                }
+
+                if (!ExactTransferContractRuntimeCache.TryGetValidation(entryId, out ExactTransferValidationResult validation) ||
+                    !HasOnlyStrictHeroWeapon2RiskValidationFailure(validation))
+                {
+                    return;
+                }
+
+                Equipment exactEquipment =
+                    contract.Equipment?.SpawnEquipment?.Clone(false) ??
+                    CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
+                        entryState,
+                        includeWeapons: true,
+                        honorExactVisualContracts: false,
+                        includeArmorVisuals: true,
+                        includeMountVisuals: true);
+                if (exactEquipment == null)
+                    return;
+
+                string beforeArmorSummary = BuildEquipmentSummary(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    EquipmentIndex.Head,
+                    EquipmentIndex.Body,
+                    EquipmentIndex.Leg,
+                    EquipmentIndex.Gloves,
+                    EquipmentIndex.Cape);
+                string beforeMountSummary = BuildEquipmentSummary(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    EquipmentIndex.Horse,
+                    EquipmentIndex.HorseHarness);
+                var changedSlots = new List<string>();
+
+                CanonicalizeSynchronizeAgentEquipmentSlot(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    exactEquipment,
+                    EquipmentIndex.Head,
+                    changedSlots);
+                CanonicalizeSynchronizeAgentEquipmentSlot(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    exactEquipment,
+                    EquipmentIndex.Body,
+                    changedSlots);
+                CanonicalizeSynchronizeAgentEquipmentSlot(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    exactEquipment,
+                    EquipmentIndex.Leg,
+                    changedSlots);
+                CanonicalizeSynchronizeAgentEquipmentSlot(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    exactEquipment,
+                    EquipmentIndex.Gloves,
+                    changedSlots);
+                CanonicalizeSynchronizeAgentEquipmentSlot(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    exactEquipment,
+                    EquipmentIndex.Cape,
+                    changedSlots);
+                CanonicalizeSynchronizeAgentEquipmentSlot(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    exactEquipment,
+                    EquipmentIndex.Horse,
+                    changedSlots);
+                CanonicalizeSynchronizeAgentEquipmentSlot(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    exactEquipment,
+                    EquipmentIndex.HorseHarness,
+                    changedSlots);
+
+                if (changedSlots.Count == 0)
+                    return;
+
+                string afterArmorSummary = BuildEquipmentSummary(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    EquipmentIndex.Head,
+                    EquipmentIndex.Body,
+                    EquipmentIndex.Leg,
+                    EquipmentIndex.Gloves,
+                    EquipmentIndex.Cape);
+                string afterMountSummary = BuildEquipmentSummary(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    EquipmentIndex.Horse,
+                    EquipmentIndex.HorseHarness);
+                string weaponSummary = BuildEquipmentSummary(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3);
+
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: canonicalized strict mounted hero SynchronizeAgentSpawnEquipment payload to exact armor/mount. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " ChangedSlots=[" + string.Join(", ", changedSlots) + "]" +
+                    " PayloadWeaponsAfter={" + weaponSummary + "}" +
+                    " PayloadArmorBefore={" + beforeArmorSummary + "}" +
+                    " PayloadArmorAfter={" + afterArmorSummary + "}" +
+                    " PayloadMountBefore={" + beforeMountSummary + "}" +
+                    " PayloadMountAfter={" + afterMountSummary + "}");
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-synchronize-agent-equipment-canonicalized-strict-mounted-hero",
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " ChangedSlots=[" + string.Join(", ", changedSlots) + "]" +
+                    " PayloadWeaponsAfter={" + weaponSummary + "}" +
+                    " PayloadArmorBefore={" + beforeArmorSummary + "}" +
+                    " PayloadArmorAfter={" + afterArmorSummary + "}" +
+                    " PayloadMountBefore={" + beforeMountSummary + "}" +
+                    " PayloadMountAfter={" + afterMountSummary + "}");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: strict mounted hero SynchronizeAgentSpawnEquipment payload canonicalization failed open: " +
+                    ex.Message);
+            }
+        }
+
+        private static void CanonicalizeSynchronizeAgentEquipmentSlot(
+            Equipment targetEquipment,
+            Equipment sourceEquipment,
+            EquipmentIndex slot,
+            List<string> changedSlots)
+        {
+            if (targetEquipment == null || sourceEquipment == null)
+                return;
+
+            EquipmentElement currentElement = targetEquipment.GetEquipmentFromSlot(slot);
+            EquipmentElement exactElement = sourceEquipment.GetEquipmentFromSlot(slot);
+            string currentItemId = currentElement.Item?.StringId ?? string.Empty;
+            string exactItemId = exactElement.Item?.StringId ?? string.Empty;
+            if (string.Equals(currentItemId, exactItemId, StringComparison.Ordinal))
+                return;
+
+            targetEquipment[slot] = exactElement;
+            changedSlots?.Add(
+                slot + "=" +
+                (currentItemId.Length > 0 ? currentItemId : "empty") +
+                "->" +
+                (exactItemId.Length > 0 ? exactItemId : "empty"));
+        }
+
+        private static bool TryCopyHybridWeaponSlotsFromMissionEquipment(
+            Equipment targetEquipment,
+            MissionEquipment missionEquipment)
+        {
+            if (targetEquipment == null || missionEquipment == null)
+                return false;
+
+            bool copiedAny = false;
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                MissionWeapon payloadMissionWeapon = missionEquipment[slot];
+                if (payloadMissionWeapon.IsEmpty || payloadMissionWeapon.Item == null)
+                    continue;
+
+                targetEquipment[slot] = new EquipmentElement(
+                    payloadMissionWeapon.Item,
+                    payloadMissionWeapon.ItemModifier,
+                    null,
+                    false);
+                copiedAny = true;
+            }
+
+            return copiedAny;
+        }
+
+        private static bool DoesRosterEntryStateMatchBattleSide(RosterEntryState entryState, BattleSideEnum side)
+        {
+            if (entryState == null || side == BattleSideEnum.None)
+                return false;
+
+            string sideId = entryState.SideId ?? string.Empty;
+            return side == BattleSideEnum.Attacker
+                ? string.Equals(sideId, "Attacker", StringComparison.OrdinalIgnoreCase)
+                : side == BattleSideEnum.Defender &&
+                  string.Equals(sideId, "Defender", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static Team ResolveCreateAgentMissionTeam(Mission mission, int teamIndex)
+        {
+            if (mission == null)
+                return null;
+
+            Team teamFromTeamIndex = Mission.MissionNetworkHelper.GetTeamFromTeamIndex(teamIndex);
+            if (teamFromTeamIndex != null && teamFromTeamIndex.Side != BattleSideEnum.None)
+                return teamFromTeamIndex;
+
+            BattleSideEnum payloadSide = ResolveCreateAgentPayloadBattleSideForPatch(teamIndex);
+            if (payloadSide == BattleSideEnum.Attacker)
+                return mission.AttackerTeam ?? mission.Teams?.Attacker;
+
+            if (payloadSide == BattleSideEnum.Defender)
+                return mission.DefenderTeam ?? mission.Teams?.Defender;
+
+            return teamFromTeamIndex;
+        }
+
+        private static BattleSideEnum ResolveCreateAgentPayloadBattleSideForPatch(int teamIndex)
+        {
+            Team missionTeam = Mission.MissionNetworkHelper.GetTeamFromTeamIndex(teamIndex);
+            if (missionTeam != null && missionTeam.Side != BattleSideEnum.None)
+                return missionTeam.Side;
+
+            if (teamIndex == 0)
+                return BattleSideEnum.Attacker;
+
+            if (teamIndex == 1)
+                return BattleSideEnum.Defender;
+
+            return BattleSideEnum.None;
         }
 
         private static bool IsMountedHeroTemplatePayload(CreateAgent createAgent)
@@ -3697,6 +4138,10 @@ namespace CoopSpectator.Patches
                         "AgentIndex=" + synchronizeAgentSpawnEquipment.AgentIndex);
                     return false;
                 }
+
+                TryCanonicalizeStrictMountedHeroSynchronizeAgentEquipmentPayload(
+                    synchronizeAgentSpawnEquipment,
+                    agent);
 
                 return true;
             }

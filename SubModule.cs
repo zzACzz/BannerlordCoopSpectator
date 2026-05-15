@@ -126,6 +126,8 @@ namespace CoopSpectator // Використовуємо кореневий names
                 BattleShellSuppressionPatch.Apply(harmony);
                 BattleMapHudSuppressionPatch.Apply(harmony);
                 MissionScreenCameraPreviewPatch.Apply(harmony);
+                CharacterTableauMountedStanceFixPatch.Apply(harmony);
+                CharacterTableauChainDiagnosticsPatch.Apply(harmony);
                 ClientChangeCultureCanonicalizationPatch.Apply(harmony);
                 MultiplayerCharacterClassFallbackPatch.Apply(harmony);
                 CampaignCombatProfileAgentStatsPatch.Apply(harmony);

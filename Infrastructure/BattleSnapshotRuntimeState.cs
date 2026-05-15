@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
+using TaleWorlds.MountAndBlade;
 using TaleWorlds.ObjectSystem;
 
 namespace CoopSpectator.Infrastructure
@@ -138,6 +139,16 @@ namespace CoopSpectator.Infrastructure
         public string CombatCapeId { get; set; }
         public string CombatHorseId { get; set; }
         public string CombatHorseHarnessId { get; set; }
+        public bool ServerCreateContractResolved { get; set; }
+        public bool ServerCreateUseStringIdExactEquipmentPath { get; set; }
+        public bool ServerCreateInjectEquipment { get; set; }
+        public bool ServerCreatePreSpawnIncludesWeapons { get; set; }
+        public bool ServerCreatePreSpawnIncludesArmorVisuals { get; set; }
+        public bool ServerCreatePreSpawnIncludesCapeVisual { get; set; }
+        public bool ServerCreatePreSpawnIncludesMountVisuals { get; set; }
+        public bool ServerCreatePayloadDiagnosticActive { get; set; }
+        public string ServerCreateRequestedProfile { get; set; }
+        public string ServerCreateEffectiveProfile { get; set; }
         public int Tier { get; set; }
     }
 
@@ -249,6 +260,16 @@ namespace CoopSpectator.Infrastructure
         public string CombatCapeId { get; set; }
         public string CombatHorseId { get; set; }
         public string CombatHorseHarnessId { get; set; }
+        public bool ServerCreateContractResolved { get; set; }
+        public bool ServerCreateUseStringIdExactEquipmentPath { get; set; }
+        public bool ServerCreateInjectEquipment { get; set; }
+        public bool ServerCreatePreSpawnIncludesWeapons { get; set; }
+        public bool ServerCreatePreSpawnIncludesArmorVisuals { get; set; }
+        public bool ServerCreatePreSpawnIncludesCapeVisual { get; set; }
+        public bool ServerCreatePreSpawnIncludesMountVisuals { get; set; }
+        public bool ServerCreatePayloadDiagnosticActive { get; set; }
+        public string ServerCreateRequestedProfile { get; set; }
+        public string ServerCreateEffectiveProfile { get; set; }
         public int Tier { get; set; }
     }
 
@@ -283,11 +304,34 @@ namespace CoopSpectator.Infrastructure
             ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(runtimeState, _source);
             ExactCampaignRuntimeObjectRegistry.SyncFromState(runtimeState, _source);
 
+            int annotatedServerCreateContractEntries = 0;
+            if (GameNetwork.IsServer &&
+                TryAnnotateDedicatedServerCreateTimeContracts(
+                    snapshot,
+                    _projection,
+                    runtimeState,
+                    _source,
+                    out annotatedServerCreateContractEntries))
+            {
+                lock (Sync)
+                {
+                    _updatedUtc = DateTime.UtcNow;
+                }
+            }
+
+            int snapshotServerCreateResolvedEntries = CountSnapshotEntriesWithResolvedServerCreateContract(snapshot);
+            int projectionServerCreateResolvedEntries = CountProjectionEntriesWithResolvedServerCreateContract(_projection);
+            int runtimeServerCreateResolvedEntries = CountRuntimeEntriesWithResolvedServerCreateContract(runtimeState);
+
             ModLogger.Info(
                 "BattleSnapshotRuntimeState: snapshot updated. " +
                 "Source=" + (_source ?? "unknown") +
                 " Sides=" + (snapshot.Sides?.Count ?? 0) +
                 " Entries=" + (_projection?.EntriesById?.Count ?? 0) +
+                " ServerCreateContractAnnotated=" + annotatedServerCreateContractEntries +
+                " SnapshotServerCreateResolved=" + snapshotServerCreateResolvedEntries +
+                " ProjectionServerCreateResolved=" + projectionServerCreateResolvedEntries +
+                " RuntimeServerCreateResolved=" + runtimeServerCreateResolvedEntries +
                 " BattleId=" + (snapshot.BattleId ?? "null"));
         }
 
@@ -415,6 +459,42 @@ namespace CoopSpectator.Infrastructure
                 _state.EntriesById.TryGetValue(entryId, out RosterEntryState entry);
                 return entry;
             }
+        }
+
+        private static int CountSnapshotEntriesWithResolvedServerCreateContract(BattleSnapshotMessage snapshot)
+        {
+            if (snapshot?.Sides == null || snapshot.Sides.Count == 0)
+                return 0;
+
+            int count = 0;
+            foreach (BattleSideSnapshotMessage side in snapshot.Sides.Where(candidate => candidate != null))
+            {
+                count += CountTroopsWithResolvedServerCreateContract(side.Troops);
+                if (side.Parties == null)
+                    continue;
+
+                foreach (BattlePartySnapshotMessage party in side.Parties.Where(candidate => candidate != null))
+                {
+                    count += CountTroopsWithResolvedServerCreateContract(party.Troops);
+                }
+            }
+
+            return count;
+        }
+
+        private static int CountProjectionEntriesWithResolvedServerCreateContract(BattleSnapshotProjectionState projection)
+        {
+            return projection?.EntriesById?.Values.Count(entry => entry?.ServerCreateContractResolved == true) ?? 0;
+        }
+
+        private static int CountRuntimeEntriesWithResolvedServerCreateContract(BattleRuntimeState runtimeState)
+        {
+            return runtimeState?.EntriesById?.Values.Count(entry => entry?.ServerCreateContractResolved == true) ?? 0;
+        }
+
+        private static int CountTroopsWithResolvedServerCreateContract(List<TroopStackInfo> troops)
+        {
+            return troops?.Count(troop => troop?.ServerCreateContractResolved == true) ?? 0;
         }
 
         public static string ResolveEntryDisplayName(RosterEntryState entryState, string fallbackId)
@@ -844,6 +924,178 @@ namespace CoopSpectator.Infrastructure
                 normalizedTemplateId.IndexOf("_" + token + "_", StringComparison.Ordinal) >= 0);
         }
 
+        private static bool TryAnnotateDedicatedServerCreateTimeContracts(
+            BattleSnapshotMessage snapshot,
+            BattleSnapshotProjectionState projection,
+            BattleRuntimeState runtimeState,
+            string source,
+            out int annotatedEntryCount)
+        {
+            annotatedEntryCount = 0;
+            if (snapshot?.Sides == null ||
+                projection?.EntriesById == null ||
+                runtimeState?.EntriesById == null ||
+                runtimeState.EntriesById.Count == 0)
+            {
+                return false;
+            }
+
+            Dictionary<string, List<TroopStackInfo>> troopsByEntryId = BuildSnapshotTroopLookup(snapshot);
+            bool useDedicatedSafeStringIdExactEquipmentPath =
+                MissionBehaviors.CoopMissionSpawnLogic.UseDedicatedSafeStringIdExactEquipmentPathOnServer();
+            var samples = new List<string>();
+
+            foreach (RosterEntryState entryState in runtimeState.EntriesById.Values
+                         .Where(entry => entry != null && !string.IsNullOrWhiteSpace(entry.EntryId) && !entry.IsHero))
+            {
+                ExactCreateAgentServerPreSpawnContractState resolvedContract =
+                    ExactCreateAgentServerPreSpawnContractResolver.Resolve(
+                        entryState,
+                        contractPlayerControlledOrigin: false,
+                        teamIndex: -1,
+                        formationIndex: -1,
+                        useDedicatedSafeStringIdExactEquipmentPath: useDedicatedSafeStringIdExactEquipmentPath);
+                if (resolvedContract == null || !resolvedContract.ContractResolved)
+                    continue;
+
+                ApplyServerCreateContract(entryState, resolvedContract);
+                if (projection.EntriesById.TryGetValue(entryState.EntryId, out BattleRosterEntryProjectionState projectionEntry) &&
+                    projectionEntry != null)
+                {
+                    ApplyServerCreateContract(projectionEntry, resolvedContract);
+                }
+
+                if (troopsByEntryId.TryGetValue(entryState.EntryId, out List<TroopStackInfo> troopsForEntry) &&
+                    troopsForEntry != null)
+                {
+                    foreach (TroopStackInfo troop in troopsForEntry.Where(candidate => candidate != null))
+                        ApplyServerCreateContract(troop, resolvedContract);
+                }
+
+                annotatedEntryCount++;
+                if (samples.Count < 8)
+                {
+                    samples.Add(
+                        entryState.EntryId +
+                        "{Inject=" + resolvedContract.InjectEquipment +
+                        ",Weapons=" + resolvedContract.ActualPreSpawnIncludesWeapons +
+                        ",Cape=" + resolvedContract.ActualPreSpawnIncludesCapeVisual +
+                        ",Mount=" + resolvedContract.ActualPreSpawnIncludesMountVisuals +
+                        ",Profile=" + (resolvedContract.EffectiveProfile ?? "null") + "}");
+                }
+            }
+
+            if (annotatedEntryCount <= 0)
+                return false;
+
+            ModLogger.Info(
+                "BattleSnapshotRuntimeState: annotated dedicated server create-time contract into battle snapshot. " +
+                "Source=" + (source ?? "unknown") +
+                " AnnotatedEntries=" + annotatedEntryCount +
+                " Sample=[" + string.Join("; ", samples) + "]");
+            return true;
+        }
+
+        private static Dictionary<string, List<TroopStackInfo>> BuildSnapshotTroopLookup(BattleSnapshotMessage snapshot)
+        {
+            var troopsByEntryId = new Dictionary<string, List<TroopStackInfo>>(StringComparer.OrdinalIgnoreCase);
+            if (snapshot?.Sides == null)
+                return troopsByEntryId;
+
+            foreach (BattleSideSnapshotMessage side in snapshot.Sides.Where(candidate => candidate != null))
+            {
+                foreach (BattlePartySnapshotMessage party in side.Parties?.Where(candidate => candidate != null) ?? Enumerable.Empty<BattlePartySnapshotMessage>())
+                {
+                    foreach (TroopStackInfo troop in party.Troops?.Where(candidate => candidate != null) ?? Enumerable.Empty<TroopStackInfo>())
+                    {
+                        if (!string.IsNullOrWhiteSpace(troop.EntryId))
+                            AddSnapshotTroopLookupEntry(troopsByEntryId, troop.EntryId, troop);
+                    }
+                }
+
+                foreach (TroopStackInfo troop in side.Troops?.Where(candidate => candidate != null) ?? Enumerable.Empty<TroopStackInfo>())
+                {
+                    if (!string.IsNullOrWhiteSpace(troop.EntryId))
+                        AddSnapshotTroopLookupEntry(troopsByEntryId, troop.EntryId, troop);
+                }
+            }
+
+            return troopsByEntryId;
+        }
+
+        private static void AddSnapshotTroopLookupEntry(
+            Dictionary<string, List<TroopStackInfo>> troopsByEntryId,
+            string entryId,
+            TroopStackInfo troop)
+        {
+            if (troopsByEntryId == null ||
+                string.IsNullOrWhiteSpace(entryId) ||
+                troop == null)
+            {
+                return;
+            }
+
+            if (!troopsByEntryId.TryGetValue(entryId, out List<TroopStackInfo> troopsForEntry) ||
+                troopsForEntry == null)
+            {
+                troopsForEntry = new List<TroopStackInfo>();
+                troopsByEntryId[entryId] = troopsForEntry;
+            }
+
+            troopsForEntry.Add(troop);
+        }
+
+        private static void ApplyServerCreateContract(RosterEntryState entryState, ExactCreateAgentServerPreSpawnContractState resolvedContract)
+        {
+            if (entryState == null || resolvedContract == null)
+                return;
+
+            entryState.ServerCreateContractResolved = resolvedContract.ContractResolved;
+            entryState.ServerCreateUseStringIdExactEquipmentPath = resolvedContract.UseDedicatedSafeStringIdExactEquipmentPath;
+            entryState.ServerCreateInjectEquipment = resolvedContract.InjectEquipment;
+            entryState.ServerCreatePreSpawnIncludesWeapons = resolvedContract.ActualPreSpawnIncludesWeapons;
+            entryState.ServerCreatePreSpawnIncludesArmorVisuals = resolvedContract.ActualPreSpawnIncludesArmorVisuals;
+            entryState.ServerCreatePreSpawnIncludesCapeVisual = resolvedContract.ActualPreSpawnIncludesCapeVisual;
+            entryState.ServerCreatePreSpawnIncludesMountVisuals = resolvedContract.ActualPreSpawnIncludesMountVisuals;
+            entryState.ServerCreatePayloadDiagnosticActive = resolvedContract.PayloadDiagnosticActive;
+            entryState.ServerCreateRequestedProfile = resolvedContract.RequestedProfile;
+            entryState.ServerCreateEffectiveProfile = resolvedContract.EffectiveProfile;
+        }
+
+        private static void ApplyServerCreateContract(BattleRosterEntryProjectionState entryState, ExactCreateAgentServerPreSpawnContractState resolvedContract)
+        {
+            if (entryState == null || resolvedContract == null)
+                return;
+
+            entryState.ServerCreateContractResolved = resolvedContract.ContractResolved;
+            entryState.ServerCreateUseStringIdExactEquipmentPath = resolvedContract.UseDedicatedSafeStringIdExactEquipmentPath;
+            entryState.ServerCreateInjectEquipment = resolvedContract.InjectEquipment;
+            entryState.ServerCreatePreSpawnIncludesWeapons = resolvedContract.ActualPreSpawnIncludesWeapons;
+            entryState.ServerCreatePreSpawnIncludesArmorVisuals = resolvedContract.ActualPreSpawnIncludesArmorVisuals;
+            entryState.ServerCreatePreSpawnIncludesCapeVisual = resolvedContract.ActualPreSpawnIncludesCapeVisual;
+            entryState.ServerCreatePreSpawnIncludesMountVisuals = resolvedContract.ActualPreSpawnIncludesMountVisuals;
+            entryState.ServerCreatePayloadDiagnosticActive = resolvedContract.PayloadDiagnosticActive;
+            entryState.ServerCreateRequestedProfile = resolvedContract.RequestedProfile;
+            entryState.ServerCreateEffectiveProfile = resolvedContract.EffectiveProfile;
+        }
+
+        private static void ApplyServerCreateContract(TroopStackInfo entryState, ExactCreateAgentServerPreSpawnContractState resolvedContract)
+        {
+            if (entryState == null || resolvedContract == null)
+                return;
+
+            entryState.ServerCreateContractResolved = resolvedContract.ContractResolved;
+            entryState.ServerCreateUseStringIdExactEquipmentPath = resolvedContract.UseDedicatedSafeStringIdExactEquipmentPath;
+            entryState.ServerCreateInjectEquipment = resolvedContract.InjectEquipment;
+            entryState.ServerCreatePreSpawnIncludesWeapons = resolvedContract.ActualPreSpawnIncludesWeapons;
+            entryState.ServerCreatePreSpawnIncludesArmorVisuals = resolvedContract.ActualPreSpawnIncludesArmorVisuals;
+            entryState.ServerCreatePreSpawnIncludesCapeVisual = resolvedContract.ActualPreSpawnIncludesCapeVisual;
+            entryState.ServerCreatePreSpawnIncludesMountVisuals = resolvedContract.ActualPreSpawnIncludesMountVisuals;
+            entryState.ServerCreatePayloadDiagnosticActive = resolvedContract.PayloadDiagnosticActive;
+            entryState.ServerCreateRequestedProfile = resolvedContract.RequestedProfile;
+            entryState.ServerCreateEffectiveProfile = resolvedContract.EffectiveProfile;
+        }
+
         private static BattleSnapshotProjectionState BuildProjection(BattleSnapshotMessage snapshot)
         {
             var projection = new BattleSnapshotProjectionState
@@ -894,8 +1146,14 @@ namespace CoopSpectator.Infrastructure
                     foreach (TroopStackInfo troop in partySnapshot.Troops.Where(entry => entry != null))
                     {
                         BattleRosterEntryProjectionState entryProjection = BuildEntryProjection(troop, sideProjection.CanonicalSideKey, partyProjection.PartyId, projection.EntriesById.Count);
-                        if (entryProjection == null || projection.EntriesById.ContainsKey(entryProjection.EntryId))
+                        if (entryProjection == null)
                             continue;
+
+                        if (projection.EntriesById.TryGetValue(entryProjection.EntryId, out BattleRosterEntryProjectionState existingPartyEntry))
+                        {
+                            MergeServerCreateContract(existingPartyEntry, entryProjection);
+                            continue;
+                        }
 
                         projection.EntriesById[entryProjection.EntryId] = entryProjection;
                         partyProjection.Entries.Add(entryProjection);
@@ -912,8 +1170,13 @@ namespace CoopSpectator.Infrastructure
                 foreach (TroopStackInfo troop in sideSnapshot.Troops.Where(entry => entry != null))
                 {
                     string entryId = ResolveEntryId(troop, sideProjection.CanonicalSideKey, troop.PartyId, projection.EntriesById.Count);
-                    if (projection.EntriesById.ContainsKey(entryId))
+                    if (projection.EntriesById.TryGetValue(entryId, out BattleRosterEntryProjectionState existingSideEntry))
+                    {
+                        BattleRosterEntryProjectionState duplicateEntryProjection = BuildEntryProjection(troop, sideProjection.CanonicalSideKey, troop.PartyId, projection.EntriesById.Count);
+                        if (duplicateEntryProjection != null)
+                            MergeServerCreateContract(existingSideEntry, duplicateEntryProjection);
                         continue;
+                    }
 
                     BattleRosterEntryProjectionState entryProjection = BuildEntryProjection(troop, sideProjection.CanonicalSideKey, troop.PartyId, projection.EntriesById.Count);
                     if (entryProjection == null)
@@ -936,6 +1199,30 @@ namespace CoopSpectator.Infrastructure
                 .ToList();
 
             return projection;
+        }
+
+        private static void MergeServerCreateContract(
+            BattleRosterEntryProjectionState target,
+            BattleRosterEntryProjectionState source)
+        {
+            if (target == null ||
+                source == null ||
+                target.ServerCreateContractResolved ||
+                !source.ServerCreateContractResolved)
+            {
+                return;
+            }
+
+            target.ServerCreateContractResolved = source.ServerCreateContractResolved;
+            target.ServerCreateUseStringIdExactEquipmentPath = source.ServerCreateUseStringIdExactEquipmentPath;
+            target.ServerCreateInjectEquipment = source.ServerCreateInjectEquipment;
+            target.ServerCreatePreSpawnIncludesWeapons = source.ServerCreatePreSpawnIncludesWeapons;
+            target.ServerCreatePreSpawnIncludesArmorVisuals = source.ServerCreatePreSpawnIncludesArmorVisuals;
+            target.ServerCreatePreSpawnIncludesCapeVisual = source.ServerCreatePreSpawnIncludesCapeVisual;
+            target.ServerCreatePreSpawnIncludesMountVisuals = source.ServerCreatePreSpawnIncludesMountVisuals;
+            target.ServerCreatePayloadDiagnosticActive = source.ServerCreatePayloadDiagnosticActive;
+            target.ServerCreateRequestedProfile = source.ServerCreateRequestedProfile;
+            target.ServerCreateEffectiveProfile = source.ServerCreateEffectiveProfile;
         }
 
         private static BattleRuntimeState BuildState(BattleSnapshotProjectionState projection)
@@ -1040,6 +1327,16 @@ namespace CoopSpectator.Infrastructure
                         CombatCapeId = entryProjection.CombatCapeId,
                         CombatHorseId = entryProjection.CombatHorseId,
                         CombatHorseHarnessId = entryProjection.CombatHorseHarnessId,
+                        ServerCreateContractResolved = entryProjection.ServerCreateContractResolved,
+                        ServerCreateUseStringIdExactEquipmentPath = entryProjection.ServerCreateUseStringIdExactEquipmentPath,
+                        ServerCreateInjectEquipment = entryProjection.ServerCreateInjectEquipment,
+                        ServerCreatePreSpawnIncludesWeapons = entryProjection.ServerCreatePreSpawnIncludesWeapons,
+                        ServerCreatePreSpawnIncludesArmorVisuals = entryProjection.ServerCreatePreSpawnIncludesArmorVisuals,
+                        ServerCreatePreSpawnIncludesCapeVisual = entryProjection.ServerCreatePreSpawnIncludesCapeVisual,
+                        ServerCreatePreSpawnIncludesMountVisuals = entryProjection.ServerCreatePreSpawnIncludesMountVisuals,
+                        ServerCreatePayloadDiagnosticActive = entryProjection.ServerCreatePayloadDiagnosticActive,
+                        ServerCreateRequestedProfile = entryProjection.ServerCreateRequestedProfile,
+                        ServerCreateEffectiveProfile = entryProjection.ServerCreateEffectiveProfile,
                         Tier = entryProjection.Tier
                     };
                     sideState.Entries.Add(entryState);
@@ -1136,6 +1433,16 @@ namespace CoopSpectator.Infrastructure
                 CombatCapeId = troop.CombatCapeId,
                 CombatHorseId = troop.CombatHorseId,
                 CombatHorseHarnessId = troop.CombatHorseHarnessId,
+                ServerCreateContractResolved = troop.ServerCreateContractResolved,
+                ServerCreateUseStringIdExactEquipmentPath = troop.ServerCreateUseStringIdExactEquipmentPath,
+                ServerCreateInjectEquipment = troop.ServerCreateInjectEquipment,
+                ServerCreatePreSpawnIncludesWeapons = troop.ServerCreatePreSpawnIncludesWeapons,
+                ServerCreatePreSpawnIncludesArmorVisuals = troop.ServerCreatePreSpawnIncludesArmorVisuals,
+                ServerCreatePreSpawnIncludesCapeVisual = troop.ServerCreatePreSpawnIncludesCapeVisual,
+                ServerCreatePreSpawnIncludesMountVisuals = troop.ServerCreatePreSpawnIncludesMountVisuals,
+                ServerCreatePayloadDiagnosticActive = troop.ServerCreatePayloadDiagnosticActive,
+                ServerCreateRequestedProfile = troop.ServerCreateRequestedProfile,
+                ServerCreateEffectiveProfile = troop.ServerCreateEffectiveProfile,
                 Tier = troop.Tier
             };
         }

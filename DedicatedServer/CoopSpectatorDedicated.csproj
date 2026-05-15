@@ -74,6 +74,7 @@
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCreateAgentCorridorDiagnostics.cs" Link="Infrastructure\ExactCreateAgentCorridorDiagnostics.cs" />
+    <Compile Include="..\Infrastructure\ExactCreateAgentServerPreSpawnContractResolver.cs" Link="Infrastructure\ExactCreateAgentServerPreSpawnContractResolver.cs" />
     <Compile Include="..\Infrastructure\ExactCreateAgentPayloadDiagnostics.cs" Link="Infrastructure\ExactCreateAgentPayloadDiagnostics.cs" />
     <Compile Include="..\Infrastructure\ExactTransferSpawnContract.cs" Link="Infrastructure\ExactTransferSpawnContract.cs" />
     <Compile Include="..\Infrastructure\ExactTransferRuntimeState.cs" Link="Infrastructure\ExactTransferRuntimeState.cs" />

@@ -72,117 +72,40 @@ namespace CoopSpectator.Patches
                 (entryState.IsHero ||
                  !string.IsNullOrWhiteSpace(entryState.HeroId) ||
                  string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
-            ExactTransferSpawnContract exactTransferContract = ExactTransferContractBuilder.Build(
-                entryState,
-                contractPlayerControlledOrigin,
-                (int)exactOrigin.Side,
-                ResolveFormationIndex(entryState));
-            ExactTransferValidationResult exactTransferValidation =
-                ExactTransferContractValidator.Validate(exactTransferContract);
+            bool useDedicatedSafeStringIdExactEquipmentPath =
+                CoopMissionSpawnLogic.UseDedicatedSafeStringIdExactEquipmentPathOnServer();
+            ExactCreateAgentServerPreSpawnContractState resolvedContract =
+                ExactCreateAgentServerPreSpawnContractResolver.Resolve(
+                    entryState,
+                    contractPlayerControlledOrigin,
+                    (int)exactOrigin.Side,
+                    ResolveFormationIndex(entryState),
+                    useDedicatedSafeStringIdExactEquipmentPath);
+            ExactTransferSpawnContract exactTransferContract = resolvedContract?.Contract;
+            ExactTransferValidationResult exactTransferValidation = resolvedContract?.Validation;
             ExactTransferContractRuntimeCache.RegisterPreSpawnContract(
                 exactTransferContract,
                 exactTransferValidation,
                 "ExactCampaignPreSpawnLoadoutPatch.Mission.SpawnAgent");
-
-            string exactEntryCompatibilitySummary;
-            string weaponDecisionReason;
-            bool includeWeapons = exactTransferContract?.Equipment?.IncludeWeaponsInPreSpawn ?? false;
-            bool includeCape = exactTransferContract?.Equipment?.IncludeCapeInPreSpawn ?? false;
-            bool includeArmorVisuals = exactTransferContract?.Equipment?.IncludeArmorVisualsInPreSpawn ?? false;
-            bool includeMountVisuals = exactTransferContract?.Equipment?.IncludeMountVisualsInPreSpawn ?? false;
-            bool useContractDrivenPreSpawnPath =
-                exactTransferContract?.SpawnPolicy?.RequirePreSpawnInjection == true &&
-                exactTransferValidation?.IsValid == true;
-            if (useContractDrivenPreSpawnPath)
-            {
-                bool strictHeroPath = exactTransferContract?.SpawnPolicy?.UseStrictExactHeroPath == true;
-                exactEntryCompatibilitySummary = strictHeroPath
-                    ? "ExactEntryContract=contract-driven-strict-hero"
-                    : "ExactEntryContract=contract-driven-full-army";
-                weaponDecisionReason = includeWeapons
-                    ? (strictHeroPath
-                        ? "contract-driven strict exact hero weapon policy"
-                        : "contract-driven full-army exact weapon policy")
-                    : (strictHeroPath
-                        ? "contract-driven strict exact hero weapon policy disabled"
-                        : "contract-driven full-army exact weapon policy disabled");
-            }
-            else
-            {
-                includeWeapons = ShouldIncludeWeaponsForPreSpawnInjection(
-                    exactOrigin,
-                    contractPlayerControlledOrigin,
-                    entryState,
-                    out exactEntryCompatibilitySummary,
-                    out weaponDecisionReason);
-            }
-            string capeDecisionReason;
-            if (useContractDrivenPreSpawnPath)
-            {
-                bool strictHeroPath = exactTransferContract?.SpawnPolicy?.UseStrictExactHeroPath == true;
-                capeDecisionReason = includeCape
-                    ? (strictHeroPath
-                        ? "contract-driven strict exact hero cape policy"
-                        : "contract-driven full-army exact cape policy")
-                    : (strictHeroPath
-                        ? "contract-driven strict exact hero cape policy disabled"
-                        : "contract-driven full-army exact cape policy disabled");
-            }
-            else
-            {
-                includeCape = CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(
-                    entryState,
-                    out _,
-                    out capeDecisionReason);
-            }
-            bool canInjectBodyPropertiesAtCreateAgentTime = useContractDrivenPreSpawnPath
-                ? exactTransferContract?.Body?.HasExactBodyProperties == true
-                : !string.IsNullOrWhiteSpace(entryState?.HeroBodyProperties);
+            string exactEntryCompatibilitySummary = resolvedContract?.ExactEntryCompatibilitySummary;
+            string weaponDecisionReason = resolvedContract?.WeaponDecisionReason;
+            string capeDecisionReason = resolvedContract?.CapeDecisionReason;
+            bool includeWeapons = resolvedContract?.IncludeWeapons == true;
+            bool includeCape = resolvedContract?.IncludeCape == true;
+            bool includeArmorVisuals = resolvedContract?.IncludeArmorVisuals == true;
+            bool includeMountVisuals = resolvedContract?.IncludeMountVisuals == true;
+            bool useContractDrivenPreSpawnPath = resolvedContract?.UseContractDrivenPreSpawnPath == true;
+            bool canInjectBodyPropertiesAtCreateAgentTime = resolvedContract?.IncludeBodyProperties == true;
             ExactCreateAgentPayloadDiagnosticDecision payloadDiagnostic =
-                ExactCreateAgentPayloadDiagnostics.Resolve(
-                    entryState,
-                    exactTransferContract,
-                    useContractDrivenPreSpawnPath,
-                    includeWeapons,
-                    includeArmorVisuals,
-                    includeCape,
-                    includeMountVisuals,
-                    canInjectBodyPropertiesAtCreateAgentTime);
+                resolvedContract?.PayloadDiagnostic ??
+                new ExactCreateAgentPayloadDiagnosticDecision
+                {
+                    IsActive = false,
+                    Reason = "resolved-contract-absent",
+                    EntryId = exactOrigin.EntryId
+                };
             PayloadDiagnosticByEntryId[exactOrigin.EntryId] = payloadDiagnostic;
-            if (payloadDiagnostic.IsActive)
-            {
-                includeWeapons = payloadDiagnostic.IncludeWeapons;
-                includeArmorVisuals = payloadDiagnostic.IncludeArmorVisuals;
-                includeCape = payloadDiagnostic.IncludeCape;
-                includeMountVisuals = payloadDiagnostic.IncludeMountVisuals;
-                canInjectBodyPropertiesAtCreateAgentTime = payloadDiagnostic.IncludeBodyProperties;
-            }
-            if (!useContractDrivenPreSpawnPath && contractPlayerControlledOrigin)
-            {
-                if (includeCape)
-                {
-                    capeDecisionReason = "player-controlled strict exact personal hero cape visual contract";
-                }
-                else if (!HasExactPersonalHeroIdentity(entryState))
-                {
-                    capeDecisionReason =
-                        "player-controlled origin keeps native template visual slots because entry is not an exact personal hero";
-                }
-                else
-                {
-                    capeDecisionReason =
-                        "player-controlled exact personal hero cape visual contract rejected: " +
-                        (capeDecisionReason ?? "unknown");
-                }
-            }
-            bool injectEquipment = useContractDrivenPreSpawnPath
-                ? exactTransferContract.SpawnPolicy.RequirePreSpawnInjection &&
-                  (includeWeapons || includeCape || includeArmorVisuals || includeMountVisuals)
-                : includeWeapons || includeCape;
-            bool useDedicatedSafeStringIdExactEquipmentPath =
-                CoopMissionSpawnLogic.UseDedicatedSafeStringIdExactEquipmentPathOnServer();
-            if (useDedicatedSafeStringIdExactEquipmentPath)
-                injectEquipment = false;
+            bool injectEquipment = resolvedContract?.InjectEquipment == true;
             Equipment exactEquipment = injectEquipment
                 ? BuildPreSpawnEquipment(
                     entryState,

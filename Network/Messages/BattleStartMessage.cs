@@ -152,6 +152,16 @@ namespace CoopSpectator.Network.Messages
         public string CombatCapeId { get; set; }
         public string CombatHorseId { get; set; }
         public string CombatHorseHarnessId { get; set; }
+        public bool ServerCreateContractResolved { get; set; }
+        public bool ServerCreateUseStringIdExactEquipmentPath { get; set; }
+        public bool ServerCreateInjectEquipment { get; set; }
+        public bool ServerCreatePreSpawnIncludesWeapons { get; set; }
+        public bool ServerCreatePreSpawnIncludesArmorVisuals { get; set; }
+        public bool ServerCreatePreSpawnIncludesCapeVisual { get; set; }
+        public bool ServerCreatePreSpawnIncludesMountVisuals { get; set; }
+        public bool ServerCreatePayloadDiagnosticActive { get; set; }
+        public string ServerCreateRequestedProfile { get; set; }
+        public string ServerCreateEffectiveProfile { get; set; }
         public bool IsHero { get; set; }
         public int Count { get; set; }
         public int WoundedCount { get; set; }

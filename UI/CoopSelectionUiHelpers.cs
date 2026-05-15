@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using TaleWorlds.CampaignSystem;
@@ -77,6 +78,9 @@ namespace CoopSpectator.UI
 
     internal static class CoopSelectionUiHelpers
     {
+        private static readonly ConcurrentDictionary<string, byte> SelectionVisualDiagnosticKeys =
+            new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+
         private const string LoadingBattleDataText = "Loading battle data...";
         private const string NeutralPlayerBannerCode = "11.163.166.1528.1528.764.764.1.0.0.133.171.171.483.483.764.764.0.0.0";
         private const string BanditBannerCode = "24.193.116.1536.1536.768.768.1.0.0";
@@ -395,7 +399,7 @@ namespace CoopSpectator.UI
             BodyProperties bodyProperties = character.GetBodyProperties(equipment);
             ResolveSideColors(snapshot?.BattleState, snapshot?.EffectiveSide ?? BattleSideEnum.None, character, out uint armorColor1, out uint armorColor2);
 
-            return new CoopCharacterVisualData
+            CoopCharacterVisualData visualData = new CoopCharacterVisualData
             {
                 HasVisual = !string.IsNullOrWhiteSpace(character.StringId) || !string.IsNullOrWhiteSpace(equipmentCode),
                 BannerCodeText = ResolveSideBannerCode(snapshot?.BattleState, snapshot?.EffectiveSide ?? BattleSideEnum.None),
@@ -409,6 +413,9 @@ namespace CoopSpectator.UI
                 ArmorColor1 = armorColor1,
                 ArmorColor2 = armorColor2
             };
+
+            LogSelectedVisualDiagnostic(snapshot, entryState, visualData);
+            return visualData;
         }
 
         public static string ResolveEntryIconType(RosterEntryState entryState)
@@ -1167,6 +1174,53 @@ namespace CoopSpectator.UI
             {
                 return string.Empty;
             }
+        }
+
+        private static void LogSelectedVisualDiagnostic(
+            CoopSelectionUiSnapshot snapshot,
+            RosterEntryState entryState,
+            CoopCharacterVisualData visualData)
+        {
+            try
+            {
+                if (entryState == null || visualData == null || !visualData.HasVisual)
+                    return;
+
+                string key =
+                    (snapshot?.EffectiveSide.ToString() ?? "None") + "|" +
+                    (entryState.EntryId ?? string.Empty) + "|" +
+                    (visualData.CharStringId ?? string.Empty) + "|" +
+                    (visualData.MountCreationKey ?? string.Empty) + "|" +
+                    visualData.StanceIndex + "|" +
+                    (visualData.EquipmentCode?.Length.ToString() ?? "0");
+
+                if (!SelectionVisualDiagnosticKeys.TryAdd(key, 0))
+                    return;
+
+                ModLogger.Info(
+                    "CoopSelectionUiHelpers: built SelectedVisual payload. " +
+                    "Side=" + (snapshot?.EffectiveSide.ToString() ?? "None") +
+                    " EntryId=" + (entryState.EntryId ?? "null") +
+                    " Character=" + (visualData.CharStringId ?? "null") +
+                    " EquipmentCodeLen=" + (visualData.EquipmentCode?.Length ?? 0) +
+                    " MountCreationKey=" + ShortenForDiagnostic(visualData.MountCreationKey, 48) +
+                    " StanceIndex=" + visualData.StanceIndex +
+                    " IsMounted=" + entryState.IsMounted +
+                    " IsHero=" + entryState.IsHero +
+                    " BodyPropertiesLen=" + (visualData.BodyProperties?.Length ?? 0));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSelectionUiHelpers: SelectedVisual diagnostic failed open: " + ex.Message);
+            }
+        }
+
+        private static string ShortenForDiagnostic(string value, int maxChars)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxChars)
+                return value ?? string.Empty;
+
+            return value.Substring(0, maxChars) + "...";
         }
 
         private static int ComputeStableSeed(string primary, string secondary)

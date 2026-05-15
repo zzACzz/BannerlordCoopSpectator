@@ -290,6 +290,16 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, troop?.CombatCapeId);
             WriteString(writer, troop?.CombatHorseId);
             WriteString(writer, troop?.CombatHorseHarnessId);
+            writer.Write(troop?.ServerCreateContractResolved ?? false);
+            writer.Write(troop?.ServerCreateUseStringIdExactEquipmentPath ?? false);
+            writer.Write(troop?.ServerCreateInjectEquipment ?? false);
+            writer.Write(troop?.ServerCreatePreSpawnIncludesWeapons ?? false);
+            writer.Write(troop?.ServerCreatePreSpawnIncludesArmorVisuals ?? false);
+            writer.Write(troop?.ServerCreatePreSpawnIncludesCapeVisual ?? false);
+            writer.Write(troop?.ServerCreatePreSpawnIncludesMountVisuals ?? false);
+            writer.Write(troop?.ServerCreatePayloadDiagnosticActive ?? false);
+            WriteString(writer, troop?.ServerCreateRequestedProfile);
+            WriteString(writer, troop?.ServerCreateEffectiveProfile);
             writer.Write(troop?.IsHero ?? false);
             writer.Write(troop?.Count ?? 0);
             writer.Write(troop?.WoundedCount ?? 0);
@@ -349,6 +359,16 @@ namespace CoopSpectator.Infrastructure
                 CombatCapeId = ReadString(reader),
                 CombatHorseId = ReadString(reader),
                 CombatHorseHarnessId = ReadString(reader),
+                ServerCreateContractResolved = reader.ReadBoolean(),
+                ServerCreateUseStringIdExactEquipmentPath = reader.ReadBoolean(),
+                ServerCreateInjectEquipment = reader.ReadBoolean(),
+                ServerCreatePreSpawnIncludesWeapons = reader.ReadBoolean(),
+                ServerCreatePreSpawnIncludesArmorVisuals = reader.ReadBoolean(),
+                ServerCreatePreSpawnIncludesCapeVisual = reader.ReadBoolean(),
+                ServerCreatePreSpawnIncludesMountVisuals = reader.ReadBoolean(),
+                ServerCreatePayloadDiagnosticActive = reader.ReadBoolean(),
+                ServerCreateRequestedProfile = ReadString(reader),
+                ServerCreateEffectiveProfile = ReadString(reader),
                 IsHero = reader.ReadBoolean(),
                 Count = reader.ReadInt32(),
                 WoundedCount = reader.ReadInt32()
