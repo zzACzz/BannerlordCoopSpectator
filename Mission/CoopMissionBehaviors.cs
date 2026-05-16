@@ -21,6 +21,7 @@ using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback
 using CoopSpectator.MissionModels;
 using CoopSpectator.Network.Messages;
+using CoopSpectator.Patches;
 using NetworkMessages.FromServer;
 
 namespace CoopSpectator.MissionBehaviors
@@ -3639,6 +3640,8 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<int, BattleSideEnum> _materializedArmySideByAgentIndex = new Dictionary<int, BattleSideEnum>();
         private static readonly Dictionary<int, Agent> _materializedAgentInstanceByIndex = new Dictionary<int, Agent>();
         private static readonly HashSet<int> _clientAuthoritativeMaterializedEntryObservedAgentIndices = new HashSet<int>();
+        private static DateTime _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
+        private static int _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount;
         private static bool _clientUseStringIdExactEquipmentPath;
         private static int _battleAgentContractTraceSequence;
         private static int _battleLifecycleStartupTraceBudgetRemaining;
@@ -3689,6 +3692,14 @@ namespace CoopSpectator.MissionBehaviors
         private static string _lastClientBattleSnapshotRefreshKey = string.Empty;
         private static string _lastDeferredClientExactVisualObserverSnapshotReadiness = string.Empty;
         private static string _lastSkippedClientBattleSnapshotRefreshKey = string.Empty;
+        private static string _lastPendingClientExactVisualPauseReason = string.Empty;
+        private static Mission _lastClientPostPossessionExactVisualPauseMission;
+        private static DateTime _clientPostPossessionExactVisualPauseResumeUtc;
+        private static int _clientPostPossessionExactVisualPauseControlledAgentIndex = -1;
+        private static DateTime _clientPostPossessionMountedTroopWeaponRefreshResumeUtc;
+        private static int _clientPostPossessionMountedTroopWeaponRefreshControlledAgentIndex = -1;
+        private static int _lastObservedClientControlledAgentIndexForExactVisualPause = int.MinValue;
+        private static bool _pendingClientExactVisualSelectionPauseSticky;
         private static bool? _lastAppliedBattlePhaseAiHold;
         private static CoopBattlePhase? _lastAppliedFormationHoldPhase;
         private static bool _hasMaterializedBattlefieldArmies;
@@ -3707,6 +3718,7 @@ namespace CoopSpectator.MissionBehaviors
         private static string _lastLoggedBattleCompletionAuditKey = string.Empty;
         private static string _lastLoggedBattleStartReadinessAuditKey = string.Empty;
         private static readonly Dictionary<int, string> _lastLoggedBattleSnapshotAckBlockStateByPeer = new Dictionary<int, string>();
+        private static readonly Dictionary<int, string> _lastLoggedReconnectFinalizeBlockStateByPeer = new Dictionary<int, string>();
         private static DateTime _nextIncompleteBattleSnapshotRefreshUtc;
         private static DateTime _nextIncompleteBattleSnapshotLogUtc;
         private static DateTime _nextSkippedClientBattleSnapshotRefreshLogUtc;
@@ -3718,6 +3730,7 @@ namespace CoopSpectator.MissionBehaviors
         private static DateTime _nextExactSceneNativeBootstrapDeferLogUtc;
         private static DateTime _nextNativeBattleMapWarmupFallbackRefreshUtc;
         private static string _lastNativeBattleMapWarmupFallbackLogKey = string.Empty;
+        private static readonly TimeSpan ClientReconnectFinalizeSettleDelay = TimeSpan.FromMilliseconds(450);
         private static readonly FieldInfo NativeWarmupCurrentStateStartTimeField =
             typeof(MultiplayerWarmupComponent).GetField("_currentStateStartTime", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo NativeWarmupStateField =
@@ -3730,6 +3743,9 @@ namespace CoopSpectator.MissionBehaviors
             typeof(Agent).GetMethod("UpdateRiderAgentCache", BindingFlags.Instance | BindingFlags.NonPublic);
         private const float NativeBattleMapWarmupFallbackDurationSeconds = 1800f;
         private const float NativeBattleMapWarmupFutureStartOffsetSeconds = 1770f;
+        private const double ClientPostPossessionExactVisualPauseSeconds = 1.75d;
+        private const double ClientPostPossessionExactVisualAcquirePauseSeconds = 1.10d;
+        private const double ClientPostPossessionMountedTroopWeaponRefreshCooldownSeconds = 3.25d;
         private static Agent _diagnosticAllowedAgent;
         private const bool EnableFixedMissionCulturesExperiment = true;
         private const string SyntheticAllCampaignTroopsBattleId = "synthetic_all_campaign_troops";
@@ -4081,6 +4097,7 @@ namespace CoopSpectator.MissionBehaviors
             public bool CreateAgentPostfixObserved { get; set; }
             public bool EquipmentSyncObserved { get; set; }
             public int OnSpawnWieldEventCount { get; set; }
+            public bool QueueFallbackSuppressedLogged { get; set; }
             public DateTime FirstObservedUtc { get; set; }
             public DateTime LastObservedUtc { get; set; }
         }
@@ -4106,8 +4123,11 @@ namespace CoopSpectator.MissionBehaviors
         {
             public int RiderAgentIndex { get; set; }
             public string EntryId { get; set; }
+            public string BattleId { get; set; }
+            public string EquipmentSignature { get; set; }
             public bool IsMountedHero { get; set; }
             public int ExpectedMountAgentIndex { get; set; } = -1;
+            public int LifecycleGeneration { get; set; } = 1;
             public bool CreateAgentPayloadObserved { get; set; }
             public bool RiderMaterialized { get; set; }
             public bool PeerBound { get; set; }
@@ -4118,6 +4138,8 @@ namespace CoopSpectator.MissionBehaviors
             public bool ExactVisualApplied { get; set; }
             public bool IncludesWeaponsApplied { get; set; }
             public bool DeathObserved { get; set; }
+            public string LocalInitialWieldAppliedVersionKey { get; set; }
+            public DateTime LocalInitialWieldAppliedUtc { get; set; }
             public StrictExactHeroTransferStage Stage { get; set; }
             public string LastSource { get; set; }
             public string LastBlockedReason { get; set; }
@@ -4144,6 +4166,8 @@ namespace CoopSpectator.MissionBehaviors
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
+            _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
+            _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = 0;
             _exactNativeSnapshotOverlayAppliedAgentIndices.Clear();
             _exactNativeSnapshotOverlayLoggedEntryIds.Clear();
             ResetClientExactCampaignVisualOverlayAssignmentState(source);
@@ -4185,12 +4209,22 @@ namespace CoopSpectator.MissionBehaviors
             _pendingExactNativeClientVisualOverlaysByAgentIndex.Clear();
             _clientCreateAgentExactVisualStateByAgentIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
+            _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
+            _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = 0;
             _clientUseStringIdExactEquipmentPath = false;
             _strictExactHeroTransferStateByRiderAgentIndex.Clear();
             _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Clear();
             _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Clear();
             _exactNativeClientVisualOverlayEntryQueuesByAssignmentKey.Clear();
             _exactNativeClientVisualOverlayQueueSnapshotKey = string.Empty;
+            _lastClientPostPossessionExactVisualPauseMission = null;
+            _clientPostPossessionExactVisualPauseResumeUtc = DateTime.MinValue;
+            _clientPostPossessionExactVisualPauseControlledAgentIndex = -1;
+            _clientPostPossessionMountedTroopWeaponRefreshResumeUtc = DateTime.MinValue;
+            _clientPostPossessionMountedTroopWeaponRefreshControlledAgentIndex = -1;
+            _lastObservedClientControlledAgentIndexForExactVisualPause = int.MinValue;
+            _lastPendingClientExactVisualPauseReason = string.Empty;
+            _pendingClientExactVisualSelectionPauseSticky = false;
             ModLogger.Info(
                 "CoopMissionSpawnLogic: reset client exact visual overlay assignment state. " +
                 "Source=" + (source ?? "unknown"));
@@ -4227,6 +4261,7 @@ namespace CoopSpectator.MissionBehaviors
                 state = new StrictExactHeroTransferRuntimeState
                 {
                     RiderAgentIndex = riderAgentIndex,
+                    LifecycleGeneration = 1,
                     Stage = StrictExactHeroTransferStage.Unknown,
                     LastUpdatedUtc = DateTime.UtcNow
                 };
@@ -4234,6 +4269,135 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return state;
+        }
+
+        private static string GetStrictExactHeroCurrentBattleId()
+        {
+            return BattleSnapshotRuntimeState.GetCurrent()?.BattleId ?? string.Empty;
+        }
+
+        private static string BuildStrictExactHeroEquipmentVersionSignature(RosterEntryState entryState)
+        {
+            if (entryState == null)
+                return string.Empty;
+
+            return
+                "Mounted=" + entryState.IsMounted +
+                "|Item0=" + (entryState.CombatItem0Id ?? string.Empty) + ":" + (entryState.CombatItem0Amount?.ToString() ?? string.Empty) +
+                "|Item1=" + (entryState.CombatItem1Id ?? string.Empty) + ":" + (entryState.CombatItem1Amount?.ToString() ?? string.Empty) +
+                "|Item2=" + (entryState.CombatItem2Id ?? string.Empty) + ":" + (entryState.CombatItem2Amount?.ToString() ?? string.Empty) +
+                "|Item3=" + (entryState.CombatItem3Id ?? string.Empty) + ":" + (entryState.CombatItem3Amount?.ToString() ?? string.Empty) +
+                "|Head=" + (entryState.CombatHeadId ?? string.Empty) +
+                "|Body=" + (entryState.CombatBodyId ?? string.Empty) +
+                "|Leg=" + (entryState.CombatLegId ?? string.Empty) +
+                "|Gloves=" + (entryState.CombatGlovesId ?? string.Empty) +
+                "|Cape=" + (entryState.CombatCapeId ?? string.Empty) +
+                "|Horse=" + (entryState.CombatHorseId ?? string.Empty) +
+                "|HorseHarness=" + (entryState.CombatHorseHarnessId ?? string.Empty);
+        }
+
+        private static string BuildDeterministicStateFingerprint(string value)
+        {
+            unchecked
+            {
+                ulong hash = 14695981039346656037UL;
+                string normalized = value ?? string.Empty;
+                for (int i = 0; i < normalized.Length; i++)
+                {
+                    hash ^= normalized[i];
+                    hash *= 1099511628211UL;
+                }
+
+                return hash.ToString("X16");
+            }
+        }
+
+        private static string BuildStrictExactHeroLocalInitialWieldVersionKey(StrictExactHeroTransferRuntimeState state)
+        {
+            if (state == null)
+                return string.Empty;
+
+            return
+                (state.BattleId ?? string.Empty) +
+                "|" + (state.EntryId ?? string.Empty) +
+                "|Equip=" + BuildDeterministicStateFingerprint(state.EquipmentSignature) +
+                "|Gen=" + Math.Max(1, state.LifecycleGeneration);
+        }
+
+        private static void InvalidateStrictExactHeroLocalInitialWieldAppliedState(
+            StrictExactHeroTransferRuntimeState state,
+            string source,
+            string reason,
+            bool bumpLifecycleGeneration)
+        {
+            if (state == null)
+                return;
+
+            string previousVersionKey = state.LocalInitialWieldAppliedVersionKey ?? string.Empty;
+            if (bumpLifecycleGeneration)
+                state.LifecycleGeneration = Math.Max(1, state.LifecycleGeneration) + 1;
+
+            state.LocalInitialWieldAppliedVersionKey = null;
+            state.LocalInitialWieldAppliedUtc = DateTime.MinValue;
+            state.LastSource = source ?? "unknown";
+            state.LastUpdatedUtc = DateTime.UtcNow;
+
+            if (string.IsNullOrWhiteSpace(previousVersionKey) && !bumpLifecycleGeneration)
+                return;
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: invalidated strict exact hero local initial wield version state. " +
+                "AgentIndex=" + state.RiderAgentIndex +
+                " EntryId=" + (state.EntryId ?? "null") +
+                " BattleId=" + (state.BattleId ?? "null") +
+                " LifecycleGeneration=" + state.LifecycleGeneration +
+                " PreviousVersionKey=" + (string.IsNullOrWhiteSpace(previousVersionKey) ? "(none)" : previousVersionKey) +
+                " Reason=" + (reason ?? "unknown") +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        private static void RefreshStrictExactHeroVersionState(
+            StrictExactHeroTransferRuntimeState state,
+            string entryId,
+            RosterEntryState entryState,
+            string source)
+        {
+            if (state == null)
+                return;
+
+            string currentBattleId = GetStrictExactHeroCurrentBattleId();
+            string currentEquipmentSignature = BuildStrictExactHeroEquipmentVersionSignature(entryState);
+
+            bool hadAuthoritativeVersionState =
+                !string.IsNullOrWhiteSpace(state.EntryId) ||
+                !string.IsNullOrWhiteSpace(state.BattleId) ||
+                !string.IsNullOrWhiteSpace(state.EquipmentSignature);
+            bool entryChanged = !string.Equals(state.EntryId ?? string.Empty, entryId ?? string.Empty, StringComparison.Ordinal);
+            bool battleChanged = !string.Equals(state.BattleId ?? string.Empty, currentBattleId, StringComparison.Ordinal);
+            bool equipmentChanged = !string.Equals(state.EquipmentSignature ?? string.Empty, currentEquipmentSignature, StringComparison.Ordinal);
+
+            if (hadAuthoritativeVersionState && (entryChanged || battleChanged || equipmentChanged))
+            {
+                var versionChanges = new List<string>(3);
+                if (entryChanged)
+                    versionChanges.Add("entry");
+                if (battleChanged)
+                    versionChanges.Add("battle");
+                if (equipmentChanged)
+                    versionChanges.Add("equipment");
+
+                InvalidateStrictExactHeroLocalInitialWieldAppliedState(
+                    state,
+                    source ?? "strict exact hero version refresh",
+                    "authoritative-version-changed:" + string.Join("+", versionChanges),
+                    bumpLifecycleGeneration: true);
+            }
+
+            state.EntryId = entryId;
+            state.BattleId = currentBattleId;
+            state.EquipmentSignature = currentEquipmentSignature;
+            state.LastSource = source ?? "unknown";
+            state.LastUpdatedUtc = DateTime.UtcNow;
         }
 
         private static void AdvanceStrictExactHeroTransferStage(
@@ -4267,6 +4431,8 @@ namespace CoopSpectator.MissionBehaviors
             string details =
                 "AgentIndex=" + state.RiderAgentIndex +
                 " EntryId=" + (state.EntryId ?? "null") +
+                " BattleId=" + (state.BattleId ?? "null") +
+                " LifecycleGeneration=" + state.LifecycleGeneration +
                 " Stage=" + state.Stage +
                 " PreviousStage=" + previousStage +
                 " ExpectedMountAgentIndex=" + state.ExpectedMountAgentIndex +
@@ -4279,6 +4445,7 @@ namespace CoopSpectator.MissionBehaviors
                 " ExactVisualQueued=" + state.ExactVisualQueued +
                 " ExactVisualApplied=" + state.ExactVisualApplied +
                 " DeathObserved=" + state.DeathObserved +
+                " LocalInitialWieldApplied=" + !string.IsNullOrWhiteSpace(state.LocalInitialWieldAppliedVersionKey) +
                 " BlockedReason=" + (state.LastBlockedReason ?? "null") +
                 " FailureReason=" + (state.LastFailureReason ?? "null") +
                 " Source=" + (source ?? "unknown");
@@ -4301,7 +4468,7 @@ namespace CoopSpectator.MissionBehaviors
             if (state == null)
                 return;
 
-            state.EntryId = entryId;
+            RefreshStrictExactHeroVersionState(state, entryId, entryState, source ?? "strict exact hero entry");
             state.IsMountedHero = entryState.IsMounted;
             if (entryState.IsMounted &&
                 TryGetTrackedClientMountedHeroMountAgentIndex(riderAgentIndex, out int mountAgentIndex, out _))
@@ -4366,7 +4533,17 @@ namespace CoopSpectator.MissionBehaviors
             if (state == null)
                 return;
 
-            state.PeerBound = riderAgent.MissionPeer != null;
+            bool nextPeerBound = riderAgent.MissionPeer != null;
+            if (nextPeerBound && !state.PeerBound)
+            {
+                InvalidateStrictExactHeroLocalInitialWieldAppliedState(
+                    state,
+                    source ?? "strict exact hero peer bound",
+                    "peer-bound-transition",
+                    bumpLifecycleGeneration: true);
+            }
+
+            state.PeerBound = nextPeerBound;
             if (riderAgent.MountAgent != null)
             {
                 state.ExpectedMountAgentIndex = riderAgent.MountAgent.Index;
@@ -4550,6 +4727,8 @@ namespace CoopSpectator.MissionBehaviors
             return
                 "StrictTransfer={Stage=" + state.Stage +
                 ",EntryId=" + (state.EntryId ?? "null") +
+                ",BattleId=" + (state.BattleId ?? "null") +
+                ",LifecycleGeneration=" + state.LifecycleGeneration +
                 ",MountedHero=" + state.IsMountedHero +
                 ",ExpectedMountAgentIndex=" + state.ExpectedMountAgentIndex +
                 ",RiderMaterialized=" + state.RiderMaterialized +
@@ -4559,6 +4738,7 @@ namespace CoopSpectator.MissionBehaviors
                 ",MountLinkVerified=" + state.MountLinkVerified +
                 ",ExactVisualQueued=" + state.ExactVisualQueued +
                 ",ExactVisualApplied=" + state.ExactVisualApplied +
+                ",LocalInitialWieldApplied=" + !string.IsNullOrWhiteSpace(state.LocalInitialWieldAppliedVersionKey) +
                 ",DeathObserved=" + state.DeathObserved +
                 ",BlockedReason=" + (state.LastBlockedReason ?? "null") +
                 ",FailureReason=" + (state.LastFailureReason ?? "null") + "}";
@@ -4774,6 +4954,8 @@ namespace CoopSpectator.MissionBehaviors
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
+            _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
+            _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = 0;
             _exactNativeSnapshotOverlayAppliedAgentIndices.Clear();
             _exactNativeSnapshotOverlayLoggedEntryIds.Clear();
             _exactNativeClientVisualOverlayAppliedAgentIndices.Clear();
@@ -4791,6 +4973,14 @@ namespace CoopSpectator.MissionBehaviors
             _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Clear();
             _exactNativeClientVisualOverlayEntryQueuesByAssignmentKey.Clear();
             _exactNativeClientVisualOverlayQueueSnapshotKey = string.Empty;
+            _lastClientPostPossessionExactVisualPauseMission = null;
+            _clientPostPossessionExactVisualPauseResumeUtc = DateTime.MinValue;
+            _clientPostPossessionExactVisualPauseControlledAgentIndex = -1;
+            _clientPostPossessionMountedTroopWeaponRefreshResumeUtc = DateTime.MinValue;
+            _clientPostPossessionMountedTroopWeaponRefreshControlledAgentIndex = -1;
+            _lastObservedClientControlledAgentIndexForExactVisualPause = int.MinValue;
+            _lastPendingClientExactVisualPauseReason = string.Empty;
+            _pendingClientExactVisualSelectionPauseSticky = false;
             _battlePhaseHeldFormationKeys.Clear();
             _battlePhaseHeldFormationUnitCounts.Clear();
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
@@ -4805,6 +4995,8 @@ namespace CoopSpectator.MissionBehaviors
             _hasMaterializedBattlefieldArmies = false;
             _lastLoggedBattleCompletionAuditKey = string.Empty;
             _lastLoggedBattleStartReadinessAuditKey = string.Empty;
+            _lastLoggedBattleSnapshotAckBlockStateByPeer.Clear();
+            _lastLoggedReconnectFinalizeBlockStateByPeer.Clear();
             _nextIncompleteBattleSnapshotRefreshUtc = DateTime.MinValue;
             _nextIncompleteBattleSnapshotLogUtc = DateTime.MinValue;
             _nextBattleMapStartupDeferLogUtc = DateTime.MinValue;
@@ -5203,6 +5395,8 @@ namespace CoopSpectator.MissionBehaviors
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
+            _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
+            _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = 0;
             _exactNativeSnapshotOverlayAppliedAgentIndices.Clear();
             _exactNativeSnapshotOverlayLoggedEntryIds.Clear();
             _exactNativeClientVisualOverlayAppliedAgentIndices.Clear();
@@ -5238,6 +5432,8 @@ namespace CoopSpectator.MissionBehaviors
             _hasTriggeredAuthoritativeBattleCompletion = false;
             _authoritativeBattleWinnerSide = string.Empty;
             _authoritativeBattleCompletionReason = string.Empty;
+            _lastLoggedBattleSnapshotAckBlockStateByPeer.Clear();
+            _lastLoggedReconnectFinalizeBlockStateByPeer.Clear();
             _lastLoggedBattleCompletionAuditKey = string.Empty;
             _lastLoggedBattleStartReadinessAuditKey = string.Empty;
             _nextIncompleteBattleSnapshotRefreshUtc = DateTime.MinValue;
@@ -5501,6 +5697,7 @@ namespace CoopSpectator.MissionBehaviors
 
             _lastDeferredClientExactVisualObserverSnapshotReadiness = string.Empty;
             EnsureClientBattleSnapshotFreshForMission(mission, "client-exact-visual-observer");
+            TryRefreshClientPostPossessionExactVisualPauseWindow(mission, "client-exact-visual-observer");
             ExactCampaignObjectCatalogBootstrap.EnsureLoaded("client-exact-visual-observer:" + (mission.SceneName ?? "null"));
             TryProcessPendingClientExactCampaignVisualOverlays(mission);
             TryMaintainClientPeerHeroExactVisualOverlays(mission);
@@ -5537,6 +5734,13 @@ namespace CoopSpectator.MissionBehaviors
             RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
             if (entryState == null)
                 return false;
+            if (ShouldPauseClientExactVisualOverlaysForReconnectFinalize(out _))
+                return false;
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState) &&
+                ShouldSuppressClientTroopExactVisualOverlayForLiveControl(agent, out _))
+            {
+                return false;
+            }
             if (ShouldAwaitMountedHeroEquipmentSyncBeforeClientExactVisualRefresh(
                     agent,
                     entryState,
@@ -5580,23 +5784,61 @@ namespace CoopSpectator.MissionBehaviors
                 _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.Remove(agent.Index);
             }
 
+            bool effectiveIncludeWeaponsForRefresh = includeWeaponsForRefresh;
+            if (effectiveIncludeWeaponsForRefresh &&
+                IsLocalPeerControlledAgent(agent))
+            {
+                effectiveIncludeWeaponsForRefresh = false;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: suppressed weapon-inclusive pending client exact visual overlay for locally controlled agent. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " Source=" + (source ?? "unknown"));
+            }
+            else if (effectiveIncludeWeaponsForRefresh &&
+                     ShouldDowngradeClientMountedTroopWeaponOverlayRefresh(agent, entryState, out string mountedCooldownReason))
+            {
+                effectiveIncludeWeaponsForRefresh = false;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: downgraded weapon-inclusive pending client exact visual overlay for mounted non-local troop during local post-possession combat stabilization. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " Reason=" + (mountedCooldownReason ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            DateTime notBeforeUtc = DateTime.UtcNow.AddSeconds(Math.Max(0.01, delaySeconds));
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState) &&
+                ShouldPauseClientPostPossessionExactVisualForAgent(agent, out string postPossessionPauseReason) &&
+                _clientPostPossessionExactVisualPauseResumeUtc > notBeforeUtc)
+            {
+                notBeforeUtc = _clientPostPossessionExactVisualPauseResumeUtc;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: deferred queued client exact visual overlay until local post-possession stabilization window completes. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " IncludeWeapons=" + effectiveIncludeWeaponsForRefresh +
+                    " Reason=" + (postPossessionPauseReason ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+            }
+
             _pendingExactNativeClientVisualOverlaysByAgentIndex[agent.Index] = new PendingClientExactVisualOverlayState
             {
                 EntryId = entryId,
                 CreatedUtc = DateTime.UtcNow,
-                NotBeforeUtc = DateTime.UtcNow.AddSeconds(Math.Max(0.01, delaySeconds)),
+                NotBeforeUtc = notBeforeUtc,
                 RetryCount = 0,
                 Source = source ?? "client exact visual queue",
-                IncludeWeaponsForRefresh = includeWeaponsForRefresh
+                IncludeWeaponsForRefresh = effectiveIncludeWeaponsForRefresh
             };
             UpdateStrictExactHeroTransferVisualQueuedState(agent.Index, entryId, source ?? "client exact visual queue");
             ModLogger.Info(
                 "CoopMissionSpawnLogic: queued client exact visual overlay refresh. " +
                 "AgentIndex=" + agent.Index +
                 " EntryId=" + entryId +
-                " IncludeWeapons=" + includeWeaponsForRefresh +
+                " IncludeWeapons=" + effectiveIncludeWeaponsForRefresh +
                 " Force=" + force +
-                " DelaySeconds=" + Math.Max(0.01, delaySeconds).ToString("0.00") +
+                " DelaySeconds=" + Math.Max(0.01, (notBeforeUtc - DateTime.UtcNow).TotalSeconds).ToString("0.00") +
                 " Source=" + (source ?? "unknown"));
             return true;
         }
@@ -5865,6 +6107,8 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsServer || snapshot == null)
                 return;
 
+            _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.UtcNow;
+            _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = Math.Max(0, snapshot.EntryCount);
             _clientUseStringIdExactEquipmentPath = snapshot.UseStringIdExactEquipmentPath;
             Dictionary<int, string> mappings =
                 CoopBattleEntryStatusBridgeFile.DeserializeAgentEntryMap(snapshot.AgentEntries);
@@ -5882,10 +6126,29 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsServer || mappings == null || mappings.Count == 0)
                 return;
 
+            Mission mission = Mission.Current;
+            TryRefreshClientPostPossessionExactVisualPauseWindow(
+                mission,
+                (source ?? "authoritative materialized agent snapshot") + " post-possession-arm");
             int appliedCount = 0;
             int updatedPendingCount = 0;
-            int requeuedCount = 0;
-            Mission mission = Mission.Current;
+            int queuedCount = 0;
+            int deferredInitCount = 0;
+            int skippedQueueCount = 0;
+            int reconnectFinalizeSuppressedCount = 0;
+            int liveControlledSuppressedCount = 0;
+            int selectionPausedCount = 0;
+            int postPossessionPausedCount = 0;
+            int reconnectFinalizeDroppedPendingCount =
+                DropPendingClientExactVisualOverlaysForReconnectFinalize(
+                    (source ?? "authoritative materialized agent snapshot") + " reconnect-finalize");
+            int liveControlledDroppedPendingCount =
+                DropPendingClientTroopExactVisualOverlaysForLiveControl(
+                    (source ?? "authoritative materialized agent snapshot") + " live-control");
+            bool pauseTroopFinalizesForReconnectFinalize =
+                ShouldPauseClientExactVisualOverlaysForReconnectFinalize(out _);
+            bool pauseTroopFinalizesForSelectionScreen =
+                ShouldPausePendingClientExactVisualOverlaysForSelectionScreen(out _);
             foreach (KeyValuePair<int, string> mapping in mappings)
             {
                 int agentIndex = mapping.Key;
@@ -5940,14 +6203,46 @@ namespace CoopSpectator.MissionBehaviors
                     entryState != null &&
                     !IsHeroEntryEligibleForExactPersonalPerks(entryState))
                 {
-                    bool requeued = TryFinalizeClientExactCampaignTroopVisualForPeerAgent(
-                        mission,
-                        agent,
-                        source ?? "authoritative materialized agent snapshot",
-                        includeWeaponsForClientRefresh: _clientUseStringIdExactEquipmentPath,
-                        allowImmediateApply: true);
-                    if (requeued)
-                        requeuedCount++;
+                    if (!IsClientTroopExactVisualInitReady(agent, entryState, out _))
+                    {
+                        deferredInitCount++;
+                    }
+                    else if (pauseTroopFinalizesForReconnectFinalize)
+                    {
+                        reconnectFinalizeSuppressedCount++;
+                    }
+                    else if (pauseTroopFinalizesForSelectionScreen)
+                    {
+                        selectionPausedCount++;
+                    }
+                    else if (ShouldSuppressClientTroopExactVisualOverlayForLiveControl(agent, out _))
+                    {
+                        liveControlledSuppressedCount++;
+                    }
+                    else if (ShouldPauseClientPostPossessionExactVisualForAgent(agent, out _))
+                    {
+                        postPossessionPausedCount++;
+                    }
+                    else
+                    {
+                        double delaySeconds = 0.18d + Math.Min(1.40d, queuedCount * 0.03d);
+                        bool queued = TryQueueClientExactCampaignVisualOverlay(
+                            mission,
+                            agent,
+                            entryId,
+                            (source ?? "authoritative materialized agent snapshot") + " delayed troop finalize",
+                            delaySeconds,
+                            force: true,
+                            includeWeaponsForRefresh: _clientUseStringIdExactEquipmentPath);
+                        if (queued)
+                        {
+                            queuedCount++;
+                        }
+                        else
+                        {
+                            skippedQueueCount++;
+                        }
+                    }
                 }
 
                 appliedCount++;
@@ -5959,11 +6254,109 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopMissionSpawnLogic: applied client authoritative materialized agent entry snapshot. " +
                     "EntryCount=" + appliedCount +
                     " PendingEntryUpdates=" + updatedPendingCount +
-                    " RequeuedTroopFinalizes=" + requeuedCount +
+                    " QueuedTroopFinalizes=" + queuedCount +
+                    " DeferredInitTroopFinalizes=" + deferredInitCount +
+                    " ReconnectFinalizeSuppressedTroopFinalizes=" + reconnectFinalizeSuppressedCount +
+                    " ReconnectFinalizeDroppedPendingOverlays=" + reconnectFinalizeDroppedPendingCount +
+                    " LiveControlledSuppressedTroopFinalizes=" + liveControlledSuppressedCount +
+                    " LiveControlledDroppedPendingOverlays=" + liveControlledDroppedPendingCount +
+                    " SelectionPausedTroopFinalizes=" + selectionPausedCount +
+                    " PostPossessionPausedTroopFinalizes=" + postPossessionPausedCount +
+                    " SkippedQueueTroopFinalizes=" + skippedQueueCount +
                     " UseStringIdExactEquipmentPath=" + _clientUseStringIdExactEquipmentPath +
                     " SnapshotCount=" + snapshotCount +
                     " Source=" + (source ?? "unknown"));
             }
+        }
+
+        internal static bool IsClientReconnectFinalizeReady(out string readinessSummary)
+        {
+            readinessSummary = string.Empty;
+            if (GameNetwork.IsServer)
+            {
+                readinessSummary = "not-client";
+                return false;
+            }
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            if (status == null)
+            {
+                readinessSummary = "status-null";
+                return false;
+            }
+
+            string readinessStage = status.BattleDataReadinessStage?.Trim() ?? string.Empty;
+            if (!string.Equals(readinessStage, "ReconnectFinalize", StringComparison.OrdinalIgnoreCase))
+            {
+                readinessSummary =
+                    "readiness-stage-not-reconnect-finalize" +
+                    " Stage=" + readinessStage +
+                    " BattleDataReady=" + status.BattleDataReady +
+                    " HasAgent=" + status.HasAgent;
+                return false;
+            }
+
+            if (status.HasAgent)
+            {
+                readinessSummary = "already-has-agent";
+                return false;
+            }
+
+            if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string battleSnapshotReadinessSummary))
+            {
+                readinessSummary = "battle-snapshot-not-applied " + (battleSnapshotReadinessSummary ?? "unknown");
+                return false;
+            }
+
+            if (_lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc == DateTime.MinValue)
+            {
+                readinessSummary =
+                    "authoritative-materialized-entry-snapshot-unobserved" +
+                    " ExpectedEntryCount=" + status.AuthoritativeMaterializedAgentEntryCount;
+                return false;
+            }
+
+            if (_lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc != DateTime.MinValue)
+            {
+                TimeSpan observedAge = DateTime.UtcNow - _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc;
+                if (observedAge < ClientReconnectFinalizeSettleDelay)
+                {
+                    readinessSummary =
+                        "authoritative-materialized-entry-snapshot-settle-pending" +
+                        " ObservedAgeSeconds=" + observedAge.TotalSeconds.ToString("F2") +
+                        " PendingSettleSeconds=" + ClientReconnectFinalizeSettleDelay.TotalSeconds.ToString("F2") +
+                        " ObservedAgentCount=" + _clientAuthoritativeMaterializedEntryObservedAgentIndices.Count +
+                        " SnapshotEntryCount=" + _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount;
+                    return false;
+                }
+            }
+
+            if (_pendingExactNativeClientVisualOverlaysByAgentIndex.Count > 0)
+            {
+                readinessSummary =
+                    "pending-client-exact-visual-overlays" +
+                    " PendingCount=" + _pendingExactNativeClientVisualOverlaysByAgentIndex.Count +
+                    " ObservedAgentCount=" + _clientAuthoritativeMaterializedEntryObservedAgentIndices.Count;
+                return false;
+            }
+
+            int deferredRecoveryPendingCount =
+                BattleMapSpawnHandoffPatch.GetDeferredClientRecoveryPendingCount(out string deferredRecoverySummary);
+            if (deferredRecoveryPendingCount > 0)
+            {
+                readinessSummary =
+                    "deferred-client-recovery-pending " +
+                    (deferredRecoverySummary ?? "unknown");
+                return false;
+            }
+
+            readinessSummary =
+                "ready" +
+                " ObservedAgentCount=" + _clientAuthoritativeMaterializedEntryObservedAgentIndices.Count +
+                " SnapshotEntryCount=" + _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount +
+                " PendingExactVisualOverlays=" + _pendingExactNativeClientVisualOverlaysByAgentIndex.Count +
+                " DeferredClientRecoveryPending=" + deferredRecoveryPendingCount;
+            return true;
         }
 
         private static bool TryGetActiveMissionAgentByIndex(Mission mission, int agentIndex, out Agent agent)
@@ -6163,6 +6556,181 @@ namespace CoopSpectator.MissionBehaviors
             return false;
         }
 
+        private static bool IsLocalPeerControlledAgent(Agent agent)
+        {
+            if (agent == null || GameNetwork.IsServer)
+                return false;
+
+            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            Agent controlledAgent = localMissionPeer?.ControlledAgent;
+            return controlledAgent != null && ReferenceEquals(controlledAgent, agent);
+        }
+
+        private static Agent GetLocalPeerControlledAgent()
+        {
+            if (GameNetwork.IsServer)
+                return null;
+
+            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            return localMissionPeer?.ControlledAgent ?? Agent.Main;
+        }
+
+        private static void TryRefreshClientPostPossessionExactVisualPauseWindow(
+            Mission mission,
+            string source)
+        {
+            if (mission == null || GameNetwork.IsServer)
+                return;
+
+            if (!ReferenceEquals(_lastClientPostPossessionExactVisualPauseMission, mission))
+            {
+                _lastClientPostPossessionExactVisualPauseMission = mission;
+                _clientPostPossessionExactVisualPauseResumeUtc = DateTime.MinValue;
+                _clientPostPossessionExactVisualPauseControlledAgentIndex = -1;
+                _clientPostPossessionMountedTroopWeaponRefreshResumeUtc = DateTime.MinValue;
+                _clientPostPossessionMountedTroopWeaponRefreshControlledAgentIndex = -1;
+                _lastObservedClientControlledAgentIndexForExactVisualPause = int.MinValue;
+            }
+
+            Agent controlledAgent = GetLocalPeerControlledAgent();
+            int currentControlledAgentIndex =
+                controlledAgent != null && controlledAgent.IsActive()
+                    ? controlledAgent.Index
+                    : -1;
+            int previousControlledAgentIndex = _lastObservedClientControlledAgentIndexForExactVisualPause;
+            if (currentControlledAgentIndex == previousControlledAgentIndex)
+                return;
+
+            _lastObservedClientControlledAgentIndexForExactVisualPause = currentControlledAgentIndex;
+            if (previousControlledAgentIndex == int.MinValue || currentControlledAgentIndex < 0)
+                return;
+
+            if (!IsClientExactCampaignVisualOverlayRuntime(mission))
+                return;
+
+            if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out _))
+                return;
+
+            double durationSeconds =
+                previousControlledAgentIndex >= 0
+                    ? ClientPostPossessionExactVisualPauseSeconds
+                    : ClientPostPossessionExactVisualAcquirePauseSeconds;
+            DateTime nowUtc = DateTime.UtcNow;
+            DateTime resumeUtc = nowUtc.AddSeconds(durationSeconds);
+            if (resumeUtc <= _clientPostPossessionExactVisualPauseResumeUtc &&
+                _clientPostPossessionExactVisualPauseControlledAgentIndex == currentControlledAgentIndex)
+            {
+                return;
+            }
+
+            _clientPostPossessionExactVisualPauseResumeUtc = resumeUtc;
+            _clientPostPossessionExactVisualPauseControlledAgentIndex = currentControlledAgentIndex;
+            _clientPostPossessionMountedTroopWeaponRefreshResumeUtc =
+                nowUtc.AddSeconds(Math.Max(durationSeconds, ClientPostPossessionMountedTroopWeaponRefreshCooldownSeconds));
+            _clientPostPossessionMountedTroopWeaponRefreshControlledAgentIndex = currentControlledAgentIndex;
+            int droppedPendingTroopOverlays =
+                DropPendingClientTroopExactVisualOverlaysForLiveControl(
+                    (source ?? "client post-possession exact visual stabilization") + " live-control-arm");
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: armed client post-possession exact visual stabilization window. " +
+                "ControlledAgentIndex=" + currentControlledAgentIndex +
+                " PreviousControlledAgentIndex=" + previousControlledAgentIndex +
+                " DurationSeconds=" + durationSeconds.ToString("0.00") +
+                " MountedTroopWeaponCooldownSeconds=" +
+                Math.Max(durationSeconds, ClientPostPossessionMountedTroopWeaponRefreshCooldownSeconds).ToString("0.00") +
+                " DroppedPendingTroopOverlays=" + droppedPendingTroopOverlays +
+                " PendingCount=" + _pendingExactNativeClientVisualOverlaysByAgentIndex.Count +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        private static bool ShouldSuppressClientTroopExactVisualOverlaysForLiveControl(out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer)
+                return false;
+
+            if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out _))
+                return false;
+
+            Agent controlledAgent = GetLocalPeerControlledAgent();
+            if (controlledAgent == null || !controlledAgent.IsActive())
+                return false;
+
+            reason =
+                "ControlledAgentIndex=" + controlledAgent.Index +
+                " LocalPeerHasLiveControl=true";
+            return true;
+        }
+
+        private static bool ShouldSuppressClientTroopExactVisualOverlayForLiveControl(
+            Agent agent,
+            out string reason)
+        {
+            reason = null;
+            if (!ShouldSuppressClientTroopExactVisualOverlaysForLiveControl(out string baseReason))
+                return false;
+
+            if (agent != null && IsLocalPeerControlledAgent(agent))
+                return false;
+
+            reason = agent == null
+                ? baseReason
+                : baseReason + " TargetAgentIndex=" + agent.Index;
+            return true;
+        }
+
+        private static bool ShouldPauseClientPostPossessionExactVisualForAgent(
+            Agent agent,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer)
+                return false;
+
+            DateTime resumeUtc = _clientPostPossessionExactVisualPauseResumeUtc;
+            if (resumeUtc == DateTime.MinValue)
+                return false;
+
+            double remainingSeconds = (resumeUtc - DateTime.UtcNow).TotalSeconds;
+            if (remainingSeconds <= 0d)
+                return false;
+
+            if (agent != null && IsLocalPeerControlledAgent(agent))
+                return false;
+
+            reason =
+                "ControlledAgentIndex=" + _clientPostPossessionExactVisualPauseControlledAgentIndex +
+                " RemainingSeconds=" + remainingSeconds.ToString("0.00");
+            return true;
+        }
+
+        private static bool ShouldDowngradeClientMountedTroopWeaponOverlayRefresh(
+            Agent agent,
+            RosterEntryState entryState,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer || agent == null || entryState == null || entryState.IsHero)
+                return false;
+
+            DateTime resumeUtc = _clientPostPossessionMountedTroopWeaponRefreshResumeUtc;
+            if (resumeUtc == DateTime.MinValue)
+                return false;
+
+            double remainingSeconds = (resumeUtc - DateTime.UtcNow).TotalSeconds;
+            if (remainingSeconds <= 0d)
+                return false;
+
+            bool mountedTroop = entryState.IsMounted || agent.MountAgent != null;
+            if (!mountedTroop || IsLocalPeerControlledAgent(agent))
+                return false;
+
+            reason =
+                "ControlledAgentIndex=" + _clientPostPossessionMountedTroopWeaponRefreshControlledAgentIndex +
+                " RemainingSeconds=" + remainingSeconds.ToString("0.00");
+            return true;
+        }
+
         private static bool ShouldAllowClientTroopWeaponOverlayRefresh(
             Agent agent,
             RosterEntryState entryState,
@@ -6182,9 +6750,14 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
-            bool locallyControlled = localMissionPeer != null && ReferenceEquals(localMissionPeer.ControlledAgent, agent);
+            bool locallyControlled = IsLocalPeerControlledAgent(agent);
             bool peerControlled = agent.MissionPeer != null || locallyControlled;
+            if (locallyControlled)
+            {
+                reason = "local-controlled-live-wield-owned-by-client";
+                return false;
+            }
+
             if (!peerControlled && !_clientUseStringIdExactEquipmentPath)
             {
                 reason = "generic-bulk-ai-weapons-disabled";
@@ -6201,6 +6774,12 @@ namespace CoopSpectator.MissionBehaviors
             if (!IsClientTroopExactVisualInitReady(agent, entryState, out string initReason))
             {
                 reason = initReason ?? "init-pending";
+                return false;
+            }
+
+            if (ShouldDowngradeClientMountedTroopWeaponOverlayRefresh(agent, entryState, out string mountedCooldownReason))
+            {
+                reason = "mounted-post-possession-combat-stabilization:" + (mountedCooldownReason ?? "unknown");
                 return false;
             }
 
@@ -6704,6 +7283,27 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || GameNetwork.IsServer || _pendingExactNativeClientVisualOverlaysByAgentIndex.Count == 0)
                 return;
 
+            DropPendingClientExactVisualOverlaysForReconnectFinalize("pending-client-exact-visual-process");
+            DropPendingClientTroopExactVisualOverlaysForLiveControl("pending-client-exact-visual-process");
+            if (_pendingExactNativeClientVisualOverlaysByAgentIndex.Count == 0)
+                return;
+
+            TryRefreshClientPostPossessionExactVisualPauseWindow(mission, "pending-client-exact-visual-process");
+            if (ShouldPausePendingClientExactVisualOverlaysForSelectionScreen(out string pauseReason))
+            {
+                if (!string.Equals(_lastPendingClientExactVisualPauseReason, pauseReason, StringComparison.Ordinal))
+                {
+                    _lastPendingClientExactVisualPauseReason = pauseReason ?? string.Empty;
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: paused pending client exact visual overlay processing while local peer is still behind selection or reconnect-finalize gating. " +
+                        "PendingCount=" + _pendingExactNativeClientVisualOverlaysByAgentIndex.Count +
+                        " Reason=" + (_lastPendingClientExactVisualPauseReason ?? "unknown"));
+                }
+
+                return;
+            }
+
+            _lastPendingClientExactVisualPauseReason = string.Empty;
             DateTime nowUtc = DateTime.UtcNow;
             var completedAgentIndices = new List<int>();
             foreach (KeyValuePair<int, PendingClientExactVisualOverlayState> pendingPair in _pendingExactNativeClientVisualOverlaysByAgentIndex)
@@ -6731,7 +7331,22 @@ namespace CoopSpectator.MissionBehaviors
                     {
                         pendingState.RetryCount++;
                         pendingState.NotBeforeUtc = nowUtc.AddMilliseconds(150);
+                }
+                    continue;
+                }
+
+                if (ShouldPauseClientPostPossessionExactVisualForAgent(agent, out string postPossessionPauseReason))
+                {
+                    pendingState.NotBeforeUtc = _clientPostPossessionExactVisualPauseResumeUtc;
+                    if (!string.Equals(_lastPendingClientExactVisualPauseReason, postPossessionPauseReason, StringComparison.Ordinal))
+                    {
+                        _lastPendingClientExactVisualPauseReason = postPossessionPauseReason ?? string.Empty;
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: paused pending client exact visual overlay processing during local post-possession stabilization window. " +
+                            "PendingCount=" + _pendingExactNativeClientVisualOverlaysByAgentIndex.Count +
+                            " Reason=" + (_lastPendingClientExactVisualPauseReason ?? "unknown"));
                     }
+
                     continue;
                 }
 
@@ -6835,9 +7450,205 @@ namespace CoopSpectator.MissionBehaviors
                 _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(completedAgentIndices[i]);
         }
 
+        private static bool ShouldPausePendingClientExactVisualOverlaysForSelectionScreen(out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer)
+            {
+                _pendingClientExactVisualSelectionPauseSticky = false;
+                return false;
+            }
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            if (status == null)
+            {
+                if (_pendingClientExactVisualSelectionPauseSticky)
+                {
+                    reason = string.IsNullOrWhiteSpace(_lastPendingClientExactVisualPauseReason)
+                        ? "selection-pause-sticky-awaiting-status"
+                        : _lastPendingClientExactVisualPauseReason;
+                    return true;
+                }
+
+                return false;
+            }
+
+            string lifecycle = status.LifecycleState?.Trim() ?? string.Empty;
+            string readinessStage = status.BattleDataReadinessStage?.Trim() ?? string.Empty;
+            bool reconnectFinalize =
+                !status.BattleDataReady &&
+                !status.HasAgent &&
+                string.Equals(readinessStage, "ReconnectFinalize", StringComparison.OrdinalIgnoreCase);
+            bool noSide =
+                string.Equals(lifecycle, "NoSide", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, CoopBattlePeerLifecycleStatus.NoSide.ToString(), StringComparison.OrdinalIgnoreCase);
+            bool sideSelection =
+                string.Equals(readinessStage, "SideSelection", StringComparison.OrdinalIgnoreCase);
+            bool unitSelection =
+                string.Equals(readinessStage, "UnitSelection", StringComparison.OrdinalIgnoreCase);
+            bool respawnSelection =
+                string.Equals(readinessStage, "RespawnSelection", StringComparison.OrdinalIgnoreCase);
+            bool respawnable =
+                string.Equals(lifecycle, "Respawnable", StringComparison.OrdinalIgnoreCase) ||
+                respawnSelection ||
+                status.CanRespawn;
+            bool shouldPause =
+                reconnectFinalize ||
+                (!status.HasAgent &&
+                 (noSide || sideSelection || unitSelection || respawnSelection || respawnable));
+            if (shouldPause)
+            {
+                reason =
+                    "Lifecycle=" + lifecycle +
+                    " BattleDataReady=" + status.BattleDataReady +
+                    " ReadinessStage=" + readinessStage +
+                    " CanRespawn=" + status.CanRespawn +
+                    " HasAgent=" + status.HasAgent;
+                _pendingClientExactVisualSelectionPauseSticky = true;
+                return true;
+            }
+
+            bool explicitResume =
+                status.HasAgent ||
+                (!noSide && !sideSelection && !unitSelection && !respawnSelection && !respawnable);
+            if (_pendingClientExactVisualSelectionPauseSticky && !explicitResume)
+            {
+                reason = string.IsNullOrWhiteSpace(_lastPendingClientExactVisualPauseReason)
+                    ? "selection-pause-sticky-awaiting-explicit-resume"
+                    : _lastPendingClientExactVisualPauseReason;
+                return true;
+            }
+
+            _pendingClientExactVisualSelectionPauseSticky = false;
+            return false;
+        }
+
+        private static bool ShouldPauseClientExactVisualOverlaysForReconnectFinalize(out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer)
+                return false;
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            if (status == null)
+                return false;
+
+            string readinessStage = status.BattleDataReadinessStage?.Trim() ?? string.Empty;
+            if (status.BattleDataReady ||
+                status.HasAgent ||
+                !string.Equals(readinessStage, "ReconnectFinalize", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            reason =
+                "Lifecycle=" + (status.LifecycleState?.Trim() ?? string.Empty) +
+                " BattleDataReady=" + status.BattleDataReady +
+                " ReadinessStage=" + readinessStage +
+                " HasAgent=" + status.HasAgent;
+            return true;
+        }
+
+        private static int DropPendingClientExactVisualOverlaysForReconnectFinalize(string source)
+        {
+            if (_pendingExactNativeClientVisualOverlaysByAgentIndex.Count == 0 ||
+                !ShouldPauseClientExactVisualOverlaysForReconnectFinalize(out string pauseReason))
+            {
+                return 0;
+            }
+
+            var droppedAgentIndices = new List<int>();
+            int droppedHeroCount = 0;
+            int droppedTroopCount = 0;
+            foreach (KeyValuePair<int, PendingClientExactVisualOverlayState> pendingPair in _pendingExactNativeClientVisualOverlaysByAgentIndex)
+            {
+                droppedAgentIndices.Add(pendingPair.Key);
+                RosterEntryState entryState =
+                    !string.IsNullOrWhiteSpace(pendingPair.Value?.EntryId)
+                        ? BattleSnapshotRuntimeState.GetEntryState(pendingPair.Value.EntryId)
+                        : null;
+                if (IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                    droppedHeroCount++;
+                else
+                    droppedTroopCount++;
+            }
+
+            for (int i = 0; i < droppedAgentIndices.Count; i++)
+                _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(droppedAgentIndices[i]);
+
+            if (droppedAgentIndices.Count > 0)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: dropped pending client exact visual overlays during reconnect finalize gate. " +
+                    "DroppedCount=" + droppedAgentIndices.Count +
+                    " DroppedHeroCount=" + droppedHeroCount +
+                    " DroppedTroopCount=" + droppedTroopCount +
+                    " Reason=" + (pauseReason ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            return droppedAgentIndices.Count;
+        }
+
+        private static int DropPendingClientTroopExactVisualOverlaysForLiveControl(string source)
+        {
+            if (_pendingExactNativeClientVisualOverlaysByAgentIndex.Count == 0 ||
+                !ShouldSuppressClientTroopExactVisualOverlaysForLiveControl(out string suppressReason))
+            {
+                return 0;
+            }
+
+            Agent controlledAgent = GetLocalPeerControlledAgent();
+            int controlledAgentIndex =
+                controlledAgent != null && controlledAgent.IsActive()
+                    ? controlledAgent.Index
+                    : -1;
+            var droppedAgentIndices = new List<int>();
+            int droppedTroopCount = 0;
+            int preservedLocalControlledCount = 0;
+            foreach (KeyValuePair<int, PendingClientExactVisualOverlayState> pendingPair in _pendingExactNativeClientVisualOverlaysByAgentIndex)
+            {
+                RosterEntryState entryState =
+                    !string.IsNullOrWhiteSpace(pendingPair.Value?.EntryId)
+                        ? BattleSnapshotRuntimeState.GetEntryState(pendingPair.Value.EntryId)
+                        : null;
+                if (IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                    continue;
+
+                if (pendingPair.Key == controlledAgentIndex)
+                {
+                    preservedLocalControlledCount++;
+                    continue;
+                }
+
+                droppedAgentIndices.Add(pendingPair.Key);
+                droppedTroopCount++;
+            }
+
+            for (int i = 0; i < droppedAgentIndices.Count; i++)
+                _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(droppedAgentIndices[i]);
+
+            if (droppedAgentIndices.Count > 0)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: dropped pending client troop exact visual overlays while local peer already has live control. " +
+                    "DroppedCount=" + droppedAgentIndices.Count +
+                    " DroppedTroopCount=" + droppedTroopCount +
+                    " PreservedLocalControlledCount=" + preservedLocalControlledCount +
+                    " Reason=" + (suppressReason ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            return droppedAgentIndices.Count;
+        }
+
         private static void TryMaintainClientPeerHeroExactVisualOverlays(Mission mission)
         {
             if (mission?.AllAgents == null || GameNetwork.IsServer)
+                return;
+
+            DropPendingClientExactVisualOverlaysForReconnectFinalize("client-hero-exact-visual-watchdog");
+            if (ShouldPauseClientExactVisualOverlaysForReconnectFinalize(out _))
                 return;
 
             DateTime nowUtc = DateTime.UtcNow;
@@ -7003,7 +7814,22 @@ namespace CoopSpectator.MissionBehaviors
             if (mission?.AllAgents == null || GameNetwork.IsServer)
                 return;
 
+            DropPendingClientExactVisualOverlaysForReconnectFinalize("client-troop-exact-visual-watchdog");
+            DropPendingClientTroopExactVisualOverlaysForLiveControl("client-troop-exact-visual-watchdog");
+            if (ShouldPauseClientExactVisualOverlaysForReconnectFinalize(out _))
+                return;
+
+            TryRefreshClientPostPossessionExactVisualPauseWindow(mission, "client-troop-exact-visual-watchdog");
             if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out _))
+                return;
+
+            if (ShouldPausePendingClientExactVisualOverlaysForSelectionScreen(out _))
+                return;
+
+            if (ShouldSuppressClientTroopExactVisualOverlaysForLiveControl(out _))
+                return;
+
+            if (ShouldPauseClientPostPossessionExactVisualForAgent(agent: null, out _))
                 return;
 
             DateTime nowUtc = DateTime.UtcNow;
@@ -7706,6 +8532,13 @@ namespace CoopSpectator.MissionBehaviors
                 return localAuthoritativeEntryId;
             }
 
+            if (TryResolveQueuedClientExactCampaignVisualOverlayEntryId(agent, out string queuedEntryId))
+            {
+                _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = queuedEntryId;
+                _materializedArmyEntryIdByAgentIndex[agent.Index] = queuedEntryId;
+                return queuedEntryId;
+            }
+
             return null;
         }
 
@@ -7731,12 +8564,18 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
+            if (HasClientExactCampaignVisualOverlayAssignmentQueueCandidate(agent))
+                return true;
+
             return false;
         }
 
         private static bool HasClientExactCampaignVisualOverlayAssignmentQueueCandidate(Agent agent)
         {
             if (agent == null || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
+                return false;
+
+            if (!ShouldAllowQueuedClientExactCampaignVisualOverlayResolution(agent, out _))
                 return false;
 
             string troopId = agent.Character?.StringId;
@@ -7753,6 +8592,12 @@ namespace CoopSpectator.MissionBehaviors
             entryId = null;
             if (agent == null || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
                 return false;
+
+            if (!ShouldAllowQueuedClientExactCampaignVisualOverlayResolution(agent, out string blockedReason))
+            {
+                TryLogSuppressedQueuedClientExactCampaignVisualOverlayResolution(agent, blockedReason);
+                return false;
+            }
 
             string troopId = agent.Character?.StringId;
             if (string.IsNullOrWhiteSpace(troopId))
@@ -7788,6 +8633,62 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return false;
+        }
+
+        private static bool ShouldAllowQueuedClientExactCampaignVisualOverlayResolution(
+            Agent agent,
+            out string reason)
+        {
+            reason = null;
+            if (agent == null || agent.Index < 0)
+            {
+                reason = "agent-null";
+                return false;
+            }
+
+            if (!TryGetClientCreateAgentExactVisualState(agent.Index, out ClientCreateAgentExactVisualRuntimeState state) ||
+                state == null)
+            {
+                return true;
+            }
+
+            if (!state.CreateAgentPayloadObserved)
+                return true;
+
+            reason =
+                "create-agent-payload-observed" +
+                "|ResolutionState=" + (state.ResolutionState ?? "unresolved") +
+                "|ObservedEntryId=" + (state.EntryId ?? "null") +
+                "|AuthoritativeMaterializedObserved=" + state.AuthoritativeMaterializedEntryObserved +
+                "|CreateAgentPostfixObserved=" + state.CreateAgentPostfixObserved +
+                "|EquipmentSyncObserved=" + state.EquipmentSyncObserved +
+                "|OnSpawnWieldEventCount=" + state.OnSpawnWieldEventCount;
+            return false;
+        }
+
+        private static void TryLogSuppressedQueuedClientExactCampaignVisualOverlayResolution(
+            Agent agent,
+            string reason)
+        {
+            if (agent == null || agent.Index < 0)
+                return;
+
+            if (!TryGetClientCreateAgentExactVisualState(agent.Index, out ClientCreateAgentExactVisualRuntimeState state) ||
+                state == null ||
+                state.QueueFallbackSuppressedLogged)
+            {
+                return;
+            }
+
+            state.QueueFallbackSuppressedLogged = true;
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: suppressed client exact visual overlay battlefield assignment queue fallback. " +
+                "AgentIndex=" + agent.Index +
+                " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                " TeamSide=" + (agent.Team?.Side.ToString() ?? "null") +
+                " ObservedEntryId=" + (state.EntryId ?? "null") +
+                " ResolutionState=" + (state.ResolutionState ?? "unresolved") +
+                " Reason=" + (reason ?? "unknown"));
         }
 
         private static string BuildClientExactCampaignVisualOverlayAssignmentKey(BattleSideEnum side, string troopId)
@@ -8028,10 +8929,46 @@ namespace CoopSpectator.MissionBehaviors
 
             bool clientVisualOnly = overlayMode == ExactCampaignSnapshotOverlayMode.ClientVisualOnly;
             bool clientHeroEntry = IsHeroEntryEligibleForExactPersonalPerks(entryState);
+            if (clientVisualOnly &&
+                !clientHeroEntry &&
+                ShouldPausePendingClientExactVisualOverlaysForSelectionScreen(out _))
+            {
+                return false;
+            }
+            if (clientVisualOnly &&
+                !clientHeroEntry &&
+                ShouldPauseClientPostPossessionExactVisualForAgent(agent, out _))
+            {
+                return false;
+            }
             bool includeWeaponsForOverlayRefresh =
                 clientVisualOnly
                     ? includeWeaponsForClientRefresh
                     : !preSpawnExactLoadoutInjected;
+            if (clientVisualOnly &&
+                includeWeaponsForOverlayRefresh &&
+                IsLocalPeerControlledAgent(agent))
+            {
+                includeWeaponsForOverlayRefresh = false;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: suppressed weapon-inclusive client exact visual overlay for locally controlled agent. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " Source=" + (source ?? "unknown"));
+            }
+            else if (clientVisualOnly &&
+                     includeWeaponsForOverlayRefresh &&
+                     !clientHeroEntry &&
+                     ShouldDowngradeClientMountedTroopWeaponOverlayRefresh(agent, entryState, out string mountedCooldownReason))
+            {
+                includeWeaponsForOverlayRefresh = false;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: downgraded weapon-inclusive client exact visual overlay for mounted non-local troop during local post-possession combat stabilization. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " Reason=" + (mountedCooldownReason ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+            }
             bool exactSnapshotHasWeapons = HasAnySnapshotWeapons(entryState);
             bool requiresClientVisibleWeaponProjection =
                 clientVisualOnly &&
@@ -8054,6 +8991,7 @@ namespace CoopSpectator.MissionBehaviors
 
                 TryApplyEntryIdentityToAgent(agent, entryState);
                 includeMountVisualsForOverlayRefresh =
+                    clientHeroEntry &&
                     entryState.IsMounted &&
                     ShouldAttemptClientMountedHeroMountVisualRepair(
                         agent,
@@ -8141,6 +9079,24 @@ namespace CoopSpectator.MissionBehaviors
                     includeWeapons: includeWeaponsForOverlayRefresh,
                     includeArmorVisuals: includeArmorVisualsForOverlayRefresh,
                     includeMountVisuals: includeMountVisualsForOverlayRefresh);
+            if (clientVisualOnly &&
+                includeWeaponsForOverlayRefresh &&
+                clientHeroEntry &&
+                spawnEquipment != null &&
+                ExactTransferContractBuilder.TryNormalizeStrictHeroWeaponLayoutInPlace(
+                    spawnEquipment,
+                    entryState,
+                    out bool normalizedStrictHeroClientVisualLayout,
+                    out string normalizedStrictHeroClientVisualLayoutSummary) &&
+                normalizedStrictHeroClientVisualLayout)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: normalized strict hero client exact visual overlay weapon layout before native refresh. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " Summary=" + (normalizedStrictHeroClientVisualLayoutSummary ?? "(none)") +
+                    " Source=" + (source ?? "unknown"));
+            }
             if (runtimeExactCharacter)
             {
                 appliedEquipment = "runtime-exact-character";
@@ -8661,6 +9617,12 @@ namespace CoopSpectator.MissionBehaviors
             wieldRefreshIssue = "(none)";
             if (agent == null || overlaySpawnEquipment == null || agent.IsMount)
                 return false;
+
+            if (IsLocalPeerControlledAgent(agent))
+            {
+                wieldRefreshIssue = "client-live-wield-refresh-skipped:local-controlled-agent";
+                return false;
+            }
 
             try
             {
@@ -9682,6 +10644,8 @@ namespace CoopSpectator.MissionBehaviors
                 _materializedArmySideByAgentIndex.Clear();
                 _materializedAgentInstanceByIndex.Clear();
                 _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
+                _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
+                _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = 0;
                 _loggedAutomatedMaterializedEntrySkipIds.Clear();
                 _loggedSuppressedMaterializedEquipmentKeys.Clear();
                 MaterializedEquipmentResolutionSourceCounts.Clear();
@@ -19546,6 +20510,14 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
                 }
 
+                if (CoopBattlePeerReconnectState.TryGetActiveBattleReconnectFinalizeGateState(
+                        missionPeer,
+                        out CoopBattlePeerReconnectState.ActiveBattleReconnectFinalizeGateState reconnectFinalizeGateState) &&
+                    !reconnectFinalizeGateState.ReadyAcknowledged)
+                {
+                    continue;
+                }
+
                 Agent candidateAgent = FindEligibleMaterializedArmyAgent(mission, authoritativeSide, pendingRequest.EntryId, pendingRequest.TroopId);
                 if (candidateAgent == null)
                 {
@@ -19570,6 +20542,9 @@ namespace CoopSpectator.MissionBehaviors
                 _spawnedCoopPeerIndices.Add(peer.Index);
                 ExpireMissionPeerVanillaSpawnVisuals(missionPeer);
                 missionPeer.WantsToSpawnAsBot = false;
+                CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
+                    peer,
+                    source + " army-possession");
                 CoopBattleSpawnRequestState.Clear(missionPeer, source + " army-possession");
                 CoopBattleSpawnRuntimeState.MarkSpawned(missionPeer, pendingRequest.TroopId, pendingRequest.EntryId, source + " army-possession");
                 CoopBattlePeerLifecycleRuntimeState.MarkAlive(missionPeer, pendingRequest.TroopId, pendingRequest.EntryId, source + " army-possession");
@@ -20519,6 +21494,29 @@ namespace CoopSpectator.MissionBehaviors
 
             if (_materializedBattleResultRemovedAgentIndices.Remove(sourceAgent.Index))
                 _materializedBattleResultRemovedAgentIndices.Add(targetAgent.Index);
+
+            if (_strictExactHeroTransferStateByRiderAgentIndex.TryGetValue(sourceAgent.Index, out StrictExactHeroTransferRuntimeState strictState) &&
+                strictState != null)
+            {
+                _strictExactHeroTransferStateByRiderAgentIndex.Remove(sourceAgent.Index);
+                strictState.RiderAgentIndex = targetAgent.Index;
+                strictState.RiderMaterialized = targetAgent.IsActive();
+                strictState.PeerBound = targetAgent.MissionPeer != null;
+                if (targetAgent.MountAgent != null)
+                {
+                    strictState.IsMountedHero = true;
+                    strictState.ExpectedMountAgentIndex = targetAgent.MountAgent.Index;
+                    strictState.MountMaterialized = true;
+                    strictState.MountLinkVerified = true;
+                }
+
+                InvalidateStrictExactHeroLocalInitialWieldAppliedState(
+                    strictState,
+                    "materialized agent runtime transfer",
+                    "agent-lifecycle-transfer",
+                    bumpLifecycleGeneration: true);
+                _strictExactHeroTransferStateByRiderAgentIndex[targetAgent.Index] = strictState;
+            }
         }
 
         private const int MaxBotsControlledCountForNetworkContract = 255;
@@ -21752,6 +22750,9 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " controlled-agent");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " controlled-agent");
+                    CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
+                        peer,
+                        source + " controlled-agent");
                     CoopBattleSpawnRuntimeState.MarkSpawned(
                         missionPeer,
                         (missionPeer.ControlledAgent.Character as BasicCharacterObject)?.StringId,
@@ -21772,6 +22773,9 @@ namespace CoopSpectator.MissionBehaviors
                     {
                         CoopBattleSelectionRequestState.Clear(missionPeer, source + " spectator");
                         CoopBattleSpawnRequestState.Clear(missionPeer, source + " spectator");
+                        CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
+                            peer,
+                            source + " spectator");
                         CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " spectator");
                         CoopBattlePeerLifecycleRuntimeState.MarkNoSide(missionPeer, BattleSideEnum.None, source + " spectator");
                         continue;
@@ -21783,6 +22787,9 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " no-side");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " no-side");
+                    CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
+                        peer,
+                        source + " no-side");
                     CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " no-side");
                     CoopBattlePeerLifecycleRuntimeState.MarkNoSide(missionPeer, BattleSideEnum.None, source + " no-side");
                     continue;
@@ -22730,6 +23737,9 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattleAuthorityState.ClearPeerSelectionAndSide(missionPeer, source + " spectator-request");
             CoopBattleSelectionRequestState.Clear(missionPeer, source + " spectator-request");
             CoopBattleSpawnRequestState.Clear(missionPeer, source + " spectator-request");
+            CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
+                peer,
+                source + " spectator-request");
             CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " spectator-request");
             missionPeer.WantsToSpawnAsBot = false;
             MovePeerToSpectatorHoldingState(mission, missionPeer, peer, source + " spectator-request");
@@ -23862,6 +24872,21 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (CoopBattlePeerReconnectState.TryGetActiveBattleReconnectFinalizeGateState(
+                    missionPeer,
+                    out CoopBattlePeerReconnectState.ActiveBattleReconnectFinalizeGateState reconnectFinalizeGateState) &&
+                !reconnectFinalizeGateState.ReadyAcknowledged)
+            {
+                readinessStage = "ReconnectFinalize";
+                readinessReason = "Finalizing reconnect to active battle...";
+                TryLogReconnectFinalizeReadinessBlock(
+                    missionPeer,
+                    currentPhase,
+                    statusSide,
+                    reconnectFinalizeGateState);
+                return false;
+            }
+
             if (statusSide != BattleSideEnum.None)
             {
                 if (!TryResolveSideBattleDataReadyForPeer(
@@ -23948,6 +24973,38 @@ namespace CoopSpectator.MissionBehaviors
                 " AcknowledgedTransmissionId=" + acknowledgedTransmissionId +
                 " Phase=" + currentPhase +
                 " StatusSide=" + statusSide);
+        }
+
+        private static void TryLogReconnectFinalizeReadinessBlock(
+            MissionPeer missionPeer,
+            CoopBattlePhase currentPhase,
+            BattleSideEnum statusSide,
+            CoopBattlePeerReconnectState.ActiveBattleReconnectFinalizeGateState reconnectFinalizeGateState)
+        {
+            NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
+            int peerIndex = peer?.Index ?? -1;
+            string logKey =
+                reconnectFinalizeGateState.TransmissionId + "|" +
+                reconnectFinalizeGateState.ReadyAcknowledged + "|" +
+                currentPhase + "|" +
+                statusSide + "|" +
+                (reconnectFinalizeGateState.Reason ?? string.Empty);
+            if (_lastLoggedReconnectFinalizeBlockStateByPeer.TryGetValue(peerIndex, out string previousLogKey) &&
+                string.Equals(previousLogKey, logKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastLoggedReconnectFinalizeBlockStateByPeer[peerIndex] = logKey;
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: battle data readiness blocked until reconnect finalize gate is acknowledged. " +
+                "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                " TransmissionId=" + reconnectFinalizeGateState.TransmissionId +
+                " ReadyAcknowledged=" + reconnectFinalizeGateState.ReadyAcknowledged +
+                " Reason=" + (reconnectFinalizeGateState.Reason ?? "null") +
+                " Phase=" + currentPhase +
+                " StatusSide=" + statusSide +
+                " ArmedUtc=" + reconnectFinalizeGateState.ArmedUtc.ToString("O"));
         }
 
         private static bool TryResolveSideBattleDataReadyForPeer(
@@ -24203,6 +25260,15 @@ namespace CoopSpectator.MissionBehaviors
                     reason: "stale-selectable-overlay-entry");
             }
 
+            if (TryResolveQueuedClientExactCampaignVisualOverlayEntryId(agent, out string queuedEntryId))
+            {
+                _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = queuedEntryId;
+                _materializedArmyEntryIdByAgentIndex[agent.Index] = queuedEntryId;
+                entryId = queuedEntryId;
+                return true;
+            }
+
+            entryId = null;
             return false;
         }
 
@@ -24327,6 +25393,205 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        internal static bool HasStrictExactHeroLocalInitialWieldBeenApplied(
+            Agent agent,
+            string entryId,
+            out string currentVersionKey,
+            out string versionStateSummary)
+        {
+            currentVersionKey = string.Empty;
+            versionStateSummary = "strict-exact-hero-local-initial-wield-state-missing";
+
+            if (GameNetwork.IsServer || agent == null || agent.IsMount || agent.Index < 0 || string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            if (!_strictExactHeroTransferStateByRiderAgentIndex.TryGetValue(agent.Index, out StrictExactHeroTransferRuntimeState state) ||
+                state == null)
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
+            {
+                versionStateSummary = "strict-exact-hero-local-initial-wield-entry-unresolved";
+                return false;
+            }
+
+            RefreshStrictExactHeroVersionState(
+                state,
+                entryId,
+                entryState,
+                "strict exact hero local initial wield query");
+
+            currentVersionKey = BuildStrictExactHeroLocalInitialWieldVersionKey(state);
+            versionStateSummary =
+                "BattleId=" + (state.BattleId ?? "null") +
+                " LifecycleGeneration=" + state.LifecycleGeneration +
+                " Applied=" + !string.IsNullOrWhiteSpace(state.LocalInitialWieldAppliedVersionKey);
+            return
+                !string.IsNullOrWhiteSpace(currentVersionKey) &&
+                string.Equals(state.LocalInitialWieldAppliedVersionKey, currentVersionKey, StringComparison.Ordinal);
+        }
+
+        internal static bool ShouldAllowVanillaOnSpawnWieldFallbackForStrictHero(
+            Agent agent,
+            string entryId,
+            out string reason)
+        {
+            reason = "strict-exact-hero-vanilla-onspawn-wield-fallback-unresolved";
+
+            if (GameNetwork.IsServer || agent == null || agent.IsMount || agent.Index < 0 || string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
+            {
+                reason = "strict-exact-hero-entry-unresolved";
+                return false;
+            }
+
+            ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
+            if (diagnostic == null)
+            {
+                reason = "strict-exact-hero-entry-diagnostic-missing";
+                return false;
+            }
+
+            if (!_strictExactHeroTransferStateByRiderAgentIndex.TryGetValue(agent.Index, out StrictExactHeroTransferRuntimeState state) ||
+                state == null)
+            {
+                reason = "strict-exact-hero-transfer-state-missing";
+                return false;
+            }
+
+            EquipmentIndex currentMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+            EquipmentIndex currentOffHandIndex = agent.GetOffhandWieldedItemIndex();
+            bool hasUsableLiveWieldState =
+                currentMainHandIndex != EquipmentIndex.None ||
+                currentOffHandIndex != EquipmentIndex.None;
+            bool degradedWeaponFallback =
+                !IsExactWeaponContractSupported(diagnostic) ||
+                !diagnostic.CurrentRuntimePreSpawnIncludesWeapons;
+
+            if (state.ExactVisualApplied || state.Stage >= StrictExactHeroTransferStage.ExactVisualApplied)
+            {
+                if (!hasUsableLiveWieldState)
+                {
+                    reason =
+                        "strict-exact-hero-local-wield-unusable-after-exact-visual" +
+                        "{Status=" + (diagnostic.Status ?? "unknown") +
+                        ",WeaponContractSupported=" + IsExactWeaponContractSupported(diagnostic) +
+                        ",CurrentPreSpawnWeapons=" + diagnostic.CurrentRuntimePreSpawnIncludesWeapons +
+                        ",Weapon2Risk=" + diagnostic.HasWeapon2WieldReplicationRisk +
+                        ",Stage=" + state.Stage +
+                        ",Main=" + currentMainHandIndex +
+                        ",Off=" + currentOffHandIndex + "}";
+                    return true;
+                }
+
+                reason = "strict-exact-hero-exact-visual-already-applied";
+                return false;
+            }
+
+            if (degradedWeaponFallback)
+            {
+                reason =
+                    "strict-exact-hero-degraded-weapon-fallback" +
+                    "{Status=" + (diagnostic.Status ?? "unknown") +
+                    ",WeaponContractSupported=" + IsExactWeaponContractSupported(diagnostic) +
+                    ",CurrentPreSpawnWeapons=" + diagnostic.CurrentRuntimePreSpawnIncludesWeapons +
+                    ",Weapon2Risk=" + diagnostic.HasWeapon2WieldReplicationRisk +
+                    ",Stage=" + state.Stage +
+                    ",Main=" + currentMainHandIndex +
+                    ",Off=" + currentOffHandIndex + "}";
+                return true;
+            }
+
+            if (!hasUsableLiveWieldState)
+            {
+                reason =
+                    "strict-exact-hero-local-wield-unusable-before-exact-visual" +
+                    "{Status=" + (diagnostic.Status ?? "unknown") +
+                    ",WeaponContractSupported=" + IsExactWeaponContractSupported(diagnostic) +
+                    ",CurrentPreSpawnWeapons=" + diagnostic.CurrentRuntimePreSpawnIncludesWeapons +
+                    ",Weapon2Risk=" + diagnostic.HasWeapon2WieldReplicationRisk +
+                    ",Stage=" + state.Stage +
+                    ",Main=" + currentMainHandIndex +
+                    ",Off=" + currentOffHandIndex + "}";
+                return true;
+            }
+
+            reason = "strict-exact-hero-exact-weapon-contract-supported";
+            return false;
+        }
+
+        internal static void InvalidateStrictExactHeroLocalInitialWieldAppliedMarker(
+            Agent agent,
+            string entryId,
+            string source,
+            string reason)
+        {
+            if (GameNetwork.IsServer || agent == null || agent.IsMount || agent.Index < 0)
+                return;
+
+            if (!_strictExactHeroTransferStateByRiderAgentIndex.TryGetValue(agent.Index, out StrictExactHeroTransferRuntimeState state) ||
+                state == null)
+            {
+                return;
+            }
+
+            RosterEntryState entryState = !string.IsNullOrWhiteSpace(entryId)
+                ? BattleSnapshotRuntimeState.GetEntryState(entryId)
+                : null;
+            if (entryState != null)
+            {
+                RefreshStrictExactHeroVersionState(
+                    state,
+                    entryId,
+                    entryState,
+                    source ?? "strict exact hero local initial wield invalidate");
+            }
+
+            InvalidateStrictExactHeroLocalInitialWieldAppliedState(
+                state,
+                source ?? "strict exact hero local initial wield invalidate",
+                reason ?? "manual-invalidate",
+                bumpLifecycleGeneration: false);
+        }
+
+        private static void RecordStrictExactHeroLocalInitialWieldApplied(
+            Agent agent,
+            string entryId,
+            string source)
+        {
+            if (GameNetwork.IsServer || agent == null || agent.IsMount || agent.Index < 0 || string.IsNullOrWhiteSpace(entryId))
+                return;
+
+            StrictExactHeroTransferRuntimeState state = EnsureStrictExactHeroTransferState(agent.Index);
+            if (state == null)
+                return;
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                return;
+
+            RefreshStrictExactHeroVersionState(
+                state,
+                entryId,
+                entryState,
+                source ?? "strict exact hero local initial wield applied");
+
+            string versionKey = BuildStrictExactHeroLocalInitialWieldVersionKey(state);
+            if (string.IsNullOrWhiteSpace(versionKey))
+                return;
+
+            state.LocalInitialWieldAppliedVersionKey = versionKey;
+            state.LocalInitialWieldAppliedUtc = DateTime.UtcNow;
+            state.LastSource = source ?? "unknown";
+            state.LastUpdatedUtc = DateTime.UtcNow;
+        }
+
         internal static bool TryApplyStrictExactHeroLocalInitialWield(
             Agent agent,
             string entryId,
@@ -24369,6 +25634,21 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (ExactTransferContractBuilder.TryNormalizeStrictHeroWeaponLayoutInPlace(
+                    overlaySpawnEquipment,
+                    entryState,
+                    out bool normalizedStrictHeroWieldLayout,
+                    out string normalizedStrictHeroWieldLayoutSummary) &&
+                normalizedStrictHeroWieldLayout)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: normalized strict hero local initial wield layout before live refresh. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " Summary=" + (normalizedStrictHeroWieldLayoutSummary ?? "(none)") +
+                    " Source=" + (source ?? "unknown"));
+            }
+
             if (TryRefreshClientOverlayLiveWeaponWieldState(
                     agent,
                     overlaySpawnEquipment,
@@ -24377,6 +25657,10 @@ namespace CoopSpectator.MissionBehaviors
                     out appliedWieldRefresh,
                     out wieldRefreshIssue))
             {
+                RecordStrictExactHeroLocalInitialWieldApplied(
+                    agent,
+                    entryId,
+                    source ?? "strict exact hero local initial wield live refresh");
                 return true;
             }
 
@@ -24403,6 +25687,13 @@ namespace CoopSpectator.MissionBehaviors
                     ",Source=" + (source ?? "unknown") + "}";
                 if (!success)
                     wieldRefreshIssue = "strict-exact-hero-local-initial-wield-post-none";
+                if (success)
+                {
+                    RecordStrictExactHeroLocalInitialWieldApplied(
+                        agent,
+                        entryId,
+                        source ?? "strict exact hero local initial wield initial-weapons");
+                }
                 return success;
             }
             catch (Exception ex)
@@ -25255,6 +26546,9 @@ namespace CoopSpectator.MissionBehaviors
 
                 _spawnedCoopPeerIndices.Add(peer.Index);
                 CoopBattleSpawnRequestState.Clear(missionPeer, source + " spawn-succeeded");
+                CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
+                    peer,
+                    source + " spawn-succeeded");
                 CoopBattleSpawnRuntimeState.MarkSpawned(missionPeer, selectedTroopId, selectedEntryId, source + " spawn-succeeded");
                 CoopBattlePeerLifecycleRuntimeState.MarkAlive(missionPeer, selectedTroopId, selectedEntryId, source + " spawn-succeeded");
 

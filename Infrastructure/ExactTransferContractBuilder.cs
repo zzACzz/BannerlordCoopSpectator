@@ -686,15 +686,40 @@ namespace CoopSpectator.Infrastructure
             IReadOnlyList<MountedWeaponSlotState> before,
             IReadOnlyList<MountedWeaponSlotState> after)
         {
-            for (int i = 0; i < 4; i++)
+            EquipmentIndex[] targetSlots =
             {
-                string beforeItemId = before != null && i < before.Count ? before[i]?.ItemId : null;
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3
+            };
+
+            for (int i = 0; i < targetSlots.Length; i++)
+            {
+                string beforeItemId = ResolveMountedLayoutItemId(before, targetSlots[i]);
                 string afterItemId = after != null && i < after.Count ? after[i]?.ItemId : null;
                 if (!string.Equals(beforeItemId, afterItemId, StringComparison.Ordinal))
                     return false;
             }
 
             return true;
+        }
+
+        private static string ResolveMountedLayoutItemId(
+            IReadOnlyList<MountedWeaponSlotState> slots,
+            EquipmentIndex targetSlot)
+        {
+            if (slots == null)
+                return null;
+
+            for (int i = 0; i < slots.Count; i++)
+            {
+                MountedWeaponSlotState slot = slots[i];
+                if (slot != null && slot.Slot == targetSlot)
+                    return slot.ItemId;
+            }
+
+            return null;
         }
 
         private static string BuildMountedLayoutSummary(

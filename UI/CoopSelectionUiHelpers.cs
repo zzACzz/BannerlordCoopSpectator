@@ -113,7 +113,7 @@ namespace CoopSpectator.UI
             bool battleDataReady = status?.BattleDataReady == true;
             string battleDataLoadingProgressText = battleDataReady
                 ? string.Empty
-                : BuildBattleDataLoadingProgressText();
+                : BuildBattleDataLoadingProgressText(status);
             string[] attackerSelectableEntryIds = battleDataReady
                 ? ResolveSelectableEntryIds(status, BattleSideEnum.Attacker)
                 : Array.Empty<string>();
@@ -203,7 +203,7 @@ namespace CoopSpectator.UI
         public static string BuildTeamHintText(CoopSelectionUiSnapshot snapshot)
         {
             if (snapshot != null && !snapshot.BattleDataReady)
-                return LoadingBattleDataText;
+                return string.Empty;
 
             return snapshot == null
                 ? "Choose a side."
@@ -216,7 +216,7 @@ namespace CoopSpectator.UI
                 return "Choose a living unit.";
 
             if (!snapshot.BattleDataReady)
-                return LoadingBattleDataText;
+                return string.Empty;
 
             return snapshot.CanSpawn
                 ? "Deploy into the selected living unit."
@@ -234,7 +234,7 @@ namespace CoopSpectator.UI
         public static string BuildUnitEmptyText(CoopSelectionUiSnapshot snapshot)
         {
             if (snapshot != null && !snapshot.BattleDataReady)
-                return LoadingBattleDataText;
+                return string.Empty;
 
             if (snapshot == null || snapshot.EffectiveSide == BattleSideEnum.None)
                 return "Select a side to view living units.";
@@ -874,10 +874,21 @@ namespace CoopSpectator.UI
             });
         }
 
-        private static string BuildBattleDataLoadingProgressText()
+        private static string BuildBattleDataLoadingProgressText(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status)
         {
+            string readinessReason = status?.BattleDataReadinessReason?.Trim() ?? string.Empty;
+            string readinessStage = status?.BattleDataReadinessStage?.Trim() ?? string.Empty;
+            bool reconnectFinalize =
+                string.Equals(readinessStage, "ReconnectFinalize", StringComparison.OrdinalIgnoreCase);
+            if (reconnectFinalize && !string.IsNullOrWhiteSpace(readinessReason))
+                return readinessReason;
+
             if (!CoopMissionNetworkBridge.TryGetClientBattleSnapshotProgress(out CoopMissionNetworkBridge.ClientBattleSnapshotProgressInfo progress))
-                return "Waiting for first data chunk...";
+            {
+                return !string.IsNullOrWhiteSpace(readinessReason)
+                    ? readinessReason
+                    : "Waiting for first data chunk...";
+            }
 
             string prefix =
                 "Progress: " +

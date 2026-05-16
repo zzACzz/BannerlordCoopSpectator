@@ -125,8 +125,6 @@ namespace CoopSpectator.Patches
             new List<DeferredClientSetAgentHealthPayload>();
         private static readonly List<DeferredClientMakeAgentDeadPayload> DeferredClientMakeAgentDeadPayloads =
             new List<DeferredClientMakeAgentDeadPayload>();
-        private static readonly HashSet<string> _strictExactHeroOnSpawnWieldRefreshAppliedKeys =
-            new HashSet<string>(StringComparer.Ordinal);
         private static long _nextDeferredClientCreateAgentSequence;
         private static long _nextDeferredClientSetAgentActionSetSequence;
         private static long _nextDeferredClientSynchronizeAgentEquipmentSequence;
@@ -424,7 +422,6 @@ namespace CoopSpectator.Patches
         public static void ResetRuntimeState(string source, bool preserveCommanderOrderControlState = false)
         {
             ExactCreateAgentCorridorDiagnostics.ResetRuntimeState(source);
-            _strictExactHeroOnSpawnWieldRefreshAppliedKeys.Clear();
             lock (DeferredMountedHeroCreateAgentPayloads)
             {
                 DeferredMountedHeroCreateAgentPayloads.Clear();
@@ -2628,7 +2625,7 @@ namespace CoopSpectator.Patches
             lock (DeferredClientCreateMissilePayloads)
             {
                 DeferredClientCreateMissilePayload existingPayload = DeferredClientCreateMissilePayloads
-                    .FirstOrDefault(candidate => candidate?.Message?.MissileIndex == createMissile.MissileIndex);
+                    .FirstOrDefault(candidate => AreDeferredClientCreateMissileMessagesEquivalent(candidate?.Message, createMissile));
                 if (existingPayload != null)
                 {
                     existingPayload.Message = createMissile;
@@ -2660,9 +2657,9 @@ namespace CoopSpectator.Patches
             {
                 DeferredClientHandleMissileCollisionReactionPayload existingPayload =
                     DeferredClientHandleMissileCollisionReactionPayloads.FirstOrDefault(
-                        candidate =>
-                            candidate?.Message?.MissileIndex == handleMissileCollisionReaction.MissileIndex &&
-                            candidate.Message.CollisionReaction == handleMissileCollisionReaction.CollisionReaction);
+                        candidate => AreDeferredClientHandleMissileCollisionReactionMessagesEquivalent(
+                            candidate?.Message,
+                            handleMissileCollisionReaction));
                 if (existingPayload != null)
                 {
                     existingPayload.Message = handleMissileCollisionReaction;
@@ -2683,15 +2680,44 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static bool HasDeferredClientCreateMissilePayload(int missileIndex)
+        private static bool HasDeferredClientCreateMissilePayload(int missileIndex, int shooterAgentIndex = int.MinValue)
         {
             if (missileIndex < 0)
                 return false;
 
             lock (DeferredClientCreateMissilePayloads)
             {
-                return DeferredClientCreateMissilePayloads.Any(candidate => candidate?.Message?.MissileIndex == missileIndex);
+                return DeferredClientCreateMissilePayloads.Any(candidate =>
+                    candidate?.Message != null &&
+                    candidate.Message.MissileIndex == missileIndex &&
+                    (shooterAgentIndex == int.MinValue || candidate.Message.AgentIndex == shooterAgentIndex));
             }
+        }
+
+        private static bool AreDeferredClientCreateMissileMessagesEquivalent(
+            CreateMissile left,
+            CreateMissile right)
+        {
+            return left != null &&
+                   right != null &&
+                   left.MissileIndex == right.MissileIndex &&
+                   left.AgentIndex == right.AgentIndex;
+        }
+
+        private static bool AreDeferredClientHandleMissileCollisionReactionMessagesEquivalent(
+            HandleMissileCollisionReaction left,
+            HandleMissileCollisionReaction right)
+        {
+            return left != null &&
+                   right != null &&
+                   left.MissileIndex == right.MissileIndex &&
+                   left.AttackerAgentIndex == right.AttackerAgentIndex &&
+                   left.AttachedAgentIndex == right.AttachedAgentIndex &&
+                   left.CollisionReaction == right.CollisionReaction &&
+                   left.AttachedToShield == right.AttachedToShield &&
+                   left.AttachedBoneIndex == right.AttachedBoneIndex &&
+                   GetMissionObjectIdValue(left.AttachedMissionObjectId) == GetMissionObjectIdValue(right.AttachedMissionObjectId) &&
+                   left.ForcedSpawnIndex == right.ForcedSpawnIndex;
         }
 
         private static bool HasDeferredClientSpawnWeaponWithNewEntityPayload(MissionObjectId missionObjectId)
@@ -3871,7 +3897,9 @@ namespace CoopSpectator.Patches
                     _missionNetworkComponentHandleServerEventCreateMissileMethod.Invoke(
                         missionNetworkComponent,
                         new object[] { createMissile });
-                    RemoveDeferredClientCreateMissilePayload(createMissile.MissileIndex);
+                    RemoveDeferredClientCreateMissilePayload(
+                        createMissile.MissileIndex,
+                        createMissile.AgentIndex);
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: replayed deferred client CreateMissile after battle snapshot apply. " +
                         "MissileIndex=" + createMissile.MissileIndex +
@@ -3931,7 +3959,9 @@ namespace CoopSpectator.Patches
                     continue;
                 }
 
-                if (HasDeferredClientCreateMissilePayload(handleMissileCollisionReaction.MissileIndex))
+                if (HasDeferredClientCreateMissilePayload(
+                        handleMissileCollisionReaction.MissileIndex,
+                        handleMissileCollisionReaction.AttackerAgentIndex))
                     continue;
 
                 if (!MissionHasLocalMissile(handleMissileCollisionReaction.MissileIndex))
@@ -3962,9 +3992,7 @@ namespace CoopSpectator.Patches
                     _missionNetworkComponentHandleServerEventHandleMissileCollisionReactionMethod.Invoke(
                         missionNetworkComponent,
                         new object[] { handleMissileCollisionReaction });
-                    RemoveDeferredClientHandleMissileCollisionReactionPayload(
-                        handleMissileCollisionReaction.MissileIndex,
-                        handleMissileCollisionReaction);
+                    RemoveDeferredClientHandleMissileCollisionReactionPayload(handleMissileCollisionReaction);
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: replayed deferred client HandleMissileCollisionReaction after battle snapshot apply. " +
                         "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
@@ -4534,30 +4562,32 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void RemoveDeferredClientCreateMissilePayload(int missileIndex)
+        private static void RemoveDeferredClientCreateMissilePayload(int missileIndex, int shooterAgentIndex = int.MinValue)
         {
             if (missileIndex < 0)
                 return;
 
             lock (DeferredClientCreateMissilePayloads)
             {
-                DeferredClientCreateMissilePayloads.RemoveAll(candidate => candidate?.Message?.MissileIndex == missileIndex);
+                DeferredClientCreateMissilePayloads.RemoveAll(candidate =>
+                    candidate?.Message != null &&
+                    candidate.Message.MissileIndex == missileIndex &&
+                    (shooterAgentIndex == int.MinValue || candidate.Message.AgentIndex == shooterAgentIndex));
             }
         }
 
         private static void RemoveDeferredClientHandleMissileCollisionReactionPayload(
-            int missileIndex,
             HandleMissileCollisionReaction referenceMessage)
         {
-            if (missileIndex < 0)
+            if (referenceMessage == null || referenceMessage.MissileIndex < 0)
                 return;
 
             lock (DeferredClientHandleMissileCollisionReactionPayloads)
             {
                 DeferredClientHandleMissileCollisionReactionPayloads.RemoveAll(candidate =>
-                    candidate?.Message?.MissileIndex == missileIndex &&
-                    (referenceMessage == null ||
-                     candidate.Message.CollisionReaction == referenceMessage.CollisionReaction));
+                    AreDeferredClientHandleMissileCollisionReactionMessagesEquivalent(
+                        candidate?.Message,
+                        referenceMessage));
             }
         }
 
@@ -6692,7 +6722,9 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (HasDeferredClientCreateMissilePayload(handleMissileCollisionReaction.MissileIndex))
+                if (HasDeferredClientCreateMissilePayload(
+                        handleMissileCollisionReaction.MissileIndex,
+                        handleMissileCollisionReaction.AttackerAgentIndex))
                 {
                     RegisterDeferredClientHandleMissileCollisionReactionPayload(
                         handleMissileCollisionReaction,
@@ -7401,9 +7433,12 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            string appliedKey = agent.Index + "|" + (entryId ?? string.Empty);
             bool localInitialWieldAlreadyApplied =
-                _strictExactHeroOnSpawnWieldRefreshAppliedKeys.Contains(appliedKey);
+                CoopMissionSpawnLogic.HasStrictExactHeroLocalInitialWieldBeenApplied(
+                    agent,
+                    entryId,
+                    out string localInitialWieldVersionKey,
+                    out string localInitialWieldVersionStateSummary);
             bool retryLocalInitialWieldDueToCurrentNone =
                 localInitialWieldAlreadyApplied &&
                 ShouldRetryStrictExactHeroLocalInitialWield(agent);
@@ -7416,7 +7451,11 @@ namespace CoopSpectator.Patches
 
             if (retryLocalInitialWieldDueToCurrentNone)
             {
-                _strictExactHeroOnSpawnWieldRefreshAppliedKeys.Remove(appliedKey);
+                CoopMissionSpawnLogic.InvalidateStrictExactHeroLocalInitialWieldAppliedMarker(
+                    agent,
+                    entryId,
+                    "battle-map handoff strict exact hero stale on-spawn wield suppression",
+                    "current-wield-none-retry");
                 localInitialWieldAlreadyApplied = false;
                 localInitialWieldResult = "strict-exact-hero-local-initial-wield-retry-after-stale-applied-key";
             }
@@ -7429,8 +7468,46 @@ namespace CoopSpectator.Patches
                     "battle-map handoff strict exact hero stale on-spawn wield suppression",
                     out localInitialWieldResult,
                     out localInitialWieldIssue);
-                if (localInitialWieldApplied)
-                    _strictExactHeroOnSpawnWieldRefreshAppliedKeys.Add(appliedKey);
+            }
+
+            bool localInitialWieldAppliedForCurrentVersion =
+                CoopMissionSpawnLogic.HasStrictExactHeroLocalInitialWieldBeenApplied(
+                    agent,
+                    entryId,
+                    out localInitialWieldVersionKey,
+                    out localInitialWieldVersionStateSummary);
+
+            string allowVanillaOnSpawnWieldFallbackReason = "(none)";
+            bool allowVanillaOnSpawnWieldFallback =
+                setWieldedItemIndex.IsWieldedOnSpawn &&
+                !localInitialWieldAppliedForCurrentVersion &&
+                CoopMissionSpawnLogic.ShouldAllowVanillaOnSpawnWieldFallbackForStrictHero(
+                    agent,
+                    entryId,
+                    out allowVanillaOnSpawnWieldFallbackReason);
+
+            if (allowVanillaOnSpawnWieldFallback)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: allowed vanilla strict exact-hero on-spawn SetWieldedItemIndex fallback because local strict wield refresh did not materialize a usable weapon state. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " TeamSide=" + agent.Team?.Side +
+                    " PayloadWieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                    " PayloadIsLeftHand=" + setWieldedItemIndex.IsLeftHand +
+                    " PayloadIsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
+                    " PayloadIsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
+                    " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
+                    " SuppressedReason=" + (suppressReason ?? "strict-exact-hero-stale-onspawn-wield") +
+                    " LocalInitialWieldApplied=" + localInitialWieldApplied +
+                    " LocalInitialWieldAlreadyApplied=" + localInitialWieldAlreadyApplied +
+                    " LocalInitialWieldAppliedForCurrentVersion=" + localInitialWieldAppliedForCurrentVersion +
+                    " LocalInitialWieldVersionKey=" + (string.IsNullOrWhiteSpace(localInitialWieldVersionKey) ? "(none)" : localInitialWieldVersionKey) +
+                    " LocalInitialWieldVersionState=" + (localInitialWieldVersionStateSummary ?? "(none)") +
+                    " LocalInitialWieldResult=" + (localInitialWieldResult ?? "(none)") +
+                    " LocalInitialWieldIssue=" + (localInitialWieldIssue ?? "(none)") +
+                    " AllowVanillaReason=" + (allowVanillaOnSpawnWieldFallbackReason ?? "(none)"));
+                return false;
             }
 
             string payloadSummary =
@@ -7442,7 +7519,10 @@ namespace CoopSpectator.Patches
                 " SuppressedReason=" + (suppressReason ?? "strict-exact-hero-stale-onspawn-wield") +
                 " LocalInitialWieldApplied=" + localInitialWieldApplied +
                 " LocalInitialWieldAlreadyApplied=" + localInitialWieldAlreadyApplied +
+                " LocalInitialWieldAppliedForCurrentVersion=" + localInitialWieldAppliedForCurrentVersion +
                 " RetryLocalInitialWieldDueToCurrentNone=" + retryLocalInitialWieldDueToCurrentNone +
+                " LocalInitialWieldVersionKey=" + (string.IsNullOrWhiteSpace(localInitialWieldVersionKey) ? "(none)" : localInitialWieldVersionKey) +
+                " LocalInitialWieldVersionState=" + (localInitialWieldVersionStateSummary ?? "(none)") +
                 " LocalInitialWieldResult=" + (localInitialWieldResult ?? "(none)") +
                 " LocalInitialWieldIssue=" + (localInitialWieldIssue ?? "(none)");
 

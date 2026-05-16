@@ -5998,6 +5998,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool isHero = TryGetBoolProperty(characterObject, "IsHero");
             if (isHero)
             {
+                string multiplayerSafeHeroId = TryResolveMultiplayerSafeHeroCharacterId(characterObject as TaleWorlds.CampaignSystem.CharacterObject);
+                if (!string.IsNullOrWhiteSpace(multiplayerSafeHeroId) && !string.Equals(multiplayerSafeHeroId, originalId, StringComparison.Ordinal))
+                {
+                    ModLogger.Info("BattleDetector: mapped hero troop id '" + originalId + "' to multiplayer-safe hero template '" + multiplayerSafeHeroId + "'.");
+                    return multiplayerSafeHeroId;
+                }
+
                 string heroRoleSafeId = TryResolveHeroRoleMissionSafeCharacterId(characterObject as TaleWorlds.CampaignSystem.CharacterObject);
                 if (!string.IsNullOrWhiteSpace(heroRoleSafeId) && !string.Equals(heroRoleSafeId, originalId, StringComparison.Ordinal))
                 {
@@ -6078,6 +6085,18 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             const string guaranteedVanillaFallbackId = "imperial_infantryman";
             ModLogger.Info("BattleDetector: no mission-safe fallback found for hero troop id '" + originalId + "'. Using guaranteed vanilla fallback '" + guaranteedVanillaFallbackId + "'.");
             return guaranteedVanillaFallbackId;
+        }
+
+        private static string TryResolveMultiplayerSafeHeroCharacterId(TaleWorlds.CampaignSystem.CharacterObject heroCharacter)
+        {
+            if (heroCharacter == null || !heroCharacter.IsHero)
+                return null;
+
+            string multiplayerSafeTroopId = TryResolveMultiplayerSafeCharacterId(heroCharacter);
+            if (string.IsNullOrWhiteSpace(multiplayerSafeTroopId))
+                return null;
+
+            return TryConvertTroopTemplateToHeroTemplate(multiplayerSafeTroopId);
         }
 
         private static string TryResolveBanditMissionSafeCharacterId(object characterObject)
