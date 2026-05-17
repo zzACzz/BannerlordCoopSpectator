@@ -54,6 +54,8 @@ namespace CoopSpectator.UI
         private DateTime _localSpawnPendingLastRequestUtc = DateTime.MinValue;
         private int _localSpawnPendingRequestAttemptCount;
         private string _lastCameraPreviewLogKey = string.Empty;
+        private bool _reconnectSelectionContractActive;
+        private string _lastReconnectSelectionContractLogKey = string.Empty;
 
         public override void OnBehaviorInitialize()
         {
@@ -74,6 +76,8 @@ namespace CoopSpectator.UI
             _overlayStartupDelay = InitialOverlayDelaySeconds;
             _hadLocalControlledAgent = HasLocalControlledAgent();
             _startBattleInstructionShown = false;
+            _reconnectSelectionContractActive = false;
+            _lastReconnectSelectionContractLogKey = string.Empty;
             ClearLocalSpawnPending("mission-screen-initialize");
             ResetSelectionFlow("mission-screen-initialize");
             ModLogger.Info("CoopMissionSelectionView: OnMissionScreenInitialize, coop selection shell init deferred.");
@@ -142,6 +146,8 @@ namespace CoopSpectator.UI
             }
 
             _currentScreen = CoopSelectionScreen.None;
+            _reconnectSelectionContractActive = false;
+            _lastReconnectSelectionContractLogKey = string.Empty;
             base.OnMissionScreenFinalize();
         }
 
@@ -192,10 +198,7 @@ namespace CoopSpectator.UI
             if (_gauntletLayer == null)
                 return;
 
-            CoopSelectionUiSnapshot snapshot = CoopSelectionUiHelpers.BuildSnapshot(
-                _selectedSideOverride,
-                _selectedEntryIdOverride,
-                hasLocalControlledAgent);
+            CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
             CoopSelectionScreen desiredScreen = DetermineDesiredScreen(snapshot);
             if (desiredScreen == CoopSelectionScreen.None)
             {
@@ -218,6 +221,83 @@ namespace CoopSpectator.UI
             UpdateOverlayInputState(true);
         }
 
+        private CoopSelectionUiSnapshot BuildCurrentSnapshot(bool hasLocalControlledAgent)
+        {
+            UpdateReconnectSelectionContractState(hasLocalControlledAgent);
+            return CoopSelectionUiHelpers.BuildSnapshot(
+                _selectedSideOverride,
+                _selectedEntryIdOverride,
+                hasLocalControlledAgent,
+                _reconnectSelectionContractActive);
+        }
+
+        private void UpdateReconnectSelectionContractState(bool hasLocalControlledAgent)
+        {
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            bool nextState = false;
+            string reason = "inactive";
+            if (!hasLocalControlledAgent && status != null)
+            {
+                if (IsReconnectFinalizeStage(status))
+                {
+                    nextState = true;
+                    reason = "reconnect-finalize";
+                }
+                else if (_reconnectSelectionContractActive && ShouldContinueReconnectSelectionContract(status))
+                {
+                    nextState = true;
+                    reason = "reconnect-selection";
+                }
+            }
+
+            string logKey = string.Join("|", new[]
+            {
+                nextState.ToString(),
+                reason,
+                status?.BattleDataReadinessStage ?? string.Empty,
+                status?.BattleDataReady.ToString() ?? bool.FalseString,
+                status?.AssignedSide ?? string.Empty,
+                status?.HasAgent.ToString() ?? bool.FalseString,
+                status?.LifecycleState ?? string.Empty
+            });
+            if (!string.Equals(_lastReconnectSelectionContractLogKey, logKey, StringComparison.Ordinal))
+            {
+                _lastReconnectSelectionContractLogKey = logKey;
+                ModLogger.Info(
+                    "CoopMissionSelectionView: reconnect selection contract state. " +
+                    "Active=" + nextState +
+                    " Reason=" + reason +
+                    " Stage=" + (status?.BattleDataReadinessStage ?? string.Empty) +
+                    " BattleDataReady=" + (status?.BattleDataReady.ToString() ?? bool.FalseString) +
+                    " AssignedSide=" + (status?.AssignedSide ?? string.Empty) +
+                    " HasAgent=" + (status?.HasAgent.ToString() ?? bool.FalseString) +
+                    " Lifecycle=" + (status?.LifecycleState ?? string.Empty));
+            }
+
+            _reconnectSelectionContractActive = nextState;
+        }
+
+        private static bool IsReconnectFinalizeStage(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status)
+        {
+            return string.Equals(
+                status?.BattleDataReadinessStage,
+                "ReconnectFinalize",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ShouldContinueReconnectSelectionContract(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status)
+        {
+            if (status == null || status.HasAgent || !status.BattleDataReady)
+                return false;
+
+            if (CoopSelectionUiHelpers.NormalizeStatusSide(status.AssignedSide) == BattleSideEnum.None)
+                return false;
+
+            string readinessStage = status.BattleDataReadinessStage ?? string.Empty;
+            return string.Equals(readinessStage, "RespawnSelection", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(readinessStage, "UnitSelection", StringComparison.OrdinalIgnoreCase);
+        }
+
         private CoopSelectionScreen DetermineDesiredScreen(CoopSelectionUiSnapshot snapshot)
         {
             if (snapshot == null || !snapshot.CanShowOverlay || _spectatorOverlayHidden)
@@ -230,11 +310,36 @@ namespace CoopSpectator.UI
                 return CoopSelectionScreen.None;
 
             if (!snapshot.BattleDataReady)
-                return CoopSelectionScreen.TeamSelection;
+                return IsReconnectFinalizePendingWithAssignedSide(snapshot)
+                    ? CoopSelectionScreen.None
+                    : CoopSelectionScreen.TeamSelection;
+
+            if (snapshot.ReconnectSelectionContractActive)
+                return DetermineReconnectDesiredScreen(snapshot);
 
             if (_requestedScreen == CoopSelectionScreen.ClassLoadout &&
                 _selectedSideOverride != BattleSideEnum.None &&
                 snapshot.EffectiveSide == _selectedSideOverride &&
+                IsUnitSelectionReady(snapshot))
+            {
+                return CoopSelectionScreen.ClassLoadout;
+            }
+
+            return CoopSelectionScreen.TeamSelection;
+        }
+
+        private CoopSelectionScreen DetermineReconnectDesiredScreen(CoopSelectionUiSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return CoopSelectionScreen.None;
+
+            if (snapshot.AuthoritativeAssignedSide != BattleSideEnum.None)
+                return IsUnitSelectionReady(snapshot)
+                    ? CoopSelectionScreen.ClassLoadout
+                    : CoopSelectionScreen.None;
+
+            if (_requestedScreen == CoopSelectionScreen.ClassLoadout &&
+                snapshot.EffectiveSide != BattleSideEnum.None &&
                 IsUnitSelectionReady(snapshot))
             {
                 return CoopSelectionScreen.ClassLoadout;
@@ -251,6 +356,17 @@ namespace CoopSpectator.UI
             string readinessStage = snapshot.BattleDataReadinessStage ?? string.Empty;
             return string.Equals(readinessStage, "UnitSelection", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(readinessStage, "RespawnSelection", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsReconnectFinalizePendingWithAssignedSide(CoopSelectionUiSnapshot snapshot)
+        {
+            if (snapshot == null || snapshot.BattleDataReady || snapshot.AuthoritativeAssignedSide == BattleSideEnum.None)
+                return false;
+
+            return string.Equals(
+                snapshot.BattleDataReadinessStage,
+                "ReconnectFinalize",
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private bool EnsureScreenLoaded(CoopSelectionUiSnapshot snapshot, CoopSelectionScreen desiredScreen)
@@ -287,12 +403,25 @@ namespace CoopSpectator.UI
             if (side == BattleSideEnum.None)
                 return;
 
+            bool hasLocalControlledAgent = HasLocalControlledAgent();
+            CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
+            if (snapshot?.ReconnectSelectionContractActive == true &&
+                snapshot.AuthoritativeAssignedSide != BattleSideEnum.None)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: ignored side selection during reconnect selection contract. " +
+                    "RequestedSide=" + side +
+                    " AuthoritativeSide=" + snapshot.AuthoritativeAssignedSide);
+                RefreshOverlay(force: true, hasLocalControlledAgent);
+                return;
+            }
+
             _spectatorOverlayHidden = false;
             _selectedSideOverride = side;
             _selectedEntryIdOverride = null;
             _requestedScreen = CoopSelectionScreen.ClassLoadout;
             CoopBattleNetworkRequestTransport.TrySelectSide(side, "CoopTeamSelectionUI Side");
-            RefreshOverlay(force: true, HasLocalControlledAgent());
+            RefreshOverlay(force: true, hasLocalControlledAgent);
         }
 
         private void HandleUnitSelected(BattleSideEnum side, string entryId)
@@ -311,10 +440,7 @@ namespace CoopSpectator.UI
         private void HandleAutoAssignRequested()
         {
             bool hasLocalControlledAgent = HasLocalControlledAgent();
-            CoopSelectionUiSnapshot snapshot = CoopSelectionUiHelpers.BuildSnapshot(
-                _selectedSideOverride,
-                _selectedEntryIdOverride,
-                hasLocalControlledAgent);
+            CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
             BattleSideEnum[] availableSides = new[]
             {
                 (snapshot?.AttackerSelectableEntryCount ?? 0) > 0 ? BattleSideEnum.Attacker : BattleSideEnum.None,
@@ -357,10 +483,7 @@ namespace CoopSpectator.UI
         private void HandleSpawnRequested()
         {
             bool hasLocalControlledAgent = HasLocalControlledAgent();
-            CoopSelectionUiSnapshot snapshot = CoopSelectionUiHelpers.BuildSnapshot(
-                _selectedSideOverride,
-                _selectedEntryIdOverride,
-                hasLocalControlledAgent);
+            CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
             if (snapshot == null || !snapshot.CanSpawn || snapshot.EffectiveSide == BattleSideEnum.None || string.IsNullOrWhiteSpace(snapshot.SelectedEntryId))
                 return;
 
@@ -683,6 +806,7 @@ namespace CoopSpectator.UI
         {
             if (!GameNetwork.IsClient ||
                 hasLocalControlledAgent ||
+                snapshot?.ShouldSuppressLivePreview == true ||
                 desiredScreen != CoopSelectionScreen.ClassLoadout ||
                 snapshot == null ||
                 snapshot.EffectiveSide == BattleSideEnum.None ||

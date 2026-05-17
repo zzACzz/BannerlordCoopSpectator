@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.Infrastructure
 {
@@ -254,7 +256,7 @@ namespace CoopSpectator.Infrastructure
             {
                 string path = GetStatusFilePath();
                 if (!File.Exists(path))
-                    return null;
+                    return GetLastValidSnapshot();
 
                 string[] lines = AtomicBridgeFileIO.ReadAllLinesShared(path);
                 EntryStatusSnapshot snapshot = new EntryStatusSnapshot
@@ -616,13 +618,53 @@ namespace CoopSpectator.Infrastructure
 
         public static string GetStatusFilePath()
         {
-            return Path.Combine(GetCoopFolderPath(), StatusFileName);
+            return Path.Combine(GetCoopFolderPath(), GetScopedStatusFileName());
         }
 
         private static string GetCoopFolderPath()
         {
             string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             return Path.Combine(docs, "Mount and Blade II Bannerlord", CoopSpectatorSubFolder);
+        }
+
+        private static string GetScopedStatusFileName()
+        {
+            string scope = ResolveRuntimeScope();
+            if (string.IsNullOrWhiteSpace(scope) || string.Equals(scope, "shared", StringComparison.OrdinalIgnoreCase))
+                return StatusFileName;
+
+            string baseName = Path.GetFileNameWithoutExtension(StatusFileName);
+            string extension = Path.GetExtension(StatusFileName);
+            return baseName + "." + scope + extension;
+        }
+
+        private static string ResolveRuntimeScope()
+        {
+            if (GameNetwork.IsClient)
+                return "client";
+
+            if (GameNetwork.IsServer)
+                return "server";
+
+            try
+            {
+                string baseDirectory = AppDomain.CurrentDomain.BaseDirectory ?? string.Empty;
+                using (Process process = Process.GetCurrentProcess())
+                {
+                    string mainModulePath = process.MainModule?.FileName ?? string.Empty;
+                    if (baseDirectory.IndexOf("Dedicated", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        mainModulePath.IndexOf("Dedicated", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        return "server";
+                    }
+                }
+            }
+            catch
+            {
+                // Best-effort role inference only.
+            }
+
+            return "shared";
         }
     }
 }
