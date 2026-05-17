@@ -19,6 +19,8 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
         private const int DashboardPort = 7210; // Порт для спроби HTTP (офіційний UDP 7210; web panel може бути тут або на іншому)
         private const int HttpTimeoutMs = 1500; // Короткий таймаут, щоб не блокувати гру
         private const int MaxResponseBodyLogLength = 400; // Скільки символів body логувати для діагностики
+        private const string StartMissionCommand = "start_mission";
+        private const string EndMissionCommand = "end_mission";
 
         /// <summary>Відправити команду на дедик-сервер: спочатку stdin (якщо процес запущений з моду), потім HTTP fallback.</summary>
         /// <returns>true якщо команду прийнято (stdin записано або HTTP успіх), false інакше.</returns>
@@ -31,7 +33,7 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
             }
             string cmd = command.Trim();
             // 1) Спроба HTTP — якщо у майбутньому з’ясуємо endpoint (наприклад з DevTools), додати сюди конкретний URL.
-            bool useOnlyHttp = cmd == "start_mission" || cmd == "end_mission";
+            bool useOnlyHttp = cmd == StartMissionCommand || cmd == EndMissionCommand;
             if (!useOnlyHttp && DedicatedHelperLauncher.HasDedicatedProcess() && DedicatedHelperLauncher.TrySendConsoleLine(cmd))
             {
                 ModLogger.Info("DedicatedServerCommands: SendCommand(\"" + cmd + "\") sent via stdin.");
@@ -118,14 +120,36 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                         if (webEx.Response is HttpWebResponse r)
                             detail += " ResponseStatusCode=" + (int)r.StatusCode;
                         ModLogger.Info("DedicatedServerCommands: HTTP " + managerUrl + " — " + detail);
+
+                        if (ShouldAssumeMissionCommandAcceptedAfterTimeout(command, webEx))
+                        {
+                            ModLogger.Info(
+                                "DedicatedServerCommands: assuming mission command already accepted by dedicated after HTTP timeout. " +
+                                "Command=" + command +
+                                " Url=" + managerUrl +
+                                " RetrySuppressed=True.");
+                            return true;
+                        }
                     }
                     else
                         ModLogger.Info("DedicatedServerCommands: HTTP " + managerUrl + " — " + ex.Message);
+
                     if (attempt == 0) continue;
                     return false;
                 }
             }
             return false;
+        }
+
+        private static bool ShouldAssumeMissionCommandAcceptedAfterTimeout(string command, WebException webException)
+        {
+            if (!string.Equals(command, StartMissionCommand, StringComparison.Ordinal))
+                return false;
+
+            if (webException == null)
+                return false;
+
+            return webException.Status == WebExceptionStatus.Timeout;
         }
 
         /// <summary>Зручні обгортки для бойового циклу. GameType задається в конфігу дедика (rotation); тут лише лог для перевірки узгодження ID.</summary>
@@ -134,9 +158,9 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
             TryLogAvailableServerOptionsViaHttp();
             TryApplySceneAwareMissionSelectionFromBattleRoster();
             ModLogger.Info("DedicatedServerCommands: SendStartMission [ID check] expected GameTypeId on dedicated=" + CoopGameModeIds.OfficialBattle + " for battle-map runtime, fallback custom ids otherwise.");
-            return SendCommand("start_mission");
+            return SendCommand(StartMissionCommand);
         }
-        public static bool SendEndMission() => SendCommand("end_mission");
+        public static bool SendEndMission() => SendCommand(EndMissionCommand);
 
         private static void TryApplySceneAwareMissionSelectionFromBattleRoster()
         {

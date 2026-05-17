@@ -27,9 +27,7 @@
         </Widget>
 
         <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="620" SuggestedHeight="860" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginBottom="5" DoNotAcceptEvents="true">
-          <Children>
-            <CharacterTableauWidget DataSource="{SelectedVisual}" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="560" SuggestedHeight="760" HorizontalAlignment="Center" VerticalAlignment="Bottom" BannerCodeText="@BannerCodeText" BodyProperties="@BodyProperties" CharStringId="@CharStringId" Race="@Race" EquipmentCode="@EquipmentCode" IsFemale="@IsFemale" MountCreationKey="@MountCreationKey" StanceIndex="@StanceIndex" ArmorColor1="@ArmorColor1" ArmorColor2="@ArmorColor2" DoNotUseCustomScale="false" CustomRenderScale="0.72" IsVisible="@HasVisual" />
-          </Children>
+          <Children />
         </Widget>
 
         <ListPanel WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="489" SuggestedHeight="200" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginBottom="10" Sprite="MPClassLoadout\stats_bg" Color="#000000FF" StackLayout.LayoutMethod="VerticalBottomToTop">

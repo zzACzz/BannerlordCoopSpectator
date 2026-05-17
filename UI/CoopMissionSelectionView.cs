@@ -22,6 +22,11 @@ namespace CoopSpectator.UI
         private const float StartBattleHotkeyCooldownSeconds = 0.2f;
         private const float ReopenSelectionHotkeyCooldownSeconds = 0.2f;
         private static readonly TimeSpan LocalSpawnOverlaySuppressionDuration = TimeSpan.FromSeconds(2.5);
+        private static readonly TimeSpan LocalSpawnPendingTimeout = TimeSpan.FromSeconds(20);
+        private static readonly TimeSpan LocalSpawnPendingResendInterval = TimeSpan.FromSeconds(1.5);
+        private const int LocalSpawnPendingMaxRequestAttempts = 8;
+        private static int _activeCameraPreviewAgentIndex = -1;
+        private static string _activeCameraPreviewEntryId = string.Empty;
 
         private GauntletLayer _gauntletLayer;
         private GauntletMovieIdentifier _movie;
@@ -37,10 +42,20 @@ namespace CoopSpectator.UI
         private bool _overlayLoadFailed;
         private bool _inputCaptured;
         private bool _hadLocalControlledAgent;
+        private bool _startBattleInstructionShown;
         private bool _spectatorOverlayHidden;
         private DateTime _overlaySuppressedUntilUtc = DateTime.MinValue;
         private float _reopenSelectionHotkeyCooldown;
         private string _lastAppliedRefreshKey = string.Empty;
+        private bool _localSpawnPending;
+        private DateTime _localSpawnPendingStartedUtc = DateTime.MinValue;
+        private string _localSpawnPendingEntryId;
+        private BattleSideEnum _localSpawnPendingSide = BattleSideEnum.None;
+        private DateTime _localSpawnPendingLastRequestUtc = DateTime.MinValue;
+        private int _localSpawnPendingRequestAttemptCount;
+        private string _lastCameraPreviewLogKey = string.Empty;
+        private bool _reconnectSelectionContractActive;
+        private string _lastReconnectSelectionContractLogKey = string.Empty;
 
         public override void OnBehaviorInitialize()
         {
@@ -60,6 +75,10 @@ namespace CoopSpectator.UI
             ViewOrderPriority = 25;
             _overlayStartupDelay = InitialOverlayDelaySeconds;
             _hadLocalControlledAgent = HasLocalControlledAgent();
+            _startBattleInstructionShown = false;
+            _reconnectSelectionContractActive = false;
+            _lastReconnectSelectionContractLogKey = string.Empty;
+            ClearLocalSpawnPending("mission-screen-initialize");
             ResetSelectionFlow("mission-screen-initialize");
             ModLogger.Info("CoopMissionSelectionView: OnMissionScreenInitialize, coop selection shell init deferred.");
         }
@@ -74,16 +93,19 @@ namespace CoopSpectator.UI
             bool hasLocalControlledAgent = HasLocalControlledAgent();
             if (_hadLocalControlledAgent && !hasLocalControlledAgent)
             {
+                ClearLocalSpawnPending("lost-local-agent");
                 _overlaySuppressedUntilUtc = DateTime.MinValue;
                 ResetSelectionFlow("lost-local-agent");
             }
             else if (!_hadLocalControlledAgent && hasLocalControlledAgent)
             {
+                ClearLocalSpawnPending("gained-local-agent");
                 _selectedEntryIdOverride = null;
             }
 
             _hadLocalControlledAgent = hasLocalControlledAgent;
             TryHandleStartBattleHotkey(dt, hasLocalControlledAgent);
+            TryShowStartBattleInstruction(hasLocalControlledAgent);
             TryHandleReopenSelectionHotkey(dt, hasLocalControlledAgent);
 
             if (_gauntletLayer == null)
@@ -124,6 +146,8 @@ namespace CoopSpectator.UI
             }
 
             _currentScreen = CoopSelectionScreen.None;
+            _reconnectSelectionContractActive = false;
+            _lastReconnectSelectionContractLogKey = string.Empty;
             base.OnMissionScreenFinalize();
         }
 
@@ -174,14 +198,12 @@ namespace CoopSpectator.UI
             if (_gauntletLayer == null)
                 return;
 
-            CoopSelectionUiSnapshot snapshot = CoopSelectionUiHelpers.BuildSnapshot(
-                _selectedSideOverride,
-                _selectedEntryIdOverride,
-                hasLocalControlledAgent);
+            CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
             CoopSelectionScreen desiredScreen = DetermineDesiredScreen(snapshot);
             if (desiredScreen == CoopSelectionScreen.None)
             {
                 ReleaseCurrentMovie();
+                ClearCameraPreviewTarget("overlay-hidden");
                 UpdateOverlayInputState(false);
                 return;
             }
@@ -195,18 +217,156 @@ namespace CoopSpectator.UI
             if (needsRefresh)
                 _lastAppliedRefreshKey = refreshKey;
 
+            UpdateCameraPreviewTarget(snapshot, desiredScreen, hasLocalControlledAgent);
             UpdateOverlayInputState(true);
+        }
+
+        private CoopSelectionUiSnapshot BuildCurrentSnapshot(bool hasLocalControlledAgent)
+        {
+            UpdateReconnectSelectionContractState(hasLocalControlledAgent);
+            return CoopSelectionUiHelpers.BuildSnapshot(
+                _selectedSideOverride,
+                _selectedEntryIdOverride,
+                hasLocalControlledAgent,
+                _reconnectSelectionContractActive);
+        }
+
+        private void UpdateReconnectSelectionContractState(bool hasLocalControlledAgent)
+        {
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            bool nextState = false;
+            string reason = "inactive";
+            if (!hasLocalControlledAgent && status != null)
+            {
+                if (IsReconnectFinalizeStage(status))
+                {
+                    nextState = true;
+                    reason = "reconnect-finalize";
+                }
+                else if (_reconnectSelectionContractActive && ShouldContinueReconnectSelectionContract(status))
+                {
+                    nextState = true;
+                    reason = "reconnect-selection";
+                }
+            }
+
+            string logKey = string.Join("|", new[]
+            {
+                nextState.ToString(),
+                reason,
+                status?.BattleDataReadinessStage ?? string.Empty,
+                status?.BattleDataReady.ToString() ?? bool.FalseString,
+                status?.AssignedSide ?? string.Empty,
+                status?.HasAgent.ToString() ?? bool.FalseString,
+                status?.LifecycleState ?? string.Empty
+            });
+            if (!string.Equals(_lastReconnectSelectionContractLogKey, logKey, StringComparison.Ordinal))
+            {
+                _lastReconnectSelectionContractLogKey = logKey;
+                ModLogger.Info(
+                    "CoopMissionSelectionView: reconnect selection contract state. " +
+                    "Active=" + nextState +
+                    " Reason=" + reason +
+                    " Stage=" + (status?.BattleDataReadinessStage ?? string.Empty) +
+                    " BattleDataReady=" + (status?.BattleDataReady.ToString() ?? bool.FalseString) +
+                    " AssignedSide=" + (status?.AssignedSide ?? string.Empty) +
+                    " HasAgent=" + (status?.HasAgent.ToString() ?? bool.FalseString) +
+                    " Lifecycle=" + (status?.LifecycleState ?? string.Empty));
+            }
+
+            _reconnectSelectionContractActive = nextState;
+        }
+
+        private static bool IsReconnectFinalizeStage(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status)
+        {
+            return string.Equals(
+                status?.BattleDataReadinessStage,
+                "ReconnectFinalize",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ShouldContinueReconnectSelectionContract(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status)
+        {
+            if (status == null || status.HasAgent || !status.BattleDataReady)
+                return false;
+
+            if (CoopSelectionUiHelpers.NormalizeStatusSide(status.AssignedSide) == BattleSideEnum.None)
+                return false;
+
+            string readinessStage = status.BattleDataReadinessStage ?? string.Empty;
+            return string.Equals(readinessStage, "RespawnSelection", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(readinessStage, "UnitSelection", StringComparison.OrdinalIgnoreCase);
         }
 
         private CoopSelectionScreen DetermineDesiredScreen(CoopSelectionUiSnapshot snapshot)
         {
-            if (snapshot == null || !snapshot.CanShowOverlay || _spectatorOverlayHidden || DateTime.UtcNow < _overlaySuppressedUntilUtc)
+            if (snapshot == null || !snapshot.CanShowOverlay || _spectatorOverlayHidden)
                 return CoopSelectionScreen.None;
 
-            if (_requestedScreen == CoopSelectionScreen.ClassLoadout && _selectedSideOverride != BattleSideEnum.None)
+            if (ShouldKeepOverlaySuppressedWhileAwaitingLocalSpawn(snapshot))
+                return CoopSelectionScreen.None;
+
+            if (DateTime.UtcNow < _overlaySuppressedUntilUtc)
+                return CoopSelectionScreen.None;
+
+            if (!snapshot.BattleDataReady)
+                return IsReconnectFinalizePendingWithAssignedSide(snapshot)
+                    ? CoopSelectionScreen.None
+                    : CoopSelectionScreen.TeamSelection;
+
+            if (snapshot.ReconnectSelectionContractActive)
+                return DetermineReconnectDesiredScreen(snapshot);
+
+            if (_requestedScreen == CoopSelectionScreen.ClassLoadout &&
+                _selectedSideOverride != BattleSideEnum.None &&
+                snapshot.EffectiveSide == _selectedSideOverride &&
+                IsUnitSelectionReady(snapshot))
+            {
                 return CoopSelectionScreen.ClassLoadout;
+            }
 
             return CoopSelectionScreen.TeamSelection;
+        }
+
+        private CoopSelectionScreen DetermineReconnectDesiredScreen(CoopSelectionUiSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return CoopSelectionScreen.None;
+
+            if (snapshot.AuthoritativeAssignedSide != BattleSideEnum.None)
+                return IsUnitSelectionReady(snapshot)
+                    ? CoopSelectionScreen.ClassLoadout
+                    : CoopSelectionScreen.None;
+
+            if (_requestedScreen == CoopSelectionScreen.ClassLoadout &&
+                snapshot.EffectiveSide != BattleSideEnum.None &&
+                IsUnitSelectionReady(snapshot))
+            {
+                return CoopSelectionScreen.ClassLoadout;
+            }
+
+            return CoopSelectionScreen.TeamSelection;
+        }
+
+        private static bool IsUnitSelectionReady(CoopSelectionUiSnapshot snapshot)
+        {
+            if (snapshot == null || !snapshot.BattleDataReady || snapshot.EffectiveSide == BattleSideEnum.None)
+                return false;
+
+            string readinessStage = snapshot.BattleDataReadinessStage ?? string.Empty;
+            return string.Equals(readinessStage, "UnitSelection", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(readinessStage, "RespawnSelection", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsReconnectFinalizePendingWithAssignedSide(CoopSelectionUiSnapshot snapshot)
+        {
+            if (snapshot == null || snapshot.BattleDataReady || snapshot.AuthoritativeAssignedSide == BattleSideEnum.None)
+                return false;
+
+            return string.Equals(
+                snapshot.BattleDataReadinessStage,
+                "ReconnectFinalize",
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private bool EnsureScreenLoaded(CoopSelectionUiSnapshot snapshot, CoopSelectionScreen desiredScreen)
@@ -243,12 +403,25 @@ namespace CoopSpectator.UI
             if (side == BattleSideEnum.None)
                 return;
 
+            bool hasLocalControlledAgent = HasLocalControlledAgent();
+            CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
+            if (snapshot?.ReconnectSelectionContractActive == true &&
+                snapshot.AuthoritativeAssignedSide != BattleSideEnum.None)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: ignored side selection during reconnect selection contract. " +
+                    "RequestedSide=" + side +
+                    " AuthoritativeSide=" + snapshot.AuthoritativeAssignedSide);
+                RefreshOverlay(force: true, hasLocalControlledAgent);
+                return;
+            }
+
             _spectatorOverlayHidden = false;
             _selectedSideOverride = side;
             _selectedEntryIdOverride = null;
             _requestedScreen = CoopSelectionScreen.ClassLoadout;
             CoopBattleNetworkRequestTransport.TrySelectSide(side, "CoopTeamSelectionUI Side");
-            RefreshOverlay(force: true, HasLocalControlledAgent());
+            RefreshOverlay(force: true, hasLocalControlledAgent);
         }
 
         private void HandleUnitSelected(BattleSideEnum side, string entryId)
@@ -267,14 +440,11 @@ namespace CoopSpectator.UI
         private void HandleAutoAssignRequested()
         {
             bool hasLocalControlledAgent = HasLocalControlledAgent();
-            CoopSelectionUiSnapshot snapshot = CoopSelectionUiHelpers.BuildSnapshot(
-                _selectedSideOverride,
-                _selectedEntryIdOverride,
-                hasLocalControlledAgent);
+            CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
             BattleSideEnum[] availableSides = new[]
             {
-                (snapshot?.AttackerSelectableEntryIds?.Length ?? 0) > 0 ? BattleSideEnum.Attacker : BattleSideEnum.None,
-                (snapshot?.DefenderSelectableEntryIds?.Length ?? 0) > 0 ? BattleSideEnum.Defender : BattleSideEnum.None
+                (snapshot?.AttackerSelectableEntryCount ?? 0) > 0 ? BattleSideEnum.Attacker : BattleSideEnum.None,
+                (snapshot?.DefenderSelectableEntryCount ?? 0) > 0 ? BattleSideEnum.Defender : BattleSideEnum.None
             }
                 .Where(side => side != BattleSideEnum.None)
                 .ToArray();
@@ -287,13 +457,14 @@ namespace CoopSpectator.UI
             ModLogger.Info(
                 "CoopMissionSelectionView: auto assign requested. " +
                 "ChosenSide=" + chosenSide +
-                " AttackerSelectable=" + (snapshot?.AttackerSelectableEntryIds?.Length ?? 0) +
-                " DefenderSelectable=" + (snapshot?.DefenderSelectableEntryIds?.Length ?? 0));
+                " AttackerSelectable=" + (snapshot?.AttackerSelectableEntryCount ?? 0) +
+                " DefenderSelectable=" + (snapshot?.DefenderSelectableEntryCount ?? 0));
             HandleSideSelected(chosenSide);
         }
 
         private void HandleSpectatorRequested()
         {
+            ClearLocalSpawnPending("spectator-requested");
             _spectatorOverlayHidden = true;
             _requestedScreen = CoopSelectionScreen.TeamSelection;
             _selectedSideOverride = BattleSideEnum.None;
@@ -312,19 +483,17 @@ namespace CoopSpectator.UI
         private void HandleSpawnRequested()
         {
             bool hasLocalControlledAgent = HasLocalControlledAgent();
-            CoopSelectionUiSnapshot snapshot = CoopSelectionUiHelpers.BuildSnapshot(
-                _selectedSideOverride,
-                _selectedEntryIdOverride,
-                hasLocalControlledAgent);
+            CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
             if (snapshot == null || !snapshot.CanSpawn || snapshot.EffectiveSide == BattleSideEnum.None || string.IsNullOrWhiteSpace(snapshot.SelectedEntryId))
                 return;
 
             _selectedSideOverride = snapshot.EffectiveSide;
             _selectedEntryIdOverride = snapshot.SelectedEntryId;
             _spectatorOverlayHidden = false;
+            MarkLocalSpawnPending(snapshot);
             _overlaySuppressedUntilUtc = DateTime.UtcNow + LocalSpawnOverlaySuppressionDuration;
-            CoopBattleNetworkRequestTransport.TrySelectEntry(snapshot.EffectiveSide, snapshot.SelectedEntryId, "CoopClassLoadoutUI SpawnEntry");
-            CoopBattleNetworkRequestTransport.TryRequestSpawn("CoopClassLoadoutUI Spawn");
+            if (!TrySendPendingSpawnRequests("CoopClassLoadoutUI Spawn", includeSelectEntry: true))
+                ClearLocalSpawnPending("spawn-request-write-failed");
             RefreshOverlay(force: true, hasLocalControlledAgent);
         }
 
@@ -341,6 +510,187 @@ namespace CoopSpectator.UI
             _selectedEntryIdOverride = null;
             _spectatorOverlayHidden = false;
             ModLogger.Info("CoopMissionSelectionView: reset selection flow. Source=" + source);
+        }
+
+        private void MarkLocalSpawnPending(CoopSelectionUiSnapshot snapshot)
+        {
+            _localSpawnPending = true;
+            _localSpawnPendingStartedUtc = DateTime.UtcNow;
+            _localSpawnPendingEntryId = snapshot?.SelectedEntryId;
+            _localSpawnPendingSide = snapshot?.EffectiveSide ?? BattleSideEnum.None;
+            _localSpawnPendingLastRequestUtc = DateTime.MinValue;
+            _localSpawnPendingRequestAttemptCount = 0;
+            ModLogger.Info(
+                "CoopMissionSelectionView: marked local spawn pending. " +
+                "Side=" + _localSpawnPendingSide +
+                " EntryId=" + (_localSpawnPendingEntryId ?? string.Empty));
+        }
+
+        private void ClearLocalSpawnPending(string source)
+        {
+            if (!_localSpawnPending)
+                return;
+
+            ModLogger.Info(
+                "CoopMissionSelectionView: cleared local spawn pending. " +
+                "Source=" + source +
+                " Side=" + _localSpawnPendingSide +
+                " EntryId=" + (_localSpawnPendingEntryId ?? string.Empty));
+            _localSpawnPending = false;
+            _localSpawnPendingStartedUtc = DateTime.MinValue;
+            _localSpawnPendingEntryId = null;
+            _localSpawnPendingSide = BattleSideEnum.None;
+            _localSpawnPendingLastRequestUtc = DateTime.MinValue;
+            _localSpawnPendingRequestAttemptCount = 0;
+            _overlaySuppressedUntilUtc = DateTime.MinValue;
+        }
+
+        private bool ShouldKeepOverlaySuppressedWhileAwaitingLocalSpawn(CoopSelectionUiSnapshot snapshot)
+        {
+            if (!_localSpawnPending)
+                return false;
+
+            if (snapshot?.IsBattleEnded == true ||
+                string.Equals(snapshot?.BattleDataReadinessStage, "BattleEnded", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearLocalSpawnPending("battle-ended");
+                return false;
+            }
+
+            if (snapshot?.HasLocalControlledAgent == true || snapshot?.Status?.HasAgent == true)
+            {
+                ClearLocalSpawnPending("authoritative-agent-ready");
+                return false;
+            }
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = snapshot?.Status;
+            string lifecycle = status?.LifecycleState ?? snapshot?.Lifecycle ?? string.Empty;
+            if (string.Equals(lifecycle, "AwaitingSelection", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, "NoSide", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, "DeadAwaitingRespawn", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearLocalSpawnPending("server-returned-to-selection");
+                return false;
+            }
+
+            bool pendingTimedOut =
+                _localSpawnPendingStartedUtc != DateTime.MinValue &&
+                DateTime.UtcNow - _localSpawnPendingStartedUtc >= LocalSpawnPendingTimeout;
+            if (status == null)
+            {
+                TryResendPendingSpawnRequestsIfStale(status, lifecycle, pendingTimedOut);
+                if (pendingTimedOut)
+                {
+                    ClearLocalSpawnPending("timeout-no-status");
+                    return false;
+                }
+
+                return true;
+            }
+
+            bool hasExplicitPendingRequestForEntry =
+                !string.IsNullOrWhiteSpace(_localSpawnPendingEntryId) &&
+                (string.Equals(status.SpawnRequestEntryId, _localSpawnPendingEntryId, StringComparison.Ordinal) ||
+                 string.Equals(status.SelectionRequestEntryId, _localSpawnPendingEntryId, StringComparison.Ordinal));
+            bool pendingEntryStillSelectable =
+                !string.IsNullOrWhiteSpace(_localSpawnPendingEntryId) &&
+                (snapshot?.EffectiveSelectableEntryIds?.Contains(_localSpawnPendingEntryId, StringComparer.OrdinalIgnoreCase) ?? false);
+            if (hasExplicitPendingRequestForEntry ||
+                string.Equals(lifecycle, "Waiting", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, "SpawnQueued", StringComparison.OrdinalIgnoreCase) ||
+                (!status.CanRespawn && !status.HasAgent))
+            {
+                TryResendPendingSpawnRequestsIfStale(status, lifecycle, pendingTimedOut);
+                return true;
+            }
+
+            if (status.CanRespawn && !status.HasAgent)
+            {
+                if (pendingEntryStillSelectable && DateTime.UtcNow < _overlaySuppressedUntilUtc)
+                    return true;
+
+                ClearLocalSpawnPending(pendingEntryStillSelectable
+                    ? "server-ready-for-new-selection"
+                    : "pending-entry-no-longer-selectable");
+                return false;
+            }
+
+            if (pendingTimedOut)
+            {
+                ClearLocalSpawnPending("timeout");
+                return false;
+            }
+
+            ClearLocalSpawnPending("state-no-longer-pending");
+            return false;
+        }
+
+        private bool TrySendPendingSpawnRequests(string source, bool includeSelectEntry)
+        {
+            if (_localSpawnPendingSide == BattleSideEnum.None || string.IsNullOrWhiteSpace(_localSpawnPendingEntryId))
+                return false;
+
+            bool entryQueued = true;
+            if (includeSelectEntry)
+            {
+                entryQueued = CoopBattleNetworkRequestTransport.TrySelectEntry(
+                    _localSpawnPendingSide,
+                    _localSpawnPendingEntryId,
+                    source + " SelectEntry");
+            }
+
+            bool spawnQueued = CoopBattleNetworkRequestTransport.TryRequestSpawn(source + " SpawnNow");
+            if (entryQueued || spawnQueued)
+            {
+                _localSpawnPendingLastRequestUtc = DateTime.UtcNow;
+                _localSpawnPendingRequestAttemptCount++;
+            }
+
+            ModLogger.Info(
+                "CoopMissionSelectionView: sent pending local spawn request batch. " +
+                "Source=" + source +
+                " Attempt=" + _localSpawnPendingRequestAttemptCount +
+                " Side=" + _localSpawnPendingSide +
+                " EntryId=" + (_localSpawnPendingEntryId ?? string.Empty) +
+                " IncludeSelectEntry=" + includeSelectEntry +
+                " EntryQueued=" + entryQueued +
+                " SpawnQueued=" + spawnQueued);
+            return entryQueued && spawnQueued;
+        }
+
+        private void TryResendPendingSpawnRequestsIfStale(
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+            string lifecycle,
+            bool pendingTimedOut)
+        {
+            if (!_localSpawnPending ||
+                pendingTimedOut ||
+                _localSpawnPendingSide == BattleSideEnum.None ||
+                string.IsNullOrWhiteSpace(_localSpawnPendingEntryId) ||
+                _localSpawnPendingRequestAttemptCount >= LocalSpawnPendingMaxRequestAttempts)
+            {
+                return;
+            }
+
+            if (_localSpawnPendingLastRequestUtc != DateTime.MinValue &&
+                DateTime.UtcNow - _localSpawnPendingLastRequestUtc < LocalSpawnPendingResendInterval)
+            {
+                return;
+            }
+
+            if (status != null)
+            {
+                if (status.HasAgent || !status.CanRespawn)
+                    return;
+
+                if (string.Equals(lifecycle, "Waiting", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(lifecycle, "SpawnQueued", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+
+            TrySendPendingSpawnRequests("CoopMissionSelectionView PendingRespawnResend", includeSelectEntry: true);
         }
 
         private void UpdateOverlayInputState(bool shouldCaptureInput)
@@ -429,6 +779,11 @@ namespace CoopSpectator.UI
 
         private void ReleaseCurrentMovie()
         {
+            bool hadPresentation =
+                _movie != null ||
+                _viewModel != null ||
+                _screenViewModel != null ||
+                _currentScreen != CoopSelectionScreen.None;
             if (_gauntletLayer != null && _movie != null)
             {
                 _gauntletLayer.ReleaseMovie(_movie);
@@ -440,6 +795,255 @@ namespace CoopSpectator.UI
             _screenViewModel = null;
             _currentScreen = CoopSelectionScreen.None;
             _lastAppliedRefreshKey = string.Empty;
+            if (hadPresentation)
+                ClearCameraPreviewTarget("release-movie");
+        }
+
+        private void UpdateCameraPreviewTarget(
+            CoopSelectionUiSnapshot snapshot,
+            CoopSelectionScreen desiredScreen,
+            bool hasLocalControlledAgent)
+        {
+            if (!GameNetwork.IsClient ||
+                hasLocalControlledAgent ||
+                snapshot?.ShouldSuppressLivePreview == true ||
+                desiredScreen != CoopSelectionScreen.ClassLoadout ||
+                snapshot == null ||
+                snapshot.EffectiveSide == BattleSideEnum.None ||
+                string.IsNullOrWhiteSpace(snapshot.SelectedEntryId))
+            {
+                ClearCameraPreviewTarget("camera-preview-not-applicable");
+                return;
+            }
+
+            if (!TryResolveCameraPreviewAgent(snapshot, out Agent previewAgent))
+            {
+                ClearCameraPreviewTarget("camera-preview-target-missing");
+                return;
+            }
+
+            ScreenBase missionScreen = MissionScreen;
+            if (missionScreen == null || !TrySetMissionScreenPreviewFollowTarget(missionScreen, previewAgent))
+            {
+                ClearCameraPreviewTarget("camera-preview-screen-unavailable");
+                return;
+            }
+
+            SetActiveCameraPreviewTarget(previewAgent, snapshot.SelectedEntryId);
+            LogCameraPreviewState(
+                "focus:" + previewAgent.Index + ":" + snapshot.SelectedEntryId,
+                "focused camera preview on selected live unit. " +
+                "AgentIndex=" + previewAgent.Index +
+                " EntryId=" + snapshot.SelectedEntryId +
+                " Side=" + snapshot.EffectiveSide);
+        }
+
+        private bool TryResolveCameraPreviewAgent(CoopSelectionUiSnapshot snapshot, out Agent previewAgent)
+        {
+            previewAgent = null;
+            Mission mission = Mission;
+            if (snapshot == null ||
+                mission?.AllAgents == null ||
+                snapshot.EffectiveSide == BattleSideEnum.None ||
+                string.IsNullOrWhiteSpace(snapshot.SelectedEntryId))
+            {
+                return false;
+            }
+
+            for (int agentIndex = 0; agentIndex < mission.AllAgents.Count; agentIndex++)
+            {
+                Agent candidate = mission.AllAgents[agentIndex];
+                if (!IsCameraPreviewCandidate(candidate, snapshot.EffectiveSide))
+                    continue;
+
+                if (!CoopMissionSpawnLogic.TryResolveSelectableEntryId(candidate, out string candidateEntryId) ||
+                    !string.Equals(candidateEntryId, snapshot.SelectedEntryId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                previewAgent = candidate;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsCameraPreviewCandidate(Agent candidate, BattleSideEnum side)
+        {
+            return candidate != null &&
+                   candidate.IsActive() &&
+                   !candidate.IsMount &&
+                   candidate.IsCameraAttachable() &&
+                   candidate.Team?.Side == side;
+        }
+
+        private void ClearCameraPreviewTarget(string source)
+        {
+            bool hadActivePreviewTarget =
+                _activeCameraPreviewAgentIndex >= 0 ||
+                !string.IsNullOrWhiteSpace(_activeCameraPreviewEntryId);
+            if (!hadActivePreviewTarget)
+                return;
+
+            ScreenBase missionScreen = MissionScreen;
+            if (missionScreen != null)
+                TryResetMissionScreenCameraPreviewState(missionScreen);
+
+            ClearActiveCameraPreviewTarget();
+
+            LogCameraPreviewState(
+                "clear:" + (source ?? "unknown"),
+                "cleared local camera preview target. Source=" + (source ?? "unknown"));
+        }
+
+        internal static bool TryGetActiveCameraPreviewAgent(out Agent previewAgent)
+        {
+            previewAgent = null;
+            int activeAgentIndex = _activeCameraPreviewAgentIndex;
+            if (activeAgentIndex < 0)
+                return false;
+
+            Mission mission = Mission.Current;
+            if (mission?.AllAgents == null)
+                return false;
+
+            for (int agentIndex = 0; agentIndex < mission.AllAgents.Count; agentIndex++)
+            {
+                Agent candidate = mission.AllAgents[agentIndex];
+                if (candidate == null || candidate.Index != activeAgentIndex)
+                    continue;
+
+                if (!candidate.IsActive() || candidate.IsMount || !candidate.IsCameraAttachable())
+                    return false;
+
+                previewAgent = candidate;
+                return true;
+            }
+
+            return false;
+        }
+
+        internal static bool ShouldSuppressLocalPreviewFollowedAgentEcho(MissionPeer missionPeer, Agent followedAgent)
+        {
+            if (!GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive ||
+                missionPeer == null)
+            {
+                return false;
+            }
+
+            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            if (localMissionPeer == null || !ReferenceEquals(localMissionPeer, missionPeer))
+                return false;
+
+            if (followedAgent == null)
+                return _activeCameraPreviewAgentIndex >= 0;
+
+            if (!followedAgent.IsActive())
+                return false;
+
+            return TryGetActiveCameraPreviewAgent(out Agent previewAgent) &&
+                   previewAgent != null &&
+                   previewAgent.Index == followedAgent.Index;
+        }
+
+        private static void SetActiveCameraPreviewTarget(Agent previewAgent, string entryId)
+        {
+            _activeCameraPreviewAgentIndex = previewAgent?.Index ?? -1;
+            _activeCameraPreviewEntryId = entryId ?? string.Empty;
+        }
+
+        private static void ClearActiveCameraPreviewTarget()
+        {
+            _activeCameraPreviewAgentIndex = -1;
+            _activeCameraPreviewEntryId = string.Empty;
+        }
+
+        private static bool TrySetMissionScreenPreviewFollowTarget(ScreenBase missionScreen, Agent agent)
+        {
+            if (missionScreen == null || agent == null)
+                return false;
+
+            if (TrySetMissionScreenLastFollowedAgent(missionScreen, agent))
+            {
+                TrySetInstanceProperty(missionScreen, "LastFollowedAgentVisuals", null);
+                return true;
+            }
+
+            return TrySetMissionScreenAgentToFollowOverride(missionScreen, agent);
+        }
+
+        private static bool TrySetMissionScreenLastFollowedAgent(ScreenBase missionScreen, Agent agent)
+        {
+            if (missionScreen == null)
+                return false;
+
+            try
+            {
+                PropertyInfo property = missionScreen.GetType().GetProperty(
+                    "LastFollowedAgent",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                MethodInfo setter = property?.GetSetMethod(true);
+                if (setter == null)
+                    return false;
+
+                setter.Invoke(missionScreen, new object[] { agent });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TrySetMissionScreenAgentToFollowOverride(ScreenBase missionScreen, Agent agent)
+        {
+            if (missionScreen == null)
+                return false;
+
+            try
+            {
+                MethodInfo method = missionScreen.GetType().GetMethod(
+                    "SetAgentToFollow",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(Agent) },
+                    null);
+                if (method == null)
+                    return false;
+
+                method.Invoke(missionScreen, new object[] { agent });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void TryResetMissionScreenCameraPreviewState(ScreenBase missionScreen)
+        {
+            if (missionScreen == null)
+                return;
+
+            TrySetMissionScreenLastFollowedAgent(missionScreen, null);
+            TrySetMissionScreenAgentToFollowOverride(missionScreen, null);
+            TrySetInstanceField(missionScreen, "_agentToFollowOverride", null);
+            TrySetInstanceField(missionScreen, "_lastFollowedAgent", null);
+            TrySetInstanceProperty(missionScreen, "LastFollowedAgentVisuals", null);
+        }
+
+        private void LogCameraPreviewState(string key, string message)
+        {
+            if (string.IsNullOrWhiteSpace(key) ||
+                string.Equals(_lastCameraPreviewLogKey, key, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastCameraPreviewLogKey = key;
+            ModLogger.Info("CoopMissionSelectionView: " + message);
         }
 
         private static string GetRefreshKey(CoopSelectionUiSnapshot snapshot, CoopSelectionScreen desiredScreen)
@@ -462,15 +1066,17 @@ namespace CoopSpectator.UI
                 return;
 
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
-            string lifecycle = snapshot?.LifecycleState ?? string.Empty;
-            bool canStartBattleNow =
-                snapshot != null &&
-                snapshot.CanStartBattle &&
-                (snapshot.HasAgent || string.Equals(lifecycle, "Alive", StringComparison.OrdinalIgnoreCase));
+            bool canStartBattleNow = snapshot != null && snapshot.CanStartBattle;
             if (!canStartBattleNow)
             {
                 _startBattleHotkeyCooldown = StartBattleHotkeyCooldownSeconds;
-                ModLogger.Info("CoopMissionSelectionView: start battle hotkey ignored because battle is not ready.");
+                ModLogger.Info(
+                    "CoopMissionSelectionView: start battle hotkey ignored because battle is not ready. " +
+                    "HasLocalControlledAgent=" + hasLocalControlledAgent +
+                    " CanStartBattle=" + (snapshot?.CanStartBattle ?? false) +
+                    " SnapshotHasAgent=" + (snapshot?.HasAgent ?? false) +
+                    " Lifecycle=" + (snapshot?.LifecycleState ?? string.Empty) +
+                    " Peer=" + (snapshot?.PeerName ?? string.Empty));
                 return;
             }
 
@@ -480,6 +1086,21 @@ namespace CoopSpectator.UI
                 InformationManager.DisplayMessage(new InformationMessage("Coop Battle: start requested"));
                 ModLogger.Info("CoopMissionSelectionView: wrote start battle request from H hotkey.");
             }
+        }
+
+        private void TryShowStartBattleInstruction(bool hasLocalControlledAgent)
+        {
+            if (_startBattleInstructionShown || !hasLocalControlledAgent || !GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return;
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            bool canStartBattleNow = snapshot != null && snapshot.CanStartBattle;
+            if (!canStartBattleNow)
+                return;
+
+            _startBattleInstructionShown = true;
+            InformationManager.DisplayMessage(new InformationMessage("Coop Battle: press H to start the battle."));
+            ModLogger.Info("CoopMissionSelectionView: showed one-shot start battle instruction for local host-controlled peer.");
         }
 
         private void TryHandleReopenSelectionHotkey(float dt, bool hasLocalControlledAgent)
@@ -646,6 +1267,21 @@ namespace CoopSpectator.UI
             {
                 PropertyInfo property = target.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 property?.GetSetMethod(true)?.Invoke(target, new[] { value });
+            }
+            catch
+            {
+            }
+        }
+
+        internal static void TrySetInstanceField(object target, string fieldName, object value)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(fieldName))
+                return;
+
+            try
+            {
+                FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                field?.SetValue(target, value);
             }
             catch
             {

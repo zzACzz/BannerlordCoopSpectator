@@ -23,6 +23,8 @@ namespace CoopSpectator.Infrastructure
             new Dictionary<string, Resolution>(StringComparer.Ordinal);
         private static readonly HashSet<string> LoggedCharacterIds =
             new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> LoggedBlockedContextKeys =
+            new HashSet<string>(StringComparer.Ordinal);
 
         public static bool TryResolve(
             BasicCharacterObject character,
@@ -37,9 +39,24 @@ namespace CoopSpectator.Infrastructure
                 return false;
 
             string characterId = character.StringId ?? string.Empty;
+            if (!ShouldAllowSurrogateResolution(characterId, out string blockedContextDiagnostics))
+            {
+                diagnostics = blockedContextDiagnostics;
+                LogBlockedContextOnce(characterId, blockedContextDiagnostics);
+                return false;
+            }
+
+            bool isHero =
+                TryGetBoolProperty(character, "IsHero") ||
+                characterId.EndsWith("_hero", StringComparison.Ordinal);
+            bool isMounted = ResolveIsMounted(character);
+            bool preferClientMountedHeroTroopSurrogate =
+                ShouldPreferClientMountedHeroTroopSurrogate(isHero, isMounted);
+            string resolutionCacheKey =
+                characterId + "|client-mounted-troop-surrogate=" + preferClientMountedHeroTroopSurrogate;
             lock (Sync)
             {
-                if (ResolutionByCharacterId.TryGetValue(characterId, out Resolution cachedResolution))
+                if (ResolutionByCharacterId.TryGetValue(resolutionCacheKey, out Resolution cachedResolution))
                 {
                     heroClass = cachedResolution?.HeroClass;
                     treatAsTroop = cachedResolution?.TreatAsTroop ?? false;
@@ -63,8 +80,6 @@ namespace CoopSpectator.Infrastructure
                 }
                 else
                 {
-                    bool isHero = TryGetBoolProperty(character, "IsHero");
-                    bool isMounted = ResolveIsMounted(character);
                     bool isRanged = ResolveIsRanged(character);
                     int tier = ResolveTier(character, isHero);
                     string cultureToken = ResolveCultureToken(character);
@@ -72,10 +87,30 @@ namespace CoopSpectator.Infrastructure
                     string heroTemplateId = isHero ? TryConvertTroopTemplateToHeroTemplateId(troopTemplateId) : null;
 
                     List<string> candidateIds = new List<string>();
-                    if (!string.IsNullOrWhiteSpace(heroTemplateId))
-                        candidateIds.Add(heroTemplateId);
-                    if (!string.IsNullOrWhiteSpace(troopTemplateId))
-                        candidateIds.Add(troopTemplateId);
+                    if (preferClientMountedHeroTroopSurrogate)
+                    {
+                        if (!string.IsNullOrWhiteSpace(troopTemplateId))
+                            candidateIds.Add(troopTemplateId);
+                        if (!string.IsNullOrWhiteSpace(heroTemplateId))
+                            candidateIds.Add(heroTemplateId);
+                        if (!string.IsNullOrWhiteSpace(characterId) &&
+                            characterId.StartsWith("mp_", StringComparison.Ordinal))
+                        {
+                            candidateIds.Add(characterId);
+                        }
+                    }
+                    else
+                    {
+                        if (!string.IsNullOrWhiteSpace(characterId) &&
+                            characterId.StartsWith("mp_", StringComparison.Ordinal))
+                        {
+                            candidateIds.Add(characterId);
+                        }
+                        if (!string.IsNullOrWhiteSpace(heroTemplateId))
+                            candidateIds.Add(heroTemplateId);
+                        if (!string.IsNullOrWhiteSpace(troopTemplateId))
+                            candidateIds.Add(troopTemplateId);
+                    }
 
                     foreach (string candidateId in candidateIds.Where(candidate => !string.IsNullOrWhiteSpace(candidate)).Distinct(StringComparer.Ordinal))
                     {
@@ -86,7 +121,7 @@ namespace CoopSpectator.Infrastructure
                             break;
                     }
 
-                    resolvedTreatAsTroop = !isHero;
+                    resolvedTreatAsTroop = preferClientMountedHeroTroopSurrogate || !isHero;
                     resolvedDiagnostics =
                         "Character=" + (characterId ?? "null") +
                         " CultureToken=" + (cultureToken ?? "null") +
@@ -95,6 +130,7 @@ namespace CoopSpectator.Infrastructure
                         " Tier=" + tier +
                         " TroopTemplate=" + (troopTemplateId ?? "null") +
                         " HeroTemplate=" + (heroTemplateId ?? "null") +
+                        " ClientMountedTroopSurrogate=" + preferClientMountedHeroTroopSurrogate +
                         " TreatAsTroop=" + resolvedTreatAsTroop +
                         " ResolvedClass=" + (resolvedClass?.StringId ?? "null");
                 }
@@ -113,10 +149,10 @@ namespace CoopSpectator.Infrastructure
 
             lock (Sync)
             {
-                ResolutionByCharacterId[characterId] = resolution;
+                ResolutionByCharacterId[resolutionCacheKey] = resolution;
             }
 
-            if (resolvedClass != null && LoggedCharacterIds.Add(characterId))
+            if (resolvedClass != null && LoggedCharacterIds.Add(resolutionCacheKey))
             {
                 ModLogger.Info(
                     "CampaignMultiplayerHeroClassResolver: mapped original campaign character to surrogate MPHeroClass. " +
@@ -127,6 +163,51 @@ namespace CoopSpectator.Infrastructure
             treatAsTroop = resolvedTreatAsTroop;
             diagnostics = resolvedDiagnostics;
             return heroClass != null;
+        }
+
+        private static bool ShouldAllowSurrogateResolution(string characterId, out string diagnostics)
+        {
+            Mission mission = Mission.Current;
+            string sceneName = mission?.SceneName ?? string.Empty;
+            bool isBattleRuntimeScene = SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(sceneName);
+            diagnostics =
+                "blocked-non-battle-context" +
+                " Character=" + (string.IsNullOrWhiteSpace(characterId) ? "null" : characterId) +
+                " HasMission=" + (mission != null) +
+                " Scene=" + (string.IsNullOrWhiteSpace(sceneName) ? "null" : sceneName) +
+                " IsBattleRuntimeScene=" + isBattleRuntimeScene +
+                " IsClient=" + GameNetwork.IsClient +
+                " IsServer=" + GameNetwork.IsServer;
+            return mission != null && isBattleRuntimeScene;
+        }
+
+        private static void LogBlockedContextOnce(string characterId, string diagnostics)
+        {
+            string normalizedCharacterId = string.IsNullOrWhiteSpace(characterId) ? "null" : characterId;
+            string logKey = normalizedCharacterId + "|" + diagnostics;
+            lock (Sync)
+            {
+                if (!LoggedBlockedContextKeys.Add(logKey))
+                    return;
+            }
+
+            ModLogger.Info(
+                "CampaignMultiplayerHeroClassResolver: skipped surrogate MPHeroClass resolution outside battle runtime. " +
+                diagnostics);
+        }
+
+        private static bool ShouldPreferClientMountedHeroTroopSurrogate(bool isHero, bool isMounted)
+        {
+            if (!isHero || !isMounted || GameNetwork.IsServer || !GameNetwork.IsClient)
+                return false;
+
+            Mission mission = Mission.Current;
+            if (mission == null)
+                return false;
+
+            string sceneName = mission.SceneName ?? string.Empty;
+            return SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(sceneName) &&
+                   SceneRuntimeClassifier.IsCampaignBattleScene(sceneName);
         }
 
         public static bool MatchesTroopClass(

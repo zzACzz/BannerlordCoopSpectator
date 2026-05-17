@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.MissionBehaviors;
 using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.GameMode
@@ -20,6 +21,7 @@ namespace CoopSpectator.GameMode
             "MissionGauntletMultiplayerOrderUIHandler",
             "OrderTroopPlacer"
         };
+        private bool _loggedBattleMapClientObserverFallback;
 
         public override void AfterStart()
         {
@@ -67,6 +69,24 @@ namespace CoopSpectator.GameMode
                 ModLogger.Info("MissionBehaviorDiagnostic: " + ex.Message);
             }
             ModLogger.Info("MissionBehaviorDiagnostic AfterStart EXIT");
+        }
+
+        public override void OnMissionTick(float dt)
+        {
+            base.OnMissionTick(dt);
+
+            Mission mission = Mission;
+            if (mission == null || GameNetwork.IsServer || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                return;
+
+            if (!_loggedBattleMapClientObserverFallback)
+            {
+                _loggedBattleMapClientObserverFallback = true;
+                ModLogger.Info(
+                    "MissionBehaviorDiagnostic: running battle-map client exact visual observer fallback because CoopMissionClientLogic is not injected in crash-isolation stack.");
+            }
+
+            CoopMissionSpawnLogic.TryRunClientExactCampaignVisualObserver(mission);
         }
 
         private static bool ContainsBehavior(List<MissionBehavior> behaviors, string typeName)

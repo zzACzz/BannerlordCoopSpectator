@@ -34,7 +34,13 @@ namespace CoopSpectator.Infrastructure
             "SandBoxCore",
             "SandBox",
             "Native",
-            "StoryMode"
+            "StoryMode",
+            "CoopSpectator"
+        };
+
+        private static readonly (string ModuleId, string RelativeModuleDataPath)[] SupplementalItemXmlSources =
+        {
+            ("CoopSpectator", "coopspectator_items.xml")
         };
 
         private static readonly Dictionary<string, ExactItemDefinition> DefinitionsById =
@@ -56,6 +62,8 @@ namespace CoopSpectator.Infrastructure
             if (!ExperimentalFeatures.EnableExactCampaignRuntimeItemRegistry || runtimeState == null)
                 return;
 
+            ExactCampaignObjectCatalogBootstrap.EnsureLoaded("exact-runtime-item-registry:" + (source ?? "unknown"));
+
             MBObjectManager objectManager = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
             if (objectManager == null)
                 return;
@@ -64,15 +72,21 @@ namespace CoopSpectator.Infrastructure
             {
                 EnsureIndexBuilt();
 
-                List<string> requestedItemIds = CollectHeroEquipmentItemIds(runtimeState)
+                List<string> requestedItemIds = CollectBattleEquipmentItemIds(runtimeState)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(itemId => itemId, StringComparer.Ordinal)
                     .ToList();
-                if (requestedItemIds.Count == 0)
+                List<string> supportItemIds = CollectSupportExactItemIds();
+                List<string> requestedAndSupportItemIds = requestedItemIds
+                    .Concat(supportItemIds)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(itemId => itemId, StringComparer.Ordinal)
+                    .ToList();
+                if (requestedAndSupportItemIds.Count == 0)
                     return;
 
                 int itemCountBefore = TryGetItemCount(objectManager);
-                List<string> missingBefore = requestedItemIds
+                List<string> missingBefore = requestedAndSupportItemIds
                     .Where(itemId => TryResolveItem(objectManager, itemId) == null)
                     .ToList();
 
@@ -100,14 +114,15 @@ namespace CoopSpectator.Infrastructure
                 TryUnregisterNonReadyObjects(objectManager);
 
                 int itemCountAfter = TryGetItemCount(objectManager);
-                List<string> missingAfter = requestedItemIds
+                List<string> missingAfter = requestedAndSupportItemIds
                     .Where(itemId => TryResolveItem(objectManager, itemId) == null)
                     .ToList();
 
                 ModLogger.Info(
-                    "ExactCampaignRuntimeItemRegistry: ensured exact campaign item availability for hero equipment. " +
+                    "ExactCampaignRuntimeItemRegistry: ensured exact campaign item availability for battle snapshot equipment. " +
                     "Source=" + (source ?? "unknown") +
                     " Requested=" + requestedItemIds.Count +
+                    " SupportRequested=" + supportItemIds.Count +
                     " MissingBefore=" + missingBefore.Count +
                     " LoadedThisPass=" + loadedThisPass.Count +
                     " MissingAfter=" + missingAfter.Count +
@@ -118,7 +133,7 @@ namespace CoopSpectator.Infrastructure
                 if (loadedThisPass.Count > 0)
                 {
                     ModLogger.Info(
-                        "ExactCampaignRuntimeItemRegistry: loaded exact hero equipment item ids = [" +
+                        "ExactCampaignRuntimeItemRegistry: loaded exact battle equipment item ids = [" +
                         string.Join(", ", loadedThisPass) +
                         "].");
                 }
@@ -133,7 +148,7 @@ namespace CoopSpectator.Infrastructure
                     }
 
                     ModLogger.Info(
-                        "ExactCampaignRuntimeItemRegistry: unresolved exact hero equipment item ids = [" +
+                        "ExactCampaignRuntimeItemRegistry: unresolved exact battle equipment item ids = [" +
                         string.Join(", ", unresolvedSummary.OrderBy(entry => entry, StringComparer.Ordinal)) +
                         "].");
                 }
@@ -172,6 +187,17 @@ namespace CoopSpectator.Infrastructure
                     scannedFiles.Add(Path.GetFileName(xmlPath) + "=" + indexedInFile);
                     duplicateCount += duplicatesInFile;
                 }
+            }
+
+            foreach ((string moduleId, string relativeModuleDataPath) in SupplementalItemXmlSources)
+            {
+                string xmlPath = ModulePathHelper.GetSiblingModuleDataFilePath(moduleId, relativeModuleDataPath);
+                if (string.IsNullOrWhiteSpace(xmlPath) || !File.Exists(xmlPath))
+                    continue;
+
+                int indexedInFile = IndexDefinitionsFromXml(moduleId, xmlPath, out int duplicatesInFile);
+                scannedFiles.Add(Path.GetFileName(xmlPath) + "=" + indexedInFile);
+                duplicateCount += duplicatesInFile;
             }
 
             _indexBuilt = true;
@@ -1101,16 +1127,16 @@ namespace CoopSpectator.Infrastructure
                 "/pieces:[" + string.Join(", ", pieceStates) + "]";
         }
 
-        private static IEnumerable<string> CollectHeroEquipmentItemIds(BattleRuntimeState runtimeState)
+        private static IEnumerable<string> CollectBattleEquipmentItemIds(BattleRuntimeState runtimeState)
         {
             if (runtimeState?.EntriesById == null)
                 yield break;
 
-            foreach (RosterEntryState heroEntry in runtimeState.EntriesById.Values
-                .Where(entry => entry != null && entry.IsHero)
+            foreach (RosterEntryState entry in runtimeState.EntriesById.Values
+                .Where(candidate => candidate != null)
                 .OrderBy(entry => entry.EntryId, StringComparer.Ordinal))
             {
-                foreach (string itemId in EnumerateHeroEquipmentSlots(heroEntry))
+                foreach (string itemId in EnumerateEntryEquipmentSlots(entry))
                 {
                     if (!string.IsNullOrWhiteSpace(itemId))
                         yield return itemId;
@@ -1118,7 +1144,23 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        private static IEnumerable<string> EnumerateHeroEquipmentSlots(RosterEntryState entryState)
+        private static List<string> CollectSupportExactItemIds()
+        {
+            // Do not bulk-register every synthetic `cs_exact_*` item globally.
+            // Campaign UI preview chains such as Party/Inventory use the shared
+            // item catalog when building CharacterTableau equipment lookups; if
+            // we pre-load all exact stand-in horses/armor there, vanilla preview
+            // code starts seeing synthetic items like `cs_exact_sumpter_horse`
+            // in fresh campaigns before any battle exact-transfer path is active.
+            //
+            // The runtime registry still loads every exact item that is actually
+            // referenced by the current battle snapshot via CollectBattleEquipmentItemIds().
+            // Crafted-item dependencies are resolved inside TryRegisterExactCraftedItem(),
+            // so keeping this support list empty is the narrowest safe baseline.
+            return new List<string>();
+        }
+
+        private static IEnumerable<string> EnumerateEntryEquipmentSlots(RosterEntryState entryState)
         {
             if (entryState == null)
                 yield break;

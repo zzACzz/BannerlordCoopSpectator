@@ -54,6 +54,7 @@
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" Link="MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentApplyDamageModel.cs" Link="MissionModels\CoopCampaignDerivedAgentApplyDamageModel.cs" />
+    <Compile Include="..\MissionModels\CoopCampaignDerivedMissionDifficultyModel.cs" Link="MissionModels\CoopCampaignDerivedMissionDifficultyModel.cs" />
     <Compile Include="Mission\DedicatedKnockoutOutcomeModelOverride.cs" Link="Mission\DedicatedKnockoutOutcomeModelOverride.cs" />
     <Compile Include="..\DedicatedHelper\DedicatedServerHostingMode.cs" Link="DedicatedHelper\DedicatedServerHostingMode.cs" />
     <Compile Include="..\DedicatedHelper\DedicatedServerLaunchSettings.cs" Link="DedicatedHelper\DedicatedServerLaunchSettings.cs" />
@@ -63,23 +64,41 @@
     <Compile Include="..\Infrastructure\ModLogger.cs" Link="Infrastructure\ModLogger.cs" />
     <Compile Include="..\Infrastructure\BattleMapContractDiagnostics.cs" Link="Infrastructure\BattleMapContractDiagnostics.cs" />
     <Compile Include="..\Infrastructure\BattleCommanderResolver.cs" Link="Infrastructure\BattleCommanderResolver.cs" />
+    <Compile Include="..\Infrastructure\BattleSnapshotBinarySerializer.cs" Link="Infrastructure\BattleSnapshotBinarySerializer.cs" />
     <Compile Include="..\Infrastructure\CampaignMapPatchMissionInit.cs" Link="Infrastructure\CampaignMapPatchMissionInit.cs" />
     <Compile Include="..\Infrastructure\CampaignMultiplayerHeroClassResolver.cs" Link="Infrastructure\CampaignMultiplayerHeroClassResolver.cs" />
+    <Compile Include="..\Infrastructure\ExactBattleAgentSpawnTraceBridgeFile.cs" Link="Infrastructure\ExactBattleAgentSpawnTraceBridgeFile.cs" />
+    <Compile Include="..\Infrastructure\ExactBattleEntryCompatibilityBridgeFile.cs" Link="Infrastructure\ExactBattleEntryCompatibilityBridgeFile.cs" />
+    <Compile Include="..\Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" Link="Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignArmyBootstrap.cs" Link="Infrastructure\ExactCampaignArmyBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />
+    <Compile Include="..\Infrastructure\ExactCreateAgentCorridorDiagnostics.cs" Link="Infrastructure\ExactCreateAgentCorridorDiagnostics.cs" />
+    <Compile Include="..\Infrastructure\ExactCreateAgentServerPreSpawnContractResolver.cs" Link="Infrastructure\ExactCreateAgentServerPreSpawnContractResolver.cs" />
+    <Compile Include="..\Infrastructure\ExactCreateAgentPayloadDiagnostics.cs" Link="Infrastructure\ExactCreateAgentPayloadDiagnostics.cs" />
+    <Compile Include="..\Infrastructure\ExactTransferSpawnContract.cs" Link="Infrastructure\ExactTransferSpawnContract.cs" />
+    <Compile Include="..\Infrastructure\ExactTransferRuntimeState.cs" Link="Infrastructure\ExactTransferRuntimeState.cs" />
+    <Compile Include="..\Infrastructure\ExactTransferStageMachine.cs" Link="Infrastructure\ExactTransferStageMachine.cs" />
+    <Compile Include="..\Infrastructure\ExactTransferContractBuilder.cs" Link="Infrastructure\ExactTransferContractBuilder.cs" />
+    <Compile Include="..\Infrastructure\ExactTransferContractValidator.cs" Link="Infrastructure\ExactTransferContractValidator.cs" />
+    <Compile Include="..\Infrastructure\ExactTransferContractRuntimeCache.cs" Link="Infrastructure\ExactTransferContractRuntimeCache.cs" />
     <Compile Include="..\Infrastructure\ModulePathHelper.cs" Link="Infrastructure\ModulePathHelper.cs" />
     <Compile Include="..\Infrastructure\SceneRuntimeClassifier.cs" Link="Infrastructure\SceneRuntimeClassifier.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePhaseBridgeFile.cs" Link="Infrastructure\CoopBattlePhaseBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePhaseRuntimeState.cs" Link="Infrastructure\CoopBattlePhaseRuntimeState.cs" />
-  <Compile Include="..\Infrastructure\BattleSnapshotRuntimeState.cs" Link="Infrastructure\BattleSnapshotRuntimeState.cs" />
-  <Compile Include="..\Infrastructure\CoopBattleAuthorityState.cs" Link="Infrastructure\CoopBattleAuthorityState.cs" />
+    <Compile Include="..\Infrastructure\BattleSnapshotRuntimeState.cs" Link="Infrastructure\BattleSnapshotRuntimeState.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleAuthorityState.cs" Link="Infrastructure\CoopBattleAuthorityState.cs" />
+    <Compile Include="..\Infrastructure\CoopBattlePeerReconnectState.cs" Link="Infrastructure\CoopBattlePeerReconnectState.cs" />
+    <Compile Include="..\Infrastructure\AtomicBridgeFileIO.cs" Link="Infrastructure\AtomicBridgeFileIO.cs" />
     <Compile Include="..\Infrastructure\CoopBattleEntryPolicy.cs" Link="Infrastructure\CoopBattleEntryPolicy.cs" />
+    <Compile Include="..\Infrastructure\CoopBattlePeerSessionState.cs" Link="Infrastructure\CoopBattlePeerSessionState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleEntryStatusBridgeFile.cs" Link="Infrastructure\CoopBattleEntryStatusBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleResultBridgeFile.cs" Link="Infrastructure\CoopBattleResultBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSelectionBridgeFile.cs" Link="Infrastructure\CoopBattleSelectionBridgeFile.cs" />
+    <Compile Include="..\Infrastructure\CustomGameJoinContextState.cs" Link="Infrastructure\CustomGameJoinContextState.cs" />
     <Compile Include="..\Infrastructure\HostSelfJoinRedirectState.cs" Link="Infrastructure\HostSelfJoinRedirectState.cs" />
+    <Compile Include="..\Infrastructure\PendingBattleMissionStartupState.cs" Link="Infrastructure\PendingBattleMissionStartupState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSelectionIntentState.cs" Link="Infrastructure\CoopBattleSelectionIntentState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSpawnBridgeFile.cs" Link="Infrastructure\CoopBattleSpawnBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSpawnIntentState.cs" Link="Infrastructure\CoopBattleSpawnIntentState.cs" />
@@ -97,7 +116,10 @@
     <Compile Include="..\Patches\MissionStateOpenNewPatches.cs" Link="Patches\MissionStateOpenNewPatches.cs" />
     <Compile Include="..\Patches\ExactCampaignArmyBootstrapPatch.cs" Link="Patches\ExactCampaignArmyBootstrapPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignPreSpawnLoadoutPatch.cs" Link="Patches\ExactCampaignPreSpawnLoadoutPatch.cs" />
+    <Compile Include="..\Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" Link="Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" />
     <Compile Include="..\Patches\BattleMapSpawnHandoffPatch.cs" Link="Patches\BattleMapSpawnHandoffPatch.cs" />
+    <Compile Include="..\Patches\LateJoinPeerBootstrapGatePatch.cs" Link="Patches\LateJoinPeerBootstrapGatePatch.cs" />
+    <Compile Include="..\Patches\FinishedLoadingMissionReadyGatePatch.cs" Link="Patches\FinishedLoadingMissionReadyGatePatch.cs" />
     <Compile Include="..\Patches\BattleShellSuppressionPatch.cs" Link="Patches\BattleShellSuppressionPatch.cs" />
     <Compile Include="..\Patches\MultiplayerCharacterClassFallbackPatch.cs" Link="Patches\MultiplayerCharacterClassFallbackPatch.cs" />
     <Compile Include="..\Patches\ServerChangeCultureCanonicalizationPatch.cs" Link="Patches\ServerChangeCultureCanonicalizationPatch.cs" />

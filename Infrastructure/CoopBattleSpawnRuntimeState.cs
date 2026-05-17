@@ -96,14 +96,19 @@ namespace CoopSpectator.Infrastructure
             SetState(networkPeer.Index, selectionState.Side, selectionState.TroopId, selectionState.EntryId, CoopBattleSpawnStatus.Validating, source, "validating");
         }
 
-        public static void MarkValidated(MissionPeer missionPeer, string troopId, string entryId, string source)
+        public static void MarkValidated(
+            MissionPeer missionPeer,
+            string troopId,
+            string entryId,
+            string source,
+            string reason = "validated")
         {
             NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();
             if (networkPeer == null)
                 return;
 
             CoopBattleAuthorityState.PeerSelectionState selectionState = CoopBattleAuthorityState.GetSelectionState(missionPeer);
-            SetState(networkPeer.Index, selectionState.Side, troopId, entryId, CoopBattleSpawnStatus.Validated, source, "validated");
+            SetState(networkPeer.Index, selectionState.Side, troopId, entryId, CoopBattleSpawnStatus.Validated, source, reason);
         }
 
         public static void MarkRejected(MissionPeer missionPeer, string source, string reason)
@@ -124,6 +129,38 @@ namespace CoopSpectator.Infrastructure
 
             CoopBattleAuthorityState.PeerSelectionState selectionState = CoopBattleAuthorityState.GetSelectionState(missionPeer);
             SetState(networkPeer.Index, selectionState.Side, troopId, entryId, CoopBattleSpawnStatus.Spawned, source, "spawned");
+        }
+
+        public static bool TryMigratePeerIndex(int previousPeerIndex, int currentPeerIndex, string source)
+        {
+            if (previousPeerIndex < 0 || currentPeerIndex < 0 || previousPeerIndex == currentPeerIndex)
+                return false;
+
+            if (!_statesByPeer.TryGetValue(previousPeerIndex, out PeerSpawnRuntimeState previousState))
+                return false;
+
+            PeerSpawnRuntimeState migratedState = new PeerSpawnRuntimeState(
+                currentPeerIndex,
+                previousState.Side,
+                previousState.TroopId,
+                previousState.EntryId,
+                previousState.Status,
+                previousState.Source,
+                previousState.Reason,
+                previousState.UpdatedUtc);
+            _statesByPeer.Remove(previousPeerIndex);
+            _statesByPeer[currentPeerIndex] = migratedState;
+
+            ModLogger.Info(
+                "CoopBattleSpawnRuntimeState: migrated reconnect peer state. " +
+                "PreviousPeerIndex=" + previousPeerIndex +
+                " CurrentPeerIndex=" + currentPeerIndex +
+                " Status=" + migratedState.Status +
+                " Side=" + migratedState.Side +
+                " EntryId=" + (migratedState.EntryId ?? "null") +
+                " Reason=" + (migratedState.Reason ?? "null") +
+                " Source=" + (source ?? "unknown"));
+            return true;
         }
 
         private static void SetState(

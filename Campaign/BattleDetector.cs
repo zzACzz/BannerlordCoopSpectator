@@ -18,6 +18,7 @@ using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.Map;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Roster;
+using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using Helpers;
 using TaleWorlds.ObjectSystem;
@@ -37,6 +38,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private const int SyntheticHeroLordLimit = 12;
         private bool _wasInMissionLastTick; // Пам'ятаємо стан попереднього тіку: чи вже була активна місія
         private bool _hasSentBattleStartForThisMission; // Прапорець, щоб не відправляти BATTLE_START багато разів за одну місію
+        private bool _hasSuppressedBattleStartForUnsupportedMission;
         private string _lastConsumedBattleResultKey;
         private string _lastMissionExitRequestedBattleResultKey;
         private string _lastMissionExitFailedBattleResultKey;
@@ -324,6 +326,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 if (!isInMissionForClient)
                 {
                     _hasSentBattleStartForThisMission = false;
+                    _hasSuppressedBattleStartForUnsupportedMission = false;
                     ResetMissionExitState();
                     _nextBattleStartAttemptUtc = DateTime.MinValue;
                     _nextBattleStartWaitLogUtc = DateTime.MinValue;
@@ -346,6 +349,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 } // Завершуємо блок if
                 _wasInMissionLastTick = false; // Оновлюємо стан "було в місії" на false
                 _hasSentBattleStartForThisMission = false; // Скидаємо прапорець, щоб наступна місія могла знову надіслати BATTLE_START
+                _hasSuppressedBattleStartForUnsupportedMission = false;
                 _nextBattleStartAttemptUtc = DateTime.MinValue;
                 _nextBattleStartWaitLogUtc = DateTime.MinValue;
                 ResetIfMissionEnded(); // Тримаємо стан консистентним
@@ -417,6 +421,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             _wasInMissionLastTick = false; // Скидаємо "було в місії" — ми вже не в місії
             _hasSentBattleStartForThisMission = false; // Дозволяємо наступній місії знову відправити BATTLE_START
+            _hasSuppressedBattleStartForUnsupportedMission = false;
             _nextBattleStartAttemptUtc = DateTime.MinValue;
             _nextBattleStartWaitLogUtc = DateTime.MinValue;
         } // Завершуємо блок методу
@@ -425,6 +430,23 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         {
             if (_hasSentBattleStartForThisMission)
                 return;
+
+            if (TryGetUnsupportedCoopMissionReason(out string unsupportedReason, out string unsupportedSummary))
+            {
+                if (!_hasSuppressedBattleStartForUnsupportedMission)
+                {
+                    _hasSuppressedBattleStartForUnsupportedMission = true;
+                    _nextBattleStartAttemptUtc = DateTime.MaxValue;
+                    _nextBattleStartWaitLogUtc = DateTime.MaxValue;
+                    UiFeedback.ShowMessageDeferred("Coop: цей бій тимчасово не підтримується. Грай його локально на хості.");
+                    ModLogger.Info(
+                        "BattleDetector: suppressed coop battle start for unsupported mission. " +
+                        "Reason=" + (unsupportedReason ?? "unknown") + " " +
+                        (unsupportedSummary ?? "Summary=none") + ".");
+                }
+
+                return;
+            }
 
             DateTime nowUtc = DateTime.UtcNow;
             if (_nextBattleStartAttemptUtc != DateTime.MinValue && nowUtc < _nextBattleStartAttemptUtc)
@@ -445,6 +467,89 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 _nextBattleStartAttemptUtc = nowUtc.AddMilliseconds(750);
             }
+        }
+
+        private static bool TryGetUnsupportedCoopMissionReason(out string reason, out string summary)
+        {
+            reason = null;
+            summary = null;
+
+            try
+            {
+                Mission mission = Mission.Current;
+                MapEvent battle = PlayerEncounter.Battle ?? PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty?.MapEvent;
+                Settlement encounterSettlement = PlayerEncounter.EncounterSettlement ?? battle?.MapEventSettlement ?? MobileParty.MainParty?.CurrentSettlement;
+                string missionScene = mission?.SceneName ?? string.Empty;
+                bool isHideoutBattle = battle?.IsHideoutBattle ?? false;
+                bool isHideoutSettlement = encounterSettlement?.IsHideout ?? false;
+                bool isLordsHallSiegeState = encounterSettlement?.CurrentSiegeState == Settlement.SiegeState.InTheLordsHall;
+                bool isSiegeAssault = battle?.IsSiegeAssault ?? false;
+                bool isBlockadeBattle = battle?.IsBlockade ?? false;
+                bool isBlockadeSallyOutBattle = battle?.IsBlockadeSallyOut ?? false;
+                bool looksLikeKeepScene = LooksLikeUnsupportedKeepScene(missionScene);
+
+                summary =
+                    "MissionScene=" + (string.IsNullOrWhiteSpace(missionScene) ? "null" : missionScene) +
+                    " BattleType=" + (battle != null ? battle.EventType.ToString() : "none") +
+                    " IsHideoutBattle=" + isHideoutBattle +
+                    " IsHideoutSettlement=" + isHideoutSettlement +
+                    " IsSiegeAssault=" + isSiegeAssault +
+                    " IsBlockade=" + isBlockadeBattle +
+                    " IsBlockadeSallyOut=" + isBlockadeSallyOutBattle +
+                    " SiegeState=" + (encounterSettlement?.CurrentSiegeState.ToString() ?? "none") +
+                    " Settlement=" + (encounterSettlement?.StringId ?? "none") +
+                    " EncounteredParty=" + (TryGetStringId(PlayerEncounter.EncounteredParty) ?? "none");
+
+                if (isHideoutBattle || isHideoutSettlement || LooksLikeUnsupportedHideoutScene(missionScene))
+                {
+                    reason = "hideout";
+                    return true;
+                }
+
+                if (isBlockadeBattle || isBlockadeSallyOutBattle)
+                {
+                    reason = "blockade";
+                    return true;
+                }
+
+                if ((isSiegeAssault && isLordsHallSiegeState) || (looksLikeKeepScene && encounterSettlement?.IsFortification == true))
+                {
+                    reason = "siege-lords-hall";
+                    return true;
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                summary = "exception=" + ex.Message;
+                return false;
+            }
+        }
+
+        private static bool LooksLikeUnsupportedHideoutScene(string sceneName)
+        {
+            if (string.IsNullOrWhiteSpace(sceneName))
+                return false;
+
+            string normalized = sceneName.Trim().ToLowerInvariant();
+            return normalized.Contains("hideout") ||
+                   normalized.Contains("bandit_lair") ||
+                   normalized.Contains("banditlair");
+        }
+
+        private static bool LooksLikeUnsupportedKeepScene(string sceneName)
+        {
+            if (string.IsNullOrWhiteSpace(sceneName))
+                return false;
+
+            string normalized = sceneName.Trim().ToLowerInvariant();
+            return normalized.Contains("lordshall") ||
+                   normalized.Contains("lords_hall") ||
+                   normalized.Contains("lords-hall") ||
+                   normalized.Contains(" keep") ||
+                   normalized.Contains("_keep") ||
+                   normalized.Contains("keep_");
         }
 
         private static void TryAttachCampaignBattleDamageDiagnosticsMissionLogic()
@@ -3556,6 +3661,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             // 3) Player side (best-effort) // Пояснюємо блок
             message.PlayerSide = TryGetPlayerSideTextSafe(); // Пишемо "Attacker/Defender/Unknown" як текст
+            float playerTroopsReceivedDamageMultiplier = TryResolvePlayerTroopsReceivedDamageMultiplierSafe();
 
             // 4) Extended battle snapshot (best-effort) // Пояснюємо блок
             message.Snapshot =
@@ -3577,6 +3683,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 message.Snapshot.MultiplayerScene = message.MultiplayerScene;
                 message.Snapshot.MultiplayerGameType = message.MultiplayerGameType;
                 message.Snapshot.MultiplayerSceneResolverSource = message.MultiplayerSceneResolverSource;
+                message.Snapshot.PlayerTroopsReceivedDamageMultiplier = playerTroopsReceivedDamageMultiplier;
             }
 
             // 5) Legacy fields for transitional clients/runtime // Пояснюємо блок
@@ -3599,7 +3706,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 message.Snapshot.ReinforcementWaveCount = message.ReinforcementWaveCount;
                 message.Snapshot.BattleSizeBudgetSource = message.BattleSizeBudgetSource;
             }
-            BattleSnapshotRuntimeState.SetCurrent(message.Snapshot, "host-battle-detector");
+            if (ShouldPublishHostBattleDetectorRuntimeSnapshot(message.Snapshot))
+            {
+                BattleSnapshotRuntimeState.SetCurrent(message.Snapshot, "host-battle-detector");
+            }
+            else
+            {
+                ModLogger.Info(
+                    "BattleDetector: skipped BattleSnapshotRuntimeState.SetCurrent for non-authoritative fallback snapshot. " +
+                    "BattleId=" + (message.Snapshot?.BattleId ?? "null") +
+                    " Sides=" + (message.Snapshot?.Sides?.Count ?? 0) + ".");
+            }
 
             ModLogger.Info(
                 "BattleDetector: campaign scene context resolved. " +
@@ -3629,6 +3746,20 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             return message; // Повертаємо сформований DTO
         } // Завершуємо блок методу
+
+        private static float TryResolvePlayerTroopsReceivedDamageMultiplierSafe()
+        {
+            try
+            {
+                float multiplier = TaleWorlds.CampaignSystem.Campaign.Current?.Models?.DifficultyModel?.GetPlayerTroopsReceivedDamageMultiplier() ?? 1f;
+                return multiplier > 0f ? multiplier : 1f;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to resolve player troops received damage multiplier. " + ex.Message);
+                return 1f;
+            }
+        }
 
         private static CampaignBattleSpawnBudgetContext TryBuildCampaignBattleSpawnBudgetContextSafe(
             string battleScene,
@@ -3708,6 +3839,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         {
             return !string.IsNullOrWhiteSpace(battleScene) &&
                    battleScene.IndexOf("siege", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool ShouldPublishHostBattleDetectorRuntimeSnapshot(BattleSnapshotMessage snapshot)
+        {
+            if (snapshot?.Sides == null || snapshot.Sides.Count == 0)
+                return false;
+
+            return !string.Equals(snapshot.BattleId, "fallback", StringComparison.OrdinalIgnoreCase);
         }
 
         private static int TryGetSnapshotTotalManCount(BattleSnapshotMessage snapshot)
@@ -5980,6 +6119,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool isHero = TryGetBoolProperty(characterObject, "IsHero");
             if (isHero)
             {
+                string multiplayerSafeHeroId = TryResolveMultiplayerSafeHeroCharacterId(characterObject as TaleWorlds.CampaignSystem.CharacterObject);
+                if (!string.IsNullOrWhiteSpace(multiplayerSafeHeroId) && !string.Equals(multiplayerSafeHeroId, originalId, StringComparison.Ordinal))
+                {
+                    ModLogger.Info("BattleDetector: mapped hero troop id '" + originalId + "' to multiplayer-safe hero template '" + multiplayerSafeHeroId + "'.");
+                    return multiplayerSafeHeroId;
+                }
+
                 string heroRoleSafeId = TryResolveHeroRoleMissionSafeCharacterId(characterObject as TaleWorlds.CampaignSystem.CharacterObject);
                 if (!string.IsNullOrWhiteSpace(heroRoleSafeId) && !string.Equals(heroRoleSafeId, originalId, StringComparison.Ordinal))
                 {
@@ -6060,6 +6206,18 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             const string guaranteedVanillaFallbackId = "imperial_infantryman";
             ModLogger.Info("BattleDetector: no mission-safe fallback found for hero troop id '" + originalId + "'. Using guaranteed vanilla fallback '" + guaranteedVanillaFallbackId + "'.");
             return guaranteedVanillaFallbackId;
+        }
+
+        private static string TryResolveMultiplayerSafeHeroCharacterId(TaleWorlds.CampaignSystem.CharacterObject heroCharacter)
+        {
+            if (heroCharacter == null || !heroCharacter.IsHero)
+                return null;
+
+            string multiplayerSafeTroopId = TryResolveMultiplayerSafeCharacterId(heroCharacter);
+            if (string.IsNullOrWhiteSpace(multiplayerSafeTroopId))
+                return null;
+
+            return TryConvertTroopTemplateToHeroTemplate(multiplayerSafeTroopId);
         }
 
         private static string TryResolveBanditMissionSafeCharacterId(object characterObject)

@@ -132,5 +132,33 @@ namespace CoopSpectator.Infrastructure
                 "Peer=" + (networkPeer.UserName ?? networkPeer.Index.ToString()) +
                 " Source=" + source);
         }
+
+        public static bool TryMigratePeerIndex(int previousPeerIndex, int currentPeerIndex, string source)
+        {
+            if (previousPeerIndex < 0 || currentPeerIndex < 0 || previousPeerIndex == currentPeerIndex)
+                return false;
+
+            if (!_pendingRequestsByPeer.TryGetValue(previousPeerIndex, out PeerSpawnRequestState previousRequest))
+                return false;
+
+            PeerSpawnRequestState migratedRequest = new PeerSpawnRequestState(
+                currentPeerIndex,
+                previousRequest.Side,
+                previousRequest.TroopId,
+                previousRequest.EntryId,
+                previousRequest.Source,
+                previousRequest.UpdatedUtc);
+            _pendingRequestsByPeer.Remove(previousPeerIndex);
+            _pendingRequestsByPeer[currentPeerIndex] = migratedRequest;
+
+            ModLogger.Info(
+                "CoopBattleSpawnRequestState: migrated reconnect peer request. " +
+                "PreviousPeerIndex=" + previousPeerIndex +
+                " CurrentPeerIndex=" + currentPeerIndex +
+                " Side=" + migratedRequest.Side +
+                " EntryId=" + (migratedRequest.EntryId ?? "null") +
+                " Source=" + (source ?? "unknown"));
+            return true;
+        }
     }
 }

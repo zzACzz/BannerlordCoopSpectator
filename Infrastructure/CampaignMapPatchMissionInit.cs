@@ -31,13 +31,15 @@ namespace CoopSpectator.Infrastructure
 
             string source = string.IsNullOrWhiteSpace(logSource) ? "CampaignMapPatchMissionInit" : logSource;
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " pre-apply");
-            BattleSnapshotMessage snapshot = TryResolveSnapshot();
+            BattleSnapshotMessage snapshot = TryResolveSnapshot(source);
             if (snapshot == null)
             {
                 ModLogger.Info(source + ": skipped campaign map patch context (battle snapshot missing).");
                 BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " skipped-missing-snapshot");
                 return;
             }
+
+            ApplyCampaignDifficultyContext(ref record, snapshot, runtimeScene, source);
 
             if (snapshot.MapPatchSceneIndex < 0)
             {
@@ -90,6 +92,25 @@ namespace CoopSpectator.Infrastructure
                 " PatchEncounterDir=(" + record.PatchEncounterDir.x.ToString("0.###") + ", " + record.PatchEncounterDir.y.ToString("0.###") + ")" +
                 " DirectionSource=" + (snapshot.PatchEncounterDirectionSource ?? "unknown") + ".");
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " post-apply");
+        }
+
+        private static void ApplyCampaignDifficultyContext(
+            ref MissionInitializerRecord record,
+            BattleSnapshotMessage snapshot,
+            string runtimeScene,
+            string source)
+        {
+            float playerTroopsReceivedDamageMultiplier = snapshot?.PlayerTroopsReceivedDamageMultiplier ?? 1f;
+            if (playerTroopsReceivedDamageMultiplier <= 0f)
+                playerTroopsReceivedDamageMultiplier = 1f;
+
+            record.DamageToFriendsMultiplier = playerTroopsReceivedDamageMultiplier;
+            record.DamageFromPlayerToFriendsMultiplier = playerTroopsReceivedDamageMultiplier;
+
+            ModLogger.Info(
+                source + ": applied campaign player-troops damage multiplier. " +
+                "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                " Multiplier=" + playerTroopsReceivedDamageMultiplier.ToString("0.###") + ".");
         }
 
         public static bool TryRepairLiveMissionContract(Mission mission, string logSource)
@@ -183,7 +204,7 @@ namespace CoopSpectator.Infrastructure
             return changed;
         }
 
-        private static BattleSnapshotMessage TryResolveSnapshot()
+        private static BattleSnapshotMessage TryResolveSnapshot(string source)
         {
             try
             {
@@ -193,6 +214,14 @@ namespace CoopSpectator.Infrastructure
             }
             catch
             {
+            }
+
+            if (GameNetwork.IsClient && !CustomGameJoinContextState.ShouldAllowLocalBattleRosterFileFallback())
+            {
+                ModLogger.Info(
+                    (string.IsNullOrWhiteSpace(source) ? "CampaignMapPatchMissionInit" : source) +
+                    ": skipped local battle roster snapshot fallback for remote custom-game join.");
+                return null;
             }
 
             try

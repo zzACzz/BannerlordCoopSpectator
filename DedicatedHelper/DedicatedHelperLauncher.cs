@@ -15,6 +15,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
     {
         private const int DefaultPort = 7210; // Офіційний UDP-порт дедик-сервера за замовчуванням
         private const string DedicatedServerFolderName = "Mount & Blade II Dedicated Server";
+        private const string ExplicitGameRootEnvVar = "BANNERLORD_GAME_ROOT";
         private const string ServerBinRelativePath = @"bin\Win64_Shipping_Server";
         /// <summary>Єдиний exe для custom dedicated server у стандартній інсталі: DedicatedCustomServer.Starter.exe (core exe в цій папці немає).</summary>
         private static readonly string[] ExeCandidates = new[] { "DedicatedCustomServer.Starter.exe" };
@@ -28,6 +29,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const string StartupConfigFileName = "ds_config_coop_start.txt";
         /// <summary>Пароль адміна для Dashboard (localhost:7210), щоб увійти в Terminal і дослідити API консольних команд.</summary>
         private const string DashboardAdminPassword = "coopforever";
+        private const string LegacyTestListedServerName = "ZZZ_COOP_TEST_7210";
         /// <summary>Пароль для HTTP-логіну в web panel (DedicatedServerCommands / WebPanelAuth).</summary>
         public static string GetDashboardAdminPassword() => GetCurrentLaunchSettings().AdminPassword;
         /// <summary>Якщо false — не передаємо конфіг при запуску (як Steam: "Command file is null"), щоб сервер не від'єднувався від Diamond. start_game тоді вводять вручну в консолі сервера.</summary>
@@ -65,10 +67,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const bool AddTokenOnly = false;
         /// <summary>Конфіг + /dedicatedcustomserverconfigfile — авто start_game (ізоляція: не ламає). Разом з AddPortOnly працює.</summary>
         private const bool AddConfigFileOnly = true;
-        /// <summary>У modded official flow: true = писати і передавати startup config (mp_tdm_map_001, ZZZ_COOP_TEST_7210, coopforever), щоб сервер був у Custom Server List з нашим ім'ям/паролем/сценою. Без token arg.</summary>
+        /// <summary>У modded official flow: true = писати і передавати startup config (mp_tdm_map_001, AC_COOP, coopforever), щоб сервер був у Custom Server List з нашим ім'ям/паролем/сценою. Без token arg.</summary>
         private const bool UseStartupConfigInModdedOfficialFlow = true;
         /// <summary>Для контрольного тесту: ім'я сервера в списку (однозначно наше).</summary>
-        private const string TestListedServerName = "ZZZ_COOP_TEST_7210";
+        private const string TestListedServerName = "AC_COOP";
         /// <summary>Для контрольного тесту: сцена TDM (listed flow safer за mp_skirmish_spawn_test).</summary>
         private const string TestListedScene = "mp_tdm_map_001";
         /// <summary>Етап 3.3: true = у listed-test конфігу використовувати GameType TdmClone (і add_map_to_usable_maps ... TdmClone), щоб на дедику працювали наші mission behaviors з логуванням. На дедику потрібно CleanModuleLoadOnly = false.</summary>
@@ -91,6 +93,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 _loadedPersistedLaunchSettings = true;
                 if (TryReadPersistedLaunchSettings(out DedicatedServerLaunchSettings persistedSettings))
                 {
+                    MigrateLegacyReleaseDefaults(persistedSettings);
                     _currentLaunchSettings = persistedSettings.Clone();
                     if (DedicatedServerLaunchSettings.TryValidateAndNormalize(_currentLaunchSettings, TestListedServerName, DashboardAdminPassword, out normalized, out string _))
                         return normalized;
@@ -118,6 +121,19 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
 
             _currentLaunchSettings = normalized.Clone();
             PersistLaunchSettings(normalized, source);
+        }
+
+        private static void MigrateLegacyReleaseDefaults(DedicatedServerLaunchSettings settings)
+        {
+            if (settings == null)
+                return;
+
+            string currentServerName = settings.ServerName?.Trim() ?? string.Empty;
+            if (!string.Equals(currentServerName, LegacyTestListedServerName, StringComparison.Ordinal))
+                return;
+
+            settings.ServerName = TestListedServerName;
+            ModLogger.Info("DedicatedHelper [settings] migrated legacy listed server name to " + TestListedServerName + ".");
         }
 
         public static int GetCurrentLaunchPort() => _currentLaunchPort;
@@ -683,6 +699,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 ModLogger.Info("DedicatedHelper [ModdedOfficialNoTokenArg] workingDir=" + (workingDir ?? ""));
                 ModLogger.Info("DedicatedHelper [ModdedOfficialNoTokenArg] exact command line=" + c1Args);
                 var c1StartInfo = new ProcessStartInfo { FileName = exePath, WorkingDirectory = workingDir ?? "", UseShellExecute = false, CreateNoWindow = false, Arguments = c1Args, RedirectStandardInput = true };
+                ApplySharedLaunchEnvironment(c1StartInfo);
                 try
                 {
                     Process p = Process.Start(c1StartInfo);
@@ -716,6 +733,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 ModLogger.Info("DedicatedHelper [B1] exact command line=" + b1Args);
                 LogB1Checklist();
                 var b1StartInfo = new ProcessStartInfo { FileName = exePath, WorkingDirectory = workingDir ?? "", UseShellExecute = false, CreateNoWindow = false, Arguments = b1Args, RedirectStandardInput = true };
+                ApplySharedLaunchEnvironment(b1StartInfo);
                 try
                 {
                     Process p = Process.Start(b1StartInfo);
@@ -753,6 +771,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 ModLogger.Info("DedicatedHelper [DEBUG Modded] _MODULES_=" + ExactCampaignSceneModulesArg);
                 ModLogger.Info("DedicatedHelper [DEBUG Modded] Paths: loaded=" + loadedPath + " error=" + errorPath + " LogOutputPath=" + logOutputDir);
                 var moddedStartInfo = new ProcessStartInfo { FileName = exePath, WorkingDirectory = workingDir ?? "", UseShellExecute = false, CreateNoWindow = false, Arguments = moddedArgs, RedirectStandardInput = true };
+                ApplySharedLaunchEnvironment(moddedStartInfo);
                 try
                 {
                     Process p = Process.Start(moddedStartInfo);
@@ -803,6 +822,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 ModLogger.Info("DedicatedHelper [LaunchPlan] ExpectedStarterAddsArgs=true ConfigInjectionMode=" + configInjectionMode);
                 ModLogger.Info("DedicatedHelper [ModdedOfficial] exact args=" + moddedOfficialArgs);
                 var moddedOfficialStartInfo = new ProcessStartInfo { FileName = exePath, WorkingDirectory = workingDir ?? "", UseShellExecute = false, CreateNoWindow = false, Arguments = moddedOfficialArgs, RedirectStandardInput = true };
+                ApplySharedLaunchEnvironment(moddedOfficialStartInfo);
                 try
                 {
                     Process p = Process.Start(moddedOfficialStartInfo);
@@ -887,6 +907,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 Arguments = arguments,
                 RedirectStandardInput = true // Щоб пізніше можна було відправити start_mission/end_mission через stdin (якщо сервер читає)
             };
+            ApplySharedLaunchEnvironment(startInfo);
 
             LogFullLaunchDiagnostics(startInfo, exePath, arguments, workingDir ?? "");
 
@@ -936,6 +957,28 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         {
             string argsForLog = BuildArguments(port, "(token)", configFileName, exePath, settings);
             ModLogger.Info("DedicatedHelper launch: exe=" + exePath + " | workingDir=" + workingDir + " | args=" + argsForLog);
+        }
+
+        private static void ApplySharedLaunchEnvironment(ProcessStartInfo startInfo)
+        {
+            if (startInfo == null)
+                return;
+
+            try
+            {
+                string gameRoot = TryGetGameRootFromProcess();
+                if (string.IsNullOrWhiteSpace(gameRoot))
+                    return;
+
+                startInfo.EnvironmentVariables[ExplicitGameRootEnvVar] = gameRoot;
+                ModLogger.Info(
+                    "DedicatedHelper [before Start] applied shared launch environment. " +
+                    ExplicitGameRootEnvVar + "=" + gameRoot + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("DedicatedHelper: failed to apply shared launch environment. " + ex.Message);
+            }
         }
 
         /// <summary>Повний діагностичний лог перед Process.Start: exe, args, CWD, оточення процесу гри, прапорці StartInfo.</summary>

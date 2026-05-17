@@ -1,4 +1,4 @@
-﻿# Bannerlord Coop Spectator
+# Mount & Blade II: Bannerlord - Coop Campaign
 
 Проєкт кооперативного режиму для Mount & Blade II: Bannerlord.
 
@@ -25,3 +25,13 @@
 
 ## Архів
 Усі неактивні/історичні файли винесені в `docs/archive/...`.
+
+## Support the project 🙌
+
+The mod is free and will always remain free.
+
+If you enjoy it and want to support further development (new features, stability, siege battles), you can do it here:
+
+👉 https://ko-fi.com/zaczua
+
+Every bit of support helps improve the mod.

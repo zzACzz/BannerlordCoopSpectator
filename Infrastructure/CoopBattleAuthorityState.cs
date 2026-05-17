@@ -98,6 +98,9 @@ namespace CoopSpectator.Infrastructure
             if (_allowedTroopIdsBySide.TryGetValue(side, out List<string> sideTroopIds) && sideTroopIds.Count > 0)
                 return sideTroopIds.ToArray();
 
+            if (side != BattleSideEnum.None)
+                return Array.Empty<string>();
+
             if (_fallbackAllowedTroopIds.Count > 0)
                 return _fallbackAllowedTroopIds.ToArray();
 
@@ -108,6 +111,9 @@ namespace CoopSpectator.Infrastructure
         {
             if (_allowedEntryIdsBySide.TryGetValue(side, out List<string> sideEntryIds) && sideEntryIds.Count > 0)
                 return sideEntryIds.ToArray();
+
+            if (side != BattleSideEnum.None)
+                return Array.Empty<string>();
 
             if (_fallbackAllowedEntryIds.Count > 0)
                 return _fallbackAllowedEntryIds.ToArray();
@@ -201,6 +207,28 @@ namespace CoopSpectator.Infrastructure
                 return false;
 
             return _selectedTroopIdByPeer.ContainsKey(networkPeer.Index) || _selectedEntryIdByPeer.ContainsKey(networkPeer.Index);
+        }
+
+        public static bool TryGetExplicitSelectedTroopId(MissionPeer missionPeer, out string troopId)
+        {
+            troopId = null;
+            NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();
+            if (networkPeer == null)
+                return false;
+
+            return _selectedTroopIdByPeer.TryGetValue(networkPeer.Index, out troopId) &&
+                   !string.IsNullOrWhiteSpace(troopId);
+        }
+
+        public static bool TryGetExplicitSelectedEntryId(MissionPeer missionPeer, out string entryId)
+        {
+            entryId = null;
+            NetworkCommunicator networkPeer = missionPeer?.GetNetworkPeer();
+            if (networkPeer == null)
+                return false;
+
+            return _selectedEntryIdByPeer.TryGetValue(networkPeer.Index, out entryId) &&
+                   !string.IsNullOrWhiteSpace(entryId);
         }
 
         public static bool TrySetSelectedTroopId(MissionPeer missionPeer, string troopId, string source)
@@ -320,6 +348,31 @@ namespace CoopSpectator.Infrastructure
                 " Source=" + source);
         }
 
+        public static bool TryMigratePeerIndex(int previousPeerIndex, int currentPeerIndex, string source)
+        {
+            if (previousPeerIndex < 0 || currentPeerIndex < 0 || previousPeerIndex == currentPeerIndex)
+                return false;
+
+            bool movedRequestedSide = TryMovePeerValue(_requestedSideByPeer, previousPeerIndex, currentPeerIndex);
+            bool movedAssignedSide = TryMovePeerValue(_assignedSideByPeer, previousPeerIndex, currentPeerIndex);
+            bool movedTroopId = TryMovePeerValue(_selectedTroopIdByPeer, previousPeerIndex, currentPeerIndex);
+            bool movedEntryId = TryMovePeerValue(_selectedEntryIdByPeer, previousPeerIndex, currentPeerIndex);
+            bool migrated = movedRequestedSide || movedAssignedSide || movedTroopId || movedEntryId;
+            if (!migrated)
+                return false;
+
+            ModLogger.Info(
+                "CoopBattleAuthorityState: migrated reconnect peer state. " +
+                "PreviousPeerIndex=" + previousPeerIndex +
+                " CurrentPeerIndex=" + currentPeerIndex +
+                " MovedRequestedSide=" + movedRequestedSide +
+                " MovedAssignedSide=" + movedAssignedSide +
+                " MovedTroopId=" + movedTroopId +
+                " MovedEntryId=" + movedEntryId +
+                " Source=" + (source ?? "unknown"));
+            return true;
+        }
+
         private static List<string> NormalizeTroopIds(IEnumerable<string> troopIds)
         {
             if (troopIds == null)
@@ -352,6 +405,16 @@ namespace CoopSpectator.Infrastructure
         private static string NormalizeEntryId(string entryId)
         {
             return string.IsNullOrWhiteSpace(entryId) ? null : entryId.Trim();
+        }
+
+        private static bool TryMovePeerValue<T>(Dictionary<int, T> statesByPeer, int previousPeerIndex, int currentPeerIndex)
+        {
+            if (statesByPeer == null || !statesByPeer.TryGetValue(previousPeerIndex, out T value))
+                return false;
+
+            statesByPeer.Remove(previousPeerIndex);
+            statesByPeer[currentPeerIndex] = value;
+            return true;
         }
 
         private static bool ContainsTroopId(IEnumerable<string> troopIds, string troopId)
@@ -392,7 +455,7 @@ namespace CoopSpectator.Infrastructure
         {
             IReadOnlyList<string> allowedTroopIds = GetAllowedTroopIds(side);
             if (allowedTroopIds.Count == 0)
-                return _fallbackSelectedTroopId;
+                return side == BattleSideEnum.None ? _fallbackSelectedTroopId : null;
 
             if (networkPeer != null &&
                 _selectedEntryIdByPeer.TryGetValue(networkPeer.Index, out string selectedEntryId) &&
@@ -413,11 +476,7 @@ namespace CoopSpectator.Infrastructure
                 return selectedTroopId;
             }
 
-            string resolvedTroopId = allowedTroopIds.FirstOrDefault() ?? _fallbackSelectedTroopId;
-            if (networkPeer != null && !string.IsNullOrWhiteSpace(resolvedTroopId))
-                _selectedTroopIdByPeer[networkPeer.Index] = resolvedTroopId;
-
-            return resolvedTroopId;
+            return allowedTroopIds.FirstOrDefault() ?? _fallbackSelectedTroopId;
         }
 
         private static string ResolveSelectedEntryId(NetworkCommunicator networkPeer, BattleSideEnum side, string troopId)
@@ -445,9 +504,6 @@ namespace CoopSpectator.Infrastructure
             {
                 resolvedEntryId = allowedEntryIds.FirstOrDefault() ?? _fallbackSelectedEntryId;
             }
-
-            if (networkPeer != null && !string.IsNullOrWhiteSpace(resolvedEntryId))
-                _selectedEntryIdByPeer[networkPeer.Index] = resolvedEntryId;
 
             return resolvedEntryId;
         }

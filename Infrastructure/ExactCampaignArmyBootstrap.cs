@@ -15,6 +15,8 @@ namespace CoopSpectator.Infrastructure
         private static Mission _activeMission;
         private static MissionAgentSpawnLogic _activeSpawnLogic;
         private static BattleSideEnum _activePlayerSide = BattleSideEnum.None;
+        private static Team _activePlayerTeam;
+        private static Team _activePlayerEnemyTeam;
         private static bool _reinforcementsEnabled;
         private static DateTime _nextDeferredLogUtc = DateTime.MinValue;
         private static DateTime _nextRuntimeDiagnosticsLogUtc = DateTime.MinValue;
@@ -110,6 +112,8 @@ namespace CoopSpectator.Infrastructure
             _activeMission = mission;
             _activeSpawnLogic = null;
             _activePlayerSide = BattleSideEnum.None;
+            _activePlayerTeam = null;
+            _activePlayerEnemyTeam = null;
             _reinforcementsEnabled = false;
             _nextDeferredLogUtc = DateTime.MinValue;
             _nextRuntimeDiagnosticsLogUtc = DateTime.MinValue;
@@ -231,9 +235,12 @@ namespace CoopSpectator.Infrastructure
 
                 initializationStep = "build-native-wave-spawn-settings";
                 MissionSpawnSettings spawnSettings = CreateNativeCampaignBattleWaveSpawnSettings();
-                int defenderInitial = defenderTotal;
-                int attackerInitial = attackerTotal;
-                int battleSizeBudget = BattleSnapshotRuntimeState.GetState()?.BattleSizeBudget ?? (defenderTotal + attackerTotal);
+                ComputeInitialSpawnCounts(
+                    defenderTotal,
+                    attackerTotal,
+                    out int defenderInitial,
+                    out int attackerInitial,
+                    out int battleSizeBudget);
                 int reinforcementWaveCount = GetResolvedReinforcementWaveCount();
 
                 initializationStep = "ensure-deployment-team-plans";
@@ -314,6 +321,8 @@ namespace CoopSpectator.Infrastructure
                 _activeMission = mission;
                 _activeSpawnLogic = spawnLogic;
                 _activePlayerSide = playerSide;
+                _activePlayerTeam = mission.PlayerTeam;
+                _activePlayerEnemyTeam = mission.PlayerEnemyTeam;
                 _reinforcementsEnabled = false;
                 reason = "initialized";
 
@@ -991,6 +1000,49 @@ namespace CoopSpectator.Infrastructure
                 " PlayerSide=" + _activePlayerSide +
                 " Source=" + (source ?? "unknown"));
             TryLogRuntimeDiagnostics(mission, source + " gate-change", force: true);
+        }
+
+        public static void TryMaintainMissionPlayerTeamContract(Mission mission, string source)
+        {
+            if (!IsActive(mission))
+                return;
+
+            if (ReferenceEquals(mission.PlayerTeam, _activePlayerTeam) &&
+                ReferenceEquals(mission.PlayerEnemyTeam, _activePlayerEnemyTeam))
+            {
+                return;
+            }
+
+            Team previousPlayerTeam = mission.PlayerTeam;
+            Team previousPlayerEnemyTeam = mission.PlayerEnemyTeam;
+            mission.PlayerTeam = _activePlayerTeam;
+
+            string previousPlayerTeamText =
+                previousPlayerTeam == null
+                    ? "null"
+                    : previousPlayerTeam.Side + "#" + previousPlayerTeam.TeamIndex;
+            string previousPlayerEnemyTeamText =
+                previousPlayerEnemyTeam == null
+                    ? "null"
+                    : previousPlayerEnemyTeam.Side + "#" + previousPlayerEnemyTeam.TeamIndex;
+            string appliedPlayerTeamText =
+                mission.PlayerTeam == null
+                    ? "null"
+                    : mission.PlayerTeam.Side + "#" + mission.PlayerTeam.TeamIndex;
+            string appliedPlayerEnemyTeamText =
+                mission.PlayerEnemyTeam == null
+                    ? "null"
+                    : mission.PlayerEnemyTeam.Side + "#" + mission.PlayerEnemyTeam.TeamIndex;
+
+            ModLogger.Info(
+                "ExactCampaignArmyBootstrap: restored native player team contract after runtime drift. " +
+                "Scene=" + (mission.SceneName ?? "null") +
+                " ActivePlayerSide=" + _activePlayerSide +
+                " PreviousPlayerTeam=" + previousPlayerTeamText +
+                " PreviousPlayerEnemyTeam=" + previousPlayerEnemyTeamText +
+                " AppliedPlayerTeam=" + appliedPlayerTeamText +
+                " AppliedPlayerEnemyTeam=" + appliedPlayerEnemyTeamText +
+                " Source=" + (source ?? "unknown"));
         }
 
         public static bool TryGetRemainingTroopCounts(
@@ -1859,6 +1911,23 @@ namespace CoopSpectator.Infrastructure
                     BasicCharacterObject candidate = MBObjectManager.Instance.GetObject<BasicCharacterObject>(candidateId);
                     if (candidate != null)
                         return candidate;
+                }
+                catch
+                {
+                }
+            }
+
+            string missionSafeFallbackCharacterId =
+                BattleSnapshotRuntimeState.TryResolveMissionSafeFallbackCharacterId(
+                    entryState,
+                    entryState.SpawnTemplateId ?? entryState.CharacterId);
+            if (!string.IsNullOrWhiteSpace(missionSafeFallbackCharacterId))
+            {
+                try
+                {
+                    BasicCharacterObject fallbackCharacter = MBObjectManager.Instance.GetObject<BasicCharacterObject>(missionSafeFallbackCharacterId);
+                    if (fallbackCharacter != null)
+                        return fallbackCharacter;
                 }
                 catch
                 {

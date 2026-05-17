@@ -21,6 +21,10 @@ namespace CoopSpectator
         /// <summary>ТЗ A: true = тільки proof-of-load, без Harmony і без реєстрації game mode. false = реєструємо TdmClone + Harmony (для Етапу 3.3 — тест з нашими mission behaviors і логуванням; UseTdmCloneForListedTest у Launcher має бути true).</summary>
         private const bool CleanModuleLoadOnly = false;
         private const bool EnableFixedTestCultures = true;
+        // Disabled after 2026-05-15 reconnect/load-crash triage:
+        // BattleShellSuppressionPatch manually bypasses native dedicated mission loading and
+        // correlates with access-violation crashes during battle scene startup.
+        private const bool EnableBattleShellSuppressionPatch = false;
         private const string FixedAttackerCultureId = "empire";
         private const string FixedDefenderCultureId = "vlandia";
 
@@ -29,6 +33,13 @@ namespace CoopSpectator
         private static DateTime _fixedCultureFirstAttemptUtc = DateTime.MinValue;
         private static DateTime _nextFixedCultureAttemptUtc = DateTime.MinValue;
         private static string _configuredHarmonyDmdGeneratorTypeName = "unconfigured";
+        private static Mission _pendingDedicatedObserverMission;
+        private static Mission _activatedDedicatedObserverMission;
+        private static DateTime _pendingDedicatedObserverFirstSeenUtc = DateTime.MinValue;
+        private static int _pendingDedicatedObserverStableReadyTickCount;
+        private static string _lastDedicatedObserverActivationWaitDiagnosticKey = string.Empty;
+        private const int DedicatedObserverRequiredStableReadyTicks = 3;
+        private const double DedicatedObserverFallbackActivationTimeoutSeconds = 15.0d;
 
         private static string GetProofFilePath(string name)
         {
@@ -48,12 +59,16 @@ namespace CoopSpectator
                 Mission currentMission = Mission.Current;
                 if (currentMission == null)
                 {
+                    ResetDedicatedObserverMissionActivationState("no-active-mission");
                     DedicatedKnockoutOutcomeModelOverride.RestoreIfNeeded();
                     TryApplyFixedTestCulturesForNextMission();
                     return;
                 }
 
                 _hasAppliedFixedTestCultures = false;
+
+                if (ShouldDelayDedicatedMissionObserverActivation(currentMission))
+                    return;
 
                 DedicatedKnockoutOutcomeModelOverride.UpdateForMission(currentMission);
                 CoopMissionSpawnLogic.TryRunDedicatedMissionObserver(currentMission);
@@ -62,6 +77,150 @@ namespace CoopSpectator
             {
                 ModLogger.Info("CoopSpectatorDedicated: mission observer tick failed: " + ex.Message);
             }
+        }
+
+        private static bool ShouldDelayDedicatedMissionObserverActivation(Mission mission)
+        {
+            if (mission == null)
+                return true;
+
+            if (!ReferenceEquals(_pendingDedicatedObserverMission, mission))
+            {
+                _pendingDedicatedObserverMission = mission;
+                _activatedDedicatedObserverMission = null;
+                _pendingDedicatedObserverFirstSeenUtc = DateTime.UtcNow;
+                _pendingDedicatedObserverStableReadyTickCount = 0;
+                _lastDedicatedObserverActivationWaitDiagnosticKey = string.Empty;
+                ModLogger.Info(
+                    "CoopSpectatorDedicated: deferred dedicated mission observer activation pending native mission-ready state. " +
+                    "Mission=" + (mission.SceneName ?? "null") +
+                    " RequiredStableTicks=" + DedicatedObserverRequiredStableReadyTicks +
+                    " FallbackTimeoutSeconds=" + DedicatedObserverFallbackActivationTimeoutSeconds.ToString("0.0"));
+                return true;
+            }
+
+            if (ReferenceEquals(_activatedDedicatedObserverMission, mission))
+                return false;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            bool readyForActivation = TryEvaluateDedicatedMissionObserverReadyState(mission, out string readyStateDetails);
+            if (readyForActivation)
+            {
+                _pendingDedicatedObserverStableReadyTickCount++;
+                if (_pendingDedicatedObserverStableReadyTickCount < DedicatedObserverRequiredStableReadyTicks)
+                {
+                    LogDedicatedMissionObserverActivationWait(
+                        mission,
+                        "waiting-stable-ready-ticks",
+                        readyStateDetails +
+                        " StableReadyTicks=" + _pendingDedicatedObserverStableReadyTickCount + "/" + DedicatedObserverRequiredStableReadyTicks);
+                    return true;
+                }
+
+                _activatedDedicatedObserverMission = mission;
+                ModLogger.Info(
+                    "CoopSpectatorDedicated: activating dedicated mission observer after native mission-ready state stabilized. " +
+                    "Mission=" + (mission.SceneName ?? "null") +
+                    " StableReadyTicks=" + _pendingDedicatedObserverStableReadyTickCount +
+                    " Details=" + readyStateDetails);
+                return false;
+            }
+
+            _pendingDedicatedObserverStableReadyTickCount = 0;
+            TimeSpan elapsed = nowUtc - _pendingDedicatedObserverFirstSeenUtc;
+            if (elapsed.TotalSeconds < DedicatedObserverFallbackActivationTimeoutSeconds)
+            {
+                LogDedicatedMissionObserverActivationWait(
+                    mission,
+                    "waiting-native-ready-state",
+                    readyStateDetails +
+                    " ElapsedSeconds=" + elapsed.TotalSeconds.ToString("0.000"));
+                return true;
+            }
+
+            _activatedDedicatedObserverMission = mission;
+            ModLogger.Info(
+                "CoopSpectatorDedicated: activating dedicated mission observer after fallback timeout despite incomplete native ready state. " +
+                "Mission=" + (mission.SceneName ?? "null") +
+                " ElapsedSeconds=" + elapsed.TotalSeconds.ToString("0.000") +
+                " Details=" + readyStateDetails);
+            return false;
+        }
+
+        private static bool TryEvaluateDedicatedMissionObserverReadyState(Mission mission, out string details)
+        {
+            if (mission == null)
+            {
+                details = "Mission=null";
+                return false;
+            }
+
+            string sceneName = mission.SceneName ?? string.Empty;
+            string modeName;
+            try
+            {
+                modeName = mission.Mode.ToString();
+            }
+            catch (Exception ex)
+            {
+                details = "Mode=(exception:" + ex.GetType().Name + ")";
+                return false;
+            }
+
+            bool modeReady = !string.Equals(modeName, "StartUp", StringComparison.OrdinalIgnoreCase);
+            bool hasLobbyComponent = mission.GetMissionBehavior<MissionLobbyComponent>() != null;
+            bool hasTimerComponent = mission.GetMissionBehavior<MultiplayerTimerComponent>() != null;
+            bool hasTeamSelectComponent = mission.GetMissionBehavior<MultiplayerTeamSelectComponent>() != null;
+
+            details =
+                "Scene=" + (string.IsNullOrWhiteSpace(sceneName) ? "(empty)" : sceneName) +
+                " Mode=" + modeName +
+                " ModeReady=" + modeReady +
+                " HasLobbyComponent=" + hasLobbyComponent +
+                " HasTimerComponent=" + hasTimerComponent +
+                " HasTeamSelectComponent=" + hasTeamSelectComponent;
+
+            if (string.IsNullOrWhiteSpace(sceneName))
+                return false;
+
+            return modeReady && hasLobbyComponent && hasTimerComponent && hasTeamSelectComponent;
+        }
+
+        private static void LogDedicatedMissionObserverActivationWait(Mission mission, string stage, string details)
+        {
+            string key =
+                (mission?.GetHashCode().ToString() ?? "null") + "|" +
+                (mission?.SceneName ?? "null") + "|" +
+                (stage ?? "none") + "|" +
+                (details ?? string.Empty);
+            if (string.Equals(_lastDedicatedObserverActivationWaitDiagnosticKey, key, StringComparison.Ordinal))
+                return;
+
+            _lastDedicatedObserverActivationWaitDiagnosticKey = key;
+            ModLogger.Info(
+                "CoopSpectatorDedicated: waiting before activating dedicated mission observer. " +
+                "Stage=" + (stage ?? "none") +
+                " Mission=" + (mission?.SceneName ?? "null") +
+                " Details=" + (details ?? string.Empty));
+        }
+
+        private static void ResetDedicatedObserverMissionActivationState(string source)
+        {
+            if (_pendingDedicatedObserverMission == null &&
+                _activatedDedicatedObserverMission == null &&
+                _pendingDedicatedObserverFirstSeenUtc == DateTime.MinValue &&
+                _pendingDedicatedObserverStableReadyTickCount == 0 &&
+                string.IsNullOrEmpty(_lastDedicatedObserverActivationWaitDiagnosticKey))
+                return;
+
+            ModLogger.Info(
+                "CoopSpectatorDedicated: cleared dedicated mission observer activation state. " +
+                "Source=" + (source ?? "unknown"));
+            _pendingDedicatedObserverMission = null;
+            _activatedDedicatedObserverMission = null;
+            _pendingDedicatedObserverFirstSeenUtc = DateTime.MinValue;
+            _pendingDedicatedObserverStableReadyTickCount = 0;
+            _lastDedicatedObserverActivationWaitDiagnosticKey = string.Empty;
         }
 
         private static void TryApplyFixedTestCulturesForNextMission()
@@ -136,6 +295,7 @@ namespace CoopSpectator
                 try { AssemblyDiagnostics.LogRuntimeLoadPaths(); AssemblyDiagnostics.WarnIfAssemblyPathUnexpected(); } catch (Exception ex) { ModLogger.Info("[DedicatedDiag] AssemblyDiagnostics failed: " + ex.Message); }
 
                 base.OnSubModuleLoad();
+                CoopBattlePeerReconnectState.EnsureHooksInstalled();
                 LogDedicatedStartupInfo();
 
                 try { DedicatedSceneContractProbe.RunStartupProbe(); } catch (Exception ex) { ModLogger.Info("CoopSpectatorDedicated: scene contract startup probe failed: " + ex.Message); }
@@ -152,8 +312,14 @@ namespace CoopSpectator
                     TryApplyMissionStateOpenNewPatches();
                     TryApplyExactCampaignArmyBootstrapPatch();
                     TryApplyExactCampaignPreSpawnLoadoutPatch();
+                    TryApplyExactCampaignNetworkObjectBootstrapPatch();
                     TryApplyBattleMapSpawnHandoffPatch();
-                    TryApplyBattleShellSuppressionPatch();
+                    TryApplyLateJoinPeerBootstrapGatePatch();
+                    TryApplyFinishedLoadingMissionReadyGatePatch();
+                    if (EnableBattleShellSuppressionPatch)
+                        TryApplyBattleShellSuppressionPatch();
+                    else
+                        ModLogger.Info("CoopSpectatorDedicated: skipped BattleShellSuppressionPatch after mission-load crash triage.");
                     TryApplyMultiplayerHeroClassOverridePatch();
                     TryApplyMultiplayerCharacterClassFallbackPatch();
                     TryApplyServerChangeCultureCanonicalizationPatch();
@@ -243,6 +409,7 @@ namespace CoopSpectator
             TryRegisterCoopCampaignDerivedAgentStatModel(game, gameStarterObject, "dedicated");
             TryRegisterCoopCampaignDerivedStrikeMagnitudeModel(game, gameStarterObject, "dedicated");
             TryRegisterCoopCampaignDerivedAgentApplyDamageModel(game, gameStarterObject, "dedicated");
+            TryRegisterCoopCampaignDerivedMissionDifficultyModel(game, gameStarterObject, "dedicated");
         }
 
         private static void TryApplyExactCampaignArmyBootstrapPatch()
@@ -273,6 +440,20 @@ namespace CoopSpectator
             }
         }
 
+        private static void TryApplyExactCampaignNetworkObjectBootstrapPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                ExactCampaignNetworkObjectBootstrapPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: ExactCampaignNetworkObjectBootstrap patch apply failed: " + ex.Message);
+            }
+        }
+
         private static void TryApplyBattleShellSuppressionPatch()
         {
             try
@@ -284,6 +465,38 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: BattleShellSuppression patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyFinishedLoadingMissionReadyGatePatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                FinishedLoadingMissionReadyGatePatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: FinishedLoadingMissionReadyGate patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyLateJoinPeerBootstrapGatePatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                LateJoinPeerBootstrapGatePatch.Apply(
+                    _harmony,
+                    patchHandleLateNewClientAfterLoadingFinished: false,
+                    patchSendAgentsToPeer: false,
+                    patchSendMissilesToPeer: false);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: LateJoinPeerBootstrapGate patch apply failed: " + ex.Message);
             }
         }
 
@@ -561,6 +774,42 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopCampaignDerivedAgentApplyDamageModel: registration failed on " + source + ": " + ex.Message);
+            }
+        }
+
+        private static void TryRegisterCoopCampaignDerivedMissionDifficultyModel(Game game, IGameStarter gameStarterObject, string source)
+        {
+            try
+            {
+                BasicGameStarter basicStarter = gameStarterObject as BasicGameStarter;
+                if (basicStarter == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedMissionDifficultyModel: skip registration on " + source +
+                        " because starter is " + (gameStarterObject?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                MissionDifficultyModel baseModel = basicStarter.GetModel<MissionDifficultyModel>();
+                if (baseModel is CoopCampaignDerivedMissionDifficultyModel)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedMissionDifficultyModel: already registered on " + source +
+                        ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                MissionDifficultyModel effectiveBaseModel = baseModel ?? new DefaultMissionDifficultyModel();
+                basicStarter.AddModel(new CoopCampaignDerivedMissionDifficultyModel(effectiveBaseModel));
+                ModLogger.Info(
+                    "CoopCampaignDerivedMissionDifficultyModel: registered on " + source +
+                    ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") +
+                    " BaseModel=" + effectiveBaseModel.GetType().FullName +
+                    " BaseWasMissing=" + (baseModel == null) + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopCampaignDerivedMissionDifficultyModel: registration failed on " + source + ": " + ex.Message);
             }
         }
 
