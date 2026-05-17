@@ -39,6 +39,8 @@ namespace CoopSpectator.Infrastructure
                 return;
             }
 
+            ApplyCampaignDifficultyContext(ref record, snapshot, runtimeScene, source);
+
             if (snapshot.MapPatchSceneIndex < 0)
             {
                 ModLogger.Info(
@@ -90,6 +92,25 @@ namespace CoopSpectator.Infrastructure
                 " PatchEncounterDir=(" + record.PatchEncounterDir.x.ToString("0.###") + ", " + record.PatchEncounterDir.y.ToString("0.###") + ")" +
                 " DirectionSource=" + (snapshot.PatchEncounterDirectionSource ?? "unknown") + ".");
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " post-apply");
+        }
+
+        private static void ApplyCampaignDifficultyContext(
+            ref MissionInitializerRecord record,
+            BattleSnapshotMessage snapshot,
+            string runtimeScene,
+            string source)
+        {
+            float playerTroopsReceivedDamageMultiplier = snapshot?.PlayerTroopsReceivedDamageMultiplier ?? 1f;
+            if (playerTroopsReceivedDamageMultiplier <= 0f)
+                playerTroopsReceivedDamageMultiplier = 1f;
+
+            record.DamageToFriendsMultiplier = playerTroopsReceivedDamageMultiplier;
+            record.DamageFromPlayerToFriendsMultiplier = playerTroopsReceivedDamageMultiplier;
+
+            ModLogger.Info(
+                source + ": applied campaign player-troops damage multiplier. " +
+                "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                " Multiplier=" + playerTroopsReceivedDamageMultiplier.ToString("0.###") + ".");
         }
 
         public static bool TryRepairLiveMissionContract(Mission mission, string logSource)

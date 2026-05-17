@@ -24,6 +24,7 @@ namespace CoopSpectator.Infrastructure
         public int BattleSizeBudget { get; set; }
         public int ReinforcementWaveCount { get; set; }
         public string BattleSizeBudgetSource { get; set; }
+        public float PlayerTroopsReceivedDamageMultiplier { get; set; } = 1f;
         public List<BattleSideState> Sides { get; set; } = new List<BattleSideState>();
         public Dictionary<string, BattleSideState> SidesByKey { get; set; } = new Dictionary<string, BattleSideState>(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, BattlePartyState> PartiesById { get; set; } = new Dictionary<string, BattlePartyState>(StringComparer.OrdinalIgnoreCase);
@@ -1276,7 +1277,8 @@ namespace CoopSpectator.Infrastructure
                 Snapshot = projection?.Snapshot,
                 BattleSizeBudget = projection?.Snapshot?.BattleSizeBudget ?? 0,
                 ReinforcementWaveCount = projection?.Snapshot?.ReinforcementWaveCount ?? 0,
-                BattleSizeBudgetSource = projection?.Snapshot?.BattleSizeBudgetSource
+                BattleSizeBudgetSource = projection?.Snapshot?.BattleSizeBudgetSource,
+                PlayerTroopsReceivedDamageMultiplier = projection?.Snapshot?.PlayerTroopsReceivedDamageMultiplier ?? 1f
             };
 
             if (projection == null)

@@ -211,6 +211,8 @@ namespace CoopSpectator.Infrastructure
                 " SceneLevels=" + (record.SceneLevels ?? "null") +
                 " PlayingInCampaignMode=" + record.PlayingInCampaignMode +
                 " SceneHasMapPatch=" + record.SceneHasMapPatch +
+                " DamageToFriendsMultiplier=" + record.DamageToFriendsMultiplier.ToString("0.###", CultureInfo.InvariantCulture) +
+                " DamageFromPlayerToFriendsMultiplier=" + record.DamageFromPlayerToFriendsMultiplier.ToString("0.###", CultureInfo.InvariantCulture) +
                 " PatchCoordinates=" + FormatVec2(record.PatchCoordinates) +
                 " PatchEncounterDir=" + FormatVec2(record.PatchEncounterDir);
         }
@@ -231,6 +233,8 @@ namespace CoopSpectator.Infrastructure
                     " SceneLevels=" + FormatValue(TryReadMember(record, "SceneLevels")) +
                     " PlayingInCampaignMode=" + FormatValue(TryReadMember(record, "PlayingInCampaignMode")) +
                     " SceneHasMapPatch=" + FormatValue(TryReadMember(record, "SceneHasMapPatch")) +
+                    " DamageToFriendsMultiplier=" + FormatValue(TryReadMember(record, "DamageToFriendsMultiplier")) +
+                    " DamageFromPlayerToFriendsMultiplier=" + FormatValue(TryReadMember(record, "DamageFromPlayerToFriendsMultiplier")) +
                     " PatchCoordinates=" + FormatValue(TryReadMember(record, "PatchCoordinates")) +
                     " PatchEncounterDir=" + FormatValue(TryReadMember(record, "PatchEncounterDir"));
             }

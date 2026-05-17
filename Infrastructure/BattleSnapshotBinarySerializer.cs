@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 1;
+        private const int SchemaVersion = 2;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -59,7 +59,7 @@ namespace CoopSpectator.Infrastructure
                     }
 
                     int schemaVersion = reader.ReadInt32();
-                    if (schemaVersion != SchemaVersion)
+                    if (schemaVersion != 1 && schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
                             "BattleSnapshotBinarySerializer: unsupported schema version. " +
@@ -68,7 +68,7 @@ namespace CoopSpectator.Infrastructure
                         return false;
                     }
 
-                    snapshot = ReadBattleSnapshot(reader);
+                    snapshot = ReadBattleSnapshot(reader, schemaVersion);
                     return snapshot != null;
                 }
             }
@@ -100,10 +100,11 @@ namespace CoopSpectator.Infrastructure
             writer.Write(snapshot.ReinforcementWaveCount);
             WriteString(writer, snapshot.BattleSizeBudgetSource);
             WriteString(writer, snapshot.PlayerSide);
+            writer.Write(snapshot.PlayerTroopsReceivedDamageMultiplier);
             WriteList(writer, snapshot.Sides, WriteBattleSide);
         }
 
-        private static BattleSnapshotMessage ReadBattleSnapshot(BinaryReader reader)
+        private static BattleSnapshotMessage ReadBattleSnapshot(BinaryReader reader, int schemaVersion)
         {
             return new BattleSnapshotMessage
             {
@@ -125,6 +126,7 @@ namespace CoopSpectator.Infrastructure
                 ReinforcementWaveCount = reader.ReadInt32(),
                 BattleSizeBudgetSource = ReadString(reader),
                 PlayerSide = ReadString(reader),
+                PlayerTroopsReceivedDamageMultiplier = schemaVersion >= 2 ? reader.ReadSingle() : 1f,
                 Sides = ReadList(reader, ReadBattleSide) ?? new List<BattleSideSnapshotMessage>()
             };
         }

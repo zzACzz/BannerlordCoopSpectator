@@ -47,6 +47,7 @@ namespace CoopSpectator.Network.Messages
         public int ReinforcementWaveCount { get; set; }
         public string BattleSizeBudgetSource { get; set; }
         public string PlayerSide { get; set; }
+        public float PlayerTroopsReceivedDamageMultiplier { get; set; } = 1f;
         public List<BattleSideSnapshotMessage> Sides { get; set; } = new List<BattleSideSnapshotMessage>();
     }
 

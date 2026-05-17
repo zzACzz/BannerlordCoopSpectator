@@ -409,6 +409,7 @@ namespace CoopSpectator
             TryRegisterCoopCampaignDerivedAgentStatModel(game, gameStarterObject, "dedicated");
             TryRegisterCoopCampaignDerivedStrikeMagnitudeModel(game, gameStarterObject, "dedicated");
             TryRegisterCoopCampaignDerivedAgentApplyDamageModel(game, gameStarterObject, "dedicated");
+            TryRegisterCoopCampaignDerivedMissionDifficultyModel(game, gameStarterObject, "dedicated");
         }
 
         private static void TryApplyExactCampaignArmyBootstrapPatch()
@@ -773,6 +774,42 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopCampaignDerivedAgentApplyDamageModel: registration failed on " + source + ": " + ex.Message);
+            }
+        }
+
+        private static void TryRegisterCoopCampaignDerivedMissionDifficultyModel(Game game, IGameStarter gameStarterObject, string source)
+        {
+            try
+            {
+                BasicGameStarter basicStarter = gameStarterObject as BasicGameStarter;
+                if (basicStarter == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedMissionDifficultyModel: skip registration on " + source +
+                        " because starter is " + (gameStarterObject?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                MissionDifficultyModel baseModel = basicStarter.GetModel<MissionDifficultyModel>();
+                if (baseModel is CoopCampaignDerivedMissionDifficultyModel)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedMissionDifficultyModel: already registered on " + source +
+                        ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                MissionDifficultyModel effectiveBaseModel = baseModel ?? new DefaultMissionDifficultyModel();
+                basicStarter.AddModel(new CoopCampaignDerivedMissionDifficultyModel(effectiveBaseModel));
+                ModLogger.Info(
+                    "CoopCampaignDerivedMissionDifficultyModel: registered on " + source +
+                    ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") +
+                    " BaseModel=" + effectiveBaseModel.GetType().FullName +
+                    " BaseWasMissing=" + (baseModel == null) + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopCampaignDerivedMissionDifficultyModel: registration failed on " + source + ": " + ex.Message);
             }
         }
 
