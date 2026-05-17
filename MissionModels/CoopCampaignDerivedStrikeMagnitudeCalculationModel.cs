@@ -4,6 +4,7 @@ using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.ComponentInterfaces;
 
@@ -11,8 +12,8 @@ namespace CoopSpectator.MissionModels
 {
     /// <summary>
     /// Thin low-level wrapper over the active strike magnitude model.
-    /// Phase 1 is diagnostics-only: it keeps vanilla magnitude behavior intact,
-    /// but logs exact campaign hero missile magnitude inputs for CoopBattle.
+    /// Keeps the stable multiplayer runtime shell, but applies the sandbox
+    /// raw armor-damage formula for CoopBattle missions.
     /// </summary>
     public sealed class CoopCampaignDerivedStrikeMagnitudeCalculationModel : StrikeMagnitudeCalculationModel
     {
@@ -44,6 +45,9 @@ namespace CoopSpectator.MissionModels
 
         public override float ComputeRawDamage(DamageTypes damageType, float magnitude, float armorEffectiveness, float absorbedDamageRatio)
         {
+            if (ShouldUseSandboxArmorFormula())
+                return ComputeSandboxRawDamage(damageType, magnitude, armorEffectiveness, absorbedDamageRatio);
+
             return _baseModel.ComputeRawDamage(damageType, magnitude, armorEffectiveness, absorbedDamageRatio);
         }
 
@@ -54,6 +58,19 @@ namespace CoopSpectator.MissionModels
 
         public override float GetBluntDamageFactorByDamageType(DamageTypes damageType)
         {
+            if (ShouldUseSandboxArmorFormula())
+            {
+                switch (damageType)
+                {
+                    case DamageTypes.Blunt:
+                        return 0.6f;
+                    case DamageTypes.Cut:
+                        return 0.1f;
+                    case DamageTypes.Pierce:
+                        return 0.25f;
+                }
+            }
+
             return _baseModel.GetBluntDamageFactorByDamageType(damageType);
         }
 
@@ -161,6 +178,43 @@ namespace CoopSpectator.MissionModels
                 default:
                     return relevantSkill;
             }
+        }
+
+        private static bool ShouldUseSandboxArmorFormula()
+        {
+            Mission mission = Mission.Current;
+            return mission != null &&
+                MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName);
+        }
+
+        private float ComputeSandboxRawDamage(
+            DamageTypes damageType,
+            float magnitude,
+            float armorEffectiveness,
+            float absorbedDamageRatio)
+        {
+            float bluntDamageFactor = GetBluntDamageFactorByDamageType(damageType);
+            float armorScale = 50f / (50f + armorEffectiveness);
+            float scaledMagnitude = magnitude * armorScale;
+            float bluntPortion = bluntDamageFactor * scaledMagnitude;
+            float reducedDamage;
+
+            switch (damageType)
+            {
+                case DamageTypes.Cut:
+                    reducedDamage = TaleWorlds.Library.MathF.Max(0f, scaledMagnitude - armorEffectiveness * 0.5f);
+                    break;
+                case DamageTypes.Pierce:
+                    reducedDamage = TaleWorlds.Library.MathF.Max(0f, scaledMagnitude - armorEffectiveness * 0.33f);
+                    break;
+                case DamageTypes.Blunt:
+                    reducedDamage = TaleWorlds.Library.MathF.Max(0f, scaledMagnitude - armorEffectiveness * 0.2f);
+                    break;
+                default:
+                    return _baseModel.ComputeRawDamage(damageType, magnitude, armorEffectiveness, absorbedDamageRatio);
+            }
+
+            return (bluntPortion + (1f - bluntDamageFactor) * reducedDamage) * absorbedDamageRatio;
         }
     }
 }
