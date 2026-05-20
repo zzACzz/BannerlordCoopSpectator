@@ -651,10 +651,18 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            return CoopBattlePeerReconnectState.TryAcknowledgeActiveBattleReconnectFinalizeGate(
+            bool acknowledged = CoopBattlePeerReconnectState.TryAcknowledgeActiveBattleReconnectFinalizeGate(
                 peer,
                 transmissionId,
                 "CoopMissionNetworkBridge.HandleClientSelectionRequest BattleReconnectFinalizeReadyAck");
+            if (!acknowledged)
+                return false;
+
+            CoopMissionSpawnLogic.TryReturnPeerToReconnectSideSelection(
+                Mission,
+                peer,
+                "CoopMissionNetworkBridge.HandleClientSelectionRequest BattleReconnectFinalizeReadyAck");
+            return true;
         }
 
         private void TryHandleBattleSnapshotBootstrapRequest(NetworkCommunicator peer)

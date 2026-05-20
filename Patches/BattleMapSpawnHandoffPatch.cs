@@ -1434,6 +1434,13 @@ namespace CoopSpectator.Patches
                 if (string.Equals(_lastLocalVisualFinalizeKey, logKey, StringComparison.Ordinal))
                     return;
 
+                bool clientLocalHeroLiveTakeoverSuppressed =
+                    CoopMissionSpawnLogic.TryArmClientLocalHeroLiveTakeoverSuppression(
+                        mission,
+                        agent,
+                        preferredEntryId,
+                        "battle-map handoff SetAgentPeer",
+                        out string clientLocalHeroLiveTakeoverReason);
                 ExactTransferContractRuntimeCache.ObserveClientPeerBound(
                     agent.Index,
                     "battle-map handoff SetAgentPeer");
@@ -1466,6 +1473,8 @@ namespace CoopSpectator.Patches
                     " MountAgentIndex=" + (agent.MountAgent?.Index.ToString() ?? "null") +
                     " ExactVisualApplied=" + exactVisualApplied +
                     " TroopExactVisualApplied=" + troopExactVisualApplied +
+                    " LocalHeroLiveTakeoverSuppressed=" + clientLocalHeroLiveTakeoverSuppressed +
+                    " LocalHeroLiveTakeoverReason=" + (clientLocalHeroLiveTakeoverReason ?? "null") +
                     " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
                     " PreferredEntryId=" + (preferredEntryId ?? "null") +
                     " EntryResolutionSource=" + (entryResolutionSource ?? "null") +
@@ -1477,6 +1486,7 @@ namespace CoopSpectator.Patches
                     "battle-map handoff SetAgentPeer",
                     "PayloadPeerIndex=" + (setAgentPeer.Peer?.Index.ToString() ?? "null") +
                     " PreferredEntryId=" + (preferredEntryId ?? "null") +
+                    " LocalHeroLiveTakeoverSuppressed=" + clientLocalHeroLiveTakeoverSuppressed +
                     " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
                     " ExactVisualApplied=" + exactVisualApplied +
                     " TroopExactVisualApplied=" + troopExactVisualApplied);
@@ -7293,6 +7303,14 @@ namespace CoopSpectator.Patches
 
             if (agent.MissionPeer != null)
                 return false;
+
+            if (!CoopMissionSpawnLogic.ShouldAttemptUnsafeClientSetWieldedItemIndexRepairDuringCreateAgentCorridor(
+                    agent,
+                    setWieldedItemIndex.IsWieldedOnSpawn,
+                    out _))
+            {
+                return false;
+            }
 
             int missionWeaponCount = CountOccupiedMissionWeaponSlots(agent.Equipment);
             int spawnWeaponCount = CountOccupiedSpawnWeaponSlots(agent.SpawnEquipment);
