@@ -7523,6 +7523,11 @@ namespace CoopSpectator.MissionBehaviors
             return false;
         }
 
+        private static bool ShouldPauseClientExactVisualOverlaysBeforeLiveControl(out string reason)
+        {
+            return ShouldPausePendingClientExactVisualOverlaysForSelectionScreen(out reason);
+        }
+
         private static bool ShouldPauseClientExactVisualOverlaysForReconnectFinalize(out string reason)
         {
             reason = null;
@@ -7648,7 +7653,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             DropPendingClientExactVisualOverlaysForReconnectFinalize("client-hero-exact-visual-watchdog");
-            if (ShouldPauseClientExactVisualOverlaysForReconnectFinalize(out _))
+            if (ShouldPauseClientExactVisualOverlaysBeforeLiveControl(out _))
                 return;
 
             DateTime nowUtc = DateTime.UtcNow;
@@ -8930,8 +8935,7 @@ namespace CoopSpectator.MissionBehaviors
             bool clientVisualOnly = overlayMode == ExactCampaignSnapshotOverlayMode.ClientVisualOnly;
             bool clientHeroEntry = IsHeroEntryEligibleForExactPersonalPerks(entryState);
             if (clientVisualOnly &&
-                !clientHeroEntry &&
-                ShouldPausePendingClientExactVisualOverlaysForSelectionScreen(out _))
+                ShouldPauseClientExactVisualOverlaysBeforeLiveControl(out _))
             {
                 return false;
             }
