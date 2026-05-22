@@ -6047,14 +6047,9 @@ namespace CoopSpectator.MissionBehaviors
             state.EntryId = entryId;
             state.ResolutionState = resolutionState ?? "resolved";
             state.ResolutionSource = source ?? "unknown";
-            _materializedArmyEntryIdByAgentIndex[createAgent.AgentIndex] = entryId;
-            _exactNativeClientVisualOverlayEntryIdByAgentIndex[createAgent.AgentIndex] = entryId;
-            BattleSideEnum payloadSide = ResolveCreateAgentPayloadBattleSide(createAgent.TeamIndex);
-            if (payloadSide != BattleSideEnum.None)
-                _materializedArmySideByAgentIndex[createAgent.AgentIndex] = payloadSide;
 
             ModLogger.Info(
-                "CoopMissionSpawnLogic: registered client create-agent payload entry mapping. " +
+                "CoopMissionSpawnLogic: registered client create-agent heuristic fallback candidate. " +
                 "AgentIndex=" + createAgent.AgentIndex +
                 " EntryId=" + entryId +
                 " ResolutionState=" + (resolutionState ?? "unknown") +
@@ -6776,6 +6771,22 @@ namespace CoopSpectator.MissionBehaviors
             if (state?.AuthoritativeMaterializedEntryObserved == true)
             {
                 reason = "authoritative-materialized-entry-observed";
+                return true;
+            }
+
+            if (TryResolveClientHeuristicCreateAgentEntryId(
+                    agent.Index,
+                    requireSettled: true,
+                    out string heuristicEntryId,
+                    out string heuristicResolutionState,
+                    out string heuristicResolutionSource,
+                    out string heuristicReason) &&
+                string.Equals(heuristicEntryId, entryState.EntryId, StringComparison.Ordinal))
+            {
+                reason =
+                    heuristicReason +
+                    "|ResolutionState=" + (heuristicResolutionState ?? "unknown") +
+                    "|ResolutionSource=" + (heuristicResolutionSource ?? "unknown");
                 return true;
             }
 
@@ -9136,6 +9147,26 @@ namespace CoopSpectator.MissionBehaviors
                 return queuedEntryId;
             }
 
+            if (TryResolveClientHeuristicCreateAgentEntryId(
+                    agent.Index,
+                    requireSettled: true,
+                    out string heuristicEntryId,
+                    out string heuristicResolutionState,
+                    out string heuristicResolutionSource,
+                    out _) &&
+                BattleSnapshotRuntimeState.GetEntryState(heuristicEntryId) is RosterEntryState heuristicEntryState &&
+                (DoesClientVisualOverlayEntryMatchAgentTroop(heuristicEntryState, agent.Character?.StringId) ||
+                 ShouldPreserveStrictExactHeroEntryMapping(agent.Index, heuristicEntryId)))
+            {
+                PromoteSettledClientHeuristicCreateAgentEntryId(
+                    agent,
+                    heuristicEntryId,
+                    heuristicResolutionState,
+                    heuristicResolutionSource,
+                    "ResolveClientExactCampaignVisualOverlayEntryId");
+                return heuristicEntryId;
+            }
+
             return null;
         }
 
@@ -9162,6 +9193,121 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private static bool TryResolveClientHeuristicCreateAgentEntryId(
+            int agentIndex,
+            bool requireSettled,
+            out string entryId,
+            out string resolutionState,
+            out string resolutionSource,
+            out string reason)
+        {
+            entryId = null;
+            resolutionState = null;
+            resolutionSource = null;
+            reason = null;
+
+            if (agentIndex < 0)
+            {
+                reason = "agent-index-invalid";
+                return false;
+            }
+
+            if (!TryGetClientCreateAgentExactVisualState(agentIndex, out ClientCreateAgentExactVisualRuntimeState state) ||
+                state == null)
+            {
+                reason = "create-agent-runtime-unobserved";
+                return false;
+            }
+
+            if (state.AuthoritativeMaterializedEntryObserved)
+            {
+                reason = "authoritative-materialized-entry-observed";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(state.EntryId))
+            {
+                reason = "heuristic-entry-unobserved";
+                return false;
+            }
+
+            resolutionState = state.ResolutionState ?? "unresolved";
+            resolutionSource = state.ResolutionSource ?? "unknown";
+            bool payloadResolutionStrongEnough =
+                string.Equals(resolutionState, "resolved-strong", StringComparison.Ordinal) ||
+                string.Equals(resolutionState, "resolved-layout", StringComparison.Ordinal);
+            if (!payloadResolutionStrongEnough)
+            {
+                reason = "heuristic-resolution-weak|ResolutionState=" + resolutionState;
+                return false;
+            }
+
+            if (BattleSnapshotRuntimeState.GetEntryState(state.EntryId) == null)
+            {
+                reason = "heuristic-entry-stale|EntryId=" + state.EntryId;
+                return false;
+            }
+
+            if (requireSettled &&
+                !HasClientTroopObservedStablePostCreateSignal(state, out string stableSignalReason))
+            {
+                reason =
+                    "heuristic-create-agent-fallback-pending" +
+                    "|ResolutionState=" + resolutionState +
+                    "|ResolutionSource=" + resolutionSource +
+                    "|StableSignal=" + stableSignalReason;
+                return false;
+            }
+
+            entryId = state.EntryId;
+            reason =
+                (requireSettled
+                    ? "heuristic-create-agent-fallback-ready"
+                    : "heuristic-create-agent-fallback-available") +
+                "|ResolutionState=" + resolutionState +
+                "|ResolutionSource=" + resolutionSource;
+            return true;
+        }
+
+        private static void PromoteSettledClientHeuristicCreateAgentEntryId(
+            Agent agent,
+            string entryId,
+            string resolutionState,
+            string resolutionSource,
+            string source)
+        {
+            if (agent == null || agent.Index < 0 || string.IsNullOrWhiteSpace(entryId))
+                return;
+
+            bool alreadyTracked =
+                _materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string trackedEntryId) &&
+                string.Equals(trackedEntryId, entryId, StringComparison.Ordinal) &&
+                _exactNativeClientVisualOverlayEntryIdByAgentIndex.TryGetValue(agent.Index, out string overlayEntryId) &&
+                string.Equals(overlayEntryId, entryId, StringComparison.Ordinal);
+
+            _materializedArmyEntryIdByAgentIndex[agent.Index] = entryId;
+            _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = entryId;
+            if (agent.Team?.Side != null && agent.Team.Side != BattleSideEnum.None)
+                _materializedArmySideByAgentIndex[agent.Index] = agent.Team.Side;
+
+            if (TryGetClientCreateAgentExactVisualState(agent.Index, out ClientCreateAgentExactVisualRuntimeState state) &&
+                state != null)
+            {
+                state.LastObservedUtc = DateTime.UtcNow;
+            }
+
+            if (alreadyTracked)
+                return;
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: promoted settled heuristic client create-agent fallback. " +
+                "AgentIndex=" + agent.Index +
+                " EntryId=" + entryId +
+                " ResolutionState=" + (resolutionState ?? "unknown") +
+                " ResolutionSource=" + (resolutionSource ?? "unknown") +
+                " Source=" + (source ?? "unknown"));
+        }
+
         internal static bool ShouldRequireExplicitMaterializationEntryId(CreateAgent createAgent, out string reason)
         {
             reason = null;
@@ -9173,9 +9319,6 @@ namespace CoopSpectator.MissionBehaviors
                 reason = "authoritative-materialized-entry-present:" + authoritativeEntryId;
                 return false;
             }
-
-            if (!HasCreateAgentMountPayload(createAgent))
-                return false;
 
             string payloadCharacterId = createAgent.Character.StringId ?? string.Empty;
             if (string.IsNullOrWhiteSpace(payloadCharacterId) ||
@@ -9201,28 +9344,19 @@ namespace CoopSpectator.MissionBehaviors
                 .Select(entryState => entryState.EntryId)
                 .Where(candidateEntryId => !string.IsNullOrWhiteSpace(candidateEntryId))
                 .Distinct(StringComparer.Ordinal)
-                .Take(5)
                 .ToList();
             if (matchingEntryIds.Count <= 1)
                 return false;
+
+            string sample = string.Join(" | ", matchingEntryIds.Take(5));
 
             reason =
                 "shared-surrogate-shell" +
                 " PayloadCharacterId=" + payloadCharacterId +
                 " PayloadSide=" + payloadSide +
                 " CandidateCount=" + matchingEntryIds.Count +
-                " EntrySample=[" + string.Join(" | ", matchingEntryIds) + "]";
+                " EntrySample=[" + sample + "]";
             return true;
-        }
-
-        private static bool HasCreateAgentMountPayload(CreateAgent createAgent)
-        {
-            if (createAgent == null)
-                return false;
-
-            return createAgent.MountAgentIndex >= 0 ||
-                   createAgent.SpawnEquipment?[EquipmentIndex.Horse].Item != null ||
-                   createAgent.SpawnEquipment?[EquipmentIndex.HorseHarness].Item != null;
         }
 
         private static bool IsMissionPeerAgentEligibleForClientExactVisualOverlay(Agent agent)
@@ -26081,6 +26215,27 @@ namespace CoopSpectator.MissionBehaviors
                 _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = queuedEntryId;
                 _materializedArmyEntryIdByAgentIndex[agent.Index] = queuedEntryId;
                 entryId = queuedEntryId;
+                return true;
+            }
+
+            if (TryResolveClientHeuristicCreateAgentEntryId(
+                    agent.Index,
+                    requireSettled: true,
+                    out string heuristicEntryId,
+                    out string heuristicResolutionState,
+                    out string heuristicResolutionSource,
+                    out _) &&
+                BattleSnapshotRuntimeState.GetEntryState(heuristicEntryId) is RosterEntryState heuristicEntryState &&
+                (DoesClientVisualOverlayEntryMatchAgentTroop(heuristicEntryState, agent?.Character?.StringId) ||
+                 ShouldPreserveStrictExactHeroEntryMapping(agent?.Index ?? -1, heuristicEntryId)))
+            {
+                PromoteSettledClientHeuristicCreateAgentEntryId(
+                    agent,
+                    heuristicEntryId,
+                    heuristicResolutionState,
+                    heuristicResolutionSource,
+                    "TryResolveSelectableEntryId");
+                entryId = heuristicEntryId;
                 return true;
             }
 
