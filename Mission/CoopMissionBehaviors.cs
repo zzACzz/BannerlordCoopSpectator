@@ -15160,6 +15160,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             bool applied = false;
+            bool lowLevelExactAgentStatsActive = CoopCampaignDerivedAgentStatCalculateModel.IsActiveForMission(mission);
 
             var equipment = agent.Equipment;
             WeaponComponentData primaryWeapon;
@@ -15173,11 +15174,19 @@ namespace CoopSpectator.MissionBehaviors
             int desiredRelevantSkill = TryGetCombatProfileSkillValue(profile, relevantSkill, templateRelevantSkill);
 
             bool suppressApproximateHeroRangedBallistics = ShouldSuppressApproximateHeroRangedBallistics(profile, agent, primaryWeapon);
+            string relevantSkillId = relevantSkill?.StringId ?? string.Empty;
+            bool exactHeroPersonalProfileActive = lowLevelExactAgentStatsActive && IsHeroProfileEligibleForExactPersonalPerks(profile);
+            bool suppressApproximateExactHeroWeaponSpeedAdjustments = exactHeroPersonalProfileActive &&
+                (string.Equals(relevantSkillId, "OneHanded", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(relevantSkillId, "TwoHanded", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(relevantSkillId, "Polearm", StringComparison.OrdinalIgnoreCase));
+            bool suppressApproximateExactHeroMovementAdjustments = exactHeroPersonalProfileActive;
 
             SetDrivenPropertyBaselineContext(profile, agent, isMountContext: false);
             try
             {
-                if (TryApplyPrimaryWeaponSkillDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill))
+                if (!suppressApproximateExactHeroWeaponSpeedAdjustments &&
+                    TryApplyPrimaryWeaponSkillDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill))
                 {
                     applied = true;
                     CountMaterializedCombatProfileApply(profile, "weapon-skill", ref profile.CountedWeaponSkillAdjustment);
@@ -15202,13 +15211,24 @@ namespace CoopSpectator.MissionBehaviors
                 if (TryApplyLoadoutAttributeDrivenStats(agent, profile, agentDrivenProperties))
                     applied = true;
 
-                if (TryApplyEnduranceDrivenStats(agent, profile, agentDrivenProperties))
+                if (!suppressApproximateExactHeroMovementAdjustments &&
+                    TryApplyEnduranceDrivenStats(agent, profile, agentDrivenProperties))
                     applied = true;
 
-                if (TryApplyPerkDrivenStats(agent, profile, agentDrivenProperties, primaryWeapon, relevantSkill))
+                if (TryApplyPerkDrivenStats(
+                        agent,
+                        profile,
+                        agentDrivenProperties,
+                        primaryWeapon,
+                        relevantSkill,
+                        suppressApproximateMovementAdjustments: suppressApproximateExactHeroMovementAdjustments))
                     applied = true;
 
-                if (TryApplyPartyModifierDrivenStats(agent, profile, agentDrivenProperties))
+                if (TryApplyPartyModifierDrivenStats(
+                        agent,
+                        profile,
+                        agentDrivenProperties,
+                        suppressApproximateMovementAdjustments: suppressApproximateExactHeroMovementAdjustments))
                     applied = true;
 
                 if (agent.HasMount || agent.MountAgent != null)
@@ -15220,6 +15240,7 @@ namespace CoopSpectator.MissionBehaviors
                             agentDrivenProperties,
                             templateRiding,
                             desiredRiding,
+                            includeSpeedAdjustments: !suppressApproximateExactHeroWeaponSpeedAdjustments,
                             includeAccuracyAdjustments: !suppressApproximateHeroRangedBallistics))
                     {
                         applied = true;
@@ -15477,7 +15498,8 @@ namespace CoopSpectator.MissionBehaviors
             MaterializedCombatProfileRuntimeState profile,
             AgentDrivenProperties agentDrivenProperties,
             WeaponComponentData primaryWeapon,
-            SkillObject relevantSkill)
+            SkillObject relevantSkill,
+            bool suppressApproximateMovementAdjustments = false)
         {
             if (agent == null || profile == null || agentDrivenProperties == null || profile.PerkIds == null || profile.PerkIds.Count == 0)
                 return false;
@@ -15519,7 +15541,10 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (profile.PerkAthleticsCount > 0 && !agent.IsMount && !(agent.HasMount || agent.MountAgent != null))
+            if (!suppressApproximateMovementAdjustments &&
+                profile.PerkAthleticsCount > 0 &&
+                !agent.IsMount &&
+                !(agent.HasMount || agent.MountAgent != null))
             {
                 if (TryApplyAthleticsPerkDrivenStats(agentDrivenProperties, profile.PerkAthleticsCount))
                 {
@@ -15528,7 +15553,9 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (profile.PerkRidingCount > 0 && (agent.HasMount || agent.MountAgent != null))
+            if (!suppressApproximateMovementAdjustments &&
+                profile.PerkRidingCount > 0 &&
+                (agent.HasMount || agent.MountAgent != null))
             {
                 if (TryApplyRidingPerkDrivenStats(agentDrivenProperties, profile.PerkRidingCount))
                 {
@@ -15764,7 +15791,8 @@ namespace CoopSpectator.MissionBehaviors
         private static bool TryApplyPartyModifierDrivenStats(
             Agent agent,
             MaterializedCombatProfileRuntimeState profile,
-            AgentDrivenProperties agentDrivenProperties)
+            AgentDrivenProperties agentDrivenProperties,
+            bool suppressApproximateMovementAdjustments = false)
         {
             if (agent == null || profile == null || agentDrivenProperties == null)
                 return false;
@@ -15800,7 +15828,8 @@ namespace CoopSpectator.MissionBehaviors
 
             if (!agent.IsMount)
             {
-                if (TryApplyPartyQuartermasterDrivenStats(agentDrivenProperties, profile))
+                if (!suppressApproximateMovementAdjustments &&
+                    TryApplyPartyQuartermasterDrivenStats(agentDrivenProperties, profile))
                 {
                     applied = true;
                     CountMaterializedCombatProfileApply(profile, "party-quartermaster", ref profile.CountedPartyQuartermasterAdjustment);
@@ -16369,6 +16398,7 @@ namespace CoopSpectator.MissionBehaviors
             AgentDrivenProperties agentDrivenProperties,
             int templateRiding,
             int desiredRiding,
+            bool includeSpeedAdjustments = true,
             bool includeAccuracyAdjustments = true)
         {
             if (desiredRiding <= 0)
@@ -16380,11 +16410,14 @@ namespace CoopSpectator.MissionBehaviors
             float desiredAttributeRiding = desiredRiding * mountRidingFactor;
             applied |= TrySetDrivenProperty(agentDrivenProperties, DrivenProperty.AttributeRiding, desiredAttributeRiding, 0.01f);
 
-            float baseMountedSpeedFactor = ComputeMountedWeaponSpeedFactor(templateRiding);
-            float desiredMountedSpeedFactor = ComputeMountedWeaponSpeedFactor(desiredRiding);
-            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.SwingSpeedMultiplier, baseMountedSpeedFactor, desiredMountedSpeedFactor);
-            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, baseMountedSpeedFactor, desiredMountedSpeedFactor);
-            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, baseMountedSpeedFactor, desiredMountedSpeedFactor);
+            if (includeSpeedAdjustments)
+            {
+                float baseMountedSpeedFactor = ComputeMountedWeaponSpeedFactor(templateRiding);
+                float desiredMountedSpeedFactor = ComputeMountedWeaponSpeedFactor(desiredRiding);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.SwingSpeedMultiplier, baseMountedSpeedFactor, desiredMountedSpeedFactor);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, baseMountedSpeedFactor, desiredMountedSpeedFactor);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, baseMountedSpeedFactor, desiredMountedSpeedFactor);
+            }
 
             if (includeAccuracyAdjustments)
             {

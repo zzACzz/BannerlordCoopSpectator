@@ -147,7 +147,16 @@ namespace CoopSpectator.Infrastructure
                   (includeWeapons || includeCape || includeArmorVisuals || includeMountVisuals)
                 : includeWeapons || includeCape;
             if (useDedicatedSafeStringIdExactEquipmentPath)
-                injectEquipment = false;
+            {
+                bool ordinaryEntryHybridCreateAgentSafe =
+                    useContractDrivenPreSpawnPath &&
+                    !HasExactPersonalHeroIdentity(entryState) &&
+                    payloadDiagnostic?.IsActive == true &&
+                    payloadDiagnostic.ClientCreateAgentSafe &&
+                    (includeWeapons || includeCape || includeArmorVisuals || includeMountVisuals);
+                if (!ordinaryEntryHybridCreateAgentSafe)
+                    injectEquipment = false;
+            }
 
             return new ExactCreateAgentServerPreSpawnContractState
             {

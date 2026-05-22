@@ -442,9 +442,20 @@ namespace CoopSpectator.MissionModels
 
             if (CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(agent, "AthleticsFormFittingArmor", out string formFittingEntryId))
             {
-                float baseArmorEncumbrance = agentDrivenProperties.ArmorEncumbrance;
+                float currentArmorEncumbrance = agentDrivenProperties.ArmorEncumbrance;
+                float baseArmorEncumbrance = currentArmorEncumbrance;
+                try
+                {
+                    float spawnArmorEncumbrance = agent.SpawnEquipment.GetTotalWeightOfArmor(agent.IsHuman);
+                    if (spawnArmorEncumbrance > 0.0001f)
+                        baseArmorEncumbrance = spawnArmorEncumbrance;
+                }
+                catch
+                {
+                }
+
                 float exactArmorEncumbrance = baseArmorEncumbrance * 0.85f;
-                if (Math.Abs(exactArmorEncumbrance - baseArmorEncumbrance) >= 0.0001f)
+                if (Math.Abs(exactArmorEncumbrance - currentArmorEncumbrance) >= 0.0001f)
                 {
                     agentDrivenProperties.ArmorEncumbrance = exactArmorEncumbrance;
                     entryId = formFittingEntryId;
@@ -535,12 +546,25 @@ namespace CoopSpectator.MissionModels
                 return;
 
             int templateSkill = TryGetCharacterSkillValue(agent.Character, relevantSkill);
-            float perSkillFactor = ResolvePersonalWeaponSpeedFactorPerSkill(skillId);
-            if (perSkillFactor <= 0f)
+            float baseWeaponSpeedFactor = ResolveVanillaPrimaryWeaponSpeedFactor(templateSkill);
+            float exactWeaponSpeedFactor = ResolveVanillaPrimaryWeaponSpeedFactor(exactSkill);
+            if (baseWeaponSpeedFactor <= 0.0001f || exactWeaponSpeedFactor <= 0.0001f)
                 return;
 
-            float baseSkillFactor = 1f + templateSkill * perSkillFactor;
-            float exactSkillFactor = 1f + exactSkill * perSkillFactor;
+            float baseSkillFactor = baseWeaponSpeedFactor;
+            float exactSkillFactor = exactWeaponSpeedFactor;
+
+            if (agent.HasMount || agent.MountAgent != null)
+            {
+                int templateRiding = TryGetCharacterSkillValue(agent.Character, DefaultSkills.Riding);
+                int exactRiding = templateRiding;
+                if (TryResolveExactSkillOverride(agent, DefaultSkills.Riding, templateRiding, out int resolvedExactRiding, out _))
+                    exactRiding = resolvedExactRiding;
+
+                baseSkillFactor *= ResolveMountedWeaponSpeedFactor(templateRiding);
+                exactSkillFactor *= ResolveMountedWeaponSpeedFactor(exactRiding);
+            }
+
             if (baseSkillFactor <= 0.0001f || Math.Abs(exactSkillFactor - baseSkillFactor) < 0.0001f)
                 return;
 
@@ -614,16 +638,15 @@ namespace CoopSpectator.MissionModels
                 " Mission=" + (agent?.Mission?.SceneName ?? "null") + ".");
         }
 
-        private static float ResolvePersonalWeaponSpeedFactorPerSkill(string skillId)
+        private static float ResolveVanillaPrimaryWeaponSpeedFactor(int relevantSkill)
         {
-            if (string.Equals(skillId, "OneHanded", StringComparison.OrdinalIgnoreCase))
-                return 0.0007f;
-            if (string.Equals(skillId, "TwoHanded", StringComparison.OrdinalIgnoreCase))
-                return 0.0006f;
-            if (string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase))
-                return 0.0006f;
+            return 0.93f + 0.0007f * Math.Max(0, relevantSkill);
+        }
 
-            return 0f;
+        private static float ResolveMountedWeaponSpeedFactor(int ridingSkill)
+        {
+            float penalty = 0.3f - ridingSkill * 0.003f;
+            return penalty > 0f ? Math.Max(0.0001f, 1f - penalty) : 1f;
         }
 
         private static int TryGetCharacterSkillValue(BasicCharacterObject character, SkillObject skillObject)
