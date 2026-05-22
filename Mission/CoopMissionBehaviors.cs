@@ -4102,6 +4102,9 @@ namespace CoopSpectator.MissionBehaviors
 
         private sealed class ClientCreateAgentExactVisualRuntimeState
         {
+            public int PayloadGeneration { get; set; } = 1;
+            public string PayloadCharacterId { get; set; }
+            public BattleSideEnum PayloadSide { get; set; }
             public string EntryId { get; set; }
             public string ResolutionState { get; set; }
             public string ResolutionSource { get; set; }
@@ -5905,7 +5908,8 @@ namespace CoopSpectator.MissionBehaviors
             int agentIndex,
             string source,
             bool logClear = false,
-            string reason = null)
+            string reason = null,
+            bool preserveCreateAgentRuntime = false)
         {
             if (agentIndex < 0)
                 return;
@@ -5916,7 +5920,11 @@ namespace CoopSpectator.MissionBehaviors
             bool hadEntryId = _exactNativeClientVisualOverlayEntryIdByAgentIndex.Remove(agentIndex);
             bool hadTrackedMount = ClearTrackedClientMountedHeroMountAgentIndexState(agentIndex);
             bool hadPending = _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agentIndex);
-            bool hadCreateAgentRuntime = _clientCreateAgentExactVisualStateByAgentIndex.Remove(agentIndex);
+            bool hadCreateAgentRuntime =
+                _clientCreateAgentExactVisualStateByAgentIndex.TryGetValue(agentIndex, out ClientCreateAgentExactVisualRuntimeState _) &&
+                _clientCreateAgentExactVisualStateByAgentIndex[agentIndex] != null;
+            if (!preserveCreateAgentRuntime)
+                _clientCreateAgentExactVisualStateByAgentIndex.Remove(agentIndex);
             bool hadAuthoritativeMaterializedEntryId = _clientAuthoritativeMaterializedEntryIdByAgentIndex.Remove(agentIndex);
             bool hadAuthoritativeMaterializedObserved = _clientAuthoritativeMaterializedEntryObservedAgentIndices.Remove(agentIndex);
             bool hadWatchdogFirstSeen = _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Remove(agentIndex);
@@ -5939,6 +5947,7 @@ namespace CoopSpectator.MissionBehaviors
                     " HadTrackedMount=" + hadTrackedMount +
                     " HadPending=" + hadPending +
                     " HadCreateAgentRuntime=" + hadCreateAgentRuntime +
+                    " PreservedCreateAgentRuntime=" + preserveCreateAgentRuntime +
                     " HadAuthoritativeMaterializedEntryId=" + hadAuthoritativeMaterializedEntryId +
                     " HadAuthoritativeMaterializedObserved=" + hadAuthoritativeMaterializedObserved +
                     " HadStrictTransferState=" + hadStrictTransferState +
@@ -5983,6 +5992,95 @@ namespace CoopSpectator.MissionBehaviors
             return _clientCreateAgentExactVisualStateByAgentIndex.TryGetValue(agentIndex, out state) && state != null;
         }
 
+        private static void ResetClientCreateAgentExactVisualRuntimeResolutionState(
+            ClientCreateAgentExactVisualRuntimeState state,
+            bool clearPayloadObservation = false)
+        {
+            if (state == null)
+                return;
+
+            state.EntryId = null;
+            state.ResolutionState = null;
+            state.ResolutionSource = null;
+            state.AuthoritativeMaterializedEntryObserved = false;
+            state.CreateAgentPostfixObserved = false;
+            state.EquipmentSyncObserved = false;
+            state.OnSpawnWieldEventCount = 0;
+            state.QueueFallbackSuppressedLogged = false;
+            if (clearPayloadObservation)
+            {
+                state.CreateAgentPayloadObserved = false;
+                state.PayloadCharacterId = null;
+                state.PayloadSide = BattleSideEnum.None;
+            }
+
+            state.LastObservedUtc = DateTime.UtcNow;
+        }
+
+        private static void ClearClientTrackedMaterializedAgentIdentityState(
+            int agentIndex,
+            string source,
+            string reason,
+            bool preserveCreateAgentRuntime,
+            bool logClear)
+        {
+            if (agentIndex < 0)
+                return;
+
+            _materializedArmyEntryIdByAgentIndex.Remove(agentIndex);
+            _materializedArmySideByAgentIndex.Remove(agentIndex);
+            _materializedAgentInstanceByIndex.Remove(agentIndex);
+            _clientAuthoritativeMaterializedEntryIdByAgentIndex.Remove(agentIndex);
+            _clientAuthoritativeMaterializedEntryObservedAgentIndices.Remove(agentIndex);
+            ClearClientExactCampaignVisualOverlayAgentIndexState(
+                agentIndex,
+                source,
+                logClear: logClear,
+                reason: reason,
+                preserveCreateAgentRuntime: preserveCreateAgentRuntime);
+        }
+
+        private static bool DoesClientCreateAgentRuntimePayloadMatchEntryId(
+            ClientCreateAgentExactVisualRuntimeState state,
+            string entryId,
+            out string mismatchReason)
+        {
+            mismatchReason = null;
+            if (state == null || !state.CreateAgentPayloadObserved)
+                return true;
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (entryState == null)
+            {
+                mismatchReason = "entry-state-missing";
+                return false;
+            }
+
+            if (state.PayloadSide != BattleSideEnum.None &&
+                !DoesClientVisualOverlayEntryMatchAgentSide(entryState, state.PayloadSide))
+            {
+                mismatchReason =
+                    "payload-side-mismatch" +
+                    "|PayloadSide=" + state.PayloadSide +
+                    "|EntrySideId=" + (entryState.SideId ?? "null");
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(state.PayloadCharacterId) &&
+                !DoesClientVisualOverlayEntryMatchAgentTroop(entryState, state.PayloadCharacterId))
+            {
+                mismatchReason =
+                    "payload-character-mismatch" +
+                    "|PayloadCharacterId=" + state.PayloadCharacterId +
+                    "|EntryCharacterId=" + (entryState.CharacterId ?? "null") +
+                    "|EntryOriginalCharacterId=" + (entryState.OriginalCharacterId ?? "null") +
+                    "|EntrySpawnTemplateId=" + (ResolveEntrySpawnTemplateId(entryState) ?? "null");
+                return false;
+            }
+
+            return true;
+        }
+
         internal static void ObserveClientCreateAgentPayloadResolvedEntry(CreateAgent createAgent, string source)
         {
             if (GameNetwork.IsServer || createAgent == null)
@@ -5992,6 +6090,41 @@ namespace CoopSpectator.MissionBehaviors
             if (state == null)
                 return;
 
+            string payloadCharacterId = createAgent.Character?.StringId ?? string.Empty;
+            BattleSideEnum payloadSide = ResolveCreateAgentPayloadBattleSide(createAgent.TeamIndex);
+            bool payloadSlotReused =
+                state.CreateAgentPayloadObserved &&
+                (!string.Equals(state.PayloadCharacterId, payloadCharacterId, StringComparison.Ordinal) ||
+                 state.PayloadSide != payloadSide);
+            if (payloadSlotReused)
+            {
+                string previousPayloadCharacterId = state.PayloadCharacterId;
+                BattleSideEnum previousPayloadSide = state.PayloadSide;
+                state.PayloadGeneration = Math.Max(1, state.PayloadGeneration) + 1;
+                ResetClientCreateAgentExactVisualRuntimeResolutionState(state);
+                ClearClientTrackedMaterializedAgentIdentityState(
+                    createAgent.AgentIndex,
+                    source ?? "unknown",
+                    "create-agent-payload-slot-reuse",
+                    preserveCreateAgentRuntime: true,
+                    logClear: true);
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: detected client create-agent agent-index slot reuse and invalidated stale tracked identity state. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " PayloadGeneration=" + state.PayloadGeneration +
+                    " PreviousPayloadCharacterId=" + (previousPayloadCharacterId ?? "null") +
+                    " PreviousPayloadSide=" + previousPayloadSide +
+                    " CurrentPayloadCharacterId=" + (payloadCharacterId ?? "null") +
+                    " CurrentPayloadSide=" + payloadSide +
+                    " Source=" + (source ?? "unknown"));
+            }
+            else if (state.PayloadGeneration <= 0)
+            {
+                state.PayloadGeneration = 1;
+            }
+
+            state.PayloadCharacterId = payloadCharacterId;
+            state.PayloadSide = payloadSide;
             state.CreateAgentPayloadObserved = true;
             state.AuthoritativeMaterializedEntryObserved =
                 _clientAuthoritativeMaterializedEntryObservedAgentIndices.Contains(createAgent.AgentIndex);
@@ -6013,6 +6146,7 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopMissionSpawnLogic: registered client create-agent authoritative entry mapping. " +
                     "AgentIndex=" + createAgent.AgentIndex +
                     " EntryId=" + authoritativeEntryId +
+                    " PayloadGeneration=" + state.PayloadGeneration +
                     " Source=" + (source ?? "unknown"));
                 return;
             }
@@ -6039,6 +6173,7 @@ namespace CoopSpectator.MissionBehaviors
                     "AgentIndex=" + createAgent.AgentIndex +
                     " CandidateEntryId=" + entryId +
                     " ResolutionState=" + (resolutionState ?? "unknown") +
+                    " PayloadGeneration=" + state.PayloadGeneration +
                     " Reason=" + (explicitIdentityReason ?? "unknown") +
                     " Source=" + (source ?? "unknown"));
                 return;
@@ -6053,6 +6188,7 @@ namespace CoopSpectator.MissionBehaviors
                 "AgentIndex=" + createAgent.AgentIndex +
                 " EntryId=" + entryId +
                 " ResolutionState=" + (resolutionState ?? "unknown") +
+                " PayloadGeneration=" + state.PayloadGeneration +
                 " PayloadCompare=" + payloadComparisonSummary +
                 " Source=" + (source ?? "unknown"));
         }
@@ -6360,6 +6496,7 @@ namespace CoopSpectator.MissionBehaviors
             int liveControlledSuppressedCount = 0;
             int selectionPausedCount = 0;
             int postPossessionPausedCount = 0;
+            int skippedStalePayloadCount = 0;
             int reconnectFinalizeDroppedPendingCount =
                 DropPendingClientExactVisualOverlaysForReconnectFinalize(
                     (source ?? "authoritative materialized agent snapshot") + " reconnect-finalize");
@@ -6376,6 +6513,30 @@ namespace CoopSpectator.MissionBehaviors
                 string entryId = mapping.Value;
                 if (agentIndex < 0 || string.IsNullOrWhiteSpace(entryId))
                     continue;
+
+                if (TryGetClientCreateAgentExactVisualState(agentIndex, out ClientCreateAgentExactVisualRuntimeState createAgentState) &&
+                    createAgentState != null &&
+                    createAgentState.CreateAgentPayloadObserved &&
+                    !DoesClientCreateAgentRuntimePayloadMatchEntryId(createAgentState, entryId, out string payloadMismatchReason))
+                {
+                    skippedStalePayloadCount++;
+                    ClearClientTrackedMaterializedAgentIdentityState(
+                        agentIndex,
+                        source ?? "unknown",
+                        "stale-authoritative-materialized-agent-snapshot|" + payloadMismatchReason,
+                        preserveCreateAgentRuntime: true,
+                        logClear: true);
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: skipped stale client authoritative materialized agent snapshot mapping because it did not match the current CreateAgent payload. " +
+                        "AgentIndex=" + agentIndex +
+                        " EntryId=" + entryId +
+                        " PayloadCharacterId=" + (createAgentState.PayloadCharacterId ?? "null") +
+                        " PayloadSide=" + createAgentState.PayloadSide +
+                        " PayloadGeneration=" + createAgentState.PayloadGeneration +
+                        " Reason=" + payloadMismatchReason +
+                        " Source=" + (source ?? "unknown"));
+                    continue;
+                }
 
                 _materializedArmyEntryIdByAgentIndex.TryGetValue(agentIndex, out string previousTrackedEntryId);
                 _materializedArmyEntryIdByAgentIndex[agentIndex] = entryId;
@@ -6485,6 +6646,7 @@ namespace CoopSpectator.MissionBehaviors
                     " SelectionPausedTroopFinalizes=" + selectionPausedCount +
                     " PostPossessionPausedTroopFinalizes=" + postPossessionPausedCount +
                     " SkippedQueueTroopFinalizes=" + skippedQueueCount +
+                    " SkippedStalePayloadMappings=" + skippedStalePayloadCount +
                     " UseStringIdExactEquipmentPath=" + _clientUseStringIdExactEquipmentPath +
                     " SnapshotCount=" + snapshotCount +
                     " Source=" + (source ?? "unknown"));
@@ -7801,7 +7963,8 @@ namespace CoopSpectator.MissionBehaviors
                 agent.Index,
                 source ?? "unknown",
                 logClear: false,
-                reason: "refresh-agent-index-state");
+                reason: "refresh-agent-index-state",
+                preserveCreateAgentRuntime: true);
             _exactNativeClientVisualOverlayAgentByIndex[agent.Index] = agent;
 
             if (logRefresh)
@@ -9186,6 +9349,29 @@ namespace CoopSpectator.MissionBehaviors
             {
                 _clientAuthoritativeMaterializedEntryIdByAgentIndex.Remove(agentIndex);
                 _clientAuthoritativeMaterializedEntryObservedAgentIndices.Remove(agentIndex);
+                return false;
+            }
+
+            if (TryGetClientCreateAgentExactVisualState(agentIndex, out ClientCreateAgentExactVisualRuntimeState state) &&
+                state != null &&
+                state.CreateAgentPayloadObserved &&
+                !DoesClientCreateAgentRuntimePayloadMatchEntryId(state, authoritativeEntryId, out string payloadMismatchReason))
+            {
+                ResetClientCreateAgentExactVisualRuntimeResolutionState(state);
+                ClearClientTrackedMaterializedAgentIdentityState(
+                    agentIndex,
+                    "TryResolveClientAuthoritativeMaterializedEntryId",
+                    "stale-authoritative-materialized-entry|" + payloadMismatchReason,
+                    preserveCreateAgentRuntime: true,
+                    logClear: true);
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected stale client authoritative materialized entry because it did not match the current CreateAgent payload. " +
+                    "AgentIndex=" + agentIndex +
+                    " EntryId=" + authoritativeEntryId +
+                    " PayloadCharacterId=" + (state.PayloadCharacterId ?? "null") +
+                    " PayloadSide=" + state.PayloadSide +
+                    " PayloadGeneration=" + state.PayloadGeneration +
+                    " Reason=" + payloadMismatchReason);
                 return false;
             }
 
@@ -26159,16 +26345,12 @@ namespace CoopSpectator.MissionBehaviors
                     return true;
                 }
 
-                _materializedArmyEntryIdByAgentIndex.Remove(agent.Index);
-                _materializedArmySideByAgentIndex.Remove(agent.Index);
-                _materializedAgentInstanceByIndex.Remove(agent.Index);
-                _clientAuthoritativeMaterializedEntryIdByAgentIndex.Remove(agent.Index);
-                _clientAuthoritativeMaterializedEntryObservedAgentIndices.Remove(agent.Index);
-                ClearClientExactCampaignVisualOverlayAgentIndexState(
+                ClearClientTrackedMaterializedAgentIdentityState(
                     agent.Index,
                     "TryResolveAuthoritativeTrackedEntryId",
-                    logClear: true,
-                    reason: "stale-authoritative-tracked-entry");
+                    "stale-authoritative-tracked-entry",
+                    preserveCreateAgentRuntime: true,
+                    logClear: true);
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: cleared stale authoritative tracked entry mapping. " +
                     "AgentIndex=" + agent.Index +
@@ -26207,7 +26389,8 @@ namespace CoopSpectator.MissionBehaviors
                     agent?.Index ?? -1,
                     "TryResolveSelectableEntryId",
                     logClear: true,
-                    reason: "stale-selectable-overlay-entry");
+                    reason: "stale-selectable-overlay-entry",
+                    preserveCreateAgentRuntime: true);
             }
 
             if (TryResolveQueuedClientExactCampaignVisualOverlayEntryId(agent, out string queuedEntryId))
