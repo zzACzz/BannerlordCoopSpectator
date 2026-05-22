@@ -3639,6 +3639,7 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<int, string> _materializedArmyEntryIdByAgentIndex = new Dictionary<int, string>();
         private static readonly Dictionary<int, BattleSideEnum> _materializedArmySideByAgentIndex = new Dictionary<int, BattleSideEnum>();
         private static readonly Dictionary<int, Agent> _materializedAgentInstanceByIndex = new Dictionary<int, Agent>();
+        private static readonly Dictionary<int, string> _clientAuthoritativeMaterializedEntryIdByAgentIndex = new Dictionary<int, string>();
         private static readonly HashSet<int> _clientAuthoritativeMaterializedEntryObservedAgentIndices = new HashSet<int>();
         private static DateTime _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
         private static int _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount;
@@ -4179,6 +4180,7 @@ namespace CoopSpectator.MissionBehaviors
             _materializedArmyEntryIdByAgentIndex.Clear();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
+            _clientAuthoritativeMaterializedEntryIdByAgentIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
             _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
             _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = 0;
@@ -4224,6 +4226,7 @@ namespace CoopSpectator.MissionBehaviors
             _pendingExactNativeClientVisualOverlaysByAgentIndex.Clear();
             _clientLocalHeroLiveTakeoverSuppressionByAgentIndex.Clear();
             _clientCreateAgentExactVisualStateByAgentIndex.Clear();
+            _clientAuthoritativeMaterializedEntryIdByAgentIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
             _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
             _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = 0;
@@ -4981,6 +4984,7 @@ namespace CoopSpectator.MissionBehaviors
             _materializedArmyEntryIdByAgentIndex.Clear();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
+            _clientAuthoritativeMaterializedEntryIdByAgentIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
             _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
             _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = 0;
@@ -5425,6 +5429,7 @@ namespace CoopSpectator.MissionBehaviors
             _materializedArmyEntryIdByAgentIndex.Clear();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
+            _clientAuthoritativeMaterializedEntryIdByAgentIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
             _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
             _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = 0;
@@ -5912,6 +5917,7 @@ namespace CoopSpectator.MissionBehaviors
             bool hadTrackedMount = ClearTrackedClientMountedHeroMountAgentIndexState(agentIndex);
             bool hadPending = _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agentIndex);
             bool hadCreateAgentRuntime = _clientCreateAgentExactVisualStateByAgentIndex.Remove(agentIndex);
+            bool hadAuthoritativeMaterializedEntryId = _clientAuthoritativeMaterializedEntryIdByAgentIndex.Remove(agentIndex);
             bool hadAuthoritativeMaterializedObserved = _clientAuthoritativeMaterializedEntryObservedAgentIndices.Remove(agentIndex);
             bool hadWatchdogFirstSeen = _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Remove(agentIndex);
             bool hadWatchdogLastAttempt = _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Remove(agentIndex);
@@ -5919,7 +5925,7 @@ namespace CoopSpectator.MissionBehaviors
             bool hadStrictTransferState = _strictExactHeroTransferStateByRiderAgentIndex.ContainsKey(agentIndex);
             ClearStrictExactHeroTransferState(agentIndex, source, reason, logClear: false);
             if (logClear &&
-                (hadTrackedAgent || hadApplied || hadIncludesWeapons || hadEntryId || hadTrackedMount || hadPending || hadCreateAgentRuntime || hadAuthoritativeMaterializedObserved || hadWatchdogFirstSeen || hadWatchdogLastAttempt || hadStrictTransferState))
+                (hadTrackedAgent || hadApplied || hadIncludesWeapons || hadEntryId || hadTrackedMount || hadPending || hadCreateAgentRuntime || hadAuthoritativeMaterializedEntryId || hadAuthoritativeMaterializedObserved || hadWatchdogFirstSeen || hadWatchdogLastAttempt || hadStrictTransferState))
             {
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: cleared client exact visual overlay agent-index state. " +
@@ -5933,6 +5939,7 @@ namespace CoopSpectator.MissionBehaviors
                     " HadTrackedMount=" + hadTrackedMount +
                     " HadPending=" + hadPending +
                     " HadCreateAgentRuntime=" + hadCreateAgentRuntime +
+                    " HadAuthoritativeMaterializedEntryId=" + hadAuthoritativeMaterializedEntryId +
                     " HadAuthoritativeMaterializedObserved=" + hadAuthoritativeMaterializedObserved +
                     " HadStrictTransferState=" + hadStrictTransferState +
                     " HadWatchdogFirstSeen=" + hadWatchdogFirstSeen +
@@ -5990,6 +5997,26 @@ namespace CoopSpectator.MissionBehaviors
                 _clientAuthoritativeMaterializedEntryObservedAgentIndices.Contains(createAgent.AgentIndex);
             state.LastObservedUtc = DateTime.UtcNow;
 
+            if (TryResolveClientAuthoritativeMaterializedEntryId(createAgent.AgentIndex, out string authoritativeEntryId))
+            {
+                state.EntryId = authoritativeEntryId;
+                state.ResolutionState = "authoritative-materialized-entry";
+                state.ResolutionSource = source ?? "unknown";
+                _materializedArmyEntryIdByAgentIndex[createAgent.AgentIndex] = authoritativeEntryId;
+                _exactNativeClientVisualOverlayEntryIdByAgentIndex[createAgent.AgentIndex] = authoritativeEntryId;
+
+                BattleSideEnum authoritativeSide = ResolveCreateAgentPayloadBattleSide(createAgent.TeamIndex);
+                if (authoritativeSide != BattleSideEnum.None)
+                    _materializedArmySideByAgentIndex[createAgent.AgentIndex] = authoritativeSide;
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: registered client create-agent authoritative entry mapping. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " EntryId=" + authoritativeEntryId +
+                    " Source=" + (source ?? "unknown"));
+                return;
+            }
+
             if (!ExactCreateAgentCorridorDiagnostics.TryResolveClientCreateAgentPayloadEntryId(
                     createAgent,
                     out string entryId,
@@ -6004,6 +6031,18 @@ namespace CoopSpectator.MissionBehaviors
                 string.Equals(resolutionState, "resolved-layout", StringComparison.Ordinal);
             if (!payloadResolutionStrongEnough || string.IsNullOrWhiteSpace(entryId))
                 return;
+
+            if (ShouldRequireExplicitMaterializationEntryId(createAgent, out string explicitIdentityReason))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: suppressed heuristic client create-agent payload entry mapping until explicit materialization token arrives. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " CandidateEntryId=" + entryId +
+                    " ResolutionState=" + (resolutionState ?? "unknown") +
+                    " Reason=" + (explicitIdentityReason ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+                return;
+            }
 
             state.EntryId = entryId;
             state.ResolutionState = resolutionState ?? "resolved";
@@ -6295,6 +6334,14 @@ namespace CoopSpectator.MissionBehaviors
                 mappings,
                 snapshot.EntryCount,
                 source ?? snapshot.Source ?? "unknown");
+
+            Mission mission = Mission.Current;
+            if (mission != null)
+            {
+                BattleMapSpawnHandoffPatch.TryProcessDeferredClientCreateAgentMessages(
+                    mission,
+                    (source ?? snapshot.Source ?? "unknown") + " authoritative-materialized-entry");
+            }
         }
 
         private static void ApplyClientAuthoritativeMaterializedAgentEntrySnapshot(
@@ -6337,6 +6384,7 @@ namespace CoopSpectator.MissionBehaviors
 
                 _materializedArmyEntryIdByAgentIndex.TryGetValue(agentIndex, out string previousTrackedEntryId);
                 _materializedArmyEntryIdByAgentIndex[agentIndex] = entryId;
+                _clientAuthoritativeMaterializedEntryIdByAgentIndex[agentIndex] = entryId;
                 _exactNativeClientVisualOverlayEntryIdByAgentIndex[agentIndex] = entryId;
                 _clientAuthoritativeMaterializedEntryObservedAgentIndices.Add(agentIndex);
                 if (!string.IsNullOrWhiteSpace(previousTrackedEntryId) &&
@@ -9034,6 +9082,13 @@ namespace CoopSpectator.MissionBehaviors
             EnsureClientBattleSnapshotFreshForMission(agent.Mission ?? Mission.Current, "ResolveClientExactCampaignVisualOverlayEntryId");
             RefreshClientExactCampaignVisualOverlayAgentIndexState(agent, "ResolveClientExactCampaignVisualOverlayEntryId", logRefresh: true);
 
+            if (TryResolveClientAuthoritativeMaterializedEntryId(agent.Index, out string authoritativeEntryId))
+            {
+                _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = authoritativeEntryId;
+                _materializedArmyEntryIdByAgentIndex[agent.Index] = authoritativeEntryId;
+                return authoritativeEntryId;
+            }
+
             if (_exactNativeClientVisualOverlayEntryIdByAgentIndex.TryGetValue(agent.Index, out string cachedEntryId) &&
                 !string.IsNullOrWhiteSpace(cachedEntryId))
             {
@@ -9082,6 +9137,92 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return null;
+        }
+
+        internal static bool TryResolveClientAuthoritativeMaterializedEntryId(int agentIndex, out string entryId)
+        {
+            entryId = null;
+            if (agentIndex < 0)
+                return false;
+
+            if (!_clientAuthoritativeMaterializedEntryIdByAgentIndex.TryGetValue(agentIndex, out string authoritativeEntryId) ||
+                string.IsNullOrWhiteSpace(authoritativeEntryId))
+            {
+                return false;
+            }
+
+            if (BattleSnapshotRuntimeState.GetEntryState(authoritativeEntryId) == null)
+            {
+                _clientAuthoritativeMaterializedEntryIdByAgentIndex.Remove(agentIndex);
+                _clientAuthoritativeMaterializedEntryObservedAgentIndices.Remove(agentIndex);
+                return false;
+            }
+
+            entryId = authoritativeEntryId;
+            return true;
+        }
+
+        internal static bool ShouldRequireExplicitMaterializationEntryId(CreateAgent createAgent, out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer || createAgent?.Character == null)
+                return false;
+
+            if (TryResolveClientAuthoritativeMaterializedEntryId(createAgent.AgentIndex, out string authoritativeEntryId))
+            {
+                reason = "authoritative-materialized-entry-present:" + authoritativeEntryId;
+                return false;
+            }
+
+            if (!HasCreateAgentMountPayload(createAgent))
+                return false;
+
+            string payloadCharacterId = createAgent.Character.StringId ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(payloadCharacterId) ||
+                createAgent.Character.IsHero ||
+                payloadCharacterId.EndsWith("_hero", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            if (runtimeState?.EntriesById == null || runtimeState.EntriesById.Count == 0)
+                return false;
+
+            BattleSideEnum payloadSide = ResolveCreateAgentPayloadBattleSide(createAgent.TeamIndex);
+            if (payloadSide == BattleSideEnum.None)
+                return false;
+
+            List<string> matchingEntryIds = runtimeState.EntriesById.Values
+                .Where(entryState =>
+                    entryState != null &&
+                    DoesClientVisualOverlayEntryMatchAgentSide(entryState, payloadSide) &&
+                    DoesClientVisualOverlayEntryMatchAgentTroop(entryState, payloadCharacterId))
+                .Select(entryState => entryState.EntryId)
+                .Where(candidateEntryId => !string.IsNullOrWhiteSpace(candidateEntryId))
+                .Distinct(StringComparer.Ordinal)
+                .Take(5)
+                .ToList();
+            if (matchingEntryIds.Count <= 1)
+                return false;
+
+            reason =
+                "shared-surrogate-shell" +
+                " PayloadCharacterId=" + payloadCharacterId +
+                " PayloadSide=" + payloadSide +
+                " CandidateCount=" + matchingEntryIds.Count +
+                " EntrySample=[" + string.Join(" | ", matchingEntryIds) + "]";
+            return true;
+        }
+
+        private static bool HasCreateAgentMountPayload(CreateAgent createAgent)
+        {
+            if (createAgent == null)
+                return false;
+
+            return createAgent.MountAgentIndex >= 0 ||
+                   createAgent.SpawnEquipment?[EquipmentIndex.Horse].Item != null ||
+                   createAgent.SpawnEquipment?[EquipmentIndex.HorseHarness].Item != null;
         }
 
         private static bool IsMissionPeerAgentEligibleForClientExactVisualOverlay(Agent agent)
@@ -11204,6 +11345,7 @@ namespace CoopSpectator.MissionBehaviors
                 _materializedArmyEntryIdByAgentIndex.Clear();
                 _materializedArmySideByAgentIndex.Clear();
                 _materializedAgentInstanceByIndex.Clear();
+                _clientAuthoritativeMaterializedEntryIdByAgentIndex.Clear();
                 _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
                 _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
                 _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = 0;
@@ -14079,6 +14221,7 @@ namespace CoopSpectator.MissionBehaviors
             _materializedArmyEntryIdByAgentIndex.Remove(agentIndex);
             _materializedArmySideByAgentIndex.Remove(agentIndex);
             _materializedAgentInstanceByIndex.Remove(agentIndex);
+            _clientAuthoritativeMaterializedEntryIdByAgentIndex.Remove(agentIndex);
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Remove(agentIndex);
             _materializedCombatProfilesByAgentIndex.Remove(agentIndex);
             _materializedBattleResultLastHitDebugByVictimAgentIndex.Remove(agentIndex);
@@ -22058,6 +22201,12 @@ namespace CoopSpectator.MissionBehaviors
             {
                 _materializedArmyEntryIdByAgentIndex[targetAgent.Index] = entryId;
                 _materializedArmyEntryIdByAgentIndex.Remove(sourceAgent.Index);
+                if (_clientAuthoritativeMaterializedEntryIdByAgentIndex.TryGetValue(sourceAgent.Index, out string authoritativeEntryId) &&
+                    !string.IsNullOrWhiteSpace(authoritativeEntryId))
+                {
+                    _clientAuthoritativeMaterializedEntryIdByAgentIndex[targetAgent.Index] = authoritativeEntryId;
+                    _clientAuthoritativeMaterializedEntryIdByAgentIndex.Remove(sourceAgent.Index);
+                }
                 if (_clientAuthoritativeMaterializedEntryObservedAgentIndices.Remove(sourceAgent.Index))
                     _clientAuthoritativeMaterializedEntryObservedAgentIndices.Add(targetAgent.Index);
             }
@@ -24942,6 +25091,30 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (TryResolveClientAuthoritativeMaterializedEntryId(createAgent.AgentIndex, out string authoritativeEntryId))
+            {
+                RosterEntryState authoritativeEntryState = BattleSnapshotRuntimeState.GetEntryState(authoritativeEntryId);
+                if (authoritativeEntryState != null && authoritativeEntryState.IsHero && authoritativeEntryState.IsMounted)
+                {
+                    entryState = authoritativeEntryState;
+                    entryId = authoritativeEntryId;
+                    resolutionSource = "authoritative-materialized-entry";
+                    contract = ExactTransferContractBuilder.Build(
+                        entryState,
+                        isPlayerControlledOrigin: false,
+                        teamIndex: createAgent.TeamIndex,
+                        formationIndex: createAgent.FormationIndex);
+                    validation = ExactTransferContractValidator.Validate(contract);
+                    ExactTransferContractRuntimeCache.RegisterClientObservedContract(
+                        contract,
+                        validation,
+                        createAgent.AgentIndex,
+                        createAgent.MountAgentIndex,
+                        "client strict CreateAgent contract resolve: " + resolutionSource);
+                    return true;
+                }
+            }
+
             string payloadCharacterId = createAgent.Character?.StringId;
             if (TryResolveClientStrictExactHeroCreateAgentEntryFromPayloadDiagnostics(
                     createAgent,
@@ -25833,6 +26006,13 @@ namespace CoopSpectator.MissionBehaviors
             if (agent == null)
                 return false;
 
+            if (TryResolveClientAuthoritativeMaterializedEntryId(agent.Index, out string authoritativeEntryId))
+            {
+                _materializedArmyEntryIdByAgentIndex[agent.Index] = authoritativeEntryId;
+                entryId = authoritativeEntryId;
+                return true;
+            }
+
             if (_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string trackedEntryId) &&
                 !string.IsNullOrWhiteSpace(trackedEntryId))
             {
@@ -25848,6 +26028,7 @@ namespace CoopSpectator.MissionBehaviors
                 _materializedArmyEntryIdByAgentIndex.Remove(agent.Index);
                 _materializedArmySideByAgentIndex.Remove(agent.Index);
                 _materializedAgentInstanceByIndex.Remove(agent.Index);
+                _clientAuthoritativeMaterializedEntryIdByAgentIndex.Remove(agent.Index);
                 _clientAuthoritativeMaterializedEntryObservedAgentIndices.Remove(agent.Index);
                 ClearClientExactCampaignVisualOverlayAgentIndexState(
                     agent.Index,

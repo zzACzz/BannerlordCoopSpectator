@@ -910,6 +910,22 @@ namespace CoopSpectator.Infrastructure
                 };
             }
 
+            if (CoopMissionSpawnLogic.TryResolveClientAuthoritativeMaterializedEntryId(createAgent.AgentIndex, out string authoritativeEntryId))
+            {
+                return new PayloadCandidateResolution
+                {
+                    State = "authoritative-agent-map",
+                    EntryId = authoritativeEntryId,
+                    Summary =
+                        "CandidateResolution={State=authoritative-agent-map" +
+                        ",AgentIndex=" + createAgent.AgentIndex +
+                        ",EntryId=" + authoritativeEntryId +
+                        ",PayloadCharacterId=" + (createAgent.Character?.StringId ?? "null") + "}",
+                    PayloadComparisonSummary =
+                        "PayloadCompare={State=authoritative-agent-map,EntryId=" + authoritativeEntryId + "}"
+                };
+            }
+
             BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
             if (runtimeState?.EntriesById == null || runtimeState.EntriesById.Count == 0)
             {
@@ -1017,6 +1033,26 @@ namespace CoopSpectator.Infrastructure
 
             string payloadComparisonSummary = BuildCandidatePayloadComparisonSummary(bestCandidate.EntryState, createAgent);
             string sample = string.Join(", ", ordered.Take(4).Select(FormatCandidate));
+            if (CoopMissionSpawnLogic.ShouldRequireExplicitMaterializationEntryId(createAgent, out string explicitIdentityReason))
+            {
+                return new PayloadCandidateResolution
+                {
+                    State = "explicit-token-required",
+                    EntryId = null,
+                    PayloadComparisonSummary = payloadComparisonSummary,
+                    Summary =
+                        "CandidateResolution={State=explicit-token-required" +
+                        ",PayloadCharacterId=" + (payloadCharacterId ?? "null") +
+                        ",PayloadSide=" + payloadSide +
+                        ",PayloadMounted=" + payloadMounted +
+                        ",CandidateCount=" + candidates.Count +
+                        ",BestEntryId=" + (bestCandidate.EntryState.EntryId ?? "null") +
+                        ",BestScore=" + bestCandidate.Score +
+                        ",Reason=" + (explicitIdentityReason ?? "unknown") +
+                        ",Candidates=[" + sample + "]}"
+                };
+            }
+
             return new PayloadCandidateResolution
             {
                 State = state,

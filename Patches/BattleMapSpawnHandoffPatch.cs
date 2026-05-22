@@ -1550,6 +1550,27 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (safeStringIdCreateAgentPathActive &&
+                    snapshotReadyForExactHeroHandoff &&
+                    !IsUnsafeImmediateClientAgentBaselineMaterializationActive &&
+                    CoopMissionSpawnLogic.ShouldRequireExplicitMaterializationEntryId(
+                        createAgent,
+                        out string explicitIdentityReason))
+                {
+                    RegisterDeferredClientCreateAgentPayload(createAgent, explicitIdentityReason);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client CreateAgent until authoritative materialization token arrives. " +
+                        "AgentIndex=" + createAgent.AgentIndex +
+                        " MountAgentIndex=" + createAgent.MountAgentIndex +
+                        " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                        " Reason=" + (explicitIdentityReason ?? "unknown"));
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientCreateAgentBypass(
+                        createAgent,
+                        "deferred-create-agent-explicit-token-pending:" + (explicitIdentityReason ?? "unknown"),
+                        "battle-map handoff CreateAgent prefix");
+                    return false;
+                }
+
                 if (snapshotReadyForExactHeroHandoff)
                 {
                     if (TryHandleStrictExactHeroCreateAgentViaContract(
@@ -2968,13 +2989,43 @@ namespace CoopSpectator.Patches
                     _missionNetworkComponentHandleServerEventCreateAgentMethod.Invoke(
                         missionNetworkComponent,
                         new object[] { createAgent });
-                    RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: replayed deferred client CreateAgent after battle snapshot apply. " +
-                        "AgentIndex=" + createAgent.AgentIndex +
-                        " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
-                        " Attempts=" + deferredPayload.Attempts +
-                        " Source=" + (source ?? "unknown"));
+                    Agent createdAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(createAgent.AgentIndex, canBeNull: true);
+                    if (createdAgent != null && createdAgent.IsActive())
+                    {
+                        RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: replayed deferred client CreateAgent after battle snapshot apply. " +
+                            "AgentIndex=" + createAgent.AgentIndex +
+                            " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " Source=" + (source ?? "unknown"));
+                    }
+                    else if (CoopMissionSpawnLogic.ShouldRequireExplicitMaterializationEntryId(
+                                 createAgent,
+                                 out string explicitIdentityReason))
+                    {
+                        deferredPayload.DeferralReason = explicitIdentityReason;
+                        if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                        {
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: deferred client CreateAgent replay still waiting for authoritative materialization token. " +
+                                "AgentIndex=" + createAgent.AgentIndex +
+                                " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                                " Attempts=" + deferredPayload.Attempts +
+                                " Reason=" + (explicitIdentityReason ?? "unknown") +
+                                " Source=" + (source ?? "unknown"));
+                        }
+                    }
+                    else
+                    {
+                        RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: replayed deferred client CreateAgent without explicit deferral follow-up. " +
+                            "AgentIndex=" + createAgent.AgentIndex +
+                            " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " Source=" + (source ?? "unknown"));
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -5232,6 +5283,20 @@ namespace CoopSpectator.Patches
 
             if (createAgent == null || createAgent.MountAgentIndex < 0)
                 return false;
+
+            if (CoopMissionSpawnLogic.TryResolveClientAuthoritativeMaterializedEntryId(createAgent.AgentIndex, out string authoritativeEntryId))
+            {
+                RosterEntryState authoritativeEntryState = BattleSnapshotRuntimeState.GetEntryState(authoritativeEntryId);
+                if (authoritativeEntryState != null &&
+                    authoritativeEntryState.IsHero &&
+                    authoritativeEntryState.IsMounted)
+                {
+                    entryId = authoritativeEntryId;
+                    entryState = authoritativeEntryState;
+                    resolutionSource = "authoritative-materialized-entry";
+                    return true;
+                }
+            }
 
             if (!ExactCreateAgentCorridorDiagnostics.TryResolveClientCreateAgentPayloadEntryId(
                     createAgent,

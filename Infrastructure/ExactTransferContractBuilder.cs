@@ -72,11 +72,16 @@ namespace CoopSpectator.Infrastructure
             RosterEntryState entryState,
             bool isPlayerControlledOrigin)
         {
+            string surrogateShellCharacterId =
+                BattleSnapshotRuntimeState.TryResolveSurrogateShellCharacterId(entryState.EntryId) ??
+                entryState.SpawnTemplateId ??
+                entryState.CharacterId;
+
             identity.CampaignCharacterId = entryState.CharacterId;
             identity.CampaignHeroStringId = entryState.HeroId;
-            identity.NativeMultiplayerCharacterId =
-                BattleSnapshotRuntimeState.TryResolveCharacterObject(entryState.EntryId)?.StringId ??
-                entryState.CharacterId;
+            identity.MaterializationEntryIdToken = entryState.EntryId;
+            identity.SurrogateShellCharacterId = surrogateShellCharacterId;
+            identity.NativeMultiplayerCharacterId = surrogateShellCharacterId;
             identity.IsHero = entryState.IsHero || !string.IsNullOrWhiteSpace(entryState.HeroId);
             identity.IsMainHero = string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase);
             identity.IsLord = !string.IsNullOrWhiteSpace(entryState.HeroOccupationId) &&

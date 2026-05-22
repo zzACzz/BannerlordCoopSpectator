@@ -575,6 +575,19 @@ namespace CoopSpectator.Infrastructure
             return TryResolveMissionSafeFallbackCharacter(entryId, entry, spawnTemplateId);
         }
 
+        public static string TryResolveSurrogateShellCharacterId(string entryId)
+        {
+            BattleRosterEntryProjectionState entry = GetEntry(entryId);
+            if (entry == null)
+                return null;
+
+            string spawnTemplateId = ResolveSpawnTemplateId(entry);
+            if (!string.IsNullOrWhiteSpace(spawnTemplateId))
+                return spawnTemplateId;
+
+            return TryResolveMissionSafeFallbackCharacterId(entry, spawnTemplateId);
+        }
+
         private static BasicCharacterObject TryResolveBasicCharacterObject(string characterId)
         {
             if (string.IsNullOrWhiteSpace(characterId))

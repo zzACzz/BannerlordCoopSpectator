@@ -35,6 +35,8 @@ namespace CoopSpectator.Infrastructure
     {
         public string CampaignCharacterId { get; set; }
         public string CampaignHeroStringId { get; set; }
+        public string MaterializationEntryIdToken { get; set; }
+        public string SurrogateShellCharacterId { get; set; }
         public string NativeMultiplayerCharacterId { get; set; }
         public bool IsHero { get; set; }
         public bool IsMainHero { get; set; }

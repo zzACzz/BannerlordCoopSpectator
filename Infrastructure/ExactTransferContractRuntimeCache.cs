@@ -371,6 +371,8 @@ namespace CoopSpectator.Infrastructure
                     "ExactTransferContract={StrictHeroPath=" + contract.SpawnPolicy?.UseStrictExactHeroPath +
                     ",RequirePreSpawnInjection=" + contract.SpawnPolicy?.RequirePreSpawnInjection +
                     ",ForbidSurrogatePrimaryMaterialization=" + contract.SpawnPolicy?.ForbidSurrogatePrimaryMaterialization +
+                    ",MaterializationToken=" + (contract.Identity?.MaterializationEntryIdToken ?? "null") +
+                    ",SurrogateShellId=" + (contract.Identity?.SurrogateShellCharacterId ?? "null") +
                     ",NativeCharacterId=" + (contract.Identity?.NativeMultiplayerCharacterId ?? "null") +
                     ",Mounted=" + contract.Mount?.IsMounted +
                     ",ExactBody=" + contract.Body?.HasExactBodyProperties +
