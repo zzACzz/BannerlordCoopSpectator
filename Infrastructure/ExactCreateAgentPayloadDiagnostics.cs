@@ -113,8 +113,12 @@ namespace CoopSpectator.Infrastructure
         };
 
         private static readonly bool DiagnosticsEnabled = true;
+        // The hash-sweep mode was useful for local diagnostics, but it is not a
+        // production-safe server policy. It intentionally mixes partial create-time
+        // payload profiles across otherwise similar troops, which leads to unstable
+        // hybrid equipment states during long battles and reinforcement waves.
         private static readonly ExactCreateAgentPayloadDiagnosticMode ActiveMode =
-            ExactCreateAgentPayloadDiagnosticMode.SweepByEntryHash;
+            ExactCreateAgentPayloadDiagnosticMode.SingleProfile;
         private static readonly ExactCreateAgentPayloadDiagnosticProfile SingleProfile =
             ExactCreateAgentPayloadDiagnosticProfile.FullExact;
 

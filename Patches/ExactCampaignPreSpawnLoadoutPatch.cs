@@ -19,6 +19,7 @@ namespace CoopSpectator.Patches
         public static void Apply(Harmony harmony)
         {
             IsOperationalOnCurrentProcess = false;
+            LoggedEntryIds.Clear();
             EquipmentInjectedByEntryId.Clear();
             PayloadDiagnosticByEntryId.Clear();
             try
