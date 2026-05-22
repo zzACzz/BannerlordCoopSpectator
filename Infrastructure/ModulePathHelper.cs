@@ -12,6 +12,7 @@ namespace CoopSpectator.Infrastructure
     public static class ModulePathHelper
     {
         private const string CurrentModuleId = "CoopSpectator";
+        private const string DedicatedCurrentModuleId = "CoopSpectatorDedicated";
         private const string ExplicitGameRootEnvVar = "BANNERLORD_GAME_ROOT";
         private const string BannerlordGameFolderName = "Mount & Blade II Bannerlord";
         private const string DedicatedServerFolderName = "Mount & Blade II Dedicated Server";
@@ -100,10 +101,27 @@ namespace CoopSpectator.Infrastructure
                 if (!string.IsNullOrEmpty(binDir))
                 {
                     string currentModuleRoot = Path.GetFullPath(Path.Combine(binDir, "..", ".."));
-                    if (string.Equals(moduleId, CurrentModuleId, StringComparison.OrdinalIgnoreCase))
+                    string currentModuleDirectoryName = Path.GetFileName(
+                        currentModuleRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                    bool currentModuleRequest =
+                        string.Equals(moduleId, currentModuleDirectoryName, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(moduleId, CurrentModuleId, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(moduleId, DedicatedCurrentModuleId, StringComparison.OrdinalIgnoreCase);
+
+                    if (currentModuleRequest)
                     {
                         if (Directory.Exists(currentModuleRoot))
+                        {
+                            if (!string.Equals(moduleId, currentModuleDirectoryName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                ModLogger.Info(
+                                    "ModulePathHelper: resolved module root via current dedicated/client module alias. " +
+                                    "requestedModuleId=" + moduleId +
+                                    " currentModuleRoot=" + currentModuleRoot +
+                                    " currentModuleDirectoryName=" + (currentModuleDirectoryName ?? "null") + ".");
+                            }
                             return currentModuleRoot;
+                        }
                     }
                     else
                     {

@@ -1756,20 +1756,24 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         battleRewardModel.CalculateRenownGain(
                             mainPartyState.PartyBase,
                             projection.WinnerRenownValue,
-                            projection.ContributionShare).ResultNumber * victoryFactor);
+                            projection.ContributionShare,
+                            victoryFactor,
+                            includeDescriptions: false).ResultNumber);
 
                     projection.ProjectedInfluence = Math.Max(
                         0f,
                         battleRewardModel.CalculateInfluenceGain(
                             mainPartyState.PartyBase,
                             projection.WinnerInfluenceValue,
-                            projection.ContributionShare).ResultNumber * victoryFactor);
+                            projection.ContributionShare,
+                            victoryFactor,
+                            includeDescriptions: false).ResultNumber);
 
                     projection.ProjectedMoraleChange = battleRewardModel.CalculateMoraleGainVictory(
                         mainPartyState.PartyBase,
                         projection.WinnerRenownValue,
                         projection.ContributionShare,
-                        battle).ResultNumber;
+                        includeDescriptions: false).ResultNumber;
 
                     float goldShare = 0f;
                     foreach (KeyValuePair<MapEventParty, float> chance in battleRewardModel.GetLootGoldChances(winnerMapSide.Parties))
@@ -2627,11 +2631,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 mainPartyMapEventParty.GainedRenown > 0.001f ||
                 mainPartyMapEventParty.GainedInfluence > 0.001f ||
                 mainPartyMapEventParty.PlunderedGold > 0 ||
-                Math.Abs(mainPartyMapEventParty.MoraleChange) > 0.001f;
+                Math.Abs(mainPartyMapEventParty.GainedMorale) > 0.001f;
 
             bool hasCommittedLoserRewards =
                 mainPartyMapEventParty.GoldLost > 0 ||
-                Math.Abs(mainPartyMapEventParty.MoraleChange) > 0.001f;
+                Math.Abs(mainPartyMapEventParty.GainedMorale) > 0.001f;
 
             bool hasCommittedAftermath = projection.MainPartyOnWinnerSide
                 ? hasCommittedWinnerRewards
@@ -2643,7 +2647,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             projection.Source = "committed-map-event-party";
             projection.ProjectedRenown = Math.Max(0f, mainPartyMapEventParty.GainedRenown);
             projection.ProjectedInfluence = Math.Max(0f, mainPartyMapEventParty.GainedInfluence);
-            projection.ProjectedMoraleChange = mainPartyMapEventParty.MoraleChange;
+            projection.ProjectedMoraleChange = mainPartyMapEventParty.GainedMorale;
             projection.ProjectedGoldGain = Math.Max(0, mainPartyMapEventParty.PlunderedGold);
             projection.ProjectedGoldLoss = Math.Max(0, mainPartyMapEventParty.GoldLost);
             return true;

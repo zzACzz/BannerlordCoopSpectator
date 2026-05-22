@@ -16,6 +16,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const int DefaultPort = 7210; // Офіційний UDP-порт дедик-сервера за замовчуванням
         private const string DedicatedServerFolderName = "Mount & Blade II Dedicated Server";
         private const string ExplicitGameRootEnvVar = "BANNERLORD_GAME_ROOT";
+        private const string DisableDedicatedWebPanelPatchEnvVar = "COOP_DISABLE_DEDICATED_WEBPANEL_PATCH";
         private const string ServerBinRelativePath = @"bin\Win64_Shipping_Server";
         /// <summary>Єдиний exe для custom dedicated server у стандартній інсталі: DedicatedCustomServer.Starter.exe (core exe в цій папці немає).</summary>
         private static readonly string[] ExeCandidates = new[] { "DedicatedCustomServer.Starter.exe" };
@@ -971,9 +972,11 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                     return;
 
                 startInfo.EnvironmentVariables[ExplicitGameRootEnvVar] = gameRoot;
+                startInfo.EnvironmentVariables[DisableDedicatedWebPanelPatchEnvVar] = "1";
                 ModLogger.Info(
                     "DedicatedHelper [before Start] applied shared launch environment. " +
-                    ExplicitGameRootEnvVar + "=" + gameRoot + ".");
+                    ExplicitGameRootEnvVar + "=" + gameRoot + " " +
+                    DisableDedicatedWebPanelPatchEnvVar + "=1.");
             }
             catch (Exception ex)
             {

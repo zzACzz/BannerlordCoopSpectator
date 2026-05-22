@@ -10997,6 +10997,8 @@ namespace CoopSpectator.MissionBehaviors
                 if (team == null || team.Side == BattleSideEnum.None || ReferenceEquals(team, mission.SpectatorTeam))
                     continue;
 
+                bool shouldSkipTeamAutoDelegation = ShouldSkipBattlePhaseTeamAutoDelegation(mission, team);
+
                 foreach (Formation formation in team.FormationsIncludingSpecialAndEmpty)
                 {
                     if (formation == null || formation.CountOfUnits <= 0)
@@ -11023,15 +11025,25 @@ namespace CoopSpectator.MissionBehaviors
                     }
                     else if (shouldRunReleasePass)
                     {
-                        // Release/pulse must also cover formations that contain the player.
-                        // They are intentionally skipped during PreBattleHold, so BattleActive
-                        // cannot rely on the held-key set alone.
                         bool wasHeld = _battlePhaseHeldFormationKeys.Remove(formationKey);
                         _battlePhaseHeldFormationUnitCounts.Remove(formationKey);
+                        bool preservePlayerFormationControl = ShouldPreserveBattlePhasePlayerFormationControl(mission, team, formation);
+                        bool issueAutoAttackWithoutAiDelegation = preservePlayerFormationControl &&
+                            ShouldApplyBattlePhaseAutoAttackWithoutAiDelegation(mission, team, formation);
                         formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
                         formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
-                        formation.SetControlledByAI(true, true);
-                        int pulsedFormationAgents = TryPulseFormationAiEngage(formation, team);
+                        int pulsedFormationAgents = 0;
+                        bool delegatedFormationToAi = false;
+                        if (!preservePlayerFormationControl)
+                        {
+                            formation.SetControlledByAI(true, true);
+                            delegatedFormationToAi = true;
+                            pulsedFormationAgents = TryPulseFormationAiEngage(formation, team);
+                        }
+                        else if (issueAutoAttackWithoutAiDelegation)
+                        {
+                            formation.SetControlledByAI(false, false);
+                        }
                         pulsedAgentCount += pulsedFormationAgents;
                         affectedFormationCount++;
 
@@ -11044,6 +11056,9 @@ namespace CoopSpectator.MissionBehaviors
                             " Formation=" + formation.FormationIndex +
                             " UnitCount=" + formation.CountOfUnits +
                             " WasHeld=" + wasHeld +
+                            " PreservedPlayerFormationControl=" + preservePlayerFormationControl +
+                            " AutoAttackWithoutAiDelegation=" + issueAutoAttackWithoutAiDelegation +
+                            " DelegatedFormationToAI=" + delegatedFormationToAi +
                             " HasPlayerControlledTroop=" + hasPlayerControlledTroop +
                             " IsPlayerTroopInFormation=" + isPlayerTroopInFormation +
                             " HasPlayerOwner=" + (playerOwner != null) +
@@ -11054,7 +11069,8 @@ namespace CoopSpectator.MissionBehaviors
 
                 if (shouldReleaseAndPulse &&
                     team.HasTeamAi &&
-                    team.HasAnyEnemyTeamsWithAgents(false))
+                    team.HasAnyEnemyTeamsWithAgents(false) &&
+                    !shouldSkipTeamAutoDelegation)
                 {
                     team.ResetTactic();
                     team.DelegateCommandToAI();
@@ -11095,10 +11111,30 @@ namespace CoopSpectator.MissionBehaviors
                 " Source=" + (source ?? "unknown"));
         }
 
-        private static bool ShouldSkipBattlePhaseFormationHold(Mission mission, Team team, Formation formation)
+        private static bool ShouldSkipBattlePhaseTeamAutoDelegation(Mission mission, Team team)
+        {
+            if (mission == null || team == null)
+                return false;
+
+            if (team.IsPlayerGeneral &&
+                team.PlayerOrderController?.Owner != null)
+            {
+                return true;
+            }
+
+            foreach (Formation formation in team.FormationsIncludingSpecialAndEmpty)
+            {
+                if (ShouldPreserveBattlePhasePlayerFormationControl(mission, team, formation))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool ShouldPreserveBattlePhasePlayerFormationControl(Mission mission, Team team, Formation formation)
         {
             if (formation == null)
-                return true;
+                return false;
 
             if (team != null &&
                 team.IsPlayerGeneral &&
@@ -11108,6 +11144,28 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return IsFormationOccupiedByControlledPeer(mission, team, formation);
+        }
+
+        private static bool ShouldApplyBattlePhaseAutoAttackWithoutAiDelegation(Mission mission, Team team, Formation formation)
+        {
+            if (mission == null || team == null || formation == null)
+                return false;
+
+            if (team.IsPlayerGeneral &&
+                team.PlayerOrderController?.Owner != null)
+            {
+                return false;
+            }
+
+            return IsFormationOccupiedByControlledPeer(mission, team, formation);
+        }
+
+        private static bool ShouldSkipBattlePhaseFormationHold(Mission mission, Team team, Formation formation)
+        {
+            if (formation == null)
+                return true;
+
+            return ShouldPreserveBattlePhasePlayerFormationControl(mission, team, formation);
         }
 
         private static bool IsFormationOccupiedByControlledPeer(Mission mission, Team team, Formation formation)
@@ -11586,13 +11644,25 @@ namespace CoopSpectator.MissionBehaviors
                 if (formation == null || formation.CountOfUnits <= 0)
                     continue;
 
+                bool preservePlayerFormationControl = ShouldPreserveBattlePhasePlayerFormationControl(team.Mission, team, formation);
+                bool issueAutoAttackWithoutAiDelegation = preservePlayerFormationControl &&
+                    ShouldApplyBattlePhaseAutoAttackWithoutAiDelegation(team.Mission, team, formation);
                 formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
                 formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
-                formation.SetControlledByAI(true, true);
-                pulsedAgentCount += TryPulseFormationAiEngage(formation, team);
+                if (!preservePlayerFormationControl)
+                {
+                    formation.SetControlledByAI(true, true);
+                    pulsedAgentCount += TryPulseFormationAiEngage(formation, team);
+                }
+                else if (issueAutoAttackWithoutAiDelegation)
+                {
+                    formation.SetControlledByAI(false, false);
+                }
             }
 
-            if (team.HasTeamAi && team.HasAnyEnemyTeamsWithAgents(false))
+            if (team.HasTeamAi &&
+                team.HasAnyEnemyTeamsWithAgents(false) &&
+                !ShouldSkipBattlePhaseTeamAutoDelegation(team.Mission, team))
             {
                 team.ResetTactic();
                 team.DelegateCommandToAI();
@@ -15160,6 +15230,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             bool applied = false;
+            bool lowLevelExactAgentStatsActive = CoopCampaignDerivedAgentStatCalculateModel.IsActiveForMission(mission);
 
             var equipment = agent.Equipment;
             WeaponComponentData primaryWeapon;
@@ -15173,11 +15244,19 @@ namespace CoopSpectator.MissionBehaviors
             int desiredRelevantSkill = TryGetCombatProfileSkillValue(profile, relevantSkill, templateRelevantSkill);
 
             bool suppressApproximateHeroRangedBallistics = ShouldSuppressApproximateHeroRangedBallistics(profile, agent, primaryWeapon);
+            string relevantSkillId = relevantSkill?.StringId ?? string.Empty;
+            bool exactHeroPersonalProfileActive = lowLevelExactAgentStatsActive && IsHeroProfileEligibleForExactPersonalPerks(profile);
+            bool suppressApproximateExactHeroWeaponSpeedAdjustments = exactHeroPersonalProfileActive &&
+                (string.Equals(relevantSkillId, "OneHanded", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(relevantSkillId, "TwoHanded", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(relevantSkillId, "Polearm", StringComparison.OrdinalIgnoreCase));
+            bool suppressApproximateExactHeroMovementAdjustments = exactHeroPersonalProfileActive;
 
             SetDrivenPropertyBaselineContext(profile, agent, isMountContext: false);
             try
             {
-                if (TryApplyPrimaryWeaponSkillDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill))
+                if (!suppressApproximateExactHeroWeaponSpeedAdjustments &&
+                    TryApplyPrimaryWeaponSkillDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill))
                 {
                     applied = true;
                     CountMaterializedCombatProfileApply(profile, "weapon-skill", ref profile.CountedWeaponSkillAdjustment);
@@ -15202,13 +15281,24 @@ namespace CoopSpectator.MissionBehaviors
                 if (TryApplyLoadoutAttributeDrivenStats(agent, profile, agentDrivenProperties))
                     applied = true;
 
-                if (TryApplyEnduranceDrivenStats(agent, profile, agentDrivenProperties))
+                if (!suppressApproximateExactHeroMovementAdjustments &&
+                    TryApplyEnduranceDrivenStats(agent, profile, agentDrivenProperties))
                     applied = true;
 
-                if (TryApplyPerkDrivenStats(agent, profile, agentDrivenProperties, primaryWeapon, relevantSkill))
+                if (TryApplyPerkDrivenStats(
+                        agent,
+                        profile,
+                        agentDrivenProperties,
+                        primaryWeapon,
+                        relevantSkill,
+                        suppressApproximateMovementAdjustments: suppressApproximateExactHeroMovementAdjustments))
                     applied = true;
 
-                if (TryApplyPartyModifierDrivenStats(agent, profile, agentDrivenProperties))
+                if (TryApplyPartyModifierDrivenStats(
+                        agent,
+                        profile,
+                        agentDrivenProperties,
+                        suppressApproximateMovementAdjustments: suppressApproximateExactHeroMovementAdjustments))
                     applied = true;
 
                 if (agent.HasMount || agent.MountAgent != null)
@@ -15220,6 +15310,7 @@ namespace CoopSpectator.MissionBehaviors
                             agentDrivenProperties,
                             templateRiding,
                             desiredRiding,
+                            includeSpeedAdjustments: !suppressApproximateExactHeroWeaponSpeedAdjustments,
                             includeAccuracyAdjustments: !suppressApproximateHeroRangedBallistics))
                     {
                         applied = true;
@@ -15477,7 +15568,8 @@ namespace CoopSpectator.MissionBehaviors
             MaterializedCombatProfileRuntimeState profile,
             AgentDrivenProperties agentDrivenProperties,
             WeaponComponentData primaryWeapon,
-            SkillObject relevantSkill)
+            SkillObject relevantSkill,
+            bool suppressApproximateMovementAdjustments = false)
         {
             if (agent == null || profile == null || agentDrivenProperties == null || profile.PerkIds == null || profile.PerkIds.Count == 0)
                 return false;
@@ -15519,7 +15611,10 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (profile.PerkAthleticsCount > 0 && !agent.IsMount && !(agent.HasMount || agent.MountAgent != null))
+            if (!suppressApproximateMovementAdjustments &&
+                profile.PerkAthleticsCount > 0 &&
+                !agent.IsMount &&
+                !(agent.HasMount || agent.MountAgent != null))
             {
                 if (TryApplyAthleticsPerkDrivenStats(agentDrivenProperties, profile.PerkAthleticsCount))
                 {
@@ -15528,7 +15623,9 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (profile.PerkRidingCount > 0 && (agent.HasMount || agent.MountAgent != null))
+            if (!suppressApproximateMovementAdjustments &&
+                profile.PerkRidingCount > 0 &&
+                (agent.HasMount || agent.MountAgent != null))
             {
                 if (TryApplyRidingPerkDrivenStats(agentDrivenProperties, profile.PerkRidingCount))
                 {
@@ -15764,7 +15861,8 @@ namespace CoopSpectator.MissionBehaviors
         private static bool TryApplyPartyModifierDrivenStats(
             Agent agent,
             MaterializedCombatProfileRuntimeState profile,
-            AgentDrivenProperties agentDrivenProperties)
+            AgentDrivenProperties agentDrivenProperties,
+            bool suppressApproximateMovementAdjustments = false)
         {
             if (agent == null || profile == null || agentDrivenProperties == null)
                 return false;
@@ -15800,7 +15898,8 @@ namespace CoopSpectator.MissionBehaviors
 
             if (!agent.IsMount)
             {
-                if (TryApplyPartyQuartermasterDrivenStats(agentDrivenProperties, profile))
+                if (!suppressApproximateMovementAdjustments &&
+                    TryApplyPartyQuartermasterDrivenStats(agentDrivenProperties, profile))
                 {
                     applied = true;
                     CountMaterializedCombatProfileApply(profile, "party-quartermaster", ref profile.CountedPartyQuartermasterAdjustment);
@@ -16369,6 +16468,7 @@ namespace CoopSpectator.MissionBehaviors
             AgentDrivenProperties agentDrivenProperties,
             int templateRiding,
             int desiredRiding,
+            bool includeSpeedAdjustments = true,
             bool includeAccuracyAdjustments = true)
         {
             if (desiredRiding <= 0)
@@ -16380,11 +16480,14 @@ namespace CoopSpectator.MissionBehaviors
             float desiredAttributeRiding = desiredRiding * mountRidingFactor;
             applied |= TrySetDrivenProperty(agentDrivenProperties, DrivenProperty.AttributeRiding, desiredAttributeRiding, 0.01f);
 
-            float baseMountedSpeedFactor = ComputeMountedWeaponSpeedFactor(templateRiding);
-            float desiredMountedSpeedFactor = ComputeMountedWeaponSpeedFactor(desiredRiding);
-            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.SwingSpeedMultiplier, baseMountedSpeedFactor, desiredMountedSpeedFactor);
-            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, baseMountedSpeedFactor, desiredMountedSpeedFactor);
-            applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, baseMountedSpeedFactor, desiredMountedSpeedFactor);
+            if (includeSpeedAdjustments)
+            {
+                float baseMountedSpeedFactor = ComputeMountedWeaponSpeedFactor(templateRiding);
+                float desiredMountedSpeedFactor = ComputeMountedWeaponSpeedFactor(desiredRiding);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.SwingSpeedMultiplier, baseMountedSpeedFactor, desiredMountedSpeedFactor);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ThrustOrRangedReadySpeedMultiplier, baseMountedSpeedFactor, desiredMountedSpeedFactor);
+                applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.ReloadSpeed, baseMountedSpeedFactor, desiredMountedSpeedFactor);
+            }
 
             if (includeAccuracyAdjustments)
             {
@@ -16711,9 +16814,20 @@ namespace CoopSpectator.MissionBehaviors
             if (profile == null)
                 return;
 
+            Dictionary<DrivenProperty, float> baselines = isMountContext
+                ? profile.MountDrivenPropertyBaselines
+                : profile.HumanDrivenPropertyBaselines;
             Dictionary<DrivenProperty, float> accumulatedScales = isMountContext
                 ? profile.MountDrivenPropertyAccumulatedScales
                 : profile.HumanDrivenPropertyAccumulatedScales;
+            string signature = GetDrivenPropertyBaselineSignature(agent, isMountContext);
+
+            if (isMountContext)
+                profile.MountDrivenPropertyBaselineSignature = signature;
+            else
+                profile.HumanDrivenPropertyBaselineSignature = signature;
+
+            baselines.Clear();
             accumulatedScales.Clear();
         }
 
@@ -21544,6 +21658,7 @@ namespace CoopSpectator.MissionBehaviors
                     pendingRequest,
                     source + " replace-bot");
                 string formationOwnershipState = NormalizeMaterializedPeerFormationOwnershipAfterReplaceBot(
+                    mission,
                     missionPeer,
                     peer,
                     targetFormation,
@@ -21671,15 +21786,24 @@ namespace CoopSpectator.MissionBehaviors
                     team.GeneralAgent = controlledAgent;
 
                 Formation controlledFormation = controlledAgent.Formation;
+                if (missionPeer.ControlledFormation != null)
+                    missionPeer.ControlledFormation = null;
                 foreach (Formation formation in team.FormationsIncludingEmpty)
                 {
                     if (formation == null || !ReferenceEquals(formation.Team, team))
                         continue;
 
                     SetServerMemberValue(formation, "PlayerOwner", controlledAgent);
-                    bool isControlledFormation = ReferenceEquals(formation, controlledFormation);
-                    SetServerMemberValue(formation, "HasPlayerControlledTroop", isControlledFormation);
-                    SetServerMemberValue(formation, "IsPlayerTroopInFormation", isControlledFormation);
+                    bool isOwnedFormation = formation.CountOfUnits > 0;
+                    SetServerMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
+                    SetServerMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
+                }
+
+                if (controlledFormation != null &&
+                    ReferenceEquals(controlledFormation.Team, team) &&
+                    !ReferenceEquals(controlledFormation.Captain, controlledAgent))
+                {
+                    controlledFormation.Captain = controlledAgent;
                 }
 
                 int controlledBotTotal = 0;
@@ -21752,6 +21876,7 @@ namespace CoopSpectator.MissionBehaviors
         }
 
         private static string NormalizeMaterializedPeerFormationOwnershipAfterReplaceBot(
+            Mission mission,
             MissionPeer missionPeer,
             NetworkCommunicator peer,
             Formation controlledFormation,
@@ -21767,6 +21892,60 @@ namespace CoopSpectator.MissionBehaviors
                 commanderControlState.StartsWith("CommanderControl=general", StringComparison.Ordinal);
             if (commanderOwnsFormation)
                 return "FormationOwnership=general";
+
+            if (ShouldPreserveMaterializedCaptainFormationPresenceDuringPreBattle(mission))
+            {
+                bool appliedFormationPlayerState = TryApplyMaterializedFormationPlayerState(
+                    missionPeer,
+                    controlledFormation,
+                    controlledAgent,
+                    source + " pre-battle-captain");
+                bool appliedSergeantTeamState = TryApplyMaterializedSergeantTeamControlState(
+                    mission,
+                    missionPeer,
+                    controlledFormation,
+                    controlledAgent,
+                    source + " pre-battle-captain");
+
+                missionPeer.ControlledFormation = controlledFormation;
+
+                if (peer != null && peer.IsConnectionActive)
+                {
+                    try
+                    {
+                        Mission.Current?.GetMissionBehavior<MissionScoreboardComponent>()?.PlayerPropertiesChanged(peer);
+                        GameNetwork.BeginBroadcastModuleEvent();
+                        WriteBotsControlledChangeClamped(
+                            peer,
+                            missionPeer.BotsUnderControlAlive,
+                            missionPeer.BotsUnderControlTotal,
+                            source + " pre-battle-captain");
+                        GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: failed to broadcast preserved non-commander pre-battle formation ownership after replace-bot. " +
+                            "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                            " Source=" + (source ?? "unknown") +
+                            " Error=" + ex.Message);
+                    }
+                }
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: preserved non-commander pre-battle formation ownership and server sergeant contract after replace-bot. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Formation=" + (controlledFormation?.FormationIndex.ToString() ?? "null") +
+                    " AppliedFormationPlayerState=" + appliedFormationPlayerState +
+                    " AppliedSergeantTeamState=" + appliedSergeantTeamState +
+                    " ControlledBotsAlive=" + missionPeer.BotsUnderControlAlive +
+                    " ControlledBotsTotal=" + missionPeer.BotsUnderControlTotal +
+                    " Source=" + (source ?? "unknown"));
+                return
+                    "FormationOwnership=pre-battle-sergeant" +
+                    " ControlledBotsAlive=" + missionPeer.BotsUnderControlAlive +
+                    " ControlledBotsTotal=" + missionPeer.BotsUnderControlTotal;
+            }
 
             bool resetFormationPlayerState = TryResetMaterializedFormationPlayerState(
                 missionPeer,
@@ -21810,6 +21989,16 @@ namespace CoopSpectator.MissionBehaviors
                 " ResetFormationPlayerState=" + resetFormationPlayerState +
                 " Source=" + (source ?? "unknown"));
             return "FormationOwnership=none";
+        }
+
+        private static bool ShouldPreserveMaterializedCaptainFormationPresenceDuringPreBattle(Mission mission)
+        {
+            if (mission == null || !GameNetwork.IsServer)
+                return false;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            return currentPhase >= CoopBattlePhase.SideSelection &&
+                currentPhase < CoopBattlePhase.BattleActive;
         }
 
         private static bool DoesPossessedEntryMatchCommanderEntry(string commanderEntryId, string possessedEntryId)
@@ -23673,6 +23862,8 @@ namespace CoopSpectator.MissionBehaviors
                 SetServerMemberValue(formation, "PlayerOwner", null);
                 SetServerMemberValue(formation, "HasPlayerControlledTroop", false);
                 SetServerMemberValue(formation, "IsPlayerTroopInFormation", false);
+                if (ReferenceEquals(formation.Captain, controlledAgent))
+                    formation.Captain = null;
                 formation.SetControlledByAI(true, true);
                 formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
                 if (formation.CountOfUnits > 0)
@@ -23980,6 +24171,12 @@ namespace CoopSpectator.MissionBehaviors
                 if (hadPlayerTroopInFormation && !((GetServerMemberValue(formation, "IsPlayerTroopInFormation") as bool?) ?? true))
                     changed = true;
 
+                if (ReferenceEquals(formation.Captain, controlledAgent))
+                {
+                    formation.Captain = null;
+                    changed = true;
+                }
+
                 bool wasAiControlled = (GetServerMemberValue(formation, "IsAIControlled") as bool?) ?? false;
                 SetServerMemberValue(formation, "IsAIControlled", true);
                 if (!wasAiControlled && ((GetServerMemberValue(formation, "IsAIControlled") as bool?) ?? false))
@@ -24025,6 +24222,208 @@ namespace CoopSpectator.MissionBehaviors
                     "Formation=" + formation.FormationIndex +
                     " MissionPeer=" + (missionPeer?.GetNetworkPeer()?.UserName ?? missionPeer?.GetNetworkPeer()?.Index.ToString() ?? "none") +
                     " AgentIndex=" + controlledAgent.Index +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            return changed;
+        }
+
+        private static bool TryApplyMaterializedFormationPlayerState(
+            MissionPeer missionPeer,
+            Formation formation,
+            Agent controlledAgent,
+            string source)
+        {
+            if (formation == null || controlledAgent == null)
+                return false;
+
+            bool changed = false;
+            try
+            {
+                object playerOwner = GetServerMemberValue(formation, "PlayerOwner");
+                if (!ReferenceEquals(playerOwner, controlledAgent))
+                {
+                    SetServerMemberValue(formation, "PlayerOwner", controlledAgent);
+                    changed = true;
+                }
+
+                bool hasPlayerControlledTroop = (GetServerMemberValue(formation, "HasPlayerControlledTroop") as bool?) ?? false;
+                if (!hasPlayerControlledTroop)
+                {
+                    SetServerMemberValue(formation, "HasPlayerControlledTroop", true);
+                    changed = true;
+                }
+
+                bool isPlayerTroopInFormation = (GetServerMemberValue(formation, "IsPlayerTroopInFormation") as bool?) ?? false;
+                if (!isPlayerTroopInFormation)
+                {
+                    SetServerMemberValue(formation, "IsPlayerTroopInFormation", true);
+                    changed = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: failed to apply materialized formation player state. " +
+                    "Formation=" + formation.FormationIndex +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+            }
+
+            if (changed)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: applied materialized formation player state. " +
+                    "Formation=" + formation.FormationIndex +
+                    " MissionPeer=" + (missionPeer?.GetNetworkPeer()?.UserName ?? missionPeer?.GetNetworkPeer()?.Index.ToString() ?? "none") +
+                    " AgentIndex=" + controlledAgent.Index +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            return changed;
+        }
+
+        private static bool TryApplyMaterializedSergeantTeamControlState(
+            Mission mission,
+            MissionPeer missionPeer,
+            Formation controlledFormation,
+            Agent controlledAgent,
+            string source)
+        {
+            if (mission == null || missionPeer == null || controlledFormation == null || controlledAgent == null)
+                return false;
+
+            Team team = missionPeer.Team ?? controlledAgent.Team ?? controlledFormation.Team;
+            if (team == null || team.Side == BattleSideEnum.None || ReferenceEquals(team, mission.SpectatorTeam))
+                return false;
+
+            bool changed = false;
+            bool demotedFromGeneral = false;
+            try
+            {
+                if (!ReferenceEquals(mission.PlayerTeam, team))
+                {
+                    mission.PlayerTeam = team;
+                    changed = true;
+                }
+
+                demotedFromGeneral = team.IsPlayerGeneral;
+                if (team.IsPlayerGeneral || !team.IsPlayerSergeant)
+                {
+                    team.SetPlayerRole(isPlayerGeneral: false, isPlayerSergeant: true);
+                    changed = true;
+                }
+
+                OrderController playerOrderController = team.PlayerOrderController;
+                if (playerOrderController != null && !ReferenceEquals(playerOrderController.Owner, controlledAgent))
+                {
+                    playerOrderController.Owner = controlledAgent;
+                    changed = true;
+                }
+
+                OrderController agentOrderController = team.GetOrderControllerOf(controlledAgent);
+                if (agentOrderController != null && !ReferenceEquals(agentOrderController.Owner, controlledAgent))
+                {
+                    agentOrderController.Owner = controlledAgent;
+                    changed = true;
+                }
+
+                controlledAgent.SetCanLeadFormationsRemotely(value: false);
+
+                if (!ReferenceEquals(controlledAgent.Formation, controlledFormation))
+                {
+                    controlledAgent.Formation = controlledFormation;
+                    changed = true;
+                }
+
+                if (!ReferenceEquals(controlledFormation.Captain, controlledAgent))
+                {
+                    controlledFormation.Captain = controlledAgent;
+                    changed = true;
+                }
+
+                bool controlledFormationWasAiControlled =
+                    (GetServerMemberValue(controlledFormation, "IsAIControlled") as bool?) ?? true;
+                if (controlledFormationWasAiControlled)
+                {
+                    controlledFormation.SetControlledByAI(false, false);
+                    changed = true;
+                }
+
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (formation == null || !ReferenceEquals(formation.Team, team) || ReferenceEquals(formation, controlledFormation))
+                        continue;
+
+                    object playerOwner = GetServerMemberValue(formation, "PlayerOwner");
+                    bool hasPlayerControlledTroop = (GetServerMemberValue(formation, "HasPlayerControlledTroop") as bool?) ?? false;
+                    bool isPlayerTroopInFormation = (GetServerMemberValue(formation, "IsPlayerTroopInFormation") as bool?) ?? false;
+                    bool shouldClearFormationPlayerState =
+                        demotedFromGeneral ||
+                        ReferenceEquals(playerOwner, controlledAgent) ||
+                        ReferenceEquals(formation.Captain, controlledAgent) ||
+                        hasPlayerControlledTroop ||
+                        isPlayerTroopInFormation;
+                    if (!shouldClearFormationPlayerState)
+                        continue;
+
+                    if (playerOwner != null)
+                    {
+                        SetServerMemberValue(formation, "PlayerOwner", null);
+                        changed = true;
+                    }
+
+                    if (hasPlayerControlledTroop)
+                    {
+                        SetServerMemberValue(formation, "HasPlayerControlledTroop", false);
+                        changed = true;
+                    }
+
+                    if (isPlayerTroopInFormation)
+                    {
+                        SetServerMemberValue(formation, "IsPlayerTroopInFormation", false);
+                        changed = true;
+                    }
+
+                    if (ReferenceEquals(formation.Captain, controlledAgent))
+                    {
+                        formation.Captain = null;
+                        changed = true;
+                    }
+
+                    bool wasAiControlled = (GetServerMemberValue(formation, "IsAIControlled") as bool?) ?? false;
+                    if (!wasAiControlled)
+                    {
+                        formation.SetControlledByAI(true, true);
+                        changed = true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: failed to apply materialized server sergeant team control state. " +
+                    "Formation=" + controlledFormation.FormationIndex +
+                    " MissionPeer=" + (missionPeer.GetNetworkPeer()?.UserName ?? missionPeer.GetNetworkPeer()?.Index.ToString() ?? "none") +
+                    " AgentIndex=" + controlledAgent.Index +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+            }
+
+            if (changed)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: applied materialized server sergeant team control state. " +
+                    "TeamIndex=" + team.TeamIndex +
+                    " Formation=" + controlledFormation.FormationIndex +
+                    " MissionPeer=" + (missionPeer.GetNetworkPeer()?.UserName ?? missionPeer.GetNetworkPeer()?.Index.ToString() ?? "none") +
+                    " AgentIndex=" + controlledAgent.Index +
+                    " DemotedFromGeneral=" + demotedFromGeneral +
+                    " TeamIsPlayerGeneral=" + team.IsPlayerGeneral +
+                    " TeamIsPlayerSergeant=" + team.IsPlayerSergeant +
+                    " FormationCaptainIndex=" + (controlledFormation.Captain?.Index.ToString() ?? "null") +
+                    " PlayerOrderOwnerIndex=" + (team.PlayerOrderController?.Owner?.Index.ToString() ?? "null") +
+                    " AgentOrderOwnerIndex=" + (team.GetOrderControllerOf(controlledAgent)?.Owner?.Index.ToString() ?? "null") +
                     " Source=" + (source ?? "unknown"));
             }
 

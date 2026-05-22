@@ -27,6 +27,7 @@ namespace CoopSpectator
         private const bool EnableBattleShellSuppressionPatch = false;
         private const string FixedAttackerCultureId = "empire";
         private const string FixedDefenderCultureId = "vlandia";
+        private const string DisableDedicatedWebPanelPatchEnvVar = "COOP_DISABLE_DEDICATED_WEBPANEL_PATCH";
 
         private static Harmony _harmony;
         private static bool _hasAppliedFixedTestCultures;
@@ -316,6 +317,8 @@ namespace CoopSpectator
                     TryApplyBattleMapSpawnHandoffPatch();
                     TryApplyLateJoinPeerBootstrapGatePatch();
                     TryApplyFinishedLoadingMissionReadyGatePatch();
+                    TryApplyOfficialBattleRuntimeQuiescePatch();
+                    TryApplyOrderControllerOwnershipDiagnosticsPatch();
                     if (EnableBattleShellSuppressionPatch)
                         TryApplyBattleShellSuppressionPatch();
                     else
@@ -465,6 +468,34 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: BattleShellSuppression patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyOfficialBattleRuntimeQuiescePatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                OfficialBattleRuntimeQuiescePatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: OfficialBattleRuntimeQuiesce patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyOrderControllerOwnershipDiagnosticsPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                OrderControllerOwnershipDiagnosticsPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: OrderControllerOwnershipDiagnostics patch apply failed: " + ex.Message);
             }
         }
 
@@ -817,6 +848,14 @@ namespace CoopSpectator
         {
             try
             {
+                if (GetEnvBool(DisableDedicatedWebPanelPatchEnvVar))
+                {
+                    ModLogger.Info(
+                        "DedicatedWebPanelPatches: skipped by diagnostic environment switch. " +
+                        DisableDedicatedWebPanelPatchEnvVar + "=1");
+                    return;
+                }
+
                 if (_harmony == null)
                     _harmony = new Harmony("com.coopspectator.dedicated");
                 DedicatedWebPanelPatches.Apply(_harmony);
@@ -824,6 +863,21 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("[HarmonyFallback] DedicatedWebPanelPatches.Apply failed. patch=DedicatedCustomGameServerStateActivated/OnSubModuleUnloaded. skipped intentionally, fallback active. Exception: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        private static bool GetEnvBool(string name)
+        {
+            try
+            {
+                string value = Environment.GetEnvironmentVariable(name);
+                return "1".Equals(value?.Trim(), StringComparison.OrdinalIgnoreCase)
+                    || "true".Equals(value?.Trim(), StringComparison.OrdinalIgnoreCase)
+                    || "yes".Equals(value?.Trim(), StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
             }
         }
 

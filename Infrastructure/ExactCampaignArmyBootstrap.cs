@@ -7,6 +7,7 @@ using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Source.Missions;
 using TaleWorlds.ObjectSystem;
+using MissionAgentSpawnLogic = TaleWorlds.MountAndBlade.DefaultBattleMissionAgentSpawnLogic;
 
 namespace CoopSpectator.Infrastructure
 {
@@ -31,7 +32,7 @@ namespace CoopSpectator.Infrastructure
         private static readonly PropertyInfo MissionInitializerRecordProperty =
             typeof(Mission).GetProperty("InitializerRecord", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionAgentSpawnLogicMissionSidesField =
-            typeof(MissionAgentSpawnLogic).GetField("_missionSides", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(MissionAgentSpawnLogic).GetField("_battleSideSpawnContexts", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionAgentSpawnLogicPhasesField =
             typeof(MissionAgentSpawnLogic).GetField("_phases", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionAgentSpawnLogicNumberOfTroopsInTotalField =
@@ -40,14 +41,11 @@ namespace CoopSpectator.Infrastructure
             typeof(MissionAgentSpawnLogic).GetField("_battleSize", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionAgentSpawnLogicDeploymentPlanField =
             typeof(MissionAgentSpawnLogic).GetField("_deploymentPlan", BindingFlags.Instance | BindingFlags.NonPublic);
-        private static readonly FieldInfo MissionAgentSpawnLogicPlayerSideField =
-            typeof(MissionAgentSpawnLogic).GetField("_playerSide", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo DefaultMissionDeploymentPlanFormationSceneSpawnEntriesField =
             typeof(DefaultMissionDeploymentPlan).GetField("_formationSceneSpawnEntries", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionSideTroopSupplierField =
-            typeof(MissionAgentSpawnLogic)
-                .GetNestedType("MissionSide", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-                ?.GetField("_troopSupplier", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(MissionBattleSideSpawnContext)
+                .GetField("_troopSupplier", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private readonly struct TeamSideOverrideState
         {
@@ -682,9 +680,8 @@ namespace CoopSpectator.Infrastructure
             builder.Append("SpawnLogicType=");
             builder.Append(spawnLogic.GetType().Name);
 
-            object playerSide = MissionAgentSpawnLogicPlayerSideField?.GetValue(spawnLogic);
             builder.Append(" NativePlayerSide=");
-            builder.Append(playerSide == null ? "null" : playerSide.GetType().GetField("_side", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(playerSide)?.ToString() ?? playerSide.ToString());
+            builder.Append(spawnLogic.PlayerSide);
 
             object deploymentPlan = MissionAgentSpawnLogicDeploymentPlanField?.GetValue(spawnLogic);
             builder.Append(" NativeDeploymentPlan=");
@@ -2074,6 +2071,8 @@ namespace CoopSpectator.Infrastructure
         public BasicCharacterObject Troop => _troop;
 
         bool IAgentOriginBase.IsUnderPlayersCommand => _isUnderPlayersCommand;
+
+        bool IAgentOriginBase.IsInSameArmyAsPlayer => _isUnderPlayersCommand;
 
         uint IAgentOriginBase.FactionColor => 0u;
 

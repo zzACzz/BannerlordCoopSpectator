@@ -30,6 +30,15 @@
     <DedicatedHarmonyRuntimeAsset>$(NuGetPackageRoot)lib.harmony\2.4.2\lib\net6.0\0Harmony.dll</DedicatedHarmonyRuntimeAsset>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(UseGameDlls)'=='true'">
+    <!--
+      Коли в корені репозиторію лежать fallback DLL, стандартний RAR спершу
+      дивиться в {CandidateAssemblyFiles}. Для збірок проти встановленої гри
+      або dedicated-сервера примусово віддаємо пріоритет HintPath.
+    -->
+    <AssemblySearchPaths>{HintPathFromItem};{CandidateAssemblyFiles};{TargetFrameworkDirectory};{RawFileName}</AssemblySearchPaths>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
   </ItemGroup>
@@ -121,6 +130,8 @@
     <Compile Include="..\Patches\LateJoinPeerBootstrapGatePatch.cs" Link="Patches\LateJoinPeerBootstrapGatePatch.cs" />
     <Compile Include="..\Patches\FinishedLoadingMissionReadyGatePatch.cs" Link="Patches\FinishedLoadingMissionReadyGatePatch.cs" />
     <Compile Include="..\Patches\BattleShellSuppressionPatch.cs" Link="Patches\BattleShellSuppressionPatch.cs" />
+    <Compile Include="..\Patches\OfficialBattleRuntimeQuiescePatch.cs" Link="Patches\OfficialBattleRuntimeQuiescePatch.cs" />
+    <Compile Include="..\Patches\OrderControllerOwnershipDiagnosticsPatch.cs" Link="Patches\OrderControllerOwnershipDiagnosticsPatch.cs" />
     <Compile Include="..\Patches\MultiplayerCharacterClassFallbackPatch.cs" Link="Patches\MultiplayerCharacterClassFallbackPatch.cs" />
     <Compile Include="..\Patches\ServerChangeCultureCanonicalizationPatch.cs" Link="Patches\ServerChangeCultureCanonicalizationPatch.cs" />
     <Compile Include="..\Patches\CampaignCombatProfileAgentStatsPatch.cs" Link="Patches\CampaignCombatProfileAgentStatsPatch.cs" />

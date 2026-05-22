@@ -45,6 +45,16 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(UseGameDlls)'=='true'">
+    <!--
+      Коли в корені репозиторію лежать fallback DLL, стандартний RAR спершу
+      дивиться в {CandidateAssemblyFiles} і може непомітно підхопити старий
+      контракт раніше за актуальний HintPath із встановленої гри. Для збірок
+      проти локальної інсталяції примусово ставимо {HintPathFromItem} першим.
+    -->
+    <AssemblySearchPaths>{HintPathFromItem};{CandidateAssemblyFiles};{TargetFrameworkDirectory};{RawFileName}</AssemblySearchPaths>
+  </PropertyGroup>
+
   <!-- Клієнт/кампанія: не компілюємо DedicatedServer. GameMode виключаємо за замовчуванням; додаємо назад у таргеті лише якщо є Multiplayer DLL. Щоб зібрати клієнта з TdmClone: вкажіть /p:BannerlordRootDir= на інсталяцію гри з bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll або скопіюйте цю DLL у корінь проєкту. -->
   <ItemGroup>
     <Compile Remove="DedicatedServer\**\*" />
@@ -262,8 +272,22 @@
     <GameModulesDir>$(BannerlordRootDir)\Modules\CoopSpectator</GameModulesDir>
     <GameModulesBinDir>$(GameModulesDir)\bin\Win64_Shipping_Client</GameModulesBinDir>
     <GameModulesMPDir>$(BannerlordRootDir)\Modules\CoopSpectatorMP</GameModulesMPDir>
+    <ResolvedClientMultiplayerDll Condition="Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll</ResolvedClientMultiplayerDll>
+    <ResolvedClientMultiplayerDll Condition="'$(ResolvedClientMultiplayerDll)'=='' and Exists('$(BannerlordMultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">$(BannerlordMultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll</ResolvedClientMultiplayerDll>
   </PropertyGroup>
-  <Target Name="DeployModToGame" AfterTargets="Build">
+
+  <Target Name="SyncClientMultiplayerDependency" AfterTargets="Build">
+    <!--
+      OutputPath points directly to Module\CoopSpectator\bin\Win64_Shipping_Client, so stale
+      TaleWorlds.MountAndBlade.Multiplayer.dll can survive across builds because the reference is
+      marked Private=false and MSBuild will not refresh it automatically. Keep the bundled copy in
+      sync with the currently installed game before deploy.
+    -->
+    <Delete Files="$(OutputPath)TaleWorlds.MountAndBlade.Multiplayer.dll" Condition="'$(HasGameModeDll)'!='true' and Exists('$(OutputPath)TaleWorlds.MountAndBlade.Multiplayer.dll')" />
+    <Copy SourceFiles="$(ResolvedClientMultiplayerDll)" DestinationFiles="$(OutputPath)TaleWorlds.MountAndBlade.Multiplayer.dll" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" Condition="'$(HasGameModeDll)'=='true' and Exists('$(ResolvedClientMultiplayerDll)')" />
+  </Target>
+
+  <Target Name="DeployModToGame" AfterTargets="Build" DependsOnTargets="SyncClientMultiplayerDependency">
     <RemoveDir Directories="$(GameModulesMPDir)" Condition="Exists('$(GameModulesMPDir)')" />
     <MakeDir Directories="$(GameModulesDir);$(GameModulesBinDir)" />
     <Copy SourceFiles="$(ProjectDir)Module\CoopSpectator\SubModule.xml" DestinationFolder="$(GameModulesDir)" SkipUnchangedFiles="true" />
