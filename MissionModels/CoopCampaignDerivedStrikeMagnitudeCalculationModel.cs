@@ -43,6 +43,11 @@ namespace CoopSpectator.MissionModels
             return _baseModel.CalculateStrikeMagnitudeForThrust(attackInformation, collisionData, weapon, thrustSpeed, extraLinearSpeed, isThrown);
         }
 
+        public override float CalculateBaseBlowMagnitudeForPassiveUsage(in AttackInformation attackInformation, in AttackCollisionData collisionData, float extraLinearSpeed)
+        {
+            return _baseModel.CalculateBaseBlowMagnitudeForPassiveUsage(attackInformation, collisionData, extraLinearSpeed);
+        }
+
         public override float ComputeRawDamage(DamageTypes damageType, float magnitude, float armorEffectiveness, float absorbedDamageRatio)
         {
             if (ShouldUseSandboxArmorFormula())

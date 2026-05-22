@@ -305,9 +305,16 @@ namespace CoopSpectator.Infrastructure
                 if (!spawnPathData.IsValid)
                     return "Valid=False";
 
+                float pivotRatio =
+                    spawnPathData.PathLength > float.Epsilon
+                        ? spawnPathData.PivotOffset / spawnPathData.PathLength
+                        : 0f;
+
                 return
                     "Valid=True" +
-                    " PivotRatio=" + spawnPathData.PivotRatio.ToString("0.###", CultureInfo.InvariantCulture) +
+                    " PivotRatio=" + pivotRatio.ToString("0.###", CultureInfo.InvariantCulture) +
+                    " PivotOffset=" + spawnPathData.PivotOffset.ToString("0.###", CultureInfo.InvariantCulture) +
+                    " PathLength=" + spawnPathData.PathLength.ToString("0.###", CultureInfo.InvariantCulture) +
                     " IsInverted=" + spawnPathData.IsInverted +
                     " SnapType=" + spawnPathData.SnapType +
                     " PathPoints=" + (spawnPathData.Path?.NumberOfPoints ?? 0);

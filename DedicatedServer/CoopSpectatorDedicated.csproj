@@ -30,6 +30,10 @@
     <DedicatedHarmonyRuntimeAsset>$(NuGetPackageRoot)lib.harmony\2.4.2\lib\net6.0\0Harmony.dll</DedicatedHarmonyRuntimeAsset>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(UseGameDlls)'=='true'">
+    <AssemblySearchPaths>{HintPathFromItem};{CandidateAssemblyFiles};{TargetFrameworkDirectory};{RawFileName}</AssemblySearchPaths>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
   </ItemGroup>
