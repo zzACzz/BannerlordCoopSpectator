@@ -32,10 +32,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
     /// </summary> // Завершуємо XML-коментар
     public sealed class BattleDetector // Оголошуємо sealed сервіс-клас (стан + простий tick)
     { // Починаємо блок класу
+        private const string EmpireCrossbowSurrogateTroopTemplateId = "mp_coop_crossbow_empire_troop";
         private const string SyntheticAllCampaignTroopsBattleId = "synthetic_all_campaign_troops";
         private const string SyntheticLiveHeroesBattleId = "synthetic_live_heroes";
         private const int SyntheticHeroCompanionLimit = 12;
         private const int SyntheticHeroLordLimit = 12;
+        private enum RangedWeaponFamily
+        {
+            Unknown = 0,
+            Bow,
+            Crossbow
+        }
         private bool _wasInMissionLastTick; // Пам'ятаємо стан попереднього тіку: чи вже була активна місія
         private bool _hasSentBattleStartForThisMission; // Прапорець, щоб не відправляти BATTLE_START багато разів за одну місію
         private bool _hasSuppressedBattleStartForUnsupportedMission;
@@ -6258,6 +6265,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool isRanged = TryGetCharacterIsRanged(characterObject);
             bool hasShield = TryGetCharacterHasShield(characterObject);
             bool hasThrown = TryGetCharacterHasThrown(characterObject);
+            RangedWeaponFamily rangedWeaponFamily = ResolveRangedWeaponFamily(characterObject);
             int tier = TryGetIntProperty(characterObject, "Tier");
             string cultureToken = TryMapCultureToMultiplayerToken(TryGetCultureId(characterObject));
 
@@ -6268,6 +6276,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             if (isRanged)
             {
+                if (!isMounted &&
+                    string.Equals(cultureToken, "empire", StringComparison.Ordinal) &&
+                    rangedWeaponFamily == RangedWeaponFamily.Crossbow)
+                {
+                    return EmpireCrossbowSurrogateTroopTemplateId;
+                }
+
                 if (!string.IsNullOrWhiteSpace(cultureToken))
                     return tier >= 4
                         ? "mp_heavy_ranged_" + cultureToken + "_troop"
@@ -6383,6 +6398,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool isRanged = heroCharacter.IsRanged;
             bool hasShield = TryGetCharacterHasShield(heroCharacter);
             bool hasThrown = TryGetCharacterHasThrown(heroCharacter);
+            RangedWeaponFamily rangedWeaponFamily = ResolveRangedWeaponFamily(heroCharacter);
             int effectiveTier = ComputeHeroRuntimeTier(heroCharacter, heroRole);
 
             string troopTemplateId = TryResolveRoleAwareTroopTemplateId(
@@ -6392,7 +6408,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 isRanged,
                 hasShield,
                 hasThrown,
-                effectiveTier);
+                effectiveTier,
+                rangedWeaponFamily);
 
             return TryConvertTroopTemplateToHeroTemplate(troopTemplateId);
         }
@@ -6431,7 +6448,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool isRanged,
             bool hasShield,
             bool hasThrown,
-            int tier)
+            int tier,
+            RangedWeaponFamily rangedWeaponFamily)
         {
             if (string.IsNullOrWhiteSpace(cultureToken))
                 return null;
@@ -6446,6 +6464,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             if (isRanged)
             {
+                if (!isMounted &&
+                    string.Equals(cultureToken, "empire", StringComparison.OrdinalIgnoreCase) &&
+                    rangedWeaponFamily == RangedWeaponFamily.Crossbow)
+                {
+                    return EmpireCrossbowSurrogateTroopTemplateId;
+                }
+
                 string rangedTemplateId = ((isLord || tier >= 4) ? "mp_heavy_ranged_" : "mp_light_ranged_") + cultureToken + "_troop";
                 return NormalizeKnownMissionSafeTemplateId(rangedTemplateId);
             }
@@ -6515,6 +6540,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool isRanged = character.IsRanged;
             bool hasShield = TryGetCharacterHasShield(character);
             bool hasThrown = TryGetCharacterHasThrown(character);
+            RangedWeaponFamily rangedWeaponFamily = ResolveRangedWeaponFamily(character);
             int tier = character.Tier;
 
             string coopControlTroopId = TryResolveCoopControlTroopId(cultureToken, isMounted, isRanged, tier);
@@ -6525,6 +6551,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 if (hasThrown)
                     return "mp_skirmisher_empire_troop";
+            }
+
+            if (!isMounted &&
+                isRanged &&
+                string.Equals(cultureToken, "empire", StringComparison.Ordinal) &&
+                rangedWeaponFamily == RangedWeaponFamily.Crossbow)
+            {
+                return EmpireCrossbowSurrogateTroopTemplateId;
             }
 
             var candidates = new List<string>();
@@ -7724,6 +7758,67 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                    TryCharacterHasWeaponClass(instance, WeaponClass.ThrowingKnife) ||
                    TryCharacterHasWeaponClass(instance, WeaponClass.Stone) ||
                    TryCharacterHasWeaponClass(instance, WeaponClass.SlingStone);
+        }
+
+        private static RangedWeaponFamily ResolveRangedWeaponFamily(object instance)
+        {
+            if (instance == null)
+                return RangedWeaponFamily.Unknown;
+
+            foreach (object equipment in EnumerateCharacterEquipments(instance))
+            {
+                RangedWeaponFamily family = ResolveRangedWeaponFamilyFromEquipment(equipment);
+                if (family != RangedWeaponFamily.Unknown)
+                    return family;
+            }
+
+            RangedWeaponFamily primaryFamily = ResolveRangedWeaponFamilyFromEquipment(TryResolvePrimaryCombatEquipment(instance));
+            if (primaryFamily != RangedWeaponFamily.Unknown)
+                return primaryFamily;
+
+            RangedWeaponFamily randomFamily = ResolveRangedWeaponFamilyFromEquipment(TryResolveRandomBattleEquipment(instance));
+            if (randomFamily != RangedWeaponFamily.Unknown)
+                return randomFamily;
+
+            string normalizedCharacterId = TryGetStringId(instance)?.Trim().ToLowerInvariant() ?? string.Empty;
+            if (normalizedCharacterId.Contains("crossbow") || normalizedCharacterId.Contains("bolt"))
+                return RangedWeaponFamily.Crossbow;
+            if (normalizedCharacterId.Contains("archer") || normalizedCharacterId.Contains("bow") || normalizedCharacterId.Contains("arrow"))
+                return RangedWeaponFamily.Bow;
+
+            return RangedWeaponFamily.Unknown;
+        }
+
+        private static RangedWeaponFamily ResolveRangedWeaponFamilyFromEquipment(object equipment)
+        {
+            if (equipment == null)
+                return RangedWeaponFamily.Unknown;
+
+            bool sawBow = false;
+            bool sawCrossbow = false;
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                string itemId = TryGetEquipmentSlotItemId(equipment, slot);
+                if (string.IsNullOrWhiteSpace(itemId))
+                    continue;
+
+                string normalizedItemId = itemId.Trim().ToLowerInvariant();
+                if (normalizedItemId.Contains("crossbow") || normalizedItemId.Contains("bolt"))
+                {
+                    sawCrossbow = true;
+                    continue;
+                }
+
+                if (normalizedItemId.Contains("bow") || normalizedItemId.Contains("arrow"))
+                    sawBow = true;
+            }
+
+            if (sawCrossbow)
+                return RangedWeaponFamily.Crossbow;
+            if (sawBow)
+                return RangedWeaponFamily.Bow;
+
+            return RangedWeaponFamily.Unknown;
         }
 
         private static bool TryCharacterHasWeaponClass(object instance, WeaponClass weaponClass)

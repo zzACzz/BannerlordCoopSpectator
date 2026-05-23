@@ -9,6 +9,15 @@ namespace CoopSpectator.Infrastructure
 {
     public static class CampaignMultiplayerHeroClassResolver
     {
+        private const string EmpireCrossbowSurrogateTroopTemplateId = "mp_coop_crossbow_empire_troop";
+
+        private enum RangedWeaponFamily
+        {
+            Unknown = 0,
+            Bow,
+            Crossbow
+        }
+
         private sealed class Resolution
         {
             public MultiplayerClassDivisions.MPHeroClass HeroClass { get; set; }
@@ -52,8 +61,11 @@ namespace CoopSpectator.Infrastructure
             bool isMounted = ResolveIsMounted(character);
             bool preferClientMountedHeroTroopSurrogate =
                 ShouldPreferClientMountedHeroTroopSurrogate(isHero, isMounted);
+            RangedWeaponFamily rangedWeaponFamily = ResolveRangedWeaponFamily(character);
             string resolutionCacheKey =
-                characterId + "|client-mounted-troop-surrogate=" + preferClientMountedHeroTroopSurrogate;
+                characterId +
+                "|client-mounted-troop-surrogate=" + preferClientMountedHeroTroopSurrogate +
+                "|ranged-weapon-family=" + rangedWeaponFamily;
             lock (Sync)
             {
                 if (ResolutionByCharacterId.TryGetValue(resolutionCacheKey, out Resolution cachedResolution))
@@ -83,7 +95,7 @@ namespace CoopSpectator.Infrastructure
                     bool isRanged = ResolveIsRanged(character);
                     int tier = ResolveTier(character, isHero);
                     string cultureToken = ResolveCultureToken(character);
-                    string troopTemplateId = ResolveSurrogateTroopTemplateId(characterId, cultureToken, isMounted, isRanged, tier);
+                    string troopTemplateId = ResolveSurrogateTroopTemplateId(characterId, cultureToken, isMounted, isRanged, tier, rangedWeaponFamily);
                     string heroTemplateId = isHero ? TryConvertTroopTemplateToHeroTemplateId(troopTemplateId) : null;
 
                     List<string> candidateIds = new List<string>();
@@ -127,6 +139,7 @@ namespace CoopSpectator.Infrastructure
                         " CultureToken=" + (cultureToken ?? "null") +
                         " Mounted=" + isMounted +
                         " Ranged=" + isRanged +
+                        " RangedWeaponFamily=" + rangedWeaponFamily +
                         " Tier=" + tier +
                         " TroopTemplate=" + (troopTemplateId ?? "null") +
                         " HeroTemplate=" + (heroTemplateId ?? "null") +
@@ -250,6 +263,94 @@ namespace CoopSpectator.Infrastructure
             return formationClass == FormationClass.Ranged || formationClass == FormationClass.HorseArcher;
         }
 
+        private static RangedWeaponFamily ResolveRangedWeaponFamily(BasicCharacterObject character)
+        {
+            if (character == null)
+                return RangedWeaponFamily.Unknown;
+
+            foreach (Equipment equipment in EnumerateBattleEquipments(character))
+            {
+                RangedWeaponFamily family = ResolveRangedWeaponFamily(equipment);
+                if (family != RangedWeaponFamily.Unknown)
+                    return family;
+            }
+
+            string normalizedCharacterId = (character.StringId ?? string.Empty).Trim().ToLowerInvariant();
+            if (normalizedCharacterId.Contains("crossbow") || normalizedCharacterId.Contains("bolt"))
+                return RangedWeaponFamily.Crossbow;
+            if (normalizedCharacterId.Contains("archer") || normalizedCharacterId.Contains("bow") || normalizedCharacterId.Contains("arrow"))
+                return RangedWeaponFamily.Bow;
+
+            return RangedWeaponFamily.Unknown;
+        }
+
+        private static IEnumerable<Equipment> EnumerateBattleEquipments(BasicCharacterObject character)
+        {
+            if (character == null)
+                yield break;
+
+            var yielded = new HashSet<Equipment>();
+
+            if (character.FirstBattleEquipment != null && yielded.Add(character.FirstBattleEquipment))
+                yield return character.FirstBattleEquipment;
+
+            if (character.RandomBattleEquipment != null && yielded.Add(character.RandomBattleEquipment))
+                yield return character.RandomBattleEquipment;
+
+            IEnumerable<Equipment> battleEquipments = null;
+            try
+            {
+                battleEquipments = character.BattleEquipments;
+            }
+            catch
+            {
+                battleEquipments = null;
+            }
+
+            if (battleEquipments == null)
+                yield break;
+
+            foreach (Equipment equipment in battleEquipments)
+            {
+                if (equipment != null && yielded.Add(equipment))
+                    yield return equipment;
+            }
+        }
+
+        private static RangedWeaponFamily ResolveRangedWeaponFamily(Equipment equipment)
+        {
+            if (equipment == null)
+                return RangedWeaponFamily.Unknown;
+
+            bool sawBow = false;
+            bool sawCrossbow = false;
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                ItemObject item = equipment[slot].Item;
+                if (item == null)
+                    continue;
+
+                switch (item.ItemType)
+                {
+                    case ItemObject.ItemTypeEnum.Crossbow:
+                    case ItemObject.ItemTypeEnum.Bolts:
+                        sawCrossbow = true;
+                        break;
+                    case ItemObject.ItemTypeEnum.Bow:
+                    case ItemObject.ItemTypeEnum.Arrows:
+                        sawBow = true;
+                        break;
+                }
+            }
+
+            if (sawCrossbow)
+                return RangedWeaponFamily.Crossbow;
+            if (sawBow)
+                return RangedWeaponFamily.Bow;
+
+            return RangedWeaponFamily.Unknown;
+        }
+
         private static int ResolveTier(BasicCharacterObject character, bool isHero)
         {
             int tier = TryGetIntProperty(character, "Tier");
@@ -315,7 +416,8 @@ namespace CoopSpectator.Infrastructure
             string cultureToken,
             bool isMounted,
             bool isRanged,
-            int tier)
+            int tier,
+            RangedWeaponFamily rangedWeaponFamily)
         {
             if (string.IsNullOrWhiteSpace(cultureToken))
                 cultureToken = "empire";
@@ -339,6 +441,12 @@ namespace CoopSpectator.Infrastructure
 
             if (isRanged)
             {
+                if (string.Equals(cultureToken, "empire", StringComparison.Ordinal) &&
+                    rangedWeaponFamily == RangedWeaponFamily.Crossbow)
+                {
+                    return EmpireCrossbowSurrogateTroopTemplateId;
+                }
+
                 return NormalizeKnownTemplateId(
                     (tier >= 4 ? "mp_heavy_ranged_" : "mp_light_ranged_") +
                     cultureToken +
