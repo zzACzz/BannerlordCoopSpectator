@@ -23,7 +23,8 @@ namespace CoopSpectator.Infrastructure
             "EquipmentRosters",
             "NPCCharacters",
             "SPCultures",
-            "CoopSpectatorRuntimeMPCharacters"
+            "CoopSpectatorRuntimeMPCharacters",
+            "CoopSpectatorGeneratedRuntimeMPCharacters"
         };
 
         private static readonly string[] SampleCharacterIds =

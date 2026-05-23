@@ -290,6 +290,7 @@
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_startup_mpcharacters.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_items.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpcharacters.xml" />
+      <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_generated_runtime_mpcharacters.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpclassdivisions.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\multiplayer_strings.xml" />
       <_DedicatedSandboxRootFiles Include="$(BannerlordRootDir)\Modules\SandBox\SubModule.xml" Condition="Exists('$(BannerlordRootDir)\Modules\SandBox\SubModule.xml')" />
