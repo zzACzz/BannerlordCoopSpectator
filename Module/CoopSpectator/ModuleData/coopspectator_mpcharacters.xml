@@ -2525,6 +2525,83 @@
     </Equipments>
     <Resistances dismount="25" />
   </NPCCharacter>
+  <NPCCharacter id="mp_coop_mounted_melee_2h_shield_hero" default_group="Cavalry" level="22" name="{=!}Mounted Melee 2h Shield Shell" occupation="Soldier" culture="Culture.empire">
+    <face>
+      <BodyProperties version="4" age="41.23" weight="0.3963" build="0.3951" key="00000000010003000000000000067000000000000000000000000000000000000006660606000000000000000000000000000000000000000000000001180000" />
+      <BodyPropertiesMax version="4" age="51.79" weight="0.6728" build="1" key="0005FC059A0034D0FFFFFFFF887AFFFFFFFEFFFB6FB7FFFFFFFFFFFFFFFFFFFF000FAFFA0FFFFFFF000000000000000000000000000000000000000001680141" />
+      <hair_tags>
+        <hair_tag name="empire" />
+      </hair_tags>
+      <beard_tags>
+        <beard_tag name="empire" />
+      </beard_tags>
+      <tattoo_tags>
+        <tattoo_tag name="Cleanface" />
+      </tattoo_tags>
+    </face>
+    <skills>
+      <skill id="Riding" value="180" />
+      <skill id="OneHanded" value="60" />
+      <skill id="TwoHanded" value="170" />
+      <skill id="Polearm" value="60" />
+      <skill id="Crossbow" value="20" />
+      <skill id="Bow" value="20" />
+      <skill id="Throwing" value="20" />
+    </skills>
+    <Equipments>
+      <EquipmentRoster>
+        <equipment slot="Item0" id="Item.mp_vlandian_two_handed_sword" />
+        <equipment slot="Item1" id="Item.mp_empire_spatha" />
+        <equipment slot="Item2" id="Item.mp_reinforced_flat_kite_shield" />
+        <equipment slot="Head" id="Item.mp_ironlame_nasalhelm_over_imperial_mail" />
+        <equipment slot="Body" id="Item.mp_legionary_mail" />
+        <equipment slot="Leg" id="Item.mp_strapped_mail_chausses" />
+        <equipment slot="Gloves" id="Item.mp_reinforced_leather_vambraces" />
+        <equipment slot="Horse" id="Item.mp_empire_horse" />
+        <equipment slot="HorseHarness" id="Item.mp_northern_light_harness" />
+      </EquipmentRoster>
+    </Equipments>
+    <Resistances dismount="75" />
+  </NPCCharacter>
+  <NPCCharacter id="mp_coop_mounted_melee_2h_shield_troop" default_group="Cavalry" level="22" name="{=!}Mounted Melee 2h Shield Shell" occupation="Soldier" culture="Culture.empire">
+    <face>
+      <BodyProperties version="4" age="44.99" weight="0.3333" build="0.3333" key="00000008800000010000000000050000000000000000000000060000000070000005500505000000000000000000000000000000000000000000000000500000" />
+      <BodyPropertiesMax version="4" age="55.28" weight="0.7951" build="0.8858" key="0011A80CC03C0010FFFFFFFF887CFFFFFFFFFFFF7FF0F7FFFFFFFFFFFFFFFFFF000DCFF90DFFFFFF000000000000000000000000000000000000000001185142" />
+      <hair_tags>
+        <hair_tag name="empire" />
+      </hair_tags>
+      <beard_tags>
+        <beard_tag name="empire" />
+      </beard_tags>
+      <tattoo_tags>
+        <tattoo_tag name="Cleanface" />
+        <tattoo_tag name="Scar16" />
+      </tattoo_tags>
+    </face>
+    <skills>
+      <skill id="Riding" value="180" />
+      <skill id="OneHanded" value="60" />
+      <skill id="TwoHanded" value="170" />
+      <skill id="Polearm" value="60" />
+      <skill id="Crossbow" value="20" />
+      <skill id="Bow" value="20" />
+      <skill id="Throwing" value="20" />
+    </skills>
+    <Equipments>
+      <EquipmentRoster>
+        <equipment slot="Item0" id="Item.mp_vlandian_two_handed_sword" />
+        <equipment slot="Item1" id="Item.mp_empire_spatha" />
+        <equipment slot="Item2" id="Item.mp_reinforced_flat_kite_shield" />
+        <equipment slot="Head" id="Item.mp_ironlame_nasalhelm_over_imperial_mail" />
+        <equipment slot="Body" id="Item.mp_legionary_mail" />
+        <equipment slot="Leg" id="Item.mp_strapped_mail_chausses" />
+        <equipment slot="Gloves" id="Item.mp_reinforced_leather_vambraces" />
+        <equipment slot="Horse" id="Item.mp_empire_horse" />
+        <equipment slot="HorseHarness" id="Item.mp_northern_light_harness" />
+      </EquipmentRoster>
+    </Equipments>
+    <Resistances dismount="75" />
+  </NPCCharacter>
   <NPCCharacter id="mp_coop_mounted_melee_polearm_shield_hero" default_group="Cavalry" level="22" name="{=!}Mounted Melee Polearm Shield Shell" occupation="Soldier" culture="Culture.empire">
     <face>
       <BodyProperties version="4" age="41.23" weight="0.3963" build="0.3951" key="00000000010003000000000000067000000000000000000000000000000000000006660606000000000000000000000000000000000000000000000001180000" />
@@ -2663,6 +2740,81 @@
     <Equipments>
       <EquipmentRoster>
         <equipment slot="Item0" id="Item.mp_western_long_spear" />
+        <equipment slot="Head" id="Item.mp_ironlame_nasalhelm_over_imperial_mail" />
+        <equipment slot="Body" id="Item.mp_legionary_mail" />
+        <equipment slot="Leg" id="Item.mp_strapped_mail_chausses" />
+        <equipment slot="Gloves" id="Item.mp_reinforced_leather_vambraces" />
+        <equipment slot="Horse" id="Item.mp_empire_horse" />
+        <equipment slot="HorseHarness" id="Item.mp_northern_light_harness" />
+      </EquipmentRoster>
+    </Equipments>
+    <Resistances dismount="75" />
+  </NPCCharacter>
+  <NPCCharacter id="mp_coop_mounted_melee_2h_no_shield_hero" default_group="Cavalry" level="22" name="{=!}Mounted Melee 2h No Shield Shell" occupation="Soldier" culture="Culture.empire">
+    <face>
+      <BodyProperties version="4" age="41.23" weight="0.3963" build="0.3951" key="00000000010003000000000000067000000000000000000000000000000000000006660606000000000000000000000000000000000000000000000001180000" />
+      <BodyPropertiesMax version="4" age="51.79" weight="0.6728" build="1" key="0005FC059A0034D0FFFFFFFF887AFFFFFFFEFFFB6FB7FFFFFFFFFFFFFFFFFFFF000FAFFA0FFFFFFF000000000000000000000000000000000000000001680141" />
+      <hair_tags>
+        <hair_tag name="empire" />
+      </hair_tags>
+      <beard_tags>
+        <beard_tag name="empire" />
+      </beard_tags>
+      <tattoo_tags>
+        <tattoo_tag name="Cleanface" />
+      </tattoo_tags>
+    </face>
+    <skills>
+      <skill id="Riding" value="180" />
+      <skill id="OneHanded" value="60" />
+      <skill id="TwoHanded" value="170" />
+      <skill id="Polearm" value="60" />
+      <skill id="Crossbow" value="20" />
+      <skill id="Bow" value="20" />
+      <skill id="Throwing" value="20" />
+    </skills>
+    <Equipments>
+      <EquipmentRoster>
+        <equipment slot="Item0" id="Item.mp_vlandian_two_handed_sword" />
+        <equipment slot="Item1" id="Item.mp_empire_spatha" />
+        <equipment slot="Head" id="Item.mp_ironlame_nasalhelm_over_imperial_mail" />
+        <equipment slot="Body" id="Item.mp_legionary_mail" />
+        <equipment slot="Leg" id="Item.mp_strapped_mail_chausses" />
+        <equipment slot="Gloves" id="Item.mp_reinforced_leather_vambraces" />
+        <equipment slot="Horse" id="Item.mp_empire_horse" />
+        <equipment slot="HorseHarness" id="Item.mp_northern_light_harness" />
+      </EquipmentRoster>
+    </Equipments>
+    <Resistances dismount="75" />
+  </NPCCharacter>
+  <NPCCharacter id="mp_coop_mounted_melee_2h_no_shield_troop" default_group="Cavalry" level="22" name="{=!}Mounted Melee 2h No Shield Shell" occupation="Soldier" culture="Culture.empire">
+    <face>
+      <BodyProperties version="4" age="44.99" weight="0.3333" build="0.3333" key="00000008800000010000000000050000000000000000000000060000000070000005500505000000000000000000000000000000000000000000000000500000" />
+      <BodyPropertiesMax version="4" age="55.28" weight="0.7951" build="0.8858" key="0011A80CC03C0010FFFFFFFF887CFFFFFFFFFFFF7FF0F7FFFFFFFFFFFFFFFFFF000DCFF90DFFFFFF000000000000000000000000000000000000000001185142" />
+      <hair_tags>
+        <hair_tag name="empire" />
+      </hair_tags>
+      <beard_tags>
+        <beard_tag name="empire" />
+      </beard_tags>
+      <tattoo_tags>
+        <tattoo_tag name="Cleanface" />
+        <tattoo_tag name="Scar16" />
+      </tattoo_tags>
+    </face>
+    <skills>
+      <skill id="Riding" value="180" />
+      <skill id="OneHanded" value="60" />
+      <skill id="TwoHanded" value="170" />
+      <skill id="Polearm" value="60" />
+      <skill id="Crossbow" value="20" />
+      <skill id="Bow" value="20" />
+      <skill id="Throwing" value="20" />
+    </skills>
+    <Equipments>
+      <EquipmentRoster>
+        <equipment slot="Item0" id="Item.mp_vlandian_two_handed_sword" />
+        <equipment slot="Item1" id="Item.mp_empire_spatha" />
         <equipment slot="Head" id="Item.mp_ironlame_nasalhelm_over_imperial_mail" />
         <equipment slot="Body" id="Item.mp_legionary_mail" />
         <equipment slot="Leg" id="Item.mp_strapped_mail_chausses" />

@@ -232,6 +232,13 @@ namespace CoopSpectator.Infrastructure
                         return "mp_coop_mounted_thrown_polearm_no_shield_troop";
 
                     case RangedFamily.None:
+                        if (melee == MeleeFamily.TwoHanded)
+                        {
+                            return hasShield
+                                ? "mp_coop_mounted_melee_2h_shield_troop"
+                                : "mp_coop_mounted_melee_2h_no_shield_troop";
+                        }
+
                         if (hasShield)
                             return "mp_coop_mounted_melee_polearm_shield_troop";
                         return "mp_coop_mounted_melee_polearm_no_shield_troop";
