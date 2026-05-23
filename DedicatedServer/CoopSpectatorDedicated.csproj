@@ -71,6 +71,7 @@
     <Compile Include="..\Infrastructure\BattleSnapshotBinarySerializer.cs" Link="Infrastructure\BattleSnapshotBinarySerializer.cs" />
     <Compile Include="..\Infrastructure\CampaignMapPatchMissionInit.cs" Link="Infrastructure\CampaignMapPatchMissionInit.cs" />
     <Compile Include="..\Infrastructure\CampaignMultiplayerHeroClassResolver.cs" Link="Infrastructure\CampaignMultiplayerHeroClassResolver.cs" />
+    <Compile Include="..\Infrastructure\CompatibilityShellTemplateResolver.cs" Link="Infrastructure\CompatibilityShellTemplateResolver.cs" />
     <Compile Include="..\Infrastructure\ExactBattleAgentSpawnTraceBridgeFile.cs" Link="Infrastructure\ExactBattleAgentSpawnTraceBridgeFile.cs" />
     <Compile Include="..\Infrastructure\ExactBattleEntryCompatibilityBridgeFile.cs" Link="Infrastructure\ExactBattleEntryCompatibilityBridgeFile.cs" />
     <Compile Include="..\Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" Link="Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" />

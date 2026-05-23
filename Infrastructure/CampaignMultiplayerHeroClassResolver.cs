@@ -95,7 +95,11 @@ namespace CoopSpectator.Infrastructure
                     bool isRanged = ResolveIsRanged(character);
                     int tier = ResolveTier(character, isHero);
                     string cultureToken = ResolveCultureToken(character);
-                    string troopTemplateId = ResolveSurrogateTroopTemplateId(characterId, cultureToken, isMounted, isRanged, tier, rangedWeaponFamily);
+                    CompatibilityShellTemplateResolver.ShellProfile compatibilityShellProfile =
+                        CompatibilityShellTemplateResolver.ResolveProfile(character);
+                    string troopTemplateId =
+                        compatibilityShellProfile?.TroopTemplateId ??
+                        ResolveSurrogateTroopTemplateId(characterId, cultureToken, isMounted, isRanged, tier, rangedWeaponFamily);
                     string heroTemplateId = isHero ? TryConvertTroopTemplateToHeroTemplateId(troopTemplateId) : null;
 
                     List<string> candidateIds = new List<string>();
@@ -140,6 +144,7 @@ namespace CoopSpectator.Infrastructure
                         " Mounted=" + isMounted +
                         " Ranged=" + isRanged +
                         " RangedWeaponFamily=" + rangedWeaponFamily +
+                        " CompatibilityShell=" + (compatibilityShellProfile?.TroopTemplateId ?? "null") +
                         " Tier=" + tier +
                         " TroopTemplate=" + (troopTemplateId ?? "null") +
                         " HeroTemplate=" + (heroTemplateId ?? "null") +

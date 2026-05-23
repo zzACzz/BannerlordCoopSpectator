@@ -5065,7 +5065,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return troops;
 
             string originalCharacterId = TryGetStringId(characterObject);
-            string spawnTemplateId = GetMissionSafeCharacterId(characterObject, rosterCharacters);
+            string defaultSpawnTemplateId = GetMissionSafeCharacterId(characterObject, rosterCharacters);
             List<CombatEquipmentVariantSnapshot> equipmentVariants = BuildCombatEquipmentVariants(characterObject, totalCount);
             bool hasSampledVariantCounts = equipmentVariants.Any(variant => variant != null && variant.SampledCount > 0);
             int activeVariantCount = Math.Max(1, Math.Min(totalCount, equipmentVariants.Count > 0 ? equipmentVariants.Count : 1));
@@ -5077,6 +5077,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 CombatEquipmentVariantSnapshot variant =
                     equipmentVariants.Count > variantIndex ? equipmentVariants[variantIndex] : null;
+                CompatibilityShellTemplateResolver.ShellProfile compatibilityShellProfile =
+                    ResolveCompatibilityShellProfile(characterObject, variant);
+                string variantSpawnTemplateId =
+                    GetMissionSafeCharacterId(characterObject, rosterCharacters, variant) ??
+                    compatibilityShellProfile?.TroopTemplateId ??
+                    defaultSpawnTemplateId;
                 int variantTroopCount = hasSampledVariantCounts && variant != null && variant.SampledCount > 0
                     ? variant.SampledCount
                     : GetDistributedVariantCount(totalCount, activeVariantCount, variantIndex);
@@ -5098,23 +5104,23 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 {
                     SideId = sideId,
                     PartyId = partyId,
-                    CharacterId = spawnTemplateId,
+                    CharacterId = variantSpawnTemplateId,
                     OriginalCharacterId = originalCharacterId,
-                    SpawnTemplateId = spawnTemplateId,
+                    SpawnTemplateId = variantSpawnTemplateId,
                     CultureId = TryGetCultureId(characterObject),
-                    HasShield = TryGetCharacterHasShield(characterObject),
-                    HasThrown = TryGetCharacterHasThrown(characterObject),
-                    IsRanged = TryGetCharacterIsRanged(characterObject),
+                    HasShield = compatibilityShellProfile?.HasShield ?? TryGetCharacterHasShield(characterObject),
+                    HasThrown = compatibilityShellProfile?.HasThrown ?? TryGetCharacterHasThrown(characterObject),
+                    IsRanged = compatibilityShellProfile?.IsRanged ?? TryGetCharacterIsRanged(characterObject),
                     TroopName = TryGetPropertyValue(characterObject, "Name")?.ToString() ?? TryGetStringId(characterObject),
                     Tier = TryGetIntProperty(characterObject, "Tier"),
-                    IsMounted = TryGetBoolProperty(characterObject, "IsMounted"),
+                    IsMounted = compatibilityShellProfile?.IsMounted ?? TryGetBoolProperty(characterObject, "IsMounted"),
                     IsHero = TryGetBoolProperty(characterObject, "IsHero"),
                     Count = variantTroopCount,
                     WoundedCount = variantWoundedCount
                 };
 
                 if (assignExplicitEntryIds)
-                    stack.EntryId = BuildVariantAwareEntryId(sideId, partyId, originalCharacterId, spawnTemplateId, variantIndex, activeVariantCount);
+                    stack.EntryId = BuildVariantAwareEntryId(sideId, partyId, originalCharacterId, variantSpawnTemplateId, variantIndex, activeVariantCount);
 
                 if (variant != null)
                     ApplyCombatEquipmentSnapshot(stack, variant);
@@ -5129,6 +5135,25 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             return troops;
+        }
+
+        private static CompatibilityShellTemplateResolver.ShellProfile ResolveCompatibilityShellProfile(
+            object characterObject,
+            CombatEquipmentVariantSnapshot variant = null)
+        {
+            bool mountedHint = TryGetBoolProperty(characterObject, "IsMounted");
+            if (variant != null)
+            {
+                return CompatibilityShellTemplateResolver.ResolveProfile(
+                    variant.CombatItem0Id,
+                    variant.CombatItem1Id,
+                    variant.CombatItem2Id,
+                    variant.CombatItem3Id,
+                    variant.CombatHorseId,
+                    mountedHint);
+            }
+
+            return CompatibilityShellTemplateResolver.ResolveProfile(characterObject as BasicCharacterObject);
         }
 
         private static int GetDistributedVariantCount(int total, int bucketCount, int bucketIndex)
@@ -6121,7 +6146,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return true;
         }
 
-        private static string GetMissionSafeCharacterId(object characterObject, List<object> rosterCharacters)
+        private static string GetMissionSafeCharacterId(
+            object characterObject,
+            List<object> rosterCharacters,
+            CombatEquipmentVariantSnapshot equipmentVariant = null)
         {
             if (characterObject == null)
                 return null;
@@ -6153,6 +6181,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     ModLogger.Info("BattleDetector: mapped bandit campaign troop id '" + originalId + "' to mission-safe bandit fallback '" + banditFallbackId + "'.");
                     return banditFallbackId;
                 }
+            }
+
+            CompatibilityShellTemplateResolver.ShellProfile compatibilityShellProfile =
+                ResolveCompatibilityShellProfile(characterObject, equipmentVariant);
+            if (!string.IsNullOrWhiteSpace(compatibilityShellProfile?.TroopTemplateId) &&
+                !string.Equals(compatibilityShellProfile.TroopTemplateId, originalId, StringComparison.Ordinal))
+            {
+                ModLogger.Info(
+                    "BattleDetector: mapped campaign troop id '" + originalId + "' to compatibility shell '" +
+                    compatibilityShellProfile.TroopTemplateId +
+                    "'." +
+                    (equipmentVariant != null
+                        ? " VariantSignature='" + (equipmentVariant.Signature ?? string.Empty) + "'."
+                        : string.Empty));
+                return compatibilityShellProfile.TroopTemplateId;
             }
 
             string multiplayerSafeId = TryResolveMultiplayerSafeCharacterId(characterObject as TaleWorlds.CampaignSystem.CharacterObject);
@@ -6260,6 +6303,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         {
             if (characterObject == null)
                 return null;
+
+            string compatibilityShellTemplateId =
+                CompatibilityShellTemplateResolver.ResolveTroopTemplateId(characterObject as BasicCharacterObject);
+            if (!string.IsNullOrWhiteSpace(compatibilityShellTemplateId))
+                return compatibilityShellTemplateId;
 
             bool isMounted = TryGetBoolProperty(characterObject, "IsMounted");
             bool isRanged = TryGetCharacterIsRanged(characterObject);
@@ -6384,6 +6432,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         {
             if (heroCharacter == null || !heroCharacter.IsHero)
                 return null;
+
+            string compatibilityHeroTemplateId =
+                CompatibilityShellTemplateResolver.TryConvertTroopTemplateToHeroTemplateId(
+                    CompatibilityShellTemplateResolver.ResolveTroopTemplateId(heroCharacter));
+            if (!string.IsNullOrWhiteSpace(compatibilityHeroTemplateId))
+                return compatibilityHeroTemplateId;
 
             string heroRole = TryGetHeroRole(heroCharacter);
             if (string.IsNullOrWhiteSpace(heroRole))
@@ -6530,6 +6584,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         {
             if (character == null)
                 return null;
+
+            string compatibilityShellTemplateId =
+                CompatibilityShellTemplateResolver.ResolveTroopTemplateId(character);
+            if (!string.IsNullOrWhiteSpace(compatibilityShellTemplateId))
+                return compatibilityShellTemplateId;
 
             string cultureId = character.Culture?.StringId;
             string cultureToken = TryMapCultureToMultiplayerToken(cultureId);
