@@ -7000,6 +7000,23 @@ namespace CoopSpectator.Patches
                     (HasDeferredClientCreateAgentPayload(setAgentHealth.AgentIndex) ||
                      HasAnyDeferredClientAgentBootstrapPayload(setAgentHealth.AgentIndex)))
                 {
+                    bool allowImmediateDeferredDeathHealthApply =
+                        setAgentHealth.Health <= 0 &&
+                        TryEmergencyMaterializeDeferredClientAgentBaselineForDeathCorridor(
+                            mission,
+                            setAgentHealth.AgentIndex,
+                            "battle-map handoff SetAgentHealth deferred-agent death corridor",
+                            snapshotReadinessSummary);
+                    if (allowImmediateDeferredDeathHealthApply)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: allowed client SetAgentHealth after emergency deferred-agent baseline materialization. " +
+                            "AgentIndex=" + setAgentHealth.AgentIndex +
+                            " Health=" + setAgentHealth.Health +
+                            " Reason=agent-bootstrap-deferred");
+                        return true;
+                    }
+
                     RegisterDeferredClientSetAgentHealthPayload(
                         setAgentHealth,
                         "agent-bootstrap-deferred");
@@ -7145,6 +7162,22 @@ namespace CoopSpectator.Patches
                     (HasDeferredClientCreateAgentPayload(makeAgentDead.AgentIndex) ||
                      HasAnyDeferredClientAgentBootstrapPayload(makeAgentDead.AgentIndex)))
                 {
+                    bool allowImmediateDeferredMakeAgentDead =
+                        TryEmergencyMaterializeDeferredClientAgentBaselineForDeathCorridor(
+                            mission,
+                            makeAgentDead.AgentIndex,
+                            "battle-map handoff MakeAgentDead deferred-agent death corridor",
+                            snapshotReadinessSummary);
+                    if (allowImmediateDeferredMakeAgentDead)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: allowed client MakeAgentDead after emergency deferred-agent baseline materialization. " +
+                            "AgentIndex=" + makeAgentDead.AgentIndex +
+                            " IsKilled=" + makeAgentDead.IsKilled +
+                            " Reason=agent-bootstrap-deferred");
+                        return true;
+                    }
+
                     RegisterDeferredClientMakeAgentDeadPayload(
                         makeAgentDead,
                         "agent-bootstrap-deferred");

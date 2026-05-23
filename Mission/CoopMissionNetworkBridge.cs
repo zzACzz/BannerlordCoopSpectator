@@ -2085,6 +2085,12 @@ namespace CoopSpectator.MissionBehaviors
                             " UseStringIdExactEquipmentPath=" + snapshot.UseStringIdExactEquipmentPath +
                             " EntryCount=" + snapshot.EntryCount +
                             " Source=" + (snapshot.Source ?? string.Empty));
+                        BattleMapSpawnHandoffPatch.TryProcessDeferredClientCreateAgentMessages(
+                            Mission,
+                            "CoopMissionNetworkBridge authoritative materialized snapshot applied");
+                        BattleMapSpawnHandoffPatch.TryProcessDeferredClientMountedHeroCreateAgents(
+                            Mission,
+                            "CoopMissionNetworkBridge authoritative materialized snapshot applied");
                     }
                     break;
                 }
