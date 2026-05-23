@@ -42,6 +42,13 @@ namespace CoopSpectator.Infrastructure
             TwoHanded
         }
 
+        private enum TwoHandedSubtype
+        {
+            None = 0,
+            Generic,
+            Axe
+        }
+
         private static readonly object Sync = new object();
         private static readonly HashSet<string> LoggedFallbackProfileKeys = new HashSet<string>(StringComparer.Ordinal);
 
@@ -197,8 +204,11 @@ namespace CoopSpectator.Infrastructure
 
             RangedFamily ranged = ResolveRangedFamily(items);
             MeleeFamily melee = ResolveMeleeFamily(items);
+            TwoHandedSubtype twoHandedSubtype = melee == MeleeFamily.TwoHanded
+                ? ResolveTwoHandedSubtype(items)
+                : TwoHandedSubtype.None;
 
-            string troopTemplateId = ResolveTroopTemplateId(mounted, ranged, melee, hasShield);
+            string troopTemplateId = ResolveTroopTemplateId(mounted, ranged, melee, hasShield, twoHandedSubtype);
             if (string.IsNullOrWhiteSpace(troopTemplateId))
                 return null;
 
@@ -213,7 +223,12 @@ namespace CoopSpectator.Infrastructure
             };
         }
 
-        private static string ResolveTroopTemplateId(bool mounted, RangedFamily ranged, MeleeFamily melee, bool hasShield)
+        private static string ResolveTroopTemplateId(
+            bool mounted,
+            RangedFamily ranged,
+            MeleeFamily melee,
+            bool hasShield,
+            TwoHandedSubtype twoHandedSubtype)
         {
             if (mounted)
             {
@@ -303,7 +318,11 @@ namespace CoopSpectator.Infrastructure
                     if (melee == MeleeFamily.Polearm)
                         return "mp_coop_foot_thrown_polearm_no_shield_troop";
                     if (melee == MeleeFamily.TwoHanded)
-                        return "mp_coop_foot_thrown_2h_no_shield_troop";
+                    {
+                        return twoHandedSubtype == TwoHandedSubtype.Axe
+                            ? "mp_coop_foot_thrown_2haxe_no_shield_troop"
+                            : "mp_coop_foot_thrown_2h_no_shield_troop";
+                    }
                     return "mp_coop_foot_thrown_1h_no_shield_troop";
 
                 case RangedFamily.None:
@@ -450,6 +469,32 @@ namespace CoopSpectator.Infrastructure
                 return MeleeFamily.OneHanded;
 
             return MeleeFamily.None;
+        }
+
+        private static TwoHandedSubtype ResolveTwoHandedSubtype(IEnumerable<ItemObject> items)
+        {
+            foreach (ItemObject item in items)
+            {
+                if (item == null || IsShield(item) || IsAmmo(item))
+                    continue;
+
+                if (ResolveItemRole(item) != ItemRole.None)
+                    continue;
+
+                WeaponComponentData primaryWeapon = item.PrimaryWeapon;
+                if (primaryWeapon == null)
+                    continue;
+
+                if (primaryWeapon.IsPolearm || !primaryWeapon.IsTwoHanded)
+                    continue;
+
+                if (primaryWeapon.WeaponClass == WeaponClass.TwoHandedAxe)
+                    return TwoHandedSubtype.Axe;
+
+                return TwoHandedSubtype.Generic;
+            }
+
+            return TwoHandedSubtype.Generic;
         }
 
         private static bool IsShield(ItemObject item)
