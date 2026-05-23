@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Xml;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -175,7 +177,11 @@ namespace CoopSpectator.Infrastructure
                 .Where(item => item != null)
                 .ToList();
 
-            return ResolveProfile(items, !string.IsNullOrWhiteSpace(NormalizeObjectId(horseItemId)) || mountedHint);
+            string normalizedHorseItemId = NormalizeObjectId(horseItemId);
+            return ResolveProfile(
+                items,
+                !string.IsNullOrWhiteSpace(normalizedHorseItemId) || mountedHint,
+                normalizedHorseItemId);
         }
 
         public static ShellAuditDescriptor ResolveAuditDescriptor(
@@ -263,7 +269,8 @@ namespace CoopSpectator.Infrastructure
 
             var items = new List<ItemObject>();
             bool hasShield = false;
-            bool mounted = mountedHint || equipment[EquipmentIndex.Horse].Item != null;
+            string horseItemId = NormalizeObjectId(equipment[EquipmentIndex.Horse].Item?.StringId);
+            bool mounted = mountedHint || !string.IsNullOrWhiteSpace(horseItemId);
 
             for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
             {
@@ -276,7 +283,7 @@ namespace CoopSpectator.Infrastructure
                     hasShield = true;
             }
 
-            return ResolveProfile(items, mounted, hasShield);
+            return ResolveProfile(items, mounted, hasShield, horseItemId);
         }
 
         private static ShellAuditDescriptor ResolveAuditDescriptor(Equipment equipment, bool mountedHint)
@@ -303,13 +310,13 @@ namespace CoopSpectator.Infrastructure
             return ResolveAuditDescriptor(items, mounted, horseItemId, hasShield);
         }
 
-        private static ShellProfile ResolveProfile(List<ItemObject> items, bool mounted)
+        private static ShellProfile ResolveProfile(List<ItemObject> items, bool mounted, string horseItemId = null)
         {
             bool hasShield = items.Any(IsShield);
-            return ResolveProfile(items, mounted, hasShield);
+            return ResolveProfile(items, mounted, hasShield, horseItemId);
         }
 
-        private static ShellProfile ResolveProfile(List<ItemObject> items, bool mounted, bool hasShield)
+        private static ShellProfile ResolveProfile(List<ItemObject> items, bool mounted, bool hasShield, string horseItemId = null)
         {
             if (items == null)
                 return null;
@@ -320,7 +327,7 @@ namespace CoopSpectator.Infrastructure
                 ? ResolveTwoHandedSubtype(items)
                 : TwoHandedSubtype.None;
 
-            string troopTemplateId = ResolveGeneratedTroopTemplateId(items, mounted, ranged, melee, hasShield) ??
+            string troopTemplateId = ResolveGeneratedTroopTemplateId(items, mounted, ranged, melee, hasShield, horseItemId) ??
                                      ResolveDetailedTroopTemplateId(items, mounted, ranged, melee, hasShield, twoHandedSubtype) ??
                                      ResolveTroopTemplateId(mounted, ranged, melee, hasShield, twoHandedSubtype);
             if (string.IsNullOrWhiteSpace(troopTemplateId))
@@ -349,7 +356,7 @@ namespace CoopSpectator.Infrastructure
                 ? ResolveTwoHandedSubtype(items)
                 : TwoHandedSubtype.None;
 
-            string troopTemplateId = ResolveGeneratedTroopTemplateId(items, mounted, ranged, melee, hasShield) ??
+            string troopTemplateId = ResolveGeneratedTroopTemplateId(items, mounted, ranged, melee, hasShield, horseItemId) ??
                                      ResolveDetailedTroopTemplateId(items, mounted, ranged, melee, hasShield, twoHandedSubtype) ??
                                      ResolveTroopTemplateId(mounted, ranged, melee, hasShield, twoHandedSubtype);
             if (string.IsNullOrWhiteSpace(troopTemplateId))
@@ -382,19 +389,17 @@ namespace CoopSpectator.Infrastructure
                 PrimaryRangedWeaponClass = primaryRangedWeaponClass,
                 PrimaryMeleeWeaponClass = primaryMeleeWeaponClass,
                 SecondaryMeleeWeaponClass = secondaryMeleeWeaponClass,
-                RuntimeSignatureKey = string.Join("|", new[]
-                {
-                    "mounted=" + mounted,
-                    "shield=" + hasShield,
-                    "ranged=" + ranged,
-                    "melee=" + melee,
-                    "two_handed_subtype=" + twoHandedSubtypeToken,
-                    "primary_weapon=" + (primaryWeaponClass ?? "None"),
-                    "primary_ranged=" + (primaryRangedWeaponClass ?? "None"),
-                    "primary_melee=" + (primaryMeleeWeaponClass ?? "None"),
-                    "secondary_melee=" + (secondaryMeleeWeaponClass ?? "None"),
-                    "horse=" + (horseItemId ?? "None")
-                })
+                RuntimeSignatureKey = BuildRuntimeSignatureKey(
+                    mounted,
+                    hasShield,
+                    ranged,
+                    melee,
+                    twoHandedSubtypeToken,
+                    primaryWeaponClass,
+                    primaryRangedWeaponClass,
+                    primaryMeleeWeaponClass,
+                    secondaryMeleeWeaponClass,
+                    horseItemId)
             };
         }
 
@@ -475,41 +480,52 @@ namespace CoopSpectator.Infrastructure
             bool mounted,
             RangedFamily ranged,
             MeleeFamily melee,
-            bool hasShield)
+            bool hasShield,
+            string horseItemId)
         {
             if (items == null || items.Count == 0)
                 return null;
 
-            string primaryRangedWeaponToken = ResolvePrimaryRangedWeaponToken(items);
-            string primaryMeleeWeaponToken = ResolvePrimaryMeleeWeaponToken(items);
-            string secondaryMeleeWeaponToken = ResolveSecondaryMeleeWeaponToken(items);
+            ItemObject primaryRangedWeapon = ResolvePrimaryRangedCombatItem(items);
+            List<ItemObject> meleeWeapons = ResolveMeleeCombatItems(items);
+            ItemObject primaryMeleeWeapon = meleeWeapons.Count > 0 ? meleeWeapons[0] : null;
+            ItemObject secondaryMeleeWeapon = meleeWeapons.Count > 1 ? meleeWeapons[1] : null;
 
-            string combatPrefixToken;
-            switch (ranged)
-            {
-                case RangedFamily.Bow:
-                    combatPrefixToken = "bow";
-                    break;
-                case RangedFamily.Crossbow:
-                    combatPrefixToken = "crossbow";
-                    break;
-                case RangedFamily.Thrown:
-                    combatPrefixToken = "thrown_" + NormalizeGeneratedToken(primaryRangedWeaponToken, "javelin");
-                    break;
-                default:
-                    combatPrefixToken = "melee";
-                    break;
-            }
+            string primaryRangedWeaponToken = NormalizeGeneratedToken(
+                ResolveWeaponClassToken(primaryRangedWeapon),
+                ranged == RangedFamily.Thrown ? "javelin" : null);
+            string primaryMeleeToken = NormalizeGeneratedToken(
+                ResolveWeaponClassToken(primaryMeleeWeapon),
+                "unarmed");
+            string secondaryMeleeToken = NormalizeGeneratedToken(
+                ResolveWeaponClassToken(secondaryMeleeWeapon),
+                null);
+            string horseToken = mounted
+                ? NormalizeGeneratedToken(NormalizeObjectId(horseItemId), "horse")
+                : null;
 
-            string primaryMeleeToken = NormalizeGeneratedToken(primaryMeleeWeaponToken, "unarmed");
-            string secondaryMeleeToken = NormalizeGeneratedToken(secondaryMeleeWeaponToken, null);
-            string mountToken = mounted ? "mounted" : "foot";
-            string shieldToken = hasShield ? "shield" : "no_shield";
+            string shellBaseId = BuildGeneratedShellBaseId(
+                mounted,
+                ranged,
+                primaryRangedWeaponToken,
+                primaryMeleeToken,
+                secondaryMeleeToken,
+                horseToken);
 
-            string troopTemplateId = "mp_coop_" + mountToken + "_" + combatPrefixToken + "_" + primaryMeleeToken;
-            if (!string.IsNullOrWhiteSpace(secondaryMeleeToken))
-                troopTemplateId += "_" + secondaryMeleeToken;
-            troopTemplateId += "_" + shieldToken + "_troop";
+            string runtimeSignatureKey = BuildRuntimeSignatureKey(
+                mounted,
+                hasShield,
+                ranged,
+                melee,
+                melee == MeleeFamily.TwoHanded ? ResolveTwoHandedSubtype(items).ToString() : "None",
+                ResolveWeaponClassToken(ResolvePrimaryCombatItem(items)),
+                ResolveWeaponClassToken(primaryRangedWeapon),
+                ResolveWeaponClassToken(primaryMeleeWeapon),
+                ResolveWeaponClassToken(secondaryMeleeWeapon),
+                NormalizeObjectId(horseItemId));
+
+            string signatureHash = ComputeShortSignatureHash(runtimeSignatureKey);
+            string troopTemplateId = shellBaseId + "_" + signatureHash + "_" + (hasShield ? "shield" : "no_shield") + "_troop";
 
             return ResolveExistingDetailedTroopTemplateId(troopTemplateId);
         }
@@ -650,6 +666,90 @@ namespace CoopSpectator.Infrastructure
                     return "sling";
                 default:
                     return token.ToLowerInvariant().Replace(" ", string.Empty);
+            }
+        }
+
+        private static string BuildGeneratedShellBaseId(
+            bool mounted,
+            RangedFamily ranged,
+            string primaryRangedWeaponToken,
+            string primaryMeleeToken,
+            string secondaryMeleeToken,
+            string horseToken)
+        {
+            string combatPrefixToken;
+            switch (ranged)
+            {
+                case RangedFamily.Bow:
+                    combatPrefixToken = "bow";
+                    break;
+                case RangedFamily.Crossbow:
+                    combatPrefixToken = "crossbow";
+                    break;
+                case RangedFamily.Thrown:
+                    combatPrefixToken = "thrown_" + NormalizeGeneratedToken(primaryRangedWeaponToken, "javelin");
+                    break;
+                default:
+                    combatPrefixToken = "melee";
+                    break;
+            }
+
+            string mountToken = mounted ? "mounted" : "foot";
+            string meleePrimaryToken = NormalizeGeneratedToken(primaryMeleeToken, "unarmed");
+            string meleeSecondaryToken = NormalizeGeneratedToken(secondaryMeleeToken, null);
+            string normalizedHorseToken = mounted
+                ? NormalizeGeneratedToken(horseToken, "horse")
+                : null;
+
+            string shellBaseId = "mp_coop_" + mountToken + "_" + combatPrefixToken + "_" + meleePrimaryToken;
+            if (!string.IsNullOrWhiteSpace(meleeSecondaryToken))
+                shellBaseId += "_" + meleeSecondaryToken;
+            if (!string.IsNullOrWhiteSpace(normalizedHorseToken))
+                shellBaseId += "_" + normalizedHorseToken;
+
+            return shellBaseId;
+        }
+
+        private static string BuildRuntimeSignatureKey(
+            bool mounted,
+            bool hasShield,
+            RangedFamily ranged,
+            MeleeFamily melee,
+            string twoHandedSubtypeToken,
+            string primaryWeaponClass,
+            string primaryRangedWeaponClass,
+            string primaryMeleeWeaponClass,
+            string secondaryMeleeWeaponClass,
+            string horseItemId)
+        {
+            return string.Join("|", new[]
+            {
+                "mounted=" + mounted,
+                "shield=" + hasShield,
+                "ranged=" + ranged,
+                "melee=" + melee,
+                "two_handed_subtype=" + (twoHandedSubtypeToken ?? "None"),
+                "primary_weapon=" + (primaryWeaponClass ?? "None"),
+                "primary_ranged=" + (primaryRangedWeaponClass ?? "None"),
+                "primary_melee=" + (primaryMeleeWeaponClass ?? "None"),
+                "secondary_melee=" + (secondaryMeleeWeaponClass ?? "None"),
+                "horse=" + (horseItemId ?? "None")
+            });
+        }
+
+        private static string ComputeShortSignatureHash(string runtimeSignatureKey)
+        {
+            if (string.IsNullOrWhiteSpace(runtimeSignatureKey))
+                return "nosig";
+
+            using (var sha1 = SHA1.Create())
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(runtimeSignatureKey);
+                byte[] hashBytes = sha1.ComputeHash(bytes);
+                var builder = new StringBuilder(8);
+                for (int i = 0; i < 4 && i < hashBytes.Length; i++)
+                    builder.Append(hashBytes[i].ToString("x2"));
+                return builder.ToString();
             }
         }
 

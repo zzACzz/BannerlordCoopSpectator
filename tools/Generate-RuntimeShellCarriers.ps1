@@ -40,11 +40,33 @@ function Normalize-ShellToken {
     }
 }
 
+function Get-ShortSignatureHash {
+    param([string]$RuntimeSignatureKey)
+
+    if ([string]::IsNullOrWhiteSpace($RuntimeSignatureKey)) {
+        return "nosig"
+    }
+
+    $sha1 = [System.Security.Cryptography.SHA1]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($RuntimeSignatureKey)
+        $hashBytes = $sha1.ComputeHash($bytes)
+        return -join ($hashBytes | Select-Object -First 4 | ForEach-Object { $_.ToString("x2") })
+    }
+    finally {
+        $sha1.Dispose()
+    }
+}
+
 function Get-ShellId {
     param($Variant)
 
     $mountToken = if ($Variant.IsMounted) { "mounted" } else { "foot" }
     $shieldToken = if ($Variant.HasShield) { "shield" } else { "no_shield" }
+    $signatureHash = Get-ShortSignatureHash $Variant.RuntimeSignatureKey
+    $primaryMeleeToken = Normalize-ShellToken $Variant.PrimaryMeleeWeaponClass "unarmed"
+    $secondaryMeleeToken = Normalize-ShellToken $Variant.SecondaryMeleeWeaponClass $null
+    $horseToken = if ($Variant.IsMounted) { Normalize-ShellToken $Variant.CombatHorseId "horse" } else { $null }
 
     $combatPrefix = switch ($Variant.RangedFamily) {
         "Bow" { "bow" }
@@ -53,13 +75,15 @@ function Get-ShellId {
         default { "melee" }
     }
 
-    $primaryMeleeToken = Normalize-ShellToken $Variant.PrimaryMeleeWeaponClass "unarmed"
-    $secondaryMeleeToken = Normalize-ShellToken $Variant.SecondaryMeleeWeaponClass $null
-
     $resolvedShellId = "mp_coop_{0}_{1}_{2}" -f $mountToken, $combatPrefix, $primaryMeleeToken
     if (-not [string]::IsNullOrWhiteSpace($secondaryMeleeToken)) {
         $resolvedShellId += "_" + $secondaryMeleeToken
     }
+    if (-not [string]::IsNullOrWhiteSpace($horseToken)) {
+        $resolvedShellId += "_" + $horseToken
+    }
+
+    $resolvedShellId += "_" + $signatureHash
 
     return $resolvedShellId + "_" + $shieldToken
 }
@@ -264,9 +288,15 @@ if (Test-Path $ExistingRuntimeCharactersPath) {
 
 $groups = @{}
 foreach ($variant in $audit.Variants) {
-    $shellBaseId = Get-ShellId $variant
-    if (-not $groups.ContainsKey($shellBaseId)) {
-        $groups[$shellBaseId] = $variant
+    $runtimeSignatureKey = if ([string]::IsNullOrWhiteSpace($variant.RuntimeSignatureKey)) {
+        "unresolved-signature"
+    }
+    else {
+        $variant.RuntimeSignatureKey
+    }
+
+    if (-not $groups.ContainsKey($runtimeSignatureKey)) {
+        $groups[$runtimeSignatureKey] = $variant
     }
 }
 
@@ -277,15 +307,14 @@ $builder = New-Object System.Text.StringBuilder
 $generatedCount = 0
 
 foreach ($entry in ($groups.GetEnumerator() | Sort-Object Name)) {
-    $shellBaseId = $entry.Key
+    $variant = $entry.Value
+    $shellBaseId = Get-ShellId $variant
     $heroId = $shellBaseId + "_hero"
     $troopId = $shellBaseId + "_troop"
 
     if ($existingIds.Contains($heroId) -or $existingIds.Contains($troopId)) {
         continue
     }
-
-    $variant = $entry.Value
     $signatureParts = Parse-VariantSignatureParts $variant.VariantSignature
     $skills = Get-Skills $variant
     $defaultGroup = Get-DefaultGroup $variant
