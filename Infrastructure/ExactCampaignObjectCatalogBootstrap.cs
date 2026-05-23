@@ -22,7 +22,8 @@ namespace CoopSpectator.Infrastructure
             "Items",
             "EquipmentRosters",
             "NPCCharacters",
-            "SPCultures"
+            "SPCultures",
+            "CoopSpectatorRuntimeMPCharacters"
         };
 
         private static readonly string[] SampleCharacterIds =
@@ -35,7 +36,7 @@ namespace CoopSpectator.Infrastructure
 
         private static readonly string[] SampleItemIds =
         {
-            "peasant_pitchfork_2_t1",
+            "crossbow_e",
             "glen_ranger_bow",
             "noyans_shield",
             "wide_leaf_spear_t4",

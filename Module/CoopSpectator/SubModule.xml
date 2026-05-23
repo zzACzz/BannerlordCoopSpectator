@@ -38,15 +38,21 @@
       </IncludedGameTypes>
     </XmlNode>
     <XmlNode>
-      <XmlName id="Items" path="coopspectator_items" />
+      <XmlName id="Items" path="coopspectator_mpitems" />
       <IncludedGameTypes>
         <GameType value="MultiplayerGame" />
       </IncludedGameTypes>
     </XmlNode>
     <XmlNode>
-      <XmlName id="MPCharacters" path="coopspectator_mpcharacters" />
+      <XmlName id="MPCharacters" path="coopspectator_startup_mpcharacters" />
       <IncludedGameTypes>
         <GameType value="MultiplayerGame" />
+      </IncludedGameTypes>
+    </XmlNode>
+    <XmlNode>
+      <XmlName id="CoopSpectatorRuntimeMPCharacters" path="coopspectator_mpcharacters" />
+      <IncludedGameTypes>
+        <GameType value="SingleplayerGame" />
       </IncludedGameTypes>
     </XmlNode>
     <XmlNode>

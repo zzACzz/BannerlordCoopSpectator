@@ -76,6 +76,7 @@
     <Compile Include="..\Infrastructure\ExactBattleEntryCompatibilityBridgeFile.cs" Link="Infrastructure\ExactBattleEntryCompatibilityBridgeFile.cs" />
     <Compile Include="..\Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" Link="Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignArmyBootstrap.cs" Link="Infrastructure\ExactCampaignArmyBootstrap.cs" />
+    <Compile Include="..\Infrastructure\BattleCatalogParityState.cs" Link="Infrastructure\BattleCatalogParityState.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />
@@ -127,6 +128,7 @@
     <Compile Include="..\Patches\FinishedLoadingMissionReadyGatePatch.cs" Link="Patches\FinishedLoadingMissionReadyGatePatch.cs" />
     <Compile Include="..\Patches\BattleShellSuppressionPatch.cs" Link="Patches\BattleShellSuppressionPatch.cs" />
     <Compile Include="..\Patches\MultiplayerCharacterClassFallbackPatch.cs" Link="Patches\MultiplayerCharacterClassFallbackPatch.cs" />
+    <Compile Include="..\Patches\StartupSafeMpHeroClassBootstrapPatch.cs" Link="Patches\StartupSafeMpHeroClassBootstrapPatch.cs" />
     <Compile Include="..\Patches\ServerChangeCultureCanonicalizationPatch.cs" Link="Patches\ServerChangeCultureCanonicalizationPatch.cs" />
     <Compile Include="..\Patches\CampaignCombatProfileAgentStatsPatch.cs" Link="Patches\CampaignCombatProfileAgentStatsPatch.cs" />
   </ItemGroup>
@@ -284,6 +286,8 @@
     <ItemGroup>
       <_ServerBinFiles Include="$(OutputPath)*" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_crafting_pieces.xml" />
+      <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpitems.xml" />
+      <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_startup_mpcharacters.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_items.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpcharacters.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpclassdivisions.xml" />
@@ -300,6 +304,8 @@
     <Copy SourceFiles="@(_ServerBinFiles)" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
     <Copy SourceFiles="@(_DedicatedModuleDataFiles)" DestinationFolder="$(_DedicatedModuleData)" SkipUnchangedFiles="false" Condition="Exists('$(DedicatedServerRootDir)')" />
     <Copy SourceFiles="..\Module\CoopSpectator\ModuleData\coopspectator_crafting_pieces.xml" DestinationFolder="$(_DedicatedModuleData)" SkipUnchangedFiles="false" Condition="Exists('$(DedicatedServerRootDir)') and Exists('..\Module\CoopSpectator\ModuleData\coopspectator_crafting_pieces.xml')" />
+    <Copy SourceFiles="..\Module\CoopSpectator\ModuleData\coopspectator_mpitems.xml" DestinationFolder="$(_DedicatedModuleData)" SkipUnchangedFiles="false" Condition="Exists('$(DedicatedServerRootDir)') and Exists('..\Module\CoopSpectator\ModuleData\coopspectator_mpitems.xml')" />
+    <Copy SourceFiles="..\Module\CoopSpectator\ModuleData\coopspectator_startup_mpcharacters.xml" DestinationFolder="$(_DedicatedModuleData)" SkipUnchangedFiles="false" Condition="Exists('$(DedicatedServerRootDir)') and Exists('..\Module\CoopSpectator\ModuleData\coopspectator_startup_mpcharacters.xml')" />
     <Copy SourceFiles="..\Module\CoopSpectator\ModuleData\coopspectator_items.xml" DestinationFolder="$(_DedicatedModuleData)" SkipUnchangedFiles="false" Condition="Exists('$(DedicatedServerRootDir)') and Exists('..\Module\CoopSpectator\ModuleData\coopspectator_items.xml')" />
     <Copy SourceFiles="@(_DedicatedSandboxRootFiles)" DestinationFiles="@(_DedicatedSandboxRootFiles->'$(_DedicatedSandboxDir)\%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxRootFiles)' != ''" />
     <Copy SourceFiles="@(_DedicatedSandboxModuleDataFiles)" DestinationFiles="@(_DedicatedSandboxModuleDataFiles->'$(_DedicatedSandboxDir)\ModuleData\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxModuleDataFiles)' != ''" />

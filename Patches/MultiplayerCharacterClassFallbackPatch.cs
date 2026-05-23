@@ -59,7 +59,7 @@ namespace CoopSpectator.Patches
             BasicCharacterObject character,
             ref MultiplayerClassDivisions.MPHeroClass __result)
         {
-            if (__result != null || character == null)
+            if (__result != null || character == null || !ShouldAllowFallbackInCurrentContext())
                 return;
 
             try
@@ -97,7 +97,7 @@ namespace CoopSpectator.Patches
             BasicCharacterObject character,
             ref bool __result)
         {
-            if (__result || __instance == null || character == null)
+            if (__result || __instance == null || character == null || !ShouldAllowFallbackInCurrentContext())
                 return;
 
             try
@@ -120,6 +120,16 @@ namespace CoopSpectator.Patches
             {
                 ModLogger.Info("MultiplayerCharacterClassFallbackPatch: IsTroopCharacter postfix failed: " + ex.Message);
             }
+        }
+
+        private static bool ShouldAllowFallbackInCurrentContext()
+        {
+            Mission mission = Mission.Current;
+            if (mission == null)
+                return false;
+
+            string sceneName = mission.SceneName ?? string.Empty;
+            return SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(sceneName);
         }
     }
 }

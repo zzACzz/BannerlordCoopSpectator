@@ -310,6 +310,7 @@ namespace CoopSpectator
                     TryConfigureDedicatedHarmonyRuntimeCompat();
                     TryApplyGameModeOverridePatch();
                     TryApplyMissionStateOpenNewPatches();
+                    TryApplyStartupSafeMpHeroClassBootstrapPatch();
                     TryApplyExactCampaignArmyBootstrapPatch();
                     TryApplyExactCampaignPreSpawnLoadoutPatch();
                     TryApplyExactCampaignNetworkObjectBootstrapPatch();
@@ -400,6 +401,20 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: MissionStateOpenNew patches apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyStartupSafeMpHeroClassBootstrapPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                StartupSafeMpHeroClassBootstrapPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: StartupSafeMpHeroClassBootstrapPatch apply failed: " + ex.Message);
             }
         }
 

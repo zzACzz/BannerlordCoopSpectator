@@ -72,7 +72,7 @@ namespace CoopSpectator.Infrastructure
             {
                 EnsureIndexBuilt();
 
-                List<string> requestedItemIds = CollectBattleEquipmentItemIds(runtimeState)
+                List<string> requestedItemIds = EnumerateBattleEquipmentItemIds(runtimeState)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(itemId => itemId, StringComparer.Ordinal)
                     .ToList();
@@ -1127,7 +1127,7 @@ namespace CoopSpectator.Infrastructure
                 "/pieces:[" + string.Join(", ", pieceStates) + "]";
         }
 
-        private static IEnumerable<string> CollectBattleEquipmentItemIds(BattleRuntimeState runtimeState)
+        internal static IEnumerable<string> EnumerateBattleEquipmentItemIds(BattleRuntimeState runtimeState)
         {
             if (runtimeState?.EntriesById == null)
                 yield break;

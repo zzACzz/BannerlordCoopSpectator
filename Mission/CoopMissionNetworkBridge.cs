@@ -60,7 +60,7 @@ namespace CoopSpectator.MissionBehaviors
             return CoopBattleSpawnBridgeFile.WriteForceRespawnableRequest(source ?? "network-fallback force-respawnable");
         }
 
-        public static bool TryAcknowledgeBattleSnapshot(int transmissionId, string source)
+        public static bool TryAcknowledgeBattleSnapshot(int transmissionId, string source, string catalogHash = null)
         {
             if (transmissionId <= 0)
                 return false;
@@ -68,7 +68,9 @@ namespace CoopSpectator.MissionBehaviors
             return TrySendClientRequest(
                 CoopBattleSelectionRequestKind.BattleSnapshotReadyAck,
                 BattleSideEnum.None,
-                transmissionId.ToString(),
+                string.IsNullOrWhiteSpace(catalogHash)
+                    ? transmissionId.ToString()
+                    : transmissionId + "|" + catalogHash,
                 source);
         }
 
@@ -1591,22 +1593,47 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
-            bool hashMatched = string.IsNullOrWhiteSpace(message.PayloadHash) ||
-                               string.Equals(message.PayloadHash, transportState.PayloadHash, StringComparison.Ordinal);
-            transportState.MarkCompleted(message.AppliedSuccessfully && hashMatched, DateTime.UtcNow);
-            _acknowledgedBattleSnapshotTransmissionIdByPeer[peer.Index] = message.TransmissionId;
-            _lastCompletedBattleSnapshotTransmissionUtcByPeer.Remove(peer.Index);
-            _lastBattleSnapshotRetryUtcByPeer.Remove(peer.Index);
+            bool payloadHashMatched = string.IsNullOrWhiteSpace(message.PayloadHash) ||
+                                      string.Equals(message.PayloadHash, transportState.PayloadHash, StringComparison.Ordinal);
+            bool serverCatalogPrepared = BattleCatalogParityState.TryPrepareCurrentBattleCatalog(
+                message.TransmissionId,
+                "CoopMissionNetworkBridge.AcceptClientBattleSnapshotCompleteAck",
+                out string expectedCatalogHash,
+                out string expectedCatalogSummary);
+            bool catalogHashMatched =
+                serverCatalogPrepared &&
+                !string.IsNullOrWhiteSpace(message.CatalogHash) &&
+                string.Equals(message.CatalogHash, expectedCatalogHash, StringComparison.Ordinal);
+            bool bootstrapReady =
+                message.AppliedSuccessfully &&
+                payloadHashMatched &&
+                serverCatalogPrepared &&
+                catalogHashMatched;
+
+            transportState.MarkCompleted(bootstrapReady, DateTime.UtcNow);
+            if (bootstrapReady)
+            {
+                _acknowledgedBattleSnapshotTransmissionIdByPeer[peer.Index] = message.TransmissionId;
+                _lastCompletedBattleSnapshotTransmissionUtcByPeer.Remove(peer.Index);
+                _lastBattleSnapshotRetryUtcByPeer.Remove(peer.Index);
+                TrySendImmediatePeerStatusPayloads(peer);
+                LateJoinPeerBootstrapGatePatch.TryReplayDeferredPeerBootstrap(
+                    peer,
+                    "CoopMissionNetworkBridge.AcceptClientBattleSnapshotCompleteAck");
+            }
+
             ModLogger.Info(
-                "CoopMissionNetworkBridge: acknowledged V2 battle snapshot completion. " +
+                "CoopMissionNetworkBridge: processed V2 battle snapshot completion ack. " +
                 "Peer=" + (peer.UserName ?? "null") +
                 " TransmissionId=" + message.TransmissionId +
                 " AppliedSuccessfully=" + message.AppliedSuccessfully +
-                " HashMatched=" + hashMatched);
-            TrySendImmediatePeerStatusPayloads(peer);
-            LateJoinPeerBootstrapGatePatch.TryReplayDeferredPeerBootstrap(
-                peer,
-                "CoopMissionNetworkBridge.AcceptClientBattleSnapshotCompleteAck");
+                " PayloadHashMatched=" + payloadHashMatched +
+                " ServerCatalogPrepared=" + serverCatalogPrepared +
+                " CatalogHashMatched=" + catalogHashMatched +
+                " ClientCatalogHash=" + (string.IsNullOrWhiteSpace(message.CatalogHash) ? "null" : message.CatalogHash) +
+                " ExpectedCatalogHash=" + (string.IsNullOrWhiteSpace(expectedCatalogHash) ? "null" : expectedCatalogHash) +
+                " BootstrapReady=" + bootstrapReady +
+                " ExpectedCatalogSummary={" + (expectedCatalogSummary ?? "unknown") + "}");
         }
 
         private void AcceptClientBattleSnapshotAbort(NetworkCommunicator peer, CoopBattleSnapshotAbortMessage message)
@@ -1722,21 +1749,41 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             BattleSnapshotRuntimeState.SetCurrent(snapshot, "CoopMissionNetworkBridge.V2");
-            MarkClientBattleSnapshotApplied(assemblyState.TransmissionId, assemblyState.PayloadHash);
-            _lastClientBattleSnapshotBootstrapRequestUtc = DateTime.MinValue;
-            BattleMapSpawnHandoffPatch.TryProcessDeferredClientCreateAgentMessages(
-                Mission,
-                "CoopMissionNetworkBridge.V2 applied");
-            BattleMapSpawnHandoffPatch.TryProcessDeferredClientMountedHeroCreateAgents(
-                Mission,
-                "CoopMissionNetworkBridge.V2 applied");
+            bool catalogPrepared = BattleCatalogParityState.TryPrepareCurrentBattleCatalog(
+                assemblyState.TransmissionId,
+                "CoopMissionNetworkBridge.V2 applied",
+                out string catalogHash,
+                out string catalogSummary);
+            if (catalogPrepared)
+            {
+                MarkClientBattleSnapshotApplied(assemblyState.TransmissionId, assemblyState.PayloadHash);
+                _lastClientBattleSnapshotBootstrapRequestUtc = DateTime.MinValue;
+                BattleMapSpawnHandoffPatch.TryProcessDeferredClientCreateAgentMessages(
+                    Mission,
+                    "CoopMissionNetworkBridge.V2 applied");
+                BattleMapSpawnHandoffPatch.TryProcessDeferredClientMountedHeroCreateAgents(
+                    Mission,
+                    "CoopMissionNetworkBridge.V2 applied");
+            }
+
             _clientBattleSnapshotAssembliesByTransmission.Remove(assemblyState.TransmissionId);
-            SendClientBattleSnapshotCompleteAck(assemblyState.TransmissionId, assemblyState.PayloadHash, appliedSuccessfully: true);
+            SendClientBattleSnapshotCompleteAck(
+                assemblyState.TransmissionId,
+                assemblyState.PayloadHash,
+                appliedSuccessfully: catalogPrepared,
+                catalogHash: catalogHash);
+            if (!catalogPrepared)
+            {
+                ClearClientBattleSnapshotApplicationState("CoopMissionNetworkBridge.V2 catalog-prepare-failed");
+            }
             ModLogger.Info(
                 "CoopMissionNetworkBridge: applied V2 battle snapshot payload on client. " +
                 "TransmissionId=" + assemblyState.TransmissionId +
                 " BattleId=" + (snapshot.BattleId ?? string.Empty) +
-                " Sides=" + (snapshot.Sides?.Count ?? 0));
+                " Sides=" + (snapshot.Sides?.Count ?? 0) +
+                " CatalogPrepared=" + catalogPrepared +
+                " CatalogHash=" + (string.IsNullOrWhiteSpace(catalogHash) ? "null" : catalogHash) +
+                " CatalogSummary={" + (catalogSummary ?? "unknown") + "}");
         }
 
         private void TryQueueOrContinuePayloadTransmission(
@@ -2083,9 +2130,19 @@ namespace CoopSpectator.MissionBehaviors
                     if (snapshot != null)
                     {
                         BattleSnapshotRuntimeState.SetCurrent(snapshot, "CoopMissionNetworkBridge");
-                        bool acknowledged = CoopBattleNetworkRequestTransport.TryAcknowledgeBattleSnapshot(
+                        bool catalogPrepared = BattleCatalogParityState.TryPrepareCurrentBattleCatalog(
                             transmissionId,
-                            "CoopMissionNetworkBridge.ApplyCompletedPayload");
+                            "CoopMissionNetworkBridge.ApplyCompletedPayload",
+                            out string catalogHash,
+                            out string catalogSummary);
+                        if (catalogPrepared)
+                            MarkClientBattleSnapshotApplied(transmissionId, string.Empty);
+                        bool acknowledged =
+                            catalogPrepared &&
+                            CoopBattleNetworkRequestTransport.TryAcknowledgeBattleSnapshot(
+                                transmissionId,
+                                "CoopMissionNetworkBridge.ApplyCompletedPayload",
+                                catalogHash);
                         ModLogger.Info(
                             "CoopMissionNetworkBridge: applied client payload. " +
                             "Kind=" + payloadKind +
@@ -2094,6 +2151,9 @@ namespace CoopSpectator.MissionBehaviors
                             " MapScene=" + (snapshot.MapScene ?? string.Empty) +
                             " Parties=" + (snapshot.Sides?.Sum(side => side?.Parties?.Count ?? 0) ?? 0) +
                             " Sides=" + (snapshot.Sides?.Count ?? 0) +
+                            " CatalogPrepared=" + catalogPrepared +
+                            " CatalogHash=" + (string.IsNullOrWhiteSpace(catalogHash) ? "null" : catalogHash) +
+                            " CatalogSummary={" + (catalogSummary ?? "unknown") + "}" +
                             " AckSent=" + acknowledged);
                     }
                     break;
@@ -2559,7 +2619,7 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static void SendClientBattleSnapshotCompleteAck(int transmissionId, string payloadHash, bool appliedSuccessfully)
+        private static void SendClientBattleSnapshotCompleteAck(int transmissionId, string payloadHash, bool appliedSuccessfully, string catalogHash)
         {
             if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive || transmissionId <= 0)
                 return;
@@ -2567,7 +2627,7 @@ namespace CoopSpectator.MissionBehaviors
             try
             {
                 GameNetwork.BeginModuleEventAsClient();
-                GameNetwork.WriteMessage(new CoopBattleSnapshotCompleteAckMessage(transmissionId, appliedSuccessfully, payloadHash));
+                GameNetwork.WriteMessage(new CoopBattleSnapshotCompleteAckMessage(transmissionId, appliedSuccessfully, payloadHash, catalogHash));
                 GameNetwork.EndModuleEventAsClient();
             }
             catch (Exception ex)
@@ -2868,13 +2928,21 @@ namespace CoopSpectator.MissionBehaviors
                 appliedTransmissionId == observedTransmissionId &&
                 string.Equals(appliedPayloadHash, observedPayloadHash, StringComparison.Ordinal) &&
                 !hasPendingObservedAssembly;
+            bool clientCatalogPrepared = BattleCatalogParityState.TryGetClientPreparedCatalogState(
+                observedTransmissionId,
+                out string preparedCatalogHash,
+                out string preparedCatalogSummary);
+            applied &= clientCatalogPrepared;
 
             readinessSummary =
                 "ObservedTransmissionId=" + observedTransmissionId +
                 " AppliedTransmissionId=" + appliedTransmissionId +
                 " ObservedPayloadHash=" + (string.IsNullOrWhiteSpace(observedPayloadHash) ? "null" : observedPayloadHash) +
                 " AppliedPayloadHash=" + (string.IsNullOrWhiteSpace(appliedPayloadHash) ? "null" : appliedPayloadHash) +
-                " HasPendingObservedAssembly=" + hasPendingObservedAssembly;
+                " HasPendingObservedAssembly=" + hasPendingObservedAssembly +
+                " CatalogPrepared=" + clientCatalogPrepared +
+                " CatalogHash=" + (string.IsNullOrWhiteSpace(preparedCatalogHash) ? "null" : preparedCatalogHash) +
+                " CatalogSummary={" + (preparedCatalogSummary ?? "unknown") + "}";
             return applied;
         }
 
@@ -2897,7 +2965,11 @@ namespace CoopSpectator.MissionBehaviors
 
         private bool TryAcknowledgePeerBattleSnapshot(NetworkCommunicator peer, string rawTransmissionId)
         {
-            if (peer == null || string.IsNullOrWhiteSpace(rawTransmissionId) || !int.TryParse(rawTransmissionId, out int transmissionId))
+            string parsedCatalogHash = string.Empty;
+            int transmissionId = 0;
+            if (peer == null ||
+                string.IsNullOrWhiteSpace(rawTransmissionId) ||
+                !TryParseBattleSnapshotReadyAck(rawTransmissionId, out transmissionId, out parsedCatalogHash))
             {
                 ModLogger.Info(
                     "CoopMissionNetworkBridge: rejected battle snapshot readiness ack. " +
@@ -2906,9 +2978,20 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            _acknowledgedBattleSnapshotTransmissionIdByPeer[peer.Index] = transmissionId;
             _expectedBattleSnapshotTransmissionIdByPeer.TryGetValue(peer.Index, out int expectedTransmissionId);
             bool snapshotReady = expectedTransmissionId > 0 && transmissionId >= expectedTransmissionId;
+            bool serverCatalogPrepared = BattleCatalogParityState.TryPrepareCurrentBattleCatalog(
+                transmissionId,
+                "CoopMissionNetworkBridge.TryAcknowledgePeerBattleSnapshot",
+                out string expectedCatalogHash,
+                out string expectedCatalogSummary);
+            bool catalogHashMatched =
+                serverCatalogPrepared &&
+                !string.IsNullOrWhiteSpace(parsedCatalogHash) &&
+                string.Equals(parsedCatalogHash, expectedCatalogHash, StringComparison.Ordinal);
+            bool bootstrapReady = snapshotReady && serverCatalogPrepared && catalogHashMatched;
+            if (bootstrapReady)
+                _acknowledgedBattleSnapshotTransmissionIdByPeer[peer.Index] = transmissionId;
             if (snapshotReady)
             {
                 _lastCompletedBattleSnapshotTransmissionUtcByPeer.Remove(peer.Index);
@@ -2919,8 +3002,31 @@ namespace CoopSpectator.MissionBehaviors
                 "Peer=" + (peer.UserName ?? "null") +
                 " TransmissionId=" + transmissionId +
                 " ExpectedTransmissionId=" + expectedTransmissionId +
-                " SnapshotReady=" + snapshotReady);
-            return true;
+                " SnapshotReady=" + snapshotReady +
+                " ServerCatalogPrepared=" + serverCatalogPrepared +
+                " CatalogHashMatched=" + catalogHashMatched +
+                " ClientCatalogHash=" + (string.IsNullOrWhiteSpace(parsedCatalogHash) ? "null" : parsedCatalogHash) +
+                " ExpectedCatalogHash=" + (string.IsNullOrWhiteSpace(expectedCatalogHash) ? "null" : expectedCatalogHash) +
+                " BootstrapReady=" + bootstrapReady +
+                " ExpectedCatalogSummary={" + (expectedCatalogSummary ?? "unknown") + "}");
+            return bootstrapReady;
+        }
+
+        private static bool TryParseBattleSnapshotReadyAck(string rawTransmissionId, out int transmissionId, out string catalogHash)
+        {
+            transmissionId = 0;
+            catalogHash = string.Empty;
+            if (string.IsNullOrWhiteSpace(rawTransmissionId))
+                return false;
+
+            string[] parts = rawTransmissionId.Split(new[] { '|' }, 2, StringSplitOptions.None);
+            if (parts.Length <= 0 || !int.TryParse(parts[0], out transmissionId))
+                return false;
+
+            if (parts.Length > 1)
+                catalogHash = parts[1] ?? string.Empty;
+
+            return transmissionId > 0;
         }
 
         private bool TrySerializeBattleSnapshotPayloadV2(
@@ -2976,6 +3082,7 @@ namespace CoopSpectator.MissionBehaviors
             _clientObservedBattleSnapshotPayloadHash = string.Empty;
             _clientAppliedBattleSnapshotTransmissionId = 0;
             _clientAppliedBattleSnapshotPayloadHash = string.Empty;
+            BattleCatalogParityState.ResetClient(source ?? "CoopMissionNetworkBridge.ClearClientBattleSnapshotApplicationState");
             BattleMapSpawnHandoffPatch.ClearDeferredClientMountedHeroCreateAgents(
                 (source ?? "CoopMissionNetworkBridge.ClearClientBattleSnapshotApplicationState") + " deferred-mounted-hero-clear");
             BattleSnapshotRuntimeState.Clear(source ?? "CoopMissionNetworkBridge.ClearClientBattleSnapshotApplicationState");

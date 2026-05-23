@@ -10,6 +10,9 @@ namespace CoopSpectator.Infrastructure
     public static class CampaignMultiplayerHeroClassResolver
     {
         private const string EmpireCrossbowSurrogateTroopTemplateId = "mp_coop_crossbow_empire_troop";
+        private const string GenericBowStartupSafeTroopTemplateId = "mp_coop_light_infantry_empire_troop";
+        private const string GenericLightInfantryStartupSafeTroopTemplateId = "mp_coop_light_infantry_empire_troop";
+        private const string GenericHeavyInfantryStartupSafeTroopTemplateId = "mp_coop_heavy_infantry_empire_troop";
 
         private enum RangedWeaponFamily
         {
@@ -30,9 +33,13 @@ namespace CoopSpectator.Infrastructure
         private static readonly object Sync = new object();
         private static readonly Dictionary<string, Resolution> ResolutionByCharacterId =
             new Dictionary<string, Resolution>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, RuntimeShellHeroClass> RuntimeShellHeroClassByKey =
+            new Dictionary<string, RuntimeShellHeroClass>(StringComparer.Ordinal);
         private static readonly HashSet<string> LoggedCharacterIds =
             new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> LoggedBlockedContextKeys =
+            new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> LoggedRuntimeShellBridgeKeys =
             new HashSet<string>(StringComparer.Ordinal);
 
         public static bool TryResolve(
@@ -97,16 +104,16 @@ namespace CoopSpectator.Infrastructure
                     string cultureToken = ResolveCultureToken(character);
                     CompatibilityShellTemplateResolver.ShellProfile compatibilityShellProfile =
                         CompatibilityShellTemplateResolver.ResolveProfile(character);
-                    string troopTemplateId =
-                        compatibilityShellProfile?.TroopTemplateId ??
+                    string compatibilityShellTroopTemplateId = compatibilityShellProfile?.TroopTemplateId;
+                    string heroClassTroopTemplateId =
                         ResolveSurrogateTroopTemplateId(characterId, cultureToken, isMounted, isRanged, tier, rangedWeaponFamily);
-                    string heroTemplateId = isHero ? TryConvertTroopTemplateToHeroTemplateId(troopTemplateId) : null;
+                    string heroTemplateId = isHero ? TryConvertTroopTemplateToHeroTemplateId(heroClassTroopTemplateId) : null;
 
                     List<string> candidateIds = new List<string>();
                     if (preferClientMountedHeroTroopSurrogate)
                     {
-                        if (!string.IsNullOrWhiteSpace(troopTemplateId))
-                            candidateIds.Add(troopTemplateId);
+                        if (!string.IsNullOrWhiteSpace(heroClassTroopTemplateId))
+                            candidateIds.Add(heroClassTroopTemplateId);
                         if (!string.IsNullOrWhiteSpace(heroTemplateId))
                             candidateIds.Add(heroTemplateId);
                         if (!string.IsNullOrWhiteSpace(characterId) &&
@@ -124,32 +131,56 @@ namespace CoopSpectator.Infrastructure
                         }
                         if (!string.IsNullOrWhiteSpace(heroTemplateId))
                             candidateIds.Add(heroTemplateId);
-                        if (!string.IsNullOrWhiteSpace(troopTemplateId))
-                            candidateIds.Add(troopTemplateId);
+                        if (!string.IsNullOrWhiteSpace(heroClassTroopTemplateId))
+                            candidateIds.Add(heroClassTroopTemplateId);
                     }
 
+                    MultiplayerClassDivisions.MPHeroClass templateHeroClass = null;
                     foreach (string candidateId in candidateIds.Where(candidate => !string.IsNullOrWhiteSpace(candidate)).Distinct(StringComparer.Ordinal))
                     {
-                        resolvedClass = heroClasses.FirstOrDefault(candidate =>
+                        templateHeroClass = heroClasses.FirstOrDefault(candidate =>
                             string.Equals(candidate?.HeroCharacter?.StringId, candidateId, StringComparison.Ordinal) ||
                             string.Equals(candidate?.TroopCharacter?.StringId, candidateId, StringComparison.Ordinal));
-                        if (resolvedClass != null)
+                        if (templateHeroClass != null)
                             break;
                     }
 
                     resolvedTreatAsTroop = preferClientMountedHeroTroopSurrogate || !isHero;
+                    bool runtimeShellBridgeApplied = false;
+                    string runtimeShellBridgeDiagnostics = "not-required";
+                    if (templateHeroClass != null)
+                    {
+                        if (TryResolveRuntimeShellHeroClassBridge(
+                                character,
+                                templateHeroClass,
+                                resolvedTreatAsTroop,
+                                out MultiplayerClassDivisions.MPHeroClass runtimeShellHeroClass,
+                                out runtimeShellBridgeDiagnostics))
+                        {
+                            resolvedClass = runtimeShellHeroClass;
+                            runtimeShellBridgeApplied = true;
+                        }
+                        else
+                        {
+                            resolvedClass = templateHeroClass;
+                        }
+                    }
+
                     resolvedDiagnostics =
                         "Character=" + (characterId ?? "null") +
                         " CultureToken=" + (cultureToken ?? "null") +
                         " Mounted=" + isMounted +
                         " Ranged=" + isRanged +
                         " RangedWeaponFamily=" + rangedWeaponFamily +
-                        " CompatibilityShell=" + (compatibilityShellProfile?.TroopTemplateId ?? "null") +
+                        " CompatibilityShell=" + (compatibilityShellTroopTemplateId ?? "null") +
                         " Tier=" + tier +
-                        " TroopTemplate=" + (troopTemplateId ?? "null") +
+                        " HeroClassTroopTemplate=" + (heroClassTroopTemplateId ?? "null") +
                         " HeroTemplate=" + (heroTemplateId ?? "null") +
                         " ClientMountedTroopSurrogate=" + preferClientMountedHeroTroopSurrogate +
                         " TreatAsTroop=" + resolvedTreatAsTroop +
+                        " TemplateClass=" + (templateHeroClass?.StringId ?? "null") +
+                        " RuntimeShellBridgeApplied=" + runtimeShellBridgeApplied +
+                        " RuntimeShellBridgeDiagnostics=" + runtimeShellBridgeDiagnostics +
                         " ResolvedClass=" + (resolvedClass?.StringId ?? "null");
                 }
             }
@@ -167,7 +198,8 @@ namespace CoopSpectator.Infrastructure
 
             lock (Sync)
             {
-                ResolutionByCharacterId[resolutionCacheKey] = resolution;
+                if (resolvedClass != null)
+                    ResolutionByCharacterId[resolutionCacheKey] = resolution;
             }
 
             if (resolvedClass != null && LoggedCharacterIds.Add(resolutionCacheKey))
@@ -188,15 +220,113 @@ namespace CoopSpectator.Infrastructure
             Mission mission = Mission.Current;
             string sceneName = mission?.SceneName ?? string.Empty;
             bool isBattleRuntimeScene = SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(sceneName);
+            BattleRuntimeState battleRuntimeState = BattleSnapshotRuntimeState.GetState();
+            bool hasServerBattleSnapshotState =
+                GameNetwork.IsServer &&
+                !GameNetwork.IsClient &&
+                ((battleRuntimeState?.EntriesById?.Count ?? 0) > 0 ||
+                 BattleSnapshotRuntimeState.GetCurrent() != null);
             diagnostics =
                 "blocked-non-battle-context" +
                 " Character=" + (string.IsNullOrWhiteSpace(characterId) ? "null" : characterId) +
                 " HasMission=" + (mission != null) +
                 " Scene=" + (string.IsNullOrWhiteSpace(sceneName) ? "null" : sceneName) +
                 " IsBattleRuntimeScene=" + isBattleRuntimeScene +
+                " HasServerBattleSnapshotState=" + hasServerBattleSnapshotState +
                 " IsClient=" + GameNetwork.IsClient +
                 " IsServer=" + GameNetwork.IsServer;
-            return mission != null && isBattleRuntimeScene;
+            return (mission != null && isBattleRuntimeScene) || hasServerBattleSnapshotState;
+        }
+
+        private static bool TryResolveRuntimeShellHeroClassBridge(
+            BasicCharacterObject character,
+            MultiplayerClassDivisions.MPHeroClass templateHeroClass,
+            bool treatAsTroop,
+            out MultiplayerClassDivisions.MPHeroClass runtimeShellHeroClass,
+            out string diagnostics)
+        {
+            runtimeShellHeroClass = null;
+            diagnostics = "bridge-not-required";
+            string characterId = character?.StringId ?? string.Empty;
+            if (character == null || templateHeroClass == null)
+            {
+                diagnostics = "bridge-input-null";
+                return false;
+            }
+
+            if (!RequiresRuntimeShellHeroClassBridge(character, templateHeroClass))
+            {
+                diagnostics = "bridge-not-required";
+                return false;
+            }
+
+            string runtimeShellHeroClassKey =
+                characterId +
+                "|template=" + (templateHeroClass.StringId ?? "null") +
+                "|treat-as-troop=" + treatAsTroop;
+            lock (Sync)
+            {
+                if (!RuntimeShellHeroClassByKey.TryGetValue(runtimeShellHeroClassKey, out RuntimeShellHeroClass cachedRuntimeShellHeroClass))
+                {
+                    cachedRuntimeShellHeroClass = new RuntimeShellHeroClass(
+                        "coopspectator_runtime_shell_class_" +
+                        SanitizeRuntimeShellHeroClassIdComponent(characterId) + "_" +
+                        SanitizeRuntimeShellHeroClassIdComponent(templateHeroClass.StringId) + "_" +
+                        (treatAsTroop ? "troop" : "hero"));
+                    cachedRuntimeShellHeroClass.UpdateFromTemplate(templateHeroClass, character, treatAsTroop);
+                    RuntimeShellHeroClassByKey[runtimeShellHeroClassKey] = cachedRuntimeShellHeroClass;
+                }
+
+                runtimeShellHeroClass = cachedRuntimeShellHeroClass;
+                if (LoggedRuntimeShellBridgeKeys.Add(runtimeShellHeroClassKey))
+                {
+                    ModLogger.Info(
+                        "CampaignMultiplayerHeroClassResolver: created runtime-only MPHeroClass bridge for surrogate shell. " +
+                        "Character=" + (characterId ?? "null") +
+                        " TemplateClass=" + (templateHeroClass.StringId ?? "null") +
+                        " TreatAsTroop=" + treatAsTroop +
+                        " RuntimeClass=" + (runtimeShellHeroClass.StringId ?? "null"));
+                }
+            }
+
+            diagnostics =
+                "bridge-created" +
+                " Character=" + (characterId ?? "null") +
+                " TemplateClass=" + (templateHeroClass.StringId ?? "null") +
+                " TreatAsTroop=" + treatAsTroop +
+                " RuntimeClass=" + (runtimeShellHeroClass?.StringId ?? "null");
+            return runtimeShellHeroClass != null;
+        }
+
+        private static bool RequiresRuntimeShellHeroClassBridge(
+            BasicCharacterObject character,
+            MultiplayerClassDivisions.MPHeroClass templateHeroClass)
+        {
+            if (character == null || templateHeroClass == null)
+                return false;
+
+            string characterId = character.StringId ?? string.Empty;
+            if (!IsMultiplayerShellCharacterId(characterId))
+                return false;
+
+            return !DoesHeroClassRepresentCharacter(templateHeroClass, character);
+        }
+
+        private static bool IsMultiplayerShellCharacterId(string characterId)
+        {
+            if (string.IsNullOrWhiteSpace(characterId))
+                return false;
+
+            return characterId.StartsWith("mp_", StringComparison.Ordinal);
+        }
+
+        private static string SanitizeRuntimeShellHeroClassIdComponent(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return "null";
+
+            return new string(
+                value.Select(ch => char.IsLetterOrDigit(ch) ? char.ToLowerInvariant(ch) : '_').ToArray());
         }
 
         private static void LogBlockedContextOnce(string characterId, string diagnostics)
@@ -428,16 +558,24 @@ namespace CoopSpectator.Infrastructure
                 cultureToken = "empire";
 
             string normalizedCharacterId = (characterId ?? string.Empty).Trim().ToLowerInvariant();
+            if (TryResolveStartupSafeLegacyTemplateId(
+                    normalizedCharacterId,
+                    rangedWeaponFamily,
+                    out string startupSafeLegacyTemplateId))
+            {
+                return startupSafeLegacyTemplateId;
+            }
+
             if (normalizedCharacterId.Contains("looter"))
                 return "mp_coop_looter_troop";
             if (normalizedCharacterId.Contains("sea_raider"))
-                return "mp_heavy_infantry_sturgia_troop";
+                return NormalizeKnownTemplateId("mp_heavy_infantry_sturgia_troop");
             if (normalizedCharacterId.Contains("forest_bandit"))
-                return "mp_light_ranged_battania_troop";
+                return NormalizeKnownTemplateId("mp_light_ranged_battania_troop");
             if (normalizedCharacterId.Contains("mountain_bandit"))
-                return "mp_light_infantry_vlandia_troop";
+                return NormalizeKnownTemplateId("mp_light_infantry_vlandia_troop");
             if (normalizedCharacterId.Contains("desert_bandit"))
-                return "mp_skirmisher_aserai_troop";
+                return NormalizeKnownTemplateId("mp_skirmisher_aserai_troop");
             if (normalizedCharacterId.Contains("steppe_bandit"))
                 return "mp_horse_archer_khuzait_troop";
 
@@ -451,6 +589,9 @@ namespace CoopSpectator.Infrastructure
                 {
                     return EmpireCrossbowSurrogateTroopTemplateId;
                 }
+
+                if (rangedWeaponFamily == RangedWeaponFamily.Bow)
+                    return GenericBowStartupSafeTroopTemplateId;
 
                 return NormalizeKnownTemplateId(
                     (tier >= 4 ? "mp_heavy_ranged_" : "mp_light_ranged_") +
@@ -469,6 +610,42 @@ namespace CoopSpectator.Infrastructure
             return NormalizeKnownTemplateId("mp_light_infantry_" + cultureToken + "_troop");
         }
 
+        private static bool TryResolveStartupSafeLegacyTemplateId(
+            string normalizedCharacterId,
+            RangedWeaponFamily rangedWeaponFamily,
+            out string templateId)
+        {
+            templateId = null;
+            if (string.IsNullOrWhiteSpace(normalizedCharacterId))
+                return false;
+
+            if (normalizedCharacterId.StartsWith("mp_coop_foot_bow_", StringComparison.Ordinal) ||
+                normalizedCharacterId.StartsWith("mp_light_ranged_", StringComparison.Ordinal) ||
+                normalizedCharacterId.StartsWith("mp_heavy_ranged_", StringComparison.Ordinal))
+            {
+                templateId =
+                    rangedWeaponFamily == RangedWeaponFamily.Crossbow
+                        ? EmpireCrossbowSurrogateTroopTemplateId
+                        : GenericBowStartupSafeTroopTemplateId;
+                return true;
+            }
+
+            switch (normalizedCharacterId)
+            {
+                case "mp_skirmisher_aserai_troop":
+                    templateId = GenericLightInfantryStartupSafeTroopTemplateId;
+                    return true;
+                case "mp_light_infantry_vlandia_troop":
+                    templateId = GenericLightInfantryStartupSafeTroopTemplateId;
+                    return true;
+                case "mp_heavy_infantry_sturgia_troop":
+                    templateId = GenericHeavyInfantryStartupSafeTroopTemplateId;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         private static string NormalizeKnownTemplateId(string candidate)
         {
             switch (candidate)
@@ -477,6 +654,14 @@ namespace CoopSpectator.Infrastructure
                     return "mp_coop_light_infantry_empire_troop";
                 case "mp_heavy_infantry_aserai_troop":
                     return "mp_shock_infantry_aserai_troop";
+                case "mp_light_ranged_battania_troop":
+                    return GenericBowStartupSafeTroopTemplateId;
+                case "mp_skirmisher_aserai_troop":
+                    return GenericLightInfantryStartupSafeTroopTemplateId;
+                case "mp_light_infantry_vlandia_troop":
+                    return GenericLightInfantryStartupSafeTroopTemplateId;
+                case "mp_heavy_infantry_sturgia_troop":
+                    return GenericHeavyInfantryStartupSafeTroopTemplateId;
                 default:
                     return candidate;
             }
@@ -491,6 +676,119 @@ namespace CoopSpectator.Infrastructure
                 return troopTemplateId;
 
             return troopTemplateId.Substring(0, troopTemplateId.Length - "_troop".Length) + "_hero";
+        }
+
+        private static bool DoesHeroClassRepresentCharacter(
+            MultiplayerClassDivisions.MPHeroClass heroClass,
+            BasicCharacterObject character)
+        {
+            if (heroClass == null || character == null)
+                return false;
+
+            string characterId = character.StringId ?? string.Empty;
+            return string.Equals(heroClass.HeroCharacter?.StringId, characterId, StringComparison.Ordinal) ||
+                   string.Equals(heroClass.TroopCharacter?.StringId, characterId, StringComparison.Ordinal);
+        }
+
+        private sealed class RuntimeShellHeroClass : MultiplayerClassDivisions.MPHeroClass
+        {
+            private static readonly FieldInfo HeroCharacterField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<HeroCharacter>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo TroopCharacterField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<TroopCharacter>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo BannerBearerCharacterField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<BannerBearerCharacter>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo CultureField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<Culture>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo ClassGroupField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<ClassGroup>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo HeroIdleAnimField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<HeroIdleAnim>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo HeroMountIdleAnimField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<HeroMountIdleAnim>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo TroopIdleAnimField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<TroopIdleAnim>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo TroopMountIdleAnimField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<TroopMountIdleAnim>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo ArmorValueField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<ArmorValue>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo HealthField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<Health>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo HeroMovementSpeedMultiplierField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<HeroMovementSpeedMultiplier>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo HeroCombatMovementSpeedMultiplierField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<HeroCombatMovementSpeedMultiplier>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo HeroTopSpeedReachDurationField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<HeroTopSpeedReachDuration>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo TroopMovementSpeedMultiplierField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<TroopMovementSpeedMultiplier>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo TroopCombatMovementSpeedMultiplierField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<TroopCombatMovementSpeedMultiplier>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo TroopTopSpeedReachDurationField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<TroopTopSpeedReachDuration>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo TroopMultiplierField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<TroopMultiplier>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo TroopCostField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<TroopCost>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo TroopCasualCostField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<TroopCasualCost>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo TroopBattleCostField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<TroopBattleCost>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo MeleeAiField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<MeleeAI>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo RangedAiField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<RangedAI>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo HeroInformationField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<HeroInformation>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo TroopInformationField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<TroopInformation>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo IconTypeField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("<IconType>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            private static readonly FieldInfo PerksField = typeof(MultiplayerClassDivisions.MPHeroClass).GetField("_perks", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            public RuntimeShellHeroClass(string stringId)
+            {
+                StringId = stringId;
+                Initialize();
+            }
+
+            public void UpdateFromTemplate(
+                MultiplayerClassDivisions.MPHeroClass template,
+                BasicCharacterObject shellCharacter,
+                bool treatAsTroop)
+            {
+                if (template == null || shellCharacter == null)
+                    return;
+
+                SetField(HeroCharacterField, treatAsTroop ? template.HeroCharacter ?? shellCharacter : shellCharacter);
+                SetField(TroopCharacterField, treatAsTroop ? shellCharacter : template.TroopCharacter ?? shellCharacter);
+                SetField(BannerBearerCharacterField, template.BannerBearerCharacter ?? shellCharacter);
+                SetField(CultureField, null);
+                SetField(ClassGroupField, template.ClassGroup ?? new MultiplayerClassDivisions.MPHeroClassGroup(shellCharacter.DefaultFormationClass.GetName()));
+                SetField(HeroIdleAnimField, template.HeroIdleAnim);
+                SetField(HeroMountIdleAnimField, template.HeroMountIdleAnim);
+                SetField(TroopIdleAnimField, template.TroopIdleAnim);
+                SetField(TroopMountIdleAnimField, template.TroopMountIdleAnim);
+                SetField(ArmorValueField, template.ArmorValue);
+                SetField(HealthField, template.Health);
+                SetField(HeroMovementSpeedMultiplierField, template.HeroMovementSpeedMultiplier);
+                SetField(HeroCombatMovementSpeedMultiplierField, template.HeroCombatMovementSpeedMultiplier);
+                SetField(HeroTopSpeedReachDurationField, template.HeroTopSpeedReachDuration);
+                SetField(TroopMovementSpeedMultiplierField, template.TroopMovementSpeedMultiplier);
+                SetField(TroopCombatMovementSpeedMultiplierField, template.TroopCombatMovementSpeedMultiplier);
+                SetField(TroopTopSpeedReachDurationField, template.TroopTopSpeedReachDuration);
+                SetField(TroopMultiplierField, template.TroopMultiplier);
+                SetField(TroopCostField, template.TroopCost);
+                SetField(TroopCasualCostField, template.TroopCasualCost);
+                SetField(TroopBattleCostField, template.TroopBattleCost);
+                SetField(MeleeAiField, template.MeleeAI);
+                SetField(RangedAiField, template.RangedAI);
+                SetField(HeroInformationField, template.HeroInformation);
+                SetField(TroopInformationField, template.TroopInformation);
+                SetField(IconTypeField, template.IconType);
+                SetField(PerksField, ClonePerks(template));
+            }
+
+            private void SetField(FieldInfo field, object value)
+            {
+                try
+                {
+                    field?.SetValue(this, value);
+                }
+                catch
+                {
+                }
+            }
+
+            private static List<IReadOnlyPerkObject> ClonePerks(MultiplayerClassDivisions.MPHeroClass template)
+            {
+                if (PerksField == null || template == null)
+                    return new List<IReadOnlyPerkObject>();
+
+                try
+                {
+                    List<IReadOnlyPerkObject> source = PerksField.GetValue(template) as List<IReadOnlyPerkObject>;
+                    return source != null ? new List<IReadOnlyPerkObject>(source) : new List<IReadOnlyPerkObject>();
+                }
+                catch
+                {
+                    return new List<IReadOnlyPerkObject>();
+                }
+            }
         }
 
         private static bool TryGetBoolProperty(object instance, string propertyName)

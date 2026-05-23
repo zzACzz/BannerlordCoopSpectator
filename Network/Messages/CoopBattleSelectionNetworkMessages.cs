@@ -544,11 +544,12 @@ namespace CoopSpectator.Network.Messages
     {
         private static readonly CompressionInfo.Integer TransmissionCompressionInfo = new CompressionInfo.Integer(0, 1048575, maximumValueGiven: true);
 
-        public CoopBattleSnapshotCompleteAckMessage(int transmissionId, bool appliedSuccessfully, string payloadHash)
+        public CoopBattleSnapshotCompleteAckMessage(int transmissionId, bool appliedSuccessfully, string payloadHash, string catalogHash)
         {
             TransmissionId = transmissionId;
             AppliedSuccessfully = appliedSuccessfully;
             PayloadHash = string.IsNullOrWhiteSpace(payloadHash) ? string.Empty : payloadHash.Trim();
+            CatalogHash = string.IsNullOrWhiteSpace(catalogHash) ? string.Empty : catalogHash.Trim();
         }
 
         public CoopBattleSnapshotCompleteAckMessage()
@@ -556,11 +557,13 @@ namespace CoopSpectator.Network.Messages
             TransmissionId = 0;
             AppliedSuccessfully = false;
             PayloadHash = string.Empty;
+            CatalogHash = string.Empty;
         }
 
         public int TransmissionId { get; private set; }
         public bool AppliedSuccessfully { get; private set; }
         public string PayloadHash { get; private set; }
+        public string CatalogHash { get; private set; }
 
         protected override bool OnRead()
         {
@@ -568,6 +571,7 @@ namespace CoopSpectator.Network.Messages
             TransmissionId = ReadIntFromPacket(TransmissionCompressionInfo, ref bufferReadValid);
             AppliedSuccessfully = ReadBoolFromPacket(ref bufferReadValid);
             PayloadHash = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
+            CatalogHash = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
             return bufferReadValid;
         }
 
@@ -576,6 +580,7 @@ namespace CoopSpectator.Network.Messages
             WriteIntToPacket(TransmissionId, TransmissionCompressionInfo);
             WriteBoolToPacket(AppliedSuccessfully);
             WriteStringToPacket(PayloadHash ?? string.Empty);
+            WriteStringToPacket(CatalogHash ?? string.Empty);
         }
 
         protected override MultiplayerMessageFilter OnGetLogFilter()
@@ -586,7 +591,8 @@ namespace CoopSpectator.Network.Messages
         protected override string OnGetLogFormat()
         {
             return "CoopBattleSnapshotCompleteAck TransmissionId=" + TransmissionId +
-                " AppliedSuccessfully=" + AppliedSuccessfully;
+                " AppliedSuccessfully=" + AppliedSuccessfully +
+                " CatalogHash=" + (string.IsNullOrWhiteSpace(CatalogHash) ? "null" : CatalogHash);
         }
     }
 
