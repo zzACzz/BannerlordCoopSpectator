@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Source.Missions;
@@ -1109,6 +1110,19 @@ namespace CoopSpectator.Infrastructure
             return false;
         }
 
+        public static bool TryGetCanonicalInstanceId(Agent agent, out string instanceId)
+        {
+            if (agent?.Origin is ExactCampaignSnapshotAgentOrigin origin &&
+                !string.IsNullOrWhiteSpace(origin.CanonicalInstanceId))
+            {
+                instanceId = origin.CanonicalInstanceId;
+                return true;
+            }
+
+            instanceId = null;
+            return false;
+        }
+
         public static void LogInitializationDeferred(Mission mission, string reason, string source)
         {
             DateTime nowUtc = DateTime.UtcNow;
@@ -1702,6 +1716,18 @@ namespace CoopSpectator.Infrastructure
             if (sideState?.Entries == null || sideState.Entries.Count <= 0)
                 return new ExactCampaignSnapshotTroopSupplier(side, side == playerSide);
 
+            if (TryBuildCanonicalSupplier(
+                    runtimeState,
+                    sideState,
+                    side,
+                    playerSide,
+                    out ExactCampaignSnapshotTroopSupplier canonicalSupplier,
+                    out totalHealthyCount,
+                    out diagnostics))
+            {
+                return canonicalSupplier;
+            }
+
             var supplier = new ExactCampaignSnapshotTroopSupplier(side, side == playerSide);
             var origins = new List<ExactCampaignSnapshotAgentOrigin>();
             RosterEntryState commanderEntryState = BattleCommanderResolver.ResolveCommanderEntry(runtimeState, side, sideState.Entries);
@@ -1856,6 +1882,118 @@ namespace CoopSpectator.Infrastructure
             return supplier;
         }
 
+        private static bool TryBuildCanonicalSupplier(
+            BattleRuntimeState runtimeState,
+            BattleSideState sideState,
+            BattleSideEnum side,
+            BattleSideEnum playerSide,
+            out ExactCampaignSnapshotTroopSupplier supplier,
+            out int totalHealthyCount,
+            out string diagnostics)
+        {
+            supplier = null;
+            totalHealthyCount = 0;
+            diagnostics = "canonical-contract-missing";
+
+            CanonicalBattleContract canonicalBattle = runtimeState?.Snapshot?.CanonicalBattle;
+            if (canonicalBattle?.TroopInstances == null || canonicalBattle.TroopInstances.Count <= 0 || sideState?.Entries == null)
+                return false;
+
+            List<CanonicalTroopInstance> sideInstances = canonicalBattle.TroopInstances
+                .Where(instance =>
+                    instance != null &&
+                    instance.IsMissionParticipant &&
+                    !instance.IsPreBattleWounded &&
+                    ResolveBattleSide(instance.SideId) == side)
+                .OrderBy(instance => instance.MissionOrderIndex < 0 ? int.MaxValue : instance.MissionOrderIndex)
+                .ThenBy(instance => instance.EntryId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(instance => instance.StableOrdinalWithinEntry)
+                .ToList();
+            if (sideInstances.Count <= 0)
+            {
+                diagnostics = "canonical-side-empty";
+                return false;
+            }
+
+            var entriesById = sideState.Entries
+                .Where(entry => entry != null && !string.IsNullOrWhiteSpace(entry.EntryId))
+                .GroupBy(entry => entry.EntryId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+            var origins = new List<ExactCampaignSnapshotAgentOrigin>(sideInstances.Count);
+            supplier = new ExactCampaignSnapshotTroopSupplier(side, side == playerSide);
+
+            RosterEntryState commanderEntryState = BattleCommanderResolver.ResolveCommanderEntry(runtimeState, side, sideState.Entries);
+            BasicCharacterObject commanderCharacter = TryResolveEntryCharacter(commanderEntryState);
+            BasicCharacterObject generalCharacter = commanderCharacter;
+            int unresolvedInstances = 0;
+            int descriptorSeedInstances = 0;
+            int syntheticSeedInstances = 0;
+            int missingEntryStateInstances = 0;
+            HashSet<int> usedSeeds = new HashSet<int>(sideInstances
+                .Where(instance => instance.CampaignTroopDescriptorSeed.HasValue && instance.CampaignTroopDescriptorSeed.Value > 0)
+                .Select(instance => instance.CampaignTroopDescriptorSeed.Value));
+            int nextSyntheticSeed = usedSeeds.Count > 0 ? Math.Max(1, usedSeeds.Max() + 1) : 1;
+
+            foreach (CanonicalTroopInstance instance in sideInstances)
+            {
+                entriesById.TryGetValue(instance.EntryId ?? string.Empty, out RosterEntryState entryState);
+                if (entryState == null)
+                    missingEntryStateInstances++;
+
+                BasicCharacterObject troop = TryResolveCanonicalInstanceCharacter(instance, entryState);
+                if (troop == null)
+                {
+                    unresolvedInstances++;
+                    continue;
+                }
+
+                if (generalCharacter == null &&
+                    (instance.IsHero || !string.IsNullOrWhiteSpace(instance.HeroRole)))
+                {
+                    generalCharacter = troop;
+                }
+
+                int seed;
+                if (instance.CampaignTroopDescriptorSeed.HasValue && instance.CampaignTroopDescriptorSeed.Value > 0)
+                {
+                    seed = instance.CampaignTroopDescriptorSeed.Value;
+                    descriptorSeedInstances++;
+                }
+                else
+                {
+                    seed = AllocateSyntheticCanonicalOriginSeed(usedSeeds, ref nextSyntheticSeed);
+                    syntheticSeedInstances++;
+                }
+
+                origins.Add(new ExactCampaignSnapshotAgentOrigin(
+                    supplier,
+                    troop,
+                    instance.EntryId,
+                    troop.StringId,
+                    side,
+                    side == playerSide,
+                    seed,
+                    instance.InstanceId));
+                totalHealthyCount++;
+            }
+
+            if (generalCharacter == null)
+                generalCharacter = origins.FirstOrDefault()?.Troop;
+
+            supplier.Initialize(origins, generalCharacter);
+            diagnostics =
+                "Canonical=true" +
+                " Entries=" + sideState.Entries.Count +
+                " MissionParticipants=" + sideInstances.Count +
+                " Healthy=" + totalHealthyCount +
+                " DescriptorSeeds=" + descriptorSeedInstances +
+                " SyntheticSeeds=" + syntheticSeedInstances +
+                " MissingEntryStates=" + missingEntryStateInstances +
+                " UnresolvedInstances=" + unresolvedInstances +
+                " GeneralCharacter=" + (generalCharacter?.StringId ?? "null");
+            return origins.Count > 0;
+        }
+
         private static void AppendOriginForEntry(
             List<ExactCampaignSnapshotAgentOrigin> origins,
             ExactCampaignSnapshotTroopSupplier supplier,
@@ -1875,7 +2013,70 @@ namespace CoopSpectator.Infrastructure
                 troop.StringId,
                 side,
                 side == playerSide,
-                seed++));
+                seed++,
+                null));
+        }
+
+        private static BasicCharacterObject TryResolveCanonicalInstanceCharacter(
+            CanonicalTroopInstance instance,
+            RosterEntryState fallbackEntryState)
+        {
+            if (fallbackEntryState != null)
+            {
+                BasicCharacterObject entryCharacter = TryResolveEntryCharacter(fallbackEntryState);
+                if (entryCharacter != null)
+                    return entryCharacter;
+            }
+
+            if (instance == null)
+                return null;
+
+            if (!string.IsNullOrWhiteSpace(instance.EntryId))
+            {
+                BasicCharacterObject runtimeCharacter = BattleSnapshotRuntimeState.TryResolveCharacterObject(instance.EntryId);
+                if (runtimeCharacter != null)
+                    return runtimeCharacter;
+            }
+
+            string[] candidateIds =
+            {
+                instance.SpawnTemplateId,
+                instance.OriginalCharacterId,
+                instance.CharacterId,
+                instance.HeroTemplateId
+            };
+
+            foreach (string candidateId in candidateIds)
+            {
+                if (string.IsNullOrWhiteSpace(candidateId))
+                    continue;
+
+                try
+                {
+                    BasicCharacterObject candidate = MBObjectManager.Instance.GetObject<BasicCharacterObject>(candidateId);
+                    if (candidate != null)
+                        return candidate;
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
+        }
+
+        private static int AllocateSyntheticCanonicalOriginSeed(ISet<int> usedSeeds, ref int nextSyntheticSeed)
+        {
+            if (usedSeeds == null)
+                usedSeeds = new HashSet<int>();
+
+            while (usedSeeds.Contains(nextSyntheticSeed))
+                nextSyntheticSeed++;
+
+            int seed = nextSyntheticSeed;
+            usedSeeds.Add(seed);
+            nextSyntheticSeed++;
+            return seed;
         }
 
         private static BasicCharacterObject TryResolveEntryCharacter(RosterEntryState entryState)
@@ -1946,6 +2147,18 @@ namespace CoopSpectator.Infrastructure
             if (string.Equals(raw, "attacker", StringComparison.OrdinalIgnoreCase))
                 return BattleSideEnum.Attacker;
             if (string.Equals(raw, "defender", StringComparison.OrdinalIgnoreCase))
+                return BattleSideEnum.Defender;
+            return BattleSideEnum.None;
+        }
+
+        private static BattleSideEnum ResolveBattleSide(string sideId)
+        {
+            if (string.IsNullOrWhiteSpace(sideId))
+                return BattleSideEnum.None;
+
+            if (string.Equals(sideId, BattleSideEnum.Attacker.ToString(), StringComparison.OrdinalIgnoreCase))
+                return BattleSideEnum.Attacker;
+            if (string.Equals(sideId, BattleSideEnum.Defender.ToString(), StringComparison.OrdinalIgnoreCase))
                 return BattleSideEnum.Defender;
             return BattleSideEnum.None;
         }
@@ -2068,6 +2281,8 @@ namespace CoopSpectator.Infrastructure
 
         public BattleSideEnum Side { get; }
 
+        public string CanonicalInstanceId { get; }
+
         public BasicCharacterObject Troop => _troop;
 
         bool IAgentOriginBase.IsUnderPlayersCommand => _isUnderPlayersCommand;
@@ -2103,13 +2318,15 @@ namespace CoopSpectator.Infrastructure
             string troopId,
             BattleSideEnum side,
             bool isUnderPlayersCommand,
-            int seed)
+            int seed,
+            string canonicalInstanceId)
         {
             _supplier = supplier;
             _troop = troop;
             EntryId = entryId ?? string.Empty;
             TroopId = troopId ?? troop?.StringId ?? string.Empty;
             Side = side;
+            CanonicalInstanceId = canonicalInstanceId ?? string.Empty;
             _isUnderPlayersCommand = isUnderPlayersCommand;
             _seed = seed;
             AgentOriginUtilities.GetDefaultTroopTraits(_troop, out _hasThrownWeapon, out _hasSpear, out _hasShield, out _hasHeavyArmor);

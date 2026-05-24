@@ -2,13 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using CoopSpectator.Network.Messages;
+using Newtonsoft.Json;
 
 namespace CoopSpectator.Infrastructure
 {
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 2;
+        private const int SchemaVersion = 3;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -59,7 +60,7 @@ namespace CoopSpectator.Infrastructure
                     }
 
                     int schemaVersion = reader.ReadInt32();
-                    if (schemaVersion != 1 && schemaVersion != SchemaVersion)
+                    if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
                             "BattleSnapshotBinarySerializer: unsupported schema version. " +
@@ -101,6 +102,7 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, snapshot.BattleSizeBudgetSource);
             WriteString(writer, snapshot.PlayerSide);
             writer.Write(snapshot.PlayerTroopsReceivedDamageMultiplier);
+            WriteString(writer, SerializeCanonicalBattle(snapshot.CanonicalBattle));
             WriteList(writer, snapshot.Sides, WriteBattleSide);
         }
 
@@ -127,8 +129,39 @@ namespace CoopSpectator.Infrastructure
                 BattleSizeBudgetSource = ReadString(reader),
                 PlayerSide = ReadString(reader),
                 PlayerTroopsReceivedDamageMultiplier = schemaVersion >= 2 ? reader.ReadSingle() : 1f,
+                CanonicalBattle = schemaVersion >= 3 ? DeserializeCanonicalBattle(ReadString(reader)) : null,
                 Sides = ReadList(reader, ReadBattleSide) ?? new List<BattleSideSnapshotMessage>()
             };
+        }
+
+        private static string SerializeCanonicalBattle(CanonicalBattleContract contract)
+        {
+            if (contract == null)
+                return string.Empty;
+
+            try
+            {
+                return JsonConvert.SerializeObject(contract);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static CanonicalBattleContract DeserializeCanonicalBattle(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            try
+            {
+                return JsonConvert.DeserializeObject<CanonicalBattleContract>(json);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static void WriteBattleSide(BinaryWriter writer, BattleSideSnapshotMessage side)

@@ -743,34 +743,70 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             Dictionary<string, EncounterPartyWritebackState> encounterParties = ResolveEncounterPartyWritebackStates();
             summary.EncounterParties = encounterParties.Count;
 
+            bool usedCanonicalCasualtyReplay = false;
+            if (ExperimentalFeatures.EnableCanonicalFieldBattleResultWriteback &&
+                result?.CanonicalResult?.TroopOutcomes != null &&
+                result.CanonicalResult.TroopOutcomes.Count > 0)
+            {
+                CanonicalBattleContract canonicalContract = BattleSnapshotRuntimeState.GetCurrent()?.CanonicalBattle;
+                if (canonicalContract != null)
+                {
+                    CampaignFieldBattleImportBridge.OutcomeReplaySummary replaySummary =
+                        CampaignFieldBattleImportBridge.ApplyResult(canonicalContract, result.CanonicalResult);
+                    int actionableOutcomes = result.CanonicalResult.TroopOutcomes.Count(outcome => IsCanonicalOutcomeActionable(outcome?.Outcome));
+                    int appliedOutcomes =
+                        replaySummary.AppliedKilled +
+                        replaySummary.AppliedWounded +
+                        replaySummary.AppliedRouted;
+                    usedCanonicalCasualtyReplay =
+                        actionableOutcomes == appliedOutcomes &&
+                        replaySummary.SkippedMissingInstance == 0 &&
+                        replaySummary.SkippedMissingDescriptorSeed == 0 &&
+                        replaySummary.SkippedMissingLiveBinding == 0;
+
+                    AddWritebackSample(
+                        summary.AdjustedSamples,
+                        "CanonicalReplay:" +
+                        " Actionable=" + actionableOutcomes +
+                        " Applied=" + appliedOutcomes +
+                        " MissingInstance=" + replaySummary.SkippedMissingInstance +
+                        " MissingSeed=" + replaySummary.SkippedMissingDescriptorSeed +
+                        " MissingBinding=" + replaySummary.SkippedMissingLiveBinding +
+                        " Used=" + usedCanonicalCasualtyReplay);
+                }
+            }
+
             Dictionary<string, BattleResultCharacterAggregate> aggregates = BuildBattleResultCharacterAggregates(result);
             summary.Aggregates = aggregates.Count;
 
-            foreach (BattleResultCharacterAggregate aggregate in aggregates.Values
-                         .OrderBy(group => group.PartyId, StringComparer.OrdinalIgnoreCase)
-                         .ThenBy(group => group.HeroId, StringComparer.OrdinalIgnoreCase)
-                         .ThenBy(group => group.OriginalCharacterId, StringComparer.OrdinalIgnoreCase)
-                         .ThenBy(group => group.CharacterId, StringComparer.OrdinalIgnoreCase))
+            if (!usedCanonicalCasualtyReplay)
             {
-                if (aggregate == null)
-                    continue;
-
-                if (!encounterParties.TryGetValue(aggregate.PartyId ?? string.Empty, out EncounterPartyWritebackState partyState) ||
-                    partyState?.MemberRoster == null)
+                foreach (BattleResultCharacterAggregate aggregate in aggregates.Values
+                             .OrderBy(group => group.PartyId, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(group => group.HeroId, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(group => group.OriginalCharacterId, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(group => group.CharacterId, StringComparer.OrdinalIgnoreCase))
                 {
-                    summary.UnresolvedPartyAggregates++;
-                    AddWritebackSample(
-                        summary.UnresolvedSamples,
-                        "MissingParty:" + (aggregate.PartyId ?? "null") + "/" + (aggregate.TroopName ?? aggregate.IdentityKey ?? "entry"));
-                    continue;
-                }
+                    if (aggregate == null)
+                        continue;
 
-                summary.ResolvedPartyAggregates++;
-                TryApplyAggregateToPartyRoster(
-                    partyState,
-                    aggregate,
-                    summary,
-                    skipMainPartyHeroHitPointWriteback && partyState.IsMainParty);
+                    if (!encounterParties.TryGetValue(aggregate.PartyId ?? string.Empty, out EncounterPartyWritebackState partyState) ||
+                        partyState?.MemberRoster == null)
+                    {
+                        summary.UnresolvedPartyAggregates++;
+                        AddWritebackSample(
+                            summary.UnresolvedSamples,
+                            "MissingParty:" + (aggregate.PartyId ?? "null") + "/" + (aggregate.TroopName ?? aggregate.IdentityKey ?? "entry"));
+                        continue;
+                    }
+
+                    summary.ResolvedPartyAggregates++;
+                    TryApplyAggregateToPartyRoster(
+                        partyState,
+                        aggregate,
+                        summary,
+                        skipMainPartyHeroHitPointWriteback && partyState.IsMainParty);
+                }
             }
 
             TryApplyCombatXpWriteback(result, encounterParties, summary);
@@ -901,6 +937,15 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 !string.IsNullOrWhiteSpace(characterId) ? "char:" + characterId :
                 null;
             return identity == null ? null : (partyId ?? string.Empty) + "|" + identity;
+        }
+
+        private static bool IsCanonicalOutcomeActionable(string outcome)
+        {
+            string normalized = (outcome ?? string.Empty).Trim();
+            return string.Equals(normalized, "killed", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, "wounded", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, "unconscious", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, "routed", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void TryApplyAggregateToPartyRoster(
@@ -3720,6 +3765,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (ExperimentalFeatures.EnableCanonicalFieldBattleContract)
             {
                 message.CanonicalBattle = CampaignFieldBattleExportBridge.Build(message);
+                if (message.CanonicalBattle != null)
+                    message.Snapshot.CanonicalBattle = message.CanonicalBattle;
                 if (message.CanonicalBattle != null)
                     CampaignFieldBattleImportBridge.ProbeLiveDescriptorRebind(message.CanonicalBattle);
             }

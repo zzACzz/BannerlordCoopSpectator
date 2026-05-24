@@ -142,5 +142,13 @@ namespace CoopSpectator.Infrastructure
         /// rebound back to live `MapEventSide` troops without stack heuristics.
         /// </summary>
         public const bool EnableCanonicalFieldBattleImportBridgeProbe = true;
+
+        /// <summary>
+        /// Host-side casualty replay for the canonical field-battle result path.
+        /// When the dedicated result contains per-instance outcomes and the
+        /// replay fully binds back to live campaign descriptors, prefer native
+        /// `MapEventSide` callbacks over legacy aggregate roster patching.
+        /// </summary>
+        public const bool EnableCanonicalFieldBattleResultWriteback = true;
     }
 }

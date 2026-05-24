@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using CoopSpectator.Network.Messages;
 using Newtonsoft.Json;
 
 namespace CoopSpectator.Infrastructure
@@ -21,6 +22,7 @@ namespace CoopSpectator.Infrastructure
             public bool IsSynthetic { get; set; }
             public DateTime UpdatedUtc { get; set; }
             public List<BattleResultEntrySnapshot> Entries { get; set; } = new List<BattleResultEntrySnapshot>();
+            public CanonicalBattleResultContract CanonicalResult { get; set; }
             public int DroppedCombatEventCount { get; set; }
             public List<BattleResultCombatEventSnapshot> CombatEvents { get; set; } = new List<BattleResultCombatEventSnapshot>();
         }
@@ -116,6 +118,7 @@ namespace CoopSpectator.Infrastructure
                     "CoopBattleResultBridgeFile: wrote result to " + path +
                     " BattleId=" + (snapshot.BattleId ?? "null") +
                     " Entries=" + (snapshot.Entries?.Count ?? 0) +
+                    " CanonicalTroopOutcomes=" + (snapshot.CanonicalResult?.TroopOutcomes?.Count ?? 0) +
                     " WinnerSide=" + (snapshot.WinnerSide ?? "none") + ".");
                 return true;
             }
@@ -145,6 +148,7 @@ namespace CoopSpectator.Infrastructure
                         "CoopBattleResultBridgeFile: read result from " + path +
                         " BattleId=" + (snapshot.BattleId ?? "null") +
                         " Entries=" + (snapshot.Entries?.Count ?? 0) +
+                        " CanonicalTroopOutcomes=" + (snapshot.CanonicalResult?.TroopOutcomes?.Count ?? 0) +
                         " WinnerSide=" + (snapshot.WinnerSide ?? "none") + ".");
                 }
                 return snapshot;
