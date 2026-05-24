@@ -109,7 +109,7 @@ namespace CoopSpectator.Infrastructure
         /// agent creation, so `CreateAgent` carries the final name, body, and
         /// loadout instead of relying on post-spawn visual overlays.
         /// </summary>
-        public const bool EnableExactCampaignRuntimeObjectRegistry = false;
+        public const bool EnableExactCampaignRuntimeObjectRegistry = true;
 
         /// <summary>
         /// Stable exact-loadout path: keep multiplayer-safe surrogate characters

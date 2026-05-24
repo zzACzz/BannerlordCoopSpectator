@@ -215,6 +215,19 @@ namespace CoopSpectator.Campaign
             int missionOrderIndex,
             string instanceIdSource)
         {
+            string canonicalCharacterId =
+                !string.IsNullOrWhiteSpace(troop?.OriginalCharacterId)
+                    ? troop.OriginalCharacterId
+                    : troop?.CharacterId;
+            string canonicalOriginalCharacterId =
+                !string.IsNullOrWhiteSpace(troop?.OriginalCharacterId)
+                    ? troop.OriginalCharacterId
+                    : troop?.CharacterId;
+            string canonicalSpawnTemplateId =
+                !string.IsNullOrWhiteSpace(troop?.SpawnTemplateId)
+                    ? troop.SpawnTemplateId
+                    : troop?.CharacterId;
+
             return new CanonicalTroopInstance
             {
                 InstanceId = BuildTroopInstanceId(troop, isPreBattleWounded, stableOrdinalWithinEntry),
@@ -222,9 +235,9 @@ namespace CoopSpectator.Campaign
                 SideId = troop.SideId,
                 PartyId = troop.PartyId,
                 EntryId = troop.EntryId,
-                CharacterId = troop.CharacterId,
-                OriginalCharacterId = troop.OriginalCharacterId,
-                SpawnTemplateId = troop.SpawnTemplateId,
+                CharacterId = canonicalCharacterId,
+                OriginalCharacterId = canonicalOriginalCharacterId,
+                SpawnTemplateId = canonicalSpawnTemplateId,
                 TroopName = troop.TroopName,
                 CultureId = troop.CultureId,
                 HeroId = troop.HeroId,

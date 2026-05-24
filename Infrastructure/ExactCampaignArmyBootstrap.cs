@@ -2040,10 +2040,10 @@ namespace CoopSpectator.Infrastructure
 
             string[] candidateIds =
             {
-                instance.SpawnTemplateId,
                 instance.OriginalCharacterId,
+                instance.HeroTemplateId,
                 instance.CharacterId,
-                instance.HeroTemplateId
+                instance.SpawnTemplateId
             };
 
             foreach (string candidateId in candidateIds)
@@ -2093,10 +2093,10 @@ namespace CoopSpectator.Infrastructure
 
             string[] candidateIds =
             {
-                entryState.SpawnTemplateId,
                 entryState.OriginalCharacterId,
+                entryState.HeroTemplateId,
                 entryState.CharacterId,
-                entryState.HeroTemplateId
+                entryState.SpawnTemplateId
             };
 
             foreach (string candidateId in candidateIds)
