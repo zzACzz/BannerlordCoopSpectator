@@ -3717,6 +3717,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 message.Snapshot.ReinforcementWaveCount = message.ReinforcementWaveCount;
                 message.Snapshot.BattleSizeBudgetSource = message.BattleSizeBudgetSource;
             }
+            if (ExperimentalFeatures.EnableCanonicalFieldBattleContract)
+            {
+                message.CanonicalBattle = CampaignFieldBattleExportBridge.Build(message);
+            }
             if (ShouldPublishHostBattleDetectorRuntimeSnapshot(message.Snapshot))
             {
                 BattleSnapshotRuntimeState.SetCurrent(message.Snapshot, "host-battle-detector");

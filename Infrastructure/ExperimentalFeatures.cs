@@ -126,5 +126,13 @@ namespace CoopSpectator.Infrastructure
         /// it unconditionally during mission-screen startup.
         /// </summary>
         public const bool EnableBattleMapClientEquipmentNetworkComponent = true;
+
+        /// <summary>
+        /// First field-battle rework slice: publish a separate canonical battle
+        /// contract next to the legacy snapshot payload. This does not switch the
+        /// runtime to the new server materialization path yet; it only starts the
+        /// data-contract separation from `BattleDetector`.
+        /// </summary>
+        public const bool EnableCanonicalFieldBattleContract = true;
     }
 }
