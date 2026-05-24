@@ -4511,14 +4511,19 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             sideSnapshot.TotalManCount = sideSnapshot.Parties.Sum(p => p?.TotalManCount ?? 0);
-            sideSnapshot.MissionReadyEntryOrder = BuildMissionReadyEntryOrder(sideObject, sideSnapshot, sideId);
+            sideSnapshot.MissionReadyDescriptors = BuildMissionReadyDescriptors(sideObject, sideSnapshot, sideId);
+            sideSnapshot.MissionReadyEntryOrder = sideSnapshot.MissionReadyDescriptors
+                .Where(descriptor => descriptor != null && !string.IsNullOrWhiteSpace(descriptor.EntryId))
+                .Select(descriptor => descriptor.EntryId)
+                .ToList();
             ModLogger.Info(
                 "BattleDetector: side snapshot built. " +
                 "SideId=" + (sideId ?? "unknown") +
                 " EnumeratedPartyObjects=" + enumeratedPartyCount +
                 " SnapshotParties=" + sideSnapshot.Parties.Count +
                 " TotalTroopStacks=" + sideSnapshot.Troops.Count +
-                " MissionReadyOrder=" + (sideSnapshot.MissionReadyEntryOrder?.Count ?? 0) + ".");
+                " MissionReadyOrder=" + (sideSnapshot.MissionReadyEntryOrder?.Count ?? 0) +
+                " MissionReadyDescriptors=" + (sideSnapshot.MissionReadyDescriptors?.Count ?? 0) + ".");
             return sideSnapshot.Parties.Count > 0 ? sideSnapshot : null;
         }
 
@@ -4529,18 +4534,18 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public int RemainingHealthyCount { get; set; }
         }
 
-        private static List<string> BuildMissionReadyEntryOrder(
+        private static List<MissionReadyDescriptorMessage> BuildMissionReadyDescriptors(
             object sideObject,
             BattleSideSnapshotMessage sideSnapshot,
             string sideId)
         {
-            var orderedEntryIds = new List<string>();
+            var orderedDescriptors = new List<MissionReadyDescriptorMessage>();
             if (sideObject == null || sideSnapshot?.Troops == null || sideSnapshot.Troops.Count == 0)
-                return orderedEntryIds;
+                return orderedDescriptors;
 
             int healthyTroopTotal = sideSnapshot.Troops.Sum(troop => Math.Max(0, (troop?.Count ?? 0) - (troop?.WoundedCount ?? 0)));
             if (healthyTroopTotal <= 0)
-                return orderedEntryIds;
+                return orderedDescriptors;
 
             try
             {
@@ -4552,7 +4557,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         "BattleDetector: mission-ready side order unavailable because native descriptor enumeration returned 0 entries. " +
                         "SideId=" + (sideId ?? "unknown") +
                         " SideType=" + sideObject.GetType().FullName + ".");
-                    return orderedEntryIds;
+                    return orderedDescriptors;
                 }
 
                 var byPartyAndOriginal = new Dictionary<string, Queue<MissionReadyEntryBucket>>(StringComparer.OrdinalIgnoreCase);
@@ -4614,7 +4619,18 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                     if (matchedBucket?.Troop != null && !string.IsNullOrWhiteSpace(matchedBucket.Troop.EntryId))
                     {
-                        orderedEntryIds.Add(matchedBucket.Troop.EntryId);
+                        orderedDescriptors.Add(new MissionReadyDescriptorMessage
+                        {
+                            OrderIndex = orderedDescriptors.Count,
+                            EntryId = matchedBucket.Troop.EntryId,
+                            SideId = sideId,
+                            PartyId = !string.IsNullOrWhiteSpace(matchedBucket.Troop.PartyId)
+                                ? matchedBucket.Troop.PartyId
+                                : readyPartyId,
+                            TroopId = readyTroopId,
+                            DescriptorSeed = TryGetMissionReadyDescriptorSeed(descriptor) ?? 0,
+                            DescriptorDebugText = descriptor?.ToString()
+                        });
                         matchedCount++;
                         continue;
                     }
@@ -4636,8 +4652,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         if (string.IsNullOrWhiteSpace(entryId))
                             return 0;
 
-                        int matchedForEntry = orderedEntryIds.Count(candidate =>
-                            string.Equals(candidate, entryId, StringComparison.OrdinalIgnoreCase));
+                        int matchedForEntry = orderedDescriptors.Count(candidate =>
+                            candidate != null &&
+                            string.Equals(candidate.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
                         int healthyForEntry = Math.Max(0, troop.Count - troop.WoundedCount);
                         return Math.Max(0, healthyForEntry - matchedForEntry);
                     });
@@ -4665,7 +4682,26 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     " Error=" + ex.GetType().Name + ": " + ex.Message + ".");
             }
 
-            return orderedEntryIds;
+            return orderedDescriptors;
+        }
+
+        private static int? TryGetMissionReadyDescriptorSeed(object descriptor)
+        {
+            if (descriptor == null)
+                return null;
+
+            try
+            {
+                object uniqueSeed = TryGetPropertyValue(descriptor, "UniqueSeed");
+                if (uniqueSeed == null)
+                    return null;
+
+                return Convert.ToInt32(uniqueSeed, CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static List<object> TryGetMissionReadyTroopDescriptors(object sideObject)

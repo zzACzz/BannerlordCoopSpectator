@@ -61,8 +61,20 @@ namespace CoopSpectator.Network.Messages
         public bool IsPlayerSide { get; set; }
         public int TotalManCount { get; set; }
         public List<string> MissionReadyEntryOrder { get; set; } = new List<string>();
+        public List<MissionReadyDescriptorMessage> MissionReadyDescriptors { get; set; } = new List<MissionReadyDescriptorMessage>();
         public List<BattlePartySnapshotMessage> Parties { get; set; } = new List<BattlePartySnapshotMessage>();
         public List<TroopStackInfo> Troops { get; set; } = new List<TroopStackInfo>();
+    }
+
+    public sealed class MissionReadyDescriptorMessage
+    {
+        public int OrderIndex { get; set; } = -1;
+        public string EntryId { get; set; }
+        public string SideId { get; set; }
+        public string PartyId { get; set; }
+        public string TroopId { get; set; }
+        public int DescriptorSeed { get; set; }
+        public string DescriptorDebugText { get; set; }
     }
 
     public sealed class BattlePartySnapshotMessage
@@ -250,6 +262,8 @@ namespace CoopSpectator.Network.Messages
     {
         public string InstanceId { get; set; }
         public string InstanceIdSource { get; set; }
+        public int? CampaignTroopDescriptorSeed { get; set; }
+        public string CampaignTroopDescriptorDebugText { get; set; }
         public string SideId { get; set; }
         public string PartyId { get; set; }
         public string EntryId { get; set; }

@@ -121,9 +121,9 @@ namespace CoopSpectator.Campaign
                             troop,
                             isMissionParticipant: true,
                             isPreBattleWounded: false,
-                            stableOrdinalWithinEntry: ordinal,
-                            missionOrderIndex: -1,
-                            instanceIdSource: "healthy_entry_ordinal");
+                        stableOrdinalWithinEntry: ordinal,
+                        missionOrderIndex: -1,
+                        instanceIdSource: "healthy_entry_ordinal");
                         queue.Enqueue(instance);
                         allHealthy.Add(instance);
                     }
@@ -142,16 +142,40 @@ namespace CoopSpectator.Campaign
             }
 
             int missionOrderIndex = 0;
-            foreach (string entryId in side?.MissionReadyEntryOrder ?? Enumerable.Empty<string>())
+            foreach (MissionReadyDescriptorMessage descriptor in side?.MissionReadyDescriptors ?? Enumerable.Empty<MissionReadyDescriptorMessage>())
             {
+                string entryId = descriptor?.EntryId;
                 if (!healthyByEntry.TryGetValue(entryId ?? string.Empty, out Queue<CanonicalTroopInstance> queue) || queue.Count == 0)
                     continue;
 
                 CanonicalTroopInstance instance = queue.Dequeue();
                 instance.MissionOrderIndex = missionOrderIndex++;
-                instance.InstanceIdSource = "mission_ready_entry_ordinal";
+                instance.InstanceIdSource = descriptor != null && descriptor.DescriptorSeed > 0
+                    ? "campaign_descriptor_seed"
+                    : "mission_ready_entry_ordinal";
+                if (descriptor != null && descriptor.DescriptorSeed > 0)
+                {
+                    instance.CampaignTroopDescriptorSeed = descriptor.DescriptorSeed;
+                    instance.CampaignTroopDescriptorDebugText = descriptor.DescriptorDebugText;
+                    instance.InstanceId = BuildDescriptorBackedInstanceId(instance, descriptor.DescriptorSeed);
+                }
                 canonicalSide.MissionReadyInstanceOrder.Add(instance.InstanceId);
                 instances.Add(instance);
+            }
+
+            if ((side?.MissionReadyDescriptors?.Count ?? 0) == 0)
+            {
+                foreach (string entryId in side?.MissionReadyEntryOrder ?? Enumerable.Empty<string>())
+                {
+                    if (!healthyByEntry.TryGetValue(entryId ?? string.Empty, out Queue<CanonicalTroopInstance> queue) || queue.Count == 0)
+                        continue;
+
+                    CanonicalTroopInstance instance = queue.Dequeue();
+                    instance.MissionOrderIndex = missionOrderIndex++;
+                    instance.InstanceIdSource = "mission_ready_entry_ordinal";
+                    canonicalSide.MissionReadyInstanceOrder.Add(instance.InstanceId);
+                    instances.Add(instance);
+                }
             }
 
             foreach (CanonicalTroopInstance unresolvedHealthy in allHealthy.Where(candidate => candidate.MissionOrderIndex < 0))
@@ -246,6 +270,14 @@ namespace CoopSpectator.Campaign
                 : troop.EntryId;
             string state = isPreBattleWounded ? "wounded" : "ready";
             return entryId + "|" + state + "|" + stableOrdinalWithinEntry;
+        }
+
+        private static string BuildDescriptorBackedInstanceId(CanonicalTroopInstance instance, int descriptorSeed)
+        {
+            string entryId = string.IsNullOrWhiteSpace(instance?.EntryId)
+                ? ((instance?.SideId ?? "side") + "|" + (instance?.PartyId ?? "party") + "|" + (instance?.OriginalCharacterId ?? instance?.CharacterId ?? "troop"))
+                : instance.EntryId;
+            return entryId + "|descriptor|" + descriptorSeed;
         }
 
         private static CanonicalEquipmentSpec CloneEquipment(TroopStackInfo troop)
