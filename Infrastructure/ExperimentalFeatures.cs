@@ -134,5 +134,13 @@ namespace CoopSpectator.Infrastructure
         /// data-contract separation from `BattleDetector`.
         /// </summary>
         public const bool EnableCanonicalFieldBattleContract = true;
+
+        /// <summary>
+        /// Host-side validation hook for the new field-battle import path:
+        /// after export, rebuild a live descriptor-seed index from the current
+        /// campaign battle and verify that exported mission participants can be
+        /// rebound back to live `MapEventSide` troops without stack heuristics.
+        /// </summary>
+        public const bool EnableCanonicalFieldBattleImportBridgeProbe = true;
     }
 }

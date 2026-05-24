@@ -3720,6 +3720,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (ExperimentalFeatures.EnableCanonicalFieldBattleContract)
             {
                 message.CanonicalBattle = CampaignFieldBattleExportBridge.Build(message);
+                if (message.CanonicalBattle != null)
+                    CampaignFieldBattleImportBridge.ProbeLiveDescriptorRebind(message.CanonicalBattle);
             }
             if (ShouldPublishHostBattleDetectorRuntimeSnapshot(message.Snapshot))
             {
