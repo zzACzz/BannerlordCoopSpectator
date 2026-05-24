@@ -18,6 +18,19 @@ namespace CoopSpectator.Campaign
             public string SideId { get; set; }
             public string PartyId { get; set; }
             public string CharacterId { get; set; }
+            public object SideObject { get; set; }
+            public object DescriptorObject { get; set; }
+        }
+
+        public sealed class OutcomeReplaySummary
+        {
+            public int Attempted { get; set; }
+            public int AppliedKilled { get; set; }
+            public int AppliedWounded { get; set; }
+            public int AppliedRouted { get; set; }
+            public int SkippedMissingInstance { get; set; }
+            public int SkippedMissingDescriptorSeed { get; set; }
+            public int SkippedMissingLiveBinding { get; set; }
         }
 
         public static void ProbeLiveDescriptorRebind(CanonicalBattleContract contract)
@@ -72,6 +85,74 @@ namespace CoopSpectator.Campaign
             }
         }
 
+        public static OutcomeReplaySummary ApplyResult(
+            CanonicalBattleContract contract,
+            CanonicalBattleResultContract result)
+        {
+            var summary = new OutcomeReplaySummary();
+            if (contract == null || result?.TroopOutcomes == null || result.TroopOutcomes.Count == 0)
+                return summary;
+
+            try
+            {
+                Dictionary<int, LiveDescriptorBinding> liveIndex = BuildLiveDescriptorIndex();
+                Dictionary<string, CanonicalTroopInstance> exportedInstances = contract.TroopInstances?
+                    .Where(instance => instance != null && !string.IsNullOrWhiteSpace(instance.InstanceId))
+                    .GroupBy(instance => instance.InstanceId, StringComparer.Ordinal)
+                    .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal)
+                    ?? new Dictionary<string, CanonicalTroopInstance>(StringComparer.Ordinal);
+
+                foreach (CanonicalTroopOutcome outcome in result.TroopOutcomes)
+                {
+                    summary.Attempted++;
+                    if (outcome == null || string.IsNullOrWhiteSpace(outcome.InstanceId) || !exportedInstances.TryGetValue(outcome.InstanceId, out CanonicalTroopInstance instance))
+                    {
+                        summary.SkippedMissingInstance++;
+                        continue;
+                    }
+
+                    int? descriptorSeed = instance.CampaignTroopDescriptorSeed;
+                    if (!descriptorSeed.HasValue || descriptorSeed.Value <= 0)
+                    {
+                        summary.SkippedMissingDescriptorSeed++;
+                        continue;
+                    }
+
+                    if (!liveIndex.TryGetValue(descriptorSeed.Value, out LiveDescriptorBinding binding) ||
+                        binding?.SideObject == null ||
+                        binding.DescriptorObject == null)
+                    {
+                        summary.SkippedMissingLiveBinding++;
+                        continue;
+                    }
+
+                    string normalizedOutcome = (outcome.Outcome ?? string.Empty).Trim().ToLowerInvariant();
+                    switch (normalizedOutcome)
+                    {
+                        case "killed":
+                            TryInvokeMethod(binding.SideObject, "OnTroopKilled", binding.DescriptorObject);
+                            summary.AppliedKilled++;
+                            break;
+                        case "wounded":
+                        case "unconscious":
+                            TryInvokeMethod(binding.SideObject, "OnTroopWounded", binding.DescriptorObject);
+                            summary.AppliedWounded++;
+                            break;
+                        case "routed":
+                            TryInvokeMethod(binding.SideObject, "OnTroopRouted", binding.DescriptorObject, false);
+                            summary.AppliedRouted++;
+                            break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CampaignFieldBattleImportBridge: ApplyResult failed: " + ex.Message);
+            }
+
+            return summary;
+        }
+
         private static Dictionary<int, LiveDescriptorBinding> BuildLiveDescriptorIndex()
         {
             var index = new Dictionary<int, LiveDescriptorBinding>();
@@ -111,7 +192,9 @@ namespace CoopSpectator.Campaign
                     DescriptorSeed = seed.Value,
                     SideId = sideId,
                     PartyId = TryGetStringId(readyParty),
-                    CharacterId = TryGetStringId(readyTroop)
+                    CharacterId = TryGetStringId(readyTroop),
+                    SideObject = sideObject,
+                    DescriptorObject = descriptor
                 };
             }
         }
