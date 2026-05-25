@@ -2,7 +2,8 @@ param(
     [string]$AuditPath = "C:\Users\Admin\OneDrive\Documents\Mount and Blade II Bannerlord\CoopSpectator\campaign_shell_audit_latest.json",
     [string]$ExistingRuntimeCharactersPath = "C:\dev\projects\BannerlordCoopSpectator3\Module\CoopSpectator\ModuleData\coopspectator_mpcharacters.xml",
     [string]$OutputPath = "C:\dev\projects\BannerlordCoopSpectator3\Module\CoopSpectator\ModuleData\coopspectator_generated_runtime_mpcharacters.xml",
-    [string]$ManifestOutputPath = "C:\dev\projects\BannerlordCoopSpectator3\Module\CoopSpectator\ModuleData\coopspectator_generated_runtime_shell_manifest.json"
+    [string]$ManifestOutputPath = "C:\dev\projects\BannerlordCoopSpectator3\Module\CoopSpectator\ModuleData\coopspectator_generated_runtime_shell_manifest.json",
+    [string]$ClassDivisionsOutputPath = "C:\dev\projects\BannerlordCoopSpectator3\Module\CoopSpectator\ModuleData\coopspectator_generated_runtime_mpclassdivisions.xml"
 )
 
 Set-StrictMode -Version Latest
@@ -295,6 +296,148 @@ function Write-NpcCharacter {
     [void]$Builder.AppendLine("  </NPCCharacter>")
 }
 
+function Get-ClassDivisionProfile {
+    param($Variant)
+
+    $profile = [ordered]@{
+        Icon = "Infantry_Light"
+        HeroIdleAnim = "act_idle_unarmed_1"
+        TroopIdleAnim = "act_idle_unarmed_1"
+        HeroMountIdleAnim = $null
+        TroopMountIdleAnim = $null
+        Multiplier = "0.82"
+        Cost = "0"
+        CasualCost = "0"
+        BattleCost = "0"
+        MeleeAi = "30"
+        RangedAi = "40"
+        Armor = "10"
+        MovementSpeed = "0.82"
+        CombatMovementSpeed = "0.95"
+        Acceleration = "1.8"
+    }
+
+    if ($Variant.IsMounted) {
+        $profile.Icon = "Cavalry_Light"
+        $profile.HeroIdleAnim = $null
+        $profile.TroopIdleAnim = $null
+        $profile.HeroMountIdleAnim = "act_horse_idle_1"
+        $profile.TroopMountIdleAnim = "act_horse_idle_1"
+        $profile.Multiplier = "0.46"
+        $profile.MeleeAi = if ($Variant.RangedFamily -eq "Bow" -or $Variant.RangedFamily -eq "Crossbow" -or $Variant.RangedFamily -eq "Thrown") { "45" } else { "50" }
+        $profile.RangedAi = if ($Variant.RangedFamily -eq "Bow" -or $Variant.RangedFamily -eq "Crossbow" -or $Variant.RangedFamily -eq "Thrown") { "50" } else { "30" }
+        $profile.Armor = if ($Variant.HasShield) { "24" } else { "15" }
+        $profile.MovementSpeed = "0.76"
+        $profile.CombatMovementSpeed = "0.60"
+        $profile.Acceleration = "2.8"
+        return $profile
+    }
+
+    if ($Variant.RangedFamily -eq "Crossbow" -or $Variant.RangedFamily -eq "Bow") {
+        $profile.Icon = "Special_JavelinThrower"
+        $profile.Multiplier = "0.70"
+        $profile.MeleeAi = "20"
+        $profile.RangedAi = "95"
+        $profile.Armor = if ($Variant.HasShield) { "28" } else { "24" }
+        $profile.MovementSpeed = "0.78"
+        $profile.CombatMovementSpeed = "0.86"
+        $profile.Acceleration = "1.8"
+        if ($Variant.HasShield) {
+            $profile.HeroIdleAnim = "act_empire_mp_legionary_idle"
+            $profile.TroopIdleAnim = "act_idle_1h_with_shield_1"
+        }
+        return $profile
+    }
+
+    if ($Variant.RangedFamily -eq "Thrown") {
+        $profile.Icon = "Special_JavelinThrower"
+        $profile.Multiplier = "0.82"
+        $profile.MeleeAi = "30"
+        $profile.RangedAi = "80"
+        $profile.Armor = if ($Variant.HasShield) { "24" } else { "12" }
+        $profile.MovementSpeed = "0.82"
+        $profile.CombatMovementSpeed = "0.90"
+        $profile.Acceleration = "1.8"
+        if ($Variant.HasShield) {
+            $profile.HeroIdleAnim = "act_empire_mp_legionary_idle"
+            $profile.TroopIdleAnim = "act_idle_1h_with_shield_1"
+        }
+        return $profile
+    }
+
+    if ($Variant.HasShield) {
+        $profile.Icon = "Infantry_Heavy"
+        $profile.HeroIdleAnim = "act_empire_mp_legionary_idle"
+        $profile.TroopIdleAnim = "act_idle_1h_with_shield_1"
+        $profile.Multiplier = "0.65"
+        $profile.MeleeAi = "50"
+        $profile.RangedAi = "50"
+        $profile.Armor = "39"
+        $profile.MovementSpeed = "0.80"
+        $profile.CombatMovementSpeed = "0.90"
+        $profile.Acceleration = "2.4"
+        return $profile
+    }
+
+    if ($Variant.MeleeFamily -eq "TwoHanded" -or $Variant.MeleeFamily -eq "Polearm") {
+        $profile.Icon = "Infantry_Heavy"
+        $profile.Multiplier = "0.72"
+        $profile.MeleeAi = "50"
+        $profile.RangedAi = "20"
+        $profile.Armor = "24"
+        $profile.MovementSpeed = "0.81"
+        $profile.CombatMovementSpeed = "0.90"
+        $profile.Acceleration = "2.0"
+    }
+
+    return $profile
+}
+
+function Write-MpClassDivision {
+    param(
+        [System.Text.StringBuilder]$Builder,
+        [string]$ClassDivisionId,
+        [string]$HeroId,
+        [string]$TroopId,
+        [hashtable]$Profile
+    )
+
+    $attributePairs = @(
+        ('id', $ClassDivisionId),
+        ('hero', $HeroId),
+        ('troop', $TroopId),
+        ('multiplier', $Profile.Multiplier),
+        ('cost', $Profile.Cost),
+        ('casual_cost', $Profile.CasualCost),
+        ('battle_cost', $Profile.BattleCost),
+        ('icon', $Profile.Icon),
+        ('melee_ai', $Profile.MeleeAi),
+        ('ranged_ai', $Profile.RangedAi),
+        ('armor', $Profile.Armor),
+        ('movement_speed', $Profile.MovementSpeed),
+        ('combat_movement_speed', $Profile.CombatMovementSpeed),
+        ('acceleration', $Profile.Acceleration)
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Profile.HeroIdleAnim)) {
+        $attributePairs += ,('hero_idle_anim', $Profile.HeroIdleAnim)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Profile.TroopIdleAnim)) {
+        $attributePairs += ,('troop_idle_anim', $Profile.TroopIdleAnim)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Profile.HeroMountIdleAnim)) {
+        $attributePairs += ,('hero_mount_idle_anim', $Profile.HeroMountIdleAnim)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Profile.TroopMountIdleAnim)) {
+        $attributePairs += ,('troop_mount_idle_anim', $Profile.TroopMountIdleAnim)
+    }
+
+    $attributes = ($attributePairs | ForEach-Object { '{0}="{1}"' -f $_[0], $_[1] }) -join ' '
+    [void]$Builder.AppendLine(("  <MPClassDivision {0}>" -f $attributes))
+    [void]$Builder.AppendLine("    <Perks />")
+    [void]$Builder.AppendLine("  </MPClassDivision>")
+}
+
 $audit = Get-Content -Raw $AuditPath | ConvertFrom-Json
 $existingIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
@@ -321,7 +464,12 @@ $builder = New-Object System.Text.StringBuilder
 [void]$builder.AppendLine('<?xml version="1.0" encoding="utf-8"?>')
 [void]$builder.AppendLine('<MPCharacters>')
 
+$classDivisionsBuilder = New-Object System.Text.StringBuilder
+[void]$classDivisionsBuilder.AppendLine('<?xml version="1.0" encoding="utf-8"?>')
+[void]$classDivisionsBuilder.AppendLine('<MPClassDivisions>')
+
 $generatedCount = 0
+$generatedClassDivisionCount = 0
 $manifestEntries = New-Object System.Collections.Generic.List[object]
 $seenManifestVariantSignatures = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 $runtimeShellManifestByRuntimeSignatureKey = @{}
@@ -337,6 +485,7 @@ foreach ($entry in ($variantsByIdentityKey.GetEnumerator() | Sort-Object Name)) 
     $shellBaseId = Get-ShellId $variant
     $heroId = $shellBaseId + "_hero"
     $troopId = $shellBaseId + "_troop"
+    $classDivisionId = "coopspectator_generated_class_" + $shellBaseId
 
     if (-not $runtimeShellManifestByRuntimeSignatureKey.ContainsKey($runtimeSignatureKey)) {
         $runtimeShellManifestByRuntimeSignatureKey[$runtimeSignatureKey] = [ordered]@{
@@ -395,19 +544,26 @@ foreach ($entry in ($variantsByIdentityKey.GetEnumerator() | Sort-Object Name)) 
 
     Write-NpcCharacter -Builder $builder -CharacterId $heroId -DisplayName $displayName -DefaultGroup $defaultGroup -Level $level -DismountResistance $dismount -Skills $skills -Equipment $equipment -HeroFace $true
     Write-NpcCharacter -Builder $builder -CharacterId $troopId -DisplayName $displayName -DefaultGroup $defaultGroup -Level $level -DismountResistance $dismount -Skills $skills -Equipment $equipment -HeroFace $false
+    Write-MpClassDivision -Builder $classDivisionsBuilder -ClassDivisionId $classDivisionId -HeroId $heroId -TroopId $troopId -Profile (Get-ClassDivisionProfile $variant)
     $generatedCount++
+    $generatedClassDivisionCount++
 }
 
 [void]$builder.AppendLine('</MPCharacters>')
+[void]$classDivisionsBuilder.AppendLine('</MPClassDivisions>')
 
 [System.IO.Directory]::CreateDirectory((Split-Path -Parent $OutputPath)) | Out-Null
 [System.IO.Directory]::CreateDirectory((Split-Path -Parent $ManifestOutputPath)) | Out-Null
+[System.IO.Directory]::CreateDirectory((Split-Path -Parent $ClassDivisionsOutputPath)) | Out-Null
 
 [System.IO.File]::WriteAllText($OutputPath, $builder.ToString(), [System.Text.UTF8Encoding]::new($true))
+[System.IO.File]::WriteAllText($ClassDivisionsOutputPath, $classDivisionsBuilder.ToString(), [System.Text.UTF8Encoding]::new($true))
 $manifestEntries |
     ConvertTo-Json -Depth 6 |
     Set-Content -Path $ManifestOutputPath -Encoding UTF8
 
 Write-Output ("GeneratedRuntimeShellFamilies={0}" -f $generatedCount)
+Write-Output ("GeneratedRuntimeShellClassDivisions={0}" -f $generatedClassDivisionCount)
 Write-Output ("OutputPath={0}" -f $OutputPath)
 Write-Output ("ManifestOutputPath={0}" -f $ManifestOutputPath)
+Write-Output ("ClassDivisionsOutputPath={0}" -f $ClassDivisionsOutputPath)
