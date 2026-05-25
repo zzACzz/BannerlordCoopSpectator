@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using CoopSpectator.Patches;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 
@@ -69,6 +70,17 @@ namespace CoopSpectator.Infrastructure
             bool preferClientMountedHeroTroopSurrogate =
                 ShouldPreferClientMountedHeroTroopSurrogate(isHero, isMounted);
             RangedWeaponFamily rangedWeaponFamily = ResolveRangedWeaponFamily(character);
+            bool isGeneratedOrdinaryRuntimeBattleTemplateCharacter =
+                IsGeneratedOrdinaryRuntimeBattleTemplateCharacter(character);
+            string generatedRuntimeHeroClassEnsureDiagnostics = "not-applicable";
+            if (isGeneratedOrdinaryRuntimeBattleTemplateCharacter &&
+                StartupSafeMpHeroClassBootstrapPatch.EnsureGeneratedRuntimeHeroClassRegisteredForCharacter(
+                    characterId,
+                    out generatedRuntimeHeroClassEnsureDiagnostics))
+            {
+                InvalidateCachedResolutionsForCharacter(characterId);
+            }
+
             string resolutionCacheKey =
                 characterId +
                 "|client-mounted-troop-surrogate=" + preferClientMountedHeroTroopSurrogate +
@@ -150,7 +162,7 @@ namespace CoopSpectator.Infrastructure
                     string runtimeShellBridgeDiagnostics = "not-required";
                     bool useGeneratedOrdinaryNativeBridge =
                         resolvedTreatAsTroop &&
-                        IsGeneratedOrdinaryRuntimeBattleTemplateCharacter(character);
+                        isGeneratedOrdinaryRuntimeBattleTemplateCharacter;
                     if (templateHeroClass != null)
                     {
                         if (TryResolveRuntimeShellHeroClassBridge(
@@ -182,6 +194,7 @@ namespace CoopSpectator.Infrastructure
                         " HeroTemplate=" + (heroTemplateId ?? "null") +
                         " ClientMountedTroopSurrogate=" + preferClientMountedHeroTroopSurrogate +
                         " TreatAsTroop=" + resolvedTreatAsTroop +
+                        " GeneratedEnsure=" + generatedRuntimeHeroClassEnsureDiagnostics +
                         " GeneratedOrdinaryNativeBridge=" + useGeneratedOrdinaryNativeBridge +
                         " TemplateClass=" + (templateHeroClass?.StringId ?? "null") +
                         " RuntimeShellBridgeApplied=" + runtimeShellBridgeApplied +
@@ -218,6 +231,21 @@ namespace CoopSpectator.Infrastructure
             treatAsTroop = resolvedTreatAsTroop;
             diagnostics = resolvedDiagnostics;
             return heroClass != null;
+        }
+
+        private static void InvalidateCachedResolutionsForCharacter(string characterId)
+        {
+            if (string.IsNullOrWhiteSpace(characterId))
+                return;
+
+            lock (Sync)
+            {
+                List<string> keysToRemove = ResolutionByCharacterId.Keys
+                    .Where(candidate => candidate.StartsWith(characterId + "|", StringComparison.Ordinal))
+                    .ToList();
+                for (int i = 0; i < keysToRemove.Count; i++)
+                    ResolutionByCharacterId.Remove(keysToRemove[i]);
+            }
         }
 
         private static bool ShouldAllowSurrogateResolution(string characterId, out string diagnostics)

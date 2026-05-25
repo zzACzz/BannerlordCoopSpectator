@@ -433,9 +433,7 @@ function Write-MpClassDivision {
     }
 
     $attributes = ($attributePairs | ForEach-Object { '{0}="{1}"' -f $_[0], $_[1] }) -join ' '
-    [void]$Builder.AppendLine(("  <MPClassDivision {0}>" -f $attributes))
-    [void]$Builder.AppendLine("    <Perks />")
-    [void]$Builder.AppendLine("  </MPClassDivision>")
+    [void]$Builder.AppendLine(("  <MPClassDivision {0} />" -f $attributes))
 }
 
 $audit = Get-Content -Raw $AuditPath | ConvertFrom-Json
