@@ -148,12 +148,16 @@ namespace CoopSpectator.Infrastructure
                     resolvedTreatAsTroop = preferClientMountedHeroTroopSurrogate || !isHero;
                     bool runtimeShellBridgeApplied = false;
                     string runtimeShellBridgeDiagnostics = "not-required";
+                    bool useGeneratedOrdinaryNativeBridge =
+                        resolvedTreatAsTroop &&
+                        IsGeneratedOrdinaryRuntimeBattleTemplateCharacter(character);
                     if (templateHeroClass != null)
                     {
                         if (TryResolveRuntimeShellHeroClassBridge(
                                 character,
                                 templateHeroClass,
                                 resolvedTreatAsTroop,
+                                useGeneratedOrdinaryNativeBridge,
                                 out MultiplayerClassDivisions.MPHeroClass runtimeShellHeroClass,
                                 out runtimeShellBridgeDiagnostics))
                         {
@@ -178,6 +182,7 @@ namespace CoopSpectator.Infrastructure
                         " HeroTemplate=" + (heroTemplateId ?? "null") +
                         " ClientMountedTroopSurrogate=" + preferClientMountedHeroTroopSurrogate +
                         " TreatAsTroop=" + resolvedTreatAsTroop +
+                        " GeneratedOrdinaryNativeBridge=" + useGeneratedOrdinaryNativeBridge +
                         " TemplateClass=" + (templateHeroClass?.StringId ?? "null") +
                         " RuntimeShellBridgeApplied=" + runtimeShellBridgeApplied +
                         " RuntimeShellBridgeDiagnostics=" + runtimeShellBridgeDiagnostics +
@@ -242,6 +247,7 @@ namespace CoopSpectator.Infrastructure
             BasicCharacterObject character,
             MultiplayerClassDivisions.MPHeroClass templateHeroClass,
             bool treatAsTroop,
+            bool preferGeneratedOrdinaryNativeBridge,
             out MultiplayerClassDivisions.MPHeroClass runtimeShellHeroClass,
             out string diagnostics)
         {
@@ -273,7 +279,11 @@ namespace CoopSpectator.Infrastructure
                         SanitizeRuntimeShellHeroClassIdComponent(characterId) + "_" +
                         SanitizeRuntimeShellHeroClassIdComponent(templateHeroClass.StringId) + "_" +
                         (treatAsTroop ? "troop" : "hero"));
-                    cachedRuntimeShellHeroClass.UpdateFromTemplate(templateHeroClass, character, treatAsTroop);
+                    cachedRuntimeShellHeroClass.UpdateFromTemplate(
+                        templateHeroClass,
+                        character,
+                        treatAsTroop,
+                        preferGeneratedOrdinaryNativeBridge);
                     RuntimeShellHeroClassByKey[runtimeShellHeroClassKey] = cachedRuntimeShellHeroClass;
                 }
 
@@ -294,8 +304,21 @@ namespace CoopSpectator.Infrastructure
                 " Character=" + (characterId ?? "null") +
                 " TemplateClass=" + (templateHeroClass.StringId ?? "null") +
                 " TreatAsTroop=" + treatAsTroop +
+                " GeneratedOrdinaryNativeBridge=" + preferGeneratedOrdinaryNativeBridge +
                 " RuntimeClass=" + (runtimeShellHeroClass?.StringId ?? "null");
             return runtimeShellHeroClass != null;
+        }
+
+        private static bool IsGeneratedOrdinaryRuntimeBattleTemplateCharacter(BasicCharacterObject character)
+        {
+            string characterId = character?.StringId;
+            if (string.IsNullOrWhiteSpace(characterId) ||
+                characterId.EndsWith("_hero", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return BattleSnapshotRuntimeState.IsGeneratedRuntimeBattleTemplateCharacterId(characterId);
         }
 
         private static bool RequiresRuntimeShellHeroClassBridge(
@@ -729,14 +752,22 @@ namespace CoopSpectator.Infrastructure
             public void UpdateFromTemplate(
                 MultiplayerClassDivisions.MPHeroClass template,
                 BasicCharacterObject shellCharacter,
-                bool treatAsTroop)
+                bool treatAsTroop,
+                bool preferGeneratedOrdinaryNativeBridge)
             {
                 if (template == null || shellCharacter == null)
                     return;
 
-                SetField(HeroCharacterField, treatAsTroop ? template.HeroCharacter ?? shellCharacter : shellCharacter);
+                bool useGeneratedOrdinaryNativeBridge =
+                    preferGeneratedOrdinaryNativeBridge &&
+                    treatAsTroop &&
+                    CampaignMultiplayerHeroClassResolver.IsGeneratedOrdinaryRuntimeBattleTemplateCharacter(shellCharacter);
+
+                SetField(HeroCharacterField, useGeneratedOrdinaryNativeBridge
+                    ? shellCharacter
+                    : (treatAsTroop ? template.HeroCharacter ?? shellCharacter : shellCharacter));
                 SetField(TroopCharacterField, treatAsTroop ? shellCharacter : template.TroopCharacter ?? shellCharacter);
-                SetField(BannerBearerCharacterField, template.BannerBearerCharacter ?? shellCharacter);
+                SetField(BannerBearerCharacterField, useGeneratedOrdinaryNativeBridge ? shellCharacter : template.BannerBearerCharacter ?? shellCharacter);
                 SetField(CultureField, null);
                 SetField(ClassGroupField, template.ClassGroup ?? new MultiplayerClassDivisions.MPHeroClassGroup(shellCharacter.DefaultFormationClass.GetName()));
                 SetField(HeroIdleAnimField, template.HeroIdleAnim);
@@ -760,7 +791,7 @@ namespace CoopSpectator.Infrastructure
                 SetField(HeroInformationField, template.HeroInformation);
                 SetField(TroopInformationField, template.TroopInformation);
                 SetField(IconTypeField, template.IconType);
-                SetField(PerksField, ClonePerks(template));
+                SetField(PerksField, useGeneratedOrdinaryNativeBridge ? new List<IReadOnlyPerkObject>() : ClonePerks(template));
             }
 
             private void SetField(FieldInfo field, object value)

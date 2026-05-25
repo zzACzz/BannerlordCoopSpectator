@@ -476,6 +476,41 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static CanonicalTroopInstance GetCanonicalTroopInstanceByCharacterId(string characterId)
+        {
+            if (string.IsNullOrWhiteSpace(characterId))
+                return null;
+
+            lock (Sync)
+            {
+                return _current?.CanonicalBattle?.TroopInstances?
+                    .FirstOrDefault(candidate =>
+                        candidate != null &&
+                        string.Equals(candidate.CharacterId, characterId, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        public static bool IsGeneratedRuntimeBattleTemplateCharacterId(string characterId)
+        {
+            CanonicalTroopInstance instance = GetCanonicalTroopInstanceByCharacterId(characterId);
+            if (instance == null ||
+                instance.IsHero ||
+                !instance.UseNativeTemplateMaterialization ||
+                string.IsNullOrWhiteSpace(instance.BattleTemplateId))
+            {
+                return false;
+            }
+
+            return string.Equals(
+                       instance.BattleTemplateSource,
+                       "variant_signature_manifest",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(
+                       instance.BattleTemplateSource,
+                       "runtime_signature_manifest",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
         public static bool UsesGeneratedRuntimeBattleTemplateMaterialization(string entryId)
         {
             CanonicalTroopInstance instance = GetCanonicalTroopInstance(entryId);
