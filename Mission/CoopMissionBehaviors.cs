@@ -3631,6 +3631,7 @@ namespace CoopSpectator.MissionBehaviors
         private static bool _hasTransferredDiagnosticAllowedAgentToPeer;
         private static readonly HashSet<int> _spawnedCoopPeerIndices = new HashSet<int>();
         private static HashSet<string> _loggedForcedPreferredClassKeys = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly Dictionary<int, int> _lastBridgedSelectedTroopIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _lastBridgedPeerTeamIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, string> _appliedFixedMissionCultureByPeer = new Dictionary<int, string>();
@@ -5415,6 +5416,7 @@ namespace CoopSpectator.MissionBehaviors
             _hasTransferredDiagnosticAllowedAgentToPeer = false;
             _spawnedCoopPeerIndices.Clear();
             _loggedForcedPreferredClassKeys.Clear();
+            _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys.Clear();
             _lastBridgedSelectedTroopIndexByPeer.Clear();
             _lastBridgedPeerTeamIndexByPeer.Clear();
             _appliedFixedMissionCultureByPeer.Clear();
@@ -22793,11 +22795,13 @@ namespace CoopSpectator.MissionBehaviors
 
             BasicCharacterObject generatedCharacter = agent.Character as BasicCharacterObject;
             Equipment generatedBattleEquipment = null;
+            Equipment snapshotBattleEquipment = null;
             try
             {
                 generatedBattleEquipment =
                     generatedCharacter?.FirstBattleEquipment?.Clone(false) ??
                     generatedCharacter?.Equipment?.Clone(false);
+                snapshotBattleEquipment = BuildSnapshotEquipmentForExactRuntime(entryState);
             }
             catch (Exception ex)
             {
@@ -22827,16 +22831,31 @@ namespace CoopSpectator.MissionBehaviors
                 EquipmentIndex.Weapon1,
                 EquipmentIndex.Weapon2,
                 EquipmentIndex.Weapon3);
+            Equipment refreshBattleEquipment = generatedBattleEquipment;
+            string refreshEquipmentSource = "generated-battle-template";
+            string refreshSelectionReason = "generated-template-kept";
+            if (ShouldPreferSnapshotEquipmentForCanonicalGeneratedTemplateNativeRefresh(
+                    entryState,
+                    generatedBattleEquipment,
+                    snapshotBattleEquipment,
+                    out string snapshotPreferenceReason))
+            {
+                refreshBattleEquipment = snapshotBattleEquipment;
+                refreshEquipmentSource = "snapshot-exact-runtime";
+                refreshSelectionReason = snapshotPreferenceReason ?? "snapshot-preferred";
+            }
 
             try
             {
-                agent.UpdateSpawnEquipmentAndRefreshVisuals(generatedBattleEquipment);
+                agent.UpdateSpawnEquipmentAndRefreshVisuals(refreshBattleEquipment);
             }
             catch (Exception ex)
             {
                 refreshSummary =
                     "GeneratedNativeRefresh=refresh-failed:" + ex.GetType().Name +
                     " Character=" + (generatedCharacter?.StringId ?? "null") +
+                    " RefreshEquipmentSource=" + refreshEquipmentSource +
+                    " RefreshSelectionReason=" + refreshSelectionReason +
                     " BeforeSpawnWeapons={" + beforeSpawnWeapons + "}" +
                     " BeforeMissionWeapons={" + beforeMissionWeapons + "}";
                 return false;
@@ -22856,11 +22875,117 @@ namespace CoopSpectator.MissionBehaviors
                 EquipmentIndex.Weapon3);
             refreshSummary =
                 "GeneratedNativeRefresh=applied Character=" + (generatedCharacter?.StringId ?? "null") +
+                " RefreshEquipmentSource=" + refreshEquipmentSource +
+                " RefreshSelectionReason=" + refreshSelectionReason +
                 " BeforeSpawnWeapons={" + beforeSpawnWeapons + "}" +
                 " BeforeMissionWeapons={" + beforeMissionWeapons + "}" +
                 " AfterSpawnWeapons={" + afterSpawnWeapons + "}" +
                 " AfterMissionWeapons={" + afterMissionWeapons + "}";
             return true;
+        }
+
+        private static bool ShouldPreferSnapshotEquipmentForCanonicalGeneratedTemplateNativeRefresh(
+            RosterEntryState entryState,
+            Equipment generatedBattleEquipment,
+            Equipment snapshotBattleEquipment,
+            out string reason)
+        {
+            reason = null;
+            if (entryState == null ||
+                entryState.IsHero ||
+                entryState.IsMounted ||
+                generatedBattleEquipment == null ||
+                snapshotBattleEquipment == null)
+            {
+                return false;
+            }
+
+            bool snapshotHasRangedWeapon =
+                HasCanonicalGeneratedTemplateNativeRefreshWeaponType(
+                    snapshotBattleEquipment,
+                    ItemObject.ItemTypeEnum.Bow,
+                    ItemObject.ItemTypeEnum.Crossbow,
+                    ItemObject.ItemTypeEnum.Thrown);
+            bool snapshotHasAmmo =
+                HasCanonicalGeneratedTemplateNativeRefreshWeaponType(
+                    snapshotBattleEquipment,
+                    ItemObject.ItemTypeEnum.Arrows,
+                    ItemObject.ItemTypeEnum.Bolts);
+            if (!snapshotHasRangedWeapon && !snapshotHasAmmo)
+                return false;
+
+            bool generatedHasRangedWeapon =
+                HasCanonicalGeneratedTemplateNativeRefreshWeaponType(
+                    generatedBattleEquipment,
+                    ItemObject.ItemTypeEnum.Bow,
+                    ItemObject.ItemTypeEnum.Crossbow,
+                    ItemObject.ItemTypeEnum.Thrown);
+            bool generatedHasAmmo =
+                HasCanonicalGeneratedTemplateNativeRefreshWeaponType(
+                    generatedBattleEquipment,
+                    ItemObject.ItemTypeEnum.Arrows,
+                    ItemObject.ItemTypeEnum.Bolts);
+            if (snapshotHasRangedWeapon && !generatedHasRangedWeapon)
+            {
+                reason = "snapshot-has-ranged-weapon-generated-missing";
+                return true;
+            }
+
+            if (snapshotHasAmmo && !generatedHasAmmo)
+            {
+                reason = "snapshot-has-ammo-generated-missing";
+                return true;
+            }
+
+            int generatedWeaponCount = CountCanonicalGeneratedTemplateNativeRefreshOccupiedWeaponSlots(generatedBattleEquipment);
+            int snapshotWeaponCount = CountCanonicalGeneratedTemplateNativeRefreshOccupiedWeaponSlots(snapshotBattleEquipment);
+            if (snapshotHasRangedWeapon && snapshotWeaponCount > generatedWeaponCount)
+            {
+                reason =
+                    "snapshot-ranged-layout-has-more-occupied-slots:" +
+                    generatedWeaponCount + "->" + snapshotWeaponCount;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool HasCanonicalGeneratedTemplateNativeRefreshWeaponType(
+            Equipment equipment,
+            params ItemObject.ItemTypeEnum[] weaponTypes)
+        {
+            if (equipment == null || weaponTypes == null || weaponTypes.Length == 0)
+                return false;
+
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                ItemObject item = equipment[slot].Item;
+                if (item == null)
+                    continue;
+
+                for (int i = 0; i < weaponTypes.Length; i++)
+                {
+                    if (item.ItemType == weaponTypes[i])
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static int CountCanonicalGeneratedTemplateNativeRefreshOccupiedWeaponSlots(Equipment equipment)
+        {
+            if (equipment == null)
+                return 0;
+
+            int count = 0;
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                if (equipment[slot].Item != null)
+                    count++;
+            }
+
+            return count;
         }
 
         private static string FormatMaterializedEquipmentCounterSummary(Dictionary<string, int> counters, int take)
@@ -30988,9 +31113,51 @@ namespace CoopSpectator.MissionBehaviors
             missionPeer.SelectedTroopIndex = preferredTroopIndex;
             _lastBridgedSelectedTroopIndexByPeer[peer.Index] = preferredTroopIndex;
 
+            TryBroadcastSelectedTroopIndexBridge(
+                peer,
+                preferredTroopIndex,
+                "CoopMissionSpawnLogic.ApplySelectedTroopIndexBridge");
+        }
+
+        public static bool IsVanillaSelectedTroopIndexNetworkCompatible(int selectedTroopIndex)
+        {
+            return selectedTroopIndex >= -1 && selectedTroopIndex <= 15;
+        }
+
+        public static bool TryBroadcastSelectedTroopIndexBridge(
+            NetworkCommunicator peer,
+            int selectedTroopIndex,
+            string source,
+            string heroClassId = null)
+        {
+            if (peer == null)
+                return false;
+
+            if (!IsVanillaSelectedTroopIndexNetworkCompatible(selectedTroopIndex))
+            {
+                string logKey = (peer.UserName ?? peer.Index.ToString()) +
+                    "|" + selectedTroopIndex +
+                    "|" + (heroClassId ?? "null") +
+                    "|" + (source ?? "unknown");
+                if (_loggedSuppressedVanillaSelectedTroopIndexBridgeKeys.Add(logKey))
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: kept local preferred troop index without vanilla UpdateSelectedTroopIndex because it exceeds native compression range. " +
+                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                        " TroopIndex=" + selectedTroopIndex +
+                        " NativeMin=-1" +
+                        " NativeMax=15" +
+                        " HeroClass=" + (heroClassId ?? "null") +
+                        " Source=" + (source ?? "unknown"));
+                }
+
+                return false;
+            }
+
             GameNetwork.BeginBroadcastModuleEvent();
-            GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateSelectedTroopIndex(peer, preferredTroopIndex));
+            GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateSelectedTroopIndex(peer, selectedTroopIndex));
             GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+            return true;
         }
 
         private static void TrySyncCoopClassRestrictions(Mission mission, string source)
