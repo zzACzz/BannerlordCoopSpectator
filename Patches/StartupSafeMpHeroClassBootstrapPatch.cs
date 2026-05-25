@@ -14,6 +14,8 @@ namespace CoopSpectator.Patches
     public static class StartupSafeMpHeroClassBootstrapPatch
     {
         private const string StartupClassDivisionsFileName = "coopspectator_mpclassdivisions.xml";
+        private const string GeneratedRuntimeClassDivisionsFileName = "coopspectator_generated_runtime_mpclassdivisions.xml";
+        private const string GeneratedRuntimeClassIdPrefix = "coopspectator_generated_class_";
         private static bool _loggedHealthyCatalog;
         private static bool _loggedMissingCatalog;
 
@@ -44,6 +46,7 @@ namespace CoopSpectator.Patches
             {
                 MBReadOnlyList<MultiplayerClassDivisions.MPHeroClass> heroClasses = MultiplayerClassDivisions.GetMPHeroClasses();
                 int existingCount = heroClasses?.Count ?? 0;
+                int existingGeneratedCount = CountRegisteredHeroClassesByPrefix(GeneratedRuntimeClassIdPrefix);
                 if (existingCount > 0)
                 {
                     if (!_loggedHealthyCatalog)
@@ -51,33 +54,41 @@ namespace CoopSpectator.Patches
                         _loggedHealthyCatalog = true;
                         ModLogger.Info(
                             "StartupSafeMpHeroClassBootstrapPatch: vanilla startup MPHeroClass catalog is healthy. " +
-                            "Count=" + existingCount + ".");
+                            "Count=" + existingCount +
+                            " GeneratedCount=" + existingGeneratedCount + ".");
                     }
-
-                    return;
                 }
 
-                string xmlPath = ModulePathHelper.GetModuleDataFilePath(StartupClassDivisionsFileName);
-                if (string.IsNullOrWhiteSpace(xmlPath) || !File.Exists(xmlPath))
+                BootstrapResult startupBootstrapResult = default;
+                BootstrapResult generatedBootstrapResult = default;
+
+                if (existingCount == 0)
                 {
-                    if (!_loggedMissingCatalog)
-                    {
-                        _loggedMissingCatalog = true;
-                        ModLogger.Info(
-                            "StartupSafeMpHeroClassBootstrapPatch: fallback XML not found. " +
-                            "Path=" + (xmlPath ?? "null") + ".");
-                    }
-
-                    return;
+                    startupBootstrapResult = BootstrapFallbackHeroClasses(StartupClassDivisionsFileName);
                 }
 
-                int created = BootstrapFallbackHeroClasses(xmlPath);
-                int totalCount = MultiplayerClassDivisions.GetMPHeroClasses()?.Count ?? 0;
-                ModLogger.Info(
-                    "StartupSafeMpHeroClassBootstrapPatch: bootstrapped startup-safe MPHeroClass catalog. " +
-                    "Created=" + created +
-                    " Total=" + totalCount +
-                    " Xml=" + xmlPath + ".");
+                if (existingGeneratedCount == 0)
+                {
+                    generatedBootstrapResult = BootstrapFallbackHeroClasses(GeneratedRuntimeClassDivisionsFileName);
+                }
+
+                if (startupBootstrapResult.HasWork || generatedBootstrapResult.HasWork)
+                {
+                    int totalCount = MultiplayerClassDivisions.GetMPHeroClasses()?.Count ?? 0;
+                    int totalGeneratedCount = CountRegisteredHeroClassesByPrefix(GeneratedRuntimeClassIdPrefix);
+                    ModLogger.Info(
+                        "StartupSafeMpHeroClassBootstrapPatch: ensured MPHeroClass catalog registration. " +
+                        "Startup[Created=" + startupBootstrapResult.Created +
+                        ",Activated=" + startupBootstrapResult.Activated +
+                        ",SkippedMissingCharacters=" + startupBootstrapResult.SkippedMissingCharacters +
+                        ",Xml=" + (startupBootstrapResult.XmlPath ?? "null") + "] " +
+                        "Generated[Created=" + generatedBootstrapResult.Created +
+                        ",Activated=" + generatedBootstrapResult.Activated +
+                        ",SkippedMissingCharacters=" + generatedBootstrapResult.SkippedMissingCharacters +
+                        ",Xml=" + (generatedBootstrapResult.XmlPath ?? "null") + "] " +
+                        "Total=" + totalCount +
+                        " GeneratedTotal=" + totalGeneratedCount + ".");
+                }
             }
             catch (Exception ex)
             {
@@ -85,20 +96,35 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static int BootstrapFallbackHeroClasses(string xmlPath)
+        private static BootstrapResult BootstrapFallbackHeroClasses(string fileName)
         {
+            var result = new BootstrapResult();
+            string xmlPath = ModulePathHelper.GetModuleDataFilePath(fileName);
+            result.XmlPath = xmlPath;
+            if (string.IsNullOrWhiteSpace(xmlPath) || !File.Exists(xmlPath))
+            {
+                if (!_loggedMissingCatalog)
+                {
+                    _loggedMissingCatalog = true;
+                    ModLogger.Info(
+                        "StartupSafeMpHeroClassBootstrapPatch: fallback XML not found. " +
+                        "Path=" + (xmlPath ?? "null") + ".");
+                }
+
+                return result;
+            }
+
             MBObjectManager objectManager = MBObjectManager.Instance;
             if (objectManager == null)
-                return 0;
+                return result;
 
             XmlDocument document = new XmlDocument();
             document.Load(xmlPath);
 
             XmlNodeList nodes = document.SelectNodes("/MPClassDivisions/MPClassDivision");
             if (nodes == null || nodes.Count == 0)
-                return 0;
+                return result;
 
-            int created = 0;
             foreach (XmlNode node in nodes)
             {
                 if (node?.Attributes == null)
@@ -114,11 +140,12 @@ namespace CoopSpectator.Patches
                     continue;
                 }
 
-                if (TryGetExistingHeroClass(objectManager, stringId) != null)
+                if (IsHeroClassRegistered(stringId))
                     continue;
 
-                BasicCharacterObject heroCharacter = TryGetExistingCharacter(objectManager, heroId);
-                BasicCharacterObject troopCharacter = TryGetExistingCharacter(objectManager, troopId);
+                MultiplayerClassDivisions.MPHeroClass heroClass = TryGetExistingHeroClass(objectManager, stringId);
+                BasicCharacterObject heroCharacter = heroClass?.HeroCharacter ?? TryGetExistingCharacter(objectManager, heroId);
+                BasicCharacterObject troopCharacter = heroClass?.TroopCharacter ?? TryGetExistingCharacter(objectManager, troopId);
                 if (heroCharacter == null || troopCharacter == null)
                 {
                     ModLogger.Info(
@@ -126,17 +153,68 @@ namespace CoopSpectator.Patches
                         "Class=" + stringId +
                         " Hero=" + heroId +
                         " Troop=" + troopId + ".");
+                    result.SkippedMissingCharacters++;
                     continue;
                 }
 
-                XmlElement strippedNode = CreateStartupSafeClassNode(node);
-                MultiplayerClassDivisions.MPHeroClass heroClass = objectManager.CreateObject<MultiplayerClassDivisions.MPHeroClass>(stringId);
-                heroClass.Deserialize(objectManager, strippedNode);
+                if (heroClass == null)
+                {
+                    heroClass = objectManager.CreateObject<MultiplayerClassDivisions.MPHeroClass>(stringId);
+                    result.Created++;
+                }
+
+                if (heroClass.HeroCharacter == null || heroClass.TroopCharacter == null)
+                {
+                    XmlElement strippedNode = CreateStartupSafeClassNode(node);
+                    heroClass.Deserialize(objectManager, strippedNode);
+                }
+
                 heroClass.AfterInitialized();
-                created++;
+                result.Activated++;
             }
 
-            return created;
+            return result;
+        }
+
+        private static bool IsHeroClassRegistered(string stringId)
+        {
+            if (string.IsNullOrWhiteSpace(stringId))
+                return false;
+
+            MBReadOnlyList<MultiplayerClassDivisions.MPHeroClass> heroClasses = MultiplayerClassDivisions.GetMPHeroClasses();
+            if (heroClasses == null)
+                return false;
+
+            for (int i = 0; i < heroClasses.Count; i++)
+            {
+                if (string.Equals(heroClasses[i]?.StringId, stringId, StringComparison.Ordinal))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static int CountRegisteredHeroClassesByPrefix(string prefix)
+        {
+            if (string.IsNullOrWhiteSpace(prefix))
+                return 0;
+
+            MBReadOnlyList<MultiplayerClassDivisions.MPHeroClass> heroClasses = MultiplayerClassDivisions.GetMPHeroClasses();
+            if (heroClasses == null)
+                return 0;
+
+            int count = 0;
+            for (int i = 0; i < heroClasses.Count; i++)
+            {
+                string stringId = heroClasses[i]?.StringId;
+                if (!string.IsNullOrWhiteSpace(stringId) &&
+                    stringId.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         private static MultiplayerClassDivisions.MPHeroClass TryGetExistingHeroClass(MBObjectManager objectManager, string stringId)
@@ -175,6 +253,16 @@ namespace CoopSpectator.Patches
             }
 
             return element;
+        }
+
+        private struct BootstrapResult
+        {
+            public int Created;
+            public int Activated;
+            public int SkippedMissingCharacters;
+            public string XmlPath;
+
+            public bool HasWork => Created > 0 || Activated > 0 || SkippedMissingCharacters > 0;
         }
     }
 }
