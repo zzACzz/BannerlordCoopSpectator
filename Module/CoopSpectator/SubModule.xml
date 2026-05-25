@@ -58,6 +58,7 @@
     <XmlNode>
       <XmlName id="CoopSpectatorGeneratedRuntimeMPCharacters" path="coopspectator_generated_runtime_mpcharacters" />
       <IncludedGameTypes>
+        <GameType value="MultiplayerGame" />
         <GameType value="SingleplayerGame" />
       </IncludedGameTypes>
     </XmlNode>

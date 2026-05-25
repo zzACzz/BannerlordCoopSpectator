@@ -42,15 +42,15 @@ function Normalize-ShellToken {
 }
 
 function Get-ShortSignatureHash {
-    param([string]$RuntimeSignatureKey)
+    param([string]$Key)
 
-    if ([string]::IsNullOrWhiteSpace($RuntimeSignatureKey)) {
+    if ([string]::IsNullOrWhiteSpace($Key)) {
         return "nosig"
     }
 
     $sha1 = [System.Security.Cryptography.SHA1]::Create()
     try {
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($RuntimeSignatureKey)
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Key)
         $hashBytes = $sha1.ComputeHash($bytes)
         return -join ($hashBytes | Select-Object -First 4 | ForEach-Object { $_.ToString("x2") })
     }
@@ -59,12 +59,30 @@ function Get-ShortSignatureHash {
     }
 }
 
+function Get-VariantIdentityKey {
+    param($Variant)
+
+    if ($null -eq $Variant) {
+        return "null-variant"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Variant.VariantSignature)) {
+        return "variant:" + $Variant.VariantSignature.Trim()
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Variant.RuntimeSignatureKey)) {
+        return "runtime:" + $Variant.RuntimeSignatureKey.Trim()
+    }
+
+    return "fallback:" + ([Guid]::NewGuid().ToString("N"))
+}
+
 function Get-ShellId {
     param($Variant)
 
     $mountToken = if ($Variant.IsMounted) { "mounted" } else { "foot" }
     $shieldToken = if ($Variant.HasShield) { "shield" } else { "no_shield" }
-    $signatureHash = Get-ShortSignatureHash $Variant.RuntimeSignatureKey
+    $signatureHash = Get-ShortSignatureHash (Get-VariantIdentityKey $Variant)
     $primaryMeleeToken = Normalize-ShellToken $Variant.PrimaryMeleeWeaponClass "unarmed"
     $secondaryMeleeToken = Normalize-ShellToken $Variant.SecondaryMeleeWeaponClass $null
     $horseToken = if ($Variant.IsMounted) { Normalize-ShellToken $Variant.CombatHorseId "horse" } else { $null }
@@ -287,17 +305,15 @@ if (Test-Path $ExistingRuntimeCharactersPath) {
     }
 }
 
-$groups = @{}
+$variantsByIdentityKey = @{}
 foreach ($variant in $audit.Variants) {
-    $runtimeSignatureKey = if ([string]::IsNullOrWhiteSpace($variant.RuntimeSignatureKey)) {
-        "unresolved-signature"
-    }
-    else {
-        $variant.RuntimeSignatureKey
+    if ($null -eq $variant) {
+        continue
     }
 
-    if (-not $groups.ContainsKey($runtimeSignatureKey)) {
-        $groups[$runtimeSignatureKey] = $variant
+    $variantIdentityKey = Get-VariantIdentityKey $variant
+    if (-not $variantsByIdentityKey.ContainsKey($variantIdentityKey)) {
+        $variantsByIdentityKey[$variantIdentityKey] = $variant
     }
 }
 
@@ -307,9 +323,10 @@ $builder = New-Object System.Text.StringBuilder
 
 $generatedCount = 0
 $manifestEntries = New-Object System.Collections.Generic.List[object]
+$seenManifestVariantSignatures = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 $runtimeShellManifestByRuntimeSignatureKey = @{}
 
-foreach ($entry in ($groups.GetEnumerator() | Sort-Object Name)) {
+foreach ($entry in ($variantsByIdentityKey.GetEnumerator() | Sort-Object Name)) {
     $variant = $entry.Value
     $runtimeSignatureKey = if ([string]::IsNullOrWhiteSpace($variant.RuntimeSignatureKey)) {
         "unresolved-signature"
@@ -321,15 +338,34 @@ foreach ($entry in ($groups.GetEnumerator() | Sort-Object Name)) {
     $heroId = $shellBaseId + "_hero"
     $troopId = $shellBaseId + "_troop"
 
-    $runtimeShellManifestByRuntimeSignatureKey[$runtimeSignatureKey] = [ordered]@{
-        RuntimeSignatureKey = $runtimeSignatureKey
-        TroopTemplateId = $troopId
-        HeroTemplateId = $heroId
-        IsMounted = [bool]$variant.IsMounted
-        HasShield = [bool]$variant.HasShield
-        HasThrown = [bool]($variant.RangedFamily -eq "Thrown")
-        RangedFamily = $variant.RangedFamily
-        MeleeFamily = $variant.MeleeFamily
+    if (-not $runtimeShellManifestByRuntimeSignatureKey.ContainsKey($runtimeSignatureKey)) {
+        $runtimeShellManifestByRuntimeSignatureKey[$runtimeSignatureKey] = [ordered]@{
+            RuntimeSignatureKey = $runtimeSignatureKey
+            TroopTemplateId = $troopId
+            HeroTemplateId = $heroId
+            IsMounted = [bool]$variant.IsMounted
+            HasShield = [bool]$variant.HasShield
+            HasThrown = [bool]($variant.RangedFamily -eq "Thrown")
+            RangedFamily = $variant.RangedFamily
+            MeleeFamily = $variant.MeleeFamily
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($variant.VariantSignature)) {
+        $variantSignature = $variant.VariantSignature.Trim()
+        if ($seenManifestVariantSignatures.Add($variantSignature)) {
+            $manifestEntries.Add([ordered]@{
+                VariantSignature = $variantSignature
+                RuntimeSignatureKey = $runtimeSignatureKey
+                TroopTemplateId = $troopId
+                HeroTemplateId = $heroId
+                IsMounted = [bool]$variant.IsMounted
+                HasShield = [bool]$variant.HasShield
+                HasThrown = [bool]($variant.RangedFamily -eq "Thrown")
+                RangedFamily = $variant.RangedFamily
+                MeleeFamily = $variant.MeleeFamily
+            }) | Out-Null
+        }
     }
 
     if ($existingIds.Contains($heroId) -or $existingIds.Contains($troopId)) {
@@ -360,42 +396,6 @@ foreach ($entry in ($groups.GetEnumerator() | Sort-Object Name)) {
     Write-NpcCharacter -Builder $builder -CharacterId $heroId -DisplayName $displayName -DefaultGroup $defaultGroup -Level $level -DismountResistance $dismount -Skills $skills -Equipment $equipment -HeroFace $true
     Write-NpcCharacter -Builder $builder -CharacterId $troopId -DisplayName $displayName -DefaultGroup $defaultGroup -Level $level -DismountResistance $dismount -Skills $skills -Equipment $equipment -HeroFace $false
     $generatedCount++
-}
-
-$seenManifestVariantSignatures = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-foreach ($variant in $audit.Variants) {
-    if ($variant -eq $null -or [string]::IsNullOrWhiteSpace($variant.VariantSignature)) {
-        continue
-    }
-
-    $runtimeSignatureKey = if ([string]::IsNullOrWhiteSpace($variant.RuntimeSignatureKey)) {
-        "unresolved-signature"
-    }
-    else {
-        $variant.RuntimeSignatureKey
-    }
-
-    if (-not $runtimeShellManifestByRuntimeSignatureKey.ContainsKey($runtimeSignatureKey)) {
-        continue
-    }
-
-    $variantSignature = $variant.VariantSignature.Trim()
-    if (-not $seenManifestVariantSignatures.Add($variantSignature)) {
-        continue
-    }
-
-    $runtimeShellInfo = $runtimeShellManifestByRuntimeSignatureKey[$runtimeSignatureKey]
-    $manifestEntries.Add([ordered]@{
-        VariantSignature = $variantSignature
-        RuntimeSignatureKey = $runtimeSignatureKey
-        TroopTemplateId = $runtimeShellInfo.TroopTemplateId
-        HeroTemplateId = $runtimeShellInfo.HeroTemplateId
-        IsMounted = $runtimeShellInfo.IsMounted
-        HasShield = $runtimeShellInfo.HasShield
-        HasThrown = $runtimeShellInfo.HasThrown
-        RangedFamily = $runtimeShellInfo.RangedFamily
-        MeleeFamily = $runtimeShellInfo.MeleeFamily
-    }) | Out-Null
 }
 
 [void]$builder.AppendLine('</MPCharacters>')
