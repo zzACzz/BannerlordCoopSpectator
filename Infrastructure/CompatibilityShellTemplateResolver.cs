@@ -160,6 +160,42 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static ShellProfile TryResolveProfileFromVariantData(
+            string combatItem0Id,
+            int? combatItem0Amount,
+            string combatItem1Id,
+            int? combatItem1Amount,
+            string combatItem2Id,
+            int? combatItem2Amount,
+            string combatItem3Id,
+            int? combatItem3Amount,
+            string combatHeadId,
+            string combatBodyId,
+            string combatLegId,
+            string combatGlovesId,
+            string combatCapeId,
+            string combatHorseId,
+            string combatHorseHarnessId)
+        {
+            string variantSignature = BuildVariantSignature(
+                combatItem0Id,
+                combatItem0Amount,
+                combatItem1Id,
+                combatItem1Amount,
+                combatItem2Id,
+                combatItem2Amount,
+                combatItem3Id,
+                combatItem3Amount,
+                combatHeadId,
+                combatBodyId,
+                combatLegId,
+                combatGlovesId,
+                combatCapeId,
+                combatHorseId,
+                combatHorseHarnessId);
+            return TryResolveProfileFromVariantSignature(variantSignature);
+        }
+
         public static ShellProfile TryResolveProfileFromRuntimeSignature(
             string combatItem0Id,
             string combatItem1Id,
@@ -902,6 +938,43 @@ namespace CoopSpectator.Infrastructure
                 Ranged = TryParseRangedFamily(manifestEntry.RangedFamily),
                 Melee = TryParseMeleeFamily(manifestEntry.MeleeFamily)
             };
+        }
+
+        private static string BuildVariantSignature(
+            string combatItem0Id,
+            int? combatItem0Amount,
+            string combatItem1Id,
+            int? combatItem1Amount,
+            string combatItem2Id,
+            int? combatItem2Amount,
+            string combatItem3Id,
+            int? combatItem3Amount,
+            string combatHeadId,
+            string combatBodyId,
+            string combatLegId,
+            string combatGlovesId,
+            string combatCapeId,
+            string combatHorseId,
+            string combatHorseHarnessId)
+        {
+            return string.Join("|", new[]
+            {
+                combatItem0Id ?? string.Empty,
+                combatItem0Amount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                combatItem1Id ?? string.Empty,
+                combatItem1Amount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                combatItem2Id ?? string.Empty,
+                combatItem2Amount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                combatItem3Id ?? string.Empty,
+                combatItem3Amount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                combatHeadId ?? string.Empty,
+                combatBodyId ?? string.Empty,
+                combatLegId ?? string.Empty,
+                combatGlovesId ?? string.Empty,
+                combatCapeId ?? string.Empty,
+                combatHorseId ?? string.Empty,
+                combatHorseHarnessId ?? string.Empty
+            });
         }
 
         private static string BuildRuntimeSignatureKeyForItems(

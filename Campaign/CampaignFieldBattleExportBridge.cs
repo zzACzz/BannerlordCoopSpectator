@@ -305,6 +305,47 @@ namespace CoopSpectator.Campaign
             if (troop == null || troop.IsHero || !string.IsNullOrWhiteSpace(troop.HeroId))
                 return;
 
+            CompatibilityShellTemplateResolver.ShellProfile variantManifestProfile =
+                CompatibilityShellTemplateResolver.TryResolveProfileFromVariantData(
+                    troop.CombatItem0Id,
+                    troop.CombatItem0Amount,
+                    troop.CombatItem1Id,
+                    troop.CombatItem1Amount,
+                    troop.CombatItem2Id,
+                    troop.CombatItem2Amount,
+                    troop.CombatItem3Id,
+                    troop.CombatItem3Amount,
+                    troop.CombatHeadId,
+                    troop.CombatBodyId,
+                    troop.CombatLegId,
+                    troop.CombatGlovesId,
+                    troop.CombatCapeId,
+                    troop.CombatHorseId,
+                    troop.CombatHorseHarnessId);
+            if (!string.IsNullOrWhiteSpace(variantManifestProfile?.TroopTemplateId))
+            {
+                battleTemplateId = variantManifestProfile.TroopTemplateId;
+                battleTemplateSource = "variant_signature_manifest";
+                useNativeTemplateMaterialization = true;
+                return;
+            }
+
+            CompatibilityShellTemplateResolver.ShellProfile runtimeSignatureProfile =
+                CompatibilityShellTemplateResolver.TryResolveProfileFromRuntimeSignature(
+                    troop.CombatItem0Id,
+                    troop.CombatItem1Id,
+                    troop.CombatItem2Id,
+                    troop.CombatItem3Id,
+                    troop.CombatHorseId,
+                    troop.IsMounted);
+            if (!string.IsNullOrWhiteSpace(runtimeSignatureProfile?.TroopTemplateId))
+            {
+                battleTemplateId = runtimeSignatureProfile.TroopTemplateId;
+                battleTemplateSource = "runtime_signature_manifest";
+                useNativeTemplateMaterialization = true;
+                return;
+            }
+
             if (CompatibilityShellTemplateResolver.IsCompatibilityShellTemplateId(canonicalSpawnTemplateId))
             {
                 battleTemplateId = canonicalSpawnTemplateId;
