@@ -58,6 +58,9 @@ namespace CoopSpectator.Network.Messages
         public string SideId { get; set; }
         public string SideText { get; set; }
         public string LeaderPartyId { get; set; }
+        public uint FactionColor { get; set; }
+        public uint FactionColor2 { get; set; }
+        public string BannerCode { get; set; }
         public float SideMorale { get; set; }
         public bool IsPlayerSide { get; set; }
         public int TotalManCount { get; set; }
@@ -82,6 +85,9 @@ namespace CoopSpectator.Network.Messages
     {
         public string PartyId { get; set; }
         public string PartyName { get; set; }
+        public uint FactionColor { get; set; }
+        public uint FactionColor2 { get; set; }
+        public string BannerCode { get; set; }
         public bool IsMainParty { get; set; }
         public int TotalManCount { get; set; }
         public BattlePartyModifierSnapshotMessage Modifiers { get; set; } = new BattlePartyModifierSnapshotMessage();
@@ -216,6 +222,9 @@ namespace CoopSpectator.Network.Messages
         public string SideId { get; set; }
         public string SideText { get; set; }
         public string LeaderPartyId { get; set; }
+        public uint FactionColor { get; set; }
+        public uint FactionColor2 { get; set; }
+        public string BannerCode { get; set; }
         public float SideMorale { get; set; }
         public bool IsPlayerSide { get; set; }
         public int TotalManCount { get; set; }
@@ -227,6 +236,9 @@ namespace CoopSpectator.Network.Messages
     {
         public string PartyId { get; set; }
         public string PartyName { get; set; }
+        public uint FactionColor { get; set; }
+        public uint FactionColor2 { get; set; }
+        public string BannerCode { get; set; }
         public bool IsMainParty { get; set; }
         public int TotalManCount { get; set; }
         public CanonicalBattlePartyModifiers Modifiers { get; set; } = new CanonicalBattlePartyModifiers();
@@ -271,6 +283,9 @@ namespace CoopSpectator.Network.Messages
         public string CharacterId { get; set; }
         public string OriginalCharacterId { get; set; }
         public string SpawnTemplateId { get; set; }
+        public string BattleTemplateId { get; set; }
+        public string BattleTemplateSource { get; set; }
+        public bool UseNativeTemplateMaterialization { get; set; }
         public string TroopName { get; set; }
         public string CultureId { get; set; }
         public string HeroId { get; set; }

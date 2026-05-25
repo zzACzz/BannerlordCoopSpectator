@@ -9,7 +9,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 3;
+        private const int SchemaVersion = 4;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -60,7 +60,7 @@ namespace CoopSpectator.Infrastructure
                     }
 
                     int schemaVersion = reader.ReadInt32();
-                    if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != SchemaVersion)
+                    if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3 && schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
                             "BattleSnapshotBinarySerializer: unsupported schema version. " +
@@ -130,7 +130,7 @@ namespace CoopSpectator.Infrastructure
                 PlayerSide = ReadString(reader),
                 PlayerTroopsReceivedDamageMultiplier = schemaVersion >= 2 ? reader.ReadSingle() : 1f,
                 CanonicalBattle = schemaVersion >= 3 ? DeserializeCanonicalBattle(ReadString(reader)) : null,
-                Sides = ReadList(reader, ReadBattleSide) ?? new List<BattleSideSnapshotMessage>()
+                Sides = ReadList(reader, innerReader => ReadBattleSide(innerReader, schemaVersion)) ?? new List<BattleSideSnapshotMessage>()
             };
         }
 
@@ -169,6 +169,9 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, side?.SideId);
             WriteString(writer, side?.SideText);
             WriteString(writer, side?.LeaderPartyId);
+            writer.Write(side?.FactionColor ?? 0u);
+            writer.Write(side?.FactionColor2 ?? 0u);
+            WriteString(writer, side?.BannerCode);
             writer.Write(side?.SideMorale ?? 0f);
             writer.Write(side?.IsPlayerSide ?? false);
             writer.Write(side?.TotalManCount ?? 0);
@@ -177,18 +180,21 @@ namespace CoopSpectator.Infrastructure
             WriteList(writer, side?.Troops, WriteTroopStack);
         }
 
-        private static BattleSideSnapshotMessage ReadBattleSide(BinaryReader reader)
+        private static BattleSideSnapshotMessage ReadBattleSide(BinaryReader reader, int schemaVersion)
         {
             return new BattleSideSnapshotMessage
             {
                 SideId = ReadString(reader),
                 SideText = ReadString(reader),
                 LeaderPartyId = ReadString(reader),
+                FactionColor = schemaVersion >= 4 ? reader.ReadUInt32() : 0u,
+                FactionColor2 = schemaVersion >= 4 ? reader.ReadUInt32() : 0u,
+                BannerCode = schemaVersion >= 4 ? ReadString(reader) : null,
                 SideMorale = reader.ReadSingle(),
                 IsPlayerSide = reader.ReadBoolean(),
                 TotalManCount = reader.ReadInt32(),
                 MissionReadyEntryOrder = ReadList(reader, ReadString) ?? new List<string>(),
-                Parties = ReadList(reader, ReadBattleParty) ?? new List<BattlePartySnapshotMessage>(),
+                Parties = ReadList(reader, innerReader => ReadBattleParty(innerReader, schemaVersion)) ?? new List<BattlePartySnapshotMessage>(),
                 Troops = ReadList(reader, ReadTroopStack) ?? new List<TroopStackInfo>()
             };
         }
@@ -197,18 +203,24 @@ namespace CoopSpectator.Infrastructure
         {
             WriteString(writer, party?.PartyId);
             WriteString(writer, party?.PartyName);
+            writer.Write(party?.FactionColor ?? 0u);
+            writer.Write(party?.FactionColor2 ?? 0u);
+            WriteString(writer, party?.BannerCode);
             writer.Write(party?.IsMainParty ?? false);
             writer.Write(party?.TotalManCount ?? 0);
             WriteBattlePartyModifier(writer, party?.Modifiers ?? new BattlePartyModifierSnapshotMessage());
             WriteList(writer, party?.Troops, WriteTroopStack);
         }
 
-        private static BattlePartySnapshotMessage ReadBattleParty(BinaryReader reader)
+        private static BattlePartySnapshotMessage ReadBattleParty(BinaryReader reader, int schemaVersion)
         {
             return new BattlePartySnapshotMessage
             {
                 PartyId = ReadString(reader),
                 PartyName = ReadString(reader),
+                FactionColor = schemaVersion >= 4 ? reader.ReadUInt32() : 0u,
+                FactionColor2 = schemaVersion >= 4 ? reader.ReadUInt32() : 0u,
+                BannerCode = schemaVersion >= 4 ? ReadString(reader) : null,
                 IsMainParty = reader.ReadBoolean(),
                 TotalManCount = reader.ReadInt32(),
                 Modifiers = ReadBattlePartyModifier(reader) ?? new BattlePartyModifierSnapshotMessage(),

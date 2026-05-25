@@ -72,6 +72,9 @@ namespace CoopSpectator.Campaign
                 SideId = side.SideId,
                 SideText = side.SideText,
                 LeaderPartyId = side.LeaderPartyId,
+                FactionColor = side.FactionColor,
+                FactionColor2 = side.FactionColor2,
+                BannerCode = side.BannerCode,
                 SideMorale = side.SideMorale,
                 IsPlayerSide = side.IsPlayerSide,
                 TotalManCount = side.TotalManCount
@@ -86,6 +89,9 @@ namespace CoopSpectator.Campaign
                 {
                     PartyId = party.PartyId,
                     PartyName = party.PartyName,
+                    FactionColor = party.FactionColor,
+                    FactionColor2 = party.FactionColor2,
+                    BannerCode = party.BannerCode,
                     IsMainParty = party.IsMainParty,
                     TotalManCount = party.TotalManCount,
                     Modifiers = CloneModifiers(party.Modifiers)
@@ -227,6 +233,12 @@ namespace CoopSpectator.Campaign
                 !string.IsNullOrWhiteSpace(troop?.SpawnTemplateId)
                     ? troop.SpawnTemplateId
                     : troop?.CharacterId;
+            ResolveBattleTemplateMaterialization(
+                troop,
+                canonicalSpawnTemplateId,
+                out string battleTemplateId,
+                out string battleTemplateSource,
+                out bool useNativeTemplateMaterialization);
 
             return new CanonicalTroopInstance
             {
@@ -238,6 +250,9 @@ namespace CoopSpectator.Campaign
                 CharacterId = canonicalCharacterId,
                 OriginalCharacterId = canonicalOriginalCharacterId,
                 SpawnTemplateId = canonicalSpawnTemplateId,
+                BattleTemplateId = battleTemplateId,
+                BattleTemplateSource = battleTemplateSource,
+                UseNativeTemplateMaterialization = useNativeTemplateMaterialization,
                 TroopName = troop.TroopName,
                 CultureId = troop.CultureId,
                 HeroId = troop.HeroId,
@@ -274,6 +289,52 @@ namespace CoopSpectator.Campaign
                 PerkIds = troop.PerkIds != null ? new List<string>(troop.PerkIds) : new List<string>(),
                 Equipment = CloneEquipment(troop)
             };
+        }
+
+        private static void ResolveBattleTemplateMaterialization(
+            TroopStackInfo troop,
+            string canonicalSpawnTemplateId,
+            out string battleTemplateId,
+            out string battleTemplateSource,
+            out bool useNativeTemplateMaterialization)
+        {
+            battleTemplateId = null;
+            battleTemplateSource = null;
+            useNativeTemplateMaterialization = false;
+
+            if (troop == null || troop.IsHero || !string.IsNullOrWhiteSpace(troop.HeroId))
+                return;
+
+            if (CompatibilityShellTemplateResolver.IsCompatibilityShellTemplateId(canonicalSpawnTemplateId))
+            {
+                battleTemplateId = canonicalSpawnTemplateId;
+                battleTemplateSource = "snapshot_spawn_template";
+                useNativeTemplateMaterialization = true;
+                return;
+            }
+
+            CompatibilityShellTemplateResolver.ShellProfile resolvedProfile =
+                CompatibilityShellTemplateResolver.ResolveProfile(
+                    troop.CombatItem0Id,
+                    troop.CombatItem1Id,
+                    troop.CombatItem2Id,
+                    troop.CombatItem3Id,
+                    troop.CombatHorseId,
+                    troop.IsMounted);
+            if (!string.IsNullOrWhiteSpace(resolvedProfile?.TroopTemplateId))
+            {
+                battleTemplateId = resolvedProfile.TroopTemplateId;
+                battleTemplateSource = "equipment_profile";
+                useNativeTemplateMaterialization = true;
+                return;
+            }
+
+            if (CompatibilityShellTemplateResolver.IsCompatibilityShellTemplateId(troop.CharacterId))
+            {
+                battleTemplateId = troop.CharacterId;
+                battleTemplateSource = "snapshot_character_id";
+                useNativeTemplateMaterialization = true;
+            }
         }
 
         private static string BuildTroopInstanceId(TroopStackInfo troop, bool isPreBattleWounded, int stableOrdinalWithinEntry)

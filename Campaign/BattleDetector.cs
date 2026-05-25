@@ -4494,6 +4494,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     ? nameof(BattleSideEnum.Defender)
                     : nameof(BattleSideEnum.Attacker),
                 LeaderPartyId = MobileParty.MainParty?.StringId ?? "main_party",
+                FactionColor = TryResolvePartyFactionColor(MobileParty.MainParty?.Party, MobileParty.MainParty?.Party),
+                FactionColor2 = TryResolvePartyFactionColor2(MobileParty.MainParty?.Party, MobileParty.MainParty?.Party),
+                BannerCode = TryResolvePartyBannerCode(MobileParty.MainParty?.Party, MobileParty.MainParty?.Party),
                 SideMorale = TryGetFloatProperty(MobileParty.MainParty, "Morale"),
                 IsPlayerSide = true
             };
@@ -4502,6 +4505,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 PartyId = MobileParty.MainParty?.StringId ?? "main_party",
                 PartyName = MobileParty.MainParty?.Name?.ToString() ?? "Main Party",
+                FactionColor = TryResolvePartyFactionColor(MobileParty.MainParty?.Party, MobileParty.MainParty?.Party),
+                FactionColor2 = TryResolvePartyFactionColor2(MobileParty.MainParty?.Party, MobileParty.MainParty?.Party),
+                BannerCode = TryResolvePartyBannerCode(MobileParty.MainParty?.Party, MobileParty.MainParty?.Party),
                 IsMainParty = true,
                 Modifiers = TryBuildPartyModifierSnapshot(MobileParty.MainParty, MobileParty.MainParty?.Party),
                 Troops = BuildPartyTroopStacksSafe()
@@ -4559,6 +4565,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     sideSnapshot.Troops.AddRange(partySnapshot.Troops);
             }
 
+            HydrateSideAppearanceFromParties(sideSnapshot);
             sideSnapshot.TotalManCount = sideSnapshot.Parties.Sum(p => p?.TotalManCount ?? 0);
             sideSnapshot.MissionReadyDescriptors = BuildMissionReadyDescriptors(sideObject, sideSnapshot, sideId);
             sideSnapshot.MissionReadyEntryOrder = sideSnapshot.MissionReadyDescriptors
@@ -4903,6 +4910,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 PartyId = partyId,
                 PartyName = partyName,
+                FactionColor = TryResolvePartyFactionColor(partyObject, partyBase),
+                FactionColor2 = TryResolvePartyFactionColor2(partyObject, partyBase),
+                BannerCode = TryResolvePartyBannerCode(partyObject, partyBase),
                 IsMainParty = isMainParty,
                 TotalManCount = troops.Sum(t => t?.Count ?? 0),
                 Modifiers = TryBuildPartyModifierSnapshot(partyObject, partyBase),
@@ -4916,6 +4926,27 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return TryGetStringId(leaderParty) ?? TryGetStringId(TryGetPropertyValue(leaderParty, "MobileParty"));
         }
 
+        private static void HydrateSideAppearanceFromParties(BattleSideSnapshotMessage sideSnapshot)
+        {
+            if (sideSnapshot?.Parties == null || sideSnapshot.Parties.Count <= 0)
+                return;
+
+            BattlePartySnapshotMessage sourceParty = sideSnapshot.Parties
+                .FirstOrDefault(party => party != null &&
+                                         !string.IsNullOrWhiteSpace(sideSnapshot.LeaderPartyId) &&
+                                         string.Equals(party.PartyId, sideSnapshot.LeaderPartyId, StringComparison.OrdinalIgnoreCase))
+                ?? sideSnapshot.Parties.FirstOrDefault(party => party != null);
+            if (sourceParty == null)
+                return;
+
+            if (sideSnapshot.FactionColor == 0u)
+                sideSnapshot.FactionColor = sourceParty.FactionColor;
+            if (sideSnapshot.FactionColor2 == 0u)
+                sideSnapshot.FactionColor2 = sourceParty.FactionColor2;
+            if (string.IsNullOrWhiteSpace(sideSnapshot.BannerCode))
+                sideSnapshot.BannerCode = sourceParty.BannerCode;
+        }
+
         private static float TryGetSideMorale(object sideObject)
         {
             float directValue = TryGetFloatProperty(sideObject, "SideMorale");
@@ -4923,6 +4954,56 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return directValue;
 
             return TryConvertToFloat(TryInvokeMethod(sideObject, "GetSideMorale"));
+        }
+
+        private static uint TryResolvePartyFactionColor(object partyObject, object partyBase)
+        {
+            return TryConvertToUInt(TryGetPropertyValue(TryResolveMapFaction(partyObject, partyBase), "Color"));
+        }
+
+        private static uint TryResolvePartyFactionColor2(object partyObject, object partyBase)
+        {
+            return TryConvertToUInt(TryGetPropertyValue(TryResolveMapFaction(partyObject, partyBase), "Color2"));
+        }
+
+        private static object TryResolveMapFaction(object partyObject, object partyBase)
+        {
+            object mobileParty = TryResolveMobileParty(partyObject, partyBase);
+            return TryGetPropertyValue(partyBase, "MapFaction")
+                ?? TryGetPropertyValue(mobileParty, "MapFaction")
+                ?? TryGetPropertyValue(TryGetPropertyValue(partyObject, "Party"), "MapFaction");
+        }
+
+        private static string TryResolvePartyBannerCode(object partyObject, object partyBase)
+        {
+            object mobileParty = TryResolveMobileParty(partyObject, partyBase);
+            object leaderHero = TryGetPropertyValue(mobileParty, "LeaderHero") ?? TryGetPropertyValue(partyBase, "LeaderHero");
+            string leaderBannerCode = TryGetBannerCode(TryGetPropertyValue(leaderHero, "ClanBanner"));
+            if (!string.IsNullOrWhiteSpace(leaderBannerCode))
+                return leaderBannerCode;
+
+            object ownerHero = TryGetPropertyValue(mobileParty, "Owner");
+            string ownerBannerCode = TryGetBannerCode(TryGetPropertyValue(ownerHero, "ClanBanner"));
+            if (!string.IsNullOrWhiteSpace(ownerBannerCode))
+                return ownerBannerCode;
+
+            string partyBannerCode = TryGetBannerCode(TryGetPropertyValue(partyBase, "Banner"));
+            if (!string.IsNullOrWhiteSpace(partyBannerCode))
+                return partyBannerCode;
+
+            return TryGetBannerCode(TryGetPropertyValue(TryResolveMapFaction(partyObject, partyBase), "Banner"));
+        }
+
+        private static string TryGetBannerCode(object bannerObject)
+        {
+            if (bannerObject is Banner banner)
+                return banner.BannerCode;
+
+            string bannerCode = TryGetPropertyValue(bannerObject, "BannerCode")?.ToString();
+            if (!string.IsNullOrWhiteSpace(bannerCode))
+                return bannerCode;
+
+            return TryInvokeMethod(bannerObject, "Serialize")?.ToString();
         }
 
         private static BattlePartyModifierSnapshotMessage TryBuildPartyModifierSnapshot(object partyObject, object partyBase)
@@ -8067,6 +8148,25 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             catch
             {
                 return 0f;
+            }
+        }
+
+        private static uint TryConvertToUInt(object value)
+        {
+            if (value is uint u)
+                return u;
+            if (value is int i && i >= 0)
+                return (uint)i;
+            if (value is long l && l >= 0L)
+                return (uint)Math.Min(uint.MaxValue, l);
+
+            try
+            {
+                return value != null ? Convert.ToUInt32(value, System.Globalization.CultureInfo.InvariantCulture) : 0u;
+            }
+            catch
+            {
+                return 0u;
             }
         }
 

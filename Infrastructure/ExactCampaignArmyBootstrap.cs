@@ -1916,6 +1916,9 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
+            CanonicalBattleSide canonicalSide = canonicalBattle.Sides?.FirstOrDefault(
+                sideStateEntry => sideStateEntry != null && ResolveBattleSide(sideStateEntry.SideId) == side);
+
             var entriesById = sideState.Entries
                 .Where(entry => entry != null && !string.IsNullOrWhiteSpace(entry.EntryId))
                 .GroupBy(entry => entry.EntryId, StringComparer.OrdinalIgnoreCase)
@@ -1940,6 +1943,17 @@ namespace CoopSpectator.Infrastructure
                 entriesById.TryGetValue(instance.EntryId ?? string.Empty, out RosterEntryState entryState);
                 if (entryState == null)
                     missingEntryStateInstances++;
+
+                CanonicalBattleParty canonicalParty = canonicalSide?.Parties?.FirstOrDefault(
+                    party =>
+                        party != null &&
+                        string.Equals(
+                            party.PartyId ?? string.Empty,
+                            instance.PartyId ?? entryState?.PartyId ?? string.Empty,
+                            StringComparison.OrdinalIgnoreCase));
+                uint factionColor = canonicalParty?.FactionColor ?? canonicalSide?.FactionColor ?? 0u;
+                uint factionColor2 = canonicalParty?.FactionColor2 ?? canonicalSide?.FactionColor2 ?? 0u;
+                string bannerCode = canonicalParty?.BannerCode ?? canonicalSide?.BannerCode;
 
                 BasicCharacterObject troop = TryResolveCanonicalInstanceCharacter(instance, entryState);
                 if (troop == null)
@@ -1977,7 +1991,10 @@ namespace CoopSpectator.Infrastructure
                     side == playerSide,
                     uniqueSeed,
                     faceSeed,
-                    instance.InstanceId));
+                    instance.InstanceId,
+                    factionColor,
+                    factionColor2,
+                    bannerCode));
                 totalHealthyCount++;
             }
 
@@ -2022,6 +2039,9 @@ namespace CoopSpectator.Infrastructure
                 side == playerSide,
                 uniqueSeed,
                 faceSeed,
+                null,
+                0u,
+                0u,
                 null));
         }
 
@@ -2200,6 +2220,7 @@ namespace CoopSpectator.Infrastructure
 
             string[] candidateIds =
             {
+                instance?.BattleTemplateId,
                 entryState?.SpawnTemplateId,
                 instance?.SpawnTemplateId,
                 entryState?.OriginalCharacterId,
@@ -2261,6 +2282,12 @@ namespace CoopSpectator.Infrastructure
                 string.Equals(instance?.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
+            }
+
+            if (instance != null)
+            {
+                return instance.UseNativeTemplateMaterialization &&
+                       !string.IsNullOrWhiteSpace(instance.BattleTemplateId);
             }
 
             return true;
@@ -2397,6 +2424,9 @@ namespace CoopSpectator.Infrastructure
         private readonly bool _hasHeavyArmor;
         private readonly bool _hasShield;
         private readonly bool _hasSpear;
+        private readonly uint _factionColor;
+        private readonly uint _factionColor2;
+        private readonly Banner _banner;
         private OriginRemovalState _removalState;
 
         private enum OriginRemovalState
@@ -2421,9 +2451,9 @@ namespace CoopSpectator.Infrastructure
 
         bool IAgentOriginBase.IsInSameArmyAsPlayer => _isUnderPlayersCommand;
 
-        uint IAgentOriginBase.FactionColor => 0u;
+        uint IAgentOriginBase.FactionColor => _factionColor;
 
-        uint IAgentOriginBase.FactionColor2 => 0u;
+        uint IAgentOriginBase.FactionColor2 => _factionColor2;
 
         IBattleCombatant IAgentOriginBase.BattleCombatant => null;
 
@@ -2431,7 +2461,7 @@ namespace CoopSpectator.Infrastructure
 
         int IAgentOriginBase.Seed => _faceSeed;
 
-        Banner IAgentOriginBase.Banner => null;
+        Banner IAgentOriginBase.Banner => _banner;
 
         BasicCharacterObject IAgentOriginBase.Troop => _troop;
 
@@ -2452,7 +2482,10 @@ namespace CoopSpectator.Infrastructure
             bool isUnderPlayersCommand,
             int uniqueSeed,
             int faceSeed,
-            string canonicalInstanceId)
+            string canonicalInstanceId,
+            uint factionColor,
+            uint factionColor2,
+            string bannerCode)
         {
             _supplier = supplier;
             _troop = troop;
@@ -2463,6 +2496,9 @@ namespace CoopSpectator.Infrastructure
             _isUnderPlayersCommand = isUnderPlayersCommand;
             _uniqueSeed = uniqueSeed;
             _faceSeed = faceSeed;
+            _factionColor = factionColor;
+            _factionColor2 = factionColor2;
+            _banner = TryCreateOriginBanner(bannerCode, factionColor, factionColor2);
             AgentOriginUtilities.GetDefaultTroopTraits(_troop, out _hasThrownWeapon, out _hasSpear, out _hasShield, out _hasHeavyArmor);
         }
 
@@ -2514,6 +2550,21 @@ namespace CoopSpectator.Infrastructure
 
             _removalState = targetState;
             return true;
+        }
+
+        private static Banner TryCreateOriginBanner(string bannerCode, uint factionColor, uint factionColor2)
+        {
+            if (string.IsNullOrWhiteSpace(bannerCode))
+                return null;
+
+            try
+            {
+                return new Banner(bannerCode, factionColor, factionColor2);
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }
