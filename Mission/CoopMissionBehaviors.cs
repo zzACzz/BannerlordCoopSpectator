@@ -10147,18 +10147,36 @@ namespace CoopSpectator.MissionBehaviors
                 overlayMode == ExactCampaignSnapshotOverlayMode.ServerAuthoritative &&
                 ShouldTreatCanonicalGeneratedTemplateAsFinalNativeSpawn(entryState))
             {
-                appliedAgentIndices.Add(agent.Index);
-                if (loggedEntryIds.Add(entryId))
+                if (TryRefreshCanonicalGeneratedTemplateFinalNativeSpawn(
+                        agent,
+                        entryState,
+                        source,
+                        out string generatedNativeRefreshSummary))
+                {
+                    appliedAgentIndices.Add(agent.Index);
+                    if (loggedEntryIds.Add(entryId))
+                    {
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: refreshed canonical generated template final native spawn from generated battle template equipment. " +
+                            "AgentIndex=" + agent.Index +
+                            " EntryId=" + entryId +
+                            " TroopId=" + (agent.Character?.StringId ?? "null") +
+                            " " + (generatedNativeRefreshSummary ?? "GeneratedNativeRefresh=(none)") +
+                            " Source=" + (source ?? "unknown"));
+                    }
+                }
+                else if (loggedEntryIds.Add(entryId + "|refresh-failed"))
                 {
                     ModLogger.Info(
-                        "CoopMissionSpawnLogic: skipped legacy server-authoritative exact overlay because canonical generated template is treated as final native spawn. " +
+                        "CoopMissionSpawnLogic: skipped legacy server-authoritative exact overlay because canonical generated template is treated as final native spawn, but generated native refresh was unavailable. " +
                         "AgentIndex=" + agent.Index +
                         " EntryId=" + entryId +
                         " TroopId=" + (agent.Character?.StringId ?? "null") +
+                        " " + (generatedNativeRefreshSummary ?? "GeneratedNativeRefresh=(none)") +
                         " Source=" + (source ?? "unknown"));
                 }
 
-                return false;
+                return appliedAgentIndices.Contains(agent.Index);
             }
 
             ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
@@ -22756,6 +22774,93 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return BattleSnapshotRuntimeState.UsesGeneratedRuntimeBattleTemplateMaterialization(entryState.EntryId);
+        }
+
+        private static bool TryRefreshCanonicalGeneratedTemplateFinalNativeSpawn(
+            Agent agent,
+            RosterEntryState entryState,
+            string source,
+            out string refreshSummary)
+        {
+            refreshSummary = "GeneratedNativeRefresh=not-applicable";
+            if (agent == null ||
+                entryState == null ||
+                !GameNetwork.IsServer ||
+                agent.IsMount)
+            {
+                return false;
+            }
+
+            BasicCharacterObject generatedCharacter = agent.Character as BasicCharacterObject;
+            Equipment generatedBattleEquipment = null;
+            try
+            {
+                generatedBattleEquipment =
+                    generatedCharacter?.FirstBattleEquipment?.Clone(false) ??
+                    generatedCharacter?.Equipment?.Clone(false);
+            }
+            catch (Exception ex)
+            {
+                refreshSummary =
+                    "GeneratedNativeRefresh=clone-failed:" + ex.GetType().Name +
+                    " Character=" + (generatedCharacter?.StringId ?? "null");
+                return false;
+            }
+
+            if (generatedBattleEquipment == null)
+            {
+                refreshSummary =
+                    "GeneratedNativeRefresh=missing-battle-equipment Character=" +
+                    (generatedCharacter?.StringId ?? "null");
+                return false;
+            }
+
+            string beforeSpawnWeapons = BuildExactEntryEquipmentSummary(
+                agent.SpawnEquipment,
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3);
+            string beforeMissionWeapons = BuildMissionEquipmentSummary(
+                agent.Equipment,
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3);
+
+            try
+            {
+                agent.UpdateSpawnEquipmentAndRefreshVisuals(generatedBattleEquipment);
+            }
+            catch (Exception ex)
+            {
+                refreshSummary =
+                    "GeneratedNativeRefresh=refresh-failed:" + ex.GetType().Name +
+                    " Character=" + (generatedCharacter?.StringId ?? "null") +
+                    " BeforeSpawnWeapons={" + beforeSpawnWeapons + "}" +
+                    " BeforeMissionWeapons={" + beforeMissionWeapons + "}";
+                return false;
+            }
+
+            string afterSpawnWeapons = BuildExactEntryEquipmentSummary(
+                agent.SpawnEquipment,
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3);
+            string afterMissionWeapons = BuildMissionEquipmentSummary(
+                agent.Equipment,
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3);
+            refreshSummary =
+                "GeneratedNativeRefresh=applied Character=" + (generatedCharacter?.StringId ?? "null") +
+                " BeforeSpawnWeapons={" + beforeSpawnWeapons + "}" +
+                " BeforeMissionWeapons={" + beforeMissionWeapons + "}" +
+                " AfterSpawnWeapons={" + afterSpawnWeapons + "}" +
+                " AfterMissionWeapons={" + afterMissionWeapons + "}";
+            return true;
         }
 
         private static string FormatMaterializedEquipmentCounterSummary(Dictionary<string, int> counters, int take)
