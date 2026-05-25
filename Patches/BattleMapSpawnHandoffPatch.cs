@@ -13,6 +13,7 @@ using NetworkMessages.FromServer;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.InputSystem;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Network.Messages;
 using TaleWorlds.ObjectSystem;
@@ -56,6 +57,7 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedWeaponDropKey;
         private static string _lastSuppressedDroppedShieldAttachmentKey;
         private static string _lastSuppressedServerMissileStickKey;
+        private static string _lastSuppressedServerMissileAttachVisualKey;
         private static string _lastLocalVisualFinalizeKey;
         private static string _lastSuppressedAssignFormationKey;
         private static string _lastSuppressedLocalSelectAllFormationsKey;
@@ -428,6 +430,8 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionSpawnAttachedWeaponOnCorpseServer), () => PatchMissionSpawnAttachedWeaponOnCorpseServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer), () => PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionHandleMissileCollisionReactionServer), () => PatchMissionHandleMissileCollisionReactionServer(harmony));
+            TryApplyPatchStep(nameof(PatchAgentAttachWeaponToWeaponServer), () => PatchAgentAttachWeaponToWeaponServer(harmony));
+            TryApplyPatchStep(nameof(PatchAgentAttachWeaponToBoneServer), () => PatchAgentAttachWeaponToBoneServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAssignFormationToPlayer), () => PatchMissionNetworkComponentAssignFormationToPlayer(harmony));
             TryApplyPatchStep(nameof(PatchOrderControllerSelectAllFormations), () => PatchOrderControllerSelectAllFormations(harmony));
             TryApplyPatchStep(nameof(PatchOrderTroopPlacerMissionScreenTick), () => PatchOrderTroopPlacerMissionScreenTick(harmony));
@@ -1157,6 +1161,42 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Mission.HandleMissileCollisionReaction.");
+        }
+
+        private static void PatchAgentAttachWeaponToWeaponServer(Harmony harmony)
+        {
+            MethodInfo target = typeof(Agent).GetMethod(
+                nameof(Agent.AttachWeaponToWeapon),
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_AttachWeaponToWeapon_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.AttachWeaponToWeapon not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.AttachWeaponToWeapon.");
+        }
+
+        private static void PatchAgentAttachWeaponToBoneServer(Harmony harmony)
+        {
+            MethodInfo target = typeof(Agent).GetMethod(
+                nameof(Agent.AttachWeaponToBone),
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_AttachWeaponToBone_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.AttachWeaponToBone not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.AttachWeaponToBone.");
         }
 
         private static void PatchMissionNetworkComponentAssignFormationToPlayer(Harmony harmony)
@@ -3371,6 +3411,90 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool Agent_AttachWeaponToWeapon_ServerPrefix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            MissionWeapon weapon,
+            GameEntity weaponEntity,
+            ref MatrixFrame attachLocalFrame)
+        {
+            try
+            {
+                if (!ShouldSuppressServerAttachedMissileVisualForExactAgent(
+                        __instance,
+                        weapon,
+                        "weapon-slot",
+                        out string entryId,
+                        out ItemObject missileItem,
+                        out string logKeyBase))
+                {
+                    return true;
+                }
+
+                string logKey = logKeyBase + "|slot=" + slotIndex;
+                if (!string.Equals(_lastSuppressedServerMissileAttachVisualKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedServerMissileAttachVisualKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed server Agent.AttachWeaponToWeapon for exact battle attached missile visual. " +
+                        "AgentIndex=" + __instance.Index +
+                        " EntryId=" + (entryId ?? "null") +
+                        " SlotIndex=" + slotIndex +
+                        " MissileItem=" + (missileItem?.StringId ?? "null") +
+                        " WeaponEntityPresent=" + (weaponEntity != null));
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.AttachWeaponToWeapon server prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool Agent_AttachWeaponToBone_ServerPrefix(
+            Agent __instance,
+            MissionWeapon weapon,
+            GameEntity weaponEntity,
+            sbyte boneIndex,
+            ref MatrixFrame attachLocalFrame)
+        {
+            try
+            {
+                if (!ShouldSuppressServerAttachedMissileVisualForExactAgent(
+                        __instance,
+                        weapon,
+                        "bone",
+                        out string entryId,
+                        out ItemObject missileItem,
+                        out string logKeyBase))
+                {
+                    return true;
+                }
+
+                string logKey = logKeyBase + "|bone=" + boneIndex;
+                if (!string.Equals(_lastSuppressedServerMissileAttachVisualKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedServerMissileAttachVisualKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed server Agent.AttachWeaponToBone for exact battle attached missile visual. " +
+                        "AgentIndex=" + __instance.Index +
+                        " EntryId=" + (entryId ?? "null") +
+                        " BoneIndex=" + boneIndex +
+                        " MissileItem=" + (missileItem?.StringId ?? "null") +
+                        " WeaponEntityPresent=" + (weaponEntity != null));
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.AttachWeaponToBone server prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static bool MissionHasLocalMissile(int missileIndex)
         {
             if (missileIndex < 0)
@@ -4566,6 +4690,36 @@ namespace CoopSpectator.Patches
                     }
                 }
             }
+        }
+
+        private static bool ShouldSuppressServerAttachedMissileVisualForExactAgent(
+            Agent agent,
+            MissionWeapon weapon,
+            string attachmentKind,
+            out string entryId,
+            out ItemObject missileItem,
+            out string logKeyBase)
+        {
+            entryId = null;
+            missileItem = weapon.Item;
+            logKeyBase = null;
+
+            Mission mission = Mission.Current;
+            if (!ShouldUseServerExactBattleAttachedMissileSuppression(mission) ||
+                agent == null ||
+                weapon.IsEmpty ||
+                !ExactCampaignArmyBootstrap.TryGetEntryId(agent, out entryId) ||
+                !IsSuppressibleAttachedMissileItem(missileItem))
+            {
+                return false;
+            }
+
+            logKeyBase =
+                attachmentKind + "|" +
+                agent.Index + "|" +
+                (entryId ?? "null") + "|" +
+                (missileItem?.StringId ?? "null");
+            return true;
         }
 
         private static void TryReplayDeferredClientAgentSetFormation(
