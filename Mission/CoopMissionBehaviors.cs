@@ -10143,6 +10143,24 @@ namespace CoopSpectator.MissionBehaviors
             if (entryState == null)
                 return false;
 
+            if (GameNetwork.IsServer &&
+                overlayMode == ExactCampaignSnapshotOverlayMode.ServerAuthoritative &&
+                ShouldTreatCanonicalGeneratedTemplateAsFinalNativeSpawn(entryState))
+            {
+                appliedAgentIndices.Add(agent.Index);
+                if (loggedEntryIds.Add(entryId))
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: skipped legacy server-authoritative exact overlay because canonical generated template is treated as final native spawn. " +
+                        "AgentIndex=" + agent.Index +
+                        " EntryId=" + entryId +
+                        " TroopId=" + (agent.Character?.StringId ?? "null") +
+                        " Source=" + (source ?? "unknown"));
+                }
+
+                return false;
+            }
+
             ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
             string appliedEquipment = "(none)";
             string equipmentMisses = "(none)";
@@ -21555,6 +21573,9 @@ namespace CoopSpectator.MissionBehaviors
         internal static bool RequiresPostCreateStringIdExactWeaponOverlayForCurrentRuntime(
             RosterEntryState entryState)
         {
+            if (ShouldTreatCanonicalGeneratedTemplateAsFinalNativeSpawn(entryState))
+                return false;
+
             return RequiresPostCreateStringIdExactWeaponOverlayForCurrentRuntime(
                 GetExactEntryCompatibilityDiagnostic(entryState));
         }
@@ -22713,6 +22734,28 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return false;
+        }
+
+        private static bool ShouldTreatCanonicalGeneratedTemplateAsFinalNativeSpawn(RosterEntryState entryState)
+        {
+            if (entryState == null ||
+                entryState.IsHero ||
+                !UseDedicatedSafeStringIdExactEquipmentPathForCurrentRuntime())
+            {
+                return false;
+            }
+
+            BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            if (snapshot?.CanonicalBattle == null ||
+                !string.Equals(
+                    snapshot.CanonicalBattle.Context?.MultiplayerGameType,
+                    "Battle",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return BattleSnapshotRuntimeState.UsesGeneratedRuntimeBattleTemplateMaterialization(entryState.EntryId);
         }
 
         private static string FormatMaterializedEquipmentCounterSummary(Dictionary<string, int> counters, int take)

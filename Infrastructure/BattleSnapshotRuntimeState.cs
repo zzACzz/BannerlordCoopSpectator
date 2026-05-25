@@ -462,6 +462,40 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static CanonicalTroopInstance GetCanonicalTroopInstance(string entryId)
+        {
+            if (string.IsNullOrWhiteSpace(entryId))
+                return null;
+
+            lock (Sync)
+            {
+                return _current?.CanonicalBattle?.TroopInstances?
+                    .FirstOrDefault(candidate =>
+                        candidate != null &&
+                        string.Equals(candidate.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        public static bool UsesGeneratedRuntimeBattleTemplateMaterialization(string entryId)
+        {
+            CanonicalTroopInstance instance = GetCanonicalTroopInstance(entryId);
+            if (instance == null ||
+                !instance.UseNativeTemplateMaterialization ||
+                string.IsNullOrWhiteSpace(instance.BattleTemplateId))
+            {
+                return false;
+            }
+
+            return string.Equals(
+                       instance.BattleTemplateSource,
+                       "variant_signature_manifest",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(
+                       instance.BattleTemplateSource,
+                       "runtime_signature_manifest",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
         private static int CountSnapshotEntriesWithResolvedServerCreateContract(BattleSnapshotMessage snapshot)
         {
             if (snapshot?.Sides == null || snapshot.Sides.Count == 0)

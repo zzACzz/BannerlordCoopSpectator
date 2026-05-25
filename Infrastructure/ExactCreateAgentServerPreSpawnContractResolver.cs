@@ -49,6 +49,8 @@ namespace CoopSpectator.Infrastructure
                 formationIndex);
             ExactTransferValidationResult exactTransferValidation =
                 ExactTransferContractValidator.Validate(exactTransferContract);
+            bool useCanonicalGeneratedTemplateNativeSpawn =
+                ShouldUseCanonicalGeneratedTemplateNativeSpawn(entryState);
 
             string exactEntryCompatibilitySummary;
             string weaponDecisionReason;
@@ -57,9 +59,20 @@ namespace CoopSpectator.Infrastructure
             bool includeArmorVisuals = exactTransferContract?.Equipment?.IncludeArmorVisualsInPreSpawn ?? false;
             bool includeMountVisuals = exactTransferContract?.Equipment?.IncludeMountVisualsInPreSpawn ?? false;
             bool useContractDrivenPreSpawnPath =
+                !useCanonicalGeneratedTemplateNativeSpawn &&
                 exactTransferContract?.SpawnPolicy?.RequirePreSpawnInjection == true &&
                 exactTransferValidation?.IsValid == true;
-            if (useContractDrivenPreSpawnPath)
+            if (useCanonicalGeneratedTemplateNativeSpawn)
+            {
+                exactEntryCompatibilitySummary = "ExactEntryContract=canonical-generated-template-native-spawn";
+                weaponDecisionReason =
+                    "canonical field battle generated MP copy is treated as the final native spawn template";
+                includeWeapons = false;
+                includeCape = false;
+                includeArmorVisuals = false;
+                includeMountVisuals = false;
+            }
+            else if (useContractDrivenPreSpawnPath)
             {
                 bool strictHeroPath = exactTransferContract?.SpawnPolicy?.UseStrictExactHeroPath == true;
                 exactEntryCompatibilitySummary = strictHeroPath
@@ -82,7 +95,12 @@ namespace CoopSpectator.Infrastructure
             }
 
             string capeDecisionReason;
-            if (useContractDrivenPreSpawnPath)
+            if (useCanonicalGeneratedTemplateNativeSpawn)
+            {
+                capeDecisionReason =
+                    "canonical field battle generated MP copy is treated as the final native spawn template";
+            }
+            else if (useContractDrivenPreSpawnPath)
             {
                 bool strictHeroPath = exactTransferContract?.SpawnPolicy?.UseStrictExactHeroPath == true;
                 capeDecisionReason = includeCape
@@ -101,7 +119,9 @@ namespace CoopSpectator.Infrastructure
                     out capeDecisionReason);
             }
 
-            bool canInjectBodyPropertiesAtCreateAgentTime = useContractDrivenPreSpawnPath
+            bool canInjectBodyPropertiesAtCreateAgentTime = useCanonicalGeneratedTemplateNativeSpawn
+                ? false
+                : useContractDrivenPreSpawnPath
                 ? exactTransferContract?.Body?.HasExactBodyProperties == true
                 : !string.IsNullOrWhiteSpace(entryState.HeroBodyProperties);
             ExactCreateAgentPayloadDiagnosticDecision payloadDiagnostic =
@@ -114,6 +134,18 @@ namespace CoopSpectator.Infrastructure
                     includeCape,
                     includeMountVisuals,
                     canInjectBodyPropertiesAtCreateAgentTime);
+            if (useCanonicalGeneratedTemplateNativeSpawn)
+            {
+                payloadDiagnostic = new ExactCreateAgentPayloadDiagnosticDecision
+                {
+                    IsActive = false,
+                    Reason = "canonical-generated-template-native-spawn",
+                    EntryId = entryState.EntryId,
+                    TroopId = entryState.SpawnTemplateId ?? entryState.CharacterId ?? entryState.OriginalCharacterId,
+                    ClientCreateAgentSafe = true,
+                    ClientCreateAgentSafeReason = "generated-template-native-spawn"
+                };
+            }
             if (payloadDiagnostic.IsActive)
             {
                 includeWeapons = payloadDiagnostic.IncludeWeapons;
@@ -366,6 +398,28 @@ namespace CoopSpectator.Infrastructure
                 snapshot.CanonicalBattle.Context?.MultiplayerGameType,
                 "Battle",
                 StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ShouldUseCanonicalGeneratedTemplateNativeSpawn(RosterEntryState entryState)
+        {
+            if (entryState == null ||
+                HasExactPersonalHeroIdentity(entryState) ||
+                !CoopMissionSpawnLogic.UseDedicatedSafeStringIdExactEquipmentPathOnServer())
+            {
+                return false;
+            }
+
+            var snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            if (snapshot?.CanonicalBattle == null ||
+                !string.Equals(
+                    snapshot.CanonicalBattle.Context?.MultiplayerGameType,
+                    "Battle",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return BattleSnapshotRuntimeState.UsesGeneratedRuntimeBattleTemplateMaterialization(entryState.EntryId);
         }
     }
 }
