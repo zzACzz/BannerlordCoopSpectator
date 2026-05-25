@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Source.Missions;
 using TaleWorlds.ObjectSystem;
@@ -1953,17 +1954,19 @@ namespace CoopSpectator.Infrastructure
                     generalCharacter = troop;
                 }
 
-                int seed;
+                int uniqueSeed;
                 if (instance.CampaignTroopDescriptorSeed.HasValue && instance.CampaignTroopDescriptorSeed.Value > 0)
                 {
-                    seed = instance.CampaignTroopDescriptorSeed.Value;
+                    uniqueSeed = instance.CampaignTroopDescriptorSeed.Value;
                     descriptorSeedInstances++;
                 }
                 else
                 {
-                    seed = AllocateSyntheticCanonicalOriginSeed(usedSeeds, ref nextSyntheticSeed);
+                    uniqueSeed = AllocateSyntheticCanonicalOriginSeed(usedSeeds, ref nextSyntheticSeed);
                     syntheticSeedInstances++;
                 }
+
+                int faceSeed = ComputeCanonicalOriginFaceSeed(instance, entryState, troop, uniqueSeed);
 
                 origins.Add(new ExactCampaignSnapshotAgentOrigin(
                     supplier,
@@ -1972,7 +1975,8 @@ namespace CoopSpectator.Infrastructure
                     troop.StringId,
                     side,
                     side == playerSide,
-                    seed,
+                    uniqueSeed,
+                    faceSeed,
                     instance.InstanceId));
                 totalHealthyCount++;
             }
@@ -2006,6 +2010,9 @@ namespace CoopSpectator.Infrastructure
             if (origins == null || supplier == null || entryState == null || troop == null)
                 return;
 
+            int uniqueSeed = seed++;
+            int faceSeed = ComputeLegacyOriginFaceSeed(entryState, troop, uniqueSeed);
+
             origins.Add(new ExactCampaignSnapshotAgentOrigin(
                 supplier,
                 troop,
@@ -2013,7 +2020,8 @@ namespace CoopSpectator.Infrastructure
                 troop.StringId,
                 side,
                 side == playerSide,
-                seed++,
+                uniqueSeed,
+                faceSeed,
                 null));
         }
 
@@ -2021,6 +2029,11 @@ namespace CoopSpectator.Infrastructure
             CanonicalTroopInstance instance,
             RosterEntryState fallbackEntryState)
         {
+            BasicCharacterObject nativeBaselineCharacter =
+                TryResolveServerNativeSpawnTemplateCharacter(fallbackEntryState, instance);
+            if (nativeBaselineCharacter != null)
+                return nativeBaselineCharacter;
+
             if (fallbackEntryState != null)
             {
                 BasicCharacterObject entryCharacter = TryResolveEntryCharacter(fallbackEntryState);
@@ -2079,10 +2092,53 @@ namespace CoopSpectator.Infrastructure
             return seed;
         }
 
+        private static int ComputeCanonicalOriginFaceSeed(
+            CanonicalTroopInstance instance,
+            RosterEntryState entryState,
+            BasicCharacterObject troop,
+            int fallbackRankSeed)
+        {
+            int rank = instance?.StableOrdinalWithinEntry ?? -1;
+            if (rank < 0)
+                rank = instance?.MissionOrderIndex ?? -1;
+            if (rank < 0)
+                rank = fallbackRankSeed;
+
+            return ComputeCampaignCompatibleFaceSeed(entryState?.PartyId ?? instance?.PartyId, troop, rank);
+        }
+
+        private static int ComputeLegacyOriginFaceSeed(
+            RosterEntryState entryState,
+            BasicCharacterObject troop,
+            int fallbackRankSeed)
+        {
+            return ComputeCampaignCompatibleFaceSeed(entryState?.PartyId, troop, fallbackRankSeed);
+        }
+
+        private static int ComputeCampaignCompatibleFaceSeed(string partyId, BasicCharacterObject troop, int rank)
+        {
+            string partyKey = partyId ?? string.Empty;
+            string troopKey = troop?.StringId ?? string.Empty;
+
+            long composite =
+                (long)partyKey.GetDeterministicHashCode() * 171L +
+                (long)troopKey.GetDeterministicHashCode() * 6791L +
+                (long)rank * 197L;
+            if (composite < 0L)
+                composite = -composite;
+
+            return (int)(composite % 2000L);
+        }
+
         private static BasicCharacterObject TryResolveEntryCharacter(RosterEntryState entryState)
         {
             if (entryState == null)
                 return null;
+
+            BasicCharacterObject nativeBaselineCharacter =
+                TryResolveServerNativeSpawnTemplateCharacter(entryState, null);
+            if (nativeBaselineCharacter != null)
+                return nativeBaselineCharacter;
 
             if (!string.IsNullOrWhiteSpace(entryState.EntryId))
             {
@@ -2133,6 +2189,81 @@ namespace CoopSpectator.Infrastructure
             }
 
             return null;
+        }
+
+        private static BasicCharacterObject TryResolveServerNativeSpawnTemplateCharacter(
+            RosterEntryState entryState,
+            CanonicalTroopInstance instance)
+        {
+            if (!ShouldUseServerNativeSpawnTemplateCharacter(entryState, instance))
+                return null;
+
+            string[] candidateIds =
+            {
+                entryState?.SpawnTemplateId,
+                instance?.SpawnTemplateId,
+                entryState?.OriginalCharacterId,
+                instance?.OriginalCharacterId,
+                entryState?.HeroTemplateId,
+                instance?.HeroTemplateId,
+                entryState?.CharacterId,
+                instance?.CharacterId
+            };
+
+            foreach (string candidateId in candidateIds)
+            {
+                if (string.IsNullOrWhiteSpace(candidateId))
+                    continue;
+
+                try
+                {
+                    BasicCharacterObject candidate = MBObjectManager.Instance.GetObject<BasicCharacterObject>(candidateId);
+                    if (candidate != null)
+                        return candidate;
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
+        }
+
+        private static bool ShouldUseServerNativeSpawnTemplateCharacter(
+            RosterEntryState entryState,
+            CanonicalTroopInstance instance)
+        {
+            if (!GameNetwork.IsServer ||
+                !CoopSpectator.MissionBehaviors.CoopMissionSpawnLogic.UseDedicatedSafeStringIdExactEquipmentPathOnServer())
+            {
+                return false;
+            }
+
+            var snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            if (snapshot?.CanonicalBattle == null ||
+                !string.Equals(
+                    snapshot.CanonicalBattle.Context?.MultiplayerGameType,
+                    "Battle",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (entryState?.IsHero == true ||
+                !string.IsNullOrWhiteSpace(entryState?.HeroId) ||
+                string.Equals(entryState?.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (instance?.IsHero == true ||
+                !string.IsNullOrWhiteSpace(instance?.HeroId) ||
+                string.Equals(instance?.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private static BattleSideEnum ResolveBattleSide(BattleSideState sideState)
@@ -2260,7 +2391,8 @@ namespace CoopSpectator.Infrastructure
         private readonly ExactCampaignSnapshotTroopSupplier _supplier;
         private readonly BasicCharacterObject _troop;
         private readonly bool _isUnderPlayersCommand;
-        private readonly int _seed;
+        private readonly int _uniqueSeed;
+        private readonly int _faceSeed;
         private readonly bool _hasThrownWeapon;
         private readonly bool _hasHeavyArmor;
         private readonly bool _hasShield;
@@ -2295,9 +2427,9 @@ namespace CoopSpectator.Infrastructure
 
         IBattleCombatant IAgentOriginBase.BattleCombatant => null;
 
-        int IAgentOriginBase.UniqueSeed => _seed;
+        int IAgentOriginBase.UniqueSeed => _uniqueSeed;
 
-        int IAgentOriginBase.Seed => _seed;
+        int IAgentOriginBase.Seed => _faceSeed;
 
         Banner IAgentOriginBase.Banner => null;
 
@@ -2318,7 +2450,8 @@ namespace CoopSpectator.Infrastructure
             string troopId,
             BattleSideEnum side,
             bool isUnderPlayersCommand,
-            int seed,
+            int uniqueSeed,
+            int faceSeed,
             string canonicalInstanceId)
         {
             _supplier = supplier;
@@ -2328,7 +2461,8 @@ namespace CoopSpectator.Infrastructure
             Side = side;
             CanonicalInstanceId = canonicalInstanceId ?? string.Empty;
             _isUnderPlayersCommand = isUnderPlayersCommand;
-            _seed = seed;
+            _uniqueSeed = uniqueSeed;
+            _faceSeed = faceSeed;
             AgentOriginUtilities.GetDefaultTroopTraits(_troop, out _hasThrownWeapon, out _hasSpear, out _hasShield, out _hasHeavyArmor);
         }
 

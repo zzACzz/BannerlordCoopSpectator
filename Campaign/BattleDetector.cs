@@ -5233,6 +5233,22 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool mountedHint = TryGetBoolProperty(characterObject, "IsMounted");
             if (variant != null)
             {
+                CompatibilityShellTemplateResolver.ShellProfile manifestProfile =
+                    CompatibilityShellTemplateResolver.TryResolveProfileFromVariantSignature(variant.Signature);
+                if (manifestProfile != null)
+                    return manifestProfile;
+
+                CompatibilityShellTemplateResolver.ShellProfile runtimeSignatureProfile =
+                    CompatibilityShellTemplateResolver.TryResolveProfileFromRuntimeSignature(
+                        variant.CombatItem0Id,
+                        variant.CombatItem1Id,
+                        variant.CombatItem2Id,
+                        variant.CombatItem3Id,
+                        variant.CombatHorseId,
+                        mountedHint);
+                if (runtimeSignatureProfile != null)
+                    return runtimeSignatureProfile;
+
                 return CompatibilityShellTemplateResolver.ResolveProfile(
                     variant.CombatItem0Id,
                     variant.CombatItem1Id,

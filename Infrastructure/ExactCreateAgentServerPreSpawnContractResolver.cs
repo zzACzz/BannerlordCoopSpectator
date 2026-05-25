@@ -123,6 +123,25 @@ namespace CoopSpectator.Infrastructure
                 canInjectBodyPropertiesAtCreateAgentTime = payloadDiagnostic.IncludeBodyProperties;
             }
 
+            bool ordinaryEntryRequiresCanonicalServerNativeBaseline =
+                RequiresCanonicalFieldBattleServerNativeBaselineForOrdinaryEntry(
+                    entryState,
+                    useContractDrivenPreSpawnPath,
+                    useDedicatedSafeStringIdExactEquipmentPath);
+
+            if (!ordinaryEntryRequiresCanonicalServerNativeBaseline &&
+                ShouldForceCanonicalFieldBattleCreateTimeWeapons(
+                    entryState,
+                    useContractDrivenPreSpawnPath,
+                    useDedicatedSafeStringIdExactEquipmentPath,
+                    payloadDiagnostic))
+            {
+                includeWeapons = true;
+                weaponDecisionReason =
+                    "canonical field battle ordinary AI requires create-time exact weapon materialization " +
+                    "because payload layout differs from native template";
+            }
+
             if (!useContractDrivenPreSpawnPath && contractPlayerControlledOrigin)
             {
                 if (includeCape)
@@ -149,12 +168,55 @@ namespace CoopSpectator.Infrastructure
             if (useDedicatedSafeStringIdExactEquipmentPath)
             {
                 bool ordinaryEntryHybridCreateAgentSafe =
+                    !ordinaryEntryRequiresCanonicalServerNativeBaseline &&
                     useContractDrivenPreSpawnPath &&
                     !HasExactPersonalHeroIdentity(entryState) &&
                     payloadDiagnostic?.IsActive == true &&
                     payloadDiagnostic.ClientCreateAgentSafe &&
                     (includeWeapons || includeCape || includeArmorVisuals || includeMountVisuals);
-                if (!ordinaryEntryHybridCreateAgentSafe)
+                bool strictFootHeroHybridCreateAgentSafe =
+                    IsCanonicalFieldBattleStrictFootHeroCreateAgentSafe(
+                        entryState,
+                        exactTransferContract,
+                        exactTransferValidation,
+                        useContractDrivenPreSpawnPath,
+                        includeWeapons,
+                        includeCape,
+                        includeArmorVisuals,
+                        includeMountVisuals);
+                bool strictMountedHeroHybridCreateAgentSafe =
+                    IsCanonicalFieldBattleStrictMountedHeroCreateAgentSafe(
+                        entryState,
+                        exactTransferContract,
+                        exactTransferValidation,
+                        useContractDrivenPreSpawnPath,
+                        includeWeapons,
+                        includeCape,
+                        includeArmorVisuals,
+                        includeMountVisuals);
+                if (strictFootHeroHybridCreateAgentSafe)
+                {
+                    weaponDecisionReason =
+                        "canonical field battle strict foot hero uses create-time exact equipment " +
+                        "because native template payload desyncs weapon slots";
+                }
+                else if (strictMountedHeroHybridCreateAgentSafe)
+                {
+                    weaponDecisionReason =
+                        "canonical field battle strict mounted hero uses create-time exact equipment " +
+                        "because native template spawn/overlay desyncs mounted weapon slots";
+                }
+                else if (ordinaryEntryRequiresCanonicalServerNativeBaseline)
+                {
+                    weaponDecisionReason =
+                        "canonical field battle ordinary AI keeps native CreateAgent baseline and " +
+                        "reapplies exact weapons post-create because dedicated pre-spawn exact loadout " +
+                        "leaves the live wield state invalid";
+                }
+
+                if (!ordinaryEntryHybridCreateAgentSafe &&
+                    !strictFootHeroHybridCreateAgentSafe &&
+                    !strictMountedHeroHybridCreateAgentSafe)
                     injectEquipment = false;
             }
 
@@ -187,6 +249,123 @@ namespace CoopSpectator.Infrastructure
                    (entryState.IsHero ||
                     !string.IsNullOrWhiteSpace(entryState.HeroId) ||
                     string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool ShouldForceCanonicalFieldBattleCreateTimeWeapons(
+            RosterEntryState entryState,
+            bool useContractDrivenPreSpawnPath,
+            bool useDedicatedSafeStringIdExactEquipmentPath,
+            ExactCreateAgentPayloadDiagnosticDecision payloadDiagnostic)
+        {
+            if (RequiresCanonicalFieldBattleServerNativeBaselineForOrdinaryEntry(
+                    entryState,
+                    useContractDrivenPreSpawnPath,
+                    useDedicatedSafeStringIdExactEquipmentPath))
+            {
+                return false;
+            }
+
+            if (entryState == null ||
+                !useContractDrivenPreSpawnPath ||
+                !useDedicatedSafeStringIdExactEquipmentPath ||
+                payloadDiagnostic?.IsActive != true ||
+                !payloadDiagnostic.ClientCreateAgentSafe ||
+                !payloadDiagnostic.RequiresCreateTimeWeapons ||
+                payloadDiagnostic.IncludeWeapons ||
+                HasExactPersonalHeroIdentity(entryState))
+            {
+                return false;
+            }
+
+            return BattleSnapshotRuntimeState.GetCurrent()?.CanonicalBattle != null;
+        }
+
+        private static bool RequiresCanonicalFieldBattleServerNativeBaselineForOrdinaryEntry(
+            RosterEntryState entryState,
+            bool useContractDrivenPreSpawnPath,
+            bool useDedicatedSafeStringIdExactEquipmentPath)
+        {
+            if (entryState == null ||
+                !useContractDrivenPreSpawnPath ||
+                !useDedicatedSafeStringIdExactEquipmentPath ||
+                HasExactPersonalHeroIdentity(entryState))
+            {
+                return false;
+            }
+
+            var snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            if (snapshot?.CanonicalBattle == null)
+                return false;
+
+            return string.Equals(
+                snapshot.CanonicalBattle.Context?.MultiplayerGameType,
+                "Battle",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsCanonicalFieldBattleStrictFootHeroCreateAgentSafe(
+            RosterEntryState entryState,
+            ExactTransferSpawnContract exactTransferContract,
+            ExactTransferValidationResult exactTransferValidation,
+            bool useContractDrivenPreSpawnPath,
+            bool includeWeapons,
+            bool includeCape,
+            bool includeArmorVisuals,
+            bool includeMountVisuals)
+        {
+            if (entryState == null ||
+                exactTransferContract == null ||
+                exactTransferValidation?.IsValid != true ||
+                !useContractDrivenPreSpawnPath ||
+                !includeWeapons ||
+                entryState.IsMounted ||
+                exactTransferContract.SpawnPolicy?.UseStrictExactHeroPath != true ||
+                exactTransferContract.InitialWield?.HasWeapon2Risk == true)
+            {
+                return false;
+            }
+
+            var snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            if (snapshot?.CanonicalBattle == null)
+                return false;
+
+            return string.Equals(
+                snapshot.CanonicalBattle.Context?.MultiplayerGameType,
+                "Battle",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsCanonicalFieldBattleStrictMountedHeroCreateAgentSafe(
+            RosterEntryState entryState,
+            ExactTransferSpawnContract exactTransferContract,
+            ExactTransferValidationResult exactTransferValidation,
+            bool useContractDrivenPreSpawnPath,
+            bool includeWeapons,
+            bool includeCape,
+            bool includeArmorVisuals,
+            bool includeMountVisuals)
+        {
+            if (entryState == null ||
+                exactTransferContract == null ||
+                exactTransferValidation?.IsValid != true ||
+                !useContractDrivenPreSpawnPath ||
+                !includeWeapons ||
+                !includeArmorVisuals ||
+                !includeMountVisuals ||
+                !entryState.IsMounted ||
+                exactTransferContract.SpawnPolicy?.UseStrictExactHeroPath != true)
+            {
+                return false;
+            }
+
+            var snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            if (snapshot?.CanonicalBattle == null)
+                return false;
+
+            return string.Equals(
+                snapshot.CanonicalBattle.Context?.MultiplayerGameType,
+                "Battle",
+                StringComparison.OrdinalIgnoreCase);
         }
     }
 }

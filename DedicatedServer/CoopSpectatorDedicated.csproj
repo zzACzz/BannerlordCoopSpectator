@@ -77,6 +77,7 @@
     <Compile Include="..\Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" Link="Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignArmyBootstrap.cs" Link="Infrastructure\ExactCampaignArmyBootstrap.cs" />
     <Compile Include="..\Infrastructure\BattleCatalogParityState.cs" Link="Infrastructure\BattleCatalogParityState.cs" />
+    <Compile Include="..\Infrastructure\ExactEquipmentCompatibilityCatalog.cs" Link="Infrastructure\ExactEquipmentCompatibilityCatalog.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />
@@ -286,11 +287,13 @@
     <ItemGroup>
       <_ServerBinFiles Include="$(OutputPath)*" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_crafting_pieces.xml" />
+      <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_crafting_templates.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpitems.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_startup_mpcharacters.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_items.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpcharacters.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_generated_runtime_mpcharacters.xml" />
+      <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_generated_runtime_shell_manifest.json" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\coopspectator_mpclassdivisions.xml" />
       <_DedicatedModuleDataFiles Include="..\Module\CoopSpectator\ModuleData\multiplayer_strings.xml" />
       <_DedicatedSandboxRootFiles Include="$(BannerlordRootDir)\Modules\SandBox\SubModule.xml" Condition="Exists('$(BannerlordRootDir)\Modules\SandBox\SubModule.xml')" />

@@ -487,10 +487,10 @@ namespace CoopSpectator.Infrastructure
                 return "(none)";
 
             var parts = new List<string>();
-            AppendWeaponSlotSummary(parts, EquipmentIndex.Weapon0, entryState.CombatItem0Id, entryState.CombatItem0Amount);
-            AppendWeaponSlotSummary(parts, EquipmentIndex.Weapon1, entryState.CombatItem1Id, entryState.CombatItem1Amount);
-            AppendWeaponSlotSummary(parts, EquipmentIndex.Weapon2, entryState.CombatItem2Id, entryState.CombatItem2Amount);
-            AppendWeaponSlotSummary(parts, EquipmentIndex.Weapon3, entryState.CombatItem3Id, entryState.CombatItem3Amount);
+            AppendWeaponSlotSummary(parts, EquipmentIndex.Weapon0, NormalizeEntryWeaponLayoutItemId(entryState.CombatItem0Id), entryState.CombatItem0Amount);
+            AppendWeaponSlotSummary(parts, EquipmentIndex.Weapon1, NormalizeEntryWeaponLayoutItemId(entryState.CombatItem1Id), entryState.CombatItem1Amount);
+            AppendWeaponSlotSummary(parts, EquipmentIndex.Weapon2, NormalizeEntryWeaponLayoutItemId(entryState.CombatItem2Id), entryState.CombatItem2Amount);
+            AppendWeaponSlotSummary(parts, EquipmentIndex.Weapon3, NormalizeEntryWeaponLayoutItemId(entryState.CombatItem3Id), entryState.CombatItem3Amount);
             return parts.Count > 0 ? string.Join(", ", parts) : "(empty)";
         }
 
@@ -568,6 +568,24 @@ namespace CoopSpectator.Infrastructure
                 "=" +
                 itemId.Trim() +
                 (amount.HasValue && amount.Value > 1 ? "@" + amount.Value : string.Empty));
+        }
+
+        private static string NormalizeEntryWeaponLayoutItemId(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return itemId;
+
+            if (ExactEquipmentCompatibilityCatalog.TryGetAliasRule(
+                    itemId,
+                    out ExactEquipmentCompatibilityRule aliasRule) &&
+                aliasRule != null &&
+                aliasRule.EquivalenceKind == ExactEquipmentCompatibilityEquivalenceKind.ExactEquivalent &&
+                !string.IsNullOrWhiteSpace(aliasRule.ResolvedItemId))
+            {
+                return aliasRule.ResolvedItemId;
+            }
+
+            return itemId;
         }
 
         private static int? TryGetEquipmentElementAmount(EquipmentElement element)

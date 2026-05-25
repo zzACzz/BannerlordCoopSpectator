@@ -76,7 +76,7 @@ namespace CoopSpectator.Infrastructure
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(itemId => itemId, StringComparer.Ordinal)
                     .ToList();
-                List<string> supportItemIds = CollectSupportExactItemIds();
+                List<string> supportItemIds = CollectSupportExactItemIds(requestedItemIds);
                 List<string> requestedAndSupportItemIds = requestedItemIds
                     .Concat(supportItemIds)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -331,6 +331,7 @@ namespace CoopSpectator.Infrastructure
                 craftedDependencies = TryCollectCraftedItemDependencies(sourceNode);
             }
 
+            Exception loadException = null;
             try
             {
                 XmlDocument singleItemDocument = BuildSingleItemDocument(sourceNode);
@@ -338,11 +339,15 @@ namespace CoopSpectator.Infrastructure
             }
             catch (Exception ex)
             {
-                failureSummary =
-                    definition.ItemId + "=load-failed@" + Path.GetFileName(definition.XmlPath) +
-                    ":" + ex.GetType().Name +
-                    BuildCraftedDependencyStatusSuffix(objectManager, craftedDependencies);
-                return false;
+                loadException = ex;
+                if (!isCraftedItemNode)
+                {
+                    failureSummary =
+                        definition.ItemId + "=load-failed@" + Path.GetFileName(definition.XmlPath) +
+                        ":" + ex.GetType().Name +
+                        BuildCraftedDependencyStatusSuffix(objectManager, craftedDependencies);
+                    return false;
+                }
             }
 
             ItemObject exactItem = TryResolveItem(objectManager, definition.ItemId);
@@ -368,8 +373,13 @@ namespace CoopSpectator.Infrastructure
                 }
                 else
                 {
+                    string loadFailure =
+                        loadException == null
+                            ? definition.ItemId + "=load-no-direct-item@" + Path.GetFileName(definition.XmlPath)
+                            : definition.ItemId + "=load-failed@" + Path.GetFileName(definition.XmlPath) +
+                              ":" + loadException.GetType().Name;
                     failureSummary =
-                        definition.ItemId + "=load-no-direct-item@" + Path.GetFileName(definition.XmlPath) +
+                        loadFailure +
                         "/node:" + definition.NodeName +
                         (!string.IsNullOrWhiteSpace(manualFailure) ? "/manual:" + manualFailure : string.Empty) +
                         BuildCraftedDependencyStatusSuffix(objectManager, craftedDependencies);
@@ -987,6 +997,7 @@ namespace CoopSpectator.Infrastructure
             LoadSupportXmlDocument(objectManager, "Native", "item_modifiers_groups.xml", loadedSources);
             LoadSupportXmlDocument(objectManager, "Native", "item_modifiers.xml", loadedSources);
             LoadSupportXmlDocument(objectManager, "Native", "crafting_templates.xml", loadedSources);
+            LoadSupportXmlDocument(objectManager, "CoopSpectator", "coopspectator_crafting_templates.xml", loadedSources);
 
             TryUnregisterNonReadyObjects(objectManager);
 
@@ -1144,20 +1155,19 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        private static List<string> CollectSupportExactItemIds()
+        private static List<string> CollectSupportExactItemIds(IEnumerable<string> requestedItemIds)
         {
-            // Do not bulk-register every synthetic `cs_exact_*` item globally.
-            // Campaign UI preview chains such as Party/Inventory use the shared
-            // item catalog when building CharacterTableau equipment lookups; if
-            // we pre-load all exact stand-in horses/armor there, vanilla preview
-            // code starts seeing synthetic items like `cs_exact_sumpter_horse`
-            // in fresh campaigns before any battle exact-transfer path is active.
-            //
-            // The runtime registry still loads every exact item that is actually
-            // referenced by the current battle snapshot via CollectBattleEquipmentItemIds().
-            // Crafted-item dependencies are resolved inside TryRegisterExactCraftedItem(),
-            // so keeping this support list empty is the narrowest safe baseline.
-            return new List<string>();
+            if (requestedItemIds == null)
+                return new List<string>();
+
+            // Keep the preload surface narrow: only synthetic compatibility aliases
+            // for raw snapshot ids that are actually present in the current battle.
+            return ExactEquipmentCompatibilityCatalog
+                .EnumerateSyntheticAliasItemIds(requestedItemIds)
+                .Where(aliasItemId => DefinitionsById.ContainsKey(aliasItemId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(aliasItemId => aliasItemId, StringComparer.Ordinal)
+                .ToList();
         }
 
         private static IEnumerable<string> EnumerateEntryEquipmentSlots(RosterEntryState entryState)

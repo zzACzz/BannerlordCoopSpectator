@@ -4,6 +4,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml;
+using Newtonsoft.Json;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.ObjectSystem;
@@ -86,12 +87,33 @@ namespace CoopSpectator.Infrastructure
             ("CoopSpectator", "coopspectator_startup_mpcharacters.xml")
         };
 
+        private const string GeneratedRuntimeShellManifestPath = "coopspectator_generated_runtime_shell_manifest.json";
+
+        private sealed class GeneratedRuntimeShellManifestEntry
+        {
+            public string VariantSignature { get; set; }
+            public string RuntimeSignatureKey { get; set; }
+            public string TroopTemplateId { get; set; }
+            public string HeroTemplateId { get; set; }
+            public bool IsMounted { get; set; }
+            public bool HasShield { get; set; }
+            public bool HasThrown { get; set; }
+            public string RangedFamily { get; set; }
+            public string MeleeFamily { get; set; }
+        }
+
         private static readonly object Sync = new object();
         private static readonly HashSet<string> LoggedFallbackProfileKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> KnownCompatibilityShellTemplateIds =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, GeneratedRuntimeShellManifestEntry> GeneratedRuntimeShellManifestEntriesByVariantSignature =
+            new Dictionary<string, GeneratedRuntimeShellManifestEntry>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, GeneratedRuntimeShellManifestEntry> GeneratedRuntimeShellManifestEntriesByRuntimeSignatureKey =
+            new Dictionary<string, GeneratedRuntimeShellManifestEntry>(StringComparer.OrdinalIgnoreCase);
         private static bool _knownCompatibilityShellTemplateIdsLoaded;
         private static string _knownCompatibilityShellTemplateIdsSummary = "not-loaded";
+        private static bool _generatedRuntimeShellManifestLoaded;
+        private static string _generatedRuntimeShellManifestSummary = "not-loaded";
 
         public static bool IsCompatibilityShellTemplateId(string candidate)
         {
@@ -116,6 +138,63 @@ namespace CoopSpectator.Infrastructure
         public static string ResolveTroopTemplateId(BasicCharacterObject character)
         {
             return ResolveProfile(character)?.TroopTemplateId;
+        }
+
+        public static ShellProfile TryResolveProfileFromVariantSignature(string variantSignature)
+        {
+            if (string.IsNullOrWhiteSpace(variantSignature))
+                return null;
+
+            EnsureGeneratedRuntimeShellManifestLoaded();
+            lock (Sync)
+            {
+                if (!GeneratedRuntimeShellManifestEntriesByVariantSignature.TryGetValue(
+                        variantSignature.Trim(),
+                        out GeneratedRuntimeShellManifestEntry manifestEntry) ||
+                    manifestEntry == null)
+                {
+                    return null;
+                }
+
+                return BuildShellProfileFromManifestEntry(manifestEntry);
+            }
+        }
+
+        public static ShellProfile TryResolveProfileFromRuntimeSignature(
+            string combatItem0Id,
+            string combatItem1Id,
+            string combatItem2Id,
+            string combatItem3Id,
+            string combatHorseId,
+            bool mountedHint = false)
+        {
+            return TryResolveProfileFromRuntimeSignature(
+                new[]
+                {
+                    combatItem0Id,
+                    combatItem1Id,
+                    combatItem2Id,
+                    combatItem3Id
+                },
+                combatHorseId,
+                mountedHint);
+        }
+
+        public static ShellProfile TryResolveProfileFromRuntimeSignature(
+            IEnumerable<string> weaponItemIds,
+            string horseItemId,
+            bool mountedHint = false)
+        {
+            List<ItemObject> items = (weaponItemIds ?? Array.Empty<string>())
+                .Select(TryResolveItem)
+                .Where(item => item != null)
+                .ToList();
+
+            string normalizedHorseItemId = NormalizeObjectId(horseItemId);
+            return TryResolveProfileFromRuntimeSignature(
+                items,
+                !string.IsNullOrWhiteSpace(normalizedHorseItemId) || mountedHint,
+                normalizedHorseItemId);
         }
 
         public static ShellAuditDescriptor ResolveAuditDescriptor(BasicCharacterObject character)
@@ -625,6 +704,74 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        private static void EnsureGeneratedRuntimeShellManifestLoaded()
+        {
+            lock (Sync)
+            {
+                if (_generatedRuntimeShellManifestLoaded)
+                    return;
+
+                GeneratedRuntimeShellManifestEntriesByVariantSignature.Clear();
+                GeneratedRuntimeShellManifestEntriesByRuntimeSignatureKey.Clear();
+                string manifestPath = ModulePathHelper.GetSiblingModuleDataFilePath(
+                    "CoopSpectator",
+                    GeneratedRuntimeShellManifestPath);
+                if (string.IsNullOrWhiteSpace(manifestPath))
+                {
+                    _generatedRuntimeShellManifestLoaded = true;
+                    _generatedRuntimeShellManifestSummary = "manifest-path-null";
+                    ModLogger.Info(
+                        "CompatibilityShellTemplateResolver: generated runtime shell manifest path could not be resolved.");
+                    return;
+                }
+
+                try
+                {
+                    string json = System.IO.File.ReadAllText(manifestPath);
+                    var entries = JsonConvert.DeserializeObject<List<GeneratedRuntimeShellManifestEntry>>(json) ??
+                                  new List<GeneratedRuntimeShellManifestEntry>();
+                    foreach (GeneratedRuntimeShellManifestEntry entry in entries)
+                    {
+                        if (entry == null || string.IsNullOrWhiteSpace(entry.VariantSignature))
+                            continue;
+
+                        GeneratedRuntimeShellManifestEntriesByVariantSignature[entry.VariantSignature.Trim()] = entry;
+                        if (!string.IsNullOrWhiteSpace(entry.RuntimeSignatureKey))
+                            GeneratedRuntimeShellManifestEntriesByRuntimeSignatureKey[entry.RuntimeSignatureKey.Trim()] = entry;
+                    }
+
+                    _generatedRuntimeShellManifestSummary =
+                        "VariantEntries=" + GeneratedRuntimeShellManifestEntriesByVariantSignature.Count +
+                        " RuntimeKeys=" + GeneratedRuntimeShellManifestEntriesByRuntimeSignatureKey.Count +
+                        " Path=" + manifestPath;
+                }
+                catch (Exception ex)
+                {
+                    _generatedRuntimeShellManifestSummary =
+                        "failed:" + ex.GetType().Name + " Path=" + manifestPath;
+                }
+
+                _generatedRuntimeShellManifestLoaded = true;
+                ModLogger.Info(
+                    "CompatibilityShellTemplateResolver: indexed generated runtime shell manifest. " +
+                    _generatedRuntimeShellManifestSummary);
+            }
+        }
+
+        private static RangedFamily TryParseRangedFamily(string value)
+        {
+            return Enum.TryParse(value, ignoreCase: true, out RangedFamily parsed)
+                ? parsed
+                : RangedFamily.None;
+        }
+
+        private static MeleeFamily TryParseMeleeFamily(string value)
+        {
+            return Enum.TryParse(value, ignoreCase: true, out MeleeFamily parsed)
+                ? parsed
+                : MeleeFamily.None;
+        }
+
         private static string NormalizeGeneratedToken(string token, string fallbackToken)
         {
             if (string.IsNullOrWhiteSpace(token))
@@ -708,6 +855,86 @@ namespace CoopSpectator.Infrastructure
                 shellBaseId += "_" + normalizedHorseToken;
 
             return shellBaseId;
+        }
+
+        private static ShellProfile TryResolveProfileFromRuntimeSignature(
+            List<ItemObject> items,
+            bool mounted,
+            string horseItemId = null)
+        {
+            if (items == null || items.Count == 0)
+                return null;
+
+            string runtimeSignatureKey = BuildRuntimeSignatureKeyForItems(items, mounted, horseItemId);
+            if (string.IsNullOrWhiteSpace(runtimeSignatureKey))
+                return null;
+
+            EnsureGeneratedRuntimeShellManifestLoaded();
+            lock (Sync)
+            {
+                if (!GeneratedRuntimeShellManifestEntriesByRuntimeSignatureKey.TryGetValue(
+                        runtimeSignatureKey.Trim(),
+                        out GeneratedRuntimeShellManifestEntry manifestEntry) ||
+                    manifestEntry == null)
+                {
+                    return null;
+                }
+
+                return BuildShellProfileFromManifestEntry(manifestEntry);
+            }
+        }
+
+        private static ShellProfile BuildShellProfileFromManifestEntry(GeneratedRuntimeShellManifestEntry manifestEntry)
+        {
+            if (manifestEntry == null)
+                return null;
+
+            string troopTemplateId = ResolveExistingDetailedTroopTemplateId(manifestEntry.TroopTemplateId);
+            if (string.IsNullOrWhiteSpace(troopTemplateId))
+                return null;
+
+            return new ShellProfile
+            {
+                TroopTemplateId = troopTemplateId,
+                IsMounted = manifestEntry.IsMounted,
+                HasShield = manifestEntry.HasShield,
+                HasThrown = manifestEntry.HasThrown,
+                Ranged = TryParseRangedFamily(manifestEntry.RangedFamily),
+                Melee = TryParseMeleeFamily(manifestEntry.MeleeFamily)
+            };
+        }
+
+        private static string BuildRuntimeSignatureKeyForItems(
+            List<ItemObject> items,
+            bool mounted,
+            string horseItemId = null)
+        {
+            if (items == null)
+                return null;
+
+            bool hasShield = items.Any(IsShield);
+            RangedFamily ranged = ResolveRangedFamily(items);
+            MeleeFamily melee = ResolveMeleeFamily(items);
+            TwoHandedSubtype twoHandedSubtype = melee == MeleeFamily.TwoHanded
+                ? ResolveTwoHandedSubtype(items)
+                : TwoHandedSubtype.None;
+            ItemObject primaryWeapon = ResolvePrimaryCombatItem(items);
+            ItemObject primaryRangedWeapon = ResolvePrimaryRangedCombatItem(items);
+            List<ItemObject> meleeWeapons = ResolveMeleeCombatItems(items);
+            ItemObject primaryMeleeWeapon = meleeWeapons.Count > 0 ? meleeWeapons[0] : null;
+            ItemObject secondaryMeleeWeapon = meleeWeapons.Count > 1 ? meleeWeapons[1] : null;
+
+            return BuildRuntimeSignatureKey(
+                mounted,
+                hasShield,
+                ranged,
+                melee,
+                twoHandedSubtype == TwoHandedSubtype.None ? "None" : twoHandedSubtype.ToString(),
+                ResolveWeaponClassToken(primaryWeapon),
+                ResolveWeaponClassToken(primaryRangedWeapon),
+                ResolveWeaponClassToken(primaryMeleeWeapon),
+                ResolveWeaponClassToken(secondaryMeleeWeapon),
+                NormalizeObjectId(horseItemId));
         }
 
         private static string BuildRuntimeSignatureKey(

@@ -1661,7 +1661,33 @@ namespace CoopSpectator.MissionBehaviors
             if (message == null || message.TransmissionId <= 0)
                 return;
 
-            ObserveClientBattleSnapshotManifest(message.TransmissionId, message.PayloadHash);
+            string normalizedPayloadHash = message.PayloadHash ?? string.Empty;
+            bool manifestMatchesAppliedSnapshot =
+                _clientAppliedBattleSnapshotTransmissionId == message.TransmissionId &&
+                message.TransmissionId > 0 &&
+                string.Equals(_clientAppliedBattleSnapshotPayloadHash ?? string.Empty, normalizedPayloadHash, StringComparison.Ordinal);
+            if (manifestMatchesAppliedSnapshot)
+            {
+                _clientBattleSnapshotAssembliesByTransmission.Remove(message.TransmissionId);
+                bool catalogPrepared = BattleCatalogParityState.TryGetClientPreparedCatalogState(
+                    message.TransmissionId,
+                    out string preparedCatalogHash,
+                    out string preparedCatalogSummary);
+                SendClientBattleSnapshotCompleteAck(
+                    message.TransmissionId,
+                    normalizedPayloadHash,
+                    appliedSuccessfully: catalogPrepared,
+                    catalogHash: preparedCatalogHash);
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: ignored repeated V2 battle snapshot manifest for already applied client snapshot. " +
+                    "TransmissionId=" + message.TransmissionId +
+                    " CatalogPrepared=" + catalogPrepared +
+                    " CatalogHash=" + (string.IsNullOrWhiteSpace(preparedCatalogHash) ? "null" : preparedCatalogHash) +
+                    " CatalogSummary={" + (preparedCatalogSummary ?? "unknown") + "}");
+                return;
+            }
+
+            ObserveClientBattleSnapshotManifest(message.TransmissionId, normalizedPayloadHash);
 
             foreach (int staleTransmissionId in _clientBattleSnapshotAssembliesByTransmission.Keys
                 .Where(existingTransmissionId => existingTransmissionId != message.TransmissionId)
@@ -1673,7 +1699,7 @@ namespace CoopSpectator.MissionBehaviors
             if (_clientBattleSnapshotAssembliesByTransmission.TryGetValue(message.TransmissionId, out BattleSnapshotClientAssemblyState existingState) &&
                 existingState != null &&
                 existingState.ChunkCount == message.ChunkCount &&
-                string.Equals(existingState.PayloadHash, message.PayloadHash, StringComparison.Ordinal))
+                string.Equals(existingState.PayloadHash, normalizedPayloadHash, StringComparison.Ordinal))
             {
                 existingState.MarkManifestObserved(DateTime.UtcNow);
                 if (!existingState.IsComplete)
@@ -1687,7 +1713,7 @@ namespace CoopSpectator.MissionBehaviors
                 message.LogicalBytes,
                 message.WireBytes,
                 message.ComparisonKey,
-                message.PayloadHash,
+                normalizedPayloadHash,
                 message.PayloadEncoding,
                 message.CompressionKind);
             _clientBattleSnapshotAssembliesByTransmission[message.TransmissionId] = assemblyState;
@@ -2923,17 +2949,26 @@ namespace CoopSpectator.MissionBehaviors
             string observedPayloadHash = _clientObservedBattleSnapshotPayloadHash ?? string.Empty;
             int appliedTransmissionId = _clientAppliedBattleSnapshotTransmissionId;
             string appliedPayloadHash = _clientAppliedBattleSnapshotPayloadHash ?? string.Empty;
+            BattleSnapshotClientAssemblyState observedAssemblyState = null;
             bool hasPendingObservedAssembly =
                 observedTransmissionId > 0 &&
                 bridge._clientBattleSnapshotAssembliesByTransmission.TryGetValue(
                     observedTransmissionId,
-                    out BattleSnapshotClientAssemblyState observedAssemblyState) &&
+                    out observedAssemblyState) &&
                 observedAssemblyState != null;
+            bool pendingObservedAssemblyMatchesAppliedState =
+                hasPendingObservedAssembly &&
+                appliedTransmissionId == observedTransmissionId &&
+                string.Equals(appliedPayloadHash, observedPayloadHash, StringComparison.Ordinal) &&
+                string.Equals(observedAssemblyState.PayloadHash, appliedPayloadHash, StringComparison.Ordinal);
+            bool hasBlockingPendingObservedAssembly =
+                hasPendingObservedAssembly &&
+                !pendingObservedAssemblyMatchesAppliedState;
             bool applied =
                 observedTransmissionId > 0 &&
                 appliedTransmissionId == observedTransmissionId &&
                 string.Equals(appliedPayloadHash, observedPayloadHash, StringComparison.Ordinal) &&
-                !hasPendingObservedAssembly;
+                !hasBlockingPendingObservedAssembly;
             bool clientCatalogPrepared = BattleCatalogParityState.TryGetClientPreparedCatalogState(
                 observedTransmissionId,
                 out string preparedCatalogHash,
@@ -2946,6 +2981,8 @@ namespace CoopSpectator.MissionBehaviors
                 " ObservedPayloadHash=" + (string.IsNullOrWhiteSpace(observedPayloadHash) ? "null" : observedPayloadHash) +
                 " AppliedPayloadHash=" + (string.IsNullOrWhiteSpace(appliedPayloadHash) ? "null" : appliedPayloadHash) +
                 " HasPendingObservedAssembly=" + hasPendingObservedAssembly +
+                " PendingObservedAssemblyMatchesAppliedState=" + pendingObservedAssemblyMatchesAppliedState +
+                " HasBlockingPendingObservedAssembly=" + hasBlockingPendingObservedAssembly +
                 " CatalogPrepared=" + clientCatalogPrepared +
                 " CatalogHash=" + (string.IsNullOrWhiteSpace(preparedCatalogHash) ? "null" : preparedCatalogHash) +
                 " CatalogSummary={" + (preparedCatalogSummary ?? "unknown") + "}";

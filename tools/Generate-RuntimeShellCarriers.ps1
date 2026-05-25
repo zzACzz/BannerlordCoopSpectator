@@ -1,7 +1,8 @@
 param(
     [string]$AuditPath = "C:\Users\Admin\OneDrive\Documents\Mount and Blade II Bannerlord\CoopSpectator\campaign_shell_audit_latest.json",
     [string]$ExistingRuntimeCharactersPath = "C:\dev\projects\BannerlordCoopSpectator3\Module\CoopSpectator\ModuleData\coopspectator_mpcharacters.xml",
-    [string]$OutputPath = "C:\dev\projects\BannerlordCoopSpectator3\Module\CoopSpectator\ModuleData\coopspectator_generated_runtime_mpcharacters.xml"
+    [string]$OutputPath = "C:\dev\projects\BannerlordCoopSpectator3\Module\CoopSpectator\ModuleData\coopspectator_generated_runtime_mpcharacters.xml",
+    [string]$ManifestOutputPath = "C:\dev\projects\BannerlordCoopSpectator3\Module\CoopSpectator\ModuleData\coopspectator_generated_runtime_shell_manifest.json"
 )
 
 Set-StrictMode -Version Latest
@@ -305,16 +306,36 @@ $builder = New-Object System.Text.StringBuilder
 [void]$builder.AppendLine('<MPCharacters>')
 
 $generatedCount = 0
+$manifestEntries = New-Object System.Collections.Generic.List[object]
+$runtimeShellManifestByRuntimeSignatureKey = @{}
 
 foreach ($entry in ($groups.GetEnumerator() | Sort-Object Name)) {
     $variant = $entry.Value
+    $runtimeSignatureKey = if ([string]::IsNullOrWhiteSpace($variant.RuntimeSignatureKey)) {
+        "unresolved-signature"
+    }
+    else {
+        $variant.RuntimeSignatureKey
+    }
     $shellBaseId = Get-ShellId $variant
     $heroId = $shellBaseId + "_hero"
     $troopId = $shellBaseId + "_troop"
 
+    $runtimeShellManifestByRuntimeSignatureKey[$runtimeSignatureKey] = [ordered]@{
+        RuntimeSignatureKey = $runtimeSignatureKey
+        TroopTemplateId = $troopId
+        HeroTemplateId = $heroId
+        IsMounted = [bool]$variant.IsMounted
+        HasShield = [bool]$variant.HasShield
+        HasThrown = [bool]($variant.RangedFamily -eq "Thrown")
+        RangedFamily = $variant.RangedFamily
+        MeleeFamily = $variant.MeleeFamily
+    }
+
     if ($existingIds.Contains($heroId) -or $existingIds.Contains($troopId)) {
         continue
     }
+
     $signatureParts = Parse-VariantSignatureParts $variant.VariantSignature
     $skills = Get-Skills $variant
     $defaultGroup = Get-DefaultGroup $variant
@@ -341,8 +362,52 @@ foreach ($entry in ($groups.GetEnumerator() | Sort-Object Name)) {
     $generatedCount++
 }
 
+$seenManifestVariantSignatures = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($variant in $audit.Variants) {
+    if ($variant -eq $null -or [string]::IsNullOrWhiteSpace($variant.VariantSignature)) {
+        continue
+    }
+
+    $runtimeSignatureKey = if ([string]::IsNullOrWhiteSpace($variant.RuntimeSignatureKey)) {
+        "unresolved-signature"
+    }
+    else {
+        $variant.RuntimeSignatureKey
+    }
+
+    if (-not $runtimeShellManifestByRuntimeSignatureKey.ContainsKey($runtimeSignatureKey)) {
+        continue
+    }
+
+    $variantSignature = $variant.VariantSignature.Trim()
+    if (-not $seenManifestVariantSignatures.Add($variantSignature)) {
+        continue
+    }
+
+    $runtimeShellInfo = $runtimeShellManifestByRuntimeSignatureKey[$runtimeSignatureKey]
+    $manifestEntries.Add([ordered]@{
+        VariantSignature = $variantSignature
+        RuntimeSignatureKey = $runtimeSignatureKey
+        TroopTemplateId = $runtimeShellInfo.TroopTemplateId
+        HeroTemplateId = $runtimeShellInfo.HeroTemplateId
+        IsMounted = $runtimeShellInfo.IsMounted
+        HasShield = $runtimeShellInfo.HasShield
+        HasThrown = $runtimeShellInfo.HasThrown
+        RangedFamily = $runtimeShellInfo.RangedFamily
+        MeleeFamily = $runtimeShellInfo.MeleeFamily
+    }) | Out-Null
+}
+
 [void]$builder.AppendLine('</MPCharacters>')
 
+[System.IO.Directory]::CreateDirectory((Split-Path -Parent $OutputPath)) | Out-Null
+[System.IO.Directory]::CreateDirectory((Split-Path -Parent $ManifestOutputPath)) | Out-Null
+
 [System.IO.File]::WriteAllText($OutputPath, $builder.ToString(), [System.Text.UTF8Encoding]::new($true))
+$manifestEntries |
+    ConvertTo-Json -Depth 6 |
+    Set-Content -Path $ManifestOutputPath -Encoding UTF8
+
 Write-Output ("GeneratedRuntimeShellFamilies={0}" -f $generatedCount)
 Write-Output ("OutputPath={0}" -f $OutputPath)
+Write-Output ("ManifestOutputPath={0}" -f $ManifestOutputPath)

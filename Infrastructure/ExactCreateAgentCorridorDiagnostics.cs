@@ -21,6 +21,8 @@ namespace CoopSpectator.Infrastructure
             new Dictionary<string, ServerCreateAgentPendingState>(StringComparer.Ordinal);
         private static readonly Dictionary<int, ServerCreateAgentExpectedState> ServerStatesByAgentIndex =
             new Dictionary<int, ServerCreateAgentExpectedState>();
+        private static readonly Dictionary<string, ExpectedEntryPayloadWeaponState> ExpectedEntryPayloadWeaponsByEntryId =
+            new Dictionary<string, ExpectedEntryPayloadWeaponState>(StringComparer.Ordinal);
 
         private sealed class ClientCreateAgentCorridorState
         {
@@ -99,6 +101,13 @@ namespace CoopSpectator.Infrastructure
             public string PayloadComparisonSummary { get; set; }
         }
 
+        private sealed class ExpectedEntryPayloadWeaponState
+        {
+            public string Source { get; set; }
+            public string WeaponLayoutSummary { get; set; }
+            public WeaponSlotSnapshot[] WeaponSlots { get; set; }
+        }
+
         private sealed class WeaponSlotSnapshot
         {
             public EquipmentIndex Slot { get; set; }
@@ -119,6 +128,7 @@ namespace CoopSpectator.Infrastructure
                 ClientStatesByAgentIndex.Clear();
                 PendingServerStatesByEntryId.Clear();
                 ServerStatesByAgentIndex.Clear();
+                ExpectedEntryPayloadWeaponsByEntryId.Clear();
             }
 
             ModLogger.Info(
@@ -845,6 +855,25 @@ namespace CoopSpectator.Infrastructure
             return !string.IsNullOrWhiteSpace(entryId);
         }
 
+        internal static string GetExpectedEntryPayloadWeaponLayoutSummary(RosterEntryState entryState)
+        {
+            ExpectedEntryPayloadWeaponState state = ResolveExpectedEntryPayloadWeaponState(entryState);
+            return state?.WeaponLayoutSummary ?? ExactCreateAgentPayloadDiagnostics.BuildEntryWeaponLayoutSummary(entryState);
+        }
+
+        internal static bool DoesCreateAgentPayloadWeaponLayoutMatchEntry(
+            RosterEntryState entryState,
+            CreateAgent createAgent)
+        {
+            if (entryState == null || createAgent == null)
+                return false;
+
+            ExpectedEntryPayloadWeaponState expectedPayloadWeapons = ResolveExpectedEntryPayloadWeaponState(entryState);
+            WeaponSlotSnapshot[] entrySlots = expectedPayloadWeapons?.WeaponSlots ?? BuildEntryWeaponSlots(entryState);
+            WeaponSlotSnapshot[] payloadSlots = BuildEffectiveCreateAgentPayloadWeaponSlots(createAgent);
+            return DoesWeaponLayoutStructureMatch(entrySlots, payloadSlots);
+        }
+
         private static ClientCreateAgentCorridorState GetOrCreateState(int agentIndex)
         {
             lock (Sync)
@@ -960,20 +989,11 @@ namespace CoopSpectator.Infrastructure
                 };
             }
 
-            bool payloadMissionWeaponLayoutAvailable = !string.Equals(payloadMissionWeaponLayout, "(none)", StringComparison.Ordinal) &&
-                                                      !string.Equals(payloadMissionWeaponLayout, "(empty)", StringComparison.Ordinal);
-            bool payloadSpawnWeaponLayoutAvailable = !string.Equals(payloadSpawnWeaponLayout, "(none)", StringComparison.Ordinal) &&
-                                                    !string.Equals(payloadSpawnWeaponLayout, "(empty)", StringComparison.Ordinal);
             var candidates = new List<PayloadCandidateMatch>();
             foreach (RosterEntryState entryState in sideEntries)
             {
                 bool characterMatch = DoesEntryMatchPayloadCharacter(entryState, payloadCharacterId);
-                string entryWeaponLayout = ExactCreateAgentPayloadDiagnostics.BuildEntryWeaponLayoutSummary(entryState);
-                bool weaponLayoutMatch =
-                    payloadMissionWeaponLayoutAvailable
-                        ? string.Equals(payloadMissionWeaponLayout, entryWeaponLayout, StringComparison.Ordinal)
-                        : payloadSpawnWeaponLayoutAvailable &&
-                          string.Equals(payloadSpawnWeaponLayout, entryWeaponLayout, StringComparison.Ordinal);
+                bool weaponLayoutMatch = DoesCreateAgentPayloadWeaponLayoutMatchEntry(entryState, createAgent);
                 bool mountedMatch = entryState.IsMounted == payloadMounted;
                 int score = (characterMatch ? 8 : 0) + (weaponLayoutMatch ? 4 : 0) + (mountedMatch ? 2 : 0);
                 if (score <= 0)
@@ -1083,12 +1103,15 @@ namespace CoopSpectator.Infrastructure
             if (createAgent == null)
                 return "PayloadCompare={State=create-agent-null}";
 
-            WeaponSlotSnapshot[] entrySlots = BuildEntryWeaponSlots(entryState);
+            ExpectedEntryPayloadWeaponState expectedPayloadWeapons = ResolveExpectedEntryPayloadWeaponState(entryState);
+            WeaponSlotSnapshot[] entrySlots = expectedPayloadWeapons?.WeaponSlots ?? BuildEntryWeaponSlots(entryState);
             WeaponSlotSnapshot[] missionSlots = BuildMissionEquipmentWeaponSlots(createAgent.MissionEquipment);
             WeaponSlotSnapshot[] spawnSlots = BuildEquipmentWeaponSlots(createAgent.SpawnEquipment);
             return
                 "PayloadCompare={EntryId=" + (entryState.EntryId ?? "null") +
+                ",EntryWeaponSlotsSource=" + (expectedPayloadWeapons?.Source ?? "raw-entry") +
                 ",EntryWeaponSlots={" + BuildWeaponSlotVector(entrySlots) + "}" +
+                ",LayoutIdentityMatch=" + DoesWeaponLayoutStructureMatch(entrySlots, BuildEffectiveCreateAgentPayloadWeaponSlots(createAgent)) +
                 "," + BuildWeaponSlotDiffSummary("MissionDiff", entrySlots, missionSlots) +
                 "," + BuildWeaponSlotDiffSummary("SpawnDiff", entrySlots, spawnSlots) +
                 "}";
@@ -1183,6 +1206,75 @@ namespace CoopSpectator.Infrastructure
             return BuildWeaponSlotVector(BuildEntryWeaponSlots(entryState));
         }
 
+        private static ExpectedEntryPayloadWeaponState ResolveExpectedEntryPayloadWeaponState(RosterEntryState entryState)
+        {
+            if (entryState == null)
+                return null;
+
+            string cacheKey = entryState.EntryId ?? string.Empty;
+            lock (Sync)
+            {
+                if (ExpectedEntryPayloadWeaponsByEntryId.TryGetValue(cacheKey, out ExpectedEntryPayloadWeaponState cached))
+                    return cached;
+            }
+
+            ExpectedEntryPayloadWeaponState built = BuildExpectedEntryPayloadWeaponState(entryState);
+            lock (Sync)
+            {
+                if (!ExpectedEntryPayloadWeaponsByEntryId.TryGetValue(cacheKey, out ExpectedEntryPayloadWeaponState cached))
+                {
+                    ExpectedEntryPayloadWeaponsByEntryId[cacheKey] = built;
+                    return built;
+                }
+
+                return cached;
+            }
+        }
+
+        private static ExpectedEntryPayloadWeaponState BuildExpectedEntryPayloadWeaponState(RosterEntryState entryState)
+        {
+            WeaponSlotSnapshot[] rawEntrySlots = BuildEntryWeaponSlots(entryState);
+            string rawEntryLayout = ExactCreateAgentPayloadDiagnostics.BuildEntryWeaponLayoutSummary(entryState);
+            var rawState = new ExpectedEntryPayloadWeaponState
+            {
+                Source = "raw-entry",
+                WeaponLayoutSummary = rawEntryLayout,
+                WeaponSlots = rawEntrySlots
+            };
+
+            try
+            {
+                Equipment expectedEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
+                    entryState,
+                    includeWeapons: true,
+                    honorExactVisualContracts: false,
+                    includeArmorVisuals: false,
+                    includeMountVisuals: false);
+                WeaponSlotSnapshot[] expectedSlots = BuildEquipmentWeaponSlots(expectedEquipment);
+                if (!HasOccupiedWeaponSlots(expectedSlots))
+                    return rawState;
+
+                return new ExpectedEntryPayloadWeaponState
+                {
+                    Source = "snapshot-exact-runtime",
+                    WeaponLayoutSummary = ExactCreateAgentPayloadDiagnostics.BuildEquipmentWeaponLayoutSummary(expectedEquipment),
+                    WeaponSlots = expectedSlots
+                };
+            }
+            catch
+            {
+                return rawState;
+            }
+        }
+
+        private static bool HasOccupiedWeaponSlots(IReadOnlyList<WeaponSlotSnapshot> slots)
+        {
+            if (slots == null)
+                return false;
+
+            return slots.Any(slot => slot != null && !string.IsNullOrWhiteSpace(slot.ItemId));
+        }
+
         private static string BuildEquipmentWeaponSlotVector(Equipment equipment)
         {
             return BuildWeaponSlotVector(BuildEquipmentWeaponSlots(equipment));
@@ -1191,6 +1283,21 @@ namespace CoopSpectator.Infrastructure
         private static string BuildMissionEquipmentWeaponSlotVector(MissionEquipment equipment)
         {
             return BuildWeaponSlotVector(BuildMissionEquipmentWeaponSlots(equipment));
+        }
+
+        private static WeaponSlotSnapshot[] BuildEffectiveCreateAgentPayloadWeaponSlots(CreateAgent createAgent)
+        {
+            if (createAgent == null)
+                return null;
+
+            WeaponSlotSnapshot[] missionSlots = BuildMissionEquipmentWeaponSlots(createAgent.MissionEquipment);
+            if (HasOccupiedWeaponSlots(missionSlots))
+                return missionSlots;
+
+            WeaponSlotSnapshot[] spawnSlots = BuildEquipmentWeaponSlots(createAgent.SpawnEquipment);
+            return HasOccupiedWeaponSlots(spawnSlots)
+                ? spawnSlots
+                : null;
         }
 
         private static string BuildEquipmentNonWeaponSlotVector(Equipment equipment)
@@ -1493,6 +1600,54 @@ namespace CoopSpectator.Infrastructure
             return slot.ItemId.Trim() + (slot.Amount.HasValue && slot.Amount.Value > 1
                 ? "@" + slot.Amount.Value.ToString(CultureInfo.InvariantCulture)
                 : string.Empty);
+        }
+
+        private static bool DoesWeaponLayoutStructureMatch(
+            IReadOnlyList<WeaponSlotSnapshot> expectedSlots,
+            IReadOnlyList<WeaponSlotSnapshot> actualSlots)
+        {
+            if (expectedSlots == null || actualSlots == null)
+                return false;
+
+            int slotCount = Math.Max(expectedSlots.Count, actualSlots.Count);
+            for (int index = 0; index < slotCount; index++)
+            {
+                WeaponSlotSnapshot expected = index < expectedSlots.Count ? expectedSlots[index] : null;
+                WeaponSlotSnapshot actual = index < actualSlots.Count ? actualSlots[index] : null;
+                string expectedItemId = NormalizeWeaponLayoutComparisonItemId(expected?.ItemId);
+                string actualItemId = NormalizeWeaponLayoutComparisonItemId(actual?.ItemId);
+                bool expectedOccupied = !string.IsNullOrWhiteSpace(expectedItemId);
+                bool actualOccupied = !string.IsNullOrWhiteSpace(actualItemId);
+                if (!expectedOccupied && !actualOccupied)
+                    continue;
+
+                if (expectedOccupied != actualOccupied)
+                    return false;
+
+                if (!string.Equals(expectedItemId, actualItemId, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static string NormalizeWeaponLayoutComparisonItemId(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return null;
+
+            string normalizedItemId = itemId.Trim();
+            if (ExactEquipmentCompatibilityCatalog.TryGetAliasRule(
+                    normalizedItemId,
+                    out ExactEquipmentCompatibilityRule aliasRule) &&
+                aliasRule != null &&
+                aliasRule.EquivalenceKind == ExactEquipmentCompatibilityEquivalenceKind.ExactEquivalent &&
+                !string.IsNullOrWhiteSpace(aliasRule.ResolvedItemId))
+            {
+                return aliasRule.ResolvedItemId.Trim();
+            }
+
+            return normalizedItemId;
         }
 
         private static string BuildWeaponSlotFamilyVector(WeaponSlotSnapshot[] slots)

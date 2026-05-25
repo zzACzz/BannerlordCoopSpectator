@@ -2598,6 +2598,26 @@
 			<Piece id="spear_pommel_9" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
+	<CraftedItem id="cs_exact_imperial_spear_t2" name="{=Vyw5KNxR}Short Militia Spear" crafting_template="cs_exact_two_handed_polearm_no_bracing" culture="Culture.empire" modifier_group="polearm">
+		<Pieces>
+			<Piece id="spear_blade_3" Type="Blade" scale_factor="90" />
+			<Piece id="spear_handle_5" Type="Handle" scale_factor="90" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem id="cs_exact_imperial_throwing_spear_1_t4" name="{=rkqaCud5}Pilum" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
+		<Pieces>
+			<Piece id="mp_pilum_blade" Type="Blade" scale_factor="110" />
+			<Piece id="mp_spear_guard_7" Type="Guard" />
+			<Piece id="mp_pilum_handle" Type="Handle" scale_factor="105" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem id="cs_exact_imperial_throwing_spear_1_t4_2" name="{=rkqaCud5}Pilum" is_merchandise="false" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
+		<Pieces>
+			<Piece id="mp_pilum_blade_extraammo" Type="Blade" scale_factor="110" />
+			<Piece id="mp_spear_guard_7" Type="Guard" />
+			<Piece id="mp_pilum_handle_extraammo" Type="Handle" scale_factor="110" />
+		</Pieces>
+	</CraftedItem>
 	<Item multiplayer_item="true" id="cs_exact_nordic_sloven" name="{=c7wcTevc}Leather Armor over Heavy Cloth" subtype="body_armor" mesh="nordic_sloven_b" culture="Culture.sturgia" weight="1.8" difficulty="0" appearance="1" Type="BodyArmor">
 		<ItemComponent>
 			<Armor body_armor="11" leg_armor="3" arm_armor="3" stealth_factor="20" has_gender_variations="true" covers_body="true" modifier_group="leather" material_type="Leather" />

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using TaleWorlds.Core;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Network.Messages;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.ObjectSystem;
 
@@ -54,9 +55,19 @@ namespace CoopSpectator.Infrastructure
             bool isRuntimeExactSupported =
                 buildMode == BuildMode.Diagnostic ||
                 CoopMissionSpawnLogic.IsCurrentRuntimeExactEntryContractSupported(entryState);
+            bool forcePostCreateWeaponOverlay =
+                buildMode == BuildMode.Runtime &&
+                CoopMissionSpawnLogic.RequiresPostCreateStringIdExactWeaponOverlayForCurrentRuntime(entryState) &&
+                !ShouldBypassLegacyPostCreateWeaponOverlayForCanonicalFieldBattle(entryState);
             PopulateIdentity(contract.Identity, entryState, isPlayerControlledOrigin);
             PopulateBody(contract.Body, entryState);
-            PopulateEquipment(contract.Equipment, entryState, isStrictHeroEntry, isRuntimeExactSupported, buildMode);
+            PopulateEquipment(
+                contract.Equipment,
+                entryState,
+                isStrictHeroEntry,
+                isRuntimeExactSupported,
+                forcePostCreateWeaponOverlay,
+                buildMode);
             PopulateMount(contract.Mount, entryState);
             PopulatePeerBinding(contract.PeerBinding, entryState, isPlayerControlledOrigin);
             PopulateInitialWield(contract.InitialWield, entryState, contract.Equipment);
@@ -122,6 +133,7 @@ namespace CoopSpectator.Infrastructure
             RosterEntryState entryState,
             bool isStrictHeroEntry,
             bool isRuntimeExactSupported,
+            bool forcePostCreateWeaponOverlay,
             BuildMode buildMode)
         {
             equipment.SpawnEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
@@ -131,15 +143,21 @@ namespace CoopSpectator.Infrastructure
                 includeArmorVisuals: true,
                 includeMountVisuals: true);
             bool exactPreSpawnWeaponCandidate = isStrictHeroEntry || isRuntimeExactSupported;
+            bool allowRuntimeCreateAgentInjection = buildMode == BuildMode.Diagnostic || !forcePostCreateWeaponOverlay;
             equipment.IncludeWeaponsInPreSpawn = buildMode == BuildMode.Diagnostic
                 ? exactPreSpawnWeaponCandidate && HasAnyWeaponItem(entryState)
-                : isRuntimeExactSupported && HasAnyWeaponItem(entryState);
-            equipment.IncludeArmorVisualsInPreSpawn = buildMode == BuildMode.Diagnostic || isRuntimeExactSupported;
+                : allowRuntimeCreateAgentInjection && isRuntimeExactSupported && HasAnyWeaponItem(entryState);
+            equipment.IncludeArmorVisualsInPreSpawn =
+                buildMode == BuildMode.Diagnostic ||
+                (allowRuntimeCreateAgentInjection && isRuntimeExactSupported);
             equipment.IncludeCapeInPreSpawn = buildMode == BuildMode.Diagnostic
                 ? exactPreSpawnWeaponCandidate
-                : CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(entryState, out _, out _);
+                : allowRuntimeCreateAgentInjection &&
+                  CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(entryState, out _, out _);
             equipment.IncludeMountVisualsInPreSpawn =
-                entryState.IsMounted && (buildMode == BuildMode.Diagnostic || isRuntimeExactSupported);
+                entryState.IsMounted &&
+                (buildMode == BuildMode.Diagnostic ||
+                 (allowRuntimeCreateAgentInjection && isRuntimeExactSupported));
 
             AddSlot(equipment, EquipmentIndex.Weapon0, "Item0", entryState.CombatItem0Id, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem0Id));
             AddSlot(equipment, EquipmentIndex.Weapon1, "Item1", entryState.CombatItem1Id, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem1Id));
@@ -261,6 +279,26 @@ namespace CoopSpectator.Infrastructure
                     !string.IsNullOrWhiteSpace(entryState.CombatItem3Id));
         }
 
+        private static bool ShouldBypassLegacyPostCreateWeaponOverlayForCanonicalFieldBattle(
+            RosterEntryState entryState)
+        {
+            if (entryState == null)
+                return false;
+
+            BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            if (snapshot?.CanonicalBattle == null)
+                return false;
+
+            // The canonical field-battle path already preloads exact compatibility
+            // aliases into the dedicated runtime. Keeping the old post-create overlay
+            // gate here forces shield-only native shells for ordinary melee troops and
+            // crashes the dedicated create-agent weapon corridor before result import.
+            return string.Equals(
+                snapshot.CanonicalBattle.Context?.MultiplayerGameType,
+                "Battle",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
         internal static bool TryNormalizeStrictHeroWeaponLayoutInPlace(
             Equipment equipment,
             RosterEntryState entryState,
@@ -285,8 +323,9 @@ namespace CoopSpectator.Infrastructure
                 return true;
             }
 
+            bool preferStrictHeroRangedLayout = IsStrictHeroEntry(entryState);
             List<MountedWeaponSlotState> orderedSlots = null;
-            if (hasRanged && hasAmmo && hasUnsafeRangedWeapon2Layout)
+            if (preferStrictHeroRangedLayout && hasRanged && hasAmmo && hasUnsafeRangedWeapon2Layout)
                 orderedSlots = BuildCanonicalStrictHeroRangedWeaponLayout(slots);
             else if (entryState.IsMounted && (hasRanged || hasAmmo || DoesWeapon2ContainLiveCandidate(equipment)))
                 orderedSlots = BuildCanonicalMountedWeaponLayout(slots, hasAmmo);
@@ -488,22 +527,27 @@ namespace CoopSpectator.Infrastructure
             }
             else
             {
-                if (primaryRanged != null)
-                {
-                    ordered.Add(primaryRanged);
-                    primaryRanged = null;
-                }
-                else if (shield != null)
+                if (shield != null)
                 {
                     ordered.Add(shield);
                     shield = null;
+                }
+                else if (primaryRanged != null)
+                {
+                    ordered.Add(primaryRanged);
+                    primaryRanged = null;
                 }
                 else
                 {
                     AddNextPreferred(ordered, remaining, preferLiveCandidate: true);
                 }
 
-                if (shield != null)
+                if (primaryRanged != null)
+                {
+                    ordered.Add(primaryRanged);
+                    primaryRanged = null;
+                }
+                else if (shield != null)
                 {
                     ordered.Add(shield);
                     shield = null;
@@ -778,6 +822,12 @@ namespace CoopSpectator.Infrastructure
             MountedWeaponRole role2 = ResolveMountedWeaponRole(equipment[EquipmentIndex.Weapon2].Item);
             MountedWeaponRole role3 = ResolveMountedWeaponRole(equipment[EquipmentIndex.Weapon3].Item);
 
+            if (IsSafeFootRangedShieldAmmoLayout(role0, role1, role2, role3))
+                return false;
+
+            if (IsSafeFootMeleeShieldRangedAmmoLayout(role0, role1, role2, role3))
+                return false;
+
             bool hasRanged = role0 == MountedWeaponRole.Ranged ||
                              role1 == MountedWeaponRole.Ranged ||
                              role2 == MountedWeaponRole.Ranged ||
@@ -795,16 +845,49 @@ namespace CoopSpectator.Infrastructure
             if (role0 == MountedWeaponRole.Ranged)
                 return role1 != MountedWeaponRole.Ammo;
 
-            bool leadingLiveSlot =
+            return role2 == MountedWeaponRole.Melee ||
+                   role2 == MountedWeaponRole.Polearm ||
+                   role2 == MountedWeaponRole.Ranged ||
+                   role2 == MountedWeaponRole.Other;
+        }
+
+        private static bool IsSafeFootRangedShieldAmmoLayout(
+            MountedWeaponRole role0,
+            MountedWeaponRole role1,
+            MountedWeaponRole role2,
+            MountedWeaponRole role3)
+        {
+            if (role0 != MountedWeaponRole.Ranged ||
+                role1 != MountedWeaponRole.Shield ||
+                role2 != MountedWeaponRole.Ammo)
+            {
+                return false;
+            }
+
+            return role3 == MountedWeaponRole.Melee ||
+                   role3 == MountedWeaponRole.Polearm ||
+                   role3 == MountedWeaponRole.Other;
+        }
+
+        private static bool IsSafeFootMeleeShieldRangedAmmoLayout(
+            MountedWeaponRole role0,
+            MountedWeaponRole role1,
+            MountedWeaponRole role2,
+            MountedWeaponRole role3)
+        {
+            bool safePrimary =
                 role0 == MountedWeaponRole.Melee ||
                 role0 == MountedWeaponRole.Polearm ||
-                role0 == MountedWeaponRole.Shield ||
                 role0 == MountedWeaponRole.Other;
-            if (leadingLiveSlot && (role1 != MountedWeaponRole.Ranged || role2 != MountedWeaponRole.Ammo))
-                return true;
+            if (!safePrimary ||
+                role1 != MountedWeaponRole.Shield ||
+                role2 != MountedWeaponRole.Ranged ||
+                role3 != MountedWeaponRole.Ammo)
+            {
+                return false;
+            }
 
-            return role2 == MountedWeaponRole.Ranged &&
-                   (role1 == MountedWeaponRole.Ammo || role3 == MountedWeaponRole.Ammo);
+            return true;
         }
 
         private static MountedWeaponRole ResolveMountedWeaponRole(ItemObject item)

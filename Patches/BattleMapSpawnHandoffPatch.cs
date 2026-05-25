@@ -31,6 +31,7 @@ namespace CoopSpectator.Patches
             typeof(Mission).GetField("_missilesDictionary", BindingFlags.Instance | BindingFlags.NonPublic);
         private static MethodInfo _missionNetworkComponentHandleServerEventCreateAgentMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSetAgentActionSetMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventAgentSetFormationMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSynchronizeAgentEquipmentMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSynchronizeMissionObjectMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSpawnWeaponWithNewEntityMethod;
@@ -53,6 +54,8 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedFollowSwitchKey;
         private static string _lastArmedLocalFollowSuppressionWindowKey;
         private static string _lastSuppressedWeaponDropKey;
+        private static string _lastSuppressedDroppedShieldAttachmentKey;
+        private static string _lastSuppressedServerMissileStickKey;
         private static string _lastLocalVisualFinalizeKey;
         private static string _lastSuppressedAssignFormationKey;
         private static string _lastSuppressedLocalSelectAllFormationsKey;
@@ -89,6 +92,8 @@ namespace CoopSpectator.Patches
             new List<DeferredClientCreateAgentPayload>();
         private static readonly List<DeferredClientSetAgentActionSetPayload> DeferredClientSetAgentActionSetPayloads =
             new List<DeferredClientSetAgentActionSetPayload>();
+        private static readonly List<DeferredClientAgentSetFormationPayload> DeferredClientAgentSetFormationPayloads =
+            new List<DeferredClientAgentSetFormationPayload>();
         private static readonly List<DeferredClientSynchronizeAgentEquipmentPayload> DeferredClientSynchronizeAgentEquipmentPayloads =
             new List<DeferredClientSynchronizeAgentEquipmentPayload>();
         private static readonly List<DeferredClientSynchronizeMissionObjectPayload> DeferredClientSynchronizeMissionObjectPayloads =
@@ -125,8 +130,11 @@ namespace CoopSpectator.Patches
             new List<DeferredClientSetAgentHealthPayload>();
         private static readonly List<DeferredClientMakeAgentDeadPayload> DeferredClientMakeAgentDeadPayloads =
             new List<DeferredClientMakeAgentDeadPayload>();
+        private static readonly Dictionary<int, ClientDroppedWeaponOriginState> ClientDroppedWeaponOriginsByMissionObjectId =
+            new Dictionary<int, ClientDroppedWeaponOriginState>();
         private static long _nextDeferredClientCreateAgentSequence;
         private static long _nextDeferredClientSetAgentActionSetSequence;
+        private static long _nextDeferredClientAgentSetFormationSequence;
         private static long _nextDeferredClientSynchronizeAgentEquipmentSequence;
         private static long _nextDeferredClientSynchronizeMissionObjectSequence;
         private static long _nextDeferredClientSpawnWeaponWithNewEntitySequence;
@@ -183,6 +191,16 @@ namespace CoopSpectator.Patches
         {
             public long Sequence;
             public SetAgentActionSet Message;
+            public DateTime DeferredUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+            public string DeferralReason;
+        }
+
+        private sealed class DeferredClientAgentSetFormationPayload
+        {
+            public long Sequence;
+            public AgentSetFormation Message;
             public DateTime DeferredUtc;
             public DateTime LastAttemptUtc;
             public int Attempts;
@@ -369,11 +387,24 @@ namespace CoopSpectator.Patches
             public string DeferralReason;
         }
 
+        private sealed class ClientDroppedWeaponOriginState
+        {
+            public int MissionObjectId;
+            public int SourceAgentIndex;
+            public EquipmentIndex EquipmentIndex;
+            public string SourceEntryId;
+            public string SourceCharacterId;
+            public bool SourceMounted;
+            public bool IsShield;
+            public DateTime ObservedUtc;
+        }
+
         public static void Apply(Harmony harmony)
         {
             TryApplyPatchStep(nameof(PatchMissionPeerFollowedAgent), () => PatchMissionPeerFollowedAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateAgent), () => PatchMissionNetworkComponentCreateAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentActionSet), () => PatchMissionNetworkComponentSetAgentActionSet(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentAgentSetFormation), () => PatchMissionNetworkComponentAgentSetFormation(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSynchronizeAgentEquipment), () => PatchMissionNetworkComponentSynchronizeAgentEquipment(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSynchronizeMissionObject), () => PatchMissionNetworkComponentSynchronizeMissionObject(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSpawnWeaponWithNewEntity), () => PatchMissionNetworkComponentSpawnWeaponWithNewEntity(harmony));
@@ -394,6 +425,9 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentMakeAgentDead), () => PatchMissionNetworkComponentMakeAgentDead(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWieldedItemIndex), () => PatchMissionNetworkComponentSetWieldedItemIndex(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent), () => PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent(harmony));
+            TryApplyPatchStep(nameof(PatchMissionSpawnAttachedWeaponOnCorpseServer), () => PatchMissionSpawnAttachedWeaponOnCorpseServer(harmony));
+            TryApplyPatchStep(nameof(PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer), () => PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer(harmony));
+            TryApplyPatchStep(nameof(PatchMissionHandleMissileCollisionReactionServer), () => PatchMissionHandleMissileCollisionReactionServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAssignFormationToPlayer), () => PatchMissionNetworkComponentAssignFormationToPlayer(harmony));
             TryApplyPatchStep(nameof(PatchOrderControllerSelectAllFormations), () => PatchOrderControllerSelectAllFormations(harmony));
             TryApplyPatchStep(nameof(PatchOrderTroopPlacerMissionScreenTick), () => PatchOrderTroopPlacerMissionScreenTick(harmony));
@@ -433,6 +467,10 @@ namespace CoopSpectator.Patches
             lock (DeferredClientSetAgentActionSetPayloads)
             {
                 DeferredClientSetAgentActionSetPayloads.Clear();
+            }
+            lock (DeferredClientAgentSetFormationPayloads)
+            {
+                DeferredClientAgentSetFormationPayloads.Clear();
             }
             lock (DeferredClientSynchronizeAgentEquipmentPayloads)
             {
@@ -506,8 +544,13 @@ namespace CoopSpectator.Patches
             {
                 DeferredClientMakeAgentDeadPayloads.Clear();
             }
+            lock (ClientDroppedWeaponOriginsByMissionObjectId)
+            {
+                ClientDroppedWeaponOriginsByMissionObjectId.Clear();
+            }
             _nextDeferredClientCreateAgentSequence = 0;
             _nextDeferredClientSetAgentActionSetSequence = 0;
+            _nextDeferredClientAgentSetFormationSequence = 0;
             _nextDeferredClientSynchronizeAgentEquipmentSequence = 0;
             _nextDeferredClientSynchronizeMissionObjectSequence = 0;
             _nextDeferredClientSpawnWeaponWithNewEntitySequence = 0;
@@ -532,6 +575,8 @@ namespace CoopSpectator.Patches
             _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
             _localFollowEchoSuppressionAgentIndex = -1;
             _lastSuppressedWeaponDropKey = null;
+            _lastSuppressedDroppedShieldAttachmentKey = null;
+            _lastSuppressedServerMissileStickKey = null;
             _lastLocalVisualFinalizeKey = null;
             _lastSuppressedAssignFormationKey = null;
             _lastSuppressedLocalSelectAllFormationsKey = null;
@@ -661,6 +706,25 @@ namespace CoopSpectator.Patches
             _missionNetworkComponentHandleServerEventSetAgentActionSetMethod = target;
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetAgentActionSet.");
+        }
+
+        private static void PatchMissionNetworkComponentAgentSetFormation(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventAgentSetFormation",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventAgentSetFormation_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventAgentSetFormation not found. Skip.");
+                return;
+            }
+
+            _missionNetworkComponentHandleServerEventAgentSetFormationMethod = target;
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventAgentSetFormation.");
         }
 
         private static void PatchMissionNetworkComponentSynchronizeAgentEquipment(Harmony harmony)
@@ -1039,6 +1103,60 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSpawnWeaponAsDropFromAgent.");
+        }
+
+        private static void PatchMissionSpawnAttachedWeaponOnCorpseServer(Harmony harmony)
+        {
+            MethodInfo target = typeof(Mission).GetMethod(
+                nameof(Mission.SpawnAttachedWeaponOnCorpse),
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_SpawnAttachedWeaponOnCorpse_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Mission.SpawnAttachedWeaponOnCorpse not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Mission.SpawnAttachedWeaponOnCorpse.");
+        }
+
+        private static void PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer(Harmony harmony)
+        {
+            MethodInfo target = typeof(Mission).GetMethod(
+                nameof(Mission.SpawnAttachedWeaponOnSpawnedWeapon),
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_SpawnAttachedWeaponOnSpawnedWeapon_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Mission.SpawnAttachedWeaponOnSpawnedWeapon not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Mission.SpawnAttachedWeaponOnSpawnedWeapon.");
+        }
+
+        private static void PatchMissionHandleMissileCollisionReactionServer(Harmony harmony)
+        {
+            MethodInfo target = typeof(Mission).GetMethod(
+                nameof(Mission.HandleMissileCollisionReaction),
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_HandleMissileCollisionReaction_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Mission.HandleMissileCollisionReaction not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Mission.HandleMissileCollisionReaction.");
         }
 
         private static void PatchMissionNetworkComponentAssignFormationToPlayer(Harmony harmony)
@@ -1552,6 +1670,13 @@ namespace CoopSpectator.Patches
 
                 if (safeStringIdCreateAgentPathActive &&
                     snapshotReadyForExactHeroHandoff &&
+                    createAgent.Character == null)
+                {
+                    TryCanonicalizeCreateAgentCharacterFromResolvedEntry(createAgent, out _);
+                }
+
+                if (safeStringIdCreateAgentPathActive &&
+                    snapshotReadyForExactHeroHandoff &&
                     !IsUnsafeImmediateClientAgentBaselineMaterializationActive &&
                     CoopMissionSpawnLogic.ShouldRequireExplicitMaterializationEntryId(
                         createAgent,
@@ -1677,6 +1802,58 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool MissionNetworkComponent_HandleServerEventAgentSetFormation_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is AgentSetFormation agentSetFormation))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                    return true;
+
+                if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary) &&
+                    !IsUnsafeImmediateClientAgentBaselineMaterializationActive)
+                {
+                    RegisterDeferredClientAgentSetFormationPayload(
+                        agentSetFormation,
+                        "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client AgentSetFormation until current battle snapshot is applied. " +
+                        "AgentIndex=" + agentSetFormation.AgentIndex +
+                        " FormationIndex=" + agentSetFormation.FormationIndex +
+                        " Reason=" + (snapshotReadinessSummary ?? "unknown"));
+                    return false;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(agentSetFormation.AgentIndex, canBeNull: true);
+                if (agent == null &&
+                    (HasDeferredClientCreateAgentPayload(agentSetFormation.AgentIndex) ||
+                     HasAnyDeferredClientAgentBootstrapPayload(agentSetFormation.AgentIndex)))
+                {
+                    RegisterDeferredClientAgentSetFormationPayload(
+                        agentSetFormation,
+                        "agent-bootstrap-deferred");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client AgentSetFormation because agent bootstrap is still deferred. " +
+                        "AgentIndex=" + agentSetFormation.AgentIndex +
+                        " FormationIndex=" + agentSetFormation.FormationIndex);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: AgentSetFormation prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static bool ShouldUseSafeStringIdCreateAgentPathOnClient(Mission mission)
         {
             if (GameNetwork.IsServer || mission == null)
@@ -1794,6 +1971,7 @@ namespace CoopSpectator.Patches
             int mountedHeroCreateAgentCount = DeferredMountedHeroCreateAgentPayloads.Count;
             int createAgentCount = DeferredClientCreateAgentPayloads.Count;
             int setAgentActionSetCount = DeferredClientSetAgentActionSetPayloads.Count;
+            int agentSetFormationCount = DeferredClientAgentSetFormationPayloads.Count;
             int synchronizeAgentEquipmentCount = DeferredClientSynchronizeAgentEquipmentPayloads.Count;
             int synchronizeMissionObjectCount = DeferredClientSynchronizeMissionObjectPayloads.Count;
             int spawnWeaponCount = DeferredClientSpawnWeaponWithNewEntityPayloads.Count;
@@ -1817,6 +1995,7 @@ namespace CoopSpectator.Patches
                 mountedHeroCreateAgentCount +
                 createAgentCount +
                 setAgentActionSetCount +
+                agentSetFormationCount +
                 synchronizeAgentEquipmentCount +
                 synchronizeMissionObjectCount +
                 spawnWeaponCount +
@@ -1841,6 +2020,7 @@ namespace CoopSpectator.Patches
                 " MountedHeroCreateAgent=" + mountedHeroCreateAgentCount +
                 " CreateAgent=" + createAgentCount +
                 " SetAgentActionSet=" + setAgentActionSetCount +
+                " AgentSetFormation=" + agentSetFormationCount +
                 " SynchronizeAgentEquipment=" + synchronizeAgentEquipmentCount +
                 " SynchronizeMissionObject=" + synchronizeMissionObjectCount +
                 " SpawnWeaponWithNewEntity=" + spawnWeaponCount +
@@ -1875,6 +2055,7 @@ namespace CoopSpectator.Patches
                 return;
 
             TryReplayDeferredClientCreateAgents(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientAgentSetFormation(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSetAgentActionSet(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSynchronizeAgentEquipment(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSpawnWeaponWithNewEntity(mission, source, snapshotReadinessSummary);
@@ -2478,6 +2659,37 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void RegisterDeferredClientAgentSetFormationPayload(
+            AgentSetFormation agentSetFormation,
+            string deferralReason)
+        {
+            if (agentSetFormation == null)
+                return;
+
+            lock (DeferredClientAgentSetFormationPayloads)
+            {
+                DeferredClientAgentSetFormationPayload existingPayload = DeferredClientAgentSetFormationPayloads
+                    .FirstOrDefault(candidate => candidate?.Message?.AgentIndex == agentSetFormation.AgentIndex);
+                if (existingPayload != null)
+                {
+                    existingPayload.Message = agentSetFormation;
+                    existingPayload.DeferralReason = deferralReason;
+                    return;
+                }
+
+                DeferredClientAgentSetFormationPayloads.Add(
+                    new DeferredClientAgentSetFormationPayload
+                    {
+                        Sequence = ++_nextDeferredClientAgentSetFormationSequence,
+                        Message = agentSetFormation,
+                        DeferredUtc = DateTime.UtcNow,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0,
+                        DeferralReason = deferralReason
+                    });
+            }
+        }
+
         private static void RegisterDeferredClientSetWieldedItemIndexPayload(
             SetWieldedItemIndex setWieldedItemIndex,
             string deferralReason)
@@ -2785,6 +2997,378 @@ namespace CoopSpectator.Patches
         private static SpawnedItemEntity TryGetLocalSpawnedItemEntity(MissionObjectId missionObjectId)
         {
             return TryGetLocalMissionObject(missionObjectId) as SpawnedItemEntity;
+        }
+
+        private static void RecordClientDroppedWeaponOrigin(
+            SpawnWeaponAsDropFromAgent spawnWeaponAsDropFromAgent,
+            Agent agent)
+        {
+            if (spawnWeaponAsDropFromAgent == null || spawnWeaponAsDropFromAgent.ForcedIndex < 0)
+                return;
+
+            ItemObject sourceItem = null;
+            try
+            {
+                if (agent?.Equipment != null &&
+                    spawnWeaponAsDropFromAgent.EquipmentIndex >= EquipmentIndex.Weapon0 &&
+                    spawnWeaponAsDropFromAgent.EquipmentIndex <= EquipmentIndex.Weapon3 &&
+                    !agent.Equipment[spawnWeaponAsDropFromAgent.EquipmentIndex].IsEmpty)
+                {
+                    sourceItem = agent.Equipment[spawnWeaponAsDropFromAgent.EquipmentIndex].Item;
+                }
+
+                if (sourceItem == null &&
+                    agent?.SpawnEquipment != null &&
+                    spawnWeaponAsDropFromAgent.EquipmentIndex >= EquipmentIndex.Weapon0 &&
+                    spawnWeaponAsDropFromAgent.EquipmentIndex <= EquipmentIndex.Weapon3 &&
+                    !agent.SpawnEquipment[spawnWeaponAsDropFromAgent.EquipmentIndex].IsEmpty)
+                {
+                    sourceItem = agent.SpawnEquipment[spawnWeaponAsDropFromAgent.EquipmentIndex].Item;
+                }
+            }
+            catch
+            {
+                sourceItem = null;
+            }
+
+            string sourceEntryId = null;
+            try
+            {
+                CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out sourceEntryId);
+            }
+            catch
+            {
+                sourceEntryId = null;
+            }
+
+            var originState = new ClientDroppedWeaponOriginState
+            {
+                MissionObjectId = spawnWeaponAsDropFromAgent.ForcedIndex,
+                SourceAgentIndex = spawnWeaponAsDropFromAgent.AgentIndex,
+                EquipmentIndex = spawnWeaponAsDropFromAgent.EquipmentIndex,
+                SourceEntryId = sourceEntryId,
+                SourceCharacterId = agent?.Character?.StringId ?? string.Empty,
+                SourceMounted = agent?.MountAgent != null || agent?.HasMount == true,
+                IsShield = IsShieldItem(sourceItem),
+                ObservedUtc = DateTime.UtcNow
+            };
+
+            lock (ClientDroppedWeaponOriginsByMissionObjectId)
+            {
+                ClientDroppedWeaponOriginsByMissionObjectId[originState.MissionObjectId] = originState;
+            }
+        }
+
+        private static bool TryGetClientDroppedWeaponOrigin(
+            MissionObjectId missionObjectId,
+            out ClientDroppedWeaponOriginState originState)
+        {
+            originState = null;
+            int missionObjectIdValue = GetMissionObjectIdValue(missionObjectId);
+            if (missionObjectIdValue < 0)
+                return false;
+
+            lock (ClientDroppedWeaponOriginsByMissionObjectId)
+            {
+                return ClientDroppedWeaponOriginsByMissionObjectId.TryGetValue(
+                    missionObjectIdValue,
+                    out originState);
+            }
+        }
+
+        private static bool ShouldSuppressClientAttachmentToDroppedShield(
+            MissionObjectId missionObjectId,
+            out ClientDroppedWeaponOriginState originState,
+            out string suppressReason)
+        {
+            suppressReason = null;
+            if (!TryGetClientDroppedWeaponOrigin(missionObjectId, out originState) ||
+                originState == null ||
+                !originState.IsShield)
+            {
+                return false;
+            }
+
+            Agent sourceAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(originState.SourceAgentIndex, canBeNull: true);
+            bool sourceInactive = sourceAgent == null || !sourceAgent.IsActive();
+            if (!sourceInactive)
+                return false;
+
+            suppressReason =
+                "dropped-shield-from-inactive-agent" +
+                "|SourceAgentIndex=" + originState.SourceAgentIndex +
+                "|EquipmentIndex=" + originState.EquipmentIndex +
+                "|Mounted=" + originState.SourceMounted +
+                "|EntryId=" + (originState.SourceEntryId ?? string.Empty) +
+                "|CharacterId=" + (originState.SourceCharacterId ?? string.Empty);
+            return true;
+        }
+
+        private static bool IsShieldItem(ItemObject item)
+        {
+            if (item == null)
+                return false;
+
+            try
+            {
+                if (item.ItemType == ItemObject.ItemTypeEnum.Shield)
+                    return true;
+
+                return item.PrimaryWeapon?.IsShield == true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool ShouldUseServerExactBattleAttachedMissileSuppression(Mission mission)
+        {
+            if (!GameNetwork.IsServer || mission == null)
+                return false;
+
+            if (!MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                return false;
+
+            return BattleSnapshotRuntimeState.GetCurrent()?.CanonicalBattle != null;
+        }
+
+        private static bool IsSuppressibleAttachedMissileItem(ItemObject item)
+        {
+            if (item == null)
+                return false;
+
+            try
+            {
+                switch (item.ItemType)
+                {
+                    case ItemObject.ItemTypeEnum.Arrows:
+                    case ItemObject.ItemTypeEnum.Bolts:
+                    case ItemObject.ItemTypeEnum.Thrown:
+                        return true;
+                }
+
+                WeaponComponentData primaryWeapon = item.PrimaryWeapon;
+                if (primaryWeapon == null)
+                    return false;
+
+                WeaponFlags flags = primaryWeapon.WeaponFlags;
+                return (flags & WeaponFlags.AttachAmmoToVisual) != 0 ||
+                       (flags & WeaponFlags.AmmoSticksWhenShot) != 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryResolveMissionMissileData(
+            Mission mission,
+            int missileIndex,
+            out ItemObject item,
+            out WeaponFlags weaponFlags,
+            out WeaponClass weaponClass)
+        {
+            item = null;
+            weaponFlags = 0;
+            weaponClass = WeaponClass.Undefined;
+
+            if (mission == null || missileIndex < 0 || MissionMissilesDictionaryField == null)
+                return false;
+
+            try
+            {
+                if (!(MissionMissilesDictionaryField.GetValue(mission) is IDictionary missilesDictionary))
+                    return false;
+
+                object missile = missilesDictionary[missileIndex];
+                if (missile == null)
+                    return false;
+
+                PropertyInfo weaponProperty = missile.GetType().GetProperty(
+                    "Weapon",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (weaponProperty == null || !(weaponProperty.GetValue(missile) is MissionWeapon missileWeapon) || missileWeapon.IsEmpty)
+                    return false;
+
+                item = missileWeapon.Item;
+                WeaponComponentData currentUsageItem = missileWeapon.CurrentUsageItem;
+                if (currentUsageItem != null)
+                {
+                    weaponFlags = currentUsageItem.WeaponFlags;
+                    weaponClass = currentUsageItem.WeaponClass;
+                }
+                else if (item?.PrimaryWeapon != null)
+                {
+                    weaponFlags = item.PrimaryWeapon.WeaponFlags;
+                    weaponClass = item.PrimaryWeapon.WeaponClass;
+                }
+
+                return item != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool Mission_SpawnAttachedWeaponOnCorpse_ServerPrefix(
+            Mission __instance,
+            Agent agent,
+            int attachedWeaponIndex,
+            int forcedSpawnIndex,
+            ref SpawnedItemEntity __result)
+        {
+            try
+            {
+                if (!ShouldUseServerExactBattleAttachedMissileSuppression(__instance) ||
+                    agent == null ||
+                    attachedWeaponIndex < 0)
+                {
+                    return true;
+                }
+
+                if (agent.IsActive() && agent.Health > 0f)
+                    return true;
+
+                if (!ExactCampaignArmyBootstrap.TryGetEntryId(agent, out string entryId) ||
+                    string.IsNullOrWhiteSpace(entryId))
+                {
+                    return true;
+                }
+
+                MissionWeapon attachedWeapon = agent.GetAttachedWeapon(attachedWeaponIndex);
+                ItemObject attachedItem = attachedWeapon.Item;
+                if (!IsSuppressibleAttachedMissileItem(attachedItem))
+                    return true;
+
+                __result = null;
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: suppressed server SpawnAttachedWeaponOnCorpse for exact battle corpse attachment. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " CharacterId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                    " AttachedWeaponIndex=" + attachedWeaponIndex +
+                    " AttachedItem=" + (attachedItem?.StringId ?? "null") +
+                    " ForcedSpawnIndex=" + forcedSpawnIndex);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: server SpawnAttachedWeaponOnCorpse prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool Mission_SpawnAttachedWeaponOnSpawnedWeapon_ServerPrefix(
+            Mission __instance,
+            SpawnedItemEntity spawnedWeapon,
+            int attachmentIndex,
+            int forcedSpawnIndex)
+        {
+            try
+            {
+                if (!ShouldUseServerExactBattleAttachedMissileSuppression(__instance) ||
+                    spawnedWeapon == null ||
+                    attachmentIndex < 0)
+                {
+                    return true;
+                }
+
+                ItemObject parentItem = spawnedWeapon.WeaponCopy.Item;
+                if (!IsShieldItem(parentItem))
+                    return true;
+
+                MissionWeapon attachedWeapon = spawnedWeapon.WeaponCopy.GetAttachedWeapon(attachmentIndex);
+                ItemObject attachedItem = attachedWeapon.Item;
+                if (!IsSuppressibleAttachedMissileItem(attachedItem))
+                    return true;
+
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: suppressed server SpawnAttachedWeaponOnSpawnedWeapon for dropped shield in exact battle. " +
+                    "SpawnedWeaponId=" + GetMissionObjectIdValue(spawnedWeapon.Id) +
+                    " ParentItem=" + (parentItem?.StringId ?? "null") +
+                    " AttachmentIndex=" + attachmentIndex +
+                    " AttachedItem=" + (attachedItem?.StringId ?? "null") +
+                    " ForcedSpawnIndex=" + forcedSpawnIndex);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: server SpawnAttachedWeaponOnSpawnedWeapon prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool Mission_HandleMissileCollisionReaction_ServerPrefix(
+            Mission __instance,
+            int missileIndex,
+            ref Mission.MissileCollisionReaction collisionReaction,
+            Agent attackerAgent,
+            Agent attachedAgent,
+            bool attachedToShield,
+            sbyte attachedBoneIndex,
+            MissionObject attachedMissionObject,
+            int forcedSpawnIndex)
+        {
+            try
+            {
+                if (!ShouldUseServerExactBattleAttachedMissileSuppression(__instance) ||
+                    collisionReaction != Mission.MissileCollisionReaction.Stick)
+                {
+                    return true;
+                }
+
+                if (!TryResolveMissionMissileData(__instance, missileIndex, out ItemObject missileItem, out WeaponFlags weaponFlags, out WeaponClass weaponClass) ||
+                    !IsSuppressibleAttachedMissileItem(missileItem))
+                {
+                    return true;
+                }
+
+                string attachedEntryId = null;
+                bool attachedExactAgent =
+                    attachedAgent != null &&
+                    ExactCampaignArmyBootstrap.TryGetEntryId(attachedAgent, out attachedEntryId);
+                ItemObject attachedMissionObjectItem = (attachedMissionObject as SpawnedItemEntity)?.WeaponCopy.Item;
+                bool attachedShieldMissionObject = IsShieldItem(attachedMissionObjectItem);
+                if (!attachedExactAgent && !attachedShieldMissionObject)
+                    return true;
+
+                collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
+
+                string logKey =
+                    missileIndex + "|" +
+                    (missileItem?.StringId ?? "null") + "|" +
+                    (attachedAgent?.Index ?? -1) + "|" +
+                    (attachedEntryId ?? "null") + "|" +
+                    attachedToShield + "|" +
+                    GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid);
+                if (!string.Equals(_lastSuppressedServerMissileStickKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedServerMissileStickKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed server missile stick reaction for exact battle and downgraded to BecomeInvisible. " +
+                        "MissileIndex=" + missileIndex +
+                        " MissileItem=" + (missileItem?.StringId ?? "null") +
+                        " WeaponClass=" + weaponClass +
+                        " WeaponFlags=" + weaponFlags +
+                        " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
+                        " AttachedAgent=" + (attachedAgent?.Index ?? -1) +
+                        " AttachedEntryId=" + (attachedEntryId ?? "null") +
+                        " AttachedToShield=" + attachedToShield +
+                        " AttachedBoneIndex=" + attachedBoneIndex +
+                        " AttachedMissionObjectId=" + GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid) +
+                        " AttachedMissionObjectItem=" + (attachedMissionObjectItem?.StringId ?? "null") +
+                        " ForcedSpawnIndex=" + forcedSpawnIndex);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: server HandleMissileCollisionReaction prefix failed open: " + ex.Message);
+                return true;
+            }
         }
 
         private static bool MissionHasLocalMissile(int missileIndex)
@@ -3984,6 +4568,77 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void TryReplayDeferredClientAgentSetFormation(
+            Mission mission,
+            string source,
+            string snapshotReadinessSummary)
+        {
+            if (_missionNetworkComponentHandleServerEventAgentSetFormationMethod == null)
+                return;
+
+            List<DeferredClientAgentSetFormationPayload> deferredPayloads;
+            lock (DeferredClientAgentSetFormationPayloads)
+            {
+                if (DeferredClientAgentSetFormationPayloads.Count <= 0)
+                    return;
+
+                deferredPayloads = DeferredClientAgentSetFormationPayloads
+                    .OrderBy(candidate => candidate.Sequence)
+                    .ToList();
+            }
+
+            MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DeferredClientAgentSetFormationPayload deferredPayload in deferredPayloads)
+            {
+                AgentSetFormation agentSetFormation = deferredPayload?.Message;
+                if (agentSetFormation == null)
+                    continue;
+
+                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
+                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                {
+                    continue;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(agentSetFormation.AgentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                deferredPayload.LastAttemptUtc = nowUtc;
+                deferredPayload.Attempts++;
+                try
+                {
+                    _missionNetworkComponentHandleServerEventAgentSetFormationMethod.Invoke(
+                        missionNetworkComponent,
+                        new object[] { agentSetFormation });
+                    RemoveDeferredClientAgentSetFormationPayload(agentSetFormation.AgentIndex);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: replayed deferred client AgentSetFormation after battle snapshot apply. " +
+                        "AgentIndex=" + agentSetFormation.AgentIndex +
+                        " FormationIndex=" + agentSetFormation.FormationIndex +
+                        " Attempts=" + deferredPayload.Attempts +
+                        " Source=" + (source ?? "unknown"));
+                }
+                catch (Exception ex)
+                {
+                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred client AgentSetFormation replay failed open. " +
+                            "AgentIndex=" + agentSetFormation.AgentIndex +
+                            " FormationIndex=" + agentSetFormation.FormationIndex +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
+                            " Message=" + ex.GetBaseException().Message);
+                    }
+                }
+            }
+        }
+
         private static void TryReplayDeferredClientHandleMissileCollisionReaction(
             Mission mission,
             string source,
@@ -4461,6 +5116,17 @@ namespace CoopSpectator.Patches
             lock (DeferredClientSetAgentActionSetPayloads)
             {
                 DeferredClientSetAgentActionSetPayloads.RemoveAll(candidate => candidate?.Message?.AgentIndex == agentIndex);
+            }
+        }
+
+        private static void RemoveDeferredClientAgentSetFormationPayload(int agentIndex)
+        {
+            if (agentIndex < 0)
+                return;
+
+            lock (DeferredClientAgentSetFormationPayloads)
+            {
+                DeferredClientAgentSetFormationPayloads.RemoveAll(candidate => candidate?.Message?.AgentIndex == agentIndex);
             }
         }
 
@@ -5679,9 +6345,12 @@ namespace CoopSpectator.Patches
             string characterSource = null;
             string bodyPropertyRangeSource = null;
 
-            canonicalizedCharacter = TryCanonicalizeCreateAgentCharacterToResolvedSurrogate(
-                createAgent,
-                out characterSource);
+            if (!ShouldPreserveEntryResolvedCreateAgentCharacter(createAgent))
+            {
+                canonicalizedCharacter = TryCanonicalizeCreateAgentCharacterToResolvedSurrogate(
+                    createAgent,
+                    out characterSource);
+            }
 
             if (ShouldCoerceRemotePlayerCreateAgentToNonPlayer(createAgent))
             {
@@ -5796,6 +6465,183 @@ namespace CoopSpectator.Patches
                      ":" + canonicalCharacterId;
             return ReferenceEquals(createAgent.Character, canonicalCharacter) ||
                    string.Equals(createAgent.Character?.StringId, canonicalCharacterId, StringComparison.Ordinal);
+        }
+
+        private static bool ShouldPreserveEntryResolvedCreateAgentCharacter(CreateAgent createAgent)
+        {
+            if (createAgent?.Character == null)
+                return false;
+
+            if (!TryResolveExpectedCreateAgentEntryCharacter(
+                    createAgent,
+                    out string entryId,
+                    out BasicCharacterObject expectedCharacter))
+            {
+                return false;
+            }
+
+            if (expectedCharacter == null)
+                return false;
+
+            bool matchesExpectedCharacter =
+                ReferenceEquals(createAgent.Character, expectedCharacter) ||
+                string.Equals(
+                    createAgent.Character.StringId,
+                    expectedCharacter.StringId,
+                    StringComparison.Ordinal);
+            if (!matchesExpectedCharacter)
+                return false;
+
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: preserved entry-resolved CreateAgent character and skipped surrogate canonicalization. " +
+                "AgentIndex=" + createAgent.AgentIndex +
+                " MountAgentIndex=" + createAgent.MountAgentIndex +
+                " EntryId=" + (entryId ?? "null") +
+                " Character=" + (createAgent.Character?.StringId ?? "null"));
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                "client-create-agent-character-entry-preserved",
+                "AgentIndex=" + createAgent.AgentIndex +
+                " MountAgentIndex=" + createAgent.MountAgentIndex +
+                " EntryId=" + (entryId ?? "null") +
+                " Character=" + (createAgent.Character?.StringId ?? "null") +
+                " Source=battle-map handoff CreateAgent prefix");
+            return true;
+        }
+
+        private static bool TryResolveExpectedCreateAgentEntryCharacter(
+            CreateAgent createAgent,
+            out string entryId,
+            out BasicCharacterObject expectedCharacter)
+        {
+            entryId = null;
+            expectedCharacter = null;
+
+            if (createAgent == null)
+                return false;
+
+            if (CoopMissionSpawnLogic.TryResolveClientAuthoritativeMaterializedEntryId(
+                    createAgent.AgentIndex,
+                    out string authoritativeEntryId) &&
+                !string.IsNullOrWhiteSpace(authoritativeEntryId))
+            {
+                entryId = authoritativeEntryId;
+            }
+            else if (ExactCreateAgentCorridorDiagnostics.TryResolveClientCreateAgentPayloadEntryId(
+                         createAgent,
+                         out string candidateEntryId,
+                         out string resolutionState,
+                         out string _))
+            {
+                bool resolutionStrongEnough =
+                    string.Equals(resolutionState, "resolved-strong", StringComparison.Ordinal) ||
+                    string.Equals(resolutionState, "resolved-layout", StringComparison.Ordinal);
+                if (resolutionStrongEnough && !string.IsNullOrWhiteSpace(candidateEntryId))
+                    entryId = candidateEntryId;
+            }
+
+            if (string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            expectedCharacter = BattleSnapshotRuntimeState.TryResolveCharacterObject(entryId);
+            return expectedCharacter != null;
+        }
+
+        private static bool TryCanonicalizeCreateAgentCharacterFromResolvedEntry(
+            CreateAgent createAgent,
+            out string source)
+        {
+            source = null;
+            if (createAgent == null || createAgent.Character != null)
+                return false;
+
+            string entryId = null;
+            string resolutionSource = null;
+            if (CoopMissionSpawnLogic.TryResolveClientAuthoritativeMaterializedEntryId(
+                    createAgent.AgentIndex,
+                    out string authoritativeEntryId))
+            {
+                entryId = authoritativeEntryId;
+                resolutionSource = "authoritative-materialized-entry";
+            }
+            else if (ExactCreateAgentCorridorDiagnostics.TryResolveClientCreateAgentPayloadEntryId(
+                         createAgent,
+                         out string candidateEntryId,
+                         out string resolutionState,
+                         out string _))
+            {
+                bool resolutionStrongEnough =
+                    string.Equals(resolutionState, "resolved-strong", StringComparison.Ordinal) ||
+                    string.Equals(resolutionState, "resolved-layout", StringComparison.Ordinal);
+                if (resolutionStrongEnough && !string.IsNullOrWhiteSpace(candidateEntryId))
+                {
+                    entryId = candidateEntryId;
+                    resolutionSource = "payload-candidate-" + resolutionState;
+                }
+            }
+            else if (CoopMissionSpawnLogic.TryResolveCharacterlessCreateAgentPayloadEntryIdByUniqueLayout(
+                         createAgent,
+                         out string uniqueLayoutEntryId,
+                         out string uniqueLayoutResolutionSummary) &&
+                     !string.IsNullOrWhiteSpace(uniqueLayoutEntryId))
+            {
+                entryId = uniqueLayoutEntryId;
+                resolutionSource = "payload-layout-unique:" + (uniqueLayoutResolutionSummary ?? "resolved");
+            }
+
+            if (string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            BasicCharacterObject resolvedCharacter = BattleSnapshotRuntimeState.TryResolveCharacterObject(entryId);
+            if (resolvedCharacter == null)
+            {
+                source =
+                    (resolutionSource ?? "unknown") +
+                    "|EntryId=" + (entryId ?? "null") +
+                    "|CharacterUnresolved=True";
+                return false;
+            }
+
+            TrySetInstanceMemberValue(createAgent, "Character", resolvedCharacter);
+            TrySetInstanceMemberValue(createAgent, "<Character>k__BackingField", resolvedCharacter);
+
+            string bodyPropertyRangeSource = null;
+            bool repairedBodyPropertyRange =
+                TryEnsureCreateAgentCharacterBodyPropertyRange(resolvedCharacter, out bodyPropertyRangeSource);
+            bool applied =
+                ReferenceEquals(createAgent.Character, resolvedCharacter) ||
+                string.Equals(createAgent.Character?.StringId, resolvedCharacter.StringId, StringComparison.Ordinal);
+            if (!applied)
+            {
+                source =
+                    (resolutionSource ?? "unknown") +
+                    "|EntryId=" + (entryId ?? "null") +
+                    "|ResolvedCharacter=" + (resolvedCharacter.StringId ?? "null") +
+                    "|Applied=False";
+                return false;
+            }
+
+            string details =
+                "AgentIndex=" + createAgent.AgentIndex +
+                " EntryId=" + (entryId ?? "null") +
+                " ResolutionSource=" + (resolutionSource ?? "unknown") +
+                " ResolvedCharacter=" + (resolvedCharacter.StringId ?? "null") +
+                " RepairedBodyPropertyRange=" + repairedBodyPropertyRange +
+                " BodyPropertyRangeSource=" + (bodyPropertyRangeSource ?? "none");
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: canonicalized CreateAgent character from resolved battle entry before native handler. " +
+                details);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                "client-create-agent-character-entry-canonicalized",
+                details + " Source=battle-map handoff CreateAgent prefix");
+            ExactCreateAgentCorridorDiagnostics.ObserveClientCreateAgentMutation(
+                createAgent,
+                details,
+                "battle-map handoff CreateAgent prefix");
+            source =
+                (resolutionSource ?? "unknown") +
+                "|EntryId=" + (entryId ?? "null") +
+                "|ResolvedCharacter=" + (resolvedCharacter.StringId ?? "null");
+            return true;
         }
 
         private static bool TryEnsureCreateAgentCharacterBodyPropertyRange(
@@ -6215,6 +7061,31 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (ShouldSuppressClientAttachmentToDroppedShield(
+                        attachWeaponToSpawnedWeapon.MissionObjectId,
+                        out ClientDroppedWeaponOriginState dropOrigin,
+                        out string suppressReason))
+                {
+                    string logKey =
+                        "attach|" + GetMissionObjectIdValue(attachWeaponToSpawnedWeapon.MissionObjectId) + "|" +
+                        (attachWeaponToSpawnedWeapon.Weapon.Item?.StringId ?? "null") + "|" +
+                        suppressReason;
+                    if (!string.Equals(_lastSuppressedDroppedShieldAttachmentKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedDroppedShieldAttachmentKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed client AttachWeaponToSpawnedWeapon for dropped shield from inactive exact agent. " +
+                            "MissionObjectId=" + GetMissionObjectIdValue(attachWeaponToSpawnedWeapon.MissionObjectId) +
+                            " Weapon=" + (attachWeaponToSpawnedWeapon.Weapon.Item?.StringId ?? "null") +
+                            " SourceAgentIndex=" + dropOrigin.SourceAgentIndex +
+                            " SourceEntryId=" + (dropOrigin.SourceEntryId ?? "null") +
+                            " SourceCharacterId=" + (dropOrigin.SourceCharacterId ?? "null") +
+                            " Reason=" + suppressReason);
+                    }
+
+                    return false;
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -6275,6 +7146,31 @@ namespace CoopSpectator.Patches
                         "SpawnedWeaponId=" + GetMissionObjectIdValue(spawnAttachedWeaponOnSpawnedWeapon.SpawnedWeaponId) +
                         " AttachmentIndex=" + spawnAttachedWeaponOnSpawnedWeapon.AttachmentIndex +
                         " ForcedIndex=" + spawnAttachedWeaponOnSpawnedWeapon.ForcedIndex);
+                    return false;
+                }
+
+                if (ShouldSuppressClientAttachmentToDroppedShield(
+                        spawnAttachedWeaponOnSpawnedWeapon.SpawnedWeaponId,
+                        out ClientDroppedWeaponOriginState dropOrigin,
+                        out string suppressReason))
+                {
+                    string logKey =
+                        "spawn-attached|" + GetMissionObjectIdValue(spawnAttachedWeaponOnSpawnedWeapon.SpawnedWeaponId) + "|" +
+                        spawnAttachedWeaponOnSpawnedWeapon.AttachmentIndex + "|" +
+                        suppressReason;
+                    if (!string.Equals(_lastSuppressedDroppedShieldAttachmentKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedDroppedShieldAttachmentKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed client SpawnAttachedWeaponOnSpawnedWeapon for dropped shield from inactive exact agent. " +
+                            "SpawnedWeaponId=" + GetMissionObjectIdValue(spawnAttachedWeaponOnSpawnedWeapon.SpawnedWeaponId) +
+                            " AttachmentIndex=" + spawnAttachedWeaponOnSpawnedWeapon.AttachmentIndex +
+                            " SourceAgentIndex=" + dropOrigin.SourceAgentIndex +
+                            " SourceEntryId=" + (dropOrigin.SourceEntryId ?? "null") +
+                            " SourceCharacterId=" + (dropOrigin.SourceCharacterId ?? "null") +
+                            " Reason=" + suppressReason);
+                    }
+
                     return false;
                 }
 
@@ -7769,6 +8665,7 @@ namespace CoopSpectator.Patches
                 }
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(spawnWeaponAsDropFromAgent.AgentIndex, canBeNull: true);
+                RecordClientDroppedWeaponOrigin(spawnWeaponAsDropFromAgent, agent);
                 bool suppress =
                     agent == null ||
                     ((agent.Equipment == null ||
