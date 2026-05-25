@@ -28,7 +28,13 @@
       </IncludedGameTypes>
     </XmlNode>
     <XmlNode>
-      <XmlName id="Items" path="coopspectator_mpitems" />
+      <XmlName id="CraftingTemplates" path="coopspectator_crafting_templates" />
+      <IncludedGameTypes>
+        <GameType value="MultiplayerGame" />
+      </IncludedGameTypes>
+    </XmlNode>
+    <XmlNode>
+      <XmlName id="Items" path="coopspectator_items" />
       <IncludedGameTypes>
         <GameType value="MultiplayerGame" />
       </IncludedGameTypes>
