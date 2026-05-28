@@ -1,4 +1,4 @@
-<!-- Збірка тільки для Dedicated Server: без CampaignSystem, лише реєстрація CoopTdm/CoopBattle + GameMode. -->
+<!-- Dedicated-server build: no CampaignSystem, only CoopBattle registration and mission runtime code. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
@@ -43,14 +43,6 @@
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattleMode.cs" Link="GameMode\MissionMultiplayerCoopBattleMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattle.cs" Link="GameMode\MissionMultiplayerCoopBattle.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattleClient.cs" Link="GameMode\MissionMultiplayerCoopBattleClient.cs" />
-    <Compile Include="..\GameMode\MissionMultiplayerCoopTdmMode.cs" Link="GameMode\MissionMultiplayerCoopTdmMode.cs" />
-    <Compile Include="..\GameMode\MissionMultiplayerCoopTdm.cs" Link="GameMode\MissionMultiplayerCoopTdm.cs" />
-    <Compile Include="..\GameMode\MissionMultiplayerCoopTdmClient.cs" Link="GameMode\MissionMultiplayerCoopTdmClient.cs" />
-    <Compile Include="..\GameMode\MissionMultiplayerTdmCloneMode.cs" Link="GameMode\MissionMultiplayerTdmCloneMode.cs" />
-    <Compile Include="..\GameMode\MissionMultiplayerTdmClone.cs" Link="GameMode\MissionMultiplayerTdmClone.cs" />
-    <Compile Include="..\GameMode\MissionMultiplayerTdmCloneClient.cs" Link="GameMode\MissionMultiplayerTdmCloneClient.cs" />
-    <Compile Include="..\GameMode\MissionMinimalClientDiagnosticMode.cs" Link="GameMode\MissionMinimalClientDiagnosticMode.cs" />
-    <Compile Include="..\GameMode\MissionMinimalServerDiagnosticMode.cs" Link="GameMode\MissionMinimalServerDiagnosticMode.cs" />
     <Compile Include="..\GameMode\MissionBehaviorHelpers.cs" Link="GameMode\MissionBehaviorHelpers.cs" />
     <Compile Include="..\GameMode\MissionBehaviorDiagnostic.cs" Link="GameMode\MissionBehaviorDiagnostic.cs" />
     <Compile Include="..\Mission\CoopMissionBehaviors.cs" Link="Mission\CoopMissionBehaviors.cs" />
@@ -317,7 +309,7 @@
     <Copy SourceFiles="@(_DedicatedSandboxCoreRootFiles)" DestinationFiles="@(_DedicatedSandboxCoreRootFiles->'$(_DedicatedSandboxCoreDir)\%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxCoreRootFiles)' != ''" />
     <Copy SourceFiles="@(_DedicatedSandboxCoreModuleDataFiles)" DestinationFiles="@(_DedicatedSandboxCoreModuleDataFiles->'$(_DedicatedSandboxCoreDir)\ModuleData\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxCoreModuleDataFiles)' != ''" />
     <Copy SourceFiles="@(_DedicatedSandboxCoreSceneFiles)" DestinationFiles="@(_DedicatedSandboxCoreSceneFiles->'$(_DedicatedSandboxCoreDir)\SceneObj\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxCoreSceneFiles)' != ''" />
-    <!-- TaleWorlds.MountAndBlade.Multiplayer.dll має лежати поруч із CoopSpectator.dll у Win64_Shipping_Client, інакше модуль не завантажується → "Cannot find game type: TdmClone". -->
+    <!-- TaleWorlds.MountAndBlade.Multiplayer.dll must be available to compile the MP runtime layer. -->
     <Copy SourceFiles="$(_MultiplayerServerBin)\TaleWorlds.MountAndBlade.Multiplayer.dll" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(_MultiplayerServerBin)\TaleWorlds.MountAndBlade.Multiplayer.dll')" />
     <Copy SourceFiles="$(_MultiplayerClientBin)\TaleWorlds.MountAndBlade.Multiplayer.dll" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(_MultiplayerClientBin)\TaleWorlds.MountAndBlade.Multiplayer.dll')" />
     <Warning Text="[CoopSpectatorDedicated] Deploy done → Dedicated Server (bin\Server + Client + Multiplayer.dll + staged SandBox/SandBoxCore exact-scene assets). Restart dedicated if running." Condition="Exists('$(DedicatedServerRootDir)')" />

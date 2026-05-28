@@ -11,7 +11,7 @@ namespace CoopSpectator.Patches
 {
     /// <summary>
     /// Temporary client-side guard for vanilla custom-game intermission VM.
-    /// The current TdmClone lobby flow triggers exceptions on culture-vote updates
+    /// The current coop battle-map lobby flow triggers exceptions on culture-vote updates
     /// before LoadMission; swallowing them lets us verify whether this is the
     /// remaining client crash source.
     /// </summary>

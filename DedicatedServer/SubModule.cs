@@ -1,4 +1,4 @@
-// Точка входу тільки для Dedicated Server. Реєстрація CoopTdm/CoopBattle + Harmony-патчі WebPanel (неблокуючий старт).
+// Dedicated-server entry point: CoopBattle registration plus runtime and web-panel hooks.
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -18,7 +18,7 @@ namespace CoopSpectator
 {
     public sealed class SubModule : MBSubModuleBase
     {
-        /// <summary>ТЗ A: true = тільки proof-of-load, без Harmony і без реєстрації game mode. false = реєструємо TdmClone + Harmony (для Етапу 3.3 — тест з нашими mission behaviors і логуванням; UseTdmCloneForListedTest у Launcher має бути true).</summary>
+        /// <summary>ТЗ A: true = тільки proof-of-load, без Harmony і без реєстрації game mode. false = normal listed/custom-server bootstrap with CoopBattle override and coop runtime hooks.</summary>
         private const bool CleanModuleLoadOnly = false;
         private const bool EnableFixedTestCultures = true;
         // Disabled after 2026-05-15 reconnect/load-crash triage:
@@ -50,9 +50,6 @@ namespace CoopSpectator
         protected override void OnApplicationTick(float dt)
         {
             base.OnApplicationTick(dt);
-
-            if (ExperimentalFeatures.EnableTdmCloneExperiment)
-                return;
 
             try
             {
@@ -92,7 +89,7 @@ namespace CoopSpectator
                 _pendingDedicatedObserverStableReadyTickCount = 0;
                 _lastDedicatedObserverActivationWaitDiagnosticKey = string.Empty;
                 ModLogger.Info(
-                    "CoopSpectatorDedicated: deferred dedicated mission observer activation pending native mission-ready state. " +
+                    "CoopSpectatorDedicated: deferred dedicated mission observer activation pending multiplayer bootstrap contract. " +
                     "Mission=" + (mission.SceneName ?? "null") +
                     " RequiredStableTicks=" + DedicatedObserverRequiredStableReadyTicks +
                     " FallbackTimeoutSeconds=" + DedicatedObserverFallbackActivationTimeoutSeconds.ToString("0.0"));
@@ -119,7 +116,7 @@ namespace CoopSpectator
 
                 _activatedDedicatedObserverMission = mission;
                 ModLogger.Info(
-                    "CoopSpectatorDedicated: activating dedicated mission observer after native mission-ready state stabilized. " +
+                    "CoopSpectatorDedicated: activating dedicated mission observer after multiplayer bootstrap contract stabilized. " +
                     "Mission=" + (mission.SceneName ?? "null") +
                     " StableReadyTicks=" + _pendingDedicatedObserverStableReadyTickCount +
                     " Details=" + readyStateDetails);
@@ -140,7 +137,7 @@ namespace CoopSpectator
 
             _activatedDedicatedObserverMission = mission;
             ModLogger.Info(
-                "CoopSpectatorDedicated: activating dedicated mission observer after fallback timeout despite incomplete native ready state. " +
+                "CoopSpectatorDedicated: activating dedicated mission observer after fallback timeout despite incomplete multiplayer bootstrap contract. " +
                 "Mission=" + (mission.SceneName ?? "null") +
                 " ElapsedSeconds=" + elapsed.TotalSeconds.ToString("0.000") +
                 " Details=" + readyStateDetails);
@@ -183,7 +180,7 @@ namespace CoopSpectator
             if (string.IsNullOrWhiteSpace(sceneName))
                 return false;
 
-            return modeReady && hasLobbyComponent && hasTimerComponent && hasTeamSelectComponent;
+            return modeReady && hasLobbyComponent && hasTimerComponent;
         }
 
         private static void LogDedicatedMissionObserverActivationWait(Mission mission, string stage, string details)
@@ -381,8 +378,7 @@ namespace CoopSpectator
                 if (_harmony == null)
                     _harmony = new Harmony("com.coopspectator.dedicated");
                 GameModeOverridePatches.Apply(_harmony);
-                if (!ExperimentalFeatures.EnableTdmCloneExperiment)
-                    ModLogger.Info("[GameModeReg] Stable baseline active: TeamDeathmatch override disabled, Battle override remains available.");
+                ModLogger.Info("[GameModeReg] Battle override available; TeamDeathmatch stays vanilla for listed flow.");
             }
             catch (Exception ex)
             {
@@ -851,21 +847,7 @@ namespace CoopSpectator
                 var battleOverride = new MissionMultiplayerCoopBattleMode(CoopGameModeIds.OfficialBattle);
                 GameModeOverridePatches.SetBattleOverride(battleOverride);
                 ModLogger.Info("[GameModeReg] Battle override armed via Harmony. GetMultiplayerGameMode(Battle) will return CoopBattle runtime.");
-                ModLogger.Info("[GameModeReg] add CoopTdm id=" + MissionMultiplayerCoopTdmMode.GameModeId);
-                TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(new MissionMultiplayerCoopTdmMode(MissionMultiplayerCoopTdmMode.GameModeId));
-                if (ExperimentalFeatures.EnableTdmCloneExperiment)
-                {
-                    ModLogger.Info("[GameModeReg] add TdmClone id=" + MissionMultiplayerTdmCloneMode.GameModeId);
-                    TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(new MissionMultiplayerTdmCloneMode(MissionMultiplayerTdmCloneMode.GameModeId));
-                    var teamDeathmatchOverride = new MissionMultiplayerTdmCloneMode(CoopGameModeIds.OfficialTeamDeathmatch);
-                    GameModeOverridePatches.SetTeamDeathmatchOverride(teamDeathmatchOverride);
-                    ModLogger.Info("[GameModeReg] skip AddMultiplayerGameMode(TeamDeathmatch) — use Harmony override only (avoids same key). GetMultiplayerGameMode(TeamDeathmatch) will return TdmClone 3+3.");
-                    ModLogger.Info("[GameModeReg] Registered: CoopBattle, CoopTdm, TdmClone. TeamDeathmatch handled by Harmony postfix.");
-                }
-                else
-                {
-                    ModLogger.Info("[GameModeReg] Stable baseline active: TdmClone registration/override disabled. Listed flow stays on vanilla TeamDeathmatch.");
-                }
+                ModLogger.Info("[GameModeReg] Listed flow keeps vanilla TeamDeathmatch. Registered custom mode set = [CoopBattle].");
             }
             catch (Exception ex)
             {

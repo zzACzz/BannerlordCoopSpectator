@@ -661,7 +661,7 @@ namespace CoopSpectator.GameMode
             }
             catch (Exception ex)
             {
-                ModLogger.Error("[TdmCloneStack] MissionScoreboardComponent create failed (MissionCustomGameServerComponent.AfterStart may crash): " + ex.Message, ex);
+                ModLogger.Error("[MultiplayerBootstrap] MissionScoreboardComponent create failed (MissionCustomGameServerComponent.AfterStart may crash): " + ex.Message, ex);
                 return null;
             }
         }

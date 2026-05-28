@@ -73,9 +73,6 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const string TestListedServerName = "AC_COOP";
         /// <summary>Для контрольного тесту: сцена TDM (listed flow safer за mp_skirmish_spawn_test).</summary>
         private const string TestListedScene = "mp_tdm_map_001";
-        /// <summary>Етап 3.3: true = у listed-test конфігу використовувати GameType TdmClone (і add_map_to_usable_maps ... TdmClone), щоб на дедику працювали наші mission behaviors з логуванням. На дедику потрібно CleanModuleLoadOnly = false.</summary>
-        private const bool UseTdmCloneForListedTest = ExperimentalFeatures.EnableTdmCloneExperiment;
-
         /// <summary>Процес дедик-сервера, запущеного з моду (для відправки команд через stdin, якщо сервер їх читає).</summary>
         private static Process _dedicatedProcess;
         private static DedicatedServerLaunchSettings _currentLaunchSettings;
@@ -524,10 +521,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 // GameType у dedicated server config ПОВИНЕН бути одним з офіційних режимів:
                 // Captain, TeamDeathmatch, Skirmish, FreeForAll, Duel або Siege.
                 // (див. офіційну документацію hosting_server / GameType).
-                // Наш кастомний режим TdmClone реєструється в модулі, але як GameType у конфігу
-                // він не підтримується → "Cannot find game type: TdmClone".
-                // Тому тут завжди ставимо валідний офіційний режим, наприклад TeamDeathmatch.
-                string gameTypeId = "TeamDeathmatch";
+                // Dedicated startup config must keep an official GameType value.
+                // We use vanilla TeamDeathmatch as the listed-shell mode and inject
+                // coop behaviors later during mission bootstrap.
+                string gameTypeId = CoopGameModeIds.OfficialTeamDeathmatch;
                 string content = BuildStartupConfigContent(settings, gameTypeId, null, includeMapLine: false, includeAddMapLine: false);
                 File.WriteAllText(configPath, content);
                 ModLogger.Info(
@@ -545,7 +542,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             }
         }
 
-        /// <summary>Записує стартовий конфіг для listed flow: явний Map + add_map_to_usable_maps + start_game. UseTdmCloneForListedTest=true → GameType TdmClone.</summary>
+        /// <summary>Записує стартовий конфіг для listed flow з official TeamDeathmatch shell.</summary>
         private static string TryWriteStartupConfigForListedTest(string exePath, DedicatedServerLaunchSettings settings)
         {
             string root = GetDedicatedServerRootFromExe(exePath);
@@ -556,7 +553,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             string configPath = Path.Combine(nativeDir, testConfigFileName);
             try
             {
-                string gameTypeId = UseTdmCloneForListedTest ? CoopGameModeIds.TdmClone : "TeamDeathmatch";
+                string gameTypeId = CoopGameModeIds.OfficialTeamDeathmatch;
                 string content = BuildStartupConfigContent(settings, gameTypeId, TestListedScene, includeMapLine: true, includeAddMapLine: true);
                 File.WriteAllText(configPath, content);
                 ModLogger.Info(
@@ -810,7 +807,7 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                         string root = GetDedicatedServerRootFromExe(exePath);
                         moddedConfigPath = !string.IsNullOrEmpty(root) ? Path.Combine(root, "Modules", "Native", moddedConfigFile) : moddedConfigFile;
                     }
-                    LogStartupState(!string.IsNullOrEmpty(moddedConfigFile), moddedConfigPath, TestListedScene, UseTdmCloneForListedTest ? "TdmClone" : "TeamDeathmatch", launchSettings.ServerName, "config file (listed-test)", string.IsNullOrEmpty(moddedConfigFile) ? "none" : "config");
+                    LogStartupState(!string.IsNullOrEmpty(moddedConfigFile), moddedConfigPath, TestListedScene, CoopGameModeIds.OfficialTeamDeathmatch, launchSettings.ServerName, "config file (listed-test)", string.IsNullOrEmpty(moddedConfigFile) ? "none" : "config");
                 }
                 else
                 {

@@ -1,5 +1,3 @@
-// Harmony-патч: підміна GetMultiplayerGameMode("TeamDeathmatch") на наш режим (3+3 спавн).
-// Ванільний Multiplayer реєструє "TeamDeathmatch" раніше, тому lookup повертає його — підмінюємо результат тут.
 using System.Reflection;
 using HarmonyLib;
 using CoopSpectator.Infrastructure;
@@ -7,23 +5,13 @@ using CoopSpectator.Infrastructure;
 namespace CoopSpectator.Patches
 {
     /// <summary>
-    /// Підміняє результат GetMultiplayerGameMode("TeamDeathmatch") на наш MissionMultiplayerTdmCloneMode,
-    /// щоб при GameType TeamDeathmatch у конфігу дедика запускалась наша місія зі спавном 3+3.
+    /// Overrides the official Battle lookup so the engine boots our CoopBattle runtime
+    /// while the listed TeamDeathmatch path remains vanilla.
     /// </summary>
     public static class GameModeOverridePatches
     {
-        /// <summary>Наш режим, який повертаємо замість ванільного TDM при запиті "TeamDeathmatch".</summary>
-        private static object _teamDeathmatchOverride;
-        /// <summary>Наш режим, який повертаємо замість ванільного Battle при запиті "Battle".</summary>
         private static object _battleOverride;
 
-        /// <summary>Встановити режим для підміни (викликати з SubModule перед/після AddMultiplayerGameMode).</summary>
-        public static void SetTeamDeathmatchOverride(object gameMode)
-        {
-            _teamDeathmatchOverride = gameMode;
-        }
-
-        /// <summary>Встановити режим для підміни офіційного Battle.</summary>
         public static void SetBattleOverride(object gameMode)
         {
             _battleOverride = gameMode;
@@ -33,7 +21,6 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                // Module — TaleWorlds.MountAndBlade.Module, метод GetMultiplayerGameMode(string).
                 MethodInfo target = AccessTools.Method(typeof(TaleWorlds.MountAndBlade.Module), "GetMultiplayerGameMode", new[] { typeof(string) });
                 if (target == null)
                 {
@@ -49,7 +36,7 @@ namespace CoopSpectator.Patches
                 }
 
                 harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-                ModLogger.Info("GameModeOverridePatches: GetMultiplayerGameMode postfix applied (TeamDeathmatch/Battle overrides active).");
+                ModLogger.Info("GameModeOverridePatches: GetMultiplayerGameMode postfix applied (Battle override active).");
             }
             catch (System.Exception ex)
             {
@@ -58,22 +45,14 @@ namespace CoopSpectator.Patches
             }
         }
 
-        /// <summary>Після виклику оригіналу: якщо запитували "TeamDeathmatch" і є наш override — повертаємо його.</summary>
+        /// <summary>After the vanilla lookup, replace Battle with the coop runtime when armed.</summary>
         public static void GetMultiplayerGameMode_Postfix(string gameType, ref object __result)
         {
-            if (string.IsNullOrEmpty(gameType)) return;
-            if (string.Equals(gameType, CoopGameModeIds.OfficialTeamDeathmatch, System.StringComparison.Ordinal))
-            {
-                if (_teamDeathmatchOverride != null)
-                    __result = _teamDeathmatchOverride;
+            if (string.IsNullOrEmpty(gameType))
                 return;
-            }
 
-            if (string.Equals(gameType, CoopGameModeIds.OfficialBattle, System.StringComparison.Ordinal))
-            {
-                if (_battleOverride != null)
-                    __result = _battleOverride;
-            }
+            if (string.Equals(gameType, CoopGameModeIds.OfficialBattle, System.StringComparison.Ordinal) && _battleOverride != null)
+                __result = _battleOverride;
         }
     }
 }

@@ -1,4 +1,4 @@
-<!-- Модуль тільки для Dedicated Server: реєстрація CoopTdm, server-side behaviors. Не для SP/клієнта. DLL лише в bin/Win64_Shipping_Server/. -->
+<!-- Dedicated-server module: CoopBattle registration and server-side runtime hooks only. -->
 <Module>
   <Name value="Bannerlord Coop Campaign (Dedicated)" />
   <Id value="CoopSpectatorDedicated" />

@@ -35,7 +35,7 @@
     <!-- Шлях до клієнтської Multiplayer DLL: спочатку root bin, інакше модуль Multiplayer (Steam-інсталяція має DLL у Modules\Multiplayer\bin\Win64_Shipping_Client). -->
     <BannerlordMultiplayerModuleBinDir>$(BannerlordRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Client</BannerlordMultiplayerModuleBinDir>
     <BannerlordNativeModuleBinDir>$(BannerlordRootDir)\Modules\Native\bin\Win64_Shipping_Client</BannerlordNativeModuleBinDir>
-    <!-- Є саме Multiplayer DLL: root bin, модуль Multiplayer, або копія в корені проєкту — тоді компілюємо GameMode і HAS_GAMEMODE для TdmClone. -->
+    <!-- If the Multiplayer DLL is available, compile the multiplayer GameMode layer and enable HAS_GAMEMODE. -->
     <HasGameModeDll Condition="'$(UseGameDlls)'=='true' and Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">true</HasGameModeDll>
     <HasGameModeDll Condition="'$(UseGameDlls)'=='true' and Exists('$(BannerlordMultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">true</HasGameModeDll>
     <HasGameModeDll Condition="'$(UseGameDlls)'!='true' and Exists('TaleWorlds.MountAndBlade.Multiplayer.dll')">true</HasGameModeDll>
@@ -49,7 +49,7 @@
     <AssemblySearchPaths>{HintPathFromItem};{CandidateAssemblyFiles};{TargetFrameworkDirectory};{RawFileName}</AssemblySearchPaths>
   </PropertyGroup>
 
-  <!-- Клієнт/кампанія: не компілюємо DedicatedServer. GameMode виключаємо за замовчуванням; додаємо назад у таргеті лише якщо є Multiplayer DLL. Щоб зібрати клієнта з TdmClone: вкажіть /p:BannerlordRootDir= на інсталяцію гри з bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll або скопіюйте цю DLL у корінь проєкту. -->
+  <!-- Client/campaign build: exclude DedicatedServer. GameMode is added back only when the Multiplayer DLL is available. -->
   <ItemGroup>
     <Compile Remove="DedicatedServer\**\*" />
     <Compile Remove="GameMode\**\*" />
@@ -220,7 +220,7 @@
       <HintPath>TaleWorlds.MountAndBlade.Lobby.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <!-- Multiplayer API (fallback: копія з гри bin\Win64_Shipping_Client у корінь проєкту — для збірки з GameMode/TdmClone) -->
+    <!-- Multiplayer API (fallback: copy the client Multiplayer DLL into the repo root for GameMode builds). -->
     <Reference Include="TaleWorlds.MountAndBlade.Multiplayer" Condition="Exists('TaleWorlds.MountAndBlade.Multiplayer.dll')">
       <HintPath>TaleWorlds.MountAndBlade.Multiplayer.dll</HintPath>
       <Private>false</Private>

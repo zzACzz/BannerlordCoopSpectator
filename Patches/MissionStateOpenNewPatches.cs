@@ -12,8 +12,8 @@ using TaleWorlds.MountAndBlade;
 namespace CoopSpectator.Patches
 {
     /// <summary>
-    /// Logs MissionState.OpenNew lifecycle and, in the stable baseline, wraps the
-    /// vanilla TeamDeathmatch behavior factory to append passive diagnostics only.
+    /// Logs MissionState.OpenNew lifecycle and wraps vanilla mission factories
+    /// where the coop runtime still attaches to the native MP shell.
     /// </summary>
     public static class MissionStateOpenNewPatches
     {
@@ -57,7 +57,7 @@ namespace CoopSpectator.Patches
                 }
 
                 harmony.Patch(openNew, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
-                ModLogger.Info("MissionStateOpenNewPatches: OpenNew prefix/postfix applied (TeamDeathmatch diagnostic injection ready).");
+                ModLogger.Info("MissionStateOpenNewPatches: OpenNew prefix/postfix applied (vanilla mission wrapping ready).");
             }
             catch (Exception ex)
             {
@@ -87,12 +87,12 @@ namespace CoopSpectator.Patches
                 CampaignMapPatchMissionInit.TryApply(ref rec, runtimeScene, "MissionState.OpenNew Battle");
             }
 
-            if (!ShouldInjectDiagnostics(missionName))
+            if (!ShouldWrapVanillaMission(missionName))
                 return;
 
             if (isCoopBattleFactory)
             {
-                ModLogger.Info("MissionState.OpenNew: skip vanilla TeamDeathmatch diagnostic wrapping for CoopBattle custom behavior factory.");
+                ModLogger.Info("MissionState.OpenNew: skip vanilla mission wrapping for CoopBattle custom behavior factory.");
                 return;
             }
 
@@ -100,7 +100,7 @@ namespace CoopSpectator.Patches
             if (string.Equals(missionName, OfficialTeamDeathmatchMissionName, StringComparison.Ordinal))
             {
                 handler = mission => WrapVanillaTeamDeathmatchBehaviors(mission, originalHandler);
-                ModLogger.Info("MissionState.OpenNew: wrapped TeamDeathmatch behavior handler for passive diagnostics injection.");
+                ModLogger.Info("MissionState.OpenNew: wrapped TeamDeathmatch behavior handler for coop runtime injection.");
             }
             else if (string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal) && GameNetwork.IsClient)
             {
@@ -119,9 +119,9 @@ namespace CoopSpectator.Patches
             ModLogger.Info("MissionState.OpenNew EXIT missionName=" + (missionName ?? "") + " (original method returned).");
         }
 
-        private static bool ShouldInjectDiagnostics(string missionName)
+        private static bool ShouldWrapVanillaMission(string missionName)
         {
-            if (!ExperimentalFeatures.EnableVanillaTeamDeathmatchDiagnosticsInjection || ExperimentalFeatures.EnableTdmCloneExperiment)
+            if (!ExperimentalFeatures.EnableVanillaMissionWrapping)
                 return false;
 
             return string.Equals(missionName, OfficialTeamDeathmatchMissionName, StringComparison.Ordinal)
@@ -203,16 +203,13 @@ namespace CoopSpectator.Patches
 
             if (GameNetwork.IsServer)
             {
-                list.Add(new MissionMinimalServerDiagnosticMode());
                 list.Add(new CoopMissionNetworkBridge());
                 list.Add(new CoopMissionSpawnLogic());
-                ModLogger.Info("MissionStateOpenNewPatches: appended MissionMinimalServerDiagnosticMode to vanilla TeamDeathmatch.");
                 ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionNetworkBridge to vanilla TeamDeathmatch.");
                 ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionSpawnLogic to vanilla TeamDeathmatch.");
             }
             else
             {
-                list.Add(new MissionMinimalClientDiagnosticMode());
                 list.Add(new CoopMissionNetworkBridge());
                 list.Add(new CoopMissionClientLogic());
 #if !COOPSPECTATOR_DEDICATED
@@ -222,7 +219,6 @@ namespace CoopSpectator.Patches
                     ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionSelectionView to wrapped TeamDeathmatch client stack.");
                 }
 #endif
-                ModLogger.Info("MissionStateOpenNewPatches: appended MissionMinimalClientDiagnosticMode to vanilla TeamDeathmatch.");
                 ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionNetworkBridge to vanilla TeamDeathmatch.");
                 ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionClientLogic to vanilla TeamDeathmatch.");
             }

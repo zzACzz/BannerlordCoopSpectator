@@ -597,7 +597,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             list.Add(behavior);
         }
 
-        /// <summary>Чи це dedicated server. Див. коментар у MissionMultiplayerCoopTdmMode.IsDedicatedServerProcess.</summary>
+        /// <summary>Returns true when the current process is the dedicated server binary.</summary>
         private static bool IsDedicatedServerProcess()
         {
             try

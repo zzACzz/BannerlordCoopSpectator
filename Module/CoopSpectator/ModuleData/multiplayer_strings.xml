@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <strings>
-  <string id="str_multiplayer_official_game_type_name.CoopTdm" text="{=*}Coop TDM" />
-  <string id="str_multiplayer_game_type.CoopTdm" text="{=*}Coop TDM" />
   <string id="str_multiplayer_official_game_type_name.CoopBattle" text="{=*}Coop Battle" />
   <string id="str_multiplayer_game_type.CoopBattle" text="{=*}Coop Battle" />
-  <string id="str_multiplayer_official_game_type_name.TdmClone" text="{=*}TDM Clone" />
-  <string id="str_multiplayer_game_type.TdmClone" text="{=*}TDM Clone" />
 </strings>
