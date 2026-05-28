@@ -157,8 +157,8 @@ namespace CoopSpectator.Patches
             List<MissionBehavior> list = new List<MissionBehavior>
             {
                 MissionLobbyComponent.CreateBehavior(),
-                new ListedShellTeamDeathmatchCompatibilityMode(),
-                new ListedShellTeamDeathmatchClientCompatibilityMode(),
+                new ListedShellCompatibilityMode(),
+                new ListedShellCompatibilityModeClient(),
                 new MultiplayerTimerComponent()
             };
 
@@ -192,7 +192,7 @@ namespace CoopSpectator.Patches
             List<MissionBehavior> list = new List<MissionBehavior>
             {
                 MissionLobbyComponent.CreateBehavior(),
-                new ListedShellTeamDeathmatchClientCompatibilityMode()
+                new ListedShellCompatibilityModeClient()
             };
 
             AddOptional(

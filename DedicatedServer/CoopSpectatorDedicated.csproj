@@ -112,8 +112,9 @@
     <Compile Include="Patches\DedicatedKnockoutOutcomePatches.cs" Link="Patches\DedicatedKnockoutOutcomePatches.cs" />
     <Compile Include="Patches\GameModeOverridePatches.cs" Link="Patches\GameModeOverridePatches.cs" />
     <Compile Include="..\Patches\MissionStateOpenNewPatches.cs" Link="Patches\MissionStateOpenNewPatches.cs" />
-    <Compile Include="..\Patches\ListedShellTeamDeathmatchCompatibilityMode.cs" Link="Patches\ListedShellTeamDeathmatchCompatibilityMode.cs" />
-    <Compile Include="..\Patches\ListedShellTeamDeathmatchClientCompatibilityMode.cs" Link="Patches\ListedShellTeamDeathmatchClientCompatibilityMode.cs" />
+    <Compile Include="..\Patches\ListedShellCompatibilityMode.cs" Link="Patches\ListedShellCompatibilityMode.cs" />
+    <Compile Include="..\Patches\ListedShellCompatibilityModeClient.cs" Link="Patches\ListedShellCompatibilityModeClient.cs" />
+    <Compile Include="..\Patches\ListedShellMissionRepresentative.cs" Link="Patches\ListedShellMissionRepresentative.cs" />
     <Compile Include="..\Patches\ListedShellSpawnFrameBehavior.cs" Link="Patches\ListedShellSpawnFrameBehavior.cs" />
     <Compile Include="..\Patches\ListedShellSpawningBehavior.cs" Link="Patches\ListedShellSpawningBehavior.cs" />
     <Compile Include="..\Patches\ExactCampaignArmyBootstrapPatch.cs" Link="Patches\ExactCampaignArmyBootstrapPatch.cs" />
