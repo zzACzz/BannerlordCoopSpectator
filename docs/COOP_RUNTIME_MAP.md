@@ -204,6 +204,8 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - authoritative troop selection більше не читає native `MissionPeer.SelectedTroopIndex` як джерело істини;
 - native `MissionPeer.Team` уже моститься server-side з coop authority state;
 - native `SelectedTroopIndex` лишається тільки compatibility bridge для vanilla bootstrap/network expectations;
+- native gold/class accounting для preview/materialization compatibility тепер теж резолвиться від authoritative coop selection, а не від `MissionPeer.SelectedTroopIndex` як джерела істини;
+- server-side coop spawn path більше не форсить native pending visuals там, де сам native `ShouldSpawnVisualsForServer(...)` повертає `false` (зокрема на dedicated);
 - старий client-side vanilla-selection reflection шар (hint/menu, class-loadout filtering, team-select/scoreboard culture sync, vanilla spawn/team-change mirror paths) уже видалений;
 - ми ще не маємо повної заміни native team-selection shell.
 
@@ -227,6 +229,12 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - `MissionLobbyEquipmentNetworkComponent` як обов'язкова частина того ж native visual/equipment bootstrap pair
 - native mission peer spawn timers
 - native team membership
+- native gold preview/deduction contract, який все ще виконується для listed/bootstrap compatibility, але вже живе поверх authoritative coop hero-class resolution
+
+Важливе звуження поточного контракту:
+
+- native pending spawn visuals тепер запитуються тільки тоді, коли поточний native game-mode contract сам вимагає server visuals через `ShouldSpawnVisualsForServer(...)`;
+- це означає, що dedicated coop runtime більше не форсить штучний pending-visual wait path там, де vanilla dedicated runtime його не запускає.
 
 Тобто логіка materialization уже значною мірою наша, але вона ще не відв'язана від native multiplayer bootstrap assumptions.
 
@@ -347,6 +355,8 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - прибраний `EnableTdmCloneExperiment` з `Infrastructure/ExperimentalFeatures.cs`;
 - прибраний `EnableBattleMapClientEquipmentNetworkComponent`, бо `MissionLobbyEquipmentNetworkComponent` уже не є опційним у battle-map runtime;
 - прибрана мертва wrapped-Battle crash-isolation гілка, яка намагалась вирізати `MissionLobbyEquipmentNetworkComponent` із client stack;
+- native spawn gold floor/deduction більше не читає `MissionPeer.SelectedTroopIndex` як authority і тепер йде через окремий authoritative compatibility hero-class resolver;
+- pending native spawn visuals більше не форсяться в coop server path, якщо native `ShouldSpawnVisualsForServer(...)` не вимагає їх для поточного peer/runtime;
 - mission wrapping flag перейменований у `EnableVanillaMissionWrapping`;
 - прибрана логіка `TeamDeathmatch` override з `DedicatedServer/Patches/GameModeOverridePatches.cs`;
 - прибрані `CoopTdm` і `TdmClone` strings з `Module/CoopSpectator/ModuleData/multiplayer_strings.xml`;

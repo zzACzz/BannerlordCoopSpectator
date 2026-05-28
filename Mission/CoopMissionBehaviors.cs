@@ -9553,7 +9553,7 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || !GameNetwork.IsServer)
                 return;
 
-            TryFinalizePendingVanillaSpawnVisuals(mission, source);
+            TryFinalizePendingNativeSpawnVisualCompatibility(mission, source);
         }
 
         private static void TryUpdateBattlePhaseState(Mission mission, string source)
@@ -21705,7 +21705,7 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 _spawnedCoopPeerIndices.Add(peer.Index);
-                ExpireMissionPeerVanillaSpawnVisuals(missionPeer);
+                ExpireMissionPeerNativeVisualCompatibilityState(missionPeer);
                 missionPeer.WantsToSpawnAsBot = false;
                 CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
                     peer,
@@ -22115,7 +22115,7 @@ namespace CoopSpectator.MissionBehaviors
                 missionPeer.FollowedAgent = targetAgent;
                 missionPeer.SpawnCountThisRound = Math.Max(missionPeer.SpawnCountThisRound, 1);
 
-                TryEnsureVanillaSpawnGoldFloor(gameMode, peer, missionPeer, source + " replace-bot");
+                TryEnsureNativeSpawnGoldCompatibilityFloor(gameMode, peer, missionPeer, source + " replace-bot");
                 Agent replacedAgent = mission.ReplaceBotWithPlayer(targetAgent, missionPeer);
                 if (replacedAgent == null)
                 {
@@ -22155,9 +22155,8 @@ namespace CoopSpectator.MissionBehaviors
                     commanderControlState,
                     source + " replace-bot");
 
-                TryApplyVanillaSpawnGoldDeduction(gameMode, peer, missionPeer, source + " replace-bot");
-                bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
-                ExpireMissionPeerVanillaSpawnVisuals(missionPeer);
+                TryApplyNativeSpawnGoldCompatibilityDeduction(gameMode, peer, missionPeer, source + " replace-bot");
+                bool removedPendingVisuals = ClearMissionPeerPendingNativeSpawnVisualCompatibility(mission, missionPeer);
                 if (IsSceneAwareBattleMapRuntime(mission) &&
                     SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
                 {
@@ -24519,7 +24518,7 @@ namespace CoopSpectator.MissionBehaviors
                     _spawnedCoopPeerIndices.Remove(peer.Index);
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " lost-controlled-agent");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " lost-controlled-agent");
-                    ExpireMissionPeerVanillaSpawnVisuals(missionPeer);
+                    ExpireMissionPeerNativeVisualCompatibilityState(missionPeer);
                     CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " lost-controlled-agent");
                     TryReleasePeerOrderOwnershipAfterLeavingActiveLife(
                         mission,
@@ -24844,7 +24843,7 @@ namespace CoopSpectator.MissionBehaviors
             if (peer != null)
                 _spawnedCoopPeerIndices.Remove(peer.Index);
 
-            ExpireMissionPeerVanillaSpawnVisuals(missionPeer);
+            ExpireMissionPeerNativeVisualCompatibilityState(missionPeer);
             ResetMissionPeerSpawnTimerForImmediateRespawn(mission, missionPeer);
             missionPeer.WantsToSpawnAsBot = false;
             MovePeerToSpectatorHoldingState(mission, missionPeer, peer, source + " forced-respawnable");
@@ -25021,13 +25020,20 @@ namespace CoopSpectator.MissionBehaviors
                  ExactCampaignArmyBootstrap.TryGetEntryId(agent, out _));
         }
 
-        private static void ExpireMissionPeerVanillaSpawnVisuals(MissionPeer missionPeer)
+        private static void ExpireMissionPeerNativeVisualCompatibilityState(MissionPeer missionPeer)
         {
             if (missionPeer == null)
                 return;
 
             missionPeer.HasSpawnedAgentVisuals = false;
             missionPeer.EquipmentUpdatingExpired = true;
+        }
+
+        private static bool ClearMissionPeerPendingNativeSpawnVisualCompatibility(Mission mission, MissionPeer missionPeer)
+        {
+            bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
+            ExpireMissionPeerNativeVisualCompatibilityState(missionPeer);
+            return removedPendingVisuals;
         }
 
         private static void ResetMissionPeerSpawnTimerForImmediateRespawn(Mission mission, MissionPeer missionPeer)
@@ -25066,7 +25072,7 @@ namespace CoopSpectator.MissionBehaviors
                 out _,
                 out _);
             missionPeer.WantsToSpawnAsBot = false;
-            ExpireMissionPeerVanillaSpawnVisuals(missionPeer);
+            ExpireMissionPeerNativeVisualCompatibilityState(missionPeer);
 
             if (!alreadySpectator)
             {
@@ -28795,9 +28801,8 @@ namespace CoopSpectator.MissionBehaviors
 
                     missionPeer.SpawnCountThisRound++;
 
-                    bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
-
-                    missionPeer.HasSpawnedAgentVisuals = false;
+                    bool hadPendingSpawnVisualCompatibility = missionPeer.HasSpawnedAgentVisuals;
+                    bool removedPendingVisuals = ClearMissionPeerPendingNativeSpawnVisualCompatibility(mission, missionPeer);
                     MPPerkObject.GetPerkHandler(missionPeer)?.OnEvent(MPPerkCondition.PerkEventFlags.SpawnEnd);
 
                     ModLogger.Info(
@@ -28805,7 +28810,7 @@ namespace CoopSpectator.MissionBehaviors
                         "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
                         " Agent=" + spawnedAgent.Index +
                         " SpawnFromVisuals=" + spawnFromAgentVisuals +
-                        " HadVisuals=" + missionPeer.HasSpawnedAgentVisuals +
+                        " HadPendingVisualCompatibility=" + hadPendingSpawnVisualCompatibility +
                         " RefreshedSpawnEquipment=" + (!runtimeExactCharacter && spawnedAgent.SpawnEquipment != null) +
                         " RuntimeExactCharacter=" + runtimeExactCharacter +
                         " AddedPerksComponent=True" +
@@ -28915,6 +28920,9 @@ namespace CoopSpectator.MissionBehaviors
                     return false;
                 }
 
+                if (!RequiresNativePendingSpawnVisualCompatibility(gameMode, peer, missionPeer, source))
+                    return false;
+
                 Team team = authoritativeTeam ?? missionPeer.Team;
                 if (team == null || ReferenceEquals(team, mission.SpectatorTeam))
                 {
@@ -28950,7 +28958,7 @@ namespace CoopSpectator.MissionBehaviors
                 gameMode.HandleAgentVisualSpawning(peer, previewBuildData);
 
                 ModLogger.Info(
-                    "CoopMissionSpawnLogic: requested vanilla agent visuals before direct spawn. " +
+                    "CoopMissionSpawnLogic: requested native spawn visual compatibility before direct spawn. " +
                     "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
                     " TroopId=" + troop.StringId +
                     " TeamIndex=" + (team.TeamIndex) +
@@ -28963,6 +28971,50 @@ namespace CoopSpectator.MissionBehaviors
                 ModLogger.Info("CoopMissionSpawnLogic: failed to request pending spawn visuals (" + source + "): " + ex.Message);
                 return false;
             }
+        }
+
+        private static bool RequiresNativePendingSpawnVisualCompatibility(
+            MissionMultiplayerGameModeBase gameMode,
+            NetworkCommunicator peer,
+            MissionPeer missionPeer,
+            string source)
+        {
+            if (gameMode == null || peer == null || missionPeer == null)
+                return false;
+
+            bool shouldSpawnVisualsForServer = false;
+            try
+            {
+                shouldSpawnVisualsForServer = gameMode.ShouldSpawnVisualsForServer(peer);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: ShouldSpawnVisualsForServer failed open (" + source + "): " + ex.Message);
+                return true;
+            }
+
+            if (shouldSpawnVisualsForServer)
+                return true;
+
+            string peerName = peer.UserName ?? peer.Index.ToString();
+            string logKey =
+                peer.Index +
+                "|native-visual-compat-skip|" +
+                (missionPeer.Team?.Side ?? BattleSideEnum.None) +
+                "|" +
+                (Mission.Current?.SceneName ?? "null");
+            if (_loggedForcedPreferredClassKeys.Add(logKey))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: skipped native pending spawn visual compatibility because current native game-mode contract does not require server visuals. " +
+                    "Peer=" + peerName +
+                    " TeamIndex=" + (missionPeer.Team?.TeamIndex ?? -1) +
+                    " Side=" + missionPeer.Team?.Side +
+                    " Source=" + source);
+            }
+
+            return false;
         }
 
         private static void GetDirectSpawnFrame(Mission mission, Team team, out Vec3 spawnPosition, out Vec2 spawnDirection)
@@ -29048,6 +29100,26 @@ namespace CoopSpectator.MissionBehaviors
             out int preferredTroopIndex,
             out string debugReason)
         {
+            if (!TryResolveAuthoritativeCompatibilityHeroClassForPeer(
+                    missionPeer,
+                    requireSpawnTimerReady,
+                    out preferredClass,
+                    out preferredTroopIndex,
+                    out debugReason))
+            {
+                return false;
+            }
+
+            return !ReferenceEquals(preferredClass, vanillaClass) || missionPeer.SelectedTroopIndex != preferredTroopIndex;
+        }
+
+        private static bool TryResolveAuthoritativeCompatibilityHeroClassForPeer(
+            MissionPeer missionPeer,
+            bool requireSpawnTimerReady,
+            out MultiplayerClassDivisions.MPHeroClass preferredClass,
+            out int preferredTroopIndex,
+            out string debugReason)
+        {
             preferredClass = null;
             preferredTroopIndex = -1;
             debugReason = string.Empty;
@@ -29127,7 +29199,7 @@ namespace CoopSpectator.MissionBehaviors
                         "' entry='" +
                         pendingRequestForBridge.EntryId +
                         "'";
-                    return !ReferenceEquals(preferredClass, vanillaClass) || missionPeer.SelectedTroopIndex != preferredTroopIndex;
+                    return true;
                 }
 
                 if (TryRejectPendingExactEntrySpawnDrift(
@@ -29145,7 +29217,7 @@ namespace CoopSpectator.MissionBehaviors
                 preferredClass = cultureClasses[exactIndex];
                 preferredTroopIndex = exactIndex;
                 debugReason = "exact troop id match for '" + targetTroopId + "' entry='" + (exactMatchEntry?.EntryId ?? selectionState.EntryId ?? "null") + "'";
-                return !ReferenceEquals(preferredClass, vanillaClass) || missionPeer.SelectedTroopIndex != preferredTroopIndex;
+                return true;
             }
 
             int bestIndex = FindBestPeerCultureHeroClassIndex(cultureClasses, targetTroopId);
@@ -29166,7 +29238,7 @@ namespace CoopSpectator.MissionBehaviors
                     "' entry='" +
                     pendingRequestForBridge.EntryId +
                     "'";
-                return !ReferenceEquals(preferredClass, vanillaClass) || missionPeer.SelectedTroopIndex != preferredTroopIndex;
+                return true;
             }
 
             if (TryRejectPendingExactEntrySpawnDrift(
@@ -29184,7 +29256,33 @@ namespace CoopSpectator.MissionBehaviors
             preferredClass = cultureClasses[bestIndex];
             preferredTroopIndex = bestIndex;
             debugReason = "peer-culture surrogate for '" + targetTroopId + "' entry='" + (surrogateEntry?.EntryId ?? selectionState.EntryId ?? "null") + "'";
-            return !ReferenceEquals(preferredClass, vanillaClass) || missionPeer.SelectedTroopIndex != preferredTroopIndex;
+            return true;
+        }
+
+        private static bool TryResolveAuthoritativeCompatibilityTroopCasualCost(
+            MissionPeer missionPeer,
+            out MultiplayerClassDivisions.MPHeroClass compatibilityClass,
+            out int compatibilityTroopIndex,
+            out int troopCasualCost,
+            out string reason)
+        {
+            troopCasualCost = 0;
+            if (!TryResolveAuthoritativeCompatibilityHeroClassForPeer(
+                    missionPeer,
+                    requireSpawnTimerReady: false,
+                    out compatibilityClass,
+                    out compatibilityTroopIndex,
+                    out reason))
+            {
+                return false;
+            }
+
+            troopCasualCost = compatibilityClass?.TroopCasualCost ?? 0;
+            if (troopCasualCost > 0)
+                return true;
+
+            reason = "compatibility hero class casual cost <= 0";
+            return false;
         }
 
         private static RosterEntryState ResolvePreferredAllowedEntryStateForPeer(
@@ -29531,7 +29629,7 @@ namespace CoopSpectator.MissionBehaviors
             TrySyncCoopClassRestrictions(mission, source);
         }
 
-        private static void TryFinalizePendingVanillaSpawnVisuals(Mission mission, string source)
+        private static void TryFinalizePendingNativeSpawnVisualCompatibility(Mission mission, string source)
         {
             if (mission == null || !GameNetwork.IsServer || GameNetwork.NetworkPeers == null || GameNetwork.NetworkPeers.Count == 0)
                 return;
@@ -29558,47 +29656,49 @@ namespace CoopSpectator.MissionBehaviors
 
                 try
                 {
-                    TryEnsureVanillaSpawnGoldFloor(gameMode, peer, missionPeer, source);
+                    TryEnsureNativeSpawnGoldCompatibilityFloor(gameMode, peer, missionPeer, source);
+                    bool resolvedCompatibilityClass = TryResolveAuthoritativeCompatibilityHeroClassForPeer(
+                        missionPeer,
+                        requireSpawnTimerReady: false,
+                        out MultiplayerClassDivisions.MPHeroClass compatibilityClass,
+                        out int compatibilityTroopIndex,
+                        out string compatibilityReason);
                     spawnComponent.SetEarlyAgentVisualsDespawning(missionPeer, canDespawnEarly: true);
                     ModLogger.Info(
-                        "CoopMissionSpawnLogic: finalized pending vanilla spawn visuals for agent creation. " +
+                        "CoopMissionSpawnLogic: finalized pending native spawn visual compatibility for agent creation. " +
                         "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
                         " TeamIndex=" + (missionPeer.Team?.TeamIndex ?? -1) +
                         " Side=" + missionPeer.Team?.Side +
-                        " SelectedTroopIndex=" + missionPeer.SelectedTroopIndex +
+                        " CompatibilityTroopIndex=" + (resolvedCompatibilityClass ? compatibilityTroopIndex : -1) +
+                        " CompatibilityHeroClass=" + (resolvedCompatibilityClass ? (compatibilityClass?.HeroCharacter?.StringId ?? "null") : "unresolved") +
+                        " CompatibilityReason=" + (resolvedCompatibilityClass ? compatibilityReason : "unresolved: " + compatibilityReason) +
                         " Source=" + source);
                 }
                 catch (Exception ex)
                 {
-                    ModLogger.Info("CoopMissionSpawnLogic: failed to finalize pending vanilla spawn visuals (" + source + "): " + ex.Message);
+                    ModLogger.Info("CoopMissionSpawnLogic: failed to finalize pending native spawn visual compatibility (" + source + "): " + ex.Message);
                 }
             }
         }
 
-        private static void TryEnsureVanillaSpawnGoldFloor(
+        private static void TryEnsureNativeSpawnGoldCompatibilityFloor(
             MissionMultiplayerGameModeBase gameMode,
             NetworkCommunicator peer,
             MissionPeer missionPeer,
             string source)
         {
-            if (gameMode == null || peer == null || missionPeer == null || missionPeer.Culture == null)
+            if (gameMode == null || peer == null || missionPeer == null)
                 return;
 
-            int selectedTroopIndex = missionPeer.SelectedTroopIndex;
-            if (selectedTroopIndex < 0)
+            if (!TryResolveAuthoritativeCompatibilityTroopCasualCost(
+                    missionPeer,
+                    out MultiplayerClassDivisions.MPHeroClass compatibilityClass,
+                    out int compatibilityTroopIndex,
+                    out int troopCasualCost,
+                    out string compatibilityReason))
+            {
                 return;
-
-            List<MultiplayerClassDivisions.MPHeroClass> cultureClasses = MultiplayerClassDivisions
-                .GetMPHeroClasses(missionPeer.Culture)
-                ?.Where(heroClass => heroClass?.HeroCharacter != null)
-                .ToList();
-            if (cultureClasses == null || selectedTroopIndex >= cultureClasses.Count)
-                return;
-
-            MultiplayerClassDivisions.MPHeroClass selectedClass = cultureClasses[selectedTroopIndex];
-            int troopCasualCost = selectedClass?.TroopCasualCost ?? 0;
-            if (troopCasualCost <= 0)
-                return;
+            }
 
             int currentGold = gameMode.GetCurrentGoldForPeer(missionPeer);
             if (currentGold >= troopCasualCost)
@@ -29606,51 +29706,47 @@ namespace CoopSpectator.MissionBehaviors
 
             gameMode.ChangeCurrentGoldForPeer(missionPeer, troopCasualCost);
             ModLogger.Info(
-                "CoopMissionSpawnLogic: raised vanilla spawn gold floor before visuals finalize. " +
+                "CoopMissionSpawnLogic: raised native spawn gold compatibility floor before visuals finalize. " +
                 "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                " SelectedTroopIndex=" + selectedTroopIndex +
-                " HeroClass=" + (selectedClass?.HeroCharacter?.StringId ?? "null") +
+                " CompatibilityTroopIndex=" + compatibilityTroopIndex +
+                " HeroClass=" + (compatibilityClass?.HeroCharacter?.StringId ?? "null") +
                 " PreviousGold=" + currentGold +
                 " AppliedGold=" + troopCasualCost +
+                " CompatibilityReason=" + compatibilityReason +
                 " Source=" + source);
         }
 
-        private static void TryApplyVanillaSpawnGoldDeduction(
+        private static void TryApplyNativeSpawnGoldCompatibilityDeduction(
             MissionMultiplayerGameModeBase gameMode,
             NetworkCommunicator peer,
             MissionPeer missionPeer,
             string source)
         {
-            if (gameMode == null || peer == null || missionPeer == null || missionPeer.Culture == null)
+            if (gameMode == null || peer == null || missionPeer == null)
                 return;
 
-            int selectedTroopIndex = missionPeer.SelectedTroopIndex;
-            if (selectedTroopIndex < 0)
+            if (!TryResolveAuthoritativeCompatibilityTroopCasualCost(
+                    missionPeer,
+                    out MultiplayerClassDivisions.MPHeroClass compatibilityClass,
+                    out int compatibilityTroopIndex,
+                    out int troopCasualCost,
+                    out string compatibilityReason))
+            {
                 return;
-
-            List<MultiplayerClassDivisions.MPHeroClass> cultureClasses = MultiplayerClassDivisions
-                .GetMPHeroClasses(missionPeer.Culture)
-                ?.Where(heroClass => heroClass?.HeroCharacter != null)
-                .ToList();
-            if (cultureClasses == null || selectedTroopIndex >= cultureClasses.Count)
-                return;
-
-            MultiplayerClassDivisions.MPHeroClass selectedClass = cultureClasses[selectedTroopIndex];
-            int troopCasualCost = selectedClass?.TroopCasualCost ?? 0;
-            if (troopCasualCost <= 0)
-                return;
+            }
 
             int currentGold = gameMode.GetCurrentGoldForPeer(missionPeer);
             int appliedGold = Math.Max(0, currentGold - troopCasualCost);
             gameMode.ChangeCurrentGoldForPeer(missionPeer, appliedGold);
             ModLogger.Info(
-                "CoopMissionSpawnLogic: applied vanilla spawn gold deduction after materialized replace-bot. " +
+                "CoopMissionSpawnLogic: applied native spawn gold compatibility deduction after materialized replace-bot. " +
                 "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                " SelectedTroopIndex=" + selectedTroopIndex +
-                " HeroClass=" + (selectedClass?.HeroCharacter?.StringId ?? "null") +
+                " CompatibilityTroopIndex=" + compatibilityTroopIndex +
+                " HeroClass=" + (compatibilityClass?.HeroCharacter?.StringId ?? "null") +
                 " PreviousGold=" + currentGold +
                 " TroopCasualCost=" + troopCasualCost +
                 " AppliedGold=" + appliedGold +
+                " CompatibilityReason=" + compatibilityReason +
                 " Source=" + source);
         }
 
