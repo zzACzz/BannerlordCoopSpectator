@@ -112,6 +112,7 @@
     <Compile Include="Patches\DedicatedKnockoutOutcomePatches.cs" Link="Patches\DedicatedKnockoutOutcomePatches.cs" />
     <Compile Include="Patches\GameModeOverridePatches.cs" Link="Patches\GameModeOverridePatches.cs" />
     <Compile Include="..\Patches\MissionStateOpenNewPatches.cs" Link="Patches\MissionStateOpenNewPatches.cs" />
+    <Compile Include="..\Patches\ListedShellSpawningBehavior.cs" Link="Patches\ListedShellSpawningBehavior.cs" />
     <Compile Include="..\Patches\ListedShellEquipmentCompatibilityComponent.cs" Link="Patches\ListedShellEquipmentCompatibilityComponent.cs" />
     <Compile Include="..\Patches\ListedShellTeamSelectionCompatibilityComponent.cs" Link="Patches\ListedShellTeamSelectionCompatibilityComponent.cs" />
     <Compile Include="..\Patches\ListedShellVisualCompatibilityComponent.cs" Link="Patches\ListedShellVisualCompatibilityComponent.cs" />

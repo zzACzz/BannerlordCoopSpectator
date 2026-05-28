@@ -126,11 +126,18 @@ namespace CoopSpectator.Patches
                 : new List<MissionBehavior>();
 
             int removedEntryUiCount = list.RemoveAll(ShouldRemoveVanillaEntryBehavior);
+            int removedNativeSpawnComponentCount = ReplaceNativeSpawnComponentWithCompatibilityIngress(list);
             int removedNativeTeamSelectCount = ReplaceNativeTeamSelectionWithPassiveCompatibilityShell(list);
             int removedNativeVisualBootstrapCount = ReplaceNativeVisualBootstrapWithPassiveCompatibilityShell(list);
             int removedNativeEquipmentBootstrapCount = ReplaceNativeEquipmentBootstrapWithPassiveCompatibilityShell(list);
             if (removedEntryUiCount > 0)
                 ModLogger.Info("MissionStateOpenNewPatches: removed vanilla entry behaviors from wrapped TeamDeathmatch stack. RemovedCount=" + removedEntryUiCount);
+            if (removedNativeSpawnComponentCount > 0)
+            {
+                ModLogger.Info(
+                    "MissionStateOpenNewPatches: replaced native SpawnComponent/TeamDeathmatchSpawningBehavior in wrapped TeamDeathmatch shell. " +
+                    "RemovedCount=" + removedNativeSpawnComponentCount);
+            }
             if (removedNativeTeamSelectCount > 0)
             {
                 ModLogger.Info(
@@ -184,6 +191,35 @@ namespace CoopSpectator.Patches
             string fullName = behavior.GetType().FullName ?? string.Empty;
             return fullName.IndexOf("MissionGauntletTeamSelection", StringComparison.OrdinalIgnoreCase) >= 0
                 || fullName.IndexOf("MissionGauntletClassLoadout", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static int ReplaceNativeSpawnComponentWithCompatibilityIngress(List<MissionBehavior> list)
+        {
+            if (list == null || list.Count == 0)
+                return 0;
+
+            int removedCount = 0;
+            for (int i = list.Count - 1; i >= 0; i--)
+            {
+                if (!(list[i] is SpawnComponent spawnComponent))
+                    continue;
+
+                if (!string.Equals(
+                        spawnComponent.SpawningBehavior?.GetType().Name,
+                        nameof(TeamDeathmatchSpawningBehavior),
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                list.RemoveAt(i);
+                removedCount++;
+            }
+
+            if (removedCount > 0)
+                list.Add(new SpawnComponent(new TeamDeathmatchSpawnFrameBehavior(), new ListedShellSpawningBehavior()));
+
+            return removedCount;
         }
 
         private static int ReplaceNativeEquipmentBootstrapWithPassiveCompatibilityShell(List<MissionBehavior> list)
