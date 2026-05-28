@@ -24925,6 +24925,24 @@ namespace CoopSpectator.MissionBehaviors
             _lastBridgedSelectedTroopIndexByPeer.Remove(peer.Index);
         }
 
+        private static bool HasSelectedTroopIndexBridgeValue(NetworkCommunicator peer, int troopIndex)
+        {
+            if (peer == null || troopIndex < 0)
+                return false;
+
+            return _lastBridgedSelectedTroopIndexByPeer.TryGetValue(peer.Index, out int bridgedTroopIndex) &&
+                   bridgedTroopIndex == troopIndex;
+        }
+
+        private static bool TryResolveSelectedTroopIndexBridgeValue(NetworkCommunicator peer, out int troopIndex)
+        {
+            troopIndex = -1;
+            if (peer == null)
+                return false;
+
+            return _lastBridgedSelectedTroopIndexByPeer.TryGetValue(peer.Index, out troopIndex);
+        }
+
         private static bool ClearMissionPeerPendingNativeSpawnVisualCompatibility(Mission mission, MissionPeer missionPeer)
         {
             bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
@@ -28698,7 +28716,8 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            return !ReferenceEquals(preferredClass, vanillaClass) || missionPeer.SelectedTroopIndex != preferredTroopIndex;
+            return !ReferenceEquals(preferredClass, vanillaClass) ||
+                   !HasSelectedTroopIndexBridgeValue(missionPeer?.GetNetworkPeer(), preferredTroopIndex);
         }
 
         private static bool TryResolveAuthoritativeCompatibilityHeroClassForPeer(
@@ -29168,7 +29187,9 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
                 }
 
-                int currentTroopIndex = missionPeer.SelectedTroopIndex;
+                int currentTroopIndex = TryResolveSelectedTroopIndexBridgeValue(peer, out int bridgedTroopIndex)
+                    ? bridgedTroopIndex
+                    : -1;
                 MultiplayerClassDivisions.MPHeroClass currentClass = null;
                 List<MultiplayerClassDivisions.MPHeroClass> cultureClasses = MultiplayerClassDivisions
                     .GetMPHeroClasses(authoritativeCulture)
@@ -29191,7 +29212,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (preferredTroopIndex < 0)
                     continue;
 
-                if (currentClass != null && missionPeer.SelectedTroopIndex == preferredTroopIndex)
+                if (currentClass != null && HasSelectedTroopIndexBridgeValue(peer, preferredTroopIndex))
                     continue;
 
                 ApplySelectedTroopIndexBridge(missionPeer, peer, preferredTroopIndex);
@@ -29639,9 +29660,7 @@ namespace CoopSpectator.MissionBehaviors
             if (missionPeer == null || peer == null || preferredTroopIndex < 0)
                 return;
 
-            if (missionPeer.SelectedTroopIndex == preferredTroopIndex &&
-                _lastBridgedSelectedTroopIndexByPeer.TryGetValue(peer.Index, out int lastBridgedTroopIndex) &&
-                lastBridgedTroopIndex == preferredTroopIndex)
+            if (HasSelectedTroopIndexBridgeValue(peer, preferredTroopIndex))
             {
                 return;
             }
