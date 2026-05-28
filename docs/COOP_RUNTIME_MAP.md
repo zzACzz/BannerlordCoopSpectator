@@ -205,21 +205,23 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - native `MissionPeer.Team` уже моститься server-side з coop authority state;
 - native `SelectedTroopIndex` лишається тільки compatibility bridge для vanilla bootstrap/network expectations;
 - native gold/class accounting для preview/materialization compatibility тепер теж резолвиться від authoritative coop selection, а не від `MissionPeer.SelectedTroopIndex` як джерела істини;
-- server-side coop spawn path більше не форсить native pending visuals там, де сам native `ShouldSpawnVisualsForServer(...)` повертає `false` (зокрема на dedicated);
+- server-side coop runtime більше не форсить native pending visuals і не переводить їх у vanilla `SpawningBehaviorBase` / `Mission.SpawnAgent(..., spawnFromAgentVisuals: true)` lifecycle;
+- `HasSpawnedAgentVisuals` і `ShouldSpawnVisualsForServer(...)` більше не входять у server-side phase/spawn authority; native preview visuals тепер тільки passive compatibility shell;
+- native visual compatibility state ще чиститься під час possession/reset, але вже не впливає на рішення про spawn або battle phase;
 - старий client-side vanilla-selection reflection шар (hint/menu, class-loadout filtering, team-select/scoreboard culture sync, vanilla spawn/team-change mirror paths) уже видалений;
 - ми ще не маємо повної заміни native team-selection shell.
 
 ## 9. Як працює materialization агентів
 
-Поточний materialization є server-authoritative, але ще частково опирається на native preview/bootstrap systems.
+Поточний materialization є server-authoritative. Native preview/bootstrap systems ще лишаються поруч, але вже не керують server-side spawn або battle-phase lifecycle.
 
 Основний flow:
 
 1. `CoopMissionSpawnLogic` валідовує side та entry, які запитав peer.
 2. Далі обчислюється authoritative allowed entry set і preferred spawn selection.
-3. За потреби логіка спершу просить native pending visuals через `TryEnsurePendingSpawnVisuals(...)`.
-4. Фінальне створення контрольованого агента відбувається в `SpawnCoopControlledAgent(...)`.
-5. Цей метод збирає `AgentBuildData`, підкладає exact equipment/body коли вони доступні, і викликає `Mission.SpawnAgent(...)`.
+3. Сервер materialize-ить battlefield agents із authoritative snapshot/entry contract.
+4. Коли peer входить у coop life, live runtime зараз намагається передати йому вже materialized agent через `TryReplaceMaterializedBotWithPlayer(...)`.
+5. Під час цього шляху exact equipment/body/identity зберігаються й повторно накладаються вже на replace-bot runtime.
 6. Сервер будує authoritative materialization snapshot через `BuildAuthoritativeMaterializedAgentEntrySnapshot(...)`.
 7. `CoopMissionNetworkBridge.TrySyncMaterializedAgentEntryPayloads()` штовхає цей snapshot клієнтам.
 
@@ -233,8 +235,10 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 
 Важливе звуження поточного контракту:
 
-- native pending spawn visuals тепер запитуються тільки тоді, коли поточний native game-mode contract сам вимагає server visuals через `ShouldSpawnVisualsForServer(...)`;
-- це означає, що dedicated coop runtime більше не форсить штучний pending-visual wait path там, де vanilla dedicated runtime його не запускає.
+- server-side coop runtime більше не має власного коду, який запитує native pending visuals;
+- dedicated coop runtime більше не викликає `ShouldSpawnVisualsForServer(...)` і не намагається підлаштовувати свій flow під native server-visual contract;
+- server-side finalize hook, який переводив native preview visuals у vanilla `SpawningBehaviorBase` spawn loop через `SetEarlyAgentVisualsDespawning(...)`, уже видалений;
+- phase progression до `Deployment`/`PreBattleHold` тепер спирається на реальний control/materialization readiness, а не на `HasSpawnedAgentVisuals`.
 
 Тобто логіка materialization уже значною мірою наша, але вона ще не відв'язана від native multiplayer bootstrap assumptions.
 
@@ -357,6 +361,9 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - прибрана мертва wrapped-Battle crash-isolation гілка, яка намагалась вирізати `MissionLobbyEquipmentNetworkComponent` із client stack;
 - native spawn gold floor/deduction більше не читає `MissionPeer.SelectedTroopIndex` як authority і тепер йде через окремий authoritative compatibility hero-class resolver;
 - pending native spawn visuals більше не форсяться в coop server path, якщо native `ShouldSpawnVisualsForServer(...)` не вимагає їх для поточного peer/runtime;
+- `HasSpawnedAgentVisuals` більше не використовується в server-side phase/deployment або spawn authority; це вже тільки compatibility state для native/client shell;
+- видалений мертвий direct-spawn experiment (`EnableDirectCoopPlayerSpawnExperiment`, `TrySpawnPeersIntoCoopControl(...)`, `SpawnCoopControlledAgent(...)`, `TryEnsurePendingSpawnVisuals(...)`), який уже не входив у live runtime tick path;
+- видалений active vanilla spawn-bridge hook (`RunVanillaSpawnBridgeTick(...)` / `TryFinalizePendingNativeSpawnVisualCompatibility(...)`), який переводив native preview visuals у `SpawningBehaviorBase` і `Mission.SpawnAgent(..., spawnFromAgentVisuals: true)`;
 - mission wrapping flag перейменований у `EnableVanillaMissionWrapping`;
 - прибрана логіка `TeamDeathmatch` override з `DedicatedServer/Patches/GameModeOverridePatches.cs`;
 - прибрані `CoopTdm` і `TdmClone` strings з `Module/CoopSpectator/ModuleData/multiplayer_strings.xml`;

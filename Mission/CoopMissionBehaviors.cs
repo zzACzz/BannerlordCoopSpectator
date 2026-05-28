@@ -909,9 +909,6 @@ namespace CoopSpectator.MissionBehaviors
     /// </summary>
     public sealed class CoopMissionSpawnLogic : MissionLogic
     {
-        // Direct/manual SpawnAgent-based player spawn is intentionally retired.
-        // Proven-good path is coop authority + vanilla TDM/SpawningBehaviorBase spawn.
-        private const bool EnableDirectCoopPlayerSpawnExperiment = false;
         // Possessing pre-materialized AI agents is currently experimental. It does not yet
         // reproduce the full vanilla player-spawn lifecycle (economy/finalize/control state),
         // so the stable runtime keeps battlefield armies materialized as AI-only context while
@@ -2662,9 +2659,6 @@ namespace CoopSpectator.MissionBehaviors
                 mission,
                 "dedicated observer",
                 applyPreMaterializationPeerNudges: true);
-            RunVanillaSpawnBridgeTick(
-                mission,
-                "dedicated observer");
             RunCoopBattlePhaseOwnerTick(mission, "dedicated observer");
         }
 
@@ -2831,7 +2825,8 @@ namespace CoopSpectator.MissionBehaviors
 
         // Keep mission behavior and dedicated observer on the same battle-lifecycle pipeline.
         // This shared tick owns authoritative coop runtime state and battlefield materialization.
-        // The legacy vanilla player-spawn bridge is kept in a separate explicit tick below.
+        // Native preview visuals may still exist for compatibility, but they no longer drive
+        // a separate vanilla player-spawn finalize path.
         private static void RunSharedServerBattleLifecycleTick(
             Mission mission,
             string source,
@@ -2995,9 +2990,6 @@ namespace CoopSpectator.MissionBehaviors
                 mission,
                 spawnSource,
                 applyPreMaterializationPeerNudges: true);
-            RunVanillaSpawnBridgeTick(
-                mission,
-                spawnSource);
         }
 
         public static void RunCoopBattlePhaseOwnerTick(Mission mission, string source)
@@ -9546,16 +9538,6 @@ namespace CoopSpectator.MissionBehaviors
                 " Source=" + (source ?? "unknown"));
         }
 
-        // This bridge keeps the stable vanilla MP preview/spawn lifecycle while CoopBattle owns
-        // the higher-level battle flow. It is isolated so we can later replace or shrink it safely.
-        private static void RunVanillaSpawnBridgeTick(Mission mission, string source)
-        {
-            if (mission == null || !GameNetwork.IsServer)
-                return;
-
-            TryFinalizePendingNativeSpawnVisualCompatibility(mission, source);
-        }
-
         private static void TryUpdateBattlePhaseState(Mission mission, string source)
         {
             if (mission == null || !GameNetwork.IsServer)
@@ -9566,7 +9548,6 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             int assignedPeerCount = 0;
-            int previewReadyPeerCount = 0;
             int controlledPeerCount = 0;
 
             if (GameNetwork.NetworkPeers != null)
@@ -9585,8 +9566,6 @@ namespace CoopSpectator.MissionBehaviors
                         continue;
 
                     assignedPeerCount++;
-                    if (missionPeer.HasSpawnedAgentVisuals)
-                        previewReadyPeerCount++;
                     if (missionPeer.ControlledAgent != null)
                         controlledPeerCount++;
                 }
@@ -9603,12 +9582,6 @@ namespace CoopSpectator.MissionBehaviors
                 CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.Deployment, source + " controlled-agent", mission);
                 if (assignedPeerCount > 0 && controlledPeerCount >= assignedPeerCount)
                     CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.PreBattleHold, source + " all-peers-controlled", mission);
-                return;
-            }
-
-            if (previewReadyPeerCount > 0)
-            {
-                CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.Deployment, source + " visuals-ready", mission);
                 return;
             }
 
@@ -20416,43 +20389,6 @@ namespace CoopSpectator.MissionBehaviors
                 " Source=" + (source ?? "unknown"));
         }
 
-        private static void TraceDirectPeerAgentSpawn(
-            NetworkCommunicator peer,
-            MissionPeer missionPeer,
-            Agent agent,
-            Team team,
-            BasicCharacterObject troop,
-            RosterEntryState entryState,
-            Equipment spawnEquipment,
-            bool usingExactSnapshotSpawnEquipment,
-            bool spawnFromAgentVisuals,
-            bool forceInitialWieldAfterSpawn,
-            string appliedIdentity,
-            string source)
-        {
-            if (agent == null)
-                return;
-
-            ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
-            AppendExactBattleAgentSpawnTraceEvent(
-                "direct-player-spawn",
-                "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
-                " AgentIndex=" + agent.Index +
-                " TeamSide=" + team?.Side +
-                " TeamIndex=" + (team != null ? team.TeamIndex.ToString() : "null") +
-                " FormationIndex=" + (agent.Formation?.FormationIndex.ToString() ?? "null") +
-                " EntryId=" + (entryState?.EntryId ?? "null") +
-                " TroopId=" + (troop?.StringId ?? "null") +
-                " MissionPeerTeam=" + (missionPeer?.Team?.TeamIndex.ToString() ?? "null") +
-                " SpawnEquipmentSource=" + (usingExactSnapshotSpawnEquipment ? "exact-snapshot" : "troop-clone") +
-                " SpawnFromAgentVisuals=" + spawnFromAgentVisuals +
-                " ForceInitialWieldAfterSpawn=" + forceInitialWieldAfterSpawn +
-                " " + BuildExactBattleAgentSpawnTraceEquipmentSummary(spawnEquipment) +
-                " " + BuildExactBattleAgentSpawnTraceContractSummary(diagnostic) +
-                " " + (appliedIdentity ?? "AppliedIdentity=(none)") +
-                " Source=" + (source ?? "unknown"));
-        }
-
         private static void TraceMaterializedReplaceBotSuccess(
             NetworkCommunicator peer,
             Agent targetAgent,
@@ -28376,82 +28312,6 @@ namespace CoopSpectator.MissionBehaviors
                    value.IndexOf('|') >= 0;
         }
 
-        private static void TrySpawnPeersIntoCoopControl(Mission mission, string source)
-        {
-            // Legacy direct-spawn experiment. Left in source for reference while respawn/reset
-            // is being redesigned, but no longer participates in the runtime tick path.
-            if (!EnableDirectCoopPlayerSpawnExperiment || mission == null || !GameNetwork.IsServer)
-                return;
-
-            if (GameNetwork.NetworkPeers == null || GameNetwork.NetworkPeers.Count == 0)
-                return;
-
-            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
-            {
-                if (!TryGetSpawnablePeerState(mission, peer, out MissionPeer missionPeer, out string reason))
-                {
-                    if (missionPeer != null && CoopBattleSpawnRequestState.HasPendingRequest(missionPeer))
-                    {
-                        CoopBattleSpawnRuntimeState.MarkRejected(missionPeer, source + " spawnable-check", reason);
-                        AdvanceLifecycleAfterSpawnWaitOrReject(mission, missionPeer, reason, source + " spawnable-check");
-                    }
-                    LogSkippedSpawn(peer, reason, source);
-                    continue;
-                }
-
-                if (!TryResolveAuthoritativeCharacterForPeer(missionPeer, out BasicCharacterObject selectedCharacter, out string selectedTroopId, out string selectedEntryId, out string resolveReason))
-                {
-                    CoopBattleSpawnRuntimeState.MarkRejected(missionPeer, source + " resolve-character", resolveReason);
-                    AdvanceLifecycleAfterSpawnWaitOrReject(mission, missionPeer, resolveReason, source + " resolve-character");
-                    LogSkippedSpawn(peer, "authoritative troop unresolved: " + resolveReason, source);
-                    continue;
-                }
-
-                if (!missionPeer.HasSpawnedAgentVisuals)
-                {
-                    BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " visuals");
-                    Team authoritativeTeam = ResolveAuthoritativeMissionTeam(mission, missionPeer, authoritativeSide);
-                    if (TryEnsurePendingSpawnVisuals(mission, missionPeer, peer, selectedCharacter, authoritativeTeam, source))
-                    {
-                        CoopBattlePeerLifecycleRuntimeState.MarkSpawnQueued(
-                            missionPeer,
-                            selectedTroopId,
-                            selectedEntryId,
-                            source + " visual-preview");
-                        LogSkippedSpawn(peer, "awaiting agent visuals", source);
-                        continue;
-                    }
-                }
-
-                RosterEntryState selectedEntryState = !string.IsNullOrWhiteSpace(selectedEntryId)
-                    ? BattleSnapshotRuntimeState.GetEntryState(selectedEntryId)
-                    : null;
-                Agent spawnedAgent = SpawnCoopControlledAgent(mission, missionPeer, peer, selectedCharacter, selectedEntryState, source);
-                if (spawnedAgent == null)
-                    continue;
-
-                _spawnedCoopPeerIndices.Add(peer.Index);
-                CoopBattleSpawnRequestState.Clear(missionPeer, source + " spawn-succeeded");
-                CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
-                    peer,
-                    source + " spawn-succeeded");
-                CoopBattleSpawnRuntimeState.MarkSpawned(missionPeer, selectedTroopId, selectedEntryId, source + " spawn-succeeded");
-                CoopBattlePeerLifecycleRuntimeState.MarkAlive(missionPeer, selectedTroopId, selectedEntryId, source + " spawn-succeeded");
-
-                string peerName = peer.UserName ?? peer.Index.ToString();
-                string agentName = spawnedAgent.Name?.ToString() ?? spawnedAgent.Index.ToString();
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: coop direct spawn succeeded (" + source + "). " +
-                    "Peer=" + peerName +
-                    " TroopId=" + selectedTroopId +
-                    " EntryId=" + (selectedEntryId ?? "null") +
-                    " Agent=" + agentName +
-                    " TeamIndex=" + (spawnedAgent.Team?.TeamIndex ?? -1) +
-                    " Side=" + (spawnedAgent.Team?.Side ?? BattleSideEnum.None) +
-                    " Position=" + spawnedAgent.Position);
-            }
-        }
-
         private static bool TryResolveAuthoritativeCharacterForPeer(
             MissionPeer missionPeer,
             out BasicCharacterObject selectedCharacter,
@@ -28580,103 +28440,6 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
-        private static bool TryGetSpawnablePeerState(
-            Mission mission,
-            NetworkCommunicator peer,
-            out MissionPeer missionPeer,
-            out string reason)
-        {
-            missionPeer = null;
-            reason = string.Empty;
-
-            if (peer == null)
-            {
-                reason = "peer is null";
-                return false;
-            }
-
-            if (peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
-            {
-                reason = "peer not ready";
-                return false;
-            }
-
-            missionPeer = peer.GetComponent<MissionPeer>();
-            if (missionPeer == null)
-            {
-                reason = "mission peer missing";
-                return false;
-            }
-
-            CoopBattlePeerSessionState.TryBuild(mission, missionPeer, "spawnable-peer-state", out CoopBattlePeerSessionSnapshot sessionSnapshot);
-
-            if (sessionSnapshot != null && sessionSnapshot.HasActiveControlledAgent)
-            {
-                reason = "peer already controls agent";
-                return false;
-            }
-
-            if (sessionSnapshot != null && sessionSnapshot.OccupiesActiveCoopLife)
-            {
-                reason = "peer still marked alive in coop runtime";
-                return false;
-            }
-
-            BattleSideEnum authoritativeSide =
-                sessionSnapshot != null && sessionSnapshot.CommittedSide != BattleSideEnum.None
-                    ? sessionSnapshot.CommittedSide
-                    : ResolveAuthoritativeSide(missionPeer, mission, "spawnable-peer-state");
-            if (authoritativeSide == BattleSideEnum.None)
-            {
-                reason = "peer side not assigned";
-                return false;
-            }
-
-            Team authoritativeTeam = ResolveAuthoritativeMissionTeam(mission, missionPeer, authoritativeSide);
-            if (authoritativeTeam == null)
-            {
-                reason = "authoritative mission team not ready";
-                return false;
-            }
-
-            if (!(sessionSnapshot?.HasPendingSpawnRequest ?? false))
-            {
-                reason = "no pending spawn request";
-                return false;
-            }
-
-            if (missionPeer.Team != null &&
-                !ReferenceEquals(missionPeer.Team, mission.SpectatorTeam) &&
-                !missionPeer.TeamInitialPerkInfoReady)
-            {
-                reason = "team perk info not ready";
-                return false;
-            }
-
-            if (!IsSpawnTimerReady(missionPeer))
-            {
-                reason = "spawn timer not ready";
-                return false;
-            }
-
-            return true;
-        }
-
-        private static void LogSkippedSpawn(NetworkCommunicator peer, string reason, string source)
-        {
-            if (peer == null || string.IsNullOrWhiteSpace(reason))
-                return;
-
-            string logKey = peer.Index + "|spawn-skipped|" + reason;
-            if (!_loggedForcedPreferredClassKeys.Add(logKey))
-                return;
-
-            ModLogger.Info(
-                "CoopMissionSpawnLogic: coop direct spawn waiting (" + source + "). " +
-                "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                " Reason=" + reason);
-        }
-
         private static void AdvanceLifecycleAfterSpawnWaitOrReject(Mission mission, MissionPeer missionPeer, string reason, string source)
         {
             if (missionPeer == null)
@@ -28717,134 +28480,6 @@ namespace CoopSpectator.MissionBehaviors
                 return mission.DefenderTeam ?? mission.Teams?.Defender;
 
             return null;
-        }
-
-        private static Agent SpawnCoopControlledAgent(
-            Mission mission,
-            MissionPeer missionPeer,
-            NetworkCommunicator peer,
-            BasicCharacterObject troop,
-            RosterEntryState entryState,
-            string source)
-        {
-            if (mission == null || missionPeer == null || peer == null || troop == null)
-                return null;
-
-            try
-            {
-                BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " spawn");
-                Team team = ResolveAuthoritativeMissionTeam(mission, missionPeer, authoritativeSide);
-                if (team == null)
-                    return null;
-
-                GetDirectSpawnFrame(mission, team, out Vec3 spawnPosition, out Vec2 spawnDirection);
-
-                Equipment snapshotSpawnEquipment = BuildSnapshotEquipmentForExactRuntime(entryState);
-                Equipment spawnEquipment = snapshotSpawnEquipment ?? troop.Equipment?.Clone(false);
-                bool usingExactSnapshotSpawnEquipment = snapshotSpawnEquipment != null;
-                ExactEntryCompatibilityDiagnostic exactEntryCompatibility = GetExactEntryCompatibilityDiagnostic(entryState);
-                string exactEntryCompatibilitySummary = BuildExactEntryCompatibilityShortSummary(exactEntryCompatibility);
-                var origin = new BasicBattleAgentOrigin(troop);
-
-                bool hasTemporaryNameOverride = TryApplyEntryNameToSpawnCharacter(troop, entryState, out TextObject originalTroopName);
-                AgentBuildData buildData = new AgentBuildData(troop);
-                try
-                {
-                    buildData.MissionPeer(missionPeer);
-                    buildData.Team(team);
-                    buildData.TroopOrigin(origin);
-                    buildData.Controller(AgentControllerType.Player);
-                    buildData.InitialPosition(in spawnPosition);
-                    buildData.InitialDirection(in spawnDirection);
-                    buildData.SpawnsIntoOwnFormation(false);
-                    buildData.SpawnsUsingOwnTroopClass(false);
-                    if (spawnEquipment != null)
-                        buildData.Equipment(spawnEquipment);
-
-                    string appliedIdentity = TryApplyEntryIdentityToBuildData(buildData, entryState);
-                    bool spawnFromAgentVisuals = missionPeer.HasSpawnedAgentVisuals;
-                    Agent spawnedAgent = mission.SpawnAgent(buildData, spawnFromAgentVisuals: spawnFromAgentVisuals);
-                    if (spawnedAgent == null)
-                        return null;
-
-                    TryApplyEntryIdentityToAgent(spawnedAgent, entryState);
-                    spawnedAgent.AddComponent(new MPPerksAgentComponent(spawnedAgent));
-                    spawnedAgent.MountAgent?.UpdateAgentProperties();
-
-                    MPPerkObject.MPOnSpawnPerkHandler onSpawnPerkHandler = MPPerkObject.GetOnSpawnPerkHandler(missionPeer);
-                    float extraHitpoints = onSpawnPerkHandler?.GetHitpoints(true) ?? 0f;
-                    if (extraHitpoints > 0f)
-                    {
-                        spawnedAgent.HealthLimit += extraHitpoints;
-                        spawnedAgent.Health = spawnedAgent.HealthLimit;
-                    }
-
-                    mission.TakeControlOfAgent(spawnedAgent);
-                    missionPeer.ControlledAgent = spawnedAgent;
-                    missionPeer.FollowedAgent = spawnedAgent;
-                    peer.ControlledAgent = spawnedAgent;
-                    spawnedAgent.MissionPeer = missionPeer;
-                    bool runtimeExactCharacter = ExactCampaignRuntimeObjectRegistry.IsRuntimeCharacter(spawnedAgent.Character as BasicCharacterObject);
-                    bool forceInitialWieldAfterSpawn = !usingExactSnapshotSpawnEquipment;
-                    if (!runtimeExactCharacter && !usingExactSnapshotSpawnEquipment && spawnedAgent.SpawnEquipment != null)
-                        spawnedAgent.UpdateSpawnEquipmentAndRefreshVisuals(spawnedAgent.SpawnEquipment);
-                    if (forceInitialWieldAfterSpawn)
-                    {
-                        spawnedAgent.WieldInitialWeapons(
-                            Agent.WeaponWieldActionType.Instant,
-                            Equipment.InitialWeaponEquipPreference.Any);
-                    }
-
-                    GameNetwork.BeginModuleEventAsServer(peer.VirtualPlayer);
-                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetAgentOwningMissionPeer(spawnedAgent.Index, peer.VirtualPlayer));
-                    GameNetwork.EndModuleEventAsServer();
-
-                    missionPeer.SpawnCountThisRound++;
-
-                    bool hadPendingSpawnVisualCompatibility = missionPeer.HasSpawnedAgentVisuals;
-                    bool removedPendingVisuals = ClearMissionPeerPendingNativeSpawnVisualCompatibility(mission, missionPeer);
-                    MPPerkObject.GetPerkHandler(missionPeer)?.OnEvent(MPPerkCondition.PerkEventFlags.SpawnEnd);
-
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: spawn agent ownership finalized. " +
-                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                        " Agent=" + spawnedAgent.Index +
-                        " SpawnFromVisuals=" + spawnFromAgentVisuals +
-                        " HadPendingVisualCompatibility=" + hadPendingSpawnVisualCompatibility +
-                        " RefreshedSpawnEquipment=" + (!runtimeExactCharacter && spawnedAgent.SpawnEquipment != null) +
-                        " RuntimeExactCharacter=" + runtimeExactCharacter +
-                        " AddedPerksComponent=True" +
-                        " SpawnCountThisRound=" + missionPeer.SpawnCountThisRound +
-                        " ExtraHitpoints=" + extraHitpoints +
-                        " VisualsRemoved=" + removedPendingVisuals +
-                        " " + exactEntryCompatibilitySummary +
-                        " " + appliedIdentity);
-                    TraceDirectPeerAgentSpawn(
-                        peer,
-                        missionPeer,
-                        spawnedAgent,
-                        team,
-                        troop,
-                        entryState,
-                        spawnEquipment,
-                        usingExactSnapshotSpawnEquipment,
-                        spawnFromAgentVisuals,
-                        forceInitialWieldAfterSpawn,
-                        appliedIdentity,
-                        source);
-
-                    return spawnedAgent;
-                }
-                finally
-                {
-                    RestoreSpawnCharacterName(troop, hasTemporaryNameOverride, originalTroopName);
-                }
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("CoopMissionSpawnLogic: coop direct spawn failed (" + source + "): " + ex.Message);
-                return null;
-            }
         }
 
         private static bool TryRemovePendingAgentVisuals(Mission mission, MissionPeer missionPeer)
@@ -28892,126 +28527,6 @@ namespace CoopSpectator.MissionBehaviors
                     ModLogger.Info("CoopMissionSpawnLogic: removing pending agent visuals failed: " + ex.Message);
                     return false;
                 }
-            }
-
-            return false;
-        }
-
-        private static bool TryEnsurePendingSpawnVisuals(
-            Mission mission,
-            MissionPeer missionPeer,
-            NetworkCommunicator peer,
-            BasicCharacterObject troop,
-            Team authoritativeTeam,
-            string source)
-        {
-            if (mission == null || missionPeer == null || peer == null || troop == null)
-                return false;
-
-            if (missionPeer.HasSpawnedAgentVisuals)
-                return true;
-
-            try
-            {
-                MissionMultiplayerGameModeBase gameMode = mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
-                if (gameMode == null)
-                {
-                    ModLogger.Info("CoopMissionSpawnLogic: pending spawn visuals unavailable (" + source + "): multiplayer game mode missing.");
-                    return false;
-                }
-
-                if (!RequiresNativePendingSpawnVisualCompatibility(gameMode, peer, missionPeer, source))
-                    return false;
-
-                Team team = authoritativeTeam ?? missionPeer.Team;
-                if (team == null || ReferenceEquals(team, mission.SpectatorTeam))
-                {
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: pending spawn visuals unavailable (" + source + "): authoritative team missing or spectator. " +
-                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                        " MissionPeerTeam=" + (missionPeer.Team?.TeamIndex ?? -1) +
-                        " AuthoritativeTeam=" + (authoritativeTeam?.TeamIndex ?? -1));
-                    return false;
-                }
-
-                Equipment previewEquipment = troop.Equipment?.Clone(false);
-                if (previewEquipment == null)
-                {
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: pending spawn visuals unavailable (" + source + "): preview equipment missing. " +
-                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                        " TroopId=" + troop.StringId);
-                    return false;
-                }
-
-                AgentBuildData previewBuildData = new AgentBuildData(troop);
-                previewBuildData.MissionPeer(missionPeer);
-                previewBuildData.Team(team);
-                previewBuildData.TroopOrigin(new BasicBattleAgentOrigin(troop));
-                previewBuildData.Equipment(previewEquipment);
-                previewBuildData.IsFemale(missionPeer.Peer?.IsFemale ?? false);
-                previewBuildData.BodyProperties((missionPeer.Peer?.BodyProperties).GetValueOrDefault());
-                previewBuildData.VisualsIndex(0);
-                previewBuildData.ClothingColor1(team.Color);
-                previewBuildData.ClothingColor2(team.Color2);
-
-                gameMode.HandleAgentVisualSpawning(peer, previewBuildData);
-
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: requested native spawn visual compatibility before direct spawn. " +
-                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                    " TroopId=" + troop.StringId +
-                    " TeamIndex=" + (team.TeamIndex) +
-                    " Side=" + team.Side +
-                    " Source=" + source);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("CoopMissionSpawnLogic: failed to request pending spawn visuals (" + source + "): " + ex.Message);
-                return false;
-            }
-        }
-
-        private static bool RequiresNativePendingSpawnVisualCompatibility(
-            MissionMultiplayerGameModeBase gameMode,
-            NetworkCommunicator peer,
-            MissionPeer missionPeer,
-            string source)
-        {
-            if (gameMode == null || peer == null || missionPeer == null)
-                return false;
-
-            bool shouldSpawnVisualsForServer = false;
-            try
-            {
-                shouldSpawnVisualsForServer = gameMode.ShouldSpawnVisualsForServer(peer);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: ShouldSpawnVisualsForServer failed open (" + source + "): " + ex.Message);
-                return true;
-            }
-
-            if (shouldSpawnVisualsForServer)
-                return true;
-
-            string peerName = peer.UserName ?? peer.Index.ToString();
-            string logKey =
-                peer.Index +
-                "|native-visual-compat-skip|" +
-                (missionPeer.Team?.Side ?? BattleSideEnum.None) +
-                "|" +
-                (Mission.Current?.SceneName ?? "null");
-            if (_loggedForcedPreferredClassKeys.Add(logKey))
-            {
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: skipped native pending spawn visual compatibility because current native game-mode contract does not require server visuals. " +
-                    "Peer=" + peerName +
-                    " TeamIndex=" + (missionPeer.Team?.TeamIndex ?? -1) +
-                    " Side=" + missionPeer.Team?.Side +
-                    " Source=" + source);
             }
 
             return false;
@@ -29627,58 +29142,6 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             TrySyncCoopClassRestrictions(mission, source);
-        }
-
-        private static void TryFinalizePendingNativeSpawnVisualCompatibility(Mission mission, string source)
-        {
-            if (mission == null || !GameNetwork.IsServer || GameNetwork.NetworkPeers == null || GameNetwork.NetworkPeers.Count == 0)
-                return;
-
-            SpawnComponent spawnComponent = mission.GetMissionBehavior<SpawnComponent>();
-            MissionMultiplayerGameModeBase gameMode = mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
-            if (spawnComponent == null || gameMode == null)
-                return;
-
-            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
-            {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
-                    continue;
-
-                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                if (missionPeer == null || missionPeer.ControlledAgent != null)
-                    continue;
-
-                if (!CoopBattleSpawnRequestState.HasPendingRequest(missionPeer))
-                    continue;
-
-                if (!missionPeer.HasSpawnedAgentVisuals || missionPeer.EquipmentUpdatingExpired)
-                    continue;
-
-                try
-                {
-                    TryEnsureNativeSpawnGoldCompatibilityFloor(gameMode, peer, missionPeer, source);
-                    bool resolvedCompatibilityClass = TryResolveAuthoritativeCompatibilityHeroClassForPeer(
-                        missionPeer,
-                        requireSpawnTimerReady: false,
-                        out MultiplayerClassDivisions.MPHeroClass compatibilityClass,
-                        out int compatibilityTroopIndex,
-                        out string compatibilityReason);
-                    spawnComponent.SetEarlyAgentVisualsDespawning(missionPeer, canDespawnEarly: true);
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: finalized pending native spawn visual compatibility for agent creation. " +
-                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                        " TeamIndex=" + (missionPeer.Team?.TeamIndex ?? -1) +
-                        " Side=" + missionPeer.Team?.Side +
-                        " CompatibilityTroopIndex=" + (resolvedCompatibilityClass ? compatibilityTroopIndex : -1) +
-                        " CompatibilityHeroClass=" + (resolvedCompatibilityClass ? (compatibilityClass?.HeroCharacter?.StringId ?? "null") : "unresolved") +
-                        " CompatibilityReason=" + (resolvedCompatibilityClass ? compatibilityReason : "unresolved: " + compatibilityReason) +
-                        " Source=" + source);
-                }
-                catch (Exception ex)
-                {
-                    ModLogger.Info("CoopMissionSpawnLogic: failed to finalize pending native spawn visual compatibility (" + source + "): " + ex.Message);
-                }
-            }
         }
 
         private static void TryEnsureNativeSpawnGoldCompatibilityFloor(
