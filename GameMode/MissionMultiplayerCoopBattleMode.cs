@@ -250,15 +250,13 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ModLogger.Info("CoopBattle client: skip MissionLobbyEquipmentNetworkComponent (MultiplayerMissionAgentVisualSpawnComponent unavailable).");
             }
 
+            ModLogger.Info("CoopBattle client: skipped MultiplayerTeamSelectComponent; authoritative coop selection overlay now owns client-side team/class intent.");
             if (!minimalBattleMapRuntime)
             {
-                ModLogger.Info("CoopBattle client: skipped MultiplayerTeamSelectComponent; custom coop selection overlay will be used instead.");
                 AddBoundaryBehaviorsForRuntime(list, mission, "client");
             }
             else
             {
-                list.Add(new MultiplayerTeamSelectComponent());
-                ModLogger.Info("CoopBattle client: retained MultiplayerTeamSelectComponent for battle-map native bootstrap compatibility.");
                 AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
                 AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
                 AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
