@@ -143,7 +143,7 @@ namespace CoopSpectator.Patches
             if (removedNativeSpawnComponentCount > 0)
             {
                 ModLogger.Info(
-                    "MissionStateOpenNewPatches: replaced native SpawnComponent/TeamDeathmatchSpawningBehavior in wrapped TeamDeathmatch shell. " +
+                    "MissionStateOpenNewPatches: replaced native SpawnComponent/TDM spawn behaviors in wrapped TeamDeathmatch shell. " +
                     "RemovedCount=" + removedNativeSpawnComponentCount);
             }
             if (removedNativeTeamSelectCount > 0)
@@ -271,7 +271,7 @@ namespace CoopSpectator.Patches
             }
 
             if (removedCount > 0)
-                list.Add(new SpawnComponent(new TeamDeathmatchSpawnFrameBehavior(), new ListedShellSpawningBehavior()));
+                list.Add(new SpawnComponent(new ListedShellSpawnFrameBehavior(), new ListedShellSpawningBehavior()));
 
             return removedCount;
         }

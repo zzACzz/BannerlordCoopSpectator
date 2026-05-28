@@ -114,6 +114,7 @@
     <Compile Include="..\Patches\MissionStateOpenNewPatches.cs" Link="Patches\MissionStateOpenNewPatches.cs" />
     <Compile Include="..\Patches\ListedShellTeamDeathmatchCompatibilityMode.cs" Link="Patches\ListedShellTeamDeathmatchCompatibilityMode.cs" />
     <Compile Include="..\Patches\ListedShellTeamDeathmatchClientCompatibilityMode.cs" Link="Patches\ListedShellTeamDeathmatchClientCompatibilityMode.cs" />
+    <Compile Include="..\Patches\ListedShellSpawnFrameBehavior.cs" Link="Patches\ListedShellSpawnFrameBehavior.cs" />
     <Compile Include="..\Patches\ListedShellSpawningBehavior.cs" Link="Patches\ListedShellSpawningBehavior.cs" />
     <Compile Include="..\Patches\ExactCampaignArmyBootstrapPatch.cs" Link="Patches\ExactCampaignArmyBootstrapPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignPreSpawnLoadoutPatch.cs" Link="Patches\ExactCampaignPreSpawnLoadoutPatch.cs" />
