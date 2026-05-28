@@ -215,7 +215,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - native `MissionPeer.Team` уже моститься server-side з coop authority state;
 - native `SelectedTroopIndex` лишається тільки compatibility bridge для vanilla bootstrap/network expectations;
 - native `SelectedTroopIndex` bridge більше не активується в custom `CoopBattle` runtime; він лишився тільки listed-shell compatibility path для native bootstrap/network expectations;
-- listed-shell `TeamInitialPerkInfoReady` більше не залежить виключно від `MissionLobbyEquipmentNetworkComponent`; server-side bridge тепер піднімає цей native spawn gate від authoritative `team/culture/troop index` compatibility state;
+- listed-shell `TeamInitialPerkInfoReady` більше не залежить виключно від `MissionLobbyEquipmentNetworkComponent`, але після виносу `SpawnComponent`/equipment shell цей gate уже не має live listed-shell читача й більше не моститься server-side;
 - listed-shell `HasSpawnedAgentVisuals` теж більше не піднімається native visual preview-етапом і більше не армується server-side bridge-ем; visual flag тепер лишається очищеним і більше не входить у listed-shell spawn authority;
 - listed-shell spawn ingress більше не використовує native `TeamDeathmatchSpawningBehavior`; TDM gold floor, troop-cost gate і spawn-time gold deduction більше не входять у live listed-shell spawn contract;
 - listed-shell mission-mode layer більше не використовує native `MissionMultiplayerTeamDeathmatch` / `MissionMultiplayerTeamDeathmatchClient`; TDM score, gold sync, kill gold і score-based match-end більше не входять у live listed-shell authority;
@@ -254,7 +254,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - native team membership
 - listed-shell native selected-troop/class bridge для bootstrap compatibility
 - listed-shell native initial-perk readiness тепер уже моститься server-side від authoritative selection і більше не має `MissionLobbyEquipmentNetworkComponent` як єдине джерело істини
-- listed-shell native selected-troop/class bridge плюс server-armed initial-perk readiness
+- listed-shell native selected-troop/class bridge
 
 Важливе звуження поточного контракту:
 
@@ -262,7 +262,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - dedicated coop runtime більше не викликає `ShouldSpawnVisualsForServer(...)` і не намагається підлаштовувати свій flow під native server-visual contract;
 - server-side finalize hook, який переводив native preview visuals у vanilla `SpawningBehaviorBase` spawn loop через `SetEarlyAgentVisualsDespawning(...)`, уже видалений;
 - native `SelectedTroopIndex` compatibility bridge більше не активується в custom `CoopBattle` runtime; у listed-shell path він тепер армується від authoritative pending spawn, а не від native visual/equipment preview window;
-- listed-shell `TeamInitialPerkInfoReady` тепер серверно переозброюється через `MissionPeer.OnTeamInitialPerkInfoReceived(...)` із coop-owned compatibility sync, тому `MissionLobbyEquipmentNetworkComponent` уже не є єдиним bootstrap-джерелом для цього spawn gate;
+- listed-shell `TeamInitialPerkInfoReady` більше не використовується як live bootstrap gate: після виносу `SpawnComponent`/equipment shell server-side bridge для нього теж прибраний;
 - listed-shell direct spawn більше не армує `HasSpawnedAgentVisuals` / `EquipmentUpdatingExpired` як bootstrap state; native visual flags тепер лишаються очищеними, а `MissionNetworkComponent.OnPeerSelectedTeam(...)` додатково глушиться як visual bootstrap corridor;
 - native `TeamDeathmatchSpawningBehavior` уже прибраний із wrapped listed shell; active listed spawn authority тепер живе в `CoopMissionSpawnLogic`, а official `SpawnComponent`/`SpawningBehaviorBase` вже взагалі прибрані з listed ingress stack;
 - `MissionLobbyComponent.GetSpawnPeriodDurationForPeer(...)` більше не читає respawn period через `Mission.GetMissionBehavior<SpawnComponent>()`, а match-end `OnMissionTick(...)` більше не дотягується до `_gameMode.SpawnComponent.SpawningBehavior`; обидва контракти тепер замкнуті в `MissionLobbySpawnContractPatch`;
@@ -395,7 +395,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - pending native spawn visuals більше не форсяться в coop server path, якщо native `ShouldSpawnVisualsForServer(...)` не вимагає їх для поточного peer/runtime;
 - `HasSpawnedAgentVisuals` більше не використовується в server-side phase/deployment або spawn authority; це вже тільки compatibility state для native/client shell;
 - `SelectedTroopIndex` compatibility bridge більше не активується в custom `CoopBattle` runtime; у listed shell він тепер живе тільки в authoritative pending-spawn bootstrap window і чистить cached state під час expiry;
-- listed-shell native `TeamInitialPerkInfoReady` більше не залежить виключно від `MissionLobbyEquipmentNetworkComponent`; readiness тепер моститься server-side від authoritative `team/culture/troop index` compatibility state;
+- listed-shell native `TeamInitialPerkInfoReady` більше не залежить виключно від `MissionLobbyEquipmentNetworkComponent`, але й більше не моститься server-side, бо live listed-shell spawn reader для цього gate вже прибраний;
 - native `MissionLobbyEquipmentNetworkComponent` повністю прибраний із wrapped listed `TeamDeathmatch` shell; listed ingress більше не тримає even passive equipment compatibility component;
 - native `MultiplayerTeamSelectComponent` повністю прибраний із wrapped listed `TeamDeathmatch` shell; listed ingress більше не несе окремий team-select compatibility layer;
 - native `MultiplayerMissionAgentVisualSpawnComponent` повністю прибраний із wrapped listed `TeamDeathmatch` shell; listed ingress більше не тримає even passive visual compatibility component;
@@ -404,7 +404,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - native `TeamDeathmatchSpawningBehavior`, native `TeamDeathmatchSpawnFrameBehavior` і сам mission-stack `SpawnComponent` прибрані із wrapped listed `TeamDeathmatch` shell; listed spawn ingress більше не має TDM gold gate, selected-troop fallback-to-zero, troop-cost deduction або official TDM spawn-point class;
 - active listed spawn authority повністю сидить у `CoopMissionSpawnLogic`, а `ListedShellSpawnFrameBehavior` лишився лише локальним helper-резолвером spawn frame, а не mission behavior shell;
 - `MissionStateOpenNewPatches.cs` більше не модифікує vanilla `TeamDeathmatch` behavior list по місцю; listed ingress тепер збирається явно в native order з мінімального shell-контракту і наших compatibility replacements;
-- listed-shell native spawn compatibility state тепер армується server-side від authoritative pending spawn тільки для `SelectedTroopIndex` і `TeamInitialPerkInfoReady`; visual flags уже не входять у це bootstrap-вікно;
+- listed-shell native spawn compatibility state тепер армується server-side тільки для `SelectedTroopIndex`; `TeamInitialPerkInfoReady` і visual flags уже не входять у це bootstrap-вікно;
 - `MultiplayerTeamSelectComponent` прибраний з `CoopBattle` server і client stack, а також повністю прибраний з wrapped listed shell;
 - `MissionLobbyEquipmentNetworkComponent` прибраний з `CoopBattle` client stack; custom runtime більше не несе native equipment/class bootstrap, лишився тільки listed-shell legacy;
 - `MultiplayerMissionAgentVisualSpawnComponent` прибраний з `CoopBattle` client stack; custom runtime більше не несе native agent-visual bootstrap;
@@ -428,7 +428,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 Головні блокери до повністю clean coop runtime зараз такі:
 
 1. Замінити залежність від official listed-shell `TeamDeathmatch` тільки після того, як буде доведений альтернативний server-list registration і join path без нього; live mission-mode/spawn layer всередині wrapper вже більше не повинен тримати native TDM authority.
-2. Прибрати решту server-armed native spawn flags у listed-shell bootstrap (`SelectedTroopIndex`, `TeamInitialPerkInfoReady`) тоді, коли ingress більше не потребуватиме навіть native `MissionLobbyComponent` shell.
+2. Прибрати решту server-armed native spawn flags у listed-shell bootstrap (`SelectedTroopIndex`) тоді, коли ingress більше не потребуватиме навіть native `MissionLobbyComponent` shell.
 3. Прибрати bridge-file fallback-и тоді, коли network transport стане достатньо надійним для selection, spawn, readiness і reconnect flows.
 4. Винести вже explicit listed-shell assembly з `MissionStateOpenNew` interception у ще чистіший coop startup entry point, коли native shell interception більше не буде потрібний.
 5. Окремо переоцінити `LocalJoinAddressPatch` та інші join patch-і, коли public, VPN і self-host join flows будуть розділені чистіше по відповідальності.
@@ -452,7 +452,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 
 - завершити перехід від native team-select stack/UI bootstrap до власної coop-owned authority і readiness-моделі;
 - прибрати останній compatibility-only міст через native `SelectedTroopIndex`, коли vanilla bootstrap більше не вимагатиме його;
-- прибрати останні listed-shell bootstrap flags через native `SelectedTroopIndex` і `TeamInitialPerkInfoReady`, коли ingress більше не потребуватиме навіть цих compatibility expectations.
+- прибрати останній listed-shell bootstrap flag через native `SelectedTroopIndex`, коли ingress більше не потребуватиме навіть цієї compatibility expectation.
 
 ### Фаза D: відчепити мод від vanilla listed shell
 
