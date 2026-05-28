@@ -116,7 +116,6 @@
     <Compile Include="..\Patches\ListedShellTeamDeathmatchClientCompatibilityMode.cs" Link="Patches\ListedShellTeamDeathmatchClientCompatibilityMode.cs" />
     <Compile Include="..\Patches\ListedShellSpawningBehavior.cs" Link="Patches\ListedShellSpawningBehavior.cs" />
     <Compile Include="..\Patches\ListedShellEquipmentCompatibilityComponent.cs" Link="Patches\ListedShellEquipmentCompatibilityComponent.cs" />
-    <Compile Include="..\Patches\ListedShellTeamSelectionCompatibilityComponent.cs" Link="Patches\ListedShellTeamSelectionCompatibilityComponent.cs" />
     <Compile Include="..\Patches\ListedShellVisualCompatibilityComponent.cs" Link="Patches\ListedShellVisualCompatibilityComponent.cs" />
     <Compile Include="..\Patches\ListedShellVisualBootstrapPatch.cs" Link="Patches\ListedShellVisualBootstrapPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignArmyBootstrapPatch.cs" Link="Patches\ExactCampaignArmyBootstrapPatch.cs" />

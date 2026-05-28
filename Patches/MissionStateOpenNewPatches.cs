@@ -148,7 +148,7 @@ namespace CoopSpectator.Patches
             if (removedNativeTeamSelectCount > 0)
             {
                 ModLogger.Info(
-                    "MissionStateOpenNewPatches: replaced native MultiplayerTeamSelectComponent in wrapped TeamDeathmatch shell. " +
+                    "MissionStateOpenNewPatches: removed native MultiplayerTeamSelectComponent from wrapped TeamDeathmatch shell. " +
                     "RemovedCount=" + removedNativeTeamSelectCount);
             }
             if (removedNativeVisualBootstrapCount > 0)
@@ -312,9 +312,6 @@ namespace CoopSpectator.Patches
                 list.RemoveAt(i);
                 removedCount++;
             }
-
-            if (removedCount > 0)
-                list.Add(new ListedShellTeamSelectionCompatibilityComponent());
 
             return removedCount;
         }
