@@ -1,157 +1,163 @@
-# Coop Runtime Architecture Audit
+# Аудит Архітектури Coop Runtime
 
-Date: `2026-05-28`
+Дата: `2026-05-28`
 
-## Table Of Contents
-- [1. Goal](#1-goal)
-- [2. Current Runtime Shape](#2-current-runtime-shape)
-- [3. Main Components](#3-main-components)
-- [4. End-To-End Flow](#4-end-to-end-flow)
-- [5. Exact Transfer And Materialization Model](#5-exact-transfer-and-materialization-model)
-- [6. Deferred Packet Model](#6-deferred-packet-model)
-- [7. Current Reproducible Failure Clusters](#7-current-reproducible-failure-clusters)
-- [8. What The Latest Client Crash Actually Shows](#8-what-the-latest-client-crash-actually-shows)
-- [9. TDM / Vanilla MP Coupling](#9-tdm--vanilla-mp-coupling)
-- [10. Invariants We Need To Preserve](#10-invariants-we-need-to-preserve)
-- [11. What Is Probably Wrong In The Current Design](#11-what-is-probably-wrong-in-the-current-design)
-- [12. Recommended Next Directions](#12-recommended-next-directions)
-- [13. Suggested Clean-Core Migration Scope](#13-suggested-clean-core-migration-scope)
-- [14. Reference Files](#14-reference-files)
+## Зміст
+- [1. Мета](#1-goal)
+- [2. Поточна Форма Runtime](#2-current-runtime-shape)
+- [3. Основні Компоненти](#3-main-components)
+- [4. Потік Від Початку До Кінця](#4-end-to-end-flow)
+- [5. Модель Exact Transfer І Матеріалізації](#5-exact-transfer-and-materialization-model)
+- [6. Модель Відкладених Пакетів](#6-deferred-packet-model)
+- [7. Поточні Відтворювані Кластери Помилок](#7-current-reproducible-failure-clusters)
+- [8. Що Насправді Показує Останній Клієнтський Краш](#8-what-the-latest-client-crash-actually-shows)
+- [9. Зчеплення З TDM / Vanilla MP](#9-tdm--vanilla-mp-coupling)
+- [10. Інваріанти, Які Ми Повинні Зберігати](#10-invariants-we-need-to-preserve)
+- [11. Що Ймовірно Неправильно В Поточному Дизайні](#11-what-is-probably-wrong-in-the-current-design)
+- [12. Рекомендовані Наступні Напрямки](#12-recommended-next-directions)
+- [13. Пропонований Scope Міграції На Clean Core](#13-suggested-clean-core-migration-scope)
+- [14. Опорні Файли](#14-reference-files)
 
-## 1. Goal
-This document is a single navigation map for the current coop battle runtime.
+<a id="1-goal"></a>
+## 1. Мета
+Цей документ є єдиною картою навігації для поточного coop battle runtime.
 
-It is meant to answer:
-- what currently runs on top of vanilla MP / TDM
-- where campaign battle state enters the MP runtime
-- where exact transfer is applied
-- where deferred network replay is applied
-- which invariants are already known to be fragile
-- which failures are separate, and which are consequences of the same design choice
+Він має дати відповідь на такі питання:
+- що зараз працює поверх vanilla MP / TDM
+- у якій точці стан кампанійної битви заходить у MP runtime
+- де саме застосовується exact transfer
+- де саме застосовується відкладений network replay
+- які інваріанти вже відомо є крихкими
+- які збої є окремими, а які є наслідком одного й того самого дизайнерського рішення
 
-This is intentionally a runtime/system audit, not a bugfix note.
+Це навмисно аудит runtime/системи, а не нотатка про один конкретний фікс.
 
-## 2. Current Runtime Shape
-The mod does **not** currently run as a clean coop-only mission core.
+<a id="2-current-runtime-shape"></a>
+## 2. Поточна Форма Runtime
+Мод зараз **не** працює як чисте coop-only mission core.
 
-It currently works as:
-- vanilla MP / TDM mission startup
-- wrapped mission behavior stack
-- coop network bridge layered on top
-- coop client/server mission logic layered on top
-- exact transfer layered on top
-- battle-map specific handoff patches layered on top
-- vanilla UI and vanilla network behavior selectively suppressed or replaced
+Поточна схема така:
+- vanilla MP / TDM startup місії
+- обгорнутий стек mission behaviors
+- поверх нього накладений coop network bridge
+- поверх нього накладена coop client/server mission logic
+- поверх нього накладений exact transfer
+- поверх нього накладені battle-map-specific handoff patch-і
+- vanilla UI і vanilla network behavior частково приглушуються або вибірково замінюються
 
-That means the system is currently a **hybrid runtime**:
-- part vanilla MP
-- part coop authoritative snapshot model
-- part exact transfer model
-- part battle-map crash isolation / replay patching
+Тобто система зараз є **гібридним runtime**:
+- частково vanilla MP
+- частково coop authoritative snapshot model
+- частково exact transfer model
+- частково battle-map crash isolation / replay patching
 
-The current system therefore depends heavily on **ordering**:
-- order of mission behavior injection
-- order of payload arrival
-- order of `CreateAgent` vs follow-up packets
-- order of side selection vs battle snapshot bootstrap
-- order of rider/mount link materialization
+Через це поточна система дуже сильно залежить від **порядку подій**:
+- порядку інжекції mission behaviors
+- порядку приходу payload-ів
+- порядку `CreateAgent` проти follow-up пакетів
+- порядку side selection проти battle snapshot bootstrap
+- порядку materialization rider/mount link
 
-## 3. Main Components
-### Mission behavior stack
-- Wrapped mission stack injection happens in [MissionStateOpenNewPatches.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/MissionStateOpenNewPatches.cs:235)
-- Battle client wrapper currently adds:
+<a id="3-main-components"></a>
+## 3. Основні Компоненти
+### Стек mission behaviors
+- Інжекція wrapped mission stack відбувається у [MissionStateOpenNewPatches.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/MissionStateOpenNewPatches.cs:235)
+- Battle client wrapper зараз додає:
   - `CoopMissionNetworkBridge`
   - `CoopMissionClientLogic`
   - `CoopMissionSelectionView`
 
 ### Coop authoritative transport
-- Network payload transport lives in [CoopMissionNetworkBridge.cs](/C:/dev/projects/BannerlordCoopSpectator3/Mission/CoopMissionNetworkBridge.cs:180)
-- Two central payload families are:
+- Network transport payload-ів живе у [CoopMissionNetworkBridge.cs](/C:/dev/projects/BannerlordCoopSpectator3/Mission/CoopMissionNetworkBridge.cs:180)
+- Дві центральні сім'ї payload-ів:
   - `EntryStatusSnapshot`
   - `AuthoritativeMaterializedAgentEntrySnapshot`
 
 ### Coop mission runtime logic
-- Main client/server runtime logic lives in [CoopMissionBehaviors.cs](/C:/dev/projects/BannerlordCoopSpectator3/Mission/CoopMissionBehaviors.cs:32)
-- This file currently owns a very large part of:
+- Основна client/server runtime logic живе у [CoopMissionBehaviors.cs](/C:/dev/projects/BannerlordCoopSpectator3/Mission/CoopMissionBehaviors.cs:32)
+- Цей файл зараз володіє дуже великою частиною:
   - exact runtime bootstrap
   - strict hero transfer
   - client materialization tracking
   - selection shell state
   - mounted link repair / exact visual follow-up
 
-### Battle-map packet interception and replay
-- The heavy handoff and replay patch lives in [BattleMapSpawnHandoffPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/BattleMapSpawnHandoffPatch.cs:129)
-- This is currently the most critical runtime patch for:
+### Battle-map interception пакетів і replay
+- Важкий handoff і replay patch живе у [BattleMapSpawnHandoffPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/BattleMapSpawnHandoffPatch.cs:129)
+- Це зараз найкритичніший runtime patch для:
   - client `CreateAgent`
   - deferred packet queues
-  - replay after battle snapshot readiness
-  - exact diagnostics around agent materialization
+  - replay після готовності battle snapshot
+  - exact diagnostics навколо materialization агентів
 
-### Exact transfer builders and runtime item support
-- Contract construction: [ExactTransferContractBuilder.cs](/C:/dev/projects/BannerlordCoopSpectator3/Infrastructure/ExactTransferContractBuilder.cs:12)
+### Exact transfer builder-и і runtime item support
+- Побудова контрактів: [ExactTransferContractBuilder.cs](/C:/dev/projects/BannerlordCoopSpectator3/Infrastructure/ExactTransferContractBuilder.cs:12)
 - Dedicated pre-spawn resolution: [ExactCreateAgentServerPreSpawnContractResolver.cs](/C:/dev/projects/BannerlordCoopSpectator3/Infrastructure/ExactCreateAgentServerPreSpawnContractResolver.cs:33)
 - Runtime item support: [ExactCampaignRuntimeItemRegistry.cs](/C:/dev/projects/BannerlordCoopSpectator3/Infrastructure/ExactCampaignRuntimeItemRegistry.cs:14)
 
-### UI suppression / replacement
-- Vanilla intermission suppression: [IntermissionVmCrashGuardPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/IntermissionVmCrashGuardPatch.cs:18)
-- Vanilla team/class UI suppression: [VanillaEntryUiSuppressionPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/VanillaEntryUiSuppressionPatch.cs:17)
+### Приглушення / заміна UI
+- Приглушення vanilla intermission: [IntermissionVmCrashGuardPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/IntermissionVmCrashGuardPatch.cs:18)
+- Приглушення vanilla team/class UI: [VanillaEntryUiSuppressionPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/VanillaEntryUiSuppressionPatch.cs:17)
 - Coop selection shell: [CoopMissionSelectionView.cs](/C:/dev/projects/BannerlordCoopSpectator3/UI/CoopMissionSelectionView.cs:16)
 
-## 4. End-To-End Flow
-### Server
-1. Campaign battle is converted into runtime battle data.
-2. Dedicated battle-map mission is opened through wrapped MP mission startup.
-3. Server materializes agents in mission.
-4. Server periodically emits:
+<a id="4-end-to-end-flow"></a>
+## 4. Потік Від Початку До Кінця
+### Сервер
+1. Campaign battle конвертується в runtime battle data.
+2. Dedicated battle-map mission відкривається через wrapped MP mission startup.
+3. Сервер materialize-ить агентів у місії.
+4. Сервер періодично надсилає:
    - `EntryStatusSnapshot`
    - `AuthoritativeMaterializedAgentEntrySnapshot`
-5. Client is expected to use the first payload family for UI state and the second for authoritative ordinary-agent binding.
+5. Від клієнта очікується, що першу сім'ю payload-ів він використає для UI state, а другу для authoritative ordinary-agent binding.
 
-### Client
-1. Wrapped MP mission opens.
-2. Vanilla intermission / entry UI is partially suppressed.
-3. Coop selection shell appears.
-4. Client receives battle snapshot and exact runtime catalog.
-5. Client receives agent-related network packets.
-6. Ordinary `CreateAgent` may be deferred until authoritative materialization data is ready.
-7. Deferred `CreateAgent` packets are replayed later.
-8. Follow-up packets are also replayed later:
+### Клієнт
+1. Відкривається wrapped MP mission.
+2. Vanilla intermission / entry UI частково приглушуються.
+3. З'являється coop selection shell.
+4. Клієнт отримує battle snapshot і exact runtime catalog.
+5. Клієнт отримує network packets, пов'язані з агентами.
+6. Ordinary `CreateAgent` може бути відкладений до моменту, коли authoritative materialization data буде готова.
+7. Відкладені `CreateAgent` packets replay-яться пізніше.
+8. Follow-up packets теж replay-яться пізніше:
    - `SetWieldedItemIndex`
    - `SynchronizeAgentSpawnEquipment`
    - weapon data / reload data / usage data
 
-The design only works if replay order is strict and complete.
+Цей дизайн працює тільки якщо порядок replay є строгим і повним.
 
-## 5. Exact Transfer And Materialization Model
-There are effectively **three** overlapping identity systems:
+<a id="5-exact-transfer-and-materialization-model"></a>
+## 5. Модель Exact Transfer І Матеріалізації
+Фактично тут накладаються **три** системи ідентичності:
 
-1. **Vanilla network agent identity**
-- native `AgentIndex`
+1. **Vanilla network identity агента**
+- нативний `AgentIndex`
 - vanilla `CreateAgent`
 - vanilla follow-up packets
 
-2. **Battle snapshot / entry identity**
+2. **Ідентичність battle snapshot / entry**
 - coop entry ids
-- side + troop + layout + source party identity
+- identity через side + troop + layout + source party
 
-3. **Exact transfer identity**
+3. **Ідентичність exact transfer**
 - strict hero contracts
 - exact weapon layouts
 - exact runtime characters / shells / items
 
-The current runtime tries to reconcile them in real time.
+Поточний runtime намагається звіряти їх у реальному часі.
 
-This is why `ShouldRequireExplicitMaterializationEntryId(...)` is critical:
+Саме тому `ShouldRequireExplicitMaterializationEntryId(...)` є критичним:
 - [CoopMissionBehaviors.cs](/C:/dev/projects/BannerlordCoopSpectator3/Mission/CoopMissionBehaviors.cs:9599)
 
-That method now gates ordinary agent exact-binding until the authoritative materialized map is non-empty.
+Цей метод тепер блокує ordinary-agent exact-binding, доки authoritative materialized map не стане непорожньою.
 
-This was the correct direction, but it only solved the **first** ordering bug.
+Це був правильний напрямок, але він вирішив лише **першу** ordering-помилку.
 
-## 6. Deferred Packet Model
-The current handoff patch has separate deferred queues for many packet types.
+<a id="6-deferred-packet-model"></a>
+## 6. Модель Відкладених Пакетів
+Поточний handoff patch має окремі deferred queue для багатьох типів пакетів.
 
-Examples in [BattleMapSpawnHandoffPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/BattleMapSpawnHandoffPatch.cs:129):
+Приклади у [BattleMapSpawnHandoffPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/BattleMapSpawnHandoffPatch.cs:129):
 - deferred `CreateAgent`
 - deferred `SetAgentActionSet`
 - deferred `AgentSetFormation`
@@ -159,170 +165,178 @@ Examples in [BattleMapSpawnHandoffPatch.cs](/C:/dev/projects/BannerlordCoopSpect
 - deferred `SetWieldedItemIndex`
 - deferred weapon network data / ammo / reload / usage
 
-Replay helpers are split by packet family.
+Replay helper-и розбиті за сім'ями пакетів.
 
-Important examples:
+Важливі приклади:
 - `TryReplayDeferredClientCreateAgents(...)`: [BattleMapSpawnHandoffPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/BattleMapSpawnHandoffPatch.cs:5768)
 - `TryReplayDeferredClientSetWieldedItemIndex(...)`: [BattleMapSpawnHandoffPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/BattleMapSpawnHandoffPatch.cs:7030)
 
-This means replay correctness depends on:
-- queue completeness
-- removal policy
-- dependency order between queues
-- "agent exists" checks
-- rider/mount readiness checks
+Це означає, що коректність replay залежить від:
+- повноти queue
+- політики видалення елементів
+- порядку залежностей між queue
+- перевірок типу "агент існує"
+- перевірок готовності rider/mount
 
-## 7. Current Reproducible Failure Clusters
-There are two separate families of failures.
+<a id="7-current-reproducible-failure-clusters"></a>
+## 7. Поточні Відтворювані Кластери Помилок
+Є дві окремі сім'ї збоїв.
 
-### A. Dedicated server combat hang / crash
-This is the long-running bolt / mounted target issue. The latest narrowing indicates:
-- not raw `HitWorld`
-- not raw `Stick`
-- not raw `AttachWeaponToBone`
-- likely later native mounted-ranged bookkeeping after a bolt hit on mounted targets
+### A. Зависання / краш dedicated server у бою
+Це довготривала проблема з bolt / mounted target. Останнє звуження показує:
+- це не сирий `HitWorld`
+- це не сирий `Stick`
+- це не сирий `AttachWeaponToBone`
+- це, ймовірно, пізніший native mounted-ranged bookkeeping після bolt hit по mounted target
 
-This family is still unresolved, but it is **not** the same issue as the current client visual crash.
+Ця сім'я ще не вирішена, але вона **не** є тією самою проблемою, що й поточний клієнтський візуальний краш.
 
-### B. Client side-selection / visual crash
-This is the currently active blocker.
+### B. Клієнтський side-selection / visual crash
+Це поточний активний блокер.
 
-This family has evolved through several visible symptoms:
+Ця сім'я вже пройшла через кілька видимих симптомів:
 - vanilla `MPIntermissionVM` null-path
-- vanilla entry UI suppression timing
-- pre-authoritative ordinary exact-binding
-- now: deferred replay mismatch between `CreateAgent` and follow-up packets
+- timing-проблеми vanilla entry UI suppression
+- ordinary exact-binding до приходу authoritative data
+- зараз: deferred replay mismatch між `CreateAgent` і follow-up пакетами
 
-## 8. What The Latest Client Crash Actually Shows
-Latest relevant run:
-- client crash process: [watchdog_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/watchdog_log_22060.txt:1)
-- server did not crash: [watchdog_log_54660.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/watchdog_log_54660.txt:1)
+<a id="8-what-the-latest-client-crash-actually-shows"></a>
+## 8. Що Насправді Показує Останній Клієнтський Краш
+Останній релевантний прогін:
+- клієнтський crash process: [watchdog_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/watchdog_log_22060.txt:1)
+- сервер не впав: [watchdog_log_54660.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/watchdog_log_54660.txt:1)
 
-### What is already fixed in this run
-- vanilla intermission callback is suppressed: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:3499)
-- exact runtime bootstrap is deferred while still in selection gate: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:3649)
-- early authoritative snapshots are empty and ordinary `CreateAgent` is correctly deferred:
-  - empty snapshot: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:776372)
+### Що вже виправлено в цьому прогоні
+- vanilla intermission callback приглушений: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:3499)
+- exact runtime bootstrap відкладається, поки клієнт ще в selection gate: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:3649)
+- ранні authoritative snapshots порожні, і ordinary `CreateAgent` правильно відкладається:
+  - порожній snapshot: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:776372)
   - deferred `CreateAgent`: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:776461)
 
-### What changed after the new gate
-- later, a non-empty authoritative snapshot arrives: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:785419)
-- deferred `CreateAgent` replay starts succeeding, but first success starts at `AgentIndex=98`: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:783794)
+### Що змінилось після нового gate
+- пізніше приходить уже непорожній authoritative snapshot: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:785419)
+- replay відкладених `CreateAgent` починає працювати, але перший успіх стартує лише з `AgentIndex=98`: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:783794)
 
-### The new concrete failure
-For earlier deferred agents, follow-up packets are still processed later even though the agent never materialized locally.
+### Нова конкретна поломка
+Для ранніх відкладених агентів follow-up packets усе одно обробляються пізніше, хоча сам агент локально так і не materialize-ився.
 
-Examples:
-- missing agents `80..86`: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:785615)
-- missing agents `36, 38, 40, 42, 44, 46`: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:785669)
+Приклади:
+- відсутні агенти `80..86`: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:785615)
+- відсутні агенти `36, 38, 40, 42, 44, 46`: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:785669)
 
-The concrete exception is:
+Конкретний виняток:
 - `TaleWorlds.Core.MBNotFoundException`
 - `Agent with index ... could not be found while reading reference from packet`
 
-This means:
-- readiness gating now works
-- but replay queue coupling still does not
+Це означає:
+- readiness gating тепер працює
+- але coupling між replay queue все ще не працює коректно
 
-### Secondary signal
-Among replayed mounted agents, some riders exist while mount runtime tracking is still absent during mounted follow-up events:
-- `MountRuntime={... Stage=absent ...}` for ordinary mounted replay: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:785339)
+### Вторинний сигнал
+Серед replay-нутих mounted агентів є випадки, де rider уже існує, а mount runtime tracking ще відсутній під час mounted follow-up events:
+- `MountRuntime={... Stage=absent ...}` для ordinary mounted replay: [rgl_log_22060.txt](/C:/ProgramData/Mount%20and%20Blade%20II%20Bannerlord/logs/rgl_log_22060.txt:785339)
 
-This is weaker than the missing-agent signal, but still important.
+Це слабший сигнал, ніж відсутні агенти, але він теж важливий.
 
-## 9. TDM / Vanilla MP Coupling
-The current runtime still inherits too much from vanilla MP / TDM assumptions:
-- mission startup
-- team selection lifecycle
-- agent network packet ordering
+<a id="9-tdm--vanilla-mp-coupling"></a>
+## 9. Зчеплення З TDM / Vanilla MP
+Поточний runtime все ще успадковує забагато припущень від vanilla MP / TDM:
+- startup місії
+- lifecycle team selection
+- порядок network packet-ів для агентів
 - mounted lifecycle assumptions
 - lobby / entry UI behavior
 
-The coop runtime then overrides those assumptions incrementally:
-- suppress a vanilla callback
-- wrap a vanilla stack
-- defer a packet
-- replay a packet later
-- rebind ordinary agents to authoritative entries
+Потім coop runtime починає поступово ці припущення перекривати:
+- приглушує один vanilla callback
+- обгортає один vanilla stack
+- відкладає один packet
+- replay-ить packet пізніше
+- перев'язує ordinary agents до authoritative entries
 
-That is why the system keeps surfacing new failures after a local fix:
-- each local patch corrects one violated invariant
-- but other queues or callbacks still assume the original vanilla timeline
+Саме тому після кожного локального фіксу з'являються нові збої:
+- кожен локальний patch виправляє один порушений інваріант
+- але інші queue або callback-и все ще живуть у припущенні про оригінальний vanilla timeline
 
-## 10. Invariants We Need To Preserve
-The runtime needs these invariants to hold:
+<a id="10-invariants-we-need-to-preserve"></a>
+## 10. Інваріанти, Які Ми Повинні Зберігати
+Runtime повинен зберігати такі інваріанти:
 
-1. No ordinary exact-binding before authoritative materialized map is non-empty.
-2. No follow-up packet for an agent before local `CreateAgent` has successfully materialized that agent.
-3. No mounted follow-up packet before both rider and mount link are available for mounted paths that require them.
-4. Vanilla intermission / entry UI must not own the flow after coop selection shell is authoritative.
-5. Exact hero path and ordinary AI path must not share assumptions unless explicitly designed to.
+1. Жодного ordinary exact-binding до того, як authoritative materialized map стане непорожньою.
+2. Жодного follow-up packet для агента до того, як локальний `CreateAgent` успішно materialize-ить цього агента.
+3. Жодного mounted follow-up packet до того, як і rider, і mount link будуть доступні для mounted path-ів, які цього потребують.
+4. Vanilla intermission / entry UI не повинні керувати flow після того, як authoritative став coop selection shell.
+5. Exact hero path і ordinary AI path не повинні ділити ті самі припущення, якщо це не було явно спроєктовано.
 
-Right now invariant `2` is the clearest active failure.
+Зараз найчіткіше активне порушення - це інваріант `2`.
 
-## 11. What Is Probably Wrong In The Current Design
-The system currently looks like it has **queue-local correctness**, but not **global replay correctness**.
+<a id="11-what-is-probably-wrong-in-the-current-design"></a>
+## 11. Що Ймовірно Неправильно В Поточному Дизайні
+Зараз система виглядає так, ніби в неї є **локальна коректність queue**, але немає **глобальної коректності replay**.
 
-In plain terms:
-- `CreateAgent` queue knows when to wait
-- `SetWieldedItemIndex` queue knows to wait if `CreateAgent` is still deferred
-- but after the authoritative snapshot arrives, we still end up in a state where:
-  - some `CreateAgent` messages never produce a local agent
-  - yet their follow-up queues continue replaying
+Простими словами:
+- queue `CreateAgent` знає, коли треба чекати
+- queue `SetWieldedItemIndex` знає, що треба чекати, якщо `CreateAgent` ще відкладений
+- але після приходу authoritative snapshot ми все одно отримуємо стан, у якому:
+  - частина `CreateAgent` повідомлень так і не створює локального агента
+  - але їхні follow-up queue все одно продовжують replay
 
-So the likely design bug is one of:
-- partial `CreateAgent` replay gap
-- silent `CreateAgent` replay non-materialization without hard dependency rollback
-- replay ordering that allows dependent queues to advance despite missing agents
-- early removal or non-persistence of `DeferredClientCreateAgentPayload` for part of the agent range
+Отже ймовірна design-помилка одна з таких:
+- частковий gap у `CreateAgent` replay
+- тихий `CreateAgent` replay non-materialization без жорсткого rollback залежностей
+- replay ordering, який дозволяє dependent queue просуватись попри відсутніх агентів
+- раннє видалення або непостійне збереження `DeferredClientCreateAgentPayload` для частини діапазону агентів
 
-The key observation is this:
-- successful replay begins at `AgentIndex=98`
-- failing follow-up packets cluster below that
+Ключове спостереження таке:
+- успішний replay починається з `AgentIndex=98`
+- збої follow-up пакетів групуються нижче цього індексу
 
-That strongly suggests the issue is not random corruption. It looks like a **systematic replay gap in an early slice of deferred agents**.
+Це дуже сильно схоже не на випадкову корупцію, а на **системний replay gap у ранньому зрізі deferred агентів**.
 
-## 12. Recommended Next Directions
-### Short-term stabilization on current architecture
-Focus on replay correctness, not more UI suppression or horse experiments.
+<a id="12-recommended-next-directions"></a>
+## 12. Рекомендовані Наступні Напрямки
+### Короткострокова стабілізація в межах поточної архітектури
+Фокус має бути на коректності replay, а не на нових UI suppression чи експериментах із кіньми.
 
-Specifically:
-- audit why some deferred `CreateAgent` entries below `98` never materialize
-- make dependent queues hard-block on confirmed local agent existence
-- prevent follow-up replay from running for agent indices whose `CreateAgent` never succeeded
-- treat mounted rider/mount late-bind as a separate second-phase dependency
+Конкретно:
+- перевірити, чому частина deferred `CreateAgent` нижче `98` так і не materialize-иться
+- зробити dependent queue жорстко заблокованими на confirmed local agent existence
+- не дозволяти follow-up replay працювати для agent index-ів, у яких `CreateAgent` так і не завершився успіхом
+- трактувати mounted rider/mount late-bind як окрему залежність другої фази
 
-### Medium-term architecture cleanup
-Split the runtime explicitly into:
+### Середньострокове очищення архітектури
+Явно розділити runtime на:
 - strict hero path
 - ordinary AI path
 - mounted ordinary AI path
 
-Right now those paths share too much infrastructure and too many assumptions.
+Зараз ці шляхи ділять забагато інфраструктури й забагато однакових припущень.
 
-## 13. Suggested Clean-Core Migration Scope
-If the project moves away from TDM-centered runtime patching, the clean-core target should be:
+<a id="13-suggested-clean-core-migration-scope"></a>
+## 13. Пропонований Scope Міграції На Clean Core
+Якщо проєкт піде від TDM-centered runtime patching, ціль clean-core міграції має бути такою:
 
-1. Keep vanilla MP transport only where needed.
-2. Own selection flow completely.
-3. Own ordinary agent materialization lifecycle completely.
-4. Use one authoritative source for agent-entry identity.
-5. Use one authoritative source for mount lifecycle after spawn.
-6. Avoid replaying vanilla follow-up packets into a half-custom lifecycle unless their prerequisites are fully satisfied by coop-owned state.
+1. Залишити vanilla MP transport тільки там, де він справді потрібен.
+2. Повністю володіти selection flow.
+3. Повністю володіти lifecycle materialization ordinary agent-ів.
+4. Мати одне authoritative джерело істини для agent-entry identity.
+5. Мати одне authoritative джерело істини для mount lifecycle після spawn.
+6. Не replay-ити vanilla follow-up packets у напівкастомний lifecycle, якщо їхні передумови не гарантуються coop-owned state.
 
-That migration should be based on this runtime inventory, not started blindly.
+Цю міграцію треба починати на основі цього runtime inventory, а не всліпу.
 
-## 14. Reference Files
-- Mission wrapper and behavior injection:
+<a id="14-reference-files"></a>
+## 14. Опорні Файли
+- Mission wrapper і behavior injection:
   - [MissionStateOpenNewPatches.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/MissionStateOpenNewPatches.cs:235)
 - Coop network bridge:
   - [CoopMissionNetworkBridge.cs](/C:/dev/projects/BannerlordCoopSpectator3/Mission/CoopMissionNetworkBridge.cs:1064)
   - [CoopMissionNetworkBridge.cs](/C:/dev/projects/BannerlordCoopSpectator3/Mission/CoopMissionNetworkBridge.cs:2097)
-- Main mission runtime logic:
+- Основна mission runtime logic:
   - [CoopMissionBehaviors.cs](/C:/dev/projects/BannerlordCoopSpectator3/Mission/CoopMissionBehaviors.cs:32)
   - [CoopMissionBehaviors.cs](/C:/dev/projects/BannerlordCoopSpectator3/Mission/CoopMissionBehaviors.cs:9599)
   - [CoopMissionBehaviors.cs](/C:/dev/projects/BannerlordCoopSpectator3/Mission/CoopMissionBehaviors.cs:6491)
-- Battle-map handoff and replay:
+- Battle-map handoff і replay:
   - [BattleMapSpawnHandoffPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/BattleMapSpawnHandoffPatch.cs:5768)
   - [BattleMapSpawnHandoffPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/BattleMapSpawnHandoffPatch.cs:7030)
   - [BattleMapSpawnHandoffPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/BattleMapSpawnHandoffPatch.cs:10495)
@@ -334,4 +348,3 @@ That migration should be based on this runtime inventory, not started blindly.
   - [IntermissionVmCrashGuardPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/IntermissionVmCrashGuardPatch.cs:18)
   - [VanillaEntryUiSuppressionPatch.cs](/C:/dev/projects/BannerlordCoopSpectator3/Patches/VanillaEntryUiSuppressionPatch.cs:17)
   - [CoopMissionSelectionView.cs](/C:/dev/projects/BannerlordCoopSpectator3/UI/CoopMissionSelectionView.cs:16)
-
