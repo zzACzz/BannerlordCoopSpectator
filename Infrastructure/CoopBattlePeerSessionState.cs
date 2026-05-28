@@ -136,11 +136,11 @@ namespace CoopSpectator.Infrastructure
                 CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(controlledAgent, out controlledEntryId);
 
             BattleSideEnum runtimeSide =
-                mission != null &&
-                missionPeer.Team != null &&
-                !ReferenceEquals(missionPeer.Team, mission.SpectatorTeam)
-                    ? missionPeer.Team.Side
-                    : missionPeer.Team?.Side ?? BattleSideEnum.None;
+                hasActiveControlledAgent &&
+                controlledAgent.Team != null &&
+                !ReferenceEquals(controlledAgent.Team, mission?.SpectatorTeam)
+                    ? controlledAgent.Team.Side
+                    : BattleSideEnum.None;
             BattleSideEnum effectiveSide = selectionState.Side != BattleSideEnum.None
                 ? selectionState.Side
                 : runtimeSide != BattleSideEnum.None

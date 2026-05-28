@@ -28537,12 +28537,16 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
-            Team currentTeam = missionPeer.Team;
-            if (currentTeam != null &&
-                mission.SpectatorTeam != null &&
-                ReferenceEquals(currentTeam, mission.SpectatorTeam))
+            if (mission.SpectatorTeam != null &&
+                CoopBattlePeerSessionState.TryBuild(
+                    mission,
+                    missionPeer,
+                    source + " native-peer-replay-spectator",
+                    out CoopBattlePeerSessionSnapshot sessionSnapshot) &&
+                (sessionSnapshot.SessionStage == CoopBattlePeerSessionStage.NoSide ||
+                 sessionSnapshot.LifecycleStatus == CoopBattlePeerLifecycleStatus.NoSide))
             {
-                teamIndex = currentTeam.TeamIndex;
+                teamIndex = mission.SpectatorTeam.TeamIndex;
                 culture = null;
                 failureReason = string.Empty;
                 return true;
