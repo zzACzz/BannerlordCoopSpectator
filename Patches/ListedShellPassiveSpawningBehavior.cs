@@ -10,6 +10,24 @@ namespace CoopSpectator.Patches
     {
         private static string _lastInitializedMissionKey = string.Empty;
 
+        internal static int ResolveRespawnPeriodForPeer(Mission mission, MissionPeer peer)
+        {
+            MissionMultiplayerGameModeBase gameMode = mission?.GetMissionBehavior<MissionMultiplayerGameModeBase>();
+            if (gameMode?.WarmupComponent != null && gameMode.WarmupComponent.IsInWarmup)
+                return 3;
+
+            if (peer?.Team != null)
+            {
+                if (peer.Team.Side == BattleSideEnum.Attacker)
+                    return MultiplayerOptions.OptionType.RespawnPeriodTeam2.GetIntValue();
+
+                if (peer.Team.Side == BattleSideEnum.Defender)
+                    return MultiplayerOptions.OptionType.RespawnPeriodTeam1.GetIntValue();
+            }
+
+            return -1;
+        }
+
         public override void Initialize(SpawnComponent spawnComponent)
         {
             SpawnComponent = spawnComponent;
@@ -60,19 +78,7 @@ namespace CoopSpectator.Patches
 
         public override int GetMaximumReSpawnPeriodForPeer(MissionPeer peer)
         {
-            if (GameMode?.WarmupComponent != null && GameMode.WarmupComponent.IsInWarmup)
-                return 3;
-
-            if (peer?.Team != null)
-            {
-                if (peer.Team.Side == BattleSideEnum.Attacker)
-                    return MultiplayerOptions.OptionType.RespawnPeriodTeam2.GetIntValue();
-
-                if (peer.Team.Side == BattleSideEnum.Defender)
-                    return MultiplayerOptions.OptionType.RespawnPeriodTeam1.GetIntValue();
-            }
-
-            return -1;
+            return ResolveRespawnPeriodForPeer(Mission, peer);
         }
 
         protected override bool IsRoundInProgress()

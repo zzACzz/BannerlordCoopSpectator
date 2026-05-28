@@ -390,6 +390,7 @@ namespace CoopSpectator
                 if (_harmony == null)
                     _harmony = new Harmony("com.coopspectator.dedicated");
                 MissionStateOpenNewPatches.Apply(_harmony);
+                MissionLobbySpawnContractPatch.Apply(_harmony);
             }
             catch (Exception ex)
             {
