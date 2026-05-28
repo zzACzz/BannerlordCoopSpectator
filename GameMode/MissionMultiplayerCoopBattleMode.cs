@@ -136,15 +136,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
             list.Add(new MultiplayerTimerComponent());
             ModLogger.Info("CoopBattle server: MultiplayerMissionAgentVisualSpawnComponent and MissionLobbyEquipmentNetworkComponent skipped (client-only).");
-            if (!minimalBattleMapRuntime)
-            {
-                list.Add(new MultiplayerTeamSelectComponent());
-            }
-            else
-            {
-                list.Add(new MultiplayerTeamSelectComponent());
-                ModLogger.Info("CoopBattle server: retained MultiplayerTeamSelectComponent for battle-map native peer-sync compatibility.");
-            }
+            ModLogger.Info("CoopBattle server: skipped MultiplayerTeamSelectComponent; authoritative coop side/team lifecycle now owns server-side team assignment.");
 
             if (!minimalBattleMapRuntime)
             {
