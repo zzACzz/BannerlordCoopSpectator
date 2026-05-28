@@ -37,6 +37,7 @@ namespace CoopSpectator.Patches
         private static string _lastMissionBehaviorStackObservationKey;
         private static string _lastDedicatedManualLoadMissionStepKey;
         private static string _lastDedicatedManualOnTickStepKey;
+        private static string _lastPassiveConsoleShellSuppressionKey;
         private static readonly HashSet<string> _patchedMissionScreenPreLoadMethods = new HashSet<string>(StringComparer.Ordinal);
         private static Harmony _runtimeHarmony;
 
@@ -181,7 +182,17 @@ namespace CoopSpectator.Patches
                 typeof(float)) ? 1 : 0;
             patchedCount += TryPatchMethod(
                 harmony,
-                "TaleWorlds.MountAndBlade.Multiplayer.ConsoleMatchStartEndHandler",
+                "TaleWorlds.MountAndBlade.ConsoleMatchStartEndHandler",
+                "OnBehaviorInitialize",
+                nameof(ConsoleMatchStartEndHandler_OnBehaviorInitialize_Prefix)) ? 1 : 0;
+            patchedCount += TryPatchMethod(
+                harmony,
+                "TaleWorlds.MountAndBlade.ConsoleMatchStartEndHandler",
+                "OnAgentBuild",
+                nameof(ConsoleMatchStartEndHandler_OnAgentBuild_Prefix)) ? 1 : 0;
+            patchedCount += TryPatchMethod(
+                harmony,
+                "TaleWorlds.MountAndBlade.ConsoleMatchStartEndHandler",
                 "OnMissionTick",
                 nameof(ConsoleMatchStartEndHandler_OnMissionTick_Prefix),
                 typeof(float)) ? 1 : 0;
@@ -504,7 +515,45 @@ namespace CoopSpectator.Patches
 
         private static bool ConsoleMatchStartEndHandler_OnMissionTick_Prefix(object __instance, float dt)
         {
+            if (ShouldSuppressPassiveConsoleMatchShell(__instance, "ConsoleMatchStartEndHandler.OnMissionTick"))
+                return false;
+
             return !ShouldSuppressNativeBattleShell(__instance, "ConsoleMatchStartEndHandler.OnMissionTick");
+        }
+
+        private static bool ConsoleMatchStartEndHandler_OnBehaviorInitialize_Prefix(object __instance)
+        {
+            return !ShouldSuppressPassiveConsoleMatchShell(__instance, "ConsoleMatchStartEndHandler.OnBehaviorInitialize");
+        }
+
+        private static bool ConsoleMatchStartEndHandler_OnAgentBuild_Prefix(object __instance)
+        {
+            return !ShouldSuppressPassiveConsoleMatchShell(__instance, "ConsoleMatchStartEndHandler.OnAgentBuild");
+        }
+
+        private static bool ShouldSuppressPassiveConsoleMatchShell(object instance, string source)
+        {
+            Mission mission = (instance as MissionBehavior)?.Mission ?? Mission.Current;
+            if (!GameNetwork.IsClient ||
+                GameNetwork.IsServer ||
+                !IsCoopBattleMapRuntime(mission))
+            {
+                return false;
+            }
+
+            string key =
+                (source ?? "unknown") + "|" +
+                (mission?.SceneName ?? "unknown");
+            if (!string.Equals(_lastPassiveConsoleShellSuppressionKey, key, StringComparison.Ordinal))
+            {
+                _lastPassiveConsoleShellSuppressionKey = key;
+                ModLogger.Info(
+                    "BattleShellSuppressionPatch: suppressed passive native console match shell behavior. " +
+                    "Source=" + (source ?? "unknown") +
+                    " Scene=" + (mission?.SceneName ?? "unknown") + ".");
+            }
+
+            return true;
         }
 
         private static bool ShouldSuppressNativeBattleShell(object instance, string source)

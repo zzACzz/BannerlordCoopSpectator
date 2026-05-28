@@ -121,6 +121,7 @@ namespace CoopSpectator.Patches
         private static string _lastExactCommanderOrderBarMovieBindingKey;
         private static string _lastForcedExactCommanderTroopSelectionInputsKey;
         private static string _lastExactCommanderOrderItemExecutionKey;
+        private static string _lastSuppressedNativeAgentVisualBootstrapKey;
         private static bool _suppressExactCommanderOrderHotkeyFallbackUntilRelease;
         private static object _activeExactCommanderMissionOrderVm;
         private static PendingLocalCommanderOrderControlFinalization _pendingLocalCommanderOrderControlFinalization;
@@ -490,6 +491,7 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentMakeAgentDead), () => PatchMissionNetworkComponentMakeAgentDead(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWieldedItemIndex), () => PatchMissionNetworkComponentSetWieldedItemIndex(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent), () => PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentOnPeerSelectedTeam), () => PatchMissionNetworkComponentOnPeerSelectedTeam(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSendAgentsToPeerServer), () => PatchMissionNetworkComponentSendAgentsToPeerServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionOnAgentAddedAsCorpseServer), () => PatchMissionOnAgentAddedAsCorpseServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionSpawnAttachedWeaponOnCorpseServer), () => PatchMissionSpawnAttachedWeaponOnCorpseServer(harmony));
@@ -1273,6 +1275,24 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.SendAgentsToPeer.");
+        }
+
+        private static void PatchMissionNetworkComponentOnPeerSelectedTeam(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                nameof(MissionNetworkComponent.OnPeerSelectedTeam),
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_OnPeerSelectedTeam_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.OnPeerSelectedTeam not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.OnPeerSelectedTeam.");
         }
 
         private static void PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer(Harmony harmony)
@@ -4324,6 +4344,57 @@ namespace CoopSpectator.Patches
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.SendAgentsToPeer server prefix failed open: " + ex.Message);
             }
+        }
+
+        private static bool MissionNetworkComponent_OnPeerSelectedTeam_Prefix(
+            MissionNetworkComponent __instance,
+            MissionPeer missionPeer)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!ShouldSuppressNativeAgentVisualBootstrapForCoopBattle(mission, missionPeer))
+                    return true;
+
+                NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
+                string key =
+                    (mission?.SceneName ?? "unknown") + "|" +
+                    (peer?.Index.ToString() ?? "null") + "|" +
+                    (missionPeer?.Team?.TeamIndex.ToString() ?? "null") + "|" +
+                    (missionPeer?.Team?.Side.ToString() ?? "null");
+                if (!string.Equals(_lastSuppressedNativeAgentVisualBootstrapKey, key, StringComparison.Ordinal))
+                {
+                    _lastSuppressedNativeAgentVisualBootstrapKey = key;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed native MissionNetworkComponent.OnPeerSelectedTeam agent-visual bootstrap for CoopBattle runtime. " +
+                        "Scene=" + (mission?.SceneName ?? "unknown") +
+                        " Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "null") +
+                        " TeamIndex=" + (missionPeer?.Team?.TeamIndex.ToString() ?? "null") +
+                        " TeamSide=" + (missionPeer?.Team?.Side.ToString() ?? "null") + ".");
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.OnPeerSelectedTeam prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool ShouldSuppressNativeAgentVisualBootstrapForCoopBattle(Mission mission, MissionPeer missionPeer)
+        {
+            if (!GameNetwork.IsServer || mission == null || missionPeer == null)
+                return false;
+
+            string sceneName = mission.SceneName ?? string.Empty;
+            if (!MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(sceneName) ||
+                !SceneRuntimeClassifier.IsCampaignBattleScene(sceneName))
+            {
+                return false;
+            }
+
+            return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null;
         }
 
         private static bool Mission_SpawnAttachedWeaponOnCorpse_ServerPrefix(

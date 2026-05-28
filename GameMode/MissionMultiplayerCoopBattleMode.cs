@@ -234,18 +234,6 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
             list.Add(new MultiplayerTimerComponent());
 
-            MissionBehavior visualSpawn = MissionBehaviorHelpers.TryCreateMissionAgentVisualSpawnComponent();
-            if (visualSpawn != null)
-            {
-                list.Add(visualSpawn);
-                if (minimalBattleMapRuntime)
-                    ModLogger.Info("CoopBattle client: retained MultiplayerMissionAgentVisualSpawnComponent for battle-map native bootstrap compatibility.");
-            }
-            else
-            {
-                ModLogger.Info("CoopBattle client: skip MultiplayerMissionAgentVisualSpawnComponent (native visual bootstrap unavailable).");
-            }
-
             ModLogger.Info("CoopBattle client: skipped MultiplayerTeamSelectComponent; authoritative coop selection overlay now owns client-side team/class intent.");
             if (!minimalBattleMapRuntime)
             {
@@ -393,7 +381,8 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             if (list == null)
                 return;
 
-            int removed = 0;
+            int removedLegacyEquipmentNetwork = 0;
+            int removedLegacyVisualSpawn = 0;
             for (int i = list.Count - 1; i >= 0; i--)
             {
                 MissionBehavior behavior = list[i];
@@ -401,18 +390,26 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                     continue;
 
                 string typeName = behavior.GetType().Name;
-                if (!string.Equals(typeName, nameof(MissionLobbyEquipmentNetworkComponent), StringComparison.Ordinal))
+                if (string.Equals(typeName, nameof(MissionLobbyEquipmentNetworkComponent), StringComparison.Ordinal))
+                {
+                    list.RemoveAt(i);
+                    removedLegacyEquipmentNetwork++;
+                    ModLogger.Info("CoopBattle client validation: removed legacy MissionLobbyEquipmentNetworkComponent from custom runtime stack.");
+                    continue;
+                }
+
+                if (!string.Equals(typeName, "MultiplayerMissionAgentVisualSpawnComponent", StringComparison.Ordinal))
                     continue;
 
                 list.RemoveAt(i);
-                removed++;
-                ModLogger.Info("CoopBattle client validation: removed legacy MissionLobbyEquipmentNetworkComponent from custom runtime stack.");
+                removedLegacyVisualSpawn++;
+                ModLogger.Info("CoopBattle client validation: removed legacy MultiplayerMissionAgentVisualSpawnComponent from custom runtime stack.");
             }
 
             ModLogger.Info(
                 "CoopBattle client validation: completed. " +
-                "RemovedLegacyEquipmentNetwork=" + removed +
-                " HasVisualSpawn=" + MissionBehaviorHelpers.ListContainsBehaviorType(list, "MultiplayerMissionAgentVisualSpawnComponent"));
+                "RemovedLegacyEquipmentNetwork=" + removedLegacyEquipmentNetwork +
+                " RemovedLegacyVisualSpawn=" + removedLegacyVisualSpawn);
         }
 
         private static void AddIfNotNull(List<MissionBehavior> list, MissionBehavior behavior)

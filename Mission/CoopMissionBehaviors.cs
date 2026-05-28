@@ -29133,6 +29133,12 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || missionPeer == null)
                 return false;
 
+            if (mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null ||
+                mission.GetMissionBehavior<MissionMultiplayerCoopBattleClient>() != null)
+            {
+                return false;
+            }
+
             if (!CoopBattleSpawnRequestState.HasPendingRequest(missionPeer))
                 return false;
 

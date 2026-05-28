@@ -57,8 +57,8 @@
 - `MultiplayerTimerComponent` повинен лишатись, бо `MissionLobbyComponent` читає його під час native state handling.
 - `MultiplayerTeamSelectComponent` більше не входить у `CoopBattle` server або client stack; він поки ще лишається тільки в listed-shell mission stack як compatibility shell для native multiplayer bootstrap і більше не є джерелом side authority.
 - `MissionScoreboardComponent` повинен лишатись на dedicated listed/custom server, бо native `MissionCustomGameServerComponent.AfterStart()` підписується на його події без null guard.
-- `MultiplayerMissionAgentVisualSpawnComponent` ще лишається в `CoopBattle` client stack як останній native visual bootstrap surface для battle-map runtime.
-- `MissionLobbyEquipmentNetworkComponent` більше не входить у `CoopBattle` client stack; його залишок тепер треба трактувати тільки як listed-shell equipment/class bootstrap legacy, а не як частину custom coop runtime.
+- `MultiplayerMissionAgentVisualSpawnComponent` більше не входить у `CoopBattle` client stack; native `CreateAgentVisuals` sender на `MissionNetworkComponent.OnPeerSelectedTeam(...)` тепер глушиться для custom coop runtime.
+- `MissionLobbyEquipmentNetworkComponent` і `MultiplayerMissionAgentVisualSpawnComponent` тепер треба трактувати тільки як listed-shell visual/equipment bootstrap legacy, а не як частину custom coop runtime.
 
 ### Контракт custom-server join flow, який ще потрібен
 
@@ -138,7 +138,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 | `MultiplayerTimerComponent` | потрібен lobby lifecycle | коли буде свій lobby shell |
 | `MultiplayerTeamSelectComponent` | listed-shell native stack/UI bootstrap і частина join-ready очікувань | коли side selection і native team bootstrap повністю підуть у coop-owned path |
 | `MissionScoreboardComponent` | потрібен dedicated `MissionCustomGameServerComponent` | коли dedicated shell більше не буде інстанціювати цей native component |
-| `MultiplayerMissionAgentVisualSpawnComponent` | останній native visual bootstrap у `CoopBattle` client runtime | коли materialization перестане спиратися на native preview visuals |
+| `MultiplayerMissionAgentVisualSpawnComponent` | listed-shell native agent-visual bootstrap legacy | коли listed-shell visual bootstrap буде повністю прибраний |
 | `MissionLobbyEquipmentNetworkComponent` | listed-shell equipment/class bootstrap legacy | коли selected-troop/perk compatibility path більше не буде потрібний |
 | official `TeamDeathmatch` listed shell | безпечна server-list registration і join bootstrap | тільки після доведеного альтернативного listed/custom startup path без TDM shell |
 | official `Battle` id | native entry point для battle mission start | лишається, але вже override-иться в `CoopBattle` |
@@ -204,7 +204,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - authoritative troop selection більше не читає native `MissionPeer.SelectedTroopIndex` як джерело істини;
 - native `MissionPeer.Team` уже моститься server-side з coop authority state;
 - native `SelectedTroopIndex` лишається тільки compatibility bridge для vanilla bootstrap/network expectations;
-- native `SelectedTroopIndex` bridge тепер активний тільки всередині native visual/equipment bootstrap window (`HasSpawnedAgentVisuals || !EquipmentUpdatingExpired`), а не протягом усього pending spawn lifecycle;
+- native `SelectedTroopIndex` bridge більше не активується в custom `CoopBattle` runtime; він лишився тільки listed-shell compatibility path для native bootstrap/network expectations;
 - `Infrastructure/CoopBattleEntryPolicy.cs` більше не тримає dead allow-flags для legacy vanilla team/class interaction; живими лишилися тільки authoritative path predicates, які реально читає battle-map handoff/client shell;
 - native class compatibility bridge ще резолвиться від authoritative coop selection, а не від `MissionPeer.SelectedTroopIndex` як джерела істини;
 - старий server-side `MultiplayerHeroClassOverridePatch` для vanilla TDM spawn/class path уже видалений; лишився тільки явний `SelectedTroopIndex` bridge;
@@ -216,7 +216,8 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - local camera preview у `UI/CoopMissionSelectionView.cs` тепер пише тільки в `MissionScreen.SetAgentToFollow(...)`; preview path більше не використовує `LastFollowedAgent` / `MissionPeer.FollowedAgent` network echo;
 - `Patches/MissionScreenCameraPreviewPatch.cs` більше не мутує `MissionLobbyComponent.MissionType` або `MissionPeer.HasSpawnedAgentVisuals`; shim тепер робить postfix override для `MissionScreen.GetSpectatingData(...)`;
 - custom `CoopBattle` client runtime більше не несе `MultiplayerTeamSelectComponent`; client-side team/class intent повністю йде через overlay + authoritative network/file bridge path;
-- ми ще не маємо повної заміни native team-selection shell.
+- passive `ConsoleMatchStartEndHandler` більше не входить у custom `CoopBattle` runtime contract; native platform-state shell приглушений разом із visual bootstrap sender-ом;
+- ми ще не маємо повної заміни listed-shell native team-selection/bootstrap shell.
 
 ## 9. Як працює materialization агентів
 
@@ -234,17 +235,17 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 
 Поточні native залежності в цьому flow:
 
-- `MultiplayerMissionAgentVisualSpawnComponent`
 - native mission peer spawn timers
 - native team membership
-- native selected-troop/class bridge для listed/bootstrap compatibility
+- listed-shell native selected-troop/class bridge для bootstrap compatibility
+- listed-shell native agent-visual/equipment bootstrap legacy
 
 Важливе звуження поточного контракту:
 
 - server-side coop runtime більше не має власного коду, який запитує native pending visuals;
 - dedicated coop runtime більше не викликає `ShouldSpawnVisualsForServer(...)` і не намагається підлаштовувати свій flow під native server-visual contract;
 - server-side finalize hook, який переводив native preview visuals у vanilla `SpawningBehaviorBase` spawn loop через `SetEarlyAgentVisualsDespawning(...)`, уже видалений;
-- native `SelectedTroopIndex` compatibility bridge більше не синхронізується весь час, поки peer має pending spawn request; він живе тільки в native visual/equipment bootstrap window і чистить свій cached bridge state під час expiry;
+- native `SelectedTroopIndex` compatibility bridge більше не синхронізується весь час, поки peer має pending spawn request; у custom `CoopBattle` runtime він уже вимкнений, а listed-shell path ще чистить свій cached bridge state під час expiry;
 - phase progression до `Deployment`/`PreBattleHold` тепер спирається на реальний control/materialization readiness, а не на `HasSpawnedAgentVisuals`.
 
 Тобто логіка materialization уже значною мірою наша, але вона ще не відв'язана від native multiplayer bootstrap assumptions.
@@ -375,6 +376,9 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - `SelectedTroopIndex` compatibility bridge звужений до native visual/equipment bootstrap window і більше не живе весь pending-spawn lifecycle;
 - `MultiplayerTeamSelectComponent` прибраний з `CoopBattle` server і client stack; native team-select shell лишився тільки в listed bootstrap path;
 - `MissionLobbyEquipmentNetworkComponent` прибраний з `CoopBattle` client stack; custom runtime більше не несе native equipment/class bootstrap, лишився тільки listed-shell legacy;
+- `MultiplayerMissionAgentVisualSpawnComponent` прибраний з `CoopBattle` client stack; custom runtime більше не несе native agent-visual bootstrap;
+- native `MissionNetworkComponent.OnPeerSelectedTeam(...)` більше не шле `CreateAgentVisuals` для custom `CoopBattle` runtime;
+- passive native `ConsoleMatchStartEndHandler` приглушений для custom `CoopBattle` runtime і більше не тримає visual-spawn/platform-state contract;
 - прибрані мертві `AllowLegacyVanillaTeamSelectionInteraction` / `AllowLegacyVanillaClassSelectionInteraction` з `Infrastructure/CoopBattleEntryPolicy.cs`;
 - видалений мертвий direct-spawn experiment (`EnableDirectCoopPlayerSpawnExperiment`, `TrySpawnPeersIntoCoopControl(...)`, `SpawnCoopControlledAgent(...)`, `TryEnsurePendingSpawnVisuals(...)`), який уже не входив у live runtime tick path;
 - видалений active vanilla spawn-bridge hook (`RunVanillaSpawnBridgeTick(...)` / `TryFinalizePendingNativeSpawnVisualCompatibility(...)`), який переводив native preview visuals у `SpawningBehaviorBase` і `Mission.SpawnAgent(..., spawnFromAgentVisuals: true)`;
@@ -391,8 +395,8 @@ Exact transfer - це спроба зберігати campaign identities, body 
 Головні блокери до повністю clean coop runtime зараз такі:
 
 1. Замінити залежність від listed-shell `TeamDeathmatch` тільки після того, як буде доведений альтернативний server-list registration і join path без нього.
-2. Дорізати залишки native `MultiplayerTeamSelectComponent` stack/UI bootstrap, хоча authoritative side/team/troop state вже перенесений у coop-owned path і старий client reflection шар уже видалений.
-3. Прибрати залежність materialization від `MultiplayerMissionAgentVisualSpawnComponent` і після цього переоцінити, чи listed-shell `MissionLobbyEquipmentNetworkComponent` ще потрібен взагалі.
+2. Дорізати залишки listed-shell native `MultiplayerTeamSelectComponent` stack/UI bootstrap, хоча authoritative side/team/troop state вже перенесений у coop-owned path і старий client reflection шар уже видалений.
+3. Прибрати listed-shell native agent-visual/equipment bootstrap legacy (`CreateAgentVisuals`, `MissionLobbyEquipmentNetworkComponent`) після перевірки late-join/reconnect contract без нього.
 4. Прибрати bridge-file fallback-и тоді, коли network transport стане достатньо надійним для selection, spawn, readiness і reconnect flows.
 5. Замінити `MissionStateOpenNew` wrapping на більш явний coop mission assembly path, коли native shell interception більше не буде потрібний.
 6. Окремо переоцінити `LocalJoinAddressPatch` та інші join patch-і, коли public, VPN і self-host join flows будуть розділені чистіше по відповідальності.
