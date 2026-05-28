@@ -13,6 +13,14 @@ namespace CoopSpectator.Patches
         private static readonly MethodInfo SetStatePlayingAsServerMethod = typeof(MissionLobbyComponent).GetMethod(
             "SetStatePlayingAsServer",
             BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo SetStateEndingAsClientMethod = typeof(MissionLobbyComponent).GetMethod(
+            "SetStateEndingAsClient",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo CurrentMultiplayerStateSetterMethod = typeof(MissionLobbyComponent)
+            .GetProperty(
+                nameof(MissionLobbyComponent.CurrentMultiplayerState),
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
+            .GetSetMethod(nonPublic: true);
 
         public static void Apply(Harmony harmony)
         {
@@ -48,10 +56,38 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
+                MethodInfo stateChangeTarget = typeof(MissionLobbyComponent).GetMethod(
+                    "HandleServerEventMissionStateChange",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo stateChangePrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
+                    nameof(HandleServerEventMissionStateChange_Prefix),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                if (stateChangeTarget == null || stateChangePrefix == null)
+                {
+                    ModLogger.Info("MissionLobbySpawnContractPatch: mission-state-change target or prefix not found. Skip.");
+                    return;
+                }
+
+                MethodInfo clientSynchronizedTarget = typeof(MissionLobbyComponent).GetMethod(
+                    "OnMyClientSynchronized",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo clientSynchronizedPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
+                    nameof(OnMyClientSynchronized_Prefix),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                if (clientSynchronizedTarget == null || clientSynchronizedPrefix == null)
+                {
+                    ModLogger.Info("MissionLobbySpawnContractPatch: client-synchronized target or prefix not found. Skip.");
+                    return;
+                }
+
                 harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
                 harmony.Patch(tickTarget, prefix: new HarmonyMethod(tickPrefix));
+                harmony.Patch(stateChangeTarget, prefix: new HarmonyMethod(stateChangePrefix));
+                harmony.Patch(clientSynchronizedTarget, prefix: new HarmonyMethod(clientSynchronizedPrefix));
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMissionTick.");
+                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventMissionStateChange.");
+                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMyClientSynchronized.");
             }
             catch (Exception ex)
             {
@@ -112,6 +148,78 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info("MissionLobbySpawnContractPatch: mission-tick prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool HandleServerEventMissionStateChange_Prefix(MissionLobbyComponent __instance, object baseMessage)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!ShouldUseListedShellLobbyContract(mission))
+                    return true;
+
+                if (!GameNetwork.IsClient)
+                    return true;
+
+                object currentStateValue = baseMessage?.GetType()
+                    .GetProperty("CurrentState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
+                    .GetValue(baseMessage);
+                object stateStartTimeValue = baseMessage?.GetType()
+                    .GetProperty("StateStartTimeInSeconds", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
+                    .GetValue(baseMessage);
+                if (!(currentStateValue is MissionLobbyComponent.MultiplayerGameState currentState) ||
+                    !(stateStartTimeValue is long stateStartTimeInSeconds))
+                {
+                    return true;
+                }
+
+                CurrentMultiplayerStateSetterMethod?.Invoke(__instance, new object[] { currentState });
+                if (currentState != MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers)
+                {
+                    if (currentState == MissionLobbyComponent.MultiplayerGameState.Playing)
+                    {
+                        MultiplayerWarmupComponent warmup = mission?.GetMissionBehavior<MultiplayerWarmupComponent>();
+                        if (warmup != null)
+                            mission.RemoveMissionBehavior(warmup);
+                    }
+
+                    MultiplayerTimerComponent timer = mission?.GetMissionBehavior<MultiplayerTimerComponent>();
+                    if (timer != null)
+                    {
+                        float duration = currentState == MissionLobbyComponent.MultiplayerGameState.Playing
+                            ? MultiplayerOptions.OptionType.MapTimeLimit.GetIntValue() * 60f
+                            : MissionLobbyComponent.PostMatchWaitDuration;
+                        timer.StartTimerAsClient(stateStartTimeInSeconds, duration);
+                    }
+                }
+
+                if (currentState == MissionLobbyComponent.MultiplayerGameState.Ending)
+                    SetStateEndingAsClientMethod?.Invoke(__instance, Array.Empty<object>());
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: mission-state-change prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool OnMyClientSynchronized_Prefix(MissionLobbyComponent __instance)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!ShouldUseListedShellLobbyContract(mission))
+                    return true;
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: client-synchronized prefix failed open: " + ex.Message);
                 return true;
             }
         }
