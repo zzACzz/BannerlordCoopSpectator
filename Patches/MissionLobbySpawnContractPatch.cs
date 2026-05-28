@@ -10,9 +10,6 @@ namespace CoopSpectator.Patches
 {
     internal static class MissionLobbySpawnContractPatch
     {
-        private static readonly MethodInfo SetStatePlayingAsServerMethod = typeof(MissionLobbyComponent).GetMethod(
-            "SetStatePlayingAsServer",
-            BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo SetStateEndingAsClientMethod = typeof(MissionLobbyComponent).GetMethod(
             "SetStateEndingAsClient",
             BindingFlags.Instance | BindingFlags.NonPublic);
@@ -21,6 +18,11 @@ namespace CoopSpectator.Patches
                 nameof(MissionLobbyComponent.CurrentMultiplayerState),
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
             .GetSetMethod(nonPublic: true);
+        private static readonly FieldInfo OnPostMatchEndedField = typeof(MissionLobbyComponent).GetField(
+            "OnPostMatchEnded",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly Type MissionStateChangeType = AccessTools.TypeByName("TaleWorlds.MountAndBlade.MissionStateChange");
+        private static readonly MethodInfo GameNetworkWriteMessageMethod = ResolveGameNetworkWriteMessageMethod();
 
         public static void Apply(Harmony harmony)
         {
@@ -142,7 +144,7 @@ namespace CoopSpectator.Patches
                 gameMode.GetWinnerTeam();
                 SetRemainingAgentsInvulnerable(mission);
                 ClearListedShellSpawnCompatibilityState();
-                __instance.SetStateEndingAsServer();
+                SetListedShellStateEndingAsServer(__instance, timer);
                 return false;
             }
             catch (Exception ex)
@@ -230,7 +232,7 @@ namespace CoopSpectator.Patches
                 return true;
 
             MultiplayerTimerComponent timer = mission?.GetMissionBehavior<MultiplayerTimerComponent>();
-            if (timer == null || SetStatePlayingAsServerMethod == null)
+            if (timer == null)
                 return true;
 
             MultiplayerWarmupComponent warmup = mission.GetMissionBehavior<MultiplayerWarmupComponent>();
@@ -251,7 +253,7 @@ namespace CoopSpectator.Patches
             if (!shouldStart)
                 return false;
 
-            SetStatePlayingAsServerMethod.Invoke(lobbyComponent, Array.Empty<object>());
+            SetListedShellStatePlayingAsServer(lobbyComponent, mission, timer);
             ModLogger.Info(
                 "MissionLobbySpawnContractPatch: advanced listed-shell lobby from WaitingFirstPlayers to Playing via explicit coop-owned lobby contract. " +
                 "Peers=" + synchronizedPeerCount +
@@ -259,6 +261,71 @@ namespace CoopSpectator.Patches
                 " MinPlayers=" + minPlayersToStart +
                 " Mission=" + (mission?.SceneName ?? "unknown"));
             return false;
+        }
+
+        private static void SetListedShellStatePlayingAsServer(
+            MissionLobbyComponent lobbyComponent,
+            Mission mission,
+            MultiplayerTimerComponent timer)
+        {
+            MultiplayerWarmupComponent warmup = mission?.GetMissionBehavior<MultiplayerWarmupComponent>();
+            if (warmup != null)
+                mission.RemoveMissionBehavior(warmup);
+
+            CurrentMultiplayerStateSetterMethod?.Invoke(
+                lobbyComponent,
+                new object[] { MissionLobbyComponent.MultiplayerGameState.Playing });
+            timer.StartTimerAsServer(MultiplayerOptions.OptionType.MapTimeLimit.GetIntValue() * 60f);
+            BroadcastMissionStateChange(
+                MissionLobbyComponent.MultiplayerGameState.Playing,
+                timer.GetCurrentTimerStartTime().NumberOfTicks);
+        }
+
+        private static void SetListedShellStateEndingAsServer(
+            MissionLobbyComponent lobbyComponent,
+            MultiplayerTimerComponent timer)
+        {
+            CurrentMultiplayerStateSetterMethod?.Invoke(
+                lobbyComponent,
+                new object[] { MissionLobbyComponent.MultiplayerGameState.Ending });
+            timer.StartTimerAsServer(MissionLobbyComponent.PostMatchWaitDuration);
+            BroadcastMissionStateChange(
+                MissionLobbyComponent.MultiplayerGameState.Ending,
+                timer.GetCurrentTimerStartTime().NumberOfTicks);
+            (OnPostMatchEndedField?.GetValue(lobbyComponent) as Action)?.Invoke();
+        }
+
+        private static void BroadcastMissionStateChange(
+            MissionLobbyComponent.MultiplayerGameState state,
+            long stateStartTimeInTicks)
+        {
+            if (MissionStateChangeType == null || GameNetworkWriteMessageMethod == null)
+                return;
+
+            object message = Activator.CreateInstance(MissionStateChangeType, state, stateStartTimeInTicks);
+            if (message == null)
+                return;
+
+            GameNetwork.BeginBroadcastModuleEvent();
+            GameNetworkWriteMessageMethod.Invoke(null, new[] { message });
+            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+        }
+
+        private static MethodInfo ResolveGameNetworkWriteMessageMethod()
+        {
+            MethodInfo[] methods = typeof(GameNetwork).GetMethods(BindingFlags.Public | BindingFlags.Static);
+            for (int i = 0; i < methods.Length; i++)
+            {
+                MethodInfo method = methods[i];
+                if (method?.Name != "WriteMessage")
+                    continue;
+
+                ParameterInfo[] parameters = method.GetParameters();
+                if (parameters.Length == 1)
+                    return method;
+            }
+
+            return null;
         }
 
         private static int CountSynchronizedPeers()
