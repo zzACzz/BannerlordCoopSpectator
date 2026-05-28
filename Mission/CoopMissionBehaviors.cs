@@ -24958,8 +24958,18 @@ namespace CoopSpectator.MissionBehaviors
             if (missionPeer == null)
                 return;
 
+            ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
             missionPeer.HasSpawnedAgentVisuals = false;
             missionPeer.EquipmentUpdatingExpired = true;
+        }
+
+        private static void ClearSelectedTroopIndexBridgeCompatibilityState(MissionPeer missionPeer)
+        {
+            NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
+            if (peer == null)
+                return;
+
+            _lastBridgedSelectedTroopIndexByPeer.Remove(peer.Index);
         }
 
         private static bool ClearMissionPeerPendingNativeSpawnVisualCompatibility(Mission mission, MissionPeer missionPeer)
@@ -29066,8 +29076,11 @@ namespace CoopSpectator.MissionBehaviors
                 if (missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam) || missionPeer.Culture == null)
                     continue;
 
-                if (!CoopBattleSpawnRequestState.HasPendingRequest(missionPeer))
+                if (!RequiresNativeSelectedTroopIndexCompatibility(mission, missionPeer))
+                {
+                    ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
                     continue;
+                }
 
                 int currentTroopIndex = missionPeer.SelectedTroopIndex;
                 MultiplayerClassDivisions.MPHeroClass currentClass = null;
@@ -29113,6 +29126,23 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             TrySyncCoopClassRestrictions(mission, source);
+        }
+
+        private static bool RequiresNativeSelectedTroopIndexCompatibility(Mission mission, MissionPeer missionPeer)
+        {
+            if (mission == null || missionPeer == null)
+                return false;
+
+            if (!CoopBattleSpawnRequestState.HasPendingRequest(missionPeer))
+                return false;
+
+            if (missionPeer.ControlledAgent != null)
+                return false;
+
+            if (missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
+                return false;
+
+            return missionPeer.HasSpawnedAgentVisuals || !missionPeer.EquipmentUpdatingExpired;
         }
 
         private static void ApplySelectedTroopIndexBridge(MissionPeer missionPeer, NetworkCommunicator peer, int preferredTroopIndex)
