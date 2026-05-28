@@ -396,6 +396,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - `HasSpawnedAgentVisuals` більше не використовується в server-side phase/deployment або spawn authority; це вже тільки compatibility state для native/client shell;
 - `SelectedTroopIndex` compatibility bridge більше не активується в custom `CoopBattle` runtime; у listed shell він тепер живе тільки як live compatibility output під час authoritative pending-spawn bootstrap window і чистить cached state під час expiry;
 - native `MissionNetworkComponent.SendTroopSelectionInformation(...)` більше не входить у listed late-join contract; authoritative selection для late join тепер приходить через `CoopMissionNetworkBridge` payloads, а не через native `UpdateSelectedTroopIndex` replay;
+- live native `UpdateSelectedTroopIndex` broadcast теж більше не ллється в not-ready peer-и; compatibility output тепер іде тільки snapshot-ready recipient-ам, тому late-join selection window більше не залежить від vanilla replay навіть під час активних змін selection у бою;
 - listed-shell native `TeamInitialPerkInfoReady` більше не залежить виключно від `MissionLobbyEquipmentNetworkComponent`, але й більше не моститься server-side, бо live listed-shell spawn reader для цього gate вже прибраний;
 - native `MissionLobbyEquipmentNetworkComponent` повністю прибраний із wrapped listed `TeamDeathmatch` shell; listed ingress більше не тримає even passive equipment compatibility component;
 - native `MultiplayerTeamSelectComponent` повністю прибраний із wrapped listed `TeamDeathmatch` shell; listed ingress більше не несе окремий team-select compatibility layer;
@@ -454,6 +455,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - завершити перехід від native team-select stack/UI bootstrap до власної coop-owned authority і readiness-моделі;
 - прибрати останній compatibility-only міст через native `SelectedTroopIndex`, коли навіть live native peer state більше не вимагатиме його;
 - завершити винос late-join peer sync із native `MissionNetworkComponent` corridor у повністю власний coop-owned ingress path без `MissionState.OpenNew` interception.
+- після цього окремо вирішити, чи лишати native `SetPeerTeam` / `ChangeCulture` replay, чи переносити і їх у coop-owned late-join ingress.
 
 ### Фаза D: відчепити мод від vanilla listed shell
 

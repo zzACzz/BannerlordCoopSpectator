@@ -935,6 +935,7 @@ namespace CoopSpectator.MissionBehaviors
         private static HashSet<string> _loggedForcedPreferredClassKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _loggedArmedListedShellNativeSpawnCompatibilityKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> _loggedDeferredVanillaSelectedTroopIndexBridgeRecipientKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly Dictionary<int, int> _lastBridgedSelectedTroopIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _lastBridgedPeerTeamIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, string> _appliedFixedMissionCultureByPeer = new Dictionary<int, string>();
@@ -2732,6 +2733,7 @@ namespace CoopSpectator.MissionBehaviors
             _spawnedCoopPeerIndices.Clear();
             _loggedForcedPreferredClassKeys.Clear();
             _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys.Clear();
+            _loggedDeferredVanillaSelectedTroopIndexBridgeRecipientKeys.Clear();
             _lastBridgedSelectedTroopIndexByPeer.Clear();
             _lastBridgedPeerTeamIndexByPeer.Clear();
             _appliedFixedMissionCultureByPeer.Clear();
@@ -29555,10 +29557,64 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            Mission mission = Mission.Current;
+            if (ShouldRouteSelectedTroopIndexBridgeThroughSnapshotReadyRecipients(mission))
+            {
+                List<NetworkCommunicator> recipients = GameNetwork.NetworkPeers;
+                if (recipients == null)
+                    return false;
+
+                bool sentToReadyRecipient = false;
+                foreach (NetworkCommunicator recipient in recipients)
+                {
+                    if (recipient == null || recipient.IsServerPeer || !recipient.IsConnectionActive)
+                        continue;
+
+                    if (!CoopMissionNetworkBridge.IsPeerCurrentBattleSnapshotBootstrapReady(recipient, out string readinessSummary))
+                    {
+                        string logKey =
+                            (peer.UserName ?? peer.Index.ToString()) + "|" +
+                            recipient.Index + "|" +
+                            selectedTroopIndex + "|" +
+                            (source ?? "unknown");
+                        if (_loggedDeferredVanillaSelectedTroopIndexBridgeRecipientKeys.Add(logKey))
+                        {
+                            ModLogger.Info(
+                                "CoopMissionSpawnLogic: withheld native UpdateSelectedTroopIndex from snapshot-unready peer. " +
+                                "SubjectPeer=" + (peer.UserName ?? peer.Index.ToString()) +
+                                " Recipient=" + (recipient.UserName ?? recipient.Index.ToString()) +
+                                " TroopIndex=" + selectedTroopIndex +
+                                " Readiness={" + (readinessSummary ?? "unknown") + "}" +
+                                " Source=" + (source ?? "unknown"));
+                        }
+
+                        continue;
+                    }
+
+                    GameNetwork.BeginModuleEventAsServer(recipient);
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateSelectedTroopIndex(peer, selectedTroopIndex));
+                    GameNetwork.EndModuleEventAsServer();
+                    sentToReadyRecipient = true;
+                }
+
+                return sentToReadyRecipient;
+            }
+
             GameNetwork.BeginBroadcastModuleEvent();
             GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateSelectedTroopIndex(peer, selectedTroopIndex));
             GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
             return true;
+        }
+
+        private static bool ShouldRouteSelectedTroopIndexBridgeThroughSnapshotReadyRecipients(Mission mission)
+        {
+            if (!GameNetwork.IsServer || mission == null)
+                return false;
+
+            if (!MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                return false;
+
+            return mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null;
         }
 
         private static void TrySyncCoopClassRestrictions(Mission mission, string source)
