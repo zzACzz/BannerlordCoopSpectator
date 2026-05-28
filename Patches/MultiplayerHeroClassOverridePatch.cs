@@ -81,9 +81,11 @@ namespace CoopSpectator.Patches
                     NetworkCommunicator networkPeer = missionPeer.GetNetworkPeer();
                     if (networkPeer != null)
                     {
-                        GameNetwork.BeginBroadcastModuleEvent();
-                        GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateSelectedTroopIndex(networkPeer, preferredTroopIndex));
-                        GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+                        CoopMissionSpawnLogic.TryBroadcastSelectedTroopIndexBridge(
+                            networkPeer,
+                            preferredTroopIndex,
+                            "MultiplayerHeroClassOverridePatch.GetMPHeroClassForPeer",
+                            preferredClass?.HeroCharacter?.StringId);
                     }
                 }
 

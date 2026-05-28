@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Network.Messages;
 using HarmonyLib;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -56,8 +57,14 @@ namespace CoopSpectator.Patches
             if (!ExperimentalFeatures.EnableExactCampaignPreSpawnLoadoutInjection || !GameNetwork.IsServer)
                 return;
 
-            if (!(agentBuildData?.AgentOrigin is ExactCampaignSnapshotAgentOrigin exactOrigin))
+            if (agentBuildData == null)
                 return;
+
+            if (!(agentBuildData.AgentOrigin is ExactCampaignSnapshotAgentOrigin exactOrigin))
+            {
+                TryInjectGeneratedOrdinarySnapshotLoadoutIntoMissionSpawnAgent(agentBuildData, spawnFromAgentVisuals);
+                return;
+            }
 
             if (string.IsNullOrWhiteSpace(exactOrigin.EntryId))
                 return;
@@ -105,8 +112,37 @@ namespace CoopSpectator.Patches
                     Reason = "resolved-contract-absent",
                     EntryId = exactOrigin.EntryId
                 };
+            bool forceGeneratedOrdinaryExactPreSpawnInjection =
+                !entryState.IsHero &&
+                BattleSnapshotRuntimeState.UsesGeneratedRuntimeBattleTemplateMaterialization(exactOrigin.EntryId);
+            if (forceGeneratedOrdinaryExactPreSpawnInjection)
+            {
+                includeWeapons = true;
+                includeArmorVisuals = true;
+                includeCape = true;
+                includeMountVisuals = entryState.IsMounted;
+                payloadDiagnostic.IsActive = false;
+                payloadDiagnostic.Reason = "generated-ordinary-exact-snapshot-pre-spawn";
+                payloadDiagnostic.RequestedProfile = ExactCreateAgentPayloadDiagnosticProfile.FullExact;
+                payloadDiagnostic.Profile = ExactCreateAgentPayloadDiagnosticProfile.FullExact;
+                payloadDiagnostic.RequestedProfileClientSafe = true;
+                payloadDiagnostic.ClientCreateAgentSafe = true;
+                payloadDiagnostic.ClientCreateAgentSafeReason = "generated-ordinary-exact-snapshot-pre-spawn";
+                payloadDiagnostic.RequiresCreateTimeWeapons = true;
+                payloadDiagnostic.WeaponLayoutMatchesNativeTemplate = false;
+                payloadDiagnostic.IncludeWeapons = true;
+                payloadDiagnostic.IncludeArmorVisuals = true;
+                payloadDiagnostic.IncludeCape = true;
+                payloadDiagnostic.IncludeMountVisuals = entryState.IsMounted;
+                payloadDiagnostic.IncludeBodyProperties = false;
+                weaponDecisionReason = "forced exact snapshot pre-spawn injection for generated ordinary entry";
+                capeDecisionReason = "forced exact snapshot pre-spawn injection for generated ordinary entry";
+                exactEntryCompatibilitySummary = "ExactEntryContract=generated-ordinary-exact-snapshot-pre-spawn";
+            }
             PayloadDiagnosticByEntryId[exactOrigin.EntryId] = payloadDiagnostic;
-            bool injectEquipment = resolvedContract?.InjectEquipment == true;
+            bool injectEquipment =
+                forceGeneratedOrdinaryExactPreSpawnInjection ||
+                resolvedContract?.InjectEquipment == true;
             Equipment exactEquipment = injectEquipment
                 ? BuildPreSpawnEquipment(
                     entryState,
@@ -191,13 +227,161 @@ namespace CoopSpectator.Patches
                 " Body=" + (!bodyProperties.Equals(default(BodyProperties))));
         }
 
+        private static bool TryInjectGeneratedOrdinarySnapshotLoadoutIntoMissionSpawnAgent(
+            AgentBuildData agentBuildData,
+            bool spawnFromAgentVisuals)
+        {
+            BasicCharacterObject generatedCharacter = agentBuildData?.AgentCharacter;
+            string characterId = generatedCharacter?.StringId;
+            if (generatedCharacter == null ||
+                string.IsNullOrWhiteSpace(characterId) ||
+                !BattleSnapshotRuntimeState.IsGeneratedRuntimeBattleTemplateCharacterId(characterId))
+            {
+                return false;
+            }
+
+            string entryId = ResolveGeneratedOrdinaryEntryIdForMissionSpawn(agentBuildData, characterId);
+            if (string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (entryState == null || entryState.IsHero)
+                return false;
+
+            if (!BattleSnapshotRuntimeState.UsesGeneratedRuntimeBattleTemplateMaterialization(entryId))
+                return false;
+
+            Equipment exactEquipment = BuildPreSpawnEquipment(
+                entryState,
+                includeWeapons: true,
+                includeArmorVisuals: true,
+                includeCape: true,
+                includeMountVisuals: entryState.IsMounted);
+            if (exactEquipment == null)
+                return false;
+
+            agentBuildData.Equipment(exactEquipment);
+            EquipmentInjectedByEntryId[entryId] = true;
+            PayloadDiagnosticByEntryId[entryId] = new ExactCreateAgentPayloadDiagnosticDecision
+            {
+                IsActive = false,
+                Reason = "generated-ordinary-exact-snapshot-pre-spawn",
+                EntryId = entryId,
+                TroopId = characterId,
+                Mode = ExactCreateAgentPayloadDiagnosticMode.Disabled,
+                RequestedProfile = ExactCreateAgentPayloadDiagnosticProfile.FullExact,
+                Profile = ExactCreateAgentPayloadDiagnosticProfile.FullExact,
+                IncludeWeapons = true,
+                IncludeArmorVisuals = true,
+                IncludeCape = true,
+                IncludeMountVisuals = entryState.IsMounted,
+                IncludeBodyProperties = false,
+                ClientCreateAgentSafe = true,
+                RequestedProfileClientSafe = true,
+                WeaponLayoutMatchesNativeTemplate = false,
+                RequiresCreateTimeWeapons = true
+            };
+
+            if (LoggedEntryIds.Add(entryId + "|generated-ordinary-pre-spawn-exact"))
+            {
+                ModLogger.Info(
+                    "ExactCampaignPreSpawnLoadoutPatch: replaced vanilla/native MP synthesized equipment with snapshot-exact loadout for generated ordinary template spawn. " +
+                    "EntryId=" + entryId +
+                    " TroopId=" + characterId +
+                    " TeamSide=" + ResolveAgentBuildDataSide(agentBuildData) +
+                    " SpawnFromAgentVisuals=" + spawnFromAgentVisuals +
+                    " Equipment={" + SummarizeEquipment(exactEquipment) + "}");
+            }
+
+            return true;
+        }
+
+        private static string ResolveGeneratedOrdinaryEntryIdForMissionSpawn(
+            AgentBuildData agentBuildData,
+            string characterId)
+        {
+            if (agentBuildData == null || string.IsNullOrWhiteSpace(characterId))
+                return null;
+
+            BattleSideEnum side = ResolveAgentBuildDataSide(agentBuildData);
+            string canonicalSideKey = ToCanonicalSideKey(side);
+            if (!string.IsNullOrWhiteSpace(canonicalSideKey))
+            {
+                string sideResolvedEntryId = BattleSnapshotRuntimeState.TryResolveEntryId(canonicalSideKey, characterId);
+                if (!string.IsNullOrWhiteSpace(sideResolvedEntryId))
+                    return sideResolvedEntryId;
+            }
+
+            CanonicalTroopInstance byBattleTemplate =
+                BattleSnapshotRuntimeState.GetCanonicalTroopInstanceByBattleTemplateId(characterId);
+            if (!string.IsNullOrWhiteSpace(byBattleTemplate?.EntryId))
+                return byBattleTemplate.EntryId;
+
+            CanonicalTroopInstance byCharacterId =
+                BattleSnapshotRuntimeState.GetCanonicalTroopInstanceByCharacterId(characterId);
+            return byCharacterId?.EntryId;
+        }
+
+        private static BattleSideEnum ResolveAgentBuildDataSide(AgentBuildData agentBuildData)
+        {
+            if (agentBuildData?.AgentTeam != null && agentBuildData.AgentTeam.Side != BattleSideEnum.None)
+                return agentBuildData.AgentTeam.Side;
+
+            if (agentBuildData?.AgentMissionPeer?.Team != null &&
+                agentBuildData.AgentMissionPeer.Team.Side != BattleSideEnum.None)
+            {
+                return agentBuildData.AgentMissionPeer.Team.Side;
+            }
+
+            if (agentBuildData?.OwningAgentMissionPeer?.Team != null &&
+                agentBuildData.OwningAgentMissionPeer.Team.Side != BattleSideEnum.None)
+            {
+                return agentBuildData.OwningAgentMissionPeer.Team.Side;
+            }
+
+            return BattleSideEnum.None;
+        }
+
+        private static string ToCanonicalSideKey(BattleSideEnum side)
+        {
+            switch (side)
+            {
+                case BattleSideEnum.Attacker:
+                    return "attacker";
+                case BattleSideEnum.Defender:
+                    return "defender";
+                default:
+                    return null;
+            }
+        }
+
         private static void Mission_SpawnAgent_Postfix(AgentBuildData agentBuildData, bool spawnFromAgentVisuals, Agent __result)
         {
             if (!ExperimentalFeatures.EnableExactCampaignPreSpawnLoadoutInjection || !GameNetwork.IsServer)
                 return;
 
-            if (!(agentBuildData?.AgentOrigin is ExactCampaignSnapshotAgentOrigin exactOrigin))
+            if (__result == null)
                 return;
+
+            if (!(agentBuildData?.AgentOrigin is ExactCampaignSnapshotAgentOrigin exactOrigin))
+            {
+                string generatedEntryId = ResolveGeneratedOrdinaryEntryIdForMissionSpawn(
+                    agentBuildData,
+                    agentBuildData?.AgentCharacter?.StringId);
+                if (!string.IsNullOrWhiteSpace(generatedEntryId))
+                {
+                    CoopMissionSpawnLogic.TryApplyImmediateServerExactCampaignNativeRefreshAfterSpawn(
+                        __result,
+                        generatedEntryId,
+                        "ExactCampaignPreSpawnLoadoutPatch.Mission.SpawnAgent postfix immediate refresh (generated ordinary)");
+                    CoopMissionSpawnLogic.TryApplyImmediateServerBootstrapInitialWieldAfterSpawn(
+                        __result,
+                        generatedEntryId,
+                        "ExactCampaignPreSpawnLoadoutPatch.Mission.SpawnAgent postfix immediate wield bootstrap (generated ordinary)");
+                }
+
+                return;
+            }
 
             if (string.IsNullOrWhiteSpace(exactOrigin.EntryId))
                 return;
@@ -212,6 +396,15 @@ namespace CoopSpectator.Patches
                     TroopId = exactOrigin.TroopId
                 };
             }
+
+            CoopMissionSpawnLogic.TryApplyImmediateServerExactCampaignNativeRefreshAfterSpawn(
+                __result,
+                exactOrigin.EntryId,
+                "ExactCampaignPreSpawnLoadoutPatch.Mission.SpawnAgent postfix immediate refresh");
+            CoopMissionSpawnLogic.TryApplyImmediateServerBootstrapInitialWieldAfterSpawn(
+                __result,
+                exactOrigin.EntryId,
+                "ExactCampaignPreSpawnLoadoutPatch.Mission.SpawnAgent postfix immediate wield bootstrap");
 
             string details =
                 "EntryId=" + exactOrigin.EntryId +

@@ -58,6 +58,42 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedDroppedShieldAttachmentKey;
         private static string _lastSuppressedServerMissileStickKey;
         private static string _lastSuppressedServerMissileAttachVisualKey;
+        private static string _lastObservedServerBoltMissileHitKey;
+        private static string _lastObservedServerBoltCollisionKey;
+        private static string _lastObservedServerBoltAttachKey;
+        private static string _lastObservedServerBoltMountBoneAttachEnterKey;
+        private static string _lastObservedServerBoltMountBoneAttachExitKey;
+        private static string _lastObservedServerBoltMountBoneAttachFaultKey;
+        private static string _lastObservedServerBoltMountStickEnterKey;
+        private static string _lastObservedServerBoltMountStickExitKey;
+        private static string _lastObservedServerBoltMountStickFaultKey;
+        private static string _lastObservedServerBoltMountBecomeInvisibleEnterKey;
+        private static string _lastObservedServerBoltMountBecomeInvisibleExitKey;
+        private static string _lastObservedServerBoltMountBecomeInvisibleFaultKey;
+        private static string _lastObservedServerBoltMissileHitPostKey;
+        private static string _lastObservedServerMountedUsageSwitchStartKey;
+        private static string _lastObservedServerMountedWieldChangeKey;
+        private static string _lastObservedServerMountedUsageChangeKey;
+        private static string _lastObservedServerMountedReloadPhaseKey;
+        private static string _lastObservedServerMountedAmmoReloadKey;
+        private static string _lastObservedServerMountedAmmoConsumeKey;
+        private static string _lastObservedServerMountedWeaponAmountChangeKey;
+        private static string _lastObservedServerMountedRemoveWeaponKey;
+        private static string _lastObservedClientMountedWeaponNetworkDataKey;
+        private static string _lastObservedClientMountedWeaponAmmoDataKey;
+        private static string _lastObservedClientMountedWeaponReloadPhaseKey;
+        private static string _lastObservedClientMountedSetWieldedKey;
+        private static string _lastObservedClientMountedUsageSwitchKey;
+        private static string _lastObservedClientMountedUsageIndexChangeKey;
+        private static string _lastObservedServerMountCorpseEnterKey;
+        private static string _lastObservedServerBoltMountCorpseSpawnKey;
+        private static string _lastObservedServerMountAttachedWeaponReplicationKey;
+        private static string _lastObservedServerBoltCorpseKey;
+        private static string _lastObservedServerBoltDroppedShieldAttachmentKey;
+        private static string _lastObservedServerBoltWorldDropEnterKey;
+        private static string _lastObservedServerBoltWorldDropExitKey;
+        private static string _lastObservedServerBoltWorldDropFaultKey;
+        private static string _lastObservedServerBoltStrikeAgentFaultKey;
         private static string _lastLocalVisualFinalizeKey;
         private static string _lastSuppressedAssignFormationKey;
         private static string _lastSuppressedLocalSelectAllFormationsKey;
@@ -177,6 +213,33 @@ namespace CoopSpectator.Patches
             public DateTime LastAttemptUtc;
             public int Attempts;
             public string DeferralReason;
+        }
+
+        private sealed class ServerBoltWorldDropObservationState
+        {
+            public string Key;
+            public string Details;
+        }
+
+        private sealed class ServerBoltMountBoneAttachObservationState
+        {
+            public string Key;
+            public string Details;
+        }
+
+        private sealed class ServerBoltMountReactionObservationState
+        {
+            public string Key;
+            public string Details;
+            public string EnterLogPrefix;
+            public string ExitLogPrefix;
+            public string FaultLogPrefix;
+        }
+
+        private sealed class ServerBoltMountedMissileHitObservationState
+        {
+            public string Key;
+            public string Details;
         }
 
         private sealed class DeferredClientCreateAgentPayload
@@ -427,9 +490,21 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentMakeAgentDead), () => PatchMissionNetworkComponentMakeAgentDead(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWieldedItemIndex), () => PatchMissionNetworkComponentSetWieldedItemIndex(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent), () => PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSendAgentsToPeerServer), () => PatchMissionNetworkComponentSendAgentsToPeerServer(harmony));
+            TryApplyPatchStep(nameof(PatchMissionOnAgentAddedAsCorpseServer), () => PatchMissionOnAgentAddedAsCorpseServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionSpawnAttachedWeaponOnCorpseServer), () => PatchMissionSpawnAttachedWeaponOnCorpseServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer), () => PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer(harmony));
+            TryApplyPatchStep(nameof(PatchMissionSpawnWeaponAsDropFromMissileServer), () => PatchMissionSpawnWeaponAsDropFromMissileServer(harmony));
+            TryApplyPatchStep(nameof(PatchMissionMissileHitCallbackServer), () => PatchMissionMissileHitCallbackServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionHandleMissileCollisionReactionServer), () => PatchMissionHandleMissileCollisionReactionServer(harmony));
+            TryApplyPatchStep(nameof(PatchAgentOnWeaponSwitchingToAlternativeStartServer), () => PatchAgentOnWeaponSwitchingToAlternativeStartServer(harmony));
+            TryApplyPatchStep(nameof(PatchAgentOnWeaponReloadPhaseChangeServer), () => PatchAgentOnWeaponReloadPhaseChangeServer(harmony));
+            TryApplyPatchStep(nameof(PatchAgentOnWeaponAmmoReloadServer), () => PatchAgentOnWeaponAmmoReloadServer(harmony));
+            TryApplyPatchStep(nameof(PatchAgentOnWeaponAmmoConsumeServer), () => PatchAgentOnWeaponAmmoConsumeServer(harmony));
+            TryApplyPatchStep(nameof(PatchAgentOnWieldedItemIndexChangeServer), () => PatchAgentOnWieldedItemIndexChangeServer(harmony));
+            TryApplyPatchStep(nameof(PatchAgentOnWeaponUsageIndexChangeServer), () => PatchAgentOnWeaponUsageIndexChangeServer(harmony));
+            TryApplyPatchStep(nameof(PatchAgentOnWeaponAmountChangeServer), () => PatchAgentOnWeaponAmountChangeServer(harmony));
+            TryApplyPatchStep(nameof(PatchAgentOnRemoveWeaponServer), () => PatchAgentOnRemoveWeaponServer(harmony));
             TryApplyPatchStep(nameof(PatchAgentAttachWeaponToWeaponServer), () => PatchAgentAttachWeaponToWeaponServer(harmony));
             TryApplyPatchStep(nameof(PatchAgentAttachWeaponToBoneServer), () => PatchAgentAttachWeaponToBoneServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAssignFormationToPlayer), () => PatchMissionNetworkComponentAssignFormationToPlayer(harmony));
@@ -581,6 +656,43 @@ namespace CoopSpectator.Patches
             _lastSuppressedWeaponDropKey = null;
             _lastSuppressedDroppedShieldAttachmentKey = null;
             _lastSuppressedServerMissileStickKey = null;
+            _lastSuppressedServerMissileAttachVisualKey = null;
+            _lastObservedServerBoltMissileHitKey = null;
+            _lastObservedServerBoltCollisionKey = null;
+            _lastObservedServerBoltAttachKey = null;
+            _lastObservedServerBoltMountBoneAttachEnterKey = null;
+            _lastObservedServerBoltMountBoneAttachExitKey = null;
+            _lastObservedServerBoltMountBoneAttachFaultKey = null;
+            _lastObservedServerBoltMountStickEnterKey = null;
+            _lastObservedServerBoltMountStickExitKey = null;
+            _lastObservedServerBoltMountStickFaultKey = null;
+            _lastObservedServerBoltMountBecomeInvisibleEnterKey = null;
+            _lastObservedServerBoltMountBecomeInvisibleExitKey = null;
+            _lastObservedServerBoltMountBecomeInvisibleFaultKey = null;
+            _lastObservedServerBoltMissileHitPostKey = null;
+            _lastObservedServerMountedUsageSwitchStartKey = null;
+            _lastObservedServerMountedWieldChangeKey = null;
+            _lastObservedServerMountedUsageChangeKey = null;
+            _lastObservedServerMountedReloadPhaseKey = null;
+            _lastObservedServerMountedAmmoReloadKey = null;
+            _lastObservedServerMountedAmmoConsumeKey = null;
+            _lastObservedServerMountedWeaponAmountChangeKey = null;
+            _lastObservedServerMountedRemoveWeaponKey = null;
+            _lastObservedClientMountedWeaponNetworkDataKey = null;
+            _lastObservedClientMountedWeaponAmmoDataKey = null;
+            _lastObservedClientMountedWeaponReloadPhaseKey = null;
+            _lastObservedClientMountedSetWieldedKey = null;
+            _lastObservedClientMountedUsageSwitchKey = null;
+            _lastObservedClientMountedUsageIndexChangeKey = null;
+            _lastObservedServerMountCorpseEnterKey = null;
+            _lastObservedServerBoltMountCorpseSpawnKey = null;
+            _lastObservedServerMountAttachedWeaponReplicationKey = null;
+            _lastObservedServerBoltCorpseKey = null;
+            _lastObservedServerBoltDroppedShieldAttachmentKey = null;
+            _lastObservedServerBoltWorldDropEnterKey = null;
+            _lastObservedServerBoltWorldDropExitKey = null;
+            _lastObservedServerBoltWorldDropFaultKey = null;
+            _lastObservedServerBoltStrikeAgentFaultKey = null;
             _lastLocalVisualFinalizeKey = null;
             _lastSuppressedAssignFormationKey = null;
             _lastSuppressedLocalSelectAllFormationsKey = null;
@@ -1127,6 +1239,42 @@ namespace CoopSpectator.Patches
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Mission.SpawnAttachedWeaponOnCorpse.");
         }
 
+        private static void PatchMissionOnAgentAddedAsCorpseServer(Harmony harmony)
+        {
+            MethodInfo target = typeof(Mission).GetMethod(
+                "OnAgentAddedAsCorpse",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_OnAgentAddedAsCorpse_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Mission.OnAgentAddedAsCorpse not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Mission.OnAgentAddedAsCorpse.");
+        }
+
+        private static void PatchMissionNetworkComponentSendAgentsToPeerServer(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "SendAgentsToPeer",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_SendAgentsToPeer_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.SendAgentsToPeer not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.SendAgentsToPeer.");
+        }
+
         private static void PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer(Harmony harmony)
         {
             MethodInfo target = typeof(Mission).GetMethod(
@@ -1145,6 +1293,34 @@ namespace CoopSpectator.Patches
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Mission.SpawnAttachedWeaponOnSpawnedWeapon.");
         }
 
+        private static void PatchMissionSpawnWeaponAsDropFromMissileServer(Harmony harmony)
+        {
+            MethodInfo target = typeof(Mission).GetMethod(
+                nameof(Mission.SpawnWeaponAsDropFromMissile),
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_SpawnWeaponAsDropFromMissile_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_SpawnWeaponAsDropFromMissile_ServerPostfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo finalizer = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_SpawnWeaponAsDropFromMissile_ServerFinalizer),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null || postfix == null || finalizer == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Mission.SpawnWeaponAsDropFromMissile not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(prefix),
+                postfix: new HarmonyMethod(postfix),
+                finalizer: new HarmonyMethod(finalizer));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix/finalizer applied to Mission.SpawnWeaponAsDropFromMissile.");
+        }
+
         private static void PatchMissionHandleMissileCollisionReactionServer(Harmony harmony)
         {
             MethodInfo target = typeof(Mission).GetMethod(
@@ -1153,14 +1329,226 @@ namespace CoopSpectator.Patches
             MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(Mission_HandleMissileCollisionReaction_ServerPrefix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || prefix == null)
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_HandleMissileCollisionReaction_ServerPostfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo finalizer = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_HandleMissileCollisionReaction_ServerFinalizer),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null || postfix == null || finalizer == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: Mission.HandleMissileCollisionReaction not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Mission.HandleMissileCollisionReaction.");
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(prefix),
+                postfix: new HarmonyMethod(postfix),
+                finalizer: new HarmonyMethod(finalizer));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix/finalizer applied to Mission.HandleMissileCollisionReaction.");
+        }
+
+        private static void PatchMissionMissileHitCallbackServer(Harmony harmony)
+        {
+            Type[] parameterTypes =
+            {
+                typeof(int).MakeByRefType(),
+                typeof(AttackCollisionData).MakeByRefType(),
+                typeof(Vec3),
+                typeof(Vec3),
+                typeof(Vec3),
+                typeof(Vec3),
+                typeof(MatrixFrame),
+                typeof(MatrixFrame),
+                typeof(int),
+                typeof(Agent),
+                typeof(Agent),
+                typeof(GameEntity)
+            };
+            MethodInfo target = AccessTools.Method(typeof(Mission), "MissileHitCallback", parameterTypes);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_MissileHitCallback_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_MissileHitCallback_ServerPostfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Mission.MissileHitCallback not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(prefix),
+                postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to Mission.MissileHitCallback.");
+        }
+
+        private static void PatchAgentOnWieldedItemIndexChangeServer(Harmony harmony)
+        {
+            MethodInfo target = typeof(Agent).GetMethod(
+                "OnWieldedItemIndexChange",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWieldedItemIndexChange_ServerPostfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWieldedItemIndexChange not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWieldedItemIndexChange.");
+        }
+
+        private static void PatchAgentOnWeaponSwitchingToAlternativeStartServer(Harmony harmony)
+        {
+            Type[] parameterTypes =
+            {
+                typeof(EquipmentIndex),
+                typeof(int)
+            };
+            MethodInfo target = AccessTools.Method(typeof(Agent), "OnWeaponSwitchingToAlternativeStart", parameterTypes);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWeaponSwitchingToAlternativeStart_ServerPostfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponSwitchingToAlternativeStart not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWeaponSwitchingToAlternativeStart.");
+        }
+
+        private static void PatchAgentOnWeaponReloadPhaseChangeServer(Harmony harmony)
+        {
+            Type[] parameterTypes =
+            {
+                typeof(EquipmentIndex),
+                typeof(short)
+            };
+            MethodInfo target = AccessTools.Method(typeof(Agent), "OnWeaponReloadPhaseChange", parameterTypes);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWeaponReloadPhaseChange_ServerPostfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponReloadPhaseChange not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWeaponReloadPhaseChange.");
+        }
+
+        private static void PatchAgentOnWeaponAmmoReloadServer(Harmony harmony)
+        {
+            Type[] parameterTypes =
+            {
+                typeof(EquipmentIndex),
+                typeof(EquipmentIndex),
+                typeof(short)
+            };
+            MethodInfo target = AccessTools.Method(typeof(Agent), "OnWeaponAmmoReload", parameterTypes);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWeaponAmmoReload_ServerPostfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponAmmoReload not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWeaponAmmoReload.");
+        }
+
+        private static void PatchAgentOnWeaponAmmoConsumeServer(Harmony harmony)
+        {
+            Type[] parameterTypes =
+            {
+                typeof(EquipmentIndex),
+                typeof(short)
+            };
+            MethodInfo target = AccessTools.Method(typeof(Agent), "OnWeaponAmmoConsume", parameterTypes);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWeaponAmmoConsume_ServerPostfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponAmmoConsume not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWeaponAmmoConsume.");
+        }
+
+        private static void PatchAgentOnWeaponUsageIndexChangeServer(Harmony harmony)
+        {
+            Type[] parameterTypes =
+            {
+                typeof(EquipmentIndex),
+                typeof(int)
+            };
+            MethodInfo target = AccessTools.Method(typeof(Agent), "OnWeaponUsageIndexChange", parameterTypes);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWeaponUsageIndexChange_ServerPostfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponUsageIndexChange not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWeaponUsageIndexChange.");
+        }
+
+        private static void PatchAgentOnWeaponAmountChangeServer(Harmony harmony)
+        {
+            Type[] parameterTypes =
+            {
+                typeof(EquipmentIndex),
+                typeof(short)
+            };
+            MethodInfo target = AccessTools.Method(typeof(Agent), "OnWeaponAmountChange", parameterTypes);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWeaponAmountChange_ServerPostfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponAmountChange not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWeaponAmountChange.");
+        }
+
+        private static void PatchAgentOnRemoveWeaponServer(Harmony harmony)
+        {
+            Type[] parameterTypes =
+            {
+                typeof(EquipmentIndex)
+            };
+            MethodInfo target = AccessTools.Method(typeof(Agent), "OnRemoveWeapon", parameterTypes);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnRemoveWeapon_ServerPostfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnRemoveWeapon not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnRemoveWeapon.");
         }
 
         private static void PatchAgentAttachWeaponToWeaponServer(Harmony harmony)
@@ -1189,14 +1577,24 @@ namespace CoopSpectator.Patches
             MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(Agent_AttachWeaponToBone_ServerPrefix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || prefix == null)
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_AttachWeaponToBone_ServerPostfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo finalizer = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_AttachWeaponToBone_ServerFinalizer),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null || postfix == null || finalizer == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.AttachWeaponToBone not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.AttachWeaponToBone.");
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(prefix),
+                postfix: new HarmonyMethod(postfix),
+                finalizer: new HarmonyMethod(finalizer));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix/finalizer applied to Agent.AttachWeaponToBone.");
         }
 
         private static void PatchMissionNetworkComponentAssignFormationToPlayer(Harmony harmony)
@@ -3164,13 +3562,18 @@ namespace CoopSpectator.Patches
 
         private static bool ShouldUseServerExactBattleAttachedMissileSuppression(Mission mission)
         {
-            if (!GameNetwork.IsServer || mission == null)
-                return false;
+            // Exact battle missile-attachment suppression previously cut the native
+            // "stick -> attach -> replicate" corridor in the middle. For the current
+            // investigation we restore the full native dedicated-server path and keep
+            // the Harmony hooks fail-open by disabling the runtime gate here.
+            return false;
+        }
 
-            if (!MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
-                return false;
-
-            return BattleSnapshotRuntimeState.GetCurrent()?.CanonicalBattle != null;
+        private static bool ShouldObserveServerExactBattleBoltAfterhitDiagnostics(Mission mission)
+        {
+            return mission != null &&
+                   GameNetwork.IsServer &&
+                   MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName);
         }
 
         private static bool IsSuppressibleAttachedMissileItem(ItemObject item)
@@ -3198,6 +3601,573 @@ namespace CoopSpectator.Patches
             }
             catch
             {
+                return false;
+            }
+        }
+
+        private static bool IsBoltAttachedMissileItem(
+            ItemObject item,
+            WeaponFlags weaponFlags = 0,
+            WeaponClass weaponClass = WeaponClass.Undefined)
+        {
+            if (item == null)
+                return false;
+
+            try
+            {
+                if (item.ItemType == ItemObject.ItemTypeEnum.Bolts)
+                    return true;
+
+                WeaponComponentData primaryWeapon = item.PrimaryWeapon;
+                WeaponClass effectiveWeaponClass = weaponClass != WeaponClass.Undefined
+                    ? weaponClass
+                    : (primaryWeapon?.WeaponClass ?? WeaponClass.Undefined);
+                WeaponFlags effectiveWeaponFlags = weaponFlags != 0
+                    ? weaponFlags
+                    : (primaryWeapon?.WeaponFlags ?? 0);
+                return effectiveWeaponClass == WeaponClass.Bolt ||
+                       (((effectiveWeaponFlags & WeaponFlags.AttachAmmoToVisual) != 0 ||
+                         (effectiveWeaponFlags & WeaponFlags.AmmoSticksWhenShot) != 0) &&
+                        item.ItemType == ItemObject.ItemTypeEnum.Bolts);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryBuildBoltAfterhitAgentSummary(Agent agent, out string summary, out string failureType)
+        {
+            if (agent == null)
+            {
+                summary = "Agent=null";
+                failureType = null;
+                return true;
+            }
+
+            try
+            {
+                if (agent.IsMount)
+                    return TryBuildBoltAfterhitMountSummary(agent, out summary, out failureType);
+
+                EquipmentIndex offhandIndex = agent.GetOffhandWieldedItemIndex();
+                string offhandItemId =
+                    offhandIndex != EquipmentIndex.None &&
+                    agent.Equipment != null
+                        ? (agent.Equipment[offhandIndex].Item?.StringId ?? "none")
+                        : "none";
+                summary =
+                    "AgentIndex=" + agent.Index +
+                    ",CharacterId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                    ",Active=" + agent.IsActive() +
+                    ",Health=" + agent.Health.ToString("0.0") +
+                    ",IsMount=" + agent.IsMount +
+                    ",Wielded=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
+                    ",Offhand=" + offhandItemId +
+                    ",MountAgentIndex=" + (agent.MountAgent?.Index.ToString() ?? "null") +
+                    ",AttachedWeapons=" + agent.GetAttachedWeaponsCount();
+                failureType = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                summary = "AgentIndex=" + SafeGetAgentIndex(agent) + ",SummaryFailed=" + ex.GetType().Name;
+                failureType = ex.GetType().Name;
+                return false;
+            }
+        }
+
+        private static string BuildBoltAfterhitAgentSummary(Agent agent)
+        {
+            TryBuildBoltAfterhitAgentSummary(agent, out string summary, out _);
+            return summary;
+        }
+
+        private static int SafeGetAgentIndex(Agent agent)
+        {
+            try
+            {
+                return agent?.Index ?? -1;
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static string BuildBoltAfterhitAgentFailureDiagnostics(Agent agent)
+        {
+            if (agent == null)
+                return "FaultDiagnostics={Agent=null}";
+
+            if (SafeIsMountAgent(agent))
+                return BuildBoltAfterhitMountFailureDiagnostics(agent);
+
+            StringBuilder builder = new StringBuilder();
+            builder.Append("FaultDiagnostics={");
+            AppendBoltAfterhitProbe(builder, "AgentIndex", () => agent.Index.ToString());
+            AppendBoltAfterhitProbe(builder, "CharacterId", () => (agent.Character as BasicCharacterObject)?.StringId ?? "null");
+            AppendBoltAfterhitProbe(builder, "OriginType", () => agent.Origin?.GetType().Name ?? "null");
+            AppendBoltAfterhitProbe(builder, "TeamSide", () => agent.Team?.Side.ToString() ?? "null");
+            AppendBoltAfterhitProbe(builder, "Formation", () => agent.Formation?.Index.ToString() ?? "null");
+            AppendBoltAfterhitProbe(builder, "Active", () => agent.IsActive().ToString());
+            AppendBoltAfterhitProbe(builder, "Health", () => agent.Health.ToString("0.0"));
+            AppendBoltAfterhitProbe(builder, "IsMount", () => agent.IsMount.ToString());
+            AppendBoltAfterhitProbe(builder, "MountAgentIndex", () => agent.MountAgent?.Index.ToString() ?? "null");
+            AppendBoltAfterhitProbe(builder, "RiderAgentIndex", () => agent.RiderAgent?.Index.ToString() ?? "null");
+            AppendBoltAfterhitProbe(builder, "PrimaryWieldedIndex", () => agent.GetPrimaryWieldedItemIndex().ToString());
+            AppendBoltAfterhitProbe(builder, "OffhandWieldedIndex", () => agent.GetOffhandWieldedItemIndex().ToString());
+            AppendBoltAfterhitProbe(builder, "WieldedItem", () => agent.WieldedWeapon.Item?.StringId ?? "none");
+            AppendBoltAfterhitProbe(builder, "WieldedOffhandItem", () => agent.WieldedOffhandWeapon.Item?.StringId ?? "none");
+            AppendBoltAfterhitProbe(builder, "AttachedWeapons", () => agent.GetAttachedWeaponsCount().ToString());
+            AppendBoltAfterhitProbe(builder, "EquipmentSlots", () => BuildBoltAfterhitAgentWeaponSlotsSnapshot(agent, includeSpawnEquipment: false));
+            AppendBoltAfterhitProbe(builder, "SpawnSlots", () => BuildBoltAfterhitAgentWeaponSlotsSnapshot(agent, includeSpawnEquipment: true));
+            builder.Append("}");
+            return builder.ToString();
+        }
+
+        private static bool TryBuildBoltAfterhitMountSummary(Agent mountAgent, out string summary, out string failureType)
+        {
+            try
+            {
+                Agent riderAgent = mountAgent.RiderAgent;
+                string mountRuntime = BuildBoltAfterhitMountRuntimeCompact(mountAgent);
+                summary =
+                    "AgentIndex=" + mountAgent.Index +
+                    ",CharacterType=" + (mountAgent.Character?.GetType().Name ?? "null") +
+                    ",MonsterType=" + (mountAgent.Monster?.GetType().Name ?? "null") +
+                    ",Active=" + mountAgent.IsActive() +
+                    ",Health=" + mountAgent.Health.ToString("0.0") +
+                    ",IsMount=" + mountAgent.IsMount +
+                    ",RiderAgentIndex=" + (riderAgent?.Index.ToString() ?? "null") +
+                    ",RiderCharacterId=" + ((riderAgent?.Character as BasicCharacterObject)?.StringId ?? "null") +
+                    "," + mountRuntime +
+                    ",AttachedWeapons=" + mountAgent.GetAttachedWeaponsCount();
+                failureType = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                summary = "AgentIndex=" + SafeGetAgentIndex(mountAgent) + ",MountSummaryFailed=" + ex.GetType().Name;
+                failureType = ex.GetType().Name;
+                return false;
+            }
+        }
+
+        private static bool SafeIsMountAgent(Agent agent)
+        {
+            try
+            {
+                return agent != null && agent.IsMount;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsMountedUsageLifecycleAgent(Agent agent)
+        {
+            try
+            {
+                return agent != null &&
+                       (agent.IsMount ||
+                        agent.MountAgent != null ||
+                        agent.RiderAgent != null);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string BuildMountedUsagePairKey(Agent agent)
+        {
+            Agent mountAgent = null;
+            Agent riderAgent = null;
+            try
+            {
+                if (SafeIsMountAgent(agent))
+                {
+                    mountAgent = agent;
+                    riderAgent = agent?.RiderAgent;
+                }
+                else
+                {
+                    mountAgent = agent?.MountAgent;
+                    riderAgent = agent;
+                }
+            }
+            catch
+            {
+            }
+
+            return
+                "Agent=" + SafeGetAgentIndex(agent) +
+                "|Mount=" + SafeGetAgentIndex(mountAgent) +
+                "|Rider=" + SafeGetAgentIndex(riderAgent);
+        }
+
+        private static string BuildMountedUsageObservationSummary(Agent agent)
+        {
+            if (agent == null)
+                return "Agent=null";
+
+            try
+            {
+                Agent mountAgent;
+                Agent riderAgent;
+                if (SafeIsMountAgent(agent))
+                {
+                    mountAgent = agent;
+                    riderAgent = agent.RiderAgent;
+                }
+                else
+                {
+                    mountAgent = agent.MountAgent;
+                    riderAgent = agent;
+                }
+
+                StringBuilder builder = new StringBuilder();
+                builder.Append("Agent={").Append(BuildBoltAfterhitAgentSummary(agent)).Append("}");
+                if (mountAgent != null && !ReferenceEquals(mountAgent, agent))
+                    builder.Append(" Mount={").Append(BuildBoltAfterhitAgentSummary(mountAgent)).Append("}");
+                if (riderAgent != null && !ReferenceEquals(riderAgent, agent))
+                    builder.Append(" Rider={").Append(BuildBoltAfterhitAgentSummary(riderAgent)).Append("}");
+                return builder.ToString();
+            }
+            catch (Exception ex)
+            {
+                return "AgentIndex=" + SafeGetAgentIndex(agent) + ",MountedUsageSummaryFailed=" + ex.GetType().Name;
+            }
+        }
+
+        private static string BuildMountedWeaponSlotObservationSummary(Agent agent, EquipmentIndex slotIndex)
+        {
+            if (agent == null)
+                return "Slot=" + slotIndex + ",Agent=null";
+
+            if (slotIndex == EquipmentIndex.None)
+                return "Slot=None";
+
+            try
+            {
+                MissionWeapon slotWeapon = agent.Equipment[slotIndex];
+                WeaponComponentData currentUsageItem = slotWeapon.CurrentUsageItem;
+                if (slotWeapon.IsEmpty || slotWeapon.Item == null)
+                {
+                    return
+                        "Slot=" + slotIndex +
+                        ",Item=none";
+                }
+
+                return
+                    "Slot=" + slotIndex +
+                    ",Item=" + (slotWeapon.Item?.StringId ?? "none") +
+                    ",Amount=" + slotWeapon.Amount +
+                    ",ModifiedMax=" + slotWeapon.ModifiedMaxAmount +
+                    ",CurrentUsageClass=" + (currentUsageItem?.WeaponClass.ToString() ?? "null") +
+                    ",CurrentUsageFlags=" + (currentUsageItem?.WeaponFlags.ToString() ?? "0") +
+                    ",IsConsumable=" + (currentUsageItem?.IsConsumable ?? false) +
+                    ",IsRanged=" + (currentUsageItem?.IsRangedWeapon ?? false);
+            }
+            catch (Exception ex)
+            {
+                return "Slot=" + slotIndex + ",SummaryFailed=" + ex.GetType().Name;
+            }
+        }
+
+        private static string BuildSetWeaponNetworkDataSemanticSummary(Agent agent, EquipmentIndex slotIndex)
+        {
+            try
+            {
+                if (agent == null || slotIndex == EquipmentIndex.None)
+                    return "unknown";
+
+                WeaponComponentData currentUsageItem = agent.Equipment[slotIndex].CurrentUsageItem;
+                if (currentUsageItem == null)
+                    return "unknown";
+
+                if (currentUsageItem.WeaponFlags.HasAnyFlag(WeaponFlags.HasHitPoints))
+                    return "hit-points";
+
+                if (currentUsageItem.IsConsumable)
+                    return "amount";
+
+                return "other";
+            }
+            catch
+            {
+                return "unknown";
+            }
+        }
+
+        private static string BuildBoltAfterhitMountFailureDiagnostics(Agent mountAgent)
+        {
+            if (mountAgent == null)
+                return "MountFaultDiagnostics={Agent=null}";
+
+            StringBuilder builder = new StringBuilder();
+            builder.Append("MountFaultDiagnostics={");
+            AppendBoltAfterhitProbe(builder, "AgentIndex", () => mountAgent.Index.ToString());
+            AppendBoltAfterhitProbe(builder, "CharacterType", () => mountAgent.Character?.GetType().Name ?? "null");
+            AppendBoltAfterhitProbe(builder, "CharacterId", () => (mountAgent.Character as BasicCharacterObject)?.StringId ?? "null");
+            AppendBoltAfterhitProbe(builder, "MonsterType", () => mountAgent.Monster?.GetType().Name ?? "null");
+            AppendBoltAfterhitProbe(builder, "OriginType", () => mountAgent.Origin?.GetType().Name ?? "null");
+            AppendBoltAfterhitProbe(builder, "TeamSide", () => mountAgent.Team?.Side.ToString() ?? "null");
+            AppendBoltAfterhitProbe(builder, "Formation", () => mountAgent.Formation?.Index.ToString() ?? "null");
+            AppendBoltAfterhitProbe(builder, "Active", () => mountAgent.IsActive().ToString());
+            AppendBoltAfterhitProbe(builder, "Health", () => mountAgent.Health.ToString("0.0"));
+            AppendBoltAfterhitProbe(builder, "IsMount", () => mountAgent.IsMount.ToString());
+            AppendBoltAfterhitProbe(builder, "RiderAgentIndex", () => mountAgent.RiderAgent?.Index.ToString() ?? "null");
+            AppendBoltAfterhitProbe(builder, "RiderSummary", () => BuildBoltAfterhitAgentSummary(mountAgent.RiderAgent));
+            AppendBoltAfterhitProbe(builder, "MountRuntime", () => BuildBoltAfterhitMountRuntimeCompact(mountAgent));
+            AppendBoltAfterhitProbe(builder, "AttachedWeapons", () => mountAgent.GetAttachedWeaponsCount().ToString());
+            builder.Append("}");
+            return builder.ToString();
+        }
+
+        private static string BuildBoltAfterhitMountRuntimeCompact(Agent mountAgent)
+        {
+            TryResolveBoltAfterhitMountRuntimeIds(
+                mountAgent,
+                out string mountEntryId,
+                out string riderEntryId,
+                out string runtimeEntryId);
+
+            string stage = "absent";
+            string failureReason = "None";
+            string riderMaterialized = "null";
+            string mountMaterialized = "null";
+            string mountLinkVerified = "null";
+            if (!string.IsNullOrWhiteSpace(runtimeEntryId) &&
+                ExactTransferContractRuntimeCache.TryGetRuntimeState(runtimeEntryId, out ExactTransferRuntimeState runtimeState) &&
+                runtimeState != null)
+            {
+                stage = runtimeState.Stage.ToString();
+                failureReason = runtimeState.FailureReason.ToString();
+                riderMaterialized = runtimeState.RiderMaterialized.ToString();
+                mountMaterialized = runtimeState.MountMaterialized.ToString();
+                mountLinkVerified = runtimeState.MountLinkVerified.ToString();
+            }
+
+            return
+                "MountRuntime={MountEntryId=" + (mountEntryId ?? "null") +
+                ",RiderEntryId=" + (riderEntryId ?? "null") +
+                ",RuntimeEntryId=" + (runtimeEntryId ?? "null") +
+                ",Stage=" + stage +
+                ",FailureReason=" + failureReason +
+                ",RiderMaterialized=" + riderMaterialized +
+                ",MountMaterialized=" + mountMaterialized +
+                ",MountLinkVerified=" + mountLinkVerified + "}";
+        }
+
+        private static string BuildBoltAfterhitAttachedWeaponsSnapshot(
+            Agent agent,
+            out int attachedWeaponsCount,
+            out int boltAttachedWeaponsCount)
+        {
+            attachedWeaponsCount = 0;
+            boltAttachedWeaponsCount = 0;
+
+            if (agent == null)
+                return "none";
+
+            try
+            {
+                attachedWeaponsCount = agent.GetAttachedWeaponsCount();
+            }
+            catch (Exception ex)
+            {
+                return "count-failed:" + ex.GetType().Name;
+            }
+
+            if (attachedWeaponsCount <= 0)
+                return "none";
+
+            StringBuilder builder = new StringBuilder();
+            for (int i = 0; i < attachedWeaponsCount; i++)
+            {
+                if (builder.Length > 0)
+                    builder.Append(";");
+
+                try
+                {
+                    MissionWeapon attachedWeapon = agent.GetAttachedWeapon(i);
+                    ItemObject attachedItem = attachedWeapon.Item;
+                    bool isBolt = IsBoltAttachedMissileItem(attachedItem);
+                    if (isBolt)
+                        boltAttachedWeaponsCount++;
+
+                    sbyte attachedBoneIndex = agent.GetAttachedWeaponBoneIndex(i);
+                    builder.Append(i)
+                        .Append(":")
+                        .Append(attachedItem?.StringId ?? "null")
+                        .Append("@")
+                        .Append(attachedBoneIndex);
+                    if (isBolt)
+                        builder.Append(":bolt");
+                }
+                catch (Exception ex)
+                {
+                    builder.Append(i)
+                        .Append(":fault:")
+                        .Append(ex.GetType().Name);
+                }
+            }
+
+            return builder.Length > 0 ? builder.ToString() : "none";
+        }
+
+        private static void TryResolveBoltAfterhitMountRuntimeIds(
+            Agent mountAgent,
+            out string mountEntryId,
+            out string riderEntryId,
+            out string runtimeEntryId)
+        {
+            mountEntryId = null;
+            riderEntryId = null;
+            runtimeEntryId = null;
+            if (mountAgent == null)
+                return;
+
+            ExactTransferContractRuntimeCache.TryGetEntryIdByMountAgentIndex(mountAgent.Index, out mountEntryId);
+            Agent riderAgent = null;
+            try
+            {
+                riderAgent = mountAgent.RiderAgent;
+            }
+            catch
+            {
+            }
+
+            if (riderAgent != null)
+                ExactTransferContractRuntimeCache.TryGetEntryIdByRiderAgentIndex(riderAgent.Index, out riderEntryId);
+
+            runtimeEntryId = !string.IsNullOrWhiteSpace(mountEntryId)
+                ? mountEntryId
+                : riderEntryId;
+        }
+
+        private static void AppendBoltAfterhitProbe(StringBuilder builder, string label, Func<string> valueFactory)
+        {
+            if (builder == null)
+                return;
+
+            if (builder.Length > 0 && builder[builder.Length - 1] != '{')
+                builder.Append(", ");
+
+            builder.Append(label);
+            builder.Append("=");
+            try
+            {
+                builder.Append(valueFactory?.Invoke() ?? "null");
+            }
+            catch (Exception ex)
+            {
+                builder.Append("ProbeFailed:");
+                builder.Append(ex.GetType().Name);
+            }
+        }
+
+        private static string BuildBoltAfterhitAgentWeaponSlotsSnapshot(Agent agent, bool includeSpawnEquipment)
+        {
+            if (agent == null)
+                return "(agent-null)";
+
+            EquipmentIndex[] slots =
+            {
+                EquipmentIndex.WeaponItemBeginSlot,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3
+            };
+
+            StringBuilder builder = new StringBuilder();
+            builder.Append("[");
+            for (int i = 0; i < slots.Length; i++)
+            {
+                EquipmentIndex slot = slots[i];
+                if (i > 0)
+                    builder.Append(", ");
+
+                builder.Append(slot);
+                builder.Append("=");
+                try
+                {
+                    string itemId;
+                    short amount;
+                    if (includeSpawnEquipment)
+                    {
+                        Equipment spawnEquipment = agent.SpawnEquipment;
+                        itemId = spawnEquipment?[slot].Item?.StringId ?? "empty";
+                        amount = (short)0;
+                    }
+                    else
+                    {
+                        MissionEquipment equipment = agent.Equipment;
+                        itemId = equipment?[slot].Item?.StringId ?? "empty";
+                        amount = equipment?[slot].Amount ?? (short)0;
+                    }
+
+                    builder.Append(itemId);
+                    if (amount > 0)
+                    {
+                        builder.Append("@");
+                        builder.Append(amount);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    builder.Append("SlotProbeFailed:");
+                    builder.Append(ex.GetType().Name);
+                }
+            }
+
+            builder.Append("]");
+            return builder.ToString();
+        }
+
+        private static string BuildBoltAfterhitMissionObjectSummary(MissionObject missionObject)
+        {
+            if (missionObject == null)
+                return "MissionObject=null";
+
+            try
+            {
+                ItemObject missionObjectItem = (missionObject as SpawnedItemEntity)?.WeaponCopy.Item;
+                return
+                    "MissionObjectId=" + GetMissionObjectIdValue(missionObject.Id) +
+                    ",Type=" + missionObject.GetType().Name +
+                    ",Item=" + (missionObjectItem?.StringId ?? "null");
+            }
+            catch (Exception ex)
+            {
+                return "MissionObjectSummaryFailed=" + ex.GetType().Name;
+            }
+        }
+
+        private static bool TryResolveMissionObjectFromHitEntity(GameEntity hitEntity, out MissionObject missionObject)
+        {
+            missionObject = null;
+            try
+            {
+                WeakGameEntity weakGameEntity = hitEntity?.WeakEntity ?? WeakGameEntity.Invalid;
+                if (!weakGameEntity.IsValid)
+                    return false;
+
+                WeakGameEntity current = weakGameEntity;
+                while (missionObject == null && current.IsValid)
+                {
+                    missionObject = current.GetFirstScriptOfType<MissionObject>();
+                    current = current.Parent;
+                }
+
+                return missionObject != null;
+            }
+            catch
+            {
+                missionObject = null;
                 return false;
             }
         }
@@ -3252,6 +4222,110 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void Mission_OnAgentAddedAsCorpse_ServerPrefix(
+            Mission __instance,
+            Agent affectedAgent,
+            int corpsesToFadeIndex)
+        {
+            try
+            {
+                if (!ShouldObserveServerExactBattleBoltAfterhitDiagnostics(__instance) ||
+                    affectedAgent == null ||
+                    !SafeIsMountAgent(affectedAgent))
+                {
+                    return;
+                }
+
+                string attachedSnapshot = BuildBoltAfterhitAttachedWeaponsSnapshot(
+                    affectedAgent,
+                    out int attachedWeaponsCount,
+                    out int boltAttachedWeaponsCount);
+                if (boltAttachedWeaponsCount <= 0)
+                    return;
+
+                ExactCampaignArmyBootstrap.TryGetEntryId(affectedAgent, out string entryId);
+                string observedKey =
+                    (entryId ?? "null") + "|" +
+                    affectedAgent.Index + "|" +
+                    corpsesToFadeIndex + "|" +
+                    attachedWeaponsCount + "|" +
+                    boltAttachedWeaponsCount + "|" +
+                    attachedSnapshot;
+                if (string.Equals(_lastObservedServerMountCorpseEnterKey, observedKey, StringComparison.Ordinal))
+                    return;
+
+                _lastObservedServerMountCorpseEnterKey = observedKey;
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: observed server mount corpse enter corridor. " +
+                    "EntryId=" + (entryId ?? "null") +
+                    " CorpsesToFadeIndex=" + corpsesToFadeIndex +
+                    " AttachedWeaponsBefore=" + attachedWeaponsCount +
+                    " BoltAttachedWeaponsBefore=" + boltAttachedWeaponsCount +
+                    " AttachedSnapshot=[" + attachedSnapshot + "] " +
+                    BuildBoltAfterhitAgentSummary(affectedAgent));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Mission.OnAgentAddedAsCorpse server prefix failed open: " + ex.Message);
+            }
+        }
+
+        private static void MissionNetworkComponent_SendAgentsToPeer_ServerPrefix(
+            MissionNetworkComponent __instance,
+            NetworkCommunicator networkPeer)
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (!ShouldObserveServerExactBattleBoltAfterhitDiagnostics(mission) ||
+                    networkPeer == null ||
+                    networkPeer.IsServerPeer ||
+                    mission == null)
+                {
+                    return;
+                }
+
+                foreach (Agent agent in mission.AllAgents)
+                {
+                    if (agent == null || !SafeIsMountAgent(agent))
+                        continue;
+
+                    string attachedSnapshot = BuildBoltAfterhitAttachedWeaponsSnapshot(
+                        agent,
+                        out int attachedWeaponsCount,
+                        out int boltAttachedWeaponsCount);
+                    if (boltAttachedWeaponsCount <= 0)
+                        continue;
+
+                    ExactCampaignArmyBootstrap.TryGetEntryId(agent, out string mountEntryId);
+                    string observedKey =
+                        networkPeer.Index + "|" +
+                        agent.Index + "|" +
+                        (agent.RiderAgent?.Index ?? -1) + "|" +
+                        attachedWeaponsCount + "|" +
+                        boltAttachedWeaponsCount + "|" +
+                        attachedSnapshot;
+                    if (string.Equals(_lastObservedServerMountAttachedWeaponReplicationKey, observedKey, StringComparison.Ordinal))
+                        continue;
+
+                    _lastObservedServerMountAttachedWeaponReplicationKey = observedKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server mount attached-weapon replication corridor. " +
+                        "Peer=" + (networkPeer.UserName ?? networkPeer.Index.ToString()) +
+                        " PeerIndex=" + networkPeer.Index +
+                        " EntryId=" + (mountEntryId ?? "null") +
+                        " AttachedWeapons=" + attachedWeaponsCount +
+                        " BoltAttachedWeapons=" + boltAttachedWeaponsCount +
+                        " AttachedSnapshot=[" + attachedSnapshot + "] " +
+                        BuildBoltAfterhitAgentSummary(agent));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.SendAgentsToPeer server prefix failed open: " + ex.Message);
+            }
+        }
+
         private static bool Mission_SpawnAttachedWeaponOnCorpse_ServerPrefix(
             Mission __instance,
             Agent agent,
@@ -3261,6 +4335,77 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                MissionWeapon attachedWeapon = default;
+                ItemObject attachedItem = null;
+                if (agent != null && attachedWeaponIndex >= 0)
+                {
+                    try
+                    {
+                        attachedWeapon = agent.GetAttachedWeapon(attachedWeaponIndex);
+                        attachedItem = attachedWeapon.Item;
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                if (ShouldObserveServerExactBattleBoltAfterhitDiagnostics(__instance) &&
+                    IsBoltAttachedMissileItem(attachedItem))
+                {
+                    ExactCampaignArmyBootstrap.TryGetEntryId(agent, out string observedEntryId);
+                    string attachedSnapshot = BuildBoltAfterhitAttachedWeaponsSnapshot(
+                        agent,
+                        out int attachedWeaponsCount,
+                        out int boltAttachedWeaponsCount);
+                    string observedKey =
+                        (observedEntryId ?? "null") + "|" +
+                        (agent?.Index ?? -1) + "|" +
+                        attachedWeaponIndex + "|" +
+                        (attachedItem?.StringId ?? "null") + "|" +
+                        forcedSpawnIndex + "|" +
+                        (agent?.Health.ToString("0.0") ?? "null");
+                    if (!string.Equals(_lastObservedServerBoltCorpseKey, observedKey, StringComparison.Ordinal))
+                    {
+                        _lastObservedServerBoltCorpseKey = observedKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: observed server bolt corpse attachment corridor. " +
+                            "EntryId=" + (observedEntryId ?? "null") +
+                            " AttachedWeaponIndex=" + attachedWeaponIndex +
+                            " AttachedItem=" + (attachedItem?.StringId ?? "null") +
+                            " ForcedSpawnIndex=" + forcedSpawnIndex +
+                            " " + BuildBoltAfterhitAgentSummary(agent));
+                    }
+
+                    if (agent != null &&
+                        SafeIsMountAgent(agent) &&
+                        boltAttachedWeaponsCount > 0)
+                    {
+                        string mountObservedKey =
+                            (observedEntryId ?? "null") + "|" +
+                            (agent?.Index ?? -1) + "|" +
+                            attachedWeaponIndex + "|" +
+                            (attachedItem?.StringId ?? "null") + "|" +
+                            forcedSpawnIndex + "|" +
+                            attachedWeaponsCount + "|" +
+                            boltAttachedWeaponsCount + "|" +
+                            attachedSnapshot;
+                        if (!string.Equals(_lastObservedServerBoltMountCorpseSpawnKey, mountObservedKey, StringComparison.Ordinal))
+                        {
+                            _lastObservedServerBoltMountCorpseSpawnKey = mountObservedKey;
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: observed server bolt mount corpse spawn corridor. " +
+                                "EntryId=" + (observedEntryId ?? "null") +
+                                " AttachedWeaponIndex=" + attachedWeaponIndex +
+                                " AttachedItem=" + (attachedItem?.StringId ?? "null") +
+                                " ForcedSpawnIndex=" + forcedSpawnIndex +
+                                " AttachedWeaponsBefore=" + attachedWeaponsCount +
+                                " BoltAttachedWeaponsBefore=" + boltAttachedWeaponsCount +
+                                " AttachedSnapshot=[" + attachedSnapshot + "] " +
+                                BuildBoltAfterhitAgentSummary(agent));
+                        }
+                    }
+                }
+
                 if (!ShouldUseServerExactBattleAttachedMissileSuppression(__instance) ||
                     agent == null ||
                     attachedWeaponIndex < 0)
@@ -3277,8 +4422,6 @@ namespace CoopSpectator.Patches
                     return true;
                 }
 
-                MissionWeapon attachedWeapon = agent.GetAttachedWeapon(attachedWeaponIndex);
-                ItemObject attachedItem = attachedWeapon.Item;
                 if (!IsSuppressibleAttachedMissileItem(attachedItem))
                     return true;
 
@@ -3308,6 +4451,43 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                ItemObject parentItem = spawnedWeapon?.WeaponCopy.Item;
+                MissionWeapon attachedWeapon = default;
+                ItemObject attachedItem = null;
+                if (spawnedWeapon != null && attachmentIndex >= 0)
+                {
+                    try
+                    {
+                        attachedWeapon = spawnedWeapon.WeaponCopy.GetAttachedWeapon(attachmentIndex);
+                        attachedItem = attachedWeapon.Item;
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                if (ShouldObserveServerExactBattleBoltAfterhitDiagnostics(__instance) &&
+                    IsShieldItem(parentItem) &&
+                    IsBoltAttachedMissileItem(attachedItem))
+                {
+                    string observedKey =
+                        GetMissionObjectIdValue(spawnedWeapon?.Id ?? MissionObjectId.Invalid) + "|" +
+                        attachmentIndex + "|" +
+                        (attachedItem?.StringId ?? "null") + "|" +
+                        forcedSpawnIndex;
+                    if (!string.Equals(_lastObservedServerBoltDroppedShieldAttachmentKey, observedKey, StringComparison.Ordinal))
+                    {
+                        _lastObservedServerBoltDroppedShieldAttachmentKey = observedKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: observed server bolt dropped-shield attachment corridor. " +
+                            "SpawnedWeaponId=" + GetMissionObjectIdValue(spawnedWeapon?.Id ?? MissionObjectId.Invalid) +
+                            " ParentItem=" + (parentItem?.StringId ?? "null") +
+                            " AttachmentIndex=" + attachmentIndex +
+                            " AttachedItem=" + (attachedItem?.StringId ?? "null") +
+                            " ForcedSpawnIndex=" + forcedSpawnIndex);
+                    }
+                }
+
                 if (!ShouldUseServerExactBattleAttachedMissileSuppression(__instance) ||
                     spawnedWeapon == null ||
                     attachmentIndex < 0)
@@ -3315,12 +4495,9 @@ namespace CoopSpectator.Patches
                     return true;
                 }
 
-                ItemObject parentItem = spawnedWeapon.WeaponCopy.Item;
                 if (!IsShieldItem(parentItem))
                     return true;
 
-                MissionWeapon attachedWeapon = spawnedWeapon.WeaponCopy.GetAttachedWeapon(attachmentIndex);
-                ItemObject attachedItem = attachedWeapon.Item;
                 if (!IsSuppressibleAttachedMissileItem(attachedItem))
                     return true;
 
@@ -3349,10 +4526,151 @@ namespace CoopSpectator.Patches
             bool attachedToShield,
             sbyte attachedBoneIndex,
             MissionObject attachedMissionObject,
-            int forcedSpawnIndex)
+            int forcedSpawnIndex,
+            ref ServerBoltMountReactionObservationState __state)
         {
+            __state = null;
+
             try
             {
+                ItemObject observedMissileItem = null;
+                WeaponFlags observedWeaponFlags = 0;
+                WeaponClass observedWeaponClass = WeaponClass.Undefined;
+                if (TryResolveMissionMissileData(__instance, missileIndex, out observedMissileItem, out observedWeaponFlags, out observedWeaponClass) &&
+                    ShouldObserveServerExactBattleBoltAfterhitDiagnostics(__instance) &&
+                    IsBoltAttachedMissileItem(observedMissileItem, observedWeaponFlags, observedWeaponClass))
+                {
+                    ExactCampaignArmyBootstrap.TryGetEntryId(attachedAgent, out string observedEntryId);
+                    ItemObject observedMissionObjectItem = (attachedMissionObject as SpawnedItemEntity)?.WeaponCopy.Item;
+                    string observedKey =
+                        missileIndex + "|" +
+                        (observedMissileItem?.StringId ?? "null") + "|" +
+                        collisionReaction + "|" +
+                        (attachedAgent?.Index ?? -1) + "|" +
+                        (observedEntryId ?? "null") + "|" +
+                        attachedToShield + "|" +
+                        attachedBoneIndex + "|" +
+                        GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid) + "|" +
+                        forcedSpawnIndex;
+                if (!string.Equals(_lastObservedServerBoltCollisionKey, observedKey, StringComparison.Ordinal))
+                {
+                    _lastObservedServerBoltCollisionKey = observedKey;
+                    string attackerSummary = BuildBoltAfterhitAgentSummary(attackerAgent);
+                    bool attachedSummaryOk = TryBuildBoltAfterhitAgentSummary(attachedAgent, out string attachedSummary, out string attachedSummaryFailureType);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server bolt collision reaction corridor. " +
+                        "MissileIndex=" + missileIndex +
+                        " CollisionReaction=" + collisionReaction +
+                        " MissileItem=" + (observedMissileItem?.StringId ?? "null") +
+                            " WeaponClass=" + observedWeaponClass +
+                            " WeaponFlags=" + observedWeaponFlags +
+                            " AttachedToShield=" + attachedToShield +
+                            " AttachedBoneIndex=" + attachedBoneIndex +
+                        " ForcedSpawnIndex=" + forcedSpawnIndex +
+                        " AttachedEntryId=" + (observedEntryId ?? "null") +
+                        " AttachedMissionObjectId=" + GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid) +
+                        " AttachedMissionObjectItem=" + (observedMissionObjectItem?.StringId ?? "null") +
+                        " Attacker={" + attackerSummary + "} " +
+                        "Attached={" + attachedSummary + "}");
+
+                    if ((collisionReaction == Mission.MissileCollisionReaction.Stick ||
+                         collisionReaction == Mission.MissileCollisionReaction.BecomeInvisible) &&
+                        attachedAgent != null &&
+                        SafeIsMountAgent(attachedAgent))
+                    {
+                        string mountObservationKey =
+                            missileIndex + "|" +
+                            (observedMissileItem?.StringId ?? "null") + "|" +
+                            collisionReaction + "|" +
+                            (attachedAgent?.Index ?? -1) + "|" +
+                            (attackerAgent?.Index ?? -1) + "|" +
+                            attachedBoneIndex + "|" +
+                            attachedToShield + "|" +
+                            forcedSpawnIndex;
+                        string mountObservationDetails =
+                            "MissileIndex=" + missileIndex +
+                            " MissileItem=" + (observedMissileItem?.StringId ?? "null") +
+                            " CollisionReaction=" + collisionReaction +
+                            " AttachedBoneIndex=" + attachedBoneIndex +
+                            " AttachedToShield=" + attachedToShield +
+                            " ForcedSpawnIndex=" + forcedSpawnIndex +
+                            " Attacker={" + attackerSummary + "} " +
+                            "Attached={" + attachedSummary + "}";
+
+                        string enterLogPrefix;
+                        string exitLogPrefix;
+                        string faultLogPrefix;
+                        if (collisionReaction == Mission.MissileCollisionReaction.Stick)
+                        {
+                            enterLogPrefix = "BattleMapSpawnHandoffPatch: observed server bolt mount stick enter corridor. ";
+                            exitLogPrefix = "BattleMapSpawnHandoffPatch: observed server bolt mount stick exit corridor. ";
+                            faultLogPrefix = "BattleMapSpawnHandoffPatch: observed server bolt mount stick fault corridor. ";
+                            __state = new ServerBoltMountReactionObservationState
+                            {
+                                Key = mountObservationKey,
+                                Details = mountObservationDetails,
+                                EnterLogPrefix = enterLogPrefix,
+                                ExitLogPrefix = exitLogPrefix,
+                                FaultLogPrefix = faultLogPrefix
+                            };
+
+                            if (!string.Equals(_lastObservedServerBoltMountStickEnterKey, mountObservationKey, StringComparison.Ordinal))
+                            {
+                                _lastObservedServerBoltMountStickEnterKey = mountObservationKey;
+                                ModLogger.Info(enterLogPrefix + mountObservationDetails);
+                            }
+                        }
+                        else
+                        {
+                            enterLogPrefix = "BattleMapSpawnHandoffPatch: observed server bolt mount become-invisible enter corridor. ";
+                            exitLogPrefix = "BattleMapSpawnHandoffPatch: observed server bolt mount become-invisible exit corridor. ";
+                            faultLogPrefix = "BattleMapSpawnHandoffPatch: observed server bolt mount become-invisible fault corridor. ";
+                            __state = new ServerBoltMountReactionObservationState
+                            {
+                                Key = mountObservationKey,
+                                Details = mountObservationDetails,
+                                EnterLogPrefix = enterLogPrefix,
+                                ExitLogPrefix = exitLogPrefix,
+                                FaultLogPrefix = faultLogPrefix
+                            };
+
+                            if (!string.Equals(_lastObservedServerBoltMountBecomeInvisibleEnterKey, mountObservationKey, StringComparison.Ordinal))
+                            {
+                                _lastObservedServerBoltMountBecomeInvisibleEnterKey = mountObservationKey;
+                                ModLogger.Info(enterLogPrefix + mountObservationDetails);
+                            }
+                        }
+                    }
+
+                    if (collisionReaction == Mission.MissileCollisionReaction.Stick &&
+                        attachedAgent != null &&
+                        !attachedSummaryOk)
+                    {
+                        string faultKey =
+                            "reaction|" +
+                            missileIndex + "|" +
+                            (observedMissileItem?.StringId ?? "null") + "|" +
+                            SafeGetAgentIndex(attachedAgent) + "|" +
+                            attachedSummaryFailureType + "|" +
+                            attachedBoneIndex;
+                        if (!string.Equals(_lastObservedServerBoltStrikeAgentFaultKey, faultKey, StringComparison.Ordinal))
+                        {
+                            _lastObservedServerBoltStrikeAgentFaultKey = faultKey;
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: observed server bolt strike-agent stick victim fault corridor. " +
+                                "Stage=HandleMissileCollisionReaction " +
+                                "MissileIndex=" + missileIndex +
+                                " MissileItem=" + (observedMissileItem?.StringId ?? "null") +
+                                " FailureType=" + (attachedSummaryFailureType ?? "unknown") +
+                                " AttachedEntryId=" + (observedEntryId ?? "null") +
+                                " AttachedBoneIndex=" + attachedBoneIndex +
+                                " VictimSummary={" + attachedSummary + "} " +
+                                BuildBoltAfterhitAgentFailureDiagnostics(attachedAgent));
+                        }
+                    }
+                }
+                }
+
                 if (!ShouldUseServerExactBattleAttachedMissileSuppression(__instance) ||
                     collisionReaction != Mission.MissileCollisionReaction.Stick)
                 {
@@ -3411,6 +4729,663 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void Mission_HandleMissileCollisionReaction_ServerPostfix(
+            Agent attachedAgent,
+            ServerBoltMountReactionObservationState __state)
+        {
+            if (__state == null)
+                return;
+
+            try
+            {
+                string attachedSummary = BuildBoltAfterhitAgentSummary(attachedAgent);
+                bool shouldLog = false;
+                if (string.Equals(__state.ExitLogPrefix, "BattleMapSpawnHandoffPatch: observed server bolt mount stick exit corridor. ", StringComparison.Ordinal))
+                {
+                    if (!string.Equals(_lastObservedServerBoltMountStickExitKey, __state.Key, StringComparison.Ordinal))
+                    {
+                        _lastObservedServerBoltMountStickExitKey = __state.Key;
+                        shouldLog = true;
+                    }
+                }
+                else if (string.Equals(__state.ExitLogPrefix, "BattleMapSpawnHandoffPatch: observed server bolt mount become-invisible exit corridor. ", StringComparison.Ordinal))
+                {
+                    if (!string.Equals(_lastObservedServerBoltMountBecomeInvisibleExitKey, __state.Key, StringComparison.Ordinal))
+                    {
+                        _lastObservedServerBoltMountBecomeInvisibleExitKey = __state.Key;
+                        shouldLog = true;
+                    }
+                }
+
+                if (shouldLog)
+                {
+                    ModLogger.Info(
+                        __state.ExitLogPrefix +
+                        __state.Details +
+                        " PostAttached={" + attachedSummary + "}");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: server HandleMissileCollisionReaction postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static Exception Mission_HandleMissileCollisionReaction_ServerFinalizer(
+            Exception __exception,
+            ServerBoltMountReactionObservationState __state)
+        {
+            if (__exception == null || __state == null)
+                return __exception;
+
+            try
+            {
+                bool shouldLog = false;
+                if (string.Equals(__state.FaultLogPrefix, "BattleMapSpawnHandoffPatch: observed server bolt mount stick fault corridor. ", StringComparison.Ordinal))
+                {
+                    if (!string.Equals(_lastObservedServerBoltMountStickFaultKey, __state.Key, StringComparison.Ordinal))
+                    {
+                        _lastObservedServerBoltMountStickFaultKey = __state.Key;
+                        shouldLog = true;
+                    }
+                }
+                else if (string.Equals(__state.FaultLogPrefix, "BattleMapSpawnHandoffPatch: observed server bolt mount become-invisible fault corridor. ", StringComparison.Ordinal))
+                {
+                    if (!string.Equals(_lastObservedServerBoltMountBecomeInvisibleFaultKey, __state.Key, StringComparison.Ordinal))
+                    {
+                        _lastObservedServerBoltMountBecomeInvisibleFaultKey = __state.Key;
+                        shouldLog = true;
+                    }
+                }
+
+                if (shouldLog)
+                {
+                    ModLogger.Info(
+                        __state.FaultLogPrefix +
+                        __state.Details +
+                        " Exception=" + __exception.GetType().Name +
+                        ":" + __exception.Message);
+                }
+            }
+            catch
+            {
+            }
+
+            return __exception;
+        }
+
+        private static void Mission_SpawnWeaponAsDropFromMissile_ServerPrefix(
+            Mission __instance,
+            int missileIndex,
+            MissionObject attachedMissionObject,
+            Mission.WeaponSpawnFlags spawnFlags,
+            int forcedSpawnIndex,
+            ref ServerBoltWorldDropObservationState __state)
+        {
+            __state = null;
+
+            try
+            {
+                if (!ShouldObserveServerExactBattleBoltAfterhitDiagnostics(__instance))
+                    return;
+
+                if (!TryResolveMissionMissileData(__instance, missileIndex, out ItemObject missileItem, out WeaponFlags weaponFlags, out WeaponClass weaponClass) ||
+                    !IsBoltAttachedMissileItem(missileItem, weaponFlags, weaponClass))
+                {
+                    return;
+                }
+
+                string observationKey =
+                    missileIndex + "|" +
+                    (missileItem?.StringId ?? "null") + "|" +
+                    spawnFlags + "|" +
+                    forcedSpawnIndex + "|" +
+                    GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid);
+                string observationDetails =
+                    "MissileIndex=" + missileIndex +
+                    " MissileItem=" + (missileItem?.StringId ?? "null") +
+                    " WeaponClass=" + weaponClass +
+                    " WeaponFlags=" + weaponFlags +
+                    " SpawnFlags=" + spawnFlags +
+                    " ForcedSpawnIndex=" + forcedSpawnIndex +
+                    " AttachedMissionObject={" + BuildBoltAfterhitMissionObjectSummary(attachedMissionObject) + "}";
+                __state = new ServerBoltWorldDropObservationState
+                {
+                    Key = observationKey,
+                    Details = observationDetails
+                };
+
+                if (!string.Equals(_lastObservedServerBoltWorldDropEnterKey, observationKey, StringComparison.Ordinal))
+                {
+                    _lastObservedServerBoltWorldDropEnterKey = observationKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server bolt world-drop enter corridor. " +
+                        observationDetails);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: server SpawnWeaponAsDropFromMissile prefix failed open: " + ex.Message);
+            }
+        }
+
+        private static void Mission_SpawnWeaponAsDropFromMissile_ServerPostfix(
+            MissionObjectId __result,
+            ServerBoltWorldDropObservationState __state)
+        {
+            if (__state == null)
+                return;
+
+            try
+            {
+                if (!string.Equals(_lastObservedServerBoltWorldDropExitKey, __state.Key, StringComparison.Ordinal))
+                {
+                    _lastObservedServerBoltWorldDropExitKey = __state.Key;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server bolt world-drop exit corridor. " +
+                        __state.Details +
+                        " ResultMissionObjectId=" + GetMissionObjectIdValue(__result));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: server SpawnWeaponAsDropFromMissile postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static Exception Mission_SpawnWeaponAsDropFromMissile_ServerFinalizer(
+            Exception __exception,
+            ServerBoltWorldDropObservationState __state)
+        {
+            if (__exception == null || __state == null)
+                return __exception;
+
+            try
+            {
+                if (!string.Equals(_lastObservedServerBoltWorldDropFaultKey, __state.Key, StringComparison.Ordinal))
+                {
+                    _lastObservedServerBoltWorldDropFaultKey = __state.Key;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server bolt world-drop fault corridor. " +
+                        __state.Details +
+                        " Exception=" + __exception.GetType().Name +
+                        ":" + __exception.Message);
+                }
+            }
+            catch
+            {
+            }
+
+            return __exception;
+        }
+
+        private static bool Mission_MissileHitCallback_ServerPrefix(
+            Mission __instance,
+            ref AttackCollisionData collisionData,
+            int numDamagedAgents,
+            Agent attacker,
+            Agent victim,
+            GameEntity hitEntity,
+            ref ServerBoltMountedMissileHitObservationState __state)
+        {
+            __state = null;
+
+            try
+            {
+                if (!ShouldObserveServerExactBattleBoltAfterhitDiagnostics(__instance))
+                    return true;
+
+                int missileIndex = collisionData.AffectorWeaponSlotOrMissileIndex;
+                if (!TryResolveMissionMissileData(__instance, missileIndex, out ItemObject missileItem, out WeaponFlags weaponFlags, out WeaponClass weaponClass) ||
+                    !IsBoltAttachedMissileItem(missileItem, weaponFlags, weaponClass))
+                {
+                    return true;
+                }
+
+                MissionObject hitMissionObject = null;
+                bool hitMissionObjectResolved = TryResolveMissionObjectFromHitEntity(hitEntity, out hitMissionObject);
+                ItemObject hitMissionObjectItem = (hitMissionObject as SpawnedItemEntity)?.WeaponCopy.Item;
+                ExactCampaignArmyBootstrap.TryGetEntryId(victim, out string victimEntryId);
+                string logKey =
+                    missileIndex + "|" +
+                    (missileItem?.StringId ?? "null") + "|" +
+                    (victim?.Index ?? -1) + "|" +
+                    (victimEntryId ?? "null") + "|" +
+                    (hitEntity != null) + "|" +
+                    hitMissionObjectResolved + "|" +
+                    GetMissionObjectIdValue(hitMissionObject?.Id ?? MissionObjectId.Invalid) + "|" +
+                    collisionData.IsColliderAgent + "|" +
+                    collisionData.EntityExists + "|" +
+                    collisionData.AttackBlockedWithShield + "|" +
+                    collisionData.MissileBlockedWithWeapon + "|" +
+                    collisionData.CollidedWithShieldOnBack + "|" +
+                    collisionData.MissileHasPhysics + "|" +
+                    collisionData.MissileGoneUnderWater + "|" +
+                    collisionData.MissileGoneOutOfBorder + "|" +
+                    collisionData.CollisionBoneIndex + "|" +
+                    collisionData.PhysicsMaterialIndex + "|" +
+                    collisionData.CollisionResult;
+                if (!string.Equals(_lastObservedServerBoltMissileHitKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastObservedServerBoltMissileHitKey = logKey;
+                    bool victimSummaryOk = TryBuildBoltAfterhitAgentSummary(victim, out string victimSummary, out string victimSummaryFailureType);
+                    string attackerSummary = BuildBoltAfterhitAgentSummary(attacker);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server bolt missile-hit pre-reaction corridor. " +
+                        "MissileIndex=" + missileIndex +
+                        " MissileItem=" + (missileItem?.StringId ?? "null") +
+                        " WeaponClass=" + weaponClass +
+                        " WeaponFlags=" + weaponFlags +
+                        " NumDamagedAgents=" + numDamagedAgents +
+                        " IsColliderAgent=" + collisionData.IsColliderAgent +
+                        " EntityExists=" + collisionData.EntityExists +
+                        " AttackBlockedWithShield=" + collisionData.AttackBlockedWithShield +
+                        " MissileBlockedWithWeapon=" + collisionData.MissileBlockedWithWeapon +
+                        " CollidedWithShieldOnBack=" + collisionData.CollidedWithShieldOnBack +
+                        " MissileHasPhysics=" + collisionData.MissileHasPhysics +
+                        " MissileGoneUnderWater=" + collisionData.MissileGoneUnderWater +
+                        " MissileGoneOutOfBorder=" + collisionData.MissileGoneOutOfBorder +
+                        " CollisionBoneIndex=" + collisionData.CollisionBoneIndex +
+                        " VictimHitBodyPart=" + collisionData.VictimHitBodyPart +
+                        " PhysicsMaterialIndex=" + collisionData.PhysicsMaterialIndex +
+                        " CollisionResult=" + collisionData.CollisionResult +
+                        " VictimEntryId=" + (victimEntryId ?? "null") +
+                        " Victim={" + victimSummary + "} " +
+                        "Attacker={" + attackerSummary + "} " +
+                        "HitEntityPresent=" + (hitEntity != null) +
+                        " HitMissionObjectResolved=" + hitMissionObjectResolved +
+                        " HitMissionObject={" + BuildBoltAfterhitMissionObjectSummary(hitMissionObject) + "} " +
+                        "HitMissionObjectItem=" + (hitMissionObjectItem?.StringId ?? "null"));
+
+                    if (collisionData.CollisionResult == CombatCollisionResult.StrikeAgent &&
+                        victim != null &&
+                        !victimSummaryOk)
+                    {
+                        string faultKey =
+                            "pre|" +
+                            missileIndex + "|" +
+                            (missileItem?.StringId ?? "null") + "|" +
+                            SafeGetAgentIndex(victim) + "|" +
+                            (victimSummaryFailureType ?? "unknown") + "|" +
+                            collisionData.CollisionBoneIndex;
+                        if (!string.Equals(_lastObservedServerBoltStrikeAgentFaultKey, faultKey, StringComparison.Ordinal))
+                        {
+                            _lastObservedServerBoltStrikeAgentFaultKey = faultKey;
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: observed server bolt strike-agent victim fault corridor. " +
+                                "Stage=MissileHitCallback " +
+                                "MissileIndex=" + missileIndex +
+                                " MissileItem=" + (missileItem?.StringId ?? "null") +
+                                " FailureType=" + (victimSummaryFailureType ?? "unknown") +
+                                " VictimEntryId=" + (victimEntryId ?? "null") +
+                                " CollisionBoneIndex=" + collisionData.CollisionBoneIndex +
+                                " VictimSummary={" + victimSummary + "} " +
+                                BuildBoltAfterhitAgentFailureDiagnostics(victim));
+                        }
+                    }
+                }
+
+                if (victim != null &&
+                    collisionData.CollisionResult == CombatCollisionResult.StrikeAgent &&
+                    IsMountedUsageLifecycleAgent(victim))
+                {
+                    __state = new ServerBoltMountedMissileHitObservationState
+                    {
+                        Key =
+                            missileIndex + "|" +
+                            (missileItem?.StringId ?? "null") + "|" +
+                            collisionData.CollisionResult + "|" +
+                            BuildMountedUsagePairKey(victim) + "|" +
+                            collisionData.CollisionBoneIndex + "|" +
+                            numDamagedAgents,
+                        Details =
+                            "MissileIndex=" + missileIndex +
+                            " MissileItem=" + (missileItem?.StringId ?? "null") +
+                            " NumDamagedAgents=" + numDamagedAgents +
+                            " CollisionBoneIndex=" + collisionData.CollisionBoneIndex +
+                            " PhysicsMaterialIndex=" + collisionData.PhysicsMaterialIndex +
+                            " VictimHitBodyPart=" + collisionData.VictimHitBodyPart +
+                            " CollisionResult=" + collisionData.CollisionResult +
+                            " Victim={" + BuildMountedUsageObservationSummary(victim) + "} " +
+                            "Attacker={" + BuildMountedUsageObservationSummary(attacker) + "} " +
+                            "HitEntityPresent=" + (hitEntity != null)
+                    };
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: server MissileHitCallback prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static void Mission_MissileHitCallback_ServerPostfix(
+            Agent victim,
+            bool __result,
+            ServerBoltMountedMissileHitObservationState __state)
+        {
+            if (__state == null)
+                return;
+
+            try
+            {
+                if (!string.Equals(_lastObservedServerBoltMissileHitPostKey, __state.Key, StringComparison.Ordinal))
+                {
+                    _lastObservedServerBoltMissileHitPostKey = __state.Key;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server bolt missile-hit post corridor. " +
+                        __state.Details +
+                        " Returned=" + __result +
+                        " PostVictim={" + BuildMountedUsageObservationSummary(victim) + "}");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: server MissileHitCallback postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static void Agent_OnWieldedItemIndexChange_ServerPostfix(
+            Agent __instance,
+            bool isOffHand,
+            bool isWieldedInstantly,
+            bool isWieldedOnSpawn)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!GameNetwork.IsServer ||
+                    mission == null ||
+                    !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                    !IsMountedUsageLifecycleAgent(__instance))
+                {
+                    return;
+                }
+
+                string logKey =
+                    BuildMountedUsagePairKey(__instance) + "|" +
+                    isOffHand + "|" +
+                    isWieldedInstantly + "|" +
+                    isWieldedOnSpawn + "|" +
+                    SafeGetAgentIndex(__instance);
+                if (!string.Equals(_lastObservedServerMountedWieldChangeKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastObservedServerMountedWieldChangeKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server mounted wield-change corridor. " +
+                        "IsOffHand=" + isOffHand +
+                        " IsWieldedInstantly=" + isWieldedInstantly +
+                        " IsWieldedOnSpawn=" + isWieldedOnSpawn +
+                        " " + BuildMountedUsageObservationSummary(__instance));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWieldedItemIndexChange postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static void Agent_OnWeaponSwitchingToAlternativeStart_ServerPostfix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            int usageIndex)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!GameNetwork.IsServer ||
+                    mission == null ||
+                    !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                    !IsMountedUsageLifecycleAgent(__instance))
+                {
+                    return;
+                }
+
+                string logKey =
+                    BuildMountedUsagePairKey(__instance) + "|" +
+                    slotIndex + "|" +
+                    usageIndex;
+                if (!string.Equals(_lastObservedServerMountedUsageSwitchStartKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastObservedServerMountedUsageSwitchStartKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server mounted usage-switch-start corridor. " +
+                        "SlotIndex=" + slotIndex +
+                        " UsageIndex=" + usageIndex +
+                        " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "} " +
+                        BuildMountedUsageObservationSummary(__instance));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponSwitchingToAlternativeStart postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static void Agent_OnWeaponUsageIndexChange_ServerPostfix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            int usageIndex)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!GameNetwork.IsServer ||
+                    mission == null ||
+                    !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                    !IsMountedUsageLifecycleAgent(__instance))
+                {
+                    return;
+                }
+
+                string logKey =
+                    BuildMountedUsagePairKey(__instance) + "|" +
+                    slotIndex + "|" +
+                    usageIndex;
+                if (!string.Equals(_lastObservedServerMountedUsageChangeKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastObservedServerMountedUsageChangeKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server mounted usage-change corridor. " +
+                        "SlotIndex=" + slotIndex +
+                        " UsageIndex=" + usageIndex +
+                        " " + BuildMountedUsageObservationSummary(__instance));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponUsageIndexChange postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static void Agent_OnWeaponReloadPhaseChange_ServerPostfix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            short reloadPhase)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!GameNetwork.IsServer ||
+                    mission == null ||
+                    !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                    !IsMountedUsageLifecycleAgent(__instance))
+                {
+                    return;
+                }
+
+                string logKey =
+                    BuildMountedUsagePairKey(__instance) + "|" +
+                    slotIndex + "|" +
+                    reloadPhase;
+                if (!string.Equals(_lastObservedServerMountedReloadPhaseKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastObservedServerMountedReloadPhaseKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server mounted reload-phase corridor. " +
+                        "SlotIndex=" + slotIndex +
+                        " ReloadPhase=" + reloadPhase +
+                        " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "} " +
+                        BuildMountedUsageObservationSummary(__instance));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponReloadPhaseChange postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static void Agent_OnWeaponAmmoReload_ServerPostfix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            EquipmentIndex ammoSlotIndex,
+            short totalAmmo)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!GameNetwork.IsServer ||
+                    mission == null ||
+                    !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                    !IsMountedUsageLifecycleAgent(__instance))
+                {
+                    return;
+                }
+
+                string logKey =
+                    BuildMountedUsagePairKey(__instance) + "|" +
+                    slotIndex + "|" +
+                    ammoSlotIndex + "|" +
+                    totalAmmo;
+                if (!string.Equals(_lastObservedServerMountedAmmoReloadKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastObservedServerMountedAmmoReloadKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server mounted ammo-reload corridor. " +
+                        "WeaponSlotIndex=" + slotIndex +
+                        " AmmoSlotIndex=" + ammoSlotIndex +
+                        " TotalAmmo=" + totalAmmo +
+                        " WeaponSlot={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "} " +
+                        "AmmoSlot={" + BuildMountedWeaponSlotObservationSummary(__instance, ammoSlotIndex) + "} " +
+                        BuildMountedUsageObservationSummary(__instance));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponAmmoReload postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static void Agent_OnWeaponAmmoConsume_ServerPostfix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            short totalAmmo)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!GameNetwork.IsServer ||
+                    mission == null ||
+                    !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                    !IsMountedUsageLifecycleAgent(__instance))
+                {
+                    return;
+                }
+
+                string logKey =
+                    BuildMountedUsagePairKey(__instance) + "|" +
+                    slotIndex + "|" +
+                    totalAmmo;
+                if (!string.Equals(_lastObservedServerMountedAmmoConsumeKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastObservedServerMountedAmmoConsumeKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server mounted ammo-consume corridor. " +
+                        "WeaponSlotIndex=" + slotIndex +
+                        " TotalAmmo=" + totalAmmo +
+                        " WeaponSlot={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "} " +
+                        BuildMountedUsageObservationSummary(__instance));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponAmmoConsume postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static void Agent_OnWeaponAmountChange_ServerPostfix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            short amount)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!GameNetwork.IsServer ||
+                    mission == null ||
+                    !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                    !IsMountedUsageLifecycleAgent(__instance))
+                {
+                    return;
+                }
+
+                string logKey =
+                    BuildMountedUsagePairKey(__instance) + "|" +
+                    slotIndex + "|" +
+                    amount;
+                if (!string.Equals(_lastObservedServerMountedWeaponAmountChangeKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastObservedServerMountedWeaponAmountChangeKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server mounted weapon-amount-change corridor. " +
+                        "SlotIndex=" + slotIndex +
+                        " Amount=" + amount +
+                        " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "} " +
+                        BuildMountedUsageObservationSummary(__instance));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponAmountChange postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static void Agent_OnRemoveWeapon_ServerPostfix(
+            Agent __instance,
+            EquipmentIndex slotIndex)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!GameNetwork.IsServer ||
+                    mission == null ||
+                    !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                    !IsMountedUsageLifecycleAgent(__instance))
+                {
+                    return;
+                }
+
+                string logKey =
+                    BuildMountedUsagePairKey(__instance) + "|" +
+                    slotIndex;
+                if (!string.Equals(_lastObservedServerMountedRemoveWeaponKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastObservedServerMountedRemoveWeaponKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server mounted remove-weapon corridor. " +
+                        "SlotIndex=" + slotIndex +
+                        " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "} " +
+                        BuildMountedUsageObservationSummary(__instance));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnRemoveWeapon postfix failed open: " + ex.Message);
+            }
+        }
+
         private static bool Agent_AttachWeaponToWeapon_ServerPrefix(
             Agent __instance,
             EquipmentIndex slotIndex,
@@ -3420,6 +5395,29 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                if (ShouldObserveServerExactBattleBoltAfterhitDiagnostics(Mission.Current) &&
+                    IsBoltAttachedMissileItem(weapon.Item))
+                {
+                    ExactCampaignArmyBootstrap.TryGetEntryId(__instance, out string observedEntryId);
+                    string observedKey =
+                        "weapon-slot|" +
+                        (__instance?.Index ?? -1) + "|" +
+                        slotIndex + "|" +
+                        (observedEntryId ?? "null") + "|" +
+                        (weapon.Item?.StringId ?? "null");
+                    if (!string.Equals(_lastObservedServerBoltAttachKey, observedKey, StringComparison.Ordinal))
+                    {
+                        _lastObservedServerBoltAttachKey = observedKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: observed server bolt attach-to-weapon corridor. " +
+                            "EntryId=" + (observedEntryId ?? "null") +
+                            " SlotIndex=" + slotIndex +
+                            " MissileItem=" + (weapon.Item?.StringId ?? "null") +
+                            " WeaponEntityPresent=" + (weaponEntity != null) +
+                            " " + BuildBoltAfterhitAgentSummary(__instance));
+                    }
+                }
+
                 if (!ShouldSuppressServerAttachedMissileVisualForExactAgent(
                         __instance,
                         weapon,
@@ -3458,10 +5456,77 @@ namespace CoopSpectator.Patches
             MissionWeapon weapon,
             GameEntity weaponEntity,
             sbyte boneIndex,
-            ref MatrixFrame attachLocalFrame)
+            ref MatrixFrame attachLocalFrame,
+            ref ServerBoltMountBoneAttachObservationState __state)
         {
+            __state = null;
+
             try
             {
+                if (ShouldObserveServerExactBattleBoltAfterhitDiagnostics(Mission.Current) &&
+                    IsBoltAttachedMissileItem(weapon.Item))
+                {
+                    ExactCampaignArmyBootstrap.TryGetEntryId(__instance, out string observedEntryId);
+                    string observedKey =
+                        "bone|" +
+                        (__instance?.Index ?? -1) + "|" +
+                        boneIndex + "|" +
+                        (observedEntryId ?? "null") + "|" +
+                        (weapon.Item?.StringId ?? "null");
+                    if (!string.Equals(_lastObservedServerBoltAttachKey, observedKey, StringComparison.Ordinal))
+                    {
+                        _lastObservedServerBoltAttachKey = observedKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: observed server bolt attach-to-bone corridor. " +
+                            "EntryId=" + (observedEntryId ?? "null") +
+                            " BoneIndex=" + boneIndex +
+                            " MissileItem=" + (weapon.Item?.StringId ?? "null") +
+                            " WeaponEntityPresent=" + (weaponEntity != null) +
+                            " " + BuildBoltAfterhitAgentSummary(__instance));
+                    }
+
+                    if (__instance != null && SafeIsMountAgent(__instance))
+                    {
+                        int attachedWeaponsBefore = -1;
+                        try
+                        {
+                            attachedWeaponsBefore = __instance.GetAttachedWeaponsCount();
+                        }
+                        catch
+                        {
+                        }
+
+                        string mountObservationKey =
+                            (__instance?.Index ?? -1) + "|" +
+                            (__instance?.RiderAgent?.Index ?? -1) + "|" +
+                            boneIndex + "|" +
+                            (weapon.Item?.StringId ?? "null") + "|" +
+                            attachedWeaponsBefore;
+                        string mountObservationDetails =
+                            "MountAgentIndex=" + (__instance?.Index ?? -1) +
+                            " RiderAgentIndex=" + (__instance?.RiderAgent?.Index ?? -1) +
+                            " BoneIndex=" + boneIndex +
+                            " MissileItem=" + (weapon.Item?.StringId ?? "null") +
+                            " WeaponEntityPresent=" + (weaponEntity != null) +
+                            " AttachedWeaponsBefore=" + attachedWeaponsBefore +
+                            " " + BuildBoltAfterhitAgentSummary(__instance);
+
+                        __state = new ServerBoltMountBoneAttachObservationState
+                        {
+                            Key = mountObservationKey,
+                            Details = mountObservationDetails
+                        };
+
+                        if (!string.Equals(_lastObservedServerBoltMountBoneAttachEnterKey, mountObservationKey, StringComparison.Ordinal))
+                        {
+                            _lastObservedServerBoltMountBoneAttachEnterKey = mountObservationKey;
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: observed server bolt mount bone-attach enter corridor. " +
+                                mountObservationDetails);
+                        }
+                    }
+                }
+
                 if (!ShouldSuppressServerAttachedMissileVisualForExactAgent(
                         __instance,
                         weapon,
@@ -3493,6 +5558,65 @@ namespace CoopSpectator.Patches
                 ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.AttachWeaponToBone server prefix failed open: " + ex.Message);
                 return true;
             }
+        }
+
+        private static void Agent_AttachWeaponToBone_ServerPostfix(
+            Agent __instance,
+            ServerBoltMountBoneAttachObservationState __state)
+        {
+            if (__state == null)
+                return;
+
+            try
+            {
+                int attachedWeaponsAfter = -1;
+                try
+                {
+                    attachedWeaponsAfter = __instance?.GetAttachedWeaponsCount() ?? -1;
+                }
+                catch
+                {
+                }
+
+                if (!string.Equals(_lastObservedServerBoltMountBoneAttachExitKey, __state.Key, StringComparison.Ordinal))
+                {
+                    _lastObservedServerBoltMountBoneAttachExitKey = __state.Key;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server bolt mount bone-attach exit corridor. " +
+                        __state.Details +
+                        " AttachedWeaponsAfter=" + attachedWeaponsAfter);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.AttachWeaponToBone server postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static Exception Agent_AttachWeaponToBone_ServerFinalizer(
+            Exception __exception,
+            ServerBoltMountBoneAttachObservationState __state)
+        {
+            if (__exception == null || __state == null)
+                return __exception;
+
+            try
+            {
+                if (!string.Equals(_lastObservedServerBoltMountBoneAttachFaultKey, __state.Key, StringComparison.Ordinal))
+                {
+                    _lastObservedServerBoltMountBoneAttachFaultKey = __state.Key;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: observed server bolt mount bone-attach fault corridor. " +
+                        __state.Details +
+                        " Exception=" + __exception.GetType().Name +
+                        ":" + __exception.Message);
+                }
+            }
+            catch
+            {
+            }
+
+            return __exception;
         }
 
         private static bool MissionHasLocalMissile(int missileIndex)
@@ -7549,6 +9673,27 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (agent != null && IsMountedUsageLifecycleAgent(agent))
+                {
+                    string logKey =
+                        BuildMountedUsagePairKey(agent) + "|" +
+                        setWeaponNetworkData.WeaponEquipmentIndex + "|" +
+                        setWeaponNetworkData.DataValue + "|" +
+                        BuildSetWeaponNetworkDataSemanticSummary(agent, setWeaponNetworkData.WeaponEquipmentIndex);
+                    if (!string.Equals(_lastObservedClientMountedWeaponNetworkDataKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastObservedClientMountedWeaponNetworkDataKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: observed client mounted weapon-network-data corridor. " +
+                            "AgentIndex=" + setWeaponNetworkData.AgentIndex +
+                            " WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex +
+                            " DataValue=" + setWeaponNetworkData.DataValue +
+                            " DataSemantic=" + BuildSetWeaponNetworkDataSemanticSummary(agent, setWeaponNetworkData.WeaponEquipmentIndex) +
+                            " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(agent, setWeaponNetworkData.WeaponEquipmentIndex) + "} " +
+                            BuildMountedUsageObservationSummary(agent));
+                    }
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -7602,6 +9747,28 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (agent != null && IsMountedUsageLifecycleAgent(agent))
+                {
+                    string logKey =
+                        BuildMountedUsagePairKey(agent) + "|" +
+                        setWeaponAmmoData.WeaponEquipmentIndex + "|" +
+                        setWeaponAmmoData.AmmoEquipmentIndex + "|" +
+                        setWeaponAmmoData.Ammo;
+                    if (!string.Equals(_lastObservedClientMountedWeaponAmmoDataKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastObservedClientMountedWeaponAmmoDataKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: observed client mounted weapon-ammo-data corridor. " +
+                            "AgentIndex=" + setWeaponAmmoData.AgentIndex +
+                            " WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
+                            " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex +
+                            " Ammo=" + setWeaponAmmoData.Ammo +
+                            " WeaponSlot={" + BuildMountedWeaponSlotObservationSummary(agent, setWeaponAmmoData.WeaponEquipmentIndex) + "} " +
+                            "AmmoSlot={" + BuildMountedWeaponSlotObservationSummary(agent, setWeaponAmmoData.AmmoEquipmentIndex) + "} " +
+                            BuildMountedUsageObservationSummary(agent));
+                    }
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -7651,6 +9818,25 @@ namespace CoopSpectator.Patches
                         "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
                         " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex);
                     return false;
+                }
+
+                if (agent != null && IsMountedUsageLifecycleAgent(agent))
+                {
+                    string logKey =
+                        BuildMountedUsagePairKey(agent) + "|" +
+                        setWeaponReloadPhase.EquipmentIndex + "|" +
+                        setWeaponReloadPhase.ReloadPhase;
+                    if (!string.Equals(_lastObservedClientMountedWeaponReloadPhaseKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastObservedClientMountedWeaponReloadPhaseKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: observed client mounted weapon-reload-phase corridor. " +
+                            "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
+                            " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
+                            " ReloadPhase=" + setWeaponReloadPhase.ReloadPhase +
+                            " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(agent, setWeaponReloadPhase.EquipmentIndex) + "} " +
+                            BuildMountedUsageObservationSummary(agent));
+                    }
                 }
 
                 return true;
@@ -7706,6 +9892,26 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (agent != null && IsMountedUsageLifecycleAgent(agent))
+                {
+                    string logKey =
+                        BuildMountedUsagePairKey(agent) + "|" +
+                        startSwitchingWeaponUsageIndex.EquipmentIndex + "|" +
+                        startSwitchingWeaponUsageIndex.UsageIndex + "|" +
+                        startSwitchingWeaponUsageIndex.CurrentMovementFlagUsageDirection;
+                    if (!string.Equals(_lastObservedClientMountedUsageSwitchKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastObservedClientMountedUsageSwitchKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: observed client mounted usage-switch corridor. " +
+                            "AgentIndex=" + startSwitchingWeaponUsageIndex.AgentIndex +
+                            " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
+                            " UsageIndex=" + startSwitchingWeaponUsageIndex.UsageIndex +
+                            " UsageDirection=" + startSwitchingWeaponUsageIndex.CurrentMovementFlagUsageDirection +
+                            " " + BuildMountedUsageObservationSummary(agent));
+                    }
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -7757,6 +9963,24 @@ namespace CoopSpectator.Patches
                         " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
                         " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex);
                     return false;
+                }
+
+                if (agent != null && IsMountedUsageLifecycleAgent(agent))
+                {
+                    string logKey =
+                        BuildMountedUsagePairKey(agent) + "|" +
+                        weaponUsageIndexChangeMessage.SlotIndex + "|" +
+                        weaponUsageIndexChangeMessage.UsageIndex;
+                    if (!string.Equals(_lastObservedClientMountedUsageIndexChangeKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastObservedClientMountedUsageIndexChangeKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: observed client mounted usage-index-change corridor. " +
+                            "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
+                            " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
+                            " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex +
+                            " " + BuildMountedUsageObservationSummary(agent));
+                    }
                 }
 
                 return true;
@@ -8730,6 +10954,30 @@ namespace CoopSpectator.Patches
                     return;
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWieldedItemIndex.AgentIndex, canBeNull: true);
+                if (agent != null && IsMountedUsageLifecycleAgent(agent))
+                {
+                    string logKey =
+                        BuildMountedUsagePairKey(agent) + "|" +
+                        setWieldedItemIndex.WieldedItemIndex + "|" +
+                        setWieldedItemIndex.IsLeftHand + "|" +
+                        setWieldedItemIndex.IsWieldedInstantly + "|" +
+                        setWieldedItemIndex.IsWieldedOnSpawn + "|" +
+                        setWieldedItemIndex.MainHandCurrentUsageIndex;
+                    if (!string.Equals(_lastObservedClientMountedSetWieldedKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastObservedClientMountedSetWieldedKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: observed client mounted set-wielded corridor. " +
+                            "AgentIndex=" + setWieldedItemIndex.AgentIndex +
+                            " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                            " IsLeftHand=" + setWieldedItemIndex.IsLeftHand +
+                            " IsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
+                            " IsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
+                            " MainHandCurrentUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
+                            " " + BuildMountedUsageObservationSummary(agent));
+                    }
+                }
+
                 if (agent == null || agent.IsMount)
                     return;
 

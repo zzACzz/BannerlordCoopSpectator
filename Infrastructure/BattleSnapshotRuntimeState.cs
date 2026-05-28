@@ -283,6 +283,7 @@ namespace CoopSpectator.Infrastructure
         private static BattleRuntimeState _state;
         private static string _source;
         private static DateTime _updatedUtc;
+        private static string _lastDeferredExactRuntimeCatalogBootstrapSignature;
 
         public static void SetCurrent(BattleSnapshotMessage snapshot, string source)
         {
@@ -301,9 +302,16 @@ namespace CoopSpectator.Infrastructure
                 _updatedUtc = DateTime.UtcNow;
             }
 
-            ExactCampaignObjectCatalogBootstrap.EnsureLoaded("battle-snapshot-runtime:" + (_source ?? "unknown"));
-            ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(runtimeState, _source);
-            ExactCampaignRuntimeObjectRegistry.SyncFromState(runtimeState, _source);
+            if (ShouldInitializeExactRuntimeCatalogsImmediately(_source, out string immediateInitializationReason))
+            {
+                ExactCampaignObjectCatalogBootstrap.EnsureLoaded("battle-snapshot-runtime:" + (_source ?? "unknown"));
+                ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(runtimeState, _source);
+                ExactCampaignRuntimeObjectRegistry.SyncFromState(runtimeState, _source);
+            }
+            else
+            {
+                LogDeferredExactRuntimeCatalogBootstrapIfNeeded(_source, immediateInitializationReason);
+            }
 
             int annotatedServerCreateContractEntries = 0;
             if (GameNetwork.IsServer &&
@@ -404,6 +412,7 @@ namespace CoopSpectator.Infrastructure
                 _projection = null;
                 _state = null;
                 LoggedMissionSafeFallbackEntryIds.Clear();
+                _lastDeferredExactRuntimeCatalogBootstrapSignature = string.Empty;
                 _source = reason ?? "cleared";
                 _updatedUtc = DateTime.UtcNow;
             }
@@ -416,6 +425,54 @@ namespace CoopSpectator.Infrastructure
                 "Source=" + (_source ?? "unknown") +
                 " PreviousBattleId=" + (string.IsNullOrWhiteSpace(previousBattleId) ? "null" : previousBattleId) +
                 " PreviousEntries=" + previousEntryCount + ".");
+        }
+
+        private static bool ShouldInitializeExactRuntimeCatalogsImmediately(string source, out string reason)
+        {
+            if (!GameNetwork.IsServer && !GameNetwork.IsClient)
+            {
+                reason = "network-runtime-inactive";
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            if (mission == null)
+            {
+                reason = "mission-null";
+                return false;
+            }
+
+            string sceneName = mission.SceneName ?? string.Empty;
+            if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(sceneName))
+            {
+                reason = "scene-not-battle-runtime:" + (string.IsNullOrWhiteSpace(sceneName) ? "null" : sceneName);
+                return false;
+            }
+
+            reason = "scene-aware-network-battle-runtime";
+            return true;
+        }
+
+        private static void LogDeferredExactRuntimeCatalogBootstrapIfNeeded(string source, string reason)
+        {
+            string missionSceneName = Mission.Current?.SceneName ?? "null";
+            string signature =
+                (source ?? "unknown") + "|" +
+                (reason ?? "unknown") + "|" +
+                missionSceneName + "|" +
+                "Server=" + GameNetwork.IsServer + "|" +
+                "Client=" + GameNetwork.IsClient;
+            if (string.Equals(_lastDeferredExactRuntimeCatalogBootstrapSignature, signature, StringComparison.Ordinal))
+                return;
+
+            _lastDeferredExactRuntimeCatalogBootstrapSignature = signature;
+            ModLogger.Info(
+                "BattleSnapshotRuntimeState: deferred immediate exact runtime catalog bootstrap until battle-local mission runtime. " +
+                "Source=" + (source ?? "unknown") +
+                " Reason=" + (reason ?? "unknown") +
+                " MissionScene=" + missionSceneName +
+                " NetworkServer=" + GameNetwork.IsServer +
+                " NetworkClient=" + GameNetwork.IsClient);
         }
 
         public static List<string> FlattenTroopIds(BattleSnapshotMessage snapshot)

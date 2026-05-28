@@ -104,6 +104,9 @@ namespace CoopSpectator.MissionBehaviors
                 ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(
                     BattleSnapshotRuntimeState.GetState(),
                     "client-afterstart:" + (mission.SceneName ?? "null"));
+                ExactCampaignRuntimeObjectRegistry.SyncFromState(
+                    BattleSnapshotRuntimeState.GetState(),
+                    "client-afterstart:" + (mission.SceneName ?? "null"));
                 BattleMapContractDiagnostics.LogMissionRuntimeContract(mission, "CoopMissionClientLogic.AfterStart");
             }
             _lastControlledAgent = Agent.Main;
@@ -4809,6 +4812,9 @@ namespace CoopSpectator.MissionBehaviors
                 ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(
                     BattleSnapshotRuntimeState.GetState(),
                     "CoopMissionSpawnLogic.AfterStart battle-map deferred");
+                ExactCampaignRuntimeObjectRegistry.SyncFromState(
+                    BattleSnapshotRuntimeState.GetState(),
+                    "CoopMissionSpawnLogic.AfterStart battle-map deferred");
                 AppendExactBattleAgentSpawnTraceLifecycleStep(
                     mission,
                     "afterstart",
@@ -4846,6 +4852,9 @@ namespace CoopSpectator.MissionBehaviors
             ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(
                 BattleSnapshotRuntimeState.GetState(),
                 "CoopMissionSpawnLogic.AfterStart");
+            ExactCampaignRuntimeObjectRegistry.SyncFromState(
+                BattleSnapshotRuntimeState.GetState(),
+                "CoopMissionSpawnLogic.AfterStart");
 
             ModLogger.Info("CoopMissionSpawnLogic: server mission entered.");
             try
@@ -4874,6 +4883,12 @@ namespace CoopSpectator.MissionBehaviors
 
             _timeUntilNextPeerLog = ServerLogIntervalSeconds;
             ModLogger.Info("CoopMissionSpawnLogic AfterStart EXIT.");
+        }
+
+        public override void OnAgentBuild(Agent agent, Banner banner)
+        {
+            base.OnAgentBuild(agent, banner);
+            TryApplyCanonicalNativeInitialWieldAtAgentBuild(agent, "CoopMissionSpawnLogic.OnAgentBuild");
         }
 
         public override void OnMissionTick(float dt)
@@ -9135,6 +9150,7 @@ namespace CoopSpectator.MissionBehaviors
                     }
 
                     if (entryState != null &&
+                        !ShouldUseSinglePassCanonicalNativeInitialWield(entryState) &&
                         TryApplyServerBootstrapInitialWieldRepairForStrictPreSpawnExactLoadout(
                             agent,
                             entryState,
@@ -10120,6 +10136,201 @@ namespace CoopSpectator.MissionBehaviors
             return CoopSpectator.Patches.ExactCampaignPreSpawnLoadoutPatch.WasEquipmentInjectedForEntry(entryId);
         }
 
+        private static bool TryResolveStrictCanonicalOrdinaryEntryState(
+            Agent agent,
+            out RosterEntryState entryState,
+            out string entryId)
+        {
+            entryState = null;
+            entryId = null;
+
+            if (agent == null || agent.IsMount)
+                return false;
+
+            if (agent.Origin is ExactCampaignSnapshotAgentOrigin exactOrigin &&
+                !string.IsNullOrWhiteSpace(exactOrigin.EntryId))
+            {
+                entryId = exactOrigin.EntryId;
+            }
+
+            if (string.IsNullOrWhiteSpace(entryId))
+                ExactCampaignArmyBootstrap.TryGetEntryId(agent, out entryId);
+
+            if (string.IsNullOrWhiteSpace(entryId))
+                _materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out entryId);
+
+            if (string.IsNullOrWhiteSpace(entryId))
+            {
+                string characterId = (agent.Character as BasicCharacterObject)?.StringId;
+                CanonicalTroopInstance instance =
+                    BattleSnapshotRuntimeState.GetCanonicalTroopInstanceByBattleTemplateId(characterId) ??
+                    BattleSnapshotRuntimeState.GetCanonicalTroopInstanceByCharacterId(characterId);
+                if (!string.IsNullOrWhiteSpace(instance?.EntryId))
+                    entryId = instance.EntryId;
+            }
+
+            if (string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            return ShouldUseStrictCanonicalOrdinaryRuntimePath(entryState);
+        }
+
+        private static bool ShouldUseStrictCanonicalOrdinaryRuntimePath(RosterEntryState entryState)
+        {
+            if (entryState == null || entryState.IsHero)
+                return false;
+
+            if (entryState.ServerCreateContractResolved &&
+                entryState.ServerCreateInjectEquipment &&
+                entryState.ServerCreatePreSpawnIncludesWeapons)
+            {
+                return true;
+            }
+
+            return BattleSnapshotRuntimeState.UsesGeneratedRuntimeBattleTemplateMaterialization(entryState.EntryId);
+        }
+
+        private static bool TryApplyCanonicalNativeInitialWieldAtAgentBuild(Agent agent, string source)
+        {
+            if (agent == null ||
+                agent.IsMount ||
+                agent.SpawnEquipment == null ||
+                !TryResolveStrictCanonicalOrdinaryEntryState(agent, out RosterEntryState entryState, out string entryId))
+            {
+                return false;
+            }
+
+            if (GameNetwork.IsServer &&
+                (agent.MissionPeer != null || agent.Controller == AgentControllerType.Player))
+            {
+                return false;
+            }
+
+            EquipmentIndex preMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+            EquipmentIndex preOffHandIndex = agent.GetOffhandWieldedItemIndex();
+            if (preMainHandIndex != EquipmentIndex.None ||
+                preOffHandIndex != EquipmentIndex.None ||
+                agent.WieldedWeapon.Item != null ||
+                agent.WieldedOffhandWeapon.Item != null)
+            {
+                return false;
+            }
+
+            ResolveCanonicalBootstrapDesiredWeaponPair(
+                entryState,
+                agent.SpawnEquipment,
+                out EquipmentIndex desiredMainHandIndex,
+                out EquipmentIndex desiredOffHandIndex,
+                out Equipment.InitialWeaponEquipPreference initialWeaponEquipPreference,
+                out string canonicalWieldReason,
+                out bool canonicalWieldResolved);
+
+            try
+            {
+                agent.WieldInitialWeapons(
+                    Agent.WeaponWieldActionType.Instant,
+                    initialWeaponEquipPreference);
+
+                EquipmentIndex postMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+                EquipmentIndex postOffHandIndex = agent.GetOffhandWieldedItemIndex();
+                bool repaired = postMainHandIndex != EquipmentIndex.None || postOffHandIndex != EquipmentIndex.None;
+
+                agent.UpdateAgentProperties();
+                agent.MountAgent?.UpdateAgentProperties();
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: applied build-stage canonical native initial wield for strict ordinary exact loadout. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " TroopId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                    " PreMain=" + FormatAgentWieldedEquipmentIndex(agent, preMainHandIndex) +
+                    " PreOff=" + FormatAgentWieldedEquipmentIndex(agent, preOffHandIndex) +
+                    " PostMain=" + FormatAgentWieldedEquipmentIndex(agent, postMainHandIndex) +
+                    " PostOff=" + FormatAgentWieldedEquipmentIndex(agent, postOffHandIndex) +
+                    " PostWieldedItem=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
+                    " PostOffhandItem=" + (agent.WieldedOffhandWeapon.Item?.StringId ?? "none") +
+                    " InitialWeaponEquipPreference=" + initialWeaponEquipPreference +
+                    " WieldStrategy=build-stage-single-native-wield{" +
+                    "DesiredMain=" + FormatWeaponEquipmentIndex(agent.SpawnEquipment, desiredMainHandIndex) +
+                    ",DesiredOff=" + FormatWeaponEquipmentIndex(agent.SpawnEquipment, desiredOffHandIndex) +
+                    ",Reason=" + (canonicalWieldReason ?? "none") +
+                    ",CanonicalResolved=" + canonicalWieldResolved + "}" +
+                    " Repaired=" + repaired +
+                    " Runtime=" + (GameNetwork.IsServer ? "server" : (GameNetwork.IsClientOrReplay ? "client" : "offline")) +
+                    " Source=" + (source ?? "unknown"));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: build-stage canonical native initial wield failed for strict ordinary exact loadout. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " TroopId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                    " InitialWeaponEquipPreference=" + initialWeaponEquipPreference +
+                    " Error=" + ex.GetType().Name +
+                    " Message=" + ex.Message +
+                    " Runtime=" + (GameNetwork.IsServer ? "server" : (GameNetwork.IsClientOrReplay ? "client" : "offline")) +
+                    " Source=" + (source ?? "unknown"));
+                return true;
+            }
+        }
+
+        internal static bool TryApplyImmediateServerExactCampaignNativeRefreshAfterSpawn(
+            Agent agent,
+            string entryId,
+            string source)
+        {
+            if (!GameNetwork.IsServer ||
+                agent == null ||
+                !agent.IsActive() ||
+                agent.IsMount ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (ShouldUseStrictCanonicalOrdinaryRuntimePath(entryState))
+                return false;
+
+            return TryApplyExactCampaignSnapshotOverlayToNativeAgent(
+                agent,
+                entryId,
+                source ?? "server immediate post-spawn refresh",
+                ExactCampaignSnapshotOverlayMode.ServerAuthoritative,
+                includeWeaponsForClientRefresh: false);
+        }
+
+        internal static bool TryApplyImmediateServerBootstrapInitialWieldAfterSpawn(
+            Agent agent,
+            string entryId,
+            string source)
+        {
+            if (!GameNetwork.IsServer ||
+                agent == null ||
+                !agent.IsActive() ||
+                agent.IsMount ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (entryState == null ||
+                ShouldUseStrictCanonicalOrdinaryRuntimePath(entryState))
+            {
+                return false;
+            }
+
+            return TryApplyServerBootstrapInitialWieldRepairForStrictPreSpawnExactLoadout(
+                agent,
+                entryState,
+                source ?? "server immediate post-spawn wield bootstrap",
+                out _);
+        }
+
         private static bool TryApplyExactCampaignSnapshotOverlayToNativeAgent(
             Agent agent,
             string entryId,
@@ -11016,6 +11227,7 @@ namespace CoopSpectator.MissionBehaviors
                     if (TryForceServerBootstrapWeaponWieldFromEquipment(
                             agent,
                             overlaySpawnEquipment,
+                            null,
                             out string explicitWieldSummary))
                     {
                         wieldStrategy += "+" + explicitWieldSummary;
@@ -19032,6 +19244,32 @@ namespace CoopSpectator.MissionBehaviors
             if (resolvedItems.Count == 0)
                 return;
 
+            if (entryState.IsHero)
+            {
+                EquipmentIndex[] sourceOrderedSlots =
+                {
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3
+                };
+
+                for (int i = 0; i < resolvedItems.Count && i < sourceOrderedSlots.Length; i++)
+                    ApplyResolvedMaterializedEquipmentOverride(spawnEquipment, sourceOrderedSlots[i], resolvedItems[i], appliedSlots);
+
+                appliedSlots?.Add("CanonicalMountedLayout=hero-source-preserved-precanonical");
+                return;
+            }
+
+            if (TryApplyCanonicalOrdinaryMountedWeaponLayout(
+                    spawnEquipment,
+                    entryState,
+                    resolvedItems,
+                    appliedSlots))
+            {
+                return;
+            }
+
             bool hasRanged = resolvedItems.Any(item => GetMaterializedMountedWeaponRole(item.Item) == MaterializedMountedWeaponRole.Ranged);
             bool hasAmmo = resolvedItems.Any(item => GetMaterializedMountedWeaponRole(item.Item) == MaterializedMountedWeaponRole.Ammo);
             var assignedSourceSlots = new HashSet<string>(StringComparer.Ordinal);
@@ -19154,6 +19392,95 @@ namespace CoopSpectator.MissionBehaviors
                 appliedSlots);
         }
 
+        private static bool TryApplyCanonicalOrdinaryMountedWeaponLayout(
+            Equipment spawnEquipment,
+            RosterEntryState entryState,
+            List<ResolvedMaterializedEquipmentOverride> resolvedItems,
+            List<string> appliedSlots)
+        {
+            if (spawnEquipment == null ||
+                entryState == null ||
+                resolvedItems == null ||
+                resolvedItems.Count <= 1 ||
+                entryState.IsHero ||
+                !entryState.IsMounted)
+            {
+                return false;
+            }
+
+            var remaining = resolvedItems
+                .Where(item => item?.Item != null)
+                .ToList();
+            if (remaining.Count <= 1)
+                return false;
+
+            bool hasRanged = remaining.Any(item => GetMaterializedMountedWeaponRole(item?.Item) == MaterializedMountedWeaponRole.Ranged);
+            bool hasAmmo = remaining.Any(item => GetMaterializedMountedWeaponRole(item?.Item) == MaterializedMountedWeaponRole.Ammo);
+            bool hasShield = remaining.Any(item => GetMaterializedMountedWeaponRole(item?.Item) == MaterializedMountedWeaponRole.Shield);
+
+            var ordered = new List<ResolvedMaterializedEquipmentOverride>(4);
+            string canonicalReason;
+            if (hasAmmo)
+            {
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ranged);
+                if (hasShield)
+                    TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Shield);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ammo);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ammo);
+                TakeFirstResolvedMountedPrimaryMelee(ordered, remaining, preferShieldCompatible: false);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Other);
+                canonicalReason = hasShield
+                    ? "canonical-mounted-ranged-shield-ammo-main"
+                    : "canonical-mounted-ranged-ammo-main";
+            }
+            else if (hasRanged)
+            {
+                TakeFirstResolvedMountedPrimaryMelee(ordered, remaining, preferShieldCompatible: hasShield);
+                if (hasShield)
+                    TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Shield);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ranged);
+                TakeFirstResolvedMountedPrimaryMelee(ordered, remaining, preferShieldCompatible: false);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Other);
+                canonicalReason = hasShield
+                    ? "canonical-mounted-thrown-shield-melee-main"
+                    : "canonical-mounted-thrown-melee-main";
+            }
+            else
+            {
+                TakeFirstResolvedMountedPrimaryMelee(ordered, remaining, preferShieldCompatible: hasShield);
+                if (hasShield)
+                    TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Shield);
+                TakeFirstResolvedMountedPrimaryMelee(ordered, remaining, preferShieldCompatible: false);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Other);
+                canonicalReason = hasShield
+                    ? "canonical-mounted-melee-shield-main"
+                    : "canonical-mounted-melee-main";
+            }
+
+            while (ordered.Count < 4 && remaining.Count > 0)
+            {
+                ordered.Add(remaining[0]);
+                remaining.RemoveAt(0);
+            }
+
+            if (ordered.Count == 0)
+                return false;
+
+            EquipmentIndex[] targetSlots =
+            {
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3
+            };
+
+            for (int i = 0; i < targetSlots.Length && i < ordered.Count; i++)
+                ApplyResolvedMaterializedEquipmentOverride(spawnEquipment, targetSlots[i], ordered[i], appliedSlots);
+
+            appliedSlots?.Add("CanonicalMountedLayout=" + canonicalReason);
+            return true;
+        }
+
         private static void TryApplyFootMaterializedWeaponOverrides(
             Equipment spawnEquipment,
             RosterEntryState entryState,
@@ -19186,6 +19513,15 @@ namespace CoopSpectator.MissionBehaviors
             }
             if (shieldItem == null)
             {
+                if (TryApplyCanonicalOrdinaryFootNoShieldWeaponLayout(
+                        spawnEquipment,
+                        entryState,
+                        resolvedItems,
+                        appliedSlots))
+                {
+                    return;
+                }
+
                 EquipmentIndex[] sequentialSlots =
                 {
                     EquipmentIndex.Weapon0,
@@ -19197,6 +19533,15 @@ namespace CoopSpectator.MissionBehaviors
                 for (int i = 0; i < resolvedItems.Count && i < sequentialSlots.Length; i++)
                     ApplyResolvedMaterializedEquipmentOverride(spawnEquipment, sequentialSlots[i], resolvedItems[i], appliedSlots);
 
+                return;
+            }
+
+            if (TryApplyCanonicalOrdinaryFootShieldWeaponLayout(
+                    spawnEquipment,
+                    entryState,
+                    resolvedItems,
+                    appliedSlots))
+            {
                 return;
             }
 
@@ -19221,6 +19566,232 @@ namespace CoopSpectator.MissionBehaviors
                 : new[] { EquipmentIndex.Weapon0, EquipmentIndex.Weapon2, EquipmentIndex.Weapon3 };
             for (int i = 0; i < remainingItems.Count && i < fallbackSlots.Length; i++)
                 ApplyResolvedMaterializedEquipmentOverride(spawnEquipment, fallbackSlots[i], remainingItems[i], appliedSlots);
+        }
+
+        private static bool TryApplyCanonicalOrdinaryFootNoShieldWeaponLayout(
+            Equipment spawnEquipment,
+            RosterEntryState entryState,
+            List<ResolvedMaterializedEquipmentOverride> resolvedItems,
+            List<string> appliedSlots)
+        {
+            if (spawnEquipment == null ||
+                entryState == null ||
+                resolvedItems == null ||
+                resolvedItems.Count <= 1 ||
+                entryState.IsHero ||
+                entryState.IsMounted ||
+                entryState.HasShield)
+            {
+                return false;
+            }
+
+            var remaining = resolvedItems
+                .Where(item => item?.Item != null)
+                .ToList();
+            if (remaining.Count <= 1)
+                return false;
+
+            bool hasRanged = remaining.Any(item => GetMaterializedMountedWeaponRole(item?.Item) == MaterializedMountedWeaponRole.Ranged);
+            bool hasAmmo = remaining.Any(item => GetMaterializedMountedWeaponRole(item?.Item) == MaterializedMountedWeaponRole.Ammo);
+            var ordered = new List<ResolvedMaterializedEquipmentOverride>(4);
+            string canonicalReason;
+            if (hasAmmo)
+            {
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ranged);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ammo);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ammo);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Polearm);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Melee);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Other);
+                canonicalReason = "canonical-no-shield-ranged-ammo-lead";
+            }
+            else
+            {
+                if (hasRanged)
+                {
+                    TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Polearm);
+                    TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Melee);
+                    TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ranged);
+                    TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ranged);
+                    TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Other);
+                    canonicalReason = "canonical-no-shield-thrown-melee-lead";
+                }
+                else
+                {
+                    TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Polearm);
+                    TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Melee);
+                    TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Other);
+                    canonicalReason = "canonical-no-shield-melee-lead";
+                }
+            }
+
+            while (ordered.Count < 4 && remaining.Count > 0)
+            {
+                ordered.Add(remaining[0]);
+                remaining.RemoveAt(0);
+            }
+
+            if (ordered.Count == 0)
+                return false;
+
+            EquipmentIndex[] targetSlots =
+            {
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3
+            };
+
+            for (int i = 0; i < targetSlots.Length && i < ordered.Count; i++)
+                ApplyResolvedMaterializedEquipmentOverride(spawnEquipment, targetSlots[i], ordered[i], appliedSlots);
+
+            appliedSlots?.Add("CanonicalFootLayout=" + canonicalReason);
+            return true;
+        }
+
+        private static bool TryApplyCanonicalOrdinaryFootShieldWeaponLayout(
+            Equipment spawnEquipment,
+            RosterEntryState entryState,
+            List<ResolvedMaterializedEquipmentOverride> resolvedItems,
+            List<string> appliedSlots)
+        {
+            if (spawnEquipment == null ||
+                entryState == null ||
+                resolvedItems == null ||
+                resolvedItems.Count <= 1 ||
+                entryState.IsHero ||
+                entryState.IsMounted ||
+                !entryState.HasShield)
+            {
+                return false;
+            }
+
+            var remaining = resolvedItems
+                .Where(item => item?.Item != null)
+                .ToList();
+            if (remaining.Count <= 1)
+                return false;
+
+            bool hasRanged = remaining.Any(item => GetMaterializedMountedWeaponRole(item?.Item) == MaterializedMountedWeaponRole.Ranged);
+            bool hasAmmo = remaining.Any(item => GetMaterializedMountedWeaponRole(item?.Item) == MaterializedMountedWeaponRole.Ammo);
+            bool hasShield = remaining.Any(item => GetMaterializedMountedWeaponRole(item?.Item) == MaterializedMountedWeaponRole.Shield);
+            if (!hasShield)
+                return false;
+
+            var ordered = new List<ResolvedMaterializedEquipmentOverride>(4);
+            string canonicalReason;
+            if (hasAmmo)
+            {
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ranged);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Shield);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ammo);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ammo);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Polearm);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Melee);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Other);
+                canonicalReason = "canonical-shield-ranged-ammo-shield-offhand";
+            }
+            else if (hasRanged)
+            {
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Polearm);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Melee);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Shield);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ranged);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Ranged);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Other);
+                canonicalReason = "canonical-shield-thrown-melee-shield-offhand";
+            }
+            else
+            {
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Polearm);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Melee);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Shield);
+                TakeFirstResolvedByRole(ordered, remaining, MaterializedMountedWeaponRole.Other);
+                canonicalReason = "canonical-shield-melee-shield-offhand";
+            }
+
+            while (ordered.Count < 4 && remaining.Count > 0)
+            {
+                ordered.Add(remaining[0]);
+                remaining.RemoveAt(0);
+            }
+
+            if (ordered.Count == 0)
+                return false;
+
+            EquipmentIndex[] targetSlots =
+            {
+                EquipmentIndex.Weapon0,
+                EquipmentIndex.Weapon1,
+                EquipmentIndex.Weapon2,
+                EquipmentIndex.Weapon3
+            };
+
+            for (int i = 0; i < targetSlots.Length && i < ordered.Count; i++)
+                ApplyResolvedMaterializedEquipmentOverride(spawnEquipment, targetSlots[i], ordered[i], appliedSlots);
+
+            appliedSlots?.Add("CanonicalFootLayout=" + canonicalReason);
+            return true;
+        }
+
+        private static void TakeFirstResolvedByRole(
+            List<ResolvedMaterializedEquipmentOverride> ordered,
+            List<ResolvedMaterializedEquipmentOverride> remaining,
+            MaterializedMountedWeaponRole role)
+        {
+            if (ordered == null || remaining == null || remaining.Count == 0)
+                return;
+
+            ResolvedMaterializedEquipmentOverride match = remaining.FirstOrDefault(item =>
+                GetMaterializedMountedWeaponRole(item?.Item) == role);
+            if (match == null)
+                return;
+
+            ordered.Add(match);
+            remaining.Remove(match);
+        }
+
+        private static void TakeFirstResolvedMountedPrimaryMelee(
+            List<ResolvedMaterializedEquipmentOverride> ordered,
+            List<ResolvedMaterializedEquipmentOverride> remaining,
+            bool preferShieldCompatible)
+        {
+            if (ordered == null || remaining == null || remaining.Count == 0)
+                return;
+
+            ResolvedMaterializedEquipmentOverride match = null;
+            if (preferShieldCompatible)
+            {
+                match = remaining.FirstOrDefault(item =>
+                    IsShieldCompatiblePrimaryMeleeMaterializedItem(item?.Item));
+            }
+
+            if (match == null)
+            {
+                match = remaining.FirstOrDefault(item =>
+                    GetMaterializedMountedWeaponRole(item?.Item) == MaterializedMountedWeaponRole.Polearm) ??
+                        remaining.FirstOrDefault(item =>
+                            GetMaterializedMountedWeaponRole(item?.Item) == MaterializedMountedWeaponRole.Melee);
+            }
+
+            if (match == null)
+                return;
+
+            ordered.Add(match);
+            remaining.Remove(match);
+        }
+
+        private static bool IsShieldCompatiblePrimaryMeleeMaterializedItem(ItemObject item)
+        {
+            MaterializedMountedWeaponRole role = GetMaterializedMountedWeaponRole(item);
+            if (role != MaterializedMountedWeaponRole.Polearm &&
+                role != MaterializedMountedWeaponRole.Melee)
+            {
+                return false;
+            }
+
+            WeaponComponentData primaryWeapon = item?.PrimaryWeapon;
+            return primaryWeapon?.WeaponFlags.HasAnyFlag(WeaponFlags.NotUsableWithOneHand) != true;
         }
 
         private static ResolvedMaterializedEquipmentOverride TryResolvePreservedNativeSeedShieldOverride(
@@ -19590,6 +20161,20 @@ namespace CoopSpectator.MissionBehaviors
                 return null;
             }
 
+            if (ShouldPreferOrdinaryBattleSafeTwinMaterializedEquipmentItem(itemId, entryState) &&
+                ExactEquipmentCompatibilityCatalog.TryGetAliasItemId(itemId, out string preferredBattleSafeTwinItemId) &&
+                !string.IsNullOrWhiteSpace(preferredBattleSafeTwinItemId))
+            {
+                ItemObject preferredBattleSafeTwinItem = TryGetMaterializedEquipmentItem(preferredBattleSafeTwinItemId);
+                if (preferredBattleSafeTwinItem != null)
+                {
+                    resolvedItemId = preferredBattleSafeTwinItem.StringId;
+                    resolutionSource = "battle-safe-twin-preferred";
+                    RecordMaterializedEquipmentResolution(itemId, resolutionSource, trackCoverage);
+                    return preferredBattleSafeTwinItem;
+                }
+            }
+
             if (ShouldPreferNormalizedMaterializedEquipmentItem(itemId, entryState, slotLabel) &&
                 TryNormalizeCampaignEquipmentToMpItemId(itemId, entryState, slotLabel, out string preferredNormalizedItemId) &&
                 !string.IsNullOrWhiteSpace(preferredNormalizedItemId))
@@ -19700,6 +20285,25 @@ namespace CoopSpectator.MissionBehaviors
             string slotLabel)
         {
             return false;
+        }
+
+        private static bool ShouldPreferOrdinaryBattleSafeTwinMaterializedEquipmentItem(
+            string itemId,
+            RosterEntryState entryState)
+        {
+            if (string.IsNullOrWhiteSpace(itemId) ||
+                entryState == null ||
+                entryState.IsHero ||
+                !ExactEquipmentCompatibilityCatalog.ShouldPreferOrdinaryBattleTwinAlias(itemId))
+            {
+                return false;
+            }
+
+            BattleSnapshotMessage currentSnapshot = BattleSnapshotRuntimeState.GetCurrent();
+            return string.Equals(
+                currentSnapshot?.CanonicalBattle?.Context?.MultiplayerGameType,
+                "Battle",
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool ShouldPreferDedicatedCompatibilityAliasMaterializedEquipmentItem(
@@ -21465,18 +22069,115 @@ namespace CoopSpectator.MissionBehaviors
             if (diagnostic == null)
                 return "ExactEntryContract=(none)";
 
+            RosterEntryState effectiveEntryState = TryGetExactEntryRuntimeState(diagnostic.EntryId);
+            bool strictOrdinaryCreateTimePath = UsesStrictCanonicalFieldBattleOrdinaryCreateTimePath(effectiveEntryState);
+            bool useEffectiveStrictOrdinaryCreateTimeContract =
+                TryGetEffectiveStrictOrdinaryCreateTimeContractState(
+                    effectiveEntryState,
+                    out bool effectiveWeaponContractSupported,
+                    out bool effectiveVisualContractSupported,
+                    out bool effectiveCurrentPreSpawnWeapons,
+                    out bool effectiveCurrentPreSpawnCape,
+                    out bool effectiveCurrentPreSpawnMount);
+
             return
-                "ExactEntryContract=" + (diagnostic.Status ?? "unknown") +
+                "ExactEntryContract=" + (useEffectiveStrictOrdinaryCreateTimeContract && effectiveWeaponContractSupported
+                    ? "generated-ordinary-exact-snapshot-pre-spawn"
+                    : strictOrdinaryCreateTimePath
+                        ? "generated-ordinary-create-time-contract-pending"
+                    : (diagnostic.Status ?? "unknown")) +
                 " Character=" + (diagnostic.CharacterResolutionSource ?? "null") + ":" + (diagnostic.ResolvedCharacter?.StringId ?? "null") +
                 " HeroClass=" + (diagnostic.HeroClassSource ?? "null") + ":" + (diagnostic.HeroClassId ?? "null") +
-                " WeaponContractSupported=" + IsExactWeaponContractSupported(diagnostic) +
-                " VisualContractSupported=" + IsExactVisualContractSupported(diagnostic) +
-                " CurrentPreSpawnWeapons=" + diagnostic.CurrentRuntimePreSpawnIncludesWeapons +
-                " HostedMaterializedSupported=" + IsMaterializedExactEntryCharacterSupported(diagnostic) +
-                " CurrentPreSpawnCape=" + diagnostic.CurrentRuntimePreSpawnIncludesCapeVisual +
-                " CurrentPreSpawnMount=" + diagnostic.CurrentRuntimePreSpawnIncludesMountVisual +
+                " WeaponContractSupported=" + (useEffectiveStrictOrdinaryCreateTimeContract
+                    ? effectiveWeaponContractSupported
+                    : IsExactWeaponContractSupported(diagnostic)) +
+                " VisualContractSupported=" + (useEffectiveStrictOrdinaryCreateTimeContract
+                    ? effectiveVisualContractSupported
+                    : IsExactVisualContractSupported(diagnostic)) +
+                " CurrentPreSpawnWeapons=" + (useEffectiveStrictOrdinaryCreateTimeContract
+                    ? effectiveCurrentPreSpawnWeapons
+                    : diagnostic.CurrentRuntimePreSpawnIncludesWeapons) +
+                " HostedMaterializedSupported=" + (useEffectiveStrictOrdinaryCreateTimeContract
+                    ? effectiveWeaponContractSupported
+                    : IsMaterializedExactEntryCharacterSupported(diagnostic)) +
+                " CurrentPreSpawnCape=" + (useEffectiveStrictOrdinaryCreateTimeContract
+                    ? effectiveCurrentPreSpawnCape
+                    : diagnostic.CurrentRuntimePreSpawnIncludesCapeVisual) +
+                " CurrentPreSpawnMount=" + (useEffectiveStrictOrdinaryCreateTimeContract
+                    ? effectiveCurrentPreSpawnMount
+                    : diagnostic.CurrentRuntimePreSpawnIncludesMountVisual) +
                 " InitialWield={" + (diagnostic.InitialWieldSummary ?? "(none)") + "}" +
                 " Weapon2Risk=" + diagnostic.HasWeapon2WieldReplicationRisk;
+        }
+
+        private static RosterEntryState TryGetExactEntryRuntimeState(string entryId)
+        {
+            if (string.IsNullOrWhiteSpace(entryId))
+                return null;
+
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            if (runtimeState?.EntriesById == null)
+                return null;
+
+            runtimeState.EntriesById.TryGetValue(entryId.Trim(), out RosterEntryState entryState);
+            return entryState;
+        }
+
+        private static bool UsesStrictCanonicalFieldBattleOrdinaryCreateTimePath(RosterEntryState entryState)
+        {
+            if (entryState == null ||
+                entryState.IsHero ||
+                HasEntryExactPersonalPerkHeroIdentity(entryState) ||
+                !UseDedicatedSafeStringIdExactEquipmentPathOnServer())
+            {
+                return false;
+            }
+
+            BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            if (snapshot?.CanonicalBattle == null ||
+                !string.Equals(
+                    snapshot.CanonicalBattle.Context?.MultiplayerGameType,
+                    "Battle",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return BattleSnapshotRuntimeState.UsesGeneratedRuntimeBattleTemplateMaterialization(entryState.EntryId);
+        }
+
+        private static bool TryGetEffectiveStrictOrdinaryCreateTimeContractState(
+            RosterEntryState entryState,
+            out bool weaponContractSupported,
+            out bool visualContractSupported,
+            out bool currentPreSpawnWeapons,
+            out bool currentPreSpawnCape,
+            out bool currentPreSpawnMount)
+        {
+            weaponContractSupported = false;
+            visualContractSupported = false;
+            currentPreSpawnWeapons = false;
+            currentPreSpawnCape = false;
+            currentPreSpawnMount = false;
+
+            if (!UsesStrictCanonicalFieldBattleOrdinaryCreateTimePath(entryState) ||
+                !entryState.ServerCreateContractResolved)
+            {
+                return false;
+            }
+
+            weaponContractSupported =
+                entryState.ServerCreateInjectEquipment &&
+                entryState.ServerCreatePreSpawnIncludesWeapons;
+            visualContractSupported =
+                entryState.ServerCreateInjectEquipment &&
+                (entryState.ServerCreatePreSpawnIncludesArmorVisuals ||
+                 entryState.ServerCreatePreSpawnIncludesCapeVisual ||
+                 entryState.ServerCreatePreSpawnIncludesMountVisuals);
+            currentPreSpawnWeapons = entryState.ServerCreatePreSpawnIncludesWeapons;
+            currentPreSpawnCape = entryState.ServerCreatePreSpawnIncludesCapeVisual;
+            currentPreSpawnMount = entryState.ServerCreatePreSpawnIncludesMountVisuals;
+            return true;
         }
 
         private static bool IsWeaponExactEntrySlot(ExactEntryEquipmentSlotDiagnostic slot)
@@ -21569,7 +22270,8 @@ namespace CoopSpectator.MissionBehaviors
         private static bool UsesCompatibilityAliasResolutionSource(string resolutionSource)
         {
             return string.Equals(resolutionSource, "compat-alias", StringComparison.Ordinal) ||
-                   string.Equals(resolutionSource, "compat-alias-preferred", StringComparison.Ordinal);
+                   string.Equals(resolutionSource, "compat-alias-preferred", StringComparison.Ordinal) ||
+                   string.Equals(resolutionSource, "battle-safe-twin-preferred", StringComparison.Ordinal);
         }
 
         private static bool RequiresPostCreateStringIdExactWeaponOverlayForCurrentRuntime(
@@ -21766,6 +22468,32 @@ namespace CoopSpectator.MissionBehaviors
             out string exactEntryCompatibilitySummary,
             out string decisionReason)
         {
+            if (UsesStrictCanonicalFieldBattleOrdinaryCreateTimePath(entryState) &&
+                (entryState == null || !entryState.ServerCreateContractResolved))
+            {
+                exactEntryCompatibilitySummary = "ExactEntryContract=generated-ordinary-create-time-contract-pending";
+                decisionReason =
+                    "strict canonical field battle ordinary create-time exact weapon contract is pending server-side resolution";
+                return false;
+            }
+
+            if (TryGetEffectiveStrictOrdinaryCreateTimeContractState(
+                    entryState,
+                    out bool effectiveWeaponContractSupported,
+                    out _,
+                    out bool effectiveCurrentPreSpawnWeapons,
+                    out _,
+                    out _))
+            {
+                exactEntryCompatibilitySummary = effectiveWeaponContractSupported
+                    ? "ExactEntryContract=generated-ordinary-exact-snapshot-pre-spawn"
+                    : "ExactEntryContract=generated-ordinary-create-time-contract-pending";
+                decisionReason = effectiveWeaponContractSupported
+                    ? "strict canonical field battle ordinary create-time exact weapon contract"
+                    : "strict canonical field battle ordinary create-time exact weapon contract is not yet resolved on the runtime entry";
+                return effectiveWeaponContractSupported && effectiveCurrentPreSpawnWeapons;
+            }
+
             ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
             exactEntryCompatibilitySummary = BuildExactEntryCompatibilityShortSummary(diagnostic);
             bool exactPersonalHeroIdentity = HasEntryExactPersonalPerkHeroIdentity(entryState);
@@ -21794,6 +22522,33 @@ namespace CoopSpectator.MissionBehaviors
             out string exactEntryCompatibilitySummary,
             out string decisionReason)
         {
+            if (UsesStrictCanonicalFieldBattleOrdinaryCreateTimePath(entryState) &&
+                (entryState == null || !entryState.ServerCreateContractResolved))
+            {
+                exactEntryCompatibilitySummary = "ExactEntryContract=generated-ordinary-create-time-contract-pending";
+                decisionReason =
+                    "strict canonical field battle ordinary create-time exact visual contract is pending server-side resolution";
+                return false;
+            }
+
+            if (TryGetEffectiveStrictOrdinaryCreateTimeContractState(
+                    entryState,
+                    out _,
+                    out bool effectiveVisualContractSupported,
+                    out _,
+                    out bool effectiveCurrentPreSpawnCape,
+                    out bool effectiveCurrentPreSpawnMount))
+            {
+                exactEntryCompatibilitySummary = effectiveVisualContractSupported
+                    ? "ExactEntryContract=generated-ordinary-exact-snapshot-pre-spawn"
+                    : "ExactEntryContract=generated-ordinary-create-time-contract-pending";
+                decisionReason = effectiveVisualContractSupported
+                    ? "strict canonical field battle ordinary create-time exact visual contract"
+                    : "strict canonical field battle ordinary create-time exact visual contract is not yet resolved on the runtime entry";
+                return effectiveVisualContractSupported &&
+                       (effectiveCurrentPreSpawnCape || effectiveCurrentPreSpawnMount);
+            }
+
             ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
             exactEntryCompatibilitySummary = BuildExactEntryCompatibilityShortSummary(diagnostic);
             bool exactPersonalHeroIdentity = HasEntryExactPersonalPerkHeroIdentity(entryState);
@@ -21824,6 +22579,17 @@ namespace CoopSpectator.MissionBehaviors
 
         internal static bool IsCurrentRuntimeExactEntryContractSupported(RosterEntryState entryState)
         {
+            if (TryGetEffectiveStrictOrdinaryCreateTimeContractState(
+                    entryState,
+                    out bool effectiveWeaponContractSupported,
+                    out _,
+                    out _,
+                    out _,
+                    out _))
+            {
+                return effectiveWeaponContractSupported;
+            }
+
             return IsExactWeaponContractSupported(GetExactEntryCompatibilityDiagnostic(entryState));
         }
 
@@ -22775,6 +23541,13 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (entryState.ServerCreateContractResolved &&
+                entryState.ServerCreateInjectEquipment &&
+                entryState.ServerCreatePreSpawnIncludesWeapons)
+            {
+                return false;
+            }
+
             return BattleSnapshotRuntimeState.UsesGeneratedRuntimeBattleTemplateMaterialization(entryState.EntryId);
         }
 
@@ -22831,6 +23604,21 @@ namespace CoopSpectator.MissionBehaviors
                 EquipmentIndex.Weapon1,
                 EquipmentIndex.Weapon2,
                 EquipmentIndex.Weapon3);
+            if (HasExactCampaignPreSpawnLoadoutInjected(agent) &&
+                DoesCurrentGeneratedTemplateNativeSpawnAlreadyMatchSnapshotWeapons(
+                    agent,
+                    snapshotBattleEquipment,
+                    out string skipReason))
+            {
+                refreshSummary =
+                    "GeneratedNativeRefresh=skipped " +
+                    "RefreshEquipmentSource=none " +
+                    "RefreshSelectionReason=" + (skipReason ?? "snapshot-already-materialized") +
+                    " BeforeSpawnWeapons={" + beforeSpawnWeapons + "}" +
+                    " BeforeMissionWeapons={" + beforeMissionWeapons + "}";
+                return true;
+            }
+
             Equipment refreshBattleEquipment = generatedBattleEquipment;
             string refreshEquipmentSource = "generated-battle-template";
             string refreshSelectionReason = "generated-template-kept";
@@ -22881,6 +23669,68 @@ namespace CoopSpectator.MissionBehaviors
                 " BeforeMissionWeapons={" + beforeMissionWeapons + "}" +
                 " AfterSpawnWeapons={" + afterSpawnWeapons + "}" +
                 " AfterMissionWeapons={" + afterMissionWeapons + "}";
+            return true;
+        }
+
+        private static bool DoesCurrentGeneratedTemplateNativeSpawnAlreadyMatchSnapshotWeapons(
+            Agent agent,
+            Equipment snapshotBattleEquipment,
+            out string reason)
+        {
+            reason = null;
+            if (agent == null || snapshotBattleEquipment == null)
+                return false;
+
+            bool spawnMatches =
+                DoesEquipmentMatchSnapshotWeaponSlots(
+                    agent.SpawnEquipment,
+                    snapshotBattleEquipment,
+                    useMissionEquipment: false);
+            bool missionMatches =
+                DoesMissionEquipmentMatchSnapshotWeaponSlots(
+                    agent.Equipment,
+                    snapshotBattleEquipment);
+            if (!spawnMatches || !missionMatches)
+                return false;
+
+            reason = "snapshot-weapon-slots-already-materialized";
+            return true;
+        }
+
+        private static bool DoesEquipmentMatchSnapshotWeaponSlots(
+            Equipment currentEquipment,
+            Equipment expectedSnapshotEquipment,
+            bool useMissionEquipment)
+        {
+            if (currentEquipment == null || expectedSnapshotEquipment == null)
+                return false;
+
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                string currentItemId = currentEquipment[slot].Item?.StringId;
+                string expectedItemId = expectedSnapshotEquipment[slot].Item?.StringId;
+                if (!string.Equals(currentItemId, expectedItemId, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static bool DoesMissionEquipmentMatchSnapshotWeaponSlots(
+            MissionEquipment currentEquipment,
+            Equipment expectedSnapshotEquipment)
+        {
+            if (currentEquipment == null || expectedSnapshotEquipment == null)
+                return false;
+
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                string currentItemId = currentEquipment[slot].Item?.StringId;
+                string expectedItemId = expectedSnapshotEquipment[slot].Item?.StringId;
+                if (!string.Equals(currentItemId, expectedItemId, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
             return true;
         }
 
@@ -22947,6 +23797,25 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
+            bool snapshotHasShield =
+                HasCanonicalGeneratedTemplateNativeRefreshWeaponType(
+                    snapshotBattleEquipment,
+                    ItemObject.ItemTypeEnum.Shield);
+            if (snapshotHasShield)
+            {
+                int generatedCombatWeaponCount =
+                    CountCanonicalGeneratedTemplateNativeRefreshCombatWeaponSlots(generatedBattleEquipment);
+                int snapshotCombatWeaponCount =
+                    CountCanonicalGeneratedTemplateNativeRefreshCombatWeaponSlots(snapshotBattleEquipment);
+                if (snapshotCombatWeaponCount > generatedCombatWeaponCount)
+                {
+                    reason =
+                        "snapshot-shield-combat-layout-has-more-combat-slots:" +
+                        generatedCombatWeaponCount + "->" + snapshotCombatWeaponCount;
+                    return true;
+                }
+            }
+
             return false;
         }
 
@@ -22983,6 +23852,31 @@ namespace CoopSpectator.MissionBehaviors
             {
                 if (equipment[slot].Item != null)
                     count++;
+            }
+
+            return count;
+        }
+
+        private static int CountCanonicalGeneratedTemplateNativeRefreshCombatWeaponSlots(Equipment equipment)
+        {
+            if (equipment == null)
+                return 0;
+
+            int count = 0;
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                ItemObject item = equipment[slot].Item;
+                if (item == null)
+                    continue;
+
+                if (item.ItemType == ItemObject.ItemTypeEnum.Shield ||
+                    item.ItemType == ItemObject.ItemTypeEnum.Arrows ||
+                    item.ItemType == ItemObject.ItemTypeEnum.Bolts)
+                {
+                    continue;
+                }
+
+                count++;
             }
 
             return count;
@@ -24223,10 +25117,50 @@ namespace CoopSpectator.MissionBehaviors
 
             try
             {
-                string wieldStrategy = "initial-weapons";
-                agent.WieldInitialWeapons(
-                    Agent.WeaponWieldActionType.Instant,
-                    Equipment.InitialWeaponEquipPreference.Any);
+                if (ShouldUseSinglePassCanonicalNativeInitialWield(entryState))
+                {
+                    return TryApplyServerCanonicalNativeInitialWieldAfterStrictPreSpawnExactLoadout(
+                        agent,
+                        entryState,
+                        observedPreSpawnExactLoadoutInjected,
+                        serverCreatePreSpawnWeaponPath,
+                        source,
+                        out repaired);
+                }
+
+                ResolveCanonicalBootstrapDesiredWeaponPair(
+                    entryState,
+                    agent.SpawnEquipment,
+                    out EquipmentIndex desiredMainHandIndex,
+                    out EquipmentIndex desiredOffHandIndex,
+                    out Equipment.InitialWeaponEquipPreference initialWeaponEquipPreference,
+                    out string canonicalWieldReason,
+                    out bool canonicalWieldResolved);
+                string wieldStrategy = canonicalWieldResolved
+                    ? "canonical-explicit-bootstrap{" +
+                      "DesiredMain=" + FormatWeaponEquipmentIndex(agent.SpawnEquipment, desiredMainHandIndex) +
+                      ",DesiredOff=" + FormatWeaponEquipmentIndex(agent.SpawnEquipment, desiredOffHandIndex) +
+                      ",Reason=" + canonicalWieldReason +
+                      ",InitialWeaponEquipPreference=" + initialWeaponEquipPreference + "}"
+                    : "initial-weapons";
+                bool attemptedCanonicalBootstrap = false;
+                if (canonicalWieldResolved)
+                {
+                    attemptedCanonicalBootstrap = TryApplyExplicitBootstrapWieldByDesiredPair(
+                        agent,
+                        agent.SpawnEquipment,
+                        desiredMainHandIndex,
+                        desiredOffHandIndex);
+                }
+
+                if (!attemptedCanonicalBootstrap ||
+                    (agent.GetPrimaryWieldedItemIndex() == EquipmentIndex.None &&
+                     agent.GetOffhandWieldedItemIndex() == EquipmentIndex.None))
+                {
+                    agent.WieldInitialWeapons(
+                        Agent.WeaponWieldActionType.Instant,
+                        initialWeaponEquipPreference);
+                }
 
                 EquipmentIndex postMainHandIndex = agent.GetPrimaryWieldedItemIndex();
                 EquipmentIndex postOffHandIndex = agent.GetOffhandWieldedItemIndex();
@@ -24247,7 +25181,7 @@ namespace CoopSpectator.MissionBehaviors
 
                     agent.WieldInitialWeapons(
                         Agent.WeaponWieldActionType.Instant,
-                        Equipment.InitialWeaponEquipPreference.Any);
+                        initialWeaponEquipPreference);
                     postMainHandIndex = agent.GetPrimaryWieldedItemIndex();
                     postOffHandIndex = agent.GetOffhandWieldedItemIndex();
                 }
@@ -24257,6 +25191,7 @@ namespace CoopSpectator.MissionBehaviors
                     if (TryForceServerBootstrapWeaponWieldFromEquipment(
                             agent,
                             agent.SpawnEquipment,
+                            entryState,
                             out string explicitWieldSummary))
                     {
                         wieldStrategy += "+" + explicitWieldSummary;
@@ -24296,6 +25231,7 @@ namespace CoopSpectator.MissionBehaviors
                     " PostOff=" + FormatAgentWieldedEquipmentIndex(agent, postOffHandIndex) +
                     " PostWieldedItem=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
                     " PostOffhandItem=" + (agent.WieldedOffhandWeapon.Item?.StringId ?? "none") +
+                    " InitialWeaponEquipPreference=" + initialWeaponEquipPreference +
                     " WieldStrategy=" + wieldStrategy +
                     " Repaired=" + repaired +
                     " Source=" + (source ?? "unknown"));
@@ -24317,9 +25253,89 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private static bool ShouldUseSinglePassCanonicalNativeInitialWield(RosterEntryState entryState)
+        {
+            return entryState != null && !entryState.IsHero;
+        }
+
+        private static bool TryApplyServerCanonicalNativeInitialWieldAfterStrictPreSpawnExactLoadout(
+            Agent agent,
+            RosterEntryState entryState,
+            bool observedPreSpawnExactLoadoutInjected,
+            bool serverCreatePreSpawnWeaponPath,
+            string source,
+            out bool repaired)
+        {
+            repaired = false;
+
+            ResolveCanonicalBootstrapDesiredWeaponPair(
+                entryState,
+                agent?.SpawnEquipment,
+                out EquipmentIndex desiredMainHandIndex,
+                out EquipmentIndex desiredOffHandIndex,
+                out Equipment.InitialWeaponEquipPreference initialWeaponEquipPreference,
+                out string canonicalWieldReason,
+                out bool canonicalWieldResolved);
+
+            EquipmentIndex preMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+            EquipmentIndex preOffHandIndex = agent.GetOffhandWieldedItemIndex();
+
+            try
+            {
+                agent.WieldInitialWeapons(
+                    Agent.WeaponWieldActionType.Instant,
+                    initialWeaponEquipPreference);
+
+                EquipmentIndex postMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+                EquipmentIndex postOffHandIndex = agent.GetOffhandWieldedItemIndex();
+                repaired = postMainHandIndex != EquipmentIndex.None || postOffHandIndex != EquipmentIndex.None;
+
+                agent.UpdateAgentProperties();
+                agent.MountAgent?.UpdateAgentProperties();
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: applied single-pass canonical native initial wield for strict pre-spawn exact loadout. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryState.EntryId ?? "null") +
+                    " TroopId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                    " ObservedPreSpawnInjected=" + observedPreSpawnExactLoadoutInjected +
+                    " ServerCreatePreSpawnWeaponPath=" + serverCreatePreSpawnWeaponPath +
+                    " PreMain=" + FormatAgentWieldedEquipmentIndex(agent, preMainHandIndex) +
+                    " PreOff=" + FormatAgentWieldedEquipmentIndex(agent, preOffHandIndex) +
+                    " PostMain=" + FormatAgentWieldedEquipmentIndex(agent, postMainHandIndex) +
+                    " PostOff=" + FormatAgentWieldedEquipmentIndex(agent, postOffHandIndex) +
+                    " PostWieldedItem=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
+                    " PostOffhandItem=" + (agent.WieldedOffhandWeapon.Item?.StringId ?? "none") +
+                    " InitialWeaponEquipPreference=" + initialWeaponEquipPreference +
+                    " WieldStrategy=single-native-wield{" +
+                    "DesiredMain=" + FormatWeaponEquipmentIndex(agent.SpawnEquipment, desiredMainHandIndex) +
+                    ",DesiredOff=" + FormatWeaponEquipmentIndex(agent.SpawnEquipment, desiredOffHandIndex) +
+                    ",Reason=" + (canonicalWieldReason ?? "none") +
+                    ",CanonicalResolved=" + canonicalWieldResolved + "}" +
+                    " Repaired=" + repaired +
+                    " Source=" + (source ?? "unknown"));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: single-pass canonical native initial wield failed for strict pre-spawn exact loadout. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryState.EntryId ?? "null") +
+                    " TroopId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                    " ObservedPreSpawnInjected=" + observedPreSpawnExactLoadoutInjected +
+                    " ServerCreatePreSpawnWeaponPath=" + serverCreatePreSpawnWeaponPath +
+                    " Error=" + ex.GetType().Name +
+                    " Message=" + ex.Message +
+                    " Source=" + (source ?? "unknown"));
+                return true;
+            }
+        }
+
         private static bool TryForceServerBootstrapWeaponWieldFromEquipment(
             Agent agent,
             Equipment equipment,
+            RosterEntryState entryState,
             out string wieldSummary)
         {
             wieldSummary = "explicit-slot-wield-skipped";
@@ -24328,11 +25344,31 @@ namespace CoopSpectator.MissionBehaviors
 
             try
             {
-                equipment.GetInitialWeaponIndicesToEquip(
+                ResolveCanonicalBootstrapDesiredWeaponPair(
+                    entryState,
+                    equipment,
                     out EquipmentIndex desiredMainHandIndex,
                     out EquipmentIndex desiredOffHandIndex,
-                    out bool mainNotUsableWithOneHand,
-                    Equipment.InitialWeaponEquipPreference.Any);
+                    out Equipment.InitialWeaponEquipPreference initialWeaponEquipPreference,
+                    out string canonicalWieldReason,
+                    out bool canonicalWieldResolved);
+                bool mainNotUsableWithOneHand;
+                if (!canonicalWieldResolved)
+                {
+                    equipment.GetInitialWeaponIndicesToEquip(
+                        out desiredMainHandIndex,
+                        out desiredOffHandIndex,
+                        out mainNotUsableWithOneHand,
+                        initialWeaponEquipPreference);
+                }
+                else
+                {
+                    ItemObject desiredMainItem = IsUsableWeaponEquipmentIndex(equipment, desiredMainHandIndex)
+                        ? equipment[desiredMainHandIndex].Item
+                        : null;
+                    mainNotUsableWithOneHand =
+                        desiredMainItem?.PrimaryWeapon?.WeaponFlags.HasAnyFlag(WeaponFlags.NotUsableWithOneHand) == true;
+                }
                 EquipmentIndex desiredAmmoIndex =
                     ResolveDesiredLiveAmmoEquipmentIndex(equipment, desiredMainHandIndex);
                 string livePairNormalization = NormalizeDesiredLiveWeaponPairForShieldIncompatibleMain(
@@ -24402,6 +25438,9 @@ namespace CoopSpectator.MissionBehaviors
                     "explicit-slot-wield{" +
                     "DesiredMain=" + FormatWeaponEquipmentIndex(equipment, desiredMainHandIndex) +
                     ",DesiredOff=" + FormatWeaponEquipmentIndex(equipment, desiredOffHandIndex) +
+                    ",InitialWeaponEquipPreference=" + initialWeaponEquipPreference +
+                    ",CanonicalWieldResolved=" + canonicalWieldResolved +
+                    ",CanonicalWieldReason=" + (canonicalWieldReason ?? "none") +
                     ",Normalization=" + livePairNormalization +
                     ",MainNotUsableWithOneHand=" + mainNotUsableWithOneHand +
                     ",UsedExplicitSlot=" + usedExplicitSlot +
@@ -24413,6 +25452,175 @@ namespace CoopSpectator.MissionBehaviors
                 wieldSummary = "explicit-slot-wield-failed:" + ex.GetType().Name;
                 return false;
             }
+        }
+
+        private static void ResolveCanonicalBootstrapDesiredWeaponPair(
+            RosterEntryState entryState,
+            Equipment equipment,
+            out EquipmentIndex desiredMainHandIndex,
+            out EquipmentIndex desiredOffHandIndex,
+            out Equipment.InitialWeaponEquipPreference initialWeaponEquipPreference,
+            out string canonicalWieldReason,
+            out bool resolved)
+        {
+            desiredMainHandIndex = EquipmentIndex.None;
+            desiredOffHandIndex = EquipmentIndex.None;
+            canonicalWieldReason = null;
+            initialWeaponEquipPreference = ResolveBootstrapInitialWeaponEquipPreference(entryState, equipment);
+            resolved = false;
+
+            if (entryState == null || equipment == null || entryState.IsHero)
+                return;
+
+            EquipmentIndex firstShield = EquipmentIndex.None;
+            EquipmentIndex firstRanged = EquipmentIndex.None;
+            EquipmentIndex firstAmmo = EquipmentIndex.None;
+            EquipmentIndex firstPolearm = EquipmentIndex.None;
+            EquipmentIndex firstMelee = EquipmentIndex.None;
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                if (!IsUsableWeaponEquipmentIndex(equipment, slot))
+                    continue;
+
+                switch (GetMaterializedMountedWeaponRole(equipment[slot].Item))
+                {
+                    case MaterializedMountedWeaponRole.Shield:
+                        if (firstShield == EquipmentIndex.None)
+                            firstShield = slot;
+                        break;
+                    case MaterializedMountedWeaponRole.Ranged:
+                        if (firstRanged == EquipmentIndex.None)
+                            firstRanged = slot;
+                        break;
+                    case MaterializedMountedWeaponRole.Ammo:
+                        if (firstAmmo == EquipmentIndex.None)
+                            firstAmmo = slot;
+                        break;
+                    case MaterializedMountedWeaponRole.Polearm:
+                        if (firstPolearm == EquipmentIndex.None)
+                            firstPolearm = slot;
+                        break;
+                    case MaterializedMountedWeaponRole.Melee:
+                        if (firstMelee == EquipmentIndex.None)
+                            firstMelee = slot;
+                        break;
+                }
+            }
+
+            bool hasAmmo = firstAmmo != EquipmentIndex.None;
+
+            if (firstRanged != EquipmentIndex.None && hasAmmo)
+            {
+                desiredMainHandIndex = firstRanged;
+                desiredOffHandIndex = firstShield;
+                initialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.RangedForMainHand;
+                canonicalWieldReason = firstShield != EquipmentIndex.None
+                    ? "ordinary-ranged-main-with-shield-offhand"
+                    : "ordinary-ranged-main";
+                resolved = true;
+                return;
+            }
+
+            EquipmentIndex firstPrimaryMelee = firstPolearm != EquipmentIndex.None
+                ? firstPolearm
+                : firstMelee;
+
+            if (firstRanged != EquipmentIndex.None && !hasAmmo)
+            {
+                desiredMainHandIndex = firstPrimaryMelee != EquipmentIndex.None
+                    ? firstPrimaryMelee
+                    : firstRanged;
+                desiredOffHandIndex = firstShield;
+                initialWeaponEquipPreference = firstPrimaryMelee != EquipmentIndex.None
+                    ? Equipment.InitialWeaponEquipPreference.MeleeForMainHand
+                    : Equipment.InitialWeaponEquipPreference.RangedForMainHand;
+                canonicalWieldReason = firstShield != EquipmentIndex.None
+                    ? "ordinary-thrown-stability-melee-main-with-shield-offhand"
+                    : "ordinary-thrown-stability-melee-main";
+                resolved = true;
+                return;
+            }
+
+            if (firstPrimaryMelee != EquipmentIndex.None)
+            {
+                desiredMainHandIndex = firstPrimaryMelee;
+                desiredOffHandIndex = firstShield;
+                initialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.MeleeForMainHand;
+                canonicalWieldReason = firstShield != EquipmentIndex.None
+                    ? "ordinary-melee-main-with-shield-offhand"
+                    : "ordinary-melee-main";
+                resolved = true;
+            }
+        }
+
+        private static bool TryApplyExplicitBootstrapWieldByDesiredPair(
+            Agent agent,
+            Equipment equipment,
+            EquipmentIndex desiredMainHandIndex,
+            EquipmentIndex desiredOffHandIndex)
+        {
+            if (agent == null || equipment == null)
+                return false;
+
+            bool usedExplicitSlot = false;
+            if (IsUsableWeaponEquipmentIndex(equipment, desiredOffHandIndex))
+            {
+                agent.TryToWieldWeaponInSlot(
+                    desiredOffHandIndex,
+                    Agent.WeaponWieldActionType.InstantAfterPickUp,
+                    false);
+                usedExplicitSlot = true;
+            }
+
+            if (IsUsableWeaponEquipmentIndex(equipment, desiredMainHandIndex))
+            {
+                agent.TryToWieldWeaponInSlot(
+                    desiredMainHandIndex,
+                    Agent.WeaponWieldActionType.InstantAfterPickUp,
+                    false);
+                usedExplicitSlot = true;
+            }
+
+            return usedExplicitSlot;
+        }
+
+        private static Equipment.InitialWeaponEquipPreference ResolveBootstrapInitialWeaponEquipPreference(
+            RosterEntryState entryState,
+            Equipment equipment)
+        {
+            if (entryState == null || equipment == null)
+                return Equipment.InitialWeaponEquipPreference.Any;
+
+            bool hasRangedWeapon = false;
+            bool hasAmmo = false;
+            bool hasPrimaryMelee = false;
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                switch (GetMaterializedMountedWeaponRole(equipment[slot].Item))
+                {
+                    case MaterializedMountedWeaponRole.Ranged:
+                        hasRangedWeapon = true;
+                        break;
+                    case MaterializedMountedWeaponRole.Ammo:
+                        hasAmmo = true;
+                        break;
+                    case MaterializedMountedWeaponRole.Polearm:
+                    case MaterializedMountedWeaponRole.Melee:
+                        hasPrimaryMelee = true;
+                        break;
+                }
+            }
+
+            if (hasRangedWeapon && hasAmmo)
+                return Equipment.InitialWeaponEquipPreference.RangedForMainHand;
+
+            if (hasPrimaryMelee)
+                return Equipment.InitialWeaponEquipPreference.MeleeForMainHand;
+
+            if (hasRangedWeapon)
+                return Equipment.InitialWeaponEquipPreference.RangedForMainHand;
+
+            return Equipment.InitialWeaponEquipPreference.Any;
         }
 
         private static bool TryQueueServerBootstrapDelayedWeaponWield(

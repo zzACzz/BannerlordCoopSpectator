@@ -49,7 +49,10 @@ namespace CoopSpectator.Infrastructure
                 formationIndex);
             ExactTransferValidationResult exactTransferValidation =
                 ExactTransferContractValidator.Validate(exactTransferContract);
+            bool useStrictCanonicalFieldBattleOrdinaryExactPreSpawnPath =
+                ShouldUseStrictCanonicalFieldBattleOrdinaryExactPreSpawnPath(entryState);
             bool useCanonicalGeneratedTemplateNativeSpawn =
+                !useStrictCanonicalFieldBattleOrdinaryExactPreSpawnPath &&
                 ShouldUseCanonicalGeneratedTemplateNativeSpawn(entryState);
 
             string exactEntryCompatibilitySummary;
@@ -156,10 +159,46 @@ namespace CoopSpectator.Infrastructure
             }
 
             bool ordinaryEntryRequiresCanonicalServerNativeBaseline =
+                !useStrictCanonicalFieldBattleOrdinaryExactPreSpawnPath &&
                 RequiresCanonicalFieldBattleServerNativeBaselineForOrdinaryEntry(
                     entryState,
                     useContractDrivenPreSpawnPath,
                     useDedicatedSafeStringIdExactEquipmentPath);
+
+            if (useStrictCanonicalFieldBattleOrdinaryExactPreSpawnPath)
+            {
+                exactEntryCompatibilitySummary = "ExactEntryContract=generated-ordinary-exact-snapshot-pre-spawn";
+                weaponDecisionReason =
+                    "strict canonical field battle ordinary path uses exact snapshot equipment " +
+                    "at create-time instead of native generated-template baseline";
+                capeDecisionReason =
+                    "strict canonical field battle ordinary path uses exact snapshot visuals " +
+                    "at create-time instead of native generated-template baseline";
+                includeWeapons = true;
+                includeArmorVisuals = true;
+                includeCape = true;
+                includeMountVisuals = entryState.IsMounted;
+                canInjectBodyPropertiesAtCreateAgentTime = false;
+                payloadDiagnostic = new ExactCreateAgentPayloadDiagnosticDecision
+                {
+                    IsActive = false,
+                    Reason = "generated-ordinary-exact-snapshot-pre-spawn",
+                    EntryId = entryState.EntryId,
+                    TroopId = entryState.SpawnTemplateId ?? entryState.CharacterId ?? entryState.OriginalCharacterId,
+                    RequestedProfile = ExactCreateAgentPayloadDiagnosticProfile.FullExact,
+                    Profile = ExactCreateAgentPayloadDiagnosticProfile.FullExact,
+                    RequestedProfileClientSafe = true,
+                    ClientCreateAgentSafe = true,
+                    ClientCreateAgentSafeReason = "generated-ordinary-exact-snapshot-pre-spawn",
+                    RequiresCreateTimeWeapons = true,
+                    WeaponLayoutMatchesNativeTemplate = false,
+                    IncludeWeapons = true,
+                    IncludeArmorVisuals = true,
+                    IncludeCape = true,
+                    IncludeMountVisuals = entryState.IsMounted,
+                    IncludeBodyProperties = false
+                };
+            }
 
             if (!ordinaryEntryRequiresCanonicalServerNativeBaseline &&
                 ShouldForceCanonicalFieldBattleCreateTimeWeapons(
@@ -251,6 +290,9 @@ namespace CoopSpectator.Infrastructure
                     !strictMountedHeroHybridCreateAgentSafe)
                     injectEquipment = false;
             }
+
+            if (useStrictCanonicalFieldBattleOrdinaryExactPreSpawnPath)
+                injectEquipment = true;
 
             return new ExactCreateAgentServerPreSpawnContractState
             {
@@ -401,6 +443,28 @@ namespace CoopSpectator.Infrastructure
         }
 
         private static bool ShouldUseCanonicalGeneratedTemplateNativeSpawn(RosterEntryState entryState)
+        {
+            if (entryState == null ||
+                HasExactPersonalHeroIdentity(entryState) ||
+                !CoopMissionSpawnLogic.UseDedicatedSafeStringIdExactEquipmentPathOnServer())
+            {
+                return false;
+            }
+
+            var snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            if (snapshot?.CanonicalBattle == null ||
+                !string.Equals(
+                    snapshot.CanonicalBattle.Context?.MultiplayerGameType,
+                    "Battle",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return BattleSnapshotRuntimeState.UsesGeneratedRuntimeBattleTemplateMaterialization(entryState.EntryId);
+        }
+
+        private static bool ShouldUseStrictCanonicalFieldBattleOrdinaryExactPreSpawnPath(RosterEntryState entryState)
         {
             if (entryState == null ||
                 HasExactPersonalHeroIdentity(entryState) ||

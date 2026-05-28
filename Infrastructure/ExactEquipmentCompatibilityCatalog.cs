@@ -63,6 +63,7 @@ namespace CoopSpectator.Infrastructure
                 ["scale_shoulder_armor"] = ExactSynthetic("cs_exact_scale_shoulder_armor"),
                 ["peasant_hammer_1_t1"] = ExactSynthetic("cs_exact_peasant_hammer_1_t1"),
                 ["peasant_maul_t1_2"] = ExactSynthetic("cs_exact_peasant_maul_t1_2"),
+                ["peasant_sickle_1_t1"] = ExactSynthetic("cs_exact_peasant_sickle_1_t1"),
                 ["northern_2hsword_t4"] = ExactSynthetic("cs_exact_northern_2hsword_t4"),
                 ["empire_polearm_1_t4"] = ExactOverlayEquivalent("mp_empire_menavlion"),
                 ["imperial_spear_t2"] = ExactOverlayEquivalent("cs_exact_imperial_spear_t2"),
@@ -84,6 +85,15 @@ namespace CoopSpectator.Infrastructure
                 ["sumpter_horse"] = ExactSynthetic("cs_exact_sumpter_horse"),
                 ["tournament_arrows"] = ExactSynthetic("cs_exact_tournament_arrows"),
                 ["tribal_bow"] = ExactSynthetic("cs_exact_tribal_bow")
+            };
+
+        private static readonly HashSet<string> PreferredOrdinaryBattleTwinSourceItemIds =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "peasant_hammer_1_t1",
+                "peasant_hammer_2_t1",
+                "peasant_maul_t1_2",
+                "peasant_sickle_1_t1"
             };
 
         internal static readonly IReadOnlyDictionary<string, string> AliasItemIds =
@@ -127,6 +137,13 @@ namespace CoopSpectator.Infrastructure
                 TryGetAliasRule(sourceItemId, out ExactEquipmentCompatibilityRule aliasRule) &&
                 string.Equals(aliasRule.ResolvedItemId, resolvedItemId, StringComparison.OrdinalIgnoreCase) &&
                 aliasRule.DeliveryMode == ExactEquipmentCompatibilityDeliveryMode.ForcePostCreateStringIdOverlay;
+        }
+
+        internal static bool ShouldPreferOrdinaryBattleTwinAlias(string sourceItemId)
+        {
+            return
+                !string.IsNullOrWhiteSpace(sourceItemId) &&
+                PreferredOrdinaryBattleTwinSourceItemIds.Contains(sourceItemId.Trim());
         }
 
         internal static IEnumerable<string> EnumerateSyntheticAliasItemIds(IEnumerable<string> sourceItemIds)

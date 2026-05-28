@@ -132,6 +132,12 @@ namespace CoopSpectator.Infrastructure
                 return EntryIdByRiderAgentIndex.TryGetValue(riderAgentIndex, out entryId);
         }
 
+        public static bool TryGetEntryIdByMountAgentIndex(int mountAgentIndex, out string entryId)
+        {
+            lock (Sync)
+                return EntryIdByMountAgentIndex.TryGetValue(mountAgentIndex, out entryId);
+        }
+
         public static void RegisterClientObservedContract(
             ExactTransferSpawnContract contract,
             ExactTransferValidationResult validation,

@@ -2721,14 +2721,21 @@
 	</Item>
 	<CraftedItem id="cs_exact_peasant_hammer_1_t1" name="{=6WcZ5Tr0}Blacksmith Hammer" crafting_template="Mace" modifier_group="cheap_weapon">
 		<Pieces>
-			<Piece id="blacksmith_hammer_tip_1" Type="Blade" scale_factor="100" />
+			<Piece id="cs_exact_blacksmith_hammer_tip_1" Type="Blade" scale_factor="100" />
 			<Piece id="blacksmith_hammer_handle_1" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
 	<CraftedItem id="cs_exact_peasant_maul_t1_2" name="{=gYpNILVC}Sledgehammer" crafting_template="TwoHandedMace" culture="Culture.battania" modifier_group="cheap_weapon">
 		<Pieces>
-			<Piece id="mace_head_24" Type="Blade" scale_factor="102" />
+			<Piece id="cs_exact_mace_head_24" Type="Blade" scale_factor="102" />
 			<Piece id="spear_handle_1" Type="Handle" />
+		</Pieces>
+	</CraftedItem>
+	<CraftedItem id="cs_exact_peasant_sickle_1_t1" name="{=4wdgiTta}Sickle" crafting_template="OneHandedAxe" modifier_group="cheap_weapon">
+		<Pieces>
+			<Piece id="cs_exact_sickle_blade_1" Type="Blade" scale_factor="98" />
+			<Piece id="axe_craft_33_handle" Type="Handle" scale_factor="90" />
+			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
 	<CraftedItem id="cs_exact_northern_2hsword_t4" name="{=1WxLaeQE}Fine Steel Two Handed Sword" crafting_template="TwoHandedSword" culture="Culture.sturgia" modifier_group="sword">
@@ -2755,7 +2762,7 @@
 	</CraftedItem>
 	<CraftedItem id="cs_exact_peasant_hammer_2_t1" name="{=beVFwINO}Wooden Hammer" crafting_template="Mace" modifier_group="cheap_weapon">
 		<Pieces>
-			<Piece id="mace_head_24" Type="Blade" />
+			<Piece id="cs_exact_mace_head_24" Type="Blade" />
 			<Piece id="blacksmith_hammer_handle_1" Type="Handle" />
 			<Piece id="cleaver_pommel_4" Type="Pommel" />
 		</Pieces>

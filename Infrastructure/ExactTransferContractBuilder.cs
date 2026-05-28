@@ -27,6 +27,23 @@ namespace CoopSpectator.Infrastructure
             Ammo = 5
         }
 
+        private enum StrictHeroWeaponProfile
+        {
+            Unknown = 0,
+            MountedBow = 1,
+            MountedCrossbow = 2,
+            MountedThrownWithShield = 3,
+            MountedThrownWithoutShield = 4,
+            MountedMeleeWithShield = 5,
+            MountedMeleeWithoutShield = 6,
+            FootBow = 7,
+            FootCrossbow = 8,
+            FootThrownWithShield = 9,
+            FootThrownWithoutShield = 10,
+            FootMeleeWithShield = 11,
+            FootMeleeWithoutShield = 12
+        }
+
         private sealed class MountedWeaponSlotState
         {
             public EquipmentIndex Slot { get; set; }
@@ -34,6 +51,18 @@ namespace CoopSpectator.Infrastructure
             public string ItemId { get; set; }
             public ItemObject Item { get; set; }
             public MountedWeaponRole Role { get; set; }
+        }
+
+        private sealed class StrictHeroWeaponProfileAnalysis
+        {
+            public StrictHeroWeaponProfile PrimaryProfile { get; set; }
+            public bool IsMounted { get; set; }
+            public bool HasBowSet { get; set; }
+            public bool HasCrossbowSet { get; set; }
+            public bool HasShield { get; set; }
+            public bool HasThrown { get; set; }
+            public bool HasMelee { get; set; }
+            public bool HasShieldCompatibleMelee { get; set; }
         }
 
         public static ExactTransferSpawnContract Build(
@@ -144,19 +173,29 @@ namespace CoopSpectator.Infrastructure
                 includeMountVisuals: true);
             bool exactPreSpawnWeaponCandidate = isStrictHeroEntry || isRuntimeExactSupported;
             bool allowRuntimeCreateAgentInjection = buildMode == BuildMode.Diagnostic || !forcePostCreateWeaponOverlay;
+            bool strictHeroRuntimeCreateTimeExactAllowed =
+                buildMode == BuildMode.Runtime &&
+                isStrictHeroEntry &&
+                allowRuntimeCreateAgentInjection;
             equipment.IncludeWeaponsInPreSpawn = buildMode == BuildMode.Diagnostic
                 ? exactPreSpawnWeaponCandidate && HasAnyWeaponItem(entryState)
-                : allowRuntimeCreateAgentInjection && isRuntimeExactSupported && HasAnyWeaponItem(entryState);
+                : strictHeroRuntimeCreateTimeExactAllowed
+                    ? HasAnyWeaponItem(entryState)
+                    : allowRuntimeCreateAgentInjection && isRuntimeExactSupported && HasAnyWeaponItem(entryState);
             equipment.IncludeArmorVisualsInPreSpawn =
                 buildMode == BuildMode.Diagnostic ||
+                strictHeroRuntimeCreateTimeExactAllowed ||
                 (allowRuntimeCreateAgentInjection && isRuntimeExactSupported);
             equipment.IncludeCapeInPreSpawn = buildMode == BuildMode.Diagnostic
                 ? exactPreSpawnWeaponCandidate
-                : allowRuntimeCreateAgentInjection &&
-                  CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(entryState, out _, out _);
+                : strictHeroRuntimeCreateTimeExactAllowed
+                    ? CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(entryState, out _, out _)
+                    : allowRuntimeCreateAgentInjection &&
+                      CoopMissionSpawnLogic.EvaluateExactRuntimeCapeVisualContract(entryState, out _, out _);
             equipment.IncludeMountVisualsInPreSpawn =
                 entryState.IsMounted &&
                 (buildMode == BuildMode.Diagnostic ||
+                 strictHeroRuntimeCreateTimeExactAllowed ||
                  (allowRuntimeCreateAgentInjection && isRuntimeExactSupported));
 
             AddSlot(equipment, EquipmentIndex.Weapon0, "Item0", entryState.CombatItem0Id, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem0Id));
@@ -325,8 +364,9 @@ namespace CoopSpectator.Infrastructure
 
             bool preferStrictHeroRangedLayout = IsStrictHeroEntry(entryState);
             List<MountedWeaponSlotState> orderedSlots = null;
-            if (preferStrictHeroRangedLayout && hasRanged && hasAmmo && hasUnsafeRangedWeapon2Layout)
-                orderedSlots = BuildCanonicalStrictHeroRangedWeaponLayout(slots);
+            string profileSummary = null;
+            if (preferStrictHeroRangedLayout)
+                orderedSlots = BuildCanonicalStrictHeroWeaponLayout(slots, entryState, out profileSummary);
             else if (entryState.IsMounted && (hasRanged || hasAmmo || DoesWeapon2ContainLiveCandidate(equipment)))
                 orderedSlots = BuildCanonicalMountedWeaponLayout(slots, hasAmmo);
 
@@ -341,6 +381,9 @@ namespace CoopSpectator.Infrastructure
                 ApplyNormalizedMountedWeaponLayout(equipment, orderedSlots);
 
             summary =
+                (string.IsNullOrWhiteSpace(profileSummary)
+                    ? string.Empty
+                    : "Profile={" + profileSummary + "} ") +
                 "Before={" + BuildMountedLayoutSummary(slots, slots) +
                 "} After={" + BuildMountedLayoutSummary(slots, orderedSlots) + "}";
             return true;
@@ -367,28 +410,100 @@ namespace CoopSpectator.Infrastructure
             equipment.MountedWeaponLayoutSummary = summary;
         }
 
-        private static List<MountedWeaponSlotState> BuildCanonicalStrictHeroRangedWeaponLayout(
-            List<MountedWeaponSlotState> sourceSlots)
+        private static List<MountedWeaponSlotState> BuildCanonicalStrictHeroWeaponLayout(
+            List<MountedWeaponSlotState> sourceSlots,
+            RosterEntryState entryState,
+            out string profileSummary)
         {
             var remaining = new List<MountedWeaponSlotState>(sourceSlots ?? Enumerable.Empty<MountedWeaponSlotState>());
             var ordered = new List<MountedWeaponSlotState>(4);
+            StrictHeroWeaponProfileAnalysis profile = AnalyzeStrictHeroWeaponProfile(sourceSlots, entryState);
+            profileSummary = BuildStrictHeroWeaponProfileSummary(profile);
 
-            MountedWeaponSlotState slot0 = remaining.FirstOrDefault(slot => slot?.Slot == EquipmentIndex.Weapon0);
-            MountedWeaponRole slot0Role = slot0?.Role ?? MountedWeaponRole.Other;
-            bool rangedLeadLayout = slot0Role == MountedWeaponRole.Ranged || slot0Role == MountedWeaponRole.Ammo;
-
-            if (rangedLeadLayout)
+            switch (profile.PrimaryProfile)
             {
-                AddFirstByRole(ordered, remaining, MountedWeaponRole.Ranged);
-                AddFirstByRole(ordered, remaining, MountedWeaponRole.Ammo);
-                AddFirstByRole(ordered, remaining, MountedWeaponRole.Ammo);
-                AddNextPreferred(ordered, remaining, preferLiveCandidate: true);
-            }
-            else
-            {
-                AddPrimaryLeadSlot(ordered, remaining, slot0);
-                AddFirstByRole(ordered, remaining, MountedWeaponRole.Ranged);
-                AddFirstByRole(ordered, remaining, MountedWeaponRole.Ammo);
+                case StrictHeroWeaponProfile.MountedBow:
+                    BuildCanonicalStrictHeroMountedRangedWeaponLayout(
+                        ordered,
+                        remaining,
+                        primaryRangedPredicate: IsBowWeaponSlot,
+                        primaryAmmoPredicate: IsArrowAmmoSlot,
+                        secondaryRangedPredicate: IsCrossbowWeaponSlot,
+                        secondaryAmmoPredicate: IsBoltAmmoSlot,
+                        hasShield: profile.HasShield,
+                        preferThrownOverMelee: true);
+                    break;
+                case StrictHeroWeaponProfile.MountedCrossbow:
+                    BuildCanonicalStrictHeroMountedRangedWeaponLayout(
+                        ordered,
+                        remaining,
+                        primaryRangedPredicate: IsCrossbowWeaponSlot,
+                        primaryAmmoPredicate: IsBoltAmmoSlot,
+                        secondaryRangedPredicate: IsBowWeaponSlot,
+                        secondaryAmmoPredicate: IsArrowAmmoSlot,
+                        hasShield: profile.HasShield,
+                        preferThrownOverMelee: true);
+                    break;
+                case StrictHeroWeaponProfile.FootBow:
+                    AddStrictHeroPrimaryBowSet(ordered, remaining);
+                    AddStrictHeroSecondaryBowAmmo(ordered, remaining);
+                    AddStrictHeroSecondaryCrossbowSet(ordered, remaining);
+                    AddStrictHeroShield(ordered, remaining);
+                    AddStrictHeroThrown(ordered, remaining);
+                    AddStrictHeroPrimaryMelee(ordered, remaining, preferShieldCompatible: profile.HasShield);
+                    AddStrictHeroRemainingMelee(ordered, remaining, preferShieldCompatible: profile.HasShield);
+                    break;
+                case StrictHeroWeaponProfile.FootCrossbow:
+                    AddStrictHeroPrimaryCrossbowSet(ordered, remaining);
+                    AddStrictHeroSecondaryCrossbowAmmo(ordered, remaining);
+                    AddStrictHeroShield(ordered, remaining);
+                    AddStrictHeroThrown(ordered, remaining);
+                    AddStrictHeroPrimaryMelee(ordered, remaining, preferShieldCompatible: profile.HasShield);
+                    AddStrictHeroRemainingMelee(ordered, remaining, preferShieldCompatible: profile.HasShield);
+                    break;
+                case StrictHeroWeaponProfile.MountedThrownWithShield:
+                case StrictHeroWeaponProfile.FootThrownWithShield:
+                    AddStrictHeroThrown(ordered, remaining);
+                    AddStrictHeroShield(ordered, remaining);
+                    AddStrictHeroPrimaryMelee(ordered, remaining, preferShieldCompatible: true);
+                    AddStrictHeroRemainingMelee(ordered, remaining, preferShieldCompatible: false);
+                    AddStrictHeroLooseRanged(ordered, remaining);
+                    AddStrictHeroLooseAmmo(ordered, remaining);
+                    break;
+                case StrictHeroWeaponProfile.MountedThrownWithoutShield:
+                case StrictHeroWeaponProfile.FootThrownWithoutShield:
+                    AddStrictHeroThrown(ordered, remaining);
+                    AddStrictHeroPrimaryMelee(ordered, remaining, preferShieldCompatible: false);
+                    AddStrictHeroRemainingMelee(ordered, remaining, preferShieldCompatible: false);
+                    AddStrictHeroShield(ordered, remaining);
+                    AddStrictHeroLooseRanged(ordered, remaining);
+                    AddStrictHeroLooseAmmo(ordered, remaining);
+                    break;
+                case StrictHeroWeaponProfile.MountedMeleeWithShield:
+                case StrictHeroWeaponProfile.FootMeleeWithShield:
+                    AddStrictHeroPrimaryMelee(ordered, remaining, preferShieldCompatible: true);
+                    AddStrictHeroShield(ordered, remaining);
+                    AddStrictHeroRemainingMelee(ordered, remaining, preferShieldCompatible: false);
+                    AddStrictHeroThrown(ordered, remaining);
+                    AddStrictHeroLooseRanged(ordered, remaining);
+                    AddStrictHeroLooseAmmo(ordered, remaining);
+                    break;
+                case StrictHeroWeaponProfile.MountedMeleeWithoutShield:
+                case StrictHeroWeaponProfile.FootMeleeWithoutShield:
+                    AddStrictHeroPrimaryMelee(ordered, remaining, preferShieldCompatible: false);
+                    AddStrictHeroRemainingMelee(ordered, remaining, preferShieldCompatible: false);
+                    AddStrictHeroThrown(ordered, remaining);
+                    AddStrictHeroShield(ordered, remaining);
+                    AddStrictHeroLooseRanged(ordered, remaining);
+                    AddStrictHeroLooseAmmo(ordered, remaining);
+                    break;
+                default:
+                    AddStrictHeroPrimaryMelee(ordered, remaining, preferShieldCompatible: profile.HasShield);
+                    AddStrictHeroShield(ordered, remaining);
+                    AddStrictHeroThrown(ordered, remaining);
+                    AddStrictHeroLooseRanged(ordered, remaining);
+                    AddStrictHeroLooseAmmo(ordered, remaining);
+                    break;
             }
 
             while (ordered.Count < 4 && remaining.Count > 0)
@@ -398,6 +513,132 @@ namespace CoopSpectator.Infrastructure
             }
 
             return ordered.Take(4).ToList();
+        }
+
+        private static StrictHeroWeaponProfileAnalysis AnalyzeStrictHeroWeaponProfile(
+            List<MountedWeaponSlotState> sourceSlots,
+            RosterEntryState entryState)
+        {
+            List<MountedWeaponSlotState> slots = sourceSlots ?? new List<MountedWeaponSlotState>();
+            bool isMounted = entryState?.IsMounted == true;
+            bool hasBow = slots.Any(IsBowWeaponSlot);
+            bool hasArrows = slots.Any(IsArrowAmmoSlot);
+            bool hasCrossbow = slots.Any(IsCrossbowWeaponSlot);
+            bool hasBolts = slots.Any(IsBoltAmmoSlot);
+            bool hasShield = slots.Any(slot => slot.Role == MountedWeaponRole.Shield);
+            bool hasThrown = slots.Any(IsThrownWeaponSlot);
+            bool hasMelee = slots.Any(IsMeleeWeaponSlot);
+            bool hasShieldCompatibleMelee = slots.Any(IsShieldCompatibleMeleeSlot);
+            bool hasBowSet = hasBow && hasArrows;
+            bool hasCrossbowSet = hasCrossbow && hasBolts;
+
+            StrictHeroWeaponProfile primaryProfile;
+            if (isMounted)
+            {
+                if (hasBowSet)
+                    primaryProfile = StrictHeroWeaponProfile.MountedBow;
+                else if (hasCrossbowSet)
+                    primaryProfile = StrictHeroWeaponProfile.MountedCrossbow;
+                else if (hasThrown)
+                    primaryProfile = hasShield && hasShieldCompatibleMelee
+                        ? StrictHeroWeaponProfile.MountedThrownWithShield
+                        : StrictHeroWeaponProfile.MountedThrownWithoutShield;
+                else
+                    primaryProfile = hasShield && hasShieldCompatibleMelee
+                        ? StrictHeroWeaponProfile.MountedMeleeWithShield
+                        : StrictHeroWeaponProfile.MountedMeleeWithoutShield;
+            }
+            else
+            {
+                if (hasBowSet)
+                    primaryProfile = StrictHeroWeaponProfile.FootBow;
+                else if (hasCrossbowSet)
+                    primaryProfile = StrictHeroWeaponProfile.FootCrossbow;
+                else if (hasThrown)
+                    primaryProfile = hasShield && hasShieldCompatibleMelee
+                        ? StrictHeroWeaponProfile.FootThrownWithShield
+                        : StrictHeroWeaponProfile.FootThrownWithoutShield;
+                else
+                    primaryProfile = hasShield && hasShieldCompatibleMelee
+                        ? StrictHeroWeaponProfile.FootMeleeWithShield
+                        : StrictHeroWeaponProfile.FootMeleeWithoutShield;
+            }
+
+            return new StrictHeroWeaponProfileAnalysis
+            {
+                PrimaryProfile = primaryProfile,
+                IsMounted = isMounted,
+                HasBowSet = hasBowSet,
+                HasCrossbowSet = hasCrossbowSet,
+                HasShield = hasShield,
+                HasThrown = hasThrown,
+                HasMelee = hasMelee,
+                HasShieldCompatibleMelee = hasShieldCompatibleMelee
+            };
+        }
+
+        private static string BuildStrictHeroWeaponProfileSummary(StrictHeroWeaponProfileAnalysis profile)
+        {
+            if (profile == null)
+                return "Primary=unknown";
+
+            var backupProfiles = new List<string>();
+            if (profile.HasBowSet && profile.HasCrossbowSet)
+                backupProfiles.Add(profile.IsMounted ? "кінний-арбалетчик" : "піший-арбалетчик");
+            if (profile.HasShield)
+                backupProfiles.Add(profile.HasShieldCompatibleMelee ? "щитова-гілка" : "щит-без-сумісної-ближньої");
+            if (profile.HasThrown)
+                backupProfiles.Add(profile.IsMounted
+                    ? (profile.HasShield && profile.HasShieldCompatibleMelee ? "кінний-метальник-зі-щитом" : "кінний-метальник-без-щита")
+                    : (profile.HasShield && profile.HasShieldCompatibleMelee ? "піший-метальник-зі-щитом" : "піший-метальник-без-щита"));
+            if (profile.HasMelee)
+                backupProfiles.Add(profile.IsMounted
+                    ? (profile.HasShieldCompatibleMelee ? "кінний-ближній-зі-щитом" : "кінний-ближній-без-щита")
+                    : (profile.HasShieldCompatibleMelee ? "піший-ближній-зі-щитом" : "піший-ближній-без-щита"));
+
+            return
+                "Primary=" + MapStrictHeroWeaponProfileLabel(profile.PrimaryProfile) +
+                ",Mounted=" + profile.IsMounted +
+                ",HasBowSet=" + profile.HasBowSet +
+                ",HasCrossbowSet=" + profile.HasCrossbowSet +
+                ",HasShield=" + profile.HasShield +
+                ",HasThrown=" + profile.HasThrown +
+                ",HasMelee=" + profile.HasMelee +
+                ",HasShieldCompatibleMelee=" + profile.HasShieldCompatibleMelee +
+                ",Backups=" + (backupProfiles.Count > 0 ? string.Join(">", backupProfiles.Distinct()) : "(none)");
+        }
+
+        private static string MapStrictHeroWeaponProfileLabel(StrictHeroWeaponProfile profile)
+        {
+            switch (profile)
+            {
+                case StrictHeroWeaponProfile.MountedBow:
+                    return "кінний-лучник";
+                case StrictHeroWeaponProfile.MountedCrossbow:
+                    return "кінний-арбалетчик";
+                case StrictHeroWeaponProfile.MountedThrownWithShield:
+                    return "кінний-метальник-зі-щитом";
+                case StrictHeroWeaponProfile.MountedThrownWithoutShield:
+                    return "кінний-метальник-без-щита";
+                case StrictHeroWeaponProfile.MountedMeleeWithShield:
+                    return "кінний-ближній-зі-щитом";
+                case StrictHeroWeaponProfile.MountedMeleeWithoutShield:
+                    return "кінний-ближній-без-щита";
+                case StrictHeroWeaponProfile.FootBow:
+                    return "піший-лучник";
+                case StrictHeroWeaponProfile.FootCrossbow:
+                    return "піший-арбалетчик";
+                case StrictHeroWeaponProfile.FootThrownWithShield:
+                    return "піший-метальник-зі-щитом";
+                case StrictHeroWeaponProfile.FootThrownWithoutShield:
+                    return "піший-метальник-без-щита";
+                case StrictHeroWeaponProfile.FootMeleeWithShield:
+                    return "піший-ближній-зі-щитом";
+                case StrictHeroWeaponProfile.FootMeleeWithoutShield:
+                    return "піший-ближній-без-щита";
+                default:
+                    return "невідомий";
+            }
         }
 
         private static List<MountedWeaponSlotState> ResolveMountedWeaponSlots(RosterEntryState entryState)
@@ -483,92 +724,45 @@ namespace CoopSpectator.Infrastructure
         {
             var remaining = new List<MountedWeaponSlotState>(sourceSlots ?? Enumerable.Empty<MountedWeaponSlotState>());
             var ordered = new List<MountedWeaponSlotState>(4);
-
-            MountedWeaponSlotState primaryMelee = TakeFirst(remaining, MountedWeaponRole.Polearm)
-                                                  ?? TakeFirst(remaining, MountedWeaponRole.Melee);
-            MountedWeaponSlotState primaryRanged = TakeFirst(remaining, MountedWeaponRole.Ranged);
-            MountedWeaponSlotState shield = TakeFirst(remaining, MountedWeaponRole.Shield);
-            MountedWeaponSlotState ammo = TakeFirst(remaining, MountedWeaponRole.Ammo);
-
-            if (primaryMelee != null)
-                ordered.Add(primaryMelee);
-            else if (primaryRanged != null)
-            {
-                ordered.Add(primaryRanged);
-                primaryRanged = null;
-            }
+            bool hasShield = remaining.Any(slot => slot.Role == MountedWeaponRole.Shield);
+            bool hasRanged = remaining.Any(slot => slot.Role == MountedWeaponRole.Ranged);
 
             if (hasAmmo)
             {
-                if (shield != null)
+                AddFirstByRole(ordered, remaining, MountedWeaponRole.Ranged);
+                if (hasShield)
                 {
-                    ordered.Add(shield);
-                    shield = null;
-                }
-                else if (primaryRanged != null)
-                {
-                    ordered.Add(primaryRanged);
-                    primaryRanged = null;
+                    AddFirstByRole(ordered, remaining, MountedWeaponRole.Shield);
+                    AddFirstByRole(ordered, remaining, MountedWeaponRole.Ammo);
+                    AddMountedPrimaryMelee(ordered, remaining, preferShieldCompatible: true);
+                    AddFirstByRole(ordered, remaining, MountedWeaponRole.Other);
                 }
                 else
                 {
-                    AddNextPreferred(ordered, remaining, preferLiveCandidate: true);
+                    AddFirstByRole(ordered, remaining, MountedWeaponRole.Ammo);
+                    if (!TryAddMountedReserveAmmo(ordered, remaining))
+                        AddEmptyMountedWeaponSlotPlaceholder(ordered);
+                    AddMountedPrimaryMelee(ordered, remaining, preferShieldCompatible: false);
+                    AddFirstByRole(ordered, remaining, MountedWeaponRole.Other);
                 }
-
-                if (ammo != null)
-                {
-                    ordered.Add(ammo);
-                    ammo = null;
-                }
-                else
-                {
-                    AddNextPreferred(ordered, remaining, preferLiveCandidate: false);
-                }
+            }
+            else if (hasRanged)
+            {
+                AddMountedPrimaryMelee(ordered, remaining, preferShieldCompatible: hasShield);
+                if (hasShield)
+                    AddFirstByRole(ordered, remaining, MountedWeaponRole.Shield);
+                AddFirstByRole(ordered, remaining, MountedWeaponRole.Ranged);
+                AddMountedPrimaryMelee(ordered, remaining, preferShieldCompatible: false);
+                AddFirstByRole(ordered, remaining, MountedWeaponRole.Other);
             }
             else
             {
-                if (shield != null)
-                {
-                    ordered.Add(shield);
-                    shield = null;
-                }
-                else if (primaryRanged != null)
-                {
-                    ordered.Add(primaryRanged);
-                    primaryRanged = null;
-                }
-                else
-                {
-                    AddNextPreferred(ordered, remaining, preferLiveCandidate: true);
-                }
-
-                if (primaryRanged != null)
-                {
-                    ordered.Add(primaryRanged);
-                    primaryRanged = null;
-                }
-                else if (shield != null)
-                {
-                    ordered.Add(shield);
-                    shield = null;
-                }
-                else if (ammo != null)
-                {
-                    ordered.Add(ammo);
-                    ammo = null;
-                }
-                else
-                {
-                    AddNextPreferred(ordered, remaining, preferLiveCandidate: false);
-                }
+                AddMountedPrimaryMelee(ordered, remaining, preferShieldCompatible: hasShield);
+                if (hasShield)
+                    AddFirstByRole(ordered, remaining, MountedWeaponRole.Shield);
+                AddMountedPrimaryMelee(ordered, remaining, preferShieldCompatible: false);
+                AddFirstByRole(ordered, remaining, MountedWeaponRole.Other);
             }
-
-            if (primaryRanged != null)
-                ordered.Add(primaryRanged);
-            if (shield != null)
-                ordered.Add(shield);
-            if (ammo != null)
-                ordered.Add(ammo);
 
             while (ordered.Count < 4 && remaining.Count > 0)
             {
@@ -577,6 +771,195 @@ namespace CoopSpectator.Infrastructure
             }
 
             return ordered.Take(4).ToList();
+        }
+
+        private static void BuildCanonicalStrictHeroMountedRangedWeaponLayout(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining,
+            Func<MountedWeaponSlotState, bool> primaryRangedPredicate,
+            Func<MountedWeaponSlotState, bool> primaryAmmoPredicate,
+            Func<MountedWeaponSlotState, bool> secondaryRangedPredicate,
+            Func<MountedWeaponSlotState, bool> secondaryAmmoPredicate,
+            bool hasShield,
+            bool preferThrownOverMelee)
+        {
+            AddFirst(ordered, remaining, primaryRangedPredicate);
+            if (hasShield)
+            {
+                AddStrictHeroShield(ordered, remaining);
+                AddFirst(ordered, remaining, primaryAmmoPredicate);
+                AddStrictHeroShieldedMountedRangedBackup(
+                    ordered,
+                    remaining,
+                    primaryAmmoPredicate,
+                    preferThrownOverMelee,
+                    preferShieldCompatibleMelee: true);
+                return;
+            }
+
+            bool hasThrownBackup = remaining.Any(IsThrownWeaponSlot);
+            bool hasMeleeBackup = remaining.Any(IsMeleeWeaponSlot);
+            int primaryAmmoCount = remaining.Count(primaryAmmoPredicate);
+            bool hasReservePrimaryAmmo = primaryAmmoCount > 1;
+            bool hasSecondaryRangedSet = remaining.Any(secondaryRangedPredicate) && remaining.Any(secondaryAmmoPredicate);
+            if (primaryAmmoCount > 0 &&
+                hasThrownBackup &&
+                hasMeleeBackup &&
+                !hasReservePrimaryAmmo &&
+                !hasSecondaryRangedSet)
+            {
+                AddStrictHeroThrown(ordered, remaining);
+                AddFirst(ordered, remaining, primaryAmmoPredicate);
+                AddStrictHeroPrimaryMelee(ordered, remaining, preferShieldCompatible: false);
+                AddStrictHeroRemainingMelee(ordered, remaining, preferShieldCompatible: false);
+                return;
+            }
+
+            AddFirst(ordered, remaining, primaryAmmoPredicate);
+            StrictHeroMountedRangedReserveKind reserveKind = ResolveStrictHeroMountedRangedReserveSlot(
+                ordered,
+                remaining,
+                primaryAmmoPredicate,
+                secondaryRangedPredicate,
+                secondaryAmmoPredicate);
+            if (reserveKind == StrictHeroMountedRangedReserveKind.EmptyPlaceholder)
+                AddEmptyMountedWeaponSlotPlaceholder(ordered);
+
+            AddStrictHeroUnshieldedMountedRangedBackup(
+                ordered,
+                remaining,
+                secondaryRangedPredicate,
+                reserveKind,
+                preferThrownOverMelee,
+                preferShieldCompatibleMelee: false);
+        }
+
+        private enum StrictHeroMountedRangedReserveKind
+        {
+            PrimaryAmmo = 0,
+            SecondaryBackupAmmo = 1,
+            EmptyPlaceholder = 2
+        }
+
+        private static StrictHeroMountedRangedReserveKind ResolveStrictHeroMountedRangedReserveSlot(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining,
+            Func<MountedWeaponSlotState, bool> primaryAmmoPredicate,
+            Func<MountedWeaponSlotState, bool> secondaryRangedPredicate,
+            Func<MountedWeaponSlotState, bool> secondaryAmmoPredicate)
+        {
+            if (ordered == null || remaining == null)
+                return StrictHeroMountedRangedReserveKind.EmptyPlaceholder;
+
+            MountedWeaponSlotState reserveAmmo = TakeFirst(remaining, primaryAmmoPredicate);
+            if (reserveAmmo != null)
+            {
+                ordered.Add(reserveAmmo);
+                return StrictHeroMountedRangedReserveKind.PrimaryAmmo;
+            }
+
+            if (remaining.Any(secondaryRangedPredicate))
+            {
+                reserveAmmo = TakeFirst(remaining, secondaryAmmoPredicate);
+            }
+
+            if (reserveAmmo == null)
+                return StrictHeroMountedRangedReserveKind.EmptyPlaceholder;
+
+            ordered.Add(reserveAmmo);
+            return StrictHeroMountedRangedReserveKind.SecondaryBackupAmmo;
+        }
+
+        private static void AddStrictHeroShieldedMountedRangedBackup(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining,
+            Func<MountedWeaponSlotState, bool> primaryAmmoPredicate,
+            bool preferThrownOverMelee,
+            bool preferShieldCompatibleMelee)
+        {
+            if (ordered == null || remaining == null)
+                return;
+
+            if (TakeAndAdd(ordered, remaining, primaryAmmoPredicate))
+                return;
+
+            if (preferThrownOverMelee && TakeAndAdd(ordered, remaining, IsThrownWeaponSlot))
+                return;
+
+            if (preferShieldCompatibleMelee && TakeAndAdd(ordered, remaining, IsShieldCompatibleMeleeSlot))
+                return;
+
+            if (TakeAndAdd(ordered, remaining, IsMeleeWeaponSlot))
+                return;
+
+            if (!preferThrownOverMelee)
+                TakeAndAdd(ordered, remaining, IsThrownWeaponSlot);
+        }
+
+        private static void AddStrictHeroUnshieldedMountedRangedBackup(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining,
+            Func<MountedWeaponSlotState, bool> secondaryRangedPredicate,
+            StrictHeroMountedRangedReserveKind reserveKind,
+            bool preferThrownOverMelee,
+            bool preferShieldCompatibleMelee)
+        {
+            if (ordered == null || remaining == null)
+                return;
+
+            if (reserveKind == StrictHeroMountedRangedReserveKind.SecondaryBackupAmmo &&
+                TakeAndAdd(ordered, remaining, secondaryRangedPredicate))
+            {
+                return;
+            }
+
+            if (preferThrownOverMelee && TakeAndAdd(ordered, remaining, IsThrownWeaponSlot))
+                return;
+
+            if (preferShieldCompatibleMelee && TakeAndAdd(ordered, remaining, IsShieldCompatibleMeleeSlot))
+                return;
+
+            if (TakeAndAdd(ordered, remaining, IsMeleeWeaponSlot))
+                return;
+
+            if (!preferThrownOverMelee)
+                TakeAndAdd(ordered, remaining, IsThrownWeaponSlot);
+        }
+
+        private static bool TryAddMountedReserveAmmo(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining)
+        {
+            if (ordered == null || remaining == null)
+                return false;
+
+            MountedWeaponSlotState reserveAmmo = TakeFirst(remaining, MountedWeaponRole.Ammo);
+            if (reserveAmmo == null)
+                return false;
+
+            ordered.Add(reserveAmmo);
+            return true;
+        }
+
+        private static void AddEmptyMountedWeaponSlotPlaceholder(List<MountedWeaponSlotState> ordered)
+        {
+            if (ordered == null || ordered.Count >= 4)
+                return;
+
+            ordered.Add(null);
+        }
+
+        private static bool TakeAndAdd(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining,
+            Func<MountedWeaponSlotState, bool> predicate)
+        {
+            MountedWeaponSlotState match = TakeFirst(remaining, predicate);
+            if (match == null)
+                return false;
+
+            ordered?.Add(match);
+            return true;
         }
 
         private static void AddNextPreferred(
@@ -603,6 +986,136 @@ namespace CoopSpectator.Infrastructure
             remaining.Remove(match);
         }
 
+        private static void AddMountedPrimaryMelee(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining,
+            bool preferShieldCompatible)
+        {
+            if (ordered == null || remaining == null || remaining.Count == 0)
+                return;
+
+            MountedWeaponSlotState match = null;
+            if (preferShieldCompatible)
+            {
+                match = remaining.FirstOrDefault(slot =>
+                    slot != null &&
+                    (slot.Role == MountedWeaponRole.Polearm || slot.Role == MountedWeaponRole.Melee) &&
+                    ((((int?)slot.Item?.PrimaryWeapon?.WeaponFlags) ?? 0) & (int)WeaponFlags.NotUsableWithOneHand) != (int)WeaponFlags.NotUsableWithOneHand);
+            }
+
+            if (match == null)
+                match = TakeFirst(remaining, MountedWeaponRole.Polearm) ?? TakeFirst(remaining, MountedWeaponRole.Melee);
+            else
+                remaining.Remove(match);
+
+            if (match != null)
+                ordered.Add(match);
+        }
+
+        private static void AddStrictHeroPrimaryBowSet(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining)
+        {
+            AddFirst(ordered, remaining, IsBowWeaponSlot);
+            AddFirst(ordered, remaining, IsArrowAmmoSlot);
+        }
+
+        private static void AddStrictHeroSecondaryBowAmmo(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining)
+        {
+            AddFirst(ordered, remaining, IsArrowAmmoSlot);
+        }
+
+        private static void AddStrictHeroPrimaryCrossbowSet(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining)
+        {
+            AddFirst(ordered, remaining, IsCrossbowWeaponSlot);
+            AddFirst(ordered, remaining, IsBoltAmmoSlot);
+        }
+
+        private static void AddStrictHeroSecondaryCrossbowAmmo(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining)
+        {
+            AddFirst(ordered, remaining, IsBoltAmmoSlot);
+        }
+
+        private static void AddStrictHeroSecondaryCrossbowSet(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining)
+        {
+            AddFirst(ordered, remaining, IsCrossbowWeaponSlot);
+            AddFirst(ordered, remaining, IsBoltAmmoSlot);
+        }
+
+        private static void AddStrictHeroShield(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining)
+        {
+            AddFirst(ordered, remaining, slot => slot?.Role == MountedWeaponRole.Shield);
+        }
+
+        private static void AddStrictHeroThrown(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining)
+        {
+            AddFirst(ordered, remaining, IsThrownWeaponSlot);
+        }
+
+        private static void AddStrictHeroPrimaryMelee(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining,
+            bool preferShieldCompatible)
+        {
+            if (ordered == null || remaining == null)
+                return;
+
+            MountedWeaponSlotState match = preferShieldCompatible
+                ? TakeFirst(remaining, IsShieldCompatibleMeleeSlot)
+                : null;
+
+            if (match == null)
+                match = TakeFirst(remaining, IsMeleeWeaponSlot);
+
+            if (match != null)
+                ordered.Add(match);
+        }
+
+        private static void AddStrictHeroRemainingMelee(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining,
+            bool preferShieldCompatible)
+        {
+            if (ordered == null || remaining == null)
+                return;
+
+            MountedWeaponSlotState match = preferShieldCompatible
+                ? TakeFirst(remaining, IsShieldCompatibleMeleeSlot)
+                : null;
+
+            if (match == null)
+                match = TakeFirst(remaining, IsMeleeWeaponSlot);
+
+            if (match != null)
+                ordered.Add(match);
+        }
+
+        private static void AddStrictHeroLooseRanged(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining)
+        {
+            AddFirst(ordered, remaining, slot => slot?.Role == MountedWeaponRole.Ranged);
+        }
+
+        private static void AddStrictHeroLooseAmmo(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining)
+        {
+            AddFirst(ordered, remaining, slot => slot?.Role == MountedWeaponRole.Ammo);
+        }
+
         private static MountedWeaponSlotState TakeFirst(List<MountedWeaponSlotState> remaining, MountedWeaponRole role)
         {
             if (remaining == null || remaining.Count == 0)
@@ -616,12 +1129,37 @@ namespace CoopSpectator.Infrastructure
             return match;
         }
 
+        private static MountedWeaponSlotState TakeFirst(
+            List<MountedWeaponSlotState> remaining,
+            Func<MountedWeaponSlotState, bool> predicate)
+        {
+            if (remaining == null || remaining.Count == 0 || predicate == null)
+                return null;
+
+            MountedWeaponSlotState match = remaining.FirstOrDefault(predicate);
+            if (match == null)
+                return null;
+
+            remaining.Remove(match);
+            return match;
+        }
+
         private static void AddFirstByRole(
             List<MountedWeaponSlotState> ordered,
             List<MountedWeaponSlotState> remaining,
             MountedWeaponRole role)
         {
             MountedWeaponSlotState match = TakeFirst(remaining, role);
+            if (match != null)
+                ordered.Add(match);
+        }
+
+        private static void AddFirst(
+            List<MountedWeaponSlotState> ordered,
+            List<MountedWeaponSlotState> remaining,
+            Func<MountedWeaponSlotState, bool> predicate)
+        {
+            MountedWeaponSlotState match = TakeFirst(remaining, predicate);
             if (match != null)
                 ordered.Add(match);
         }
@@ -817,6 +1355,9 @@ namespace CoopSpectator.Infrastructure
             if (equipment == null)
                 return false;
 
+            if (IsSafeStrictHeroMountedRangedThrownMeleeLayout(equipment))
+                return false;
+
             MountedWeaponRole role0 = ResolveMountedWeaponRole(equipment[EquipmentIndex.Weapon0].Item);
             MountedWeaponRole role1 = ResolveMountedWeaponRole(equipment[EquipmentIndex.Weapon1].Item);
             MountedWeaponRole role2 = ResolveMountedWeaponRole(equipment[EquipmentIndex.Weapon2].Item);
@@ -826,6 +1367,9 @@ namespace CoopSpectator.Infrastructure
                 return false;
 
             if (IsSafeFootMeleeShieldRangedAmmoLayout(role0, role1, role2, role3))
+                return false;
+
+            if (IsSafeMountedRangedShieldAmmoLayout(role0, role1, role2, role3))
                 return false;
 
             bool hasRanged = role0 == MountedWeaponRole.Ranged ||
@@ -849,6 +1393,56 @@ namespace CoopSpectator.Infrastructure
                    role2 == MountedWeaponRole.Polearm ||
                    role2 == MountedWeaponRole.Ranged ||
                    role2 == MountedWeaponRole.Other;
+        }
+
+        private static bool IsSafeStrictHeroMountedRangedThrownMeleeLayout(Equipment equipment)
+        {
+            if (equipment == null)
+                return false;
+
+            var slots = ResolveMountedWeaponSlots(equipment);
+            MountedWeaponSlotState slot0 = slots.FirstOrDefault(slot => slot?.Slot == EquipmentIndex.Weapon0);
+            MountedWeaponSlotState slot1 = slots.FirstOrDefault(slot => slot?.Slot == EquipmentIndex.Weapon1);
+            MountedWeaponSlotState slot2 = slots.FirstOrDefault(slot => slot?.Slot == EquipmentIndex.Weapon2);
+            MountedWeaponSlotState slot3 = slots.FirstOrDefault(slot => slot?.Slot == EquipmentIndex.Weapon3);
+            if (slot0?.Item == null || slot1?.Item == null || slot2?.Item == null || slot3?.Item == null)
+                return false;
+
+            bool isBowPattern =
+                IsBowWeaponSlot(slot0) &&
+                (
+                    (IsArrowAmmoSlot(slot1) && IsThrownWeaponSlot(slot2)) ||
+                    (IsThrownWeaponSlot(slot1) && IsArrowAmmoSlot(slot2))
+                );
+            bool isCrossbowPattern =
+                IsCrossbowWeaponSlot(slot0) &&
+                (
+                    (IsBoltAmmoSlot(slot1) && IsThrownWeaponSlot(slot2)) ||
+                    (IsThrownWeaponSlot(slot1) && IsBoltAmmoSlot(slot2))
+                );
+            if (!isBowPattern && !isCrossbowPattern)
+                return false;
+
+            return IsMeleeWeaponSlot(slot3) ||
+                   slot3.Role == MountedWeaponRole.Other;
+        }
+
+        private static bool IsSafeMountedRangedShieldAmmoLayout(
+            MountedWeaponRole role0,
+            MountedWeaponRole role1,
+            MountedWeaponRole role2,
+            MountedWeaponRole role3)
+        {
+            if (role0 != MountedWeaponRole.Ranged ||
+                role1 != MountedWeaponRole.Shield ||
+                role2 != MountedWeaponRole.Ammo)
+            {
+                return false;
+            }
+
+            return role3 == MountedWeaponRole.Melee ||
+                   role3 == MountedWeaponRole.Polearm ||
+                   role3 == MountedWeaponRole.Other;
         }
 
         private static bool IsSafeFootRangedShieldAmmoLayout(
@@ -939,6 +1533,59 @@ namespace CoopSpectator.Infrastructure
                 default:
                     return MountedWeaponRole.Other;
             }
+        }
+
+        private static bool IsBowWeaponSlot(MountedWeaponSlotState slot)
+        {
+            return slot?.Item?.ItemType == ItemObject.ItemTypeEnum.Bow;
+        }
+
+        private static bool IsCrossbowWeaponSlot(MountedWeaponSlotState slot)
+        {
+            return slot?.Item?.ItemType == ItemObject.ItemTypeEnum.Crossbow;
+        }
+
+        private static bool IsArrowAmmoSlot(MountedWeaponSlotState slot)
+        {
+            return slot?.Item?.ItemType == ItemObject.ItemTypeEnum.Arrows;
+        }
+
+        private static bool IsBoltAmmoSlot(MountedWeaponSlotState slot)
+        {
+            return slot?.Item?.ItemType == ItemObject.ItemTypeEnum.Bolts;
+        }
+
+        private static bool IsThrownWeaponSlot(MountedWeaponSlotState slot)
+        {
+            if (slot?.Item == null)
+                return false;
+
+            WeaponComponentData primaryWeapon = slot.Item.PrimaryWeapon;
+            if (primaryWeapon != null)
+            {
+                return primaryWeapon.WeaponClass == WeaponClass.Javelin ||
+                       primaryWeapon.WeaponClass == WeaponClass.ThrowingAxe ||
+                       primaryWeapon.WeaponClass == WeaponClass.ThrowingKnife ||
+                       primaryWeapon.WeaponClass == WeaponClass.Stone ||
+                       primaryWeapon.WeaponClass == WeaponClass.SlingStone;
+            }
+
+            return slot.Item.ItemType == ItemObject.ItemTypeEnum.Thrown;
+        }
+
+        private static bool IsMeleeWeaponSlot(MountedWeaponSlotState slot)
+        {
+            return slot != null &&
+                   (slot.Role == MountedWeaponRole.Melee || slot.Role == MountedWeaponRole.Polearm);
+        }
+
+        private static bool IsShieldCompatibleMeleeSlot(MountedWeaponSlotState slot)
+        {
+            if (!IsMeleeWeaponSlot(slot))
+                return false;
+
+            int weaponFlags = ((int?)slot.Item?.PrimaryWeapon?.WeaponFlags) ?? 0;
+            return (weaponFlags & (int)WeaponFlags.NotUsableWithOneHand) != (int)WeaponFlags.NotUsableWithOneHand;
         }
 
         private static string GetWeaponSlotLabel(EquipmentIndex slot)
