@@ -12567,7 +12567,10 @@ namespace CoopSpectator.Patches
             if (missionPeer == null || !missionPeer.IsControlledAgentActive)
                 return false;
 
-            Team team = missionPeer.Team ?? missionPeer.ControlledAgent?.Team;
+            Team team = missionPeer.ControlledAgent?.Team ??
+                        ResolveAuthoritativeMissionTeamForPatch(
+                            mission,
+                            CoopBattleAuthorityState.GetSelectionState(missionPeer).Side);
             string controlledEntryId = ResolveAgentEntryId(
                 missionPeer.ControlledAgent,
                 CoopBattleSpawnRuntimeState.TryGetState(missionPeer, out PeerSpawnRuntimeState spawnIdentityState)

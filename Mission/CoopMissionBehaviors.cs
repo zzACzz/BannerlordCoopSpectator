@@ -22022,7 +22022,11 @@ namespace CoopSpectator.MissionBehaviors
             try
             {
                 RosterEntryState targetEntryState = ResolveMaterializedEntryStateForPossessedAgent(targetAgent, pendingRequest);
-                Team peerTeam = missionPeer.Team ?? targetAgent.Team;
+                Team peerTeam = ResolveObservedActiveOrAuthoritativeMissionTeam(
+                                    mission,
+                                    missionPeer,
+                                    source + " replace-bot") ??
+                                targetAgent.Team;
                 if (peerTeam != null && !ReferenceEquals(targetAgent.Team, peerTeam))
                 {
                     targetAgent.SetTeam(peerTeam, false);
@@ -22190,7 +22194,11 @@ namespace CoopSpectator.MissionBehaviors
                 if (!DoesPossessedEntryMatchCommanderEntry(commanderEntry.EntryId, possessedEntryId))
                     return "CommanderControl=(captain)";
 
-                Team team = missionPeer.Team ?? controlledAgent.Team;
+                Team team = controlledAgent.Team ??
+                            ResolveObservedActiveOrAuthoritativeMissionTeam(
+                                mission,
+                                missionPeer,
+                                source + " commander-control");
                 if (team == null)
                     return "CommanderControl=(captain)";
 
@@ -24252,10 +24260,7 @@ namespace CoopSpectator.MissionBehaviors
             if (HasAllowedRosterForSide(assignedSide))
                 return assignedSide;
 
-            BattleSideEnum runtimeSide =
-                missionPeer.Team != null && !ReferenceEquals(missionPeer.Team, mission?.SpectatorTeam)
-                    ? missionPeer.Team.Side
-                    : BattleSideEnum.None;
+            BattleSideEnum runtimeSide = ResolveActiveControlledAgentSide(mission, missionPeer);
             if (runtimeSide != BattleSideEnum.None)
                 CoopBattleAuthorityState.TryRequestSide(missionPeer, runtimeSide, source + " runtime-team");
 
@@ -24265,6 +24270,52 @@ namespace CoopSpectator.MissionBehaviors
 
             CoopBattleAuthorityState.TryAssignSide(missionPeer, requestedOrRuntimeSide, source);
             return requestedOrRuntimeSide;
+        }
+
+        private static BattleSideEnum ResolveActiveControlledAgentSide(Mission mission, MissionPeer missionPeer)
+        {
+            Team activeControlledTeam = ResolveActiveControlledAgentTeam(mission, missionPeer);
+            return activeControlledTeam?.Side ?? BattleSideEnum.None;
+        }
+
+        private static Team ResolveActiveControlledAgentTeam(Mission mission, MissionPeer missionPeer)
+        {
+            Agent controlledAgent = missionPeer?.ControlledAgent;
+            Team controlledTeam = controlledAgent?.Team;
+            if (controlledAgent == null ||
+                !controlledAgent.IsActive() ||
+                controlledTeam == null ||
+                controlledTeam.Side == BattleSideEnum.None ||
+                ReferenceEquals(controlledTeam, mission?.SpectatorTeam))
+            {
+                return null;
+            }
+
+            return controlledTeam;
+        }
+
+        private static Team ResolveObservedActiveOrAuthoritativeMissionTeam(
+            Mission mission,
+            MissionPeer missionPeer,
+            string source)
+        {
+            Team activeControlledTeam = ResolveActiveControlledAgentTeam(mission, missionPeer);
+            if (activeControlledTeam != null)
+                return activeControlledTeam;
+
+            BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " observed-team");
+            if (authoritativeSide == BattleSideEnum.None)
+                return null;
+
+            Team authoritativeTeam = ResolveAuthoritativeMissionTeam(mission, missionPeer, authoritativeSide);
+            if (authoritativeTeam == null ||
+                authoritativeTeam.Side == BattleSideEnum.None ||
+                ReferenceEquals(authoritativeTeam, mission?.SpectatorTeam))
+            {
+                return null;
+            }
+
+            return authoritativeTeam;
         }
 
         private static bool HasAllowedRosterForSide(BattleSideEnum side)
@@ -24338,14 +24389,19 @@ namespace CoopSpectator.MissionBehaviors
                 Agent controlledAgent = missionPeer.ControlledAgent;
                 bool hasActiveControlledAgent = HasActiveControlledAgent(missionPeer);
                 bool hadActiveCoopLifeRuntime = IsPeerOccupyingActiveCoopLife(missionPeer);
+                Team activeControlledTeam = ResolveActiveControlledAgentTeam(mission, missionPeer);
                 bool lostControlledAgent =
                     hadActiveCoopLifeRuntime &&
                     (!hasActiveControlledAgent ||
-                     missionPeer.Team == null ||
-                     ReferenceEquals(missionPeer.Team, mission.SpectatorTeam));
+                     activeControlledTeam == null);
                 if (lostControlledAgent)
                 {
-                    Team previousTeam = missionPeer.Team ?? controlledAgent?.Team;
+                    Team previousTeam =
+                        controlledAgent?.Team ??
+                        ResolveObservedActiveOrAuthoritativeMissionTeam(
+                            mission,
+                            missionPeer,
+                            source + " lost-controlled-agent");
                     if (controlledAgent != null && !controlledAgent.IsActive())
                     {
                         missionPeer.ControlledAgent = null;
@@ -24393,22 +24449,6 @@ namespace CoopSpectator.MissionBehaviors
                         CoopBattleAuthorityState.GetSelectedEntryId(missionPeer),
                         source + " controlled-agent");
                     continue;
-                }
-
-                if (missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
-                {
-                    BattleSideEnum spectatorAuthoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " spectator-pending-request");
-                    if (spectatorAuthoritativeSide == BattleSideEnum.None)
-                    {
-                        CoopBattleSelectionRequestState.Clear(missionPeer, source + " spectator");
-                        CoopBattleSpawnRequestState.Clear(missionPeer, source + " spectator");
-                        CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
-                            peer,
-                            source + " spectator");
-                        CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " spectator");
-                        CoopBattlePeerLifecycleRuntimeState.MarkNoSide(missionPeer, BattleSideEnum.None, source + " spectator");
-                        continue;
-                    }
                 }
 
                 BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " pending-request");
@@ -24631,7 +24671,12 @@ namespace CoopSpectator.MissionBehaviors
 
             NetworkCommunicator peer = missionPeer.GetNetworkPeer();
             Agent controlledAgent = missionPeer.ControlledAgent;
-            Team previousTeam = missionPeer.Team ?? controlledAgent?.Team;
+            Team previousTeam =
+                controlledAgent?.Team ??
+                ResolveObservedActiveOrAuthoritativeMissionTeam(
+                    mission,
+                    missionPeer,
+                    source + " force-respawnable");
             bool triggeredVanillaRemoval = false;
             bool returnedMaterializedAgentToAi = false;
             if (controlledAgent != null && controlledAgent.IsActive())
@@ -25436,10 +25481,7 @@ namespace CoopSpectator.MissionBehaviors
             bool peerOccupiesActiveCoopLife = IsPeerOccupyingActiveCoopLife(missionPeer);
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
             BattleSideEnum assignedSide = CoopBattleAuthorityState.GetAssignedSide(missionPeer);
-            BattleSideEnum runtimeSide =
-                missionPeer.Team != null && !ReferenceEquals(missionPeer.Team, mission.SpectatorTeam)
-                    ? missionPeer.Team.Side
-                    : BattleSideEnum.None;
+            BattleSideEnum runtimeSide = ResolveActiveControlledAgentSide(mission, missionPeer);
             BattleSideEnum committedSide = assignedSide != BattleSideEnum.None ? assignedSide : runtimeSide;
             if (requestedSide != BattleSideEnum.None &&
                 currentPhase >= CoopBattlePhase.BattleActive &&
