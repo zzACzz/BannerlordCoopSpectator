@@ -10,6 +10,10 @@ namespace CoopSpectator.Patches
 {
     internal static class MissionLobbySpawnContractPatch
     {
+        private static readonly MethodInfo SetStatePlayingAsServerMethod = typeof(MissionLobbyComponent).GetMethod(
+            "SetStatePlayingAsServer",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
         public static void Apply(Harmony harmony)
         {
             try
@@ -81,10 +85,13 @@ namespace CoopSpectator.Patches
                 if (!ShouldUseListedShellLobbyContract(mission))
                     return true;
 
-                if (__instance.CurrentMultiplayerState != MissionLobbyComponent.MultiplayerGameState.Playing)
+                if (!GameNetwork.IsServerOrRecorder)
                     return true;
 
-                if (!GameNetwork.IsServerOrRecorder)
+                if (__instance.CurrentMultiplayerState == MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers)
+                    return HandleWaitingFirstPlayersState(__instance, mission);
+
+                if (__instance.CurrentMultiplayerState != MissionLobbyComponent.MultiplayerGameState.Playing)
                     return true;
 
                 MissionMultiplayerGameModeBase gameMode = mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
@@ -107,6 +114,58 @@ namespace CoopSpectator.Patches
                 ModLogger.Info("MissionLobbySpawnContractPatch: mission-tick prefix failed open: " + ex.Message);
                 return true;
             }
+        }
+
+        private static bool HandleWaitingFirstPlayersState(MissionLobbyComponent lobbyComponent, Mission mission)
+        {
+            if (!GameNetwork.IsServer)
+                return true;
+
+            MultiplayerTimerComponent timer = mission?.GetMissionBehavior<MultiplayerTimerComponent>();
+            if (timer == null || SetStatePlayingAsServerMethod == null)
+                return true;
+
+            MultiplayerWarmupComponent warmup = mission.GetMissionBehavior<MultiplayerWarmupComponent>();
+            if (warmup != null && warmup.IsInWarmup)
+                return false;
+
+            if (!timer.CheckIfTimerPassed())
+                return false;
+
+            int synchronizedPeerCount = CountSynchronizedPeers();
+            int configuredBotCount =
+                MultiplayerOptions.OptionType.NumberOfBotsTeam1.GetIntValue() +
+                MultiplayerOptions.OptionType.NumberOfBotsTeam2.GetIntValue();
+            int minPlayersToStart = MultiplayerOptions.OptionType.MinNumberOfPlayersForMatchStart.GetIntValue();
+            bool shouldStart =
+                synchronizedPeerCount + configuredBotCount >= minPlayersToStart ||
+                MBCommon.CurrentGameType == MBCommon.GameType.MultiClientServer;
+            if (!shouldStart)
+                return false;
+
+            SetStatePlayingAsServerMethod.Invoke(lobbyComponent, Array.Empty<object>());
+            ModLogger.Info(
+                "MissionLobbySpawnContractPatch: advanced listed-shell lobby from WaitingFirstPlayers to Playing via explicit coop-owned lobby contract. " +
+                "Peers=" + synchronizedPeerCount +
+                " Bots=" + configuredBotCount +
+                " MinPlayers=" + minPlayersToStart +
+                " Mission=" + (mission?.SceneName ?? "unknown"));
+            return false;
+        }
+
+        private static int CountSynchronizedPeers()
+        {
+            if (GameNetwork.NetworkPeers == null)
+                return 0;
+
+            int count = 0;
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer != null && peer.IsSynchronized)
+                    count++;
+            }
+
+            return count;
         }
 
         private static int ResolveListedShellRespawnPeriodForPeer(Mission mission, MissionPeer peer)
