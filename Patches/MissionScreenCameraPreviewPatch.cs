@@ -54,9 +54,7 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
-                if (localMissionPeer == null ||
-                    previewAgent == null ||
+                if (previewAgent == null ||
                     !previewAgent.IsActive() ||
                     !ReferenceEquals(previewAgent.Mission, __instance.Mission))
                 {
@@ -76,7 +74,6 @@ namespace CoopSpectator.Patches
                 bool missionTypeBlockedPreview =
                     missionLobbyComponent != null &&
                     missionLobbyComponent.MissionType == MultiplayerGameType.Battle;
-                bool nativeVisualStateBlockedPreview = localMissionPeer.HasSpawnedAgentVisuals;
 
                 __result = new Mission.SpectatorData(
                     previewAgent,
@@ -86,8 +83,7 @@ namespace CoopSpectator.Patches
                 string logKey =
                     previewAgent.Index + "|" +
                     (__instance.Mission.SceneName ?? "null") + "|" +
-                    missionTypeBlockedPreview + "|" +
-                    nativeVisualStateBlockedPreview;
+                    missionTypeBlockedPreview;
                 if (!string.Equals(_lastPreviewOverrideKey, logKey, StringComparison.Ordinal))
                 {
                     _lastPreviewOverrideKey = logKey;
@@ -97,7 +93,6 @@ namespace CoopSpectator.Patches
                         " PreviousAgentIndex=" + (currentAgentToFollow?.Index.ToString() ?? "null") +
                         " PreviousCameraType=" + (int)previousCameraType +
                         " MissionTypeBlockedPreview=" + missionTypeBlockedPreview +
-                        " NativeVisualStateBlockedPreview=" + nativeVisualStateBlockedPreview +
                         " Mission=" + (__instance.Mission.SceneName ?? "null"));
                 }
             }

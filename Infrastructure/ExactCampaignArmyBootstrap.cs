@@ -1413,10 +1413,10 @@ namespace CoopSpectator.Infrastructure
             if (team == null)
                 return null;
 
-            string assignedPeerBannerCode = TryResolveAssignedMissionPeerBannerCode(team);
+            string assignedPeerBannerCode = TryResolveAssignedPeerBannerCodeForSide(side);
             if (!string.IsNullOrWhiteSpace(assignedPeerBannerCode))
             {
-                source = "assigned-peer";
+                source = "coop-side-peer";
                 return assignedPeerBannerCode;
             }
 
@@ -1440,9 +1440,9 @@ namespace CoopSpectator.Infrastructure
             return null;
         }
 
-        private static string TryResolveAssignedMissionPeerBannerCode(Team team)
+        private static string TryResolveAssignedPeerBannerCodeForSide(BattleSideEnum side)
         {
-            if (team == null || GameNetwork.NetworkPeers == null)
+            if (side == BattleSideEnum.None || GameNetwork.NetworkPeers == null)
                 return null;
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
@@ -1451,7 +1451,14 @@ namespace CoopSpectator.Infrastructure
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                if (missionPeer == null || !ReferenceEquals(missionPeer.Team, team))
+                if (missionPeer == null)
+                    continue;
+
+                CoopBattleAuthorityState.PeerSelectionState selectionState = CoopBattleAuthorityState.GetSelectionState(missionPeer);
+                BattleSideEnum peerSide = selectionState.Side != BattleSideEnum.None
+                    ? selectionState.Side
+                    : selectionState.RequestedSide;
+                if (peerSide != side)
                     continue;
 
                 string bannerCode = missionPeer.Peer?.BannerCode;

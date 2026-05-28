@@ -115,14 +115,12 @@ namespace CoopSpectator.Patches
             if (gameMode?.WarmupComponent != null && gameMode.WarmupComponent.IsInWarmup)
                 return 3;
 
-            if (peer?.Team != null)
-            {
-                if (peer.Team.Side == BattleSideEnum.Attacker)
-                    return MultiplayerOptions.OptionType.RespawnPeriodTeam2.GetIntValue();
+            BattleSideEnum authoritativeSide = CoopBattleAuthorityState.GetAssignedSide(peer);
+            if (authoritativeSide == BattleSideEnum.Attacker)
+                return MultiplayerOptions.OptionType.RespawnPeriodTeam2.GetIntValue();
 
-                if (peer.Team.Side == BattleSideEnum.Defender)
-                    return MultiplayerOptions.OptionType.RespawnPeriodTeam1.GetIntValue();
-            }
+            if (authoritativeSide == BattleSideEnum.Defender)
+                return MultiplayerOptions.OptionType.RespawnPeriodTeam1.GetIntValue();
 
             return -1;
         }

@@ -1100,55 +1100,6 @@ namespace CoopSpectator.UI
             }
         }
 
-        private static string TryResolveAssignedMissionPeerBannerCode(Team team)
-        {
-            if (team == null || GameNetwork.NetworkPeers == null)
-                return null;
-
-            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
-            {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive)
-                    continue;
-
-                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                if (missionPeer == null || !ReferenceEquals(missionPeer.Team, team))
-                    continue;
-
-                string bannerCode = missionPeer.Peer?.BannerCode;
-                if (!string.IsNullOrWhiteSpace(bannerCode))
-                    return bannerCode;
-            }
-
-            return null;
-        }
-
-        private static string TryResolveSingleActivePlayerPeerBannerCode()
-        {
-            if (GameNetwork.NetworkPeers == null)
-                return null;
-
-            string resolvedBannerCode = null;
-            int candidateCount = 0;
-            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
-            {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive)
-                    continue;
-
-                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                string bannerCode = missionPeer?.Peer?.BannerCode;
-                if (string.IsNullOrWhiteSpace(bannerCode))
-                    continue;
-
-                candidateCount++;
-                if (candidateCount > 1)
-                    return null;
-
-                resolvedBannerCode = bannerCode;
-            }
-
-            return resolvedBannerCode;
-        }
-
         private static string TryResolvePlayerClanBannerCode()
         {
             try

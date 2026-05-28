@@ -214,6 +214,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - authoritative troop selection більше не читає native `MissionPeer.SelectedTroopIndex` як джерело істини;
 - native `MissionPeer.Team` уже моститься server-side з coop authority state;
 - coop hero-class resolver, class-restriction sync і listed direct-spawn path більше не читають native `MissionPeer.Team` / `MissionPeer.Culture` як source of truth; вони резолвлять runtime team/culture від authoritative side + entry state, а native peer state лишається compatibility output;
+- exact formation-banner seeding теж більше не шукає assigned peer через native `MissionPeer.Team`; banner source тепер резолвиться від coop-owned side authority + player-side fallback, а не від native mission membership cache;
 - native `SelectedTroopIndex` лишається тільки compatibility bridge для live native peer state, але late-join replay цього поля вже не входить у join contract;
 - native `SelectedTroopIndex` bridge більше не активується в custom `CoopBattle` runtime; у listed-shell path він більше не використовується як native late-join sync token, бо цю ділянку вже забрав `CoopMissionNetworkBridge`;
 - native peer-state replay для `SetPeerTeam` / `ChangeCulture` більше не покладається на vanilla loop усередині `MissionNetworkComponent.SendExistingObjectsToPeer(...)`; battle-map ingress збирає цей replay явно через наш patch-layer;
@@ -233,6 +234,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - vanilla team/class gauntlet entry views у wrapped listed `TeamDeathmatch` shell тепер зрізаються структурно в `MissionStateOpenNewPatches`, а не глушаться окремим UI suppression patch;
 - local camera preview у `UI/CoopMissionSelectionView.cs` тепер пише тільки в `MissionScreen.SetAgentToFollow(...)`; preview path більше не використовує `LastFollowedAgent` / `MissionPeer.FollowedAgent` network echo;
 - `Patches/MissionScreenCameraPreviewPatch.cs` більше не мутує `MissionLobbyComponent.MissionType` або `MissionPeer.HasSpawnedAgentVisuals`; shim тепер робить postfix override для `MissionScreen.GetSpectatingData(...)`;
+- `Patches/MissionScreenCameraPreviewPatch.cs` тепер також більше не читає `MissionPeer.HasSpawnedAgentVisuals` навіть як passive preview gate; camera preview shim залежить тільки від нашого active preview target і result override;
 - custom `CoopBattle` client runtime більше не несе `MultiplayerTeamSelectComponent`; client-side team/class intent повністю йде через overlay + authoritative network/file bridge path;
 - passive `ConsoleMatchStartEndHandler` більше не входить у custom `CoopBattle` runtime contract; native platform-state shell приглушений разом із visual bootstrap sender-ом;
 - listed-shell більше не тримає окремий team-selection shell; side/team authority повністю заходить через coop-owned bridge path.
@@ -269,6 +271,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - listed-shell direct spawn більше не армує `HasSpawnedAgentVisuals` / `EquipmentUpdatingExpired` як bootstrap state; native visual flags тепер лишаються очищеними, а `MissionNetworkComponent.OnPeerSelectedTeam(...)` додатково глушиться як visual bootstrap corridor;
 - native `TeamDeathmatchSpawningBehavior` уже прибраний із wrapped listed shell; active listed spawn authority тепер живе в `CoopMissionSpawnLogic`, а official `SpawnComponent`/`SpawningBehaviorBase` вже взагалі прибрані з listed ingress stack;
 - `MissionLobbyComponent.GetSpawnPeriodDurationForPeer(...)` більше не читає respawn period через `Mission.GetMissionBehavior<SpawnComponent>()`, а match-end `OnMissionTick(...)` більше не дотягується до `_gameMode.SpawnComponent.SpawningBehavior`; обидва контракти тепер замкнуті в `MissionLobbySpawnContractPatch`;
+- listed-shell respawn period у `MissionLobbySpawnContractPatch` тепер теж більше не читає `MissionPeer.Team.Side`; він резолвиться від `CoopBattleAuthorityState.GetAssignedSide(...)`, тому lobby timer contract уже не залежить від native peer-team cache;
 - native `MissionMultiplayerTeamDeathmatch` / `MissionMultiplayerTeamDeathmatchClient` уже прибрані із wrapped listed shell; live ingress лишився тільки через compatibility modes, які тримають TDM-derived type contract без native economy/score loop;
 - phase progression до `Deployment`/`PreBattleHold` тепер спирається на реальний control/materialization readiness, а не на `HasSpawnedAgentVisuals`.
 
@@ -409,6 +412,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - active coop runtime side/team logic теж більше не бере `MissionPeer.Team` як source of truth: `ResolveAuthoritativeSide(...)`, materialized replace-bot, commander-control promotion, pending-spawn/lost-life path і server-side select-all suppression тепер спираються на `controlledAgent.Team` або authoritative mission team; native `MissionPeer.Team` лишився головно в compatibility write/replay шарі та логах.
 - `CoopBattlePeerSessionState` і spectator fallback у native late-join replay теж більше не читають runtime side з `MissionPeer.Team`; session/runtime side тепер йде від active `controlledAgent.Team`, а spectator replay — від explicit coop session stage `NoSide`.
 - `SelectedTroopIndex` compatibility path теж більше не читає native `MissionPeer.SelectedTroopIndex` для прийняття рішень; listed hero-class sync тепер тримає власний bridged-index cache і використовує native troop-index тільки як write-only compatibility output + network message surface.
+- presentation/helper layer теж далі чиститься від native peer-team читань: dead `CoopSelectionUiHelpers` banner helper-и прибрані, а live exact banner seeding більше не використовує `MissionPeer.Team` для assigned-peer lookup.
 - listed-shell native `TeamInitialPerkInfoReady` більше не залежить виключно від `MissionLobbyEquipmentNetworkComponent`, але й більше не моститься server-side, бо live listed-shell spawn reader для цього gate вже прибраний;
 - native `MissionLobbyEquipmentNetworkComponent` повністю прибраний із wrapped listed `TeamDeathmatch` shell; listed ingress більше не тримає even passive equipment compatibility component;
 - native `MultiplayerTeamSelectComponent` повністю прибраний із wrapped listed `TeamDeathmatch` shell; listed ingress більше не несе окремий team-select compatibility layer;
