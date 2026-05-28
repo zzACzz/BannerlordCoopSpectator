@@ -5,6 +5,7 @@ using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using HarmonyLib;
+using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.Patches
@@ -231,18 +232,29 @@ namespace CoopSpectator.Patches
                 if (missionPeer == null)
                     continue;
 
-                if (missionPeer.Team != null)
+                if (!CoopMissionSpawnLogic.TryResolveAuthoritativeNativePeerCompatibilityStateForReplay(
+                        mission,
+                        missionPeer,
+                        source + " subject-replay",
+                        out int teamIndex,
+                        out BasicCultureObject culture,
+                        out string _))
+                {
+                    continue;
+                }
+
+                if (teamIndex >= 0)
                 {
                     GameNetwork.BeginModuleEventAsServer(networkPeer);
-                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetPeerTeam(subjectPeer, missionPeer.Team.TeamIndex));
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetPeerTeam(subjectPeer, teamIndex));
                     GameNetwork.EndModuleEventAsServer();
                     sentAny = true;
                 }
 
-                if (missionPeer.Culture != null)
+                if (culture != null)
                 {
                     GameNetwork.BeginModuleEventAsServer(networkPeer);
-                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.ChangeCulture(missionPeer, missionPeer.Culture));
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.ChangeCulture(missionPeer, culture));
                     GameNetwork.EndModuleEventAsServer();
                     sentAny = true;
                 }

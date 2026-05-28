@@ -12660,7 +12660,7 @@ namespace CoopSpectator.Patches
             if (controlledAgent == null || !controlledAgent.IsActive())
                 return false;
 
-            Team team = myMissionPeer.Team ?? controlledAgent.Team ?? mission.PlayerTeam;
+            Team team = controlledAgent.Team ?? myMissionPeer.Team ?? mission.PlayerTeam;
             if (!ReferenceEquals(orderController, team?.PlayerOrderController))
                 return false;
 

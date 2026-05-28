@@ -936,7 +936,6 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly HashSet<string> _loggedArmedListedShellNativeSpawnCompatibilityKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _loggedDeferredVanillaSelectedTroopIndexBridgeRecipientKeys = new HashSet<string>(StringComparer.Ordinal);
-        private static readonly HashSet<string> _loggedDeferredNativePeerCompatibilityRecipientKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly Dictionary<int, int> _lastBridgedSelectedTroopIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _lastBridgedPeerTeamIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, string> _appliedFixedMissionCultureByPeer = new Dictionary<int, string>();
@@ -2735,7 +2734,6 @@ namespace CoopSpectator.MissionBehaviors
             _loggedForcedPreferredClassKeys.Clear();
             _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys.Clear();
             _loggedDeferredVanillaSelectedTroopIndexBridgeRecipientKeys.Clear();
-            _loggedDeferredNativePeerCompatibilityRecipientKeys.Clear();
             _lastBridgedSelectedTroopIndexByPeer.Clear();
             _lastBridgedPeerTeamIndexByPeer.Clear();
             _appliedFixedMissionCultureByPeer.Clear();
@@ -23365,7 +23363,7 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                if (missionPeer == null || missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
+                if (missionPeer == null)
                     continue;
 
                 // Fixed mission culture is only needed right before a real coop spawn.
@@ -23378,14 +23376,17 @@ namespace CoopSpectator.MissionBehaviors
                 if (controlledAgent != null && controlledAgent.IsActive())
                     continue;
 
-                BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " team-sync");
-                string targetCultureId = ResolveRuntimeMissionCultureIdForPeer(missionPeer, authoritativeSide);
-                if (string.IsNullOrWhiteSpace(targetCultureId))
+                if (!TryResolveAuthoritativeRuntimePeerContext(
+                        mission,
+                        missionPeer,
+                        source + " team-sync",
+                        out BattleSideEnum _,
+                        out Team authoritativeTeam,
+                        out BasicCultureObject targetCulture,
+                        out string _))
+                {
                     continue;
-
-                BasicCultureObject targetCulture = MBObjectManager.Instance?.GetObject<BasicCultureObject>(targetCultureId);
-                if (targetCulture == null)
-                    continue;
+                }
 
                 string currentCultureId = missionPeer.Culture?.StringId;
                 if (string.Equals(currentCultureId, targetCulture.StringId, StringComparison.Ordinal))
@@ -23409,13 +23410,11 @@ namespace CoopSpectator.MissionBehaviors
 
                 _appliedFixedMissionCultureByPeer[peer.Index] = appliedCultureId;
 
-                TryBroadcastFixedMissionCulture(peer, missionPeer, targetCulture);
-
                 ModLogger.Info(
-                    "CoopMissionSpawnLogic: forced fixed mission culture (" + source + "). " +
+                    "CoopMissionSpawnLogic: forced authoritative runtime culture without live native ChangeCulture rebroadcast (" + source + "). " +
                     "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                    " TeamIndex=" + missionPeer.Team.TeamIndex +
-                    " Side=" + missionPeer.Team.Side +
+                    " TeamIndex=" + authoritativeTeam.TeamIndex +
+                    " Side=" + authoritativeTeam.Side +
                     " PreviousCulture=" + (currentCultureId ?? "null") +
                     " AppliedCulture=" + appliedCultureId +
                     " PreferredHeroRole=" + (ResolvePreferredAllowedEntryStateForPeer(missionPeer, CoopBattleAuthorityState.GetSelectionState(missionPeer))?.HeroRole ?? "none"));
@@ -23479,25 +23478,13 @@ namespace CoopSpectator.MissionBehaviors
 
                 _lastBridgedPeerTeamIndexByPeer[peer.Index] = authoritativeTeamIndex;
 
-                try
-                {
-                    BroadcastNativePeerTeamCompatibility(
-                        peer,
-                        authoritativeTeamIndex,
-                        source + " authoritative-team-sync");
-
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: bridged authoritative peer team into native mission membership (" + source + "). " +
-                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                        " PreviousTeamIndex=" + (currentTeam?.TeamIndex ?? -1) +
-                        " AppliedTeamIndex=" + authoritativeTeamIndex +
-                        " AppliedSide=" + authoritativeTeam.Side +
-                        " PeerOccupiesActiveCoopLife=" + peerOccupiesActiveCoopLife);
-                }
-                catch (Exception ex)
-                {
-                    ModLogger.Info("CoopMissionSpawnLogic: rebroadcast authoritative peer team failed: " + ex.Message);
-                }
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: bridged authoritative peer team into native mission membership without live native SetPeerTeam rebroadcast (" + source + "). " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " PreviousTeamIndex=" + (currentTeam?.TeamIndex ?? -1) +
+                    " AppliedTeamIndex=" + authoritativeTeamIndex +
+                    " AppliedSide=" + authoritativeTeam.Side +
+                    " PeerOccupiesActiveCoopLife=" + peerOccupiesActiveCoopLife);
             }
         }
 
@@ -23541,31 +23528,6 @@ namespace CoopSpectator.MissionBehaviors
             return string.IsNullOrWhiteSpace(preferredEntry.CultureId)
                 ? null
                 : preferredEntry.CultureId;
-        }
-
-        private static void TryBroadcastFixedMissionCulture(NetworkCommunicator peer, MissionPeer missionPeer, BasicCultureObject targetCulture)
-        {
-            if (peer == null || missionPeer == null || targetCulture == null || !GameNetwork.IsServer)
-                return;
-
-            try
-            {
-                BroadcastNativePeerCultureCompatibility(
-                    missionPeer,
-                    targetCulture,
-                    source: "CoopMissionSpawnLogic.TryBroadcastFixedMissionCulture");
-
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: rebroadcast fixed culture after server override. " +
-                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                    " TeamIndex=" + (missionPeer.Team?.TeamIndex ?? -1) +
-                    " Side=" + (missionPeer.Team?.Side.ToString() ?? "None") +
-                    " Culture=" + targetCulture.StringId);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("CoopMissionSpawnLogic: rebroadcast fixed culture failed: " + ex.Message);
-            }
         }
 
         private static object GetServerMemberValue(object instance, string memberName)
@@ -25044,25 +25006,6 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     if (peer != null)
                         _lastBridgedPeerTeamIndexByPeer.Remove(peer.Index);
-
-                    try
-                    {
-                        if (peer != null)
-                        {
-                            BroadcastNativePeerTeamCompatibility(
-                                peer,
-                                spectatorTeam.TeamIndex,
-                                source + " spectator-holding-team");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        ModLogger.Info(
-                            "CoopMissionSpawnLogic: rebroadcast spectator holding team failed. " +
-                            "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
-                            " Source=" + (source ?? "unknown") +
-                            " Error=" + ex.Message);
-                    }
                 }
             }
 
@@ -28501,7 +28444,7 @@ namespace CoopSpectator.MissionBehaviors
             return null;
         }
 
-        private static bool TryResolveAuthoritativeRuntimePeerContext(
+        internal static bool TryResolveAuthoritativeRuntimePeerContext(
             Mission mission,
             MissionPeer missionPeer,
             string source,
@@ -28556,6 +28499,58 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return true;
+        }
+
+        internal static bool TryResolveAuthoritativeNativePeerCompatibilityStateForReplay(
+            Mission mission,
+            MissionPeer missionPeer,
+            string source,
+            out int teamIndex,
+            out BasicCultureObject culture,
+            out string failureReason)
+        {
+            teamIndex = -1;
+            culture = null;
+            failureReason = string.Empty;
+
+            if (mission == null)
+            {
+                failureReason = "mission is null";
+                return false;
+            }
+
+            if (missionPeer == null)
+            {
+                failureReason = "missionPeer is null";
+                return false;
+            }
+
+            if (TryResolveAuthoritativeRuntimePeerContext(
+                    mission,
+                    missionPeer,
+                    source + " native-peer-replay",
+                    out BattleSideEnum _,
+                    out Team authoritativeTeam,
+                    out BasicCultureObject authoritativeCulture,
+                    out failureReason))
+            {
+                teamIndex = authoritativeTeam.TeamIndex;
+                culture = authoritativeCulture;
+                return true;
+            }
+
+            Team currentTeam = missionPeer.Team;
+            if (currentTeam != null &&
+                mission.SpectatorTeam != null &&
+                ReferenceEquals(currentTeam, mission.SpectatorTeam))
+            {
+                teamIndex = currentTeam.TeamIndex;
+                culture = null;
+                failureReason = string.Empty;
+                return true;
+            }
+
+            return false;
         }
 
         private static bool TryRemovePendingAgentVisuals(Mission mission, MissionPeer missionPeer)
@@ -29701,116 +29696,6 @@ namespace CoopSpectator.MissionBehaviors
             GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateSelectedTroopIndex(peer, selectedTroopIndex));
             GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
             return true;
-        }
-
-        private static void BroadcastNativePeerTeamCompatibility(
-            NetworkCommunicator subjectPeer,
-            int teamIndex,
-            string source)
-        {
-            if (subjectPeer == null || !GameNetwork.IsServer)
-                return;
-
-            Mission mission = Mission.Current;
-            if (ShouldRouteNativePeerCompatibilityThroughSnapshotReadyRecipients(mission))
-            {
-                List<NetworkCommunicator> recipients = GameNetwork.NetworkPeers;
-                if (recipients == null)
-                    return;
-
-                foreach (NetworkCommunicator recipient in recipients)
-                {
-                    if (recipient == null || recipient.IsServerPeer || !recipient.IsConnectionActive)
-                        continue;
-
-                    if (!CoopMissionNetworkBridge.IsPeerCurrentBattleSnapshotBootstrapReady(recipient, out string readinessSummary))
-                    {
-                        string logKey =
-                            "team|" +
-                            (subjectPeer.UserName ?? subjectPeer.Index.ToString()) + "|" +
-                            recipient.Index + "|" +
-                            teamIndex + "|" +
-                            (source ?? "unknown");
-                        if (_loggedDeferredNativePeerCompatibilityRecipientKeys.Add(logKey))
-                        {
-                            ModLogger.Info(
-                                "CoopMissionSpawnLogic: withheld native SetPeerTeam from snapshot-unready peer. " +
-                                "SubjectPeer=" + (subjectPeer.UserName ?? subjectPeer.Index.ToString()) +
-                                " Recipient=" + (recipient.UserName ?? recipient.Index.ToString()) +
-                                " TeamIndex=" + teamIndex +
-                                " Readiness={" + (readinessSummary ?? "unknown") + "}" +
-                                " Source=" + (source ?? "unknown"));
-                        }
-
-                        continue;
-                    }
-
-                    GameNetwork.BeginModuleEventAsServer(recipient);
-                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetPeerTeam(subjectPeer, teamIndex));
-                    GameNetwork.EndModuleEventAsServer();
-                }
-
-                return;
-            }
-
-            GameNetwork.BeginBroadcastModuleEvent();
-            GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetPeerTeam(subjectPeer, teamIndex));
-            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
-        }
-
-        private static void BroadcastNativePeerCultureCompatibility(
-            MissionPeer subjectMissionPeer,
-            BasicCultureObject targetCulture,
-            string source)
-        {
-            if (subjectMissionPeer == null || targetCulture == null || !GameNetwork.IsServer)
-                return;
-
-            Mission mission = Mission.Current;
-            if (ShouldRouteNativePeerCompatibilityThroughSnapshotReadyRecipients(mission))
-            {
-                List<NetworkCommunicator> recipients = GameNetwork.NetworkPeers;
-                if (recipients == null)
-                    return;
-
-                foreach (NetworkCommunicator recipient in recipients)
-                {
-                    if (recipient == null || recipient.IsServerPeer || !recipient.IsConnectionActive)
-                        continue;
-
-                    if (!CoopMissionNetworkBridge.IsPeerCurrentBattleSnapshotBootstrapReady(recipient, out string readinessSummary))
-                    {
-                        string logKey =
-                            "culture|" +
-                            (subjectMissionPeer.Peer?.UserName ?? subjectMissionPeer.Peer?.Index.ToString() ?? "none") + "|" +
-                            recipient.Index + "|" +
-                            targetCulture.StringId + "|" +
-                            (source ?? "unknown");
-                        if (_loggedDeferredNativePeerCompatibilityRecipientKeys.Add(logKey))
-                        {
-                            ModLogger.Info(
-                                "CoopMissionSpawnLogic: withheld native ChangeCulture from snapshot-unready peer. " +
-                                "SubjectPeer=" + (subjectMissionPeer.Peer?.UserName ?? subjectMissionPeer.Peer?.Index.ToString() ?? "none") +
-                                " Recipient=" + (recipient.UserName ?? recipient.Index.ToString()) +
-                                " Culture=" + targetCulture.StringId +
-                                " Readiness={" + (readinessSummary ?? "unknown") + "}" +
-                                " Source=" + (source ?? "unknown"));
-                        }
-
-                        continue;
-                    }
-
-                    GameNetwork.BeginModuleEventAsServer(recipient);
-                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.ChangeCulture(subjectMissionPeer, targetCulture));
-                    GameNetwork.EndModuleEventAsServer();
-                }
-
-                return;
-            }
-
-            GameNetwork.BeginBroadcastModuleEvent();
-            GameNetwork.WriteMessage(new NetworkMessages.FromServer.ChangeCulture(subjectMissionPeer, targetCulture));
-            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
         }
 
         private static bool ShouldRouteNativePeerCompatibilityThroughSnapshotReadyRecipients(Mission mission)
