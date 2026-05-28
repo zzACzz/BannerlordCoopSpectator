@@ -128,7 +128,6 @@
     <Compile Include="..\Patches\BattleShellSuppressionPatch.cs" Link="Patches\BattleShellSuppressionPatch.cs" />
     <Compile Include="..\Patches\MultiplayerCharacterClassFallbackPatch.cs" Link="Patches\MultiplayerCharacterClassFallbackPatch.cs" />
     <Compile Include="..\Patches\StartupSafeMpHeroClassBootstrapPatch.cs" Link="Patches\StartupSafeMpHeroClassBootstrapPatch.cs" />
-    <Compile Include="..\Patches\ServerChangeCultureCanonicalizationPatch.cs" Link="Patches\ServerChangeCultureCanonicalizationPatch.cs" />
     <Compile Include="..\Patches\CampaignCombatProfileAgentStatsPatch.cs" Link="Patches\CampaignCombatProfileAgentStatsPatch.cs" />
   </ItemGroup>
 

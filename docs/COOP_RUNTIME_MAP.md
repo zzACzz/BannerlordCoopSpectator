@@ -348,7 +348,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 | Listed TDM shell wrapping | `Patches/MissionStateOpenNewPatches.cs` |
 | Native UI suppression | `Patches/BattleMapHudSuppressionPatch.cs`, `Patches/MissionScreenCameraPreviewPatch.cs` |
 | Connectivity і local/self join | `Patches/LobbyCustomGameLocalJoinPatch.cs`, `Patches/LobbyJoinResultSelfJoinArmPatch.cs`, `Patches/LocalJoinAddressPatch.cs`, `Patches/LobbyRequestJoinDiagnosticsPatch.cs` |
-| Native class/culture compatibility | `Patches/ClientChangeCultureCanonicalizationPatch.cs`, `Patches/ServerChangeCultureCanonicalizationPatch.cs`, `Patches/MultiplayerCharacterClassFallbackPatch.cs`, `Patches/StartupSafeMpHeroClassBootstrapPatch.cs` |
+| Native class compatibility | `Patches/MultiplayerCharacterClassFallbackPatch.cs`, `Patches/StartupSafeMpHeroClassBootstrapPatch.cs` |
 | Залишковий crash isolation | `Patches/IntermissionVmCrashGuardPatch.cs` |
 | Listed-shell startup helper | `DedicatedHelper/DedicatedHelperLauncher.cs` |
 
@@ -402,6 +402,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - live native `UpdateSelectedTroopIndex` broadcast теж більше не ллється в not-ready peer-и; compatibility output тепер іде тільки snapshot-ready recipient-ам, тому late-join selection window більше не залежить від vanilla replay навіть під час активних змін selection у бою;
 - live native `SetPeerTeam` / `ChangeCulture` compatibility broadcasts теж більше не ллються в snapshot-unready peer-и; якщо `SendExistingObjectsToPeer` спрацював до snapshot readiness, peer-state replay тепер відкладається й дограється вже через `CoopMissionNetworkBridge` readiness ack;
 - live native `SetPeerTeam` / `ChangeCulture` compatibility broadcasts взагалі прибрані з active coop runtime; late-join peer-state replay ще існує, але тепер бере team/culture з authoritative runtime resolver-а, а не з `MissionPeer.Team` / `MissionPeer.Culture` як implicit source;
+- `ClientChangeCultureCanonicalizationPatch` і `ServerChangeCultureCanonicalizationPatch` видалені; fixed `Attacker=empire / Defender=vlandia` canonicalization більше не входить у runtime, бо culture replay тепер already-authoritative і не повинен переписуватись legacy TDM/fixed-culture шаром;
 - coop hero-class resolution, allowed-class sync і listed direct authoritative spawn більше не читають native `MissionPeer.Team` / `MissionPeer.Culture` як runtime input; цей native peer state лишився тільки compatibility surface для vanilla message-layer і color/bootstrap хвостів, які ще треба дорізати;
 - listed-shell native `TeamInitialPerkInfoReady` більше не залежить виключно від `MissionLobbyEquipmentNetworkComponent`, але й більше не моститься server-side, бо live listed-shell spawn reader для цього gate вже прибраний;
 - native `MissionLobbyEquipmentNetworkComponent` повністю прибраний із wrapped listed `TeamDeathmatch` shell; listed ingress більше не тримає even passive equipment compatibility component;

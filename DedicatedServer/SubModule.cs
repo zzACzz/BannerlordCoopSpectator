@@ -319,7 +319,6 @@ namespace CoopSpectator
                     else
                         ModLogger.Info("CoopSpectatorDedicated: skipped BattleShellSuppressionPatch after mission-load crash triage.");
                     TryApplyMultiplayerCharacterClassFallbackPatch();
-                    TryApplyServerChangeCultureCanonicalizationPatch();
                     TryApplyCampaignCombatProfileAgentStatsPatch();
                     RegisterCoopBattleGameMode();
                     TryApplyWebPanelPatches();
@@ -638,20 +637,6 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: dedicated knockout outcome patch apply failed: " + ex.Message);
-            }
-        }
-
-        private static void TryApplyServerChangeCultureCanonicalizationPatch()
-        {
-            try
-            {
-                if (_harmony == null)
-                    _harmony = new Harmony("com.coopspectator.dedicated");
-                ServerChangeCultureCanonicalizationPatch.Apply(_harmony);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("CoopSpectatorDedicated: server ChangeCulture canonicalization patch apply failed: " + ex.Message);
             }
         }
 
