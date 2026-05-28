@@ -98,7 +98,7 @@ namespace CoopSpectator.Patches
 
                 gameMode.GetWinnerTeam();
                 SetRemainingAgentsInvulnerable(mission);
-                ClearListedShellSpawnCompatibilityFlags();
+                ClearListedShellSpawnCompatibilityState();
                 __instance.SetStateEndingAsServer();
                 return false;
             }
@@ -134,13 +134,13 @@ namespace CoopSpectator.Patches
                 agent.SetMortalityState(Agent.MortalityState.Invulnerable);
         }
 
-        private static void ClearListedShellSpawnCompatibilityFlags()
+        private static void ClearListedShellSpawnCompatibilityState()
         {
-            ClearListedShellSpawnCompatibilityFlags(GameNetwork.NetworkPeers);
-            ClearListedShellSpawnCompatibilityFlags(GameNetwork.DisconnectedNetworkPeers);
+            ClearListedShellSpawnCompatibilityState(GameNetwork.NetworkPeers);
+            ClearListedShellSpawnCompatibilityState(GameNetwork.DisconnectedNetworkPeers);
         }
 
-        private static void ClearListedShellSpawnCompatibilityFlags(IEnumerable<NetworkCommunicator> peers)
+        private static void ClearListedShellSpawnCompatibilityState(IEnumerable<NetworkCommunicator> peers)
         {
             if (peers == null)
                 return;
@@ -151,8 +151,6 @@ namespace CoopSpectator.Patches
                 if (missionPeer == null)
                     continue;
 
-                missionPeer.HasSpawnedAgentVisuals = false;
-                missionPeer.EquipmentUpdatingExpired = true;
                 missionPeer.WantsToSpawnAsBot = false;
             }
         }

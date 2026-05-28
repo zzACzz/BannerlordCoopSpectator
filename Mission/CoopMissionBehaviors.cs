@@ -21642,7 +21642,7 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 _spawnedCoopPeerIndices.Add(peer.Index);
-                ExpireMissionPeerNativeVisualCompatibilityState(missionPeer);
+                ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
                 missionPeer.WantsToSpawnAsBot = false;
                 CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
                     peer,
@@ -22094,7 +22094,7 @@ namespace CoopSpectator.MissionBehaviors
                     commanderControlState,
                     source + " replace-bot");
 
-                bool removedPendingVisuals = ClearMissionPeerPendingNativeSpawnVisualCompatibility(mission, missionPeer);
+                ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
                 if (IsSceneAwareBattleMapRuntime(mission) &&
                     SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
                 {
@@ -22115,7 +22115,6 @@ namespace CoopSpectator.MissionBehaviors
                     " " + commanderControlState +
                     " " + formationOwnershipState +
                     " " + reappliedAgentState +
-                    " RemovedPendingVisuals=" + removedPendingVisuals +
                     " Source=" + (source ?? "unknown"));
                 TraceMaterializedReplaceBotSuccess(
                     peer,
@@ -24415,7 +24414,7 @@ namespace CoopSpectator.MissionBehaviors
                     _spawnedCoopPeerIndices.Remove(peer.Index);
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " lost-controlled-agent");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " lost-controlled-agent");
-                    ExpireMissionPeerNativeVisualCompatibilityState(missionPeer);
+                    ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
                     CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " lost-controlled-agent");
                     TryReleasePeerOrderOwnershipAfterLeavingActiveLife(
                         mission,
@@ -24729,7 +24728,7 @@ namespace CoopSpectator.MissionBehaviors
             if (peer != null)
                 _spawnedCoopPeerIndices.Remove(peer.Index);
 
-            ExpireMissionPeerNativeVisualCompatibilityState(missionPeer);
+            ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
             ResetMissionPeerSpawnTimerForImmediateRespawn(mission, missionPeer);
             missionPeer.WantsToSpawnAsBot = false;
             MovePeerToSpectatorHoldingState(mission, missionPeer, peer, source + " forced-respawnable");
@@ -24906,16 +24905,6 @@ namespace CoopSpectator.MissionBehaviors
                  ExactCampaignArmyBootstrap.TryGetEntryId(agent, out _));
         }
 
-        private static void ExpireMissionPeerNativeVisualCompatibilityState(MissionPeer missionPeer)
-        {
-            if (missionPeer == null)
-                return;
-
-            ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
-            missionPeer.HasSpawnedAgentVisuals = false;
-            missionPeer.EquipmentUpdatingExpired = true;
-        }
-
         private static void ClearSelectedTroopIndexBridgeCompatibilityState(MissionPeer missionPeer)
         {
             NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
@@ -24941,13 +24930,6 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             return _lastBridgedSelectedTroopIndexByPeer.TryGetValue(peer.Index, out troopIndex);
-        }
-
-        private static bool ClearMissionPeerPendingNativeSpawnVisualCompatibility(Mission mission, MissionPeer missionPeer)
-        {
-            bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
-            ExpireMissionPeerNativeVisualCompatibilityState(missionPeer);
-            return removedPendingVisuals;
         }
 
         private static void ResetMissionPeerSpawnTimerForImmediateRespawn(Mission mission, MissionPeer missionPeer)
@@ -24986,7 +24968,7 @@ namespace CoopSpectator.MissionBehaviors
                 out _,
                 out _);
             missionPeer.WantsToSpawnAsBot = false;
-            ExpireMissionPeerNativeVisualCompatibilityState(missionPeer);
+            ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
 
             if (!alreadySpectator)
             {
@@ -28573,56 +28555,6 @@ namespace CoopSpectator.MissionBehaviors
             return false;
         }
 
-        private static bool TryRemovePendingAgentVisuals(Mission mission, MissionPeer missionPeer)
-        {
-            if (mission == null || missionPeer == null || mission.MissionBehaviors == null)
-                return false;
-
-            foreach (MissionBehavior behavior in mission.MissionBehaviors)
-            {
-                if (behavior == null)
-                    continue;
-
-                Type behaviorType = behavior.GetType();
-                if (behaviorType.Name.IndexOf("MissionAgentVisualSpawnComponent", StringComparison.OrdinalIgnoreCase) < 0)
-                    continue;
-
-                try
-                {
-                    MethodInfo removeMethod = behaviorType.GetMethod(
-                        "RemoveAgentVisuals",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                        null,
-                        new[] { typeof(MissionPeer), typeof(bool) },
-                        null);
-                    if (removeMethod != null)
-                    {
-                        removeMethod.Invoke(behavior, new object[] { missionPeer, true });
-                        return true;
-                    }
-
-                    removeMethod = behaviorType.GetMethod(
-                        "RemoveAgentVisuals",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                        null,
-                        new[] { typeof(MissionPeer) },
-                        null);
-                    if (removeMethod != null)
-                    {
-                        removeMethod.Invoke(behavior, new object[] { missionPeer });
-                        return true;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ModLogger.Info("CoopMissionSpawnLogic: removing pending agent visuals failed: " + ex.Message);
-                    return false;
-                }
-            }
-
-            return false;
-        }
-
         private static void GetDirectSpawnFrame(Mission mission, Team team, out Vec3 spawnPosition, out Vec2 spawnDirection)
         {
             spawnPosition = team.Side == BattleSideEnum.Attacker
@@ -29324,13 +29256,6 @@ namespace CoopSpectator.MissionBehaviors
 
             ApplySelectedTroopIndexBridge(missionPeer, peer, preferredTroopIndex);
 
-            bool removedPendingVisuals = false;
-            if (missionPeer.HasSpawnedAgentVisuals || !missionPeer.EquipmentUpdatingExpired)
-                removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
-
-            missionPeer.HasSpawnedAgentVisuals = false;
-            missionPeer.EquipmentUpdatingExpired = true;
-
             string peerName = peer?.UserName ?? peer?.Index.ToString() ?? "none";
             string classId = preferredClass?.HeroCharacter?.StringId ?? "null";
             string logKey =
@@ -29341,13 +29266,11 @@ namespace CoopSpectator.MissionBehaviors
                 classId;
             if (_loggedArmedListedShellNativeSpawnCompatibilityKeys.Add(logKey))
             {
-                ModLogger.Info(
+                    ModLogger.Info(
                         "CoopMissionSpawnLogic: armed listed-shell selected-troop compatibility state from authoritative coop selection. " +
                         "Peer=" + peerName +
                         " TroopIndex=" + preferredTroopIndex +
                         " HeroClass=" + classId +
-                        " ClearedStaleVisuals=" + removedPendingVisuals +
-                        " HasSpawnedAgentVisuals=" + missionPeer.HasSpawnedAgentVisuals +
                         " Reason=" + debugReason +
                         " Source=" + (source ?? "unknown"));
                 }
@@ -29360,16 +29283,14 @@ namespace CoopSpectator.MissionBehaviors
             MissionPeer missionPeer,
             string source)
         {
-            if (mission == null || missionPeer == null)
+            if (missionPeer == null)
                 return;
 
-            bool removedPendingVisuals = ClearMissionPeerPendingNativeSpawnVisualCompatibility(mission, missionPeer);
-            if (!removedPendingVisuals)
-                return;
+            ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
 
             NetworkCommunicator peer = missionPeer.GetNetworkPeer();
             ModLogger.Info(
-                "CoopMissionSpawnLogic: cleared stale listed-shell native visual compatibility after direct authoritative spawn. " +
+                "CoopMissionSpawnLogic: cleared listed-shell selected-troop compatibility bridge after direct authoritative spawn. " +
                 "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
                 " Source=" + (source ?? "unknown"));
         }
