@@ -4,8 +4,8 @@ using TaleWorlds.MountAndBlade;
 namespace CoopSpectator.Infrastructure
 {
     /// <summary>
-    /// Explicit policy split between legacy TDM bootstrap surfaces and the
-    /// authoritative coop entry path.
+    /// Explicit client-side snapshot of when the authoritative coop entry path
+    /// has enough state to override native selection/bootstrap assumptions.
     /// </summary>
     public static class CoopBattleEntryPolicy
     {
@@ -20,13 +20,9 @@ namespace CoopSpectator.Infrastructure
             public bool HasBridgeSide => BridgeSide != BattleSideEnum.None;
             public bool HasBridgeTroop => !string.IsNullOrWhiteSpace(BridgeTroopOrEntryId);
 
-            // Legacy TDM UI is allowed only until the coop path has enough intent to take over.
             public bool UseAuthoritativeSidePath => HasBridgeSide || PlayerHasActiveAgent;
             public bool UseAuthoritativeTroopPath => HasBridgeTroop || PlayerHasActiveAgent;
             public bool UseAuthoritativeEntryPath => UseAuthoritativeSidePath || UseAuthoritativeTroopPath;
-
-            public bool AllowLegacyVanillaTeamSelectionInteraction => !UseAuthoritativeSidePath;
-            public bool AllowLegacyVanillaClassSelectionInteraction => !UseAuthoritativeTroopPath;
 
             public string Describe()
             {

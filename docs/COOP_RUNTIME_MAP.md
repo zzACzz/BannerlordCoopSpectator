@@ -204,6 +204,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - native `MissionPeer.Team` уже моститься server-side з coop authority state;
 - native `SelectedTroopIndex` лишається тільки compatibility bridge для vanilla bootstrap/network expectations;
 - native `SelectedTroopIndex` bridge тепер активний тільки всередині native visual/equipment bootstrap window (`HasSpawnedAgentVisuals || !EquipmentUpdatingExpired`), а не протягом усього pending spawn lifecycle;
+- `Infrastructure/CoopBattleEntryPolicy.cs` більше не тримає dead allow-flags для legacy vanilla team/class interaction; живими лишилися тільки authoritative path predicates, які реально читає battle-map handoff/client shell;
 - native class compatibility bridge ще резолвиться від authoritative coop selection, а не від `MissionPeer.SelectedTroopIndex` як джерела істини;
 - старий server-side `MultiplayerHeroClassOverridePatch` для vanilla TDM spawn/class path уже видалений; лишився тільки явний `SelectedTroopIndex` bridge;
 - server-side coop runtime більше не форсить native pending visuals і не переводить їх у vanilla `SpawningBehaviorBase` / `Mission.SpawnAgent(..., spawnFromAgentVisuals: true)` lifecycle;
@@ -372,6 +373,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - `HasSpawnedAgentVisuals` більше не використовується в server-side phase/deployment або spawn authority; це вже тільки compatibility state для native/client shell;
 - `SelectedTroopIndex` compatibility bridge звужений до native visual/equipment bootstrap window і більше не живе весь pending-spawn lifecycle;
 - `MultiplayerTeamSelectComponent` прибраний з `CoopBattle` server stack; team-select shell лишився тільки в client battle-map/listed-shell bootstrap path;
+- прибрані мертві `AllowLegacyVanillaTeamSelectionInteraction` / `AllowLegacyVanillaClassSelectionInteraction` з `Infrastructure/CoopBattleEntryPolicy.cs`;
 - видалений мертвий direct-spawn experiment (`EnableDirectCoopPlayerSpawnExperiment`, `TrySpawnPeersIntoCoopControl(...)`, `SpawnCoopControlledAgent(...)`, `TryEnsurePendingSpawnVisuals(...)`), який уже не входив у live runtime tick path;
 - видалений active vanilla spawn-bridge hook (`RunVanillaSpawnBridgeTick(...)` / `TryFinalizePendingNativeSpawnVisualCompatibility(...)`), який переводив native preview visuals у `SpawningBehaviorBase` і `Mission.SpawnAgent(..., spawnFromAgentVisuals: true)`;
 - прибраний старий feature-flag `EnableVanillaMissionWrapping`; listed `TeamDeathmatch` shell wrapping тепер є явною частиною поточного join/startup контракту, а не runtime toggle;
