@@ -57,7 +57,7 @@
 - `MultiplayerTimerComponent` повинен лишатись, бо `MissionLobbyComponent` читає його під час native state handling.
 - `MultiplayerTeamSelectComponent` поки ще лишається в mission stack як compatibility shell для native multiplayer bootstrap, але більше не є джерелом side authority і більше не входить у dedicated ready heuristic.
 - `MissionScoreboardComponent` повинен лишатись на dedicated listed/custom server, бо native `MissionCustomGameServerComponent.AfterStart()` підписується на його події без null guard.
-- `MultiplayerMissionAgentVisualSpawnComponent` повинен існувати раніше за `MissionLobbyEquipmentNetworkComponent`; інакше equipment-network component не можна додавати взагалі.
+- `MultiplayerMissionAgentVisualSpawnComponent` і `MissionLobbyEquipmentNetworkComponent` зараз треба трактувати як один native visual/equipment bootstrap pair: якщо visual-spawn component недоступний, equipment-network component додавати не можна; окремого safe fallback path для battle-map runtime більше немає.
 
 ### Контракт custom-server join flow, який ще потрібен
 
@@ -138,7 +138,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 | `MultiplayerTeamSelectComponent` | native stack/UI bootstrap і частина join-ready очікувань | коли side selection і native team bootstrap повністю підуть у coop-owned path |
 | `MissionScoreboardComponent` | потрібен dedicated `MissionCustomGameServerComponent` | коли dedicated shell більше не буде інстанціювати цей native component |
 | `MultiplayerMissionAgentVisualSpawnComponent` | native visual bootstrap для class/equipment/lobby visuals | коли materialization перестане спиратися на native preview visuals |
-| `MissionLobbyEquipmentNetworkComponent` | поки ще частина native equipment/class sync | коли preview/class/equipment path стане повністю нашим |
+| `MissionLobbyEquipmentNetworkComponent` | обов'язкова compatibility-залежність native equipment/class bootstrap поруч із `MultiplayerMissionAgentVisualSpawnComponent` | коли preview/class/equipment path стане повністю нашим |
 | official `TeamDeathmatch` listed shell | безпечна server-list registration і join bootstrap | тільки після доведеного альтернативного listed/custom startup path без TDM shell |
 | official `Battle` id | native entry point для battle mission start | лишається, але вже override-иться в `CoopBattle` |
 
@@ -224,7 +224,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 Поточні native залежності в цьому flow:
 
 - `MultiplayerMissionAgentVisualSpawnComponent`
-- `MissionLobbyEquipmentNetworkComponent`
+- `MissionLobbyEquipmentNetworkComponent` як обов'язкова частина того ж native visual/equipment bootstrap pair
 - native mission peer spawn timers
 - native team membership
 
@@ -345,6 +345,8 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - видалені minimal mission diagnostic modes, які існували тільки для старого crash isolation;
 - прибрані `CoopTdm` і `TdmClone` ids з `Infrastructure/CoopGameModeIds.cs`;
 - прибраний `EnableTdmCloneExperiment` з `Infrastructure/ExperimentalFeatures.cs`;
+- прибраний `EnableBattleMapClientEquipmentNetworkComponent`, бо `MissionLobbyEquipmentNetworkComponent` уже не є опційним у battle-map runtime;
+- прибрана мертва wrapped-Battle crash-isolation гілка, яка намагалась вирізати `MissionLobbyEquipmentNetworkComponent` із client stack;
 - mission wrapping flag перейменований у `EnableVanillaMissionWrapping`;
 - прибрана логіка `TeamDeathmatch` override з `DedicatedServer/Patches/GameModeOverridePatches.cs`;
 - прибрані `CoopTdm` і `TdmClone` strings з `Module/CoopSpectator/ModuleData/multiplayer_strings.xml`;

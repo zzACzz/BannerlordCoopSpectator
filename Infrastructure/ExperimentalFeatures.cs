@@ -114,13 +114,6 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableExactCampaignPreSpawnLoadoutInjection = true;
 
         /// <summary>
-        /// Battle-map client safety switch: keep MissionLobbyEquipmentNetworkComponent
-        /// enabled because native gauntlet class-loadout initialization dereferences
-        /// it unconditionally during mission-screen startup.
-        /// </summary>
-        public const bool EnableBattleMapClientEquipmentNetworkComponent = true;
-
-        /// <summary>
         /// First field-battle rework slice: publish a separate canonical battle
         /// contract next to the legacy snapshot payload. This does not switch the
         /// runtime to the new server materialization path yet; it only starts the

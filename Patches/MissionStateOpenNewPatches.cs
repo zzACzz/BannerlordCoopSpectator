@@ -245,15 +245,6 @@ namespace CoopSpectator.Patches
             else
                 ModLogger.Info("MissionStateOpenNewPatches: no vanilla entry gauntlet behaviors matched removal filter in wrapped Battle client stack.");
 
-            if (battleMapRuntime && !ExperimentalFeatures.EnableBattleMapClientEquipmentNetworkComponent)
-            {
-                int removedEquipmentNetworkCount = list.RemoveAll(ShouldRemoveBattleClientEquipmentNetworkBehavior);
-                if (removedEquipmentNetworkCount > 0)
-                    ModLogger.Info("MissionStateOpenNewPatches: removed MissionLobbyEquipmentNetworkComponent from wrapped Battle client stack for battle-map spawn crash isolation. RemovedCount=" + removedEquipmentNetworkCount);
-                else
-                    ModLogger.Info("MissionStateOpenNewPatches: MissionLobbyEquipmentNetworkComponent not found in wrapped Battle client stack during battle-map spawn crash isolation.");
-            }
-
             LogWrappedBehaviorStack("battle-after-removal", list);
 
             if (battleMapRuntime)
@@ -398,15 +389,6 @@ namespace CoopSpectator.Patches
             string fullName = behavior.GetType().FullName ?? string.Empty;
             return fullName.IndexOf("MissionGauntletTeamSelection", StringComparison.OrdinalIgnoreCase) >= 0
                 || fullName.IndexOf("MissionGauntletClassLoadout", StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private static bool ShouldRemoveBattleClientEquipmentNetworkBehavior(MissionBehavior behavior)
-        {
-            if (behavior == null)
-                return false;
-
-            string fullName = behavior.GetType().FullName ?? string.Empty;
-            return fullName.IndexOf("MissionLobbyEquipmentNetworkComponent", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
     }

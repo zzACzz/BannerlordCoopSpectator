@@ -246,20 +246,9 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             if (visualSpawn != null)
             {
                 list.Add(visualSpawn);
-
-                bool includeEquipmentNetworkComponent =
-                    !minimalBattleMapRuntime ||
-                    ExperimentalFeatures.EnableBattleMapClientEquipmentNetworkComponent;
-                if (includeEquipmentNetworkComponent)
-                {
-                    list.Add(new MissionLobbyEquipmentNetworkComponent());
-                    if (minimalBattleMapRuntime)
-                        ModLogger.Info("CoopBattle client: retained MissionLobbyEquipmentNetworkComponent for battle-map native bootstrap compatibility.");
-                }
-                else
-                {
-                    ModLogger.Info("CoopBattle client: skipped MissionLobbyEquipmentNetworkComponent for battle-map spawn crash isolation while retaining MultiplayerMissionAgentVisualSpawnComponent.");
-                }
+                list.Add(new MissionLobbyEquipmentNetworkComponent());
+                if (minimalBattleMapRuntime)
+                    ModLogger.Info("CoopBattle client: retained MissionLobbyEquipmentNetworkComponent for battle-map native bootstrap compatibility.");
 
                 if (minimalBattleMapRuntime)
                     ModLogger.Info("CoopBattle client: retained MultiplayerMissionAgentVisualSpawnComponent for battle-map native bootstrap compatibility.");
