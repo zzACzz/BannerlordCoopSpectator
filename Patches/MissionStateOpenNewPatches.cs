@@ -126,10 +126,17 @@ namespace CoopSpectator.Patches
                 : new List<MissionBehavior>();
 
             int removedEntryUiCount = list.RemoveAll(ShouldRemoveVanillaEntryBehavior);
+            int removedNativeTeamSelectCount = ReplaceNativeTeamSelectionWithPassiveCompatibilityShell(list);
             int removedNativeVisualBootstrapCount = ReplaceNativeVisualBootstrapWithPassiveCompatibilityShell(list);
             int removedNativeEquipmentBootstrapCount = ReplaceNativeEquipmentBootstrapWithPassiveCompatibilityShell(list);
             if (removedEntryUiCount > 0)
                 ModLogger.Info("MissionStateOpenNewPatches: removed vanilla entry behaviors from wrapped TeamDeathmatch stack. RemovedCount=" + removedEntryUiCount);
+            if (removedNativeTeamSelectCount > 0)
+            {
+                ModLogger.Info(
+                    "MissionStateOpenNewPatches: replaced native MultiplayerTeamSelectComponent in wrapped TeamDeathmatch shell. " +
+                    "RemovedCount=" + removedNativeTeamSelectCount);
+            }
             if (removedNativeVisualBootstrapCount > 0)
             {
                 ModLogger.Info(
@@ -200,6 +207,31 @@ namespace CoopSpectator.Patches
 
             if (removedCount > 0)
                 list.Add(new ListedShellEquipmentCompatibilityComponent());
+
+            return removedCount;
+        }
+
+        private static int ReplaceNativeTeamSelectionWithPassiveCompatibilityShell(List<MissionBehavior> list)
+        {
+            if (list == null || list.Count == 0)
+                return 0;
+
+            int removedCount = 0;
+            for (int i = list.Count - 1; i >= 0; i--)
+            {
+                MissionBehavior behavior = list[i];
+                if (behavior == null)
+                    continue;
+
+                if (!string.Equals(behavior.GetType().Name, nameof(MultiplayerTeamSelectComponent), StringComparison.Ordinal))
+                    continue;
+
+                list.RemoveAt(i);
+                removedCount++;
+            }
+
+            if (removedCount > 0)
+                list.Add(new ListedShellTeamSelectionCompatibilityComponent());
 
             return removedCount;
         }
