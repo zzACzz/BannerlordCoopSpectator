@@ -12,8 +12,8 @@ using TaleWorlds.MountAndBlade;
 namespace CoopSpectator.Patches
 {
     /// <summary>
-    /// Logs MissionState.OpenNew lifecycle and wraps vanilla mission factories
-    /// where the coop runtime still attaches to the native MP shell.
+    /// Logs MissionState.OpenNew lifecycle and wraps only the listed
+    /// TeamDeathmatch shell where the coop runtime still attaches to native MP startup.
     /// </summary>
     public static class MissionStateOpenNewPatches
     {
@@ -24,7 +24,6 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                BattleMapContractDiagnostics.LogMissionStateOpenNewContract("MissionStateOpenNewPatches.Apply");
                 Type missionStateType = typeof(MissionState);
                 MethodInfo openNew = missionStateType
                     .GetMethods(BindingFlags.Public | BindingFlags.Static)
@@ -49,15 +48,14 @@ namespace CoopSpectator.Patches
                 }
 
                 MethodInfo prefix = typeof(MissionStateOpenNewPatches).GetMethod(nameof(OpenNew_Prefix), BindingFlags.Public | BindingFlags.Static);
-                MethodInfo postfix = typeof(MissionStateOpenNewPatches).GetMethod(nameof(OpenNew_Postfix), BindingFlags.Public | BindingFlags.Static);
-                if (prefix == null || postfix == null)
+                if (prefix == null)
                 {
-                    ModLogger.Info("MissionStateOpenNewPatches: prefix/postfix methods not found. Skip.");
+                    ModLogger.Info("MissionStateOpenNewPatches: prefix method not found. Skip.");
                     return;
                 }
 
-                harmony.Patch(openNew, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
-                ModLogger.Info("MissionStateOpenNewPatches: OpenNew prefix/postfix applied (vanilla mission wrapping ready).");
+                harmony.Patch(openNew, prefix: new HarmonyMethod(prefix));
+                ModLogger.Info("MissionStateOpenNewPatches: OpenNew prefix applied (listed TeamDeathmatch shell wrapping ready).");
             }
             catch (Exception ex)
             {
@@ -72,60 +70,28 @@ namespace CoopSpectator.Patches
             bool addDefaultMissionBehaviors,
             bool needsMemoryCleanup)
         {
-            ModLogger.Info("MissionState.OpenNew ENTER missionName=" + (missionName ?? "") + " (engine will create mission then call behavior factory).");
-            BattleMapContractDiagnostics.LogMissionInitializerRecordState(rec, "MissionState.OpenNew prefix");
-            LogMissionOpenHandlerContract(missionName, handler, addDefaultMissionBehaviors, needsMemoryCleanup);
-
             bool isOfficialBattleMission = string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal);
             bool isCoopBattleFactory = IsCoopBattleBehaviorFactory(handler);
             if (GameNetwork.IsServer && isOfficialBattleMission)
                 PendingBattleMissionStartupState.Arm(rec.SceneName, "MissionState.OpenNew prefix");
 
-            if (isOfficialBattleMission && !isCoopBattleFactory)
-            {
-                string runtimeScene = rec.SceneName ?? string.Empty;
-                CampaignMapPatchMissionInit.TryApply(ref rec, runtimeScene, "MissionState.OpenNew Battle");
-            }
-
-            if (!ShouldWrapVanillaMission(missionName))
+            if (!ShouldWrapListedTeamDeathmatchShell(missionName))
                 return;
 
             if (isCoopBattleFactory)
             {
-                ModLogger.Info("MissionState.OpenNew: skip vanilla mission wrapping for CoopBattle custom behavior factory.");
+                ModLogger.Info("MissionState.OpenNew: skip listed TeamDeathmatch shell wrapping for CoopBattle custom behavior factory.");
                 return;
             }
 
             InitializeMissionBehaviorsDelegate originalHandler = handler;
-            if (string.Equals(missionName, OfficialTeamDeathmatchMissionName, StringComparison.Ordinal))
-            {
-                handler = mission => WrapVanillaTeamDeathmatchBehaviors(mission, originalHandler);
-                ModLogger.Info("MissionState.OpenNew: wrapped TeamDeathmatch behavior handler for coop runtime injection.");
-            }
-            else if (string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal) && GameNetwork.IsClient)
-            {
-                handler = mission => WrapVanillaBattleClientBehaviors(mission, originalHandler);
-                ModLogger.Info("MissionState.OpenNew: wrapped Battle client behavior handler for coop selection overlay injection.");
-            }
+            handler = mission => WrapVanillaTeamDeathmatchBehaviors(mission, originalHandler);
+            ModLogger.Info("MissionState.OpenNew: wrapped TeamDeathmatch behavior handler for coop runtime injection.");
         }
 
-        public static void OpenNew_Postfix(
-            string missionName,
-            MissionInitializerRecord rec,
-            InitializeMissionBehaviorsDelegate handler,
-            bool addDefaultMissionBehaviors,
-            bool needsMemoryCleanup)
+        private static bool ShouldWrapListedTeamDeathmatchShell(string missionName)
         {
-            ModLogger.Info("MissionState.OpenNew EXIT missionName=" + (missionName ?? "") + " (original method returned).");
-        }
-
-        private static bool ShouldWrapVanillaMission(string missionName)
-        {
-            if (!ExperimentalFeatures.EnableVanillaMissionWrapping)
-                return false;
-
-            return string.Equals(missionName, OfficialTeamDeathmatchMissionName, StringComparison.Ordinal)
-                || (GameNetwork.IsClient && string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal));
+            return string.Equals(missionName, OfficialTeamDeathmatchMissionName, StringComparison.Ordinal);
         }
 
         private static bool IsCoopBattleBehaviorFactory(InitializeMissionBehaviorsDelegate handler)
@@ -149,38 +115,6 @@ namespace CoopSpectator.Patches
 
             string fullName = type.FullName ?? string.Empty;
             return fullName.IndexOf(nameof(MissionMultiplayerCoopBattleMode), StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private static void LogMissionOpenHandlerContract(
-            string missionName,
-            InitializeMissionBehaviorsDelegate handler,
-            bool addDefaultMissionBehaviors,
-            bool needsMemoryCleanup)
-        {
-            try
-            {
-                if (!string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal) &&
-                    !string.Equals(missionName, OfficialTeamDeathmatchMissionName, StringComparison.Ordinal))
-                    return;
-
-                MethodInfo handlerMethod = handler?.Method;
-                Type declaringType = handlerMethod?.DeclaringType;
-                Type targetType = handler?.Target?.GetType();
-                ModLogger.Info(
-                    "MissionState.OpenNew handler contract. " +
-                    "MissionName=" + (missionName ?? string.Empty) +
-                    " HandlerMethod=" + (handlerMethod?.Name ?? "null") +
-                    " HandlerDeclaringType=" + (declaringType?.FullName ?? "null") +
-                    " HandlerTargetType=" + (targetType?.FullName ?? "null") +
-                    " AddDefaultMissionBehaviors=" + addDefaultMissionBehaviors +
-                    " NeedsMemoryCleanup=" + needsMemoryCleanup +
-                    " IsServer=" + GameNetwork.IsServer +
-                    " IsClient=" + GameNetwork.IsClient + ".");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionState.OpenNew handler contract log failed: " + ex.Message);
-            }
         }
 
         private static IEnumerable<MissionBehavior> WrapVanillaTeamDeathmatchBehaviors(
@@ -226,135 +160,6 @@ namespace CoopSpectator.Patches
             list.Add(new MissionBehaviorDiagnostic());
             ModLogger.Info("MissionStateOpenNewPatches: appended MissionBehaviorDiagnostic to vanilla TeamDeathmatch. FinalCount=" + list.Count);
             return list;
-        }
-
-        private static IEnumerable<MissionBehavior> WrapVanillaBattleClientBehaviors(
-            Mission mission,
-            InitializeMissionBehaviorsDelegate originalHandler)
-        {
-            List<MissionBehavior> list = originalHandler != null
-                ? new List<MissionBehavior>(originalHandler(mission) ?? Enumerable.Empty<MissionBehavior>())
-                : new List<MissionBehavior>();
-            bool battleMapRuntime = MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission?.SceneName ?? string.Empty);
-
-            LogWrappedBehaviorStack("battle-before-removal", list);
-
-            int removedEntryUiCount = list.RemoveAll(ShouldRemoveVanillaEntryBehavior);
-            if (removedEntryUiCount > 0)
-                ModLogger.Info("MissionStateOpenNewPatches: removed vanilla entry gauntlet behaviors from wrapped Battle client stack. RemovedCount=" + removedEntryUiCount);
-            else
-                ModLogger.Info("MissionStateOpenNewPatches: no vanilla entry gauntlet behaviors matched removal filter in wrapped Battle client stack.");
-
-            LogWrappedBehaviorStack("battle-after-removal", list);
-
-            if (battleMapRuntime)
-            {
-                InjectBattleMapClientUiParityViews(mission, list);
-            }
-
-#if !COOPSPECTATOR_DEDICATED
-            if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
-            {
-                TryAddBehaviorIfMissing(
-                    list,
-                    () => new CoopMissionNetworkBridge(),
-                    new[] { nameof(CoopMissionNetworkBridge) },
-                    "MissionStateOpenNewPatches: appended CoopMissionNetworkBridge to wrapped Battle client stack.",
-                    "MissionStateOpenNewPatches: CoopMissionNetworkBridge already present in wrapped Battle client stack.");
-                TryAddBehaviorIfMissing(
-                    list,
-                    () => new CoopMissionClientLogic(),
-                    new[] { nameof(CoopMissionClientLogic) },
-                    "MissionStateOpenNewPatches: appended CoopMissionClientLogic to wrapped Battle client stack.",
-                    "MissionStateOpenNewPatches: CoopMissionClientLogic already present in wrapped Battle client stack.");
-                TryAddBehaviorIfMissing(
-                    list,
-                    () => new CoopSpectator.UI.CoopMissionSelectionView(),
-                    new[] { nameof(CoopSpectator.UI.CoopMissionSelectionView) },
-                    "MissionStateOpenNewPatches: appended CoopMissionSelectionView to wrapped Battle client stack.",
-                    "MissionStateOpenNewPatches: CoopMissionSelectionView already present in wrapped Battle client stack.");
-            }
-#endif
-            list.Add(new MissionBehaviorDiagnostic());
-            ModLogger.Info("MissionStateOpenNewPatches: appended MissionBehaviorDiagnostic to wrapped Battle client stack. FinalCount=" + list.Count);
-            return list;
-        }
-
-        private static void InjectBattleMapClientUiParityViews(Mission mission, List<MissionBehavior> list)
-        {
-            bool addedAgentLabel = TryAddBehaviorIfMissing(
-                list,
-                () => MissionBehaviorHelpers.TryCreateMissionAgentLabelUiParityView(mission),
-                new[] { "MissionAgentLabelUIHandler", "MissionAgentLabelView" },
-                "MissionStateOpenNewPatches: battle-map client injected agent-label mission view into wrapped Battle stack.",
-                "MissionStateOpenNewPatches: battle-map client already had agent-label mission view in wrapped Battle stack.");
-
-            bool addedFormationTargetSelection = TryAddBehaviorIfMissing(
-                list,
-                () => MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies("TaleWorlds.MountAndBlade.View.MissionViews.MissionFormationTargetSelectionHandler"),
-                new[] { "MissionFormationTargetSelectionHandler" },
-                "MissionStateOpenNewPatches: battle-map client injected MissionFormationTargetSelectionHandler into wrapped Battle stack.",
-                "MissionStateOpenNewPatches: battle-map client already had MissionFormationTargetSelectionHandler in wrapped Battle stack.");
-
-            bool addedFormationMarker = TryAddBehaviorIfMissing(
-                list,
-                () => MissionBehaviorHelpers.TryCreateMissionFormationMarkerUiParityView(mission),
-                new[] { "MissionFormationMarkerUIHandler", "MissionGauntletFormationMarker" },
-                "MissionStateOpenNewPatches: battle-map client injected formation-marker mission view into wrapped Battle stack.",
-                "MissionStateOpenNewPatches: battle-map client already had formation-marker mission view in wrapped Battle stack.");
-
-            ModLogger.Info(
-                "CoopBattle client: injected agent label and formation marker mission views for wrapped MultiplayerBattle battle-map runtime. Scene=" + (mission?.SceneName ?? "null") +
-                " AddedAgentLabel=" + addedAgentLabel +
-                " AddedFormationTargetSelection=" + addedFormationTargetSelection +
-                " AddedFormationMarker=" + addedFormationMarker);
-        }
-
-        private static bool TryAddBehaviorIfMissing(
-            List<MissionBehavior> list,
-            Func<MissionBehavior> behaviorFactory,
-            string[] expectedTypeNames,
-            string addedLogMessage,
-            string alreadyPresentLogMessage)
-        {
-            if (ListContainsBehaviorType(list, expectedTypeNames))
-            {
-                ModLogger.Info(alreadyPresentLogMessage);
-                return false;
-            }
-
-            MissionBehavior behavior = behaviorFactory?.Invoke();
-            if (behavior == null)
-                return false;
-
-            list.Add(behavior);
-            ModLogger.Info(addedLogMessage + " AddedType=" + (behavior.GetType().FullName ?? behavior.GetType().Name));
-            return true;
-        }
-
-        private static bool ListContainsBehaviorType(List<MissionBehavior> list, IEnumerable<string> expectedTypeNames)
-        {
-            if (list == null || expectedTypeNames == null)
-                return false;
-
-            HashSet<string> expected = new HashSet<string>(
-                expectedTypeNames.Where(name => !string.IsNullOrEmpty(name)),
-                StringComparer.Ordinal);
-            if (expected.Count == 0)
-                return false;
-
-            for (int i = 0; i < list.Count; i++)
-            {
-                MissionBehavior behavior = list[i];
-                if (behavior == null)
-                    continue;
-
-                string typeName = behavior.GetType().Name ?? string.Empty;
-                if (expected.Contains(typeName))
-                    return true;
-            }
-
-            return false;
         }
 
         private static void LogWrappedBehaviorStack(string stage, List<MissionBehavior> list)

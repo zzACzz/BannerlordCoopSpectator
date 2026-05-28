@@ -209,7 +209,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - `HasSpawnedAgentVisuals` і `ShouldSpawnVisualsForServer(...)` більше не входять у server-side phase/spawn authority; native preview visuals тепер тільки passive compatibility shell;
 - native visual compatibility state ще чиститься під час possession/reset, але вже не впливає на рішення про spawn або battle phase;
 - старий client-side vanilla-selection reflection шар (hint/menu, class-loadout filtering, team-select/scoreboard culture sync, vanilla spawn/team-change mirror paths) уже видалений;
-- vanilla team/class gauntlet entry views у wrapped `TeamDeathmatch` / `Battle` client stacks тепер зрізаються структурно в `MissionStateOpenNewPatches`, а не глушаться окремим UI suppression patch;
+- vanilla team/class gauntlet entry views у wrapped listed `TeamDeathmatch` shell тепер зрізаються структурно в `MissionStateOpenNewPatches`, а не глушаться окремим UI suppression patch;
 - local camera preview у `UI/CoopMissionSelectionView.cs` тепер пише тільки в `MissionScreen.SetAgentToFollow(...)`; preview path більше не використовує `LastFollowedAgent` / `MissionPeer.FollowedAgent` network echo;
 - `Patches/MissionScreenCameraPreviewPatch.cs` більше не мутує `MissionLobbyComponent.MissionType` або `MissionPeer.HasSpawnedAgentVisuals`; shim тепер робить postfix override для `MissionScreen.GetSpectatingData(...)`;
 - ми ще не маємо повної заміни native team-selection shell.
@@ -316,7 +316,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 
 | Зона | Основні файли |
 | --- | --- |
-| Mission wrapping | `Patches/MissionStateOpenNewPatches.cs` |
+| Listed TDM shell wrapping | `Patches/MissionStateOpenNewPatches.cs` |
 | Native UI suppression | `Patches/BattleMapHudSuppressionPatch.cs`, `Patches/MissionScreenCameraPreviewPatch.cs` |
 | Connectivity і local/self join | `Patches/LobbyCustomGameLocalJoinPatch.cs`, `Patches/LobbyJoinResultSelfJoinArmPatch.cs`, `Patches/LocalJoinAddressPatch.cs`, `Patches/LobbyRequestJoinDiagnosticsPatch.cs` |
 | Native class/culture compatibility | `Patches/ClientChangeCultureCanonicalizationPatch.cs`, `Patches/ServerChangeCultureCanonicalizationPatch.cs`, `Patches/MultiplayerCharacterClassFallbackPatch.cs`, `Patches/StartupSafeMpHeroClassBootstrapPatch.cs` |
@@ -362,13 +362,15 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - прибраний `EnableTdmCloneExperiment` з `Infrastructure/ExperimentalFeatures.cs`;
 - прибраний `EnableBattleMapClientEquipmentNetworkComponent`, бо `MissionLobbyEquipmentNetworkComponent` уже не є опційним у battle-map runtime;
 - прибрана мертва wrapped-Battle crash-isolation гілка, яка намагалась вирізати `MissionLobbyEquipmentNetworkComponent` із client stack;
+- прибраний dead wrapped-`Battle` client path із `MissionStateOpenNewPatches.cs`; wrapper mission-open тепер обслуговує тільки listed `TeamDeathmatch` shell, а `Battle` йде через `CoopBattle` game-mode override;
+- прибрані `MissionState.OpenNew` postfix/handler-contract diagnostics із `MissionStateOpenNewPatches.cs`; у wrapper-і лишився тільки функціональний listed-shell hook без triage-era log-only шару;
 - прибраний native spawn gold floor/deduction compatibility path навколо `ReplaceBotWithPlayer(...)`, бо coop runtime і client mode більше не використовують vanilla gold economy як spawn contract;
 - прибраний server-only `MultiplayerHeroClassOverridePatch`, який підміняв `MultiplayerClassDivisions.GetMPHeroClassForPeer(...)` для старого vanilla spawn/class path;
 - pending native spawn visuals більше не форсяться в coop server path, якщо native `ShouldSpawnVisualsForServer(...)` не вимагає їх для поточного peer/runtime;
 - `HasSpawnedAgentVisuals` більше не використовується в server-side phase/deployment або spawn authority; це вже тільки compatibility state для native/client shell;
 - видалений мертвий direct-spawn experiment (`EnableDirectCoopPlayerSpawnExperiment`, `TrySpawnPeersIntoCoopControl(...)`, `SpawnCoopControlledAgent(...)`, `TryEnsurePendingSpawnVisuals(...)`), який уже не входив у live runtime tick path;
 - видалений active vanilla spawn-bridge hook (`RunVanillaSpawnBridgeTick(...)` / `TryFinalizePendingNativeSpawnVisualCompatibility(...)`), який переводив native preview visuals у `SpawningBehaviorBase` і `Mission.SpawnAgent(..., spawnFromAgentVisuals: true)`;
-- mission wrapping flag перейменований у `EnableVanillaMissionWrapping`;
+- прибраний старий feature-flag `EnableVanillaMissionWrapping`; listed `TeamDeathmatch` shell wrapping тепер є явною частиною поточного join/startup контракту, а не runtime toggle;
 - прибрана логіка `TeamDeathmatch` override з `DedicatedServer/Patches/GameModeOverridePatches.cs`;
 - прибрані `CoopTdm` і `TdmClone` strings з `Module/CoopSpectator/ModuleData/multiplayer_strings.xml`;
 - прибрані dedicated-project compile includes для видалених TDM файлів;

@@ -6,12 +6,6 @@ namespace CoopSpectator.Infrastructure
     public static class ExperimentalFeatures
     {
         /// <summary>
-        /// Keep the official vanilla listed mission shell, but wrap its mission-open
-        /// behavior factory so coop-specific selection and spawn logic can attach.
-        /// </summary>
-        public const bool EnableVanillaMissionWrapping = true;
-
-        /// <summary>
         /// Replaces the native TDM team/class picker with a custom coop overlay
         /// that reads and writes the authoritative bridge files directly.
         /// </summary>
