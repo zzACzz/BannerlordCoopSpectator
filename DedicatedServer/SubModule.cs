@@ -312,7 +312,6 @@ namespace CoopSpectator
                     TryApplyBattleMapSpawnHandoffPatch();
                     TryApplyLateJoinPeerBootstrapGatePatch();
                     TryApplyLateJoinPeerStateReplayOwnershipPatch();
-                    TryApplyLateJoinSelectedTroopReplaySuppressionPatch();
                     TryApplyFinishedLoadingMissionReadyGatePatch();
                     if (EnableBattleShellSuppressionPatch)
                         TryApplyBattleShellSuppressionPatch();
@@ -507,20 +506,6 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: LateJoinPeerBootstrapGate patch apply failed: " + ex.Message);
-            }
-        }
-
-        private static void TryApplyLateJoinSelectedTroopReplaySuppressionPatch()
-        {
-            try
-            {
-                if (_harmony == null)
-                    _harmony = new Harmony("com.coopspectator.dedicated");
-                LateJoinSelectedTroopReplaySuppressionPatch.Apply(_harmony);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("CoopSpectatorDedicated: LateJoinSelectedTroopReplaySuppression patch apply failed: " + ex.Message);
             }
         }
 

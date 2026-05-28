@@ -690,8 +690,7 @@ namespace CoopSpectator.MissionBehaviors
                     " MyPeer=" + (myPeer?.UserName ?? myPeer?.Index.ToString() ?? "null") +
                     " MissionPeerTeam=" + (missionPeer?.Team?.TeamIndex ?? -1) +
                     " MissionPeerSide=" + (missionPeer?.Team?.Side ?? BattleSideEnum.None) +
-                    " MissionPeerCulture=" + (missionPeer?.Culture?.StringId ?? "null") +
-                    " SelectedTroopIndex=" + (missionPeer?.SelectedTroopIndex ?? -1));
+                    " MissionPeerCulture=" + (missionPeer?.Culture?.StringId ?? "null"));
 
                 MissionBehavior[] behaviors = mission.MissionBehaviors?.Where(behavior => behavior != null).ToArray() ?? Array.Empty<MissionBehavior>();
                 foreach (MissionBehavior behavior in behaviors)
@@ -934,9 +933,7 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly HashSet<int> _spawnedCoopPeerIndices = new HashSet<int>();
         private static HashSet<string> _loggedForcedPreferredClassKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _loggedArmedListedShellNativeSpawnCompatibilityKeys = new HashSet<string>(StringComparer.Ordinal);
-        private static readonly HashSet<string> _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys = new HashSet<string>(StringComparer.Ordinal);
-        private static readonly HashSet<string> _loggedDeferredVanillaSelectedTroopIndexBridgeRecipientKeys = new HashSet<string>(StringComparer.Ordinal);
-        private static readonly Dictionary<int, int> _lastBridgedSelectedTroopIndexByPeer = new Dictionary<int, int>();
+        private static readonly Dictionary<int, int> _selectedTroopIndexCompatibilityCacheByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _lastBridgedPeerTeamIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<FormationClass, bool> _appliedCoopClassAvailabilityStates = new Dictionary<FormationClass, bool>();
         private static readonly Dictionary<int, int> _lastAlignedControlledAgentIndexByPeer = new Dictionary<int, int>();
@@ -2729,9 +2726,7 @@ namespace CoopSpectator.MissionBehaviors
             _hasTransferredDiagnosticAllowedAgentToPeer = false;
             _spawnedCoopPeerIndices.Clear();
             _loggedForcedPreferredClassKeys.Clear();
-            _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys.Clear();
-            _loggedDeferredVanillaSelectedTroopIndexBridgeRecipientKeys.Clear();
-            _lastBridgedSelectedTroopIndexByPeer.Clear();
+            _selectedTroopIndexCompatibilityCacheByPeer.Clear();
             _lastBridgedPeerTeamIndexByPeer.Clear();
             _appliedCoopClassAvailabilityStates.Clear();
             _lastAlignedControlledAgentIndexByPeer.Clear();
@@ -21642,7 +21637,7 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 _spawnedCoopPeerIndices.Add(peer.Index);
-                ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
+                ClearSelectedTroopIndexCompatibilityCache(missionPeer);
                 missionPeer.WantsToSpawnAsBot = false;
                 CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
                     peer,
@@ -22094,7 +22089,7 @@ namespace CoopSpectator.MissionBehaviors
                     commanderControlState,
                     source + " replace-bot");
 
-                ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
+                ClearSelectedTroopIndexCompatibilityCache(missionPeer);
                 if (IsSceneAwareBattleMapRuntime(mission) &&
                     SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
                 {
@@ -24414,7 +24409,7 @@ namespace CoopSpectator.MissionBehaviors
                     _spawnedCoopPeerIndices.Remove(peer.Index);
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " lost-controlled-agent");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " lost-controlled-agent");
-                    ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
+                    ClearSelectedTroopIndexCompatibilityCache(missionPeer);
                     CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " lost-controlled-agent");
                     TryReleasePeerOrderOwnershipAfterLeavingActiveLife(
                         mission,
@@ -24728,7 +24723,7 @@ namespace CoopSpectator.MissionBehaviors
             if (peer != null)
                 _spawnedCoopPeerIndices.Remove(peer.Index);
 
-            ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
+            ClearSelectedTroopIndexCompatibilityCache(missionPeer);
             ResetMissionPeerSpawnTimerForImmediateRespawn(mission, missionPeer);
             missionPeer.WantsToSpawnAsBot = false;
             MovePeerToSpectatorHoldingState(mission, missionPeer, peer, source + " forced-respawnable");
@@ -24905,31 +24900,31 @@ namespace CoopSpectator.MissionBehaviors
                  ExactCampaignArmyBootstrap.TryGetEntryId(agent, out _));
         }
 
-        private static void ClearSelectedTroopIndexBridgeCompatibilityState(MissionPeer missionPeer)
+        private static void ClearSelectedTroopIndexCompatibilityCache(MissionPeer missionPeer)
         {
             NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
             if (peer == null)
                 return;
 
-            _lastBridgedSelectedTroopIndexByPeer.Remove(peer.Index);
+            _selectedTroopIndexCompatibilityCacheByPeer.Remove(peer.Index);
         }
 
-        private static bool HasSelectedTroopIndexBridgeValue(NetworkCommunicator peer, int troopIndex)
+        private static bool HasSelectedTroopIndexCompatibilityCacheValue(NetworkCommunicator peer, int troopIndex)
         {
             if (peer == null || troopIndex < 0)
                 return false;
 
-            return _lastBridgedSelectedTroopIndexByPeer.TryGetValue(peer.Index, out int bridgedTroopIndex) &&
-                   bridgedTroopIndex == troopIndex;
+            return _selectedTroopIndexCompatibilityCacheByPeer.TryGetValue(peer.Index, out int cachedTroopIndex) &&
+                   cachedTroopIndex == troopIndex;
         }
 
-        private static bool TryResolveSelectedTroopIndexBridgeValue(NetworkCommunicator peer, out int troopIndex)
+        private static bool TryResolveSelectedTroopIndexCompatibilityCacheValue(NetworkCommunicator peer, out int troopIndex)
         {
             troopIndex = -1;
             if (peer == null)
                 return false;
 
-            return _lastBridgedSelectedTroopIndexByPeer.TryGetValue(peer.Index, out troopIndex);
+            return _selectedTroopIndexCompatibilityCacheByPeer.TryGetValue(peer.Index, out troopIndex);
         }
 
         private static void ResetMissionPeerSpawnTimerForImmediateRespawn(Mission mission, MissionPeer missionPeer)
@@ -24968,7 +24963,7 @@ namespace CoopSpectator.MissionBehaviors
                 out _,
                 out _);
             missionPeer.WantsToSpawnAsBot = false;
-            ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
+            ClearSelectedTroopIndexCompatibilityCache(missionPeer);
 
             if (!alreadySpectator)
             {
@@ -28649,7 +28644,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return !ReferenceEquals(preferredClass, vanillaClass) ||
-                   !HasSelectedTroopIndexBridgeValue(missionPeer?.GetNetworkPeer(), preferredTroopIndex);
+                   !HasSelectedTroopIndexCompatibilityCacheValue(missionPeer?.GetNetworkPeer(), preferredTroopIndex);
         }
 
         private static bool TryResolveAuthoritativeCompatibilityHeroClassForPeer(
@@ -29115,12 +29110,12 @@ namespace CoopSpectator.MissionBehaviors
 
                 if (!RequiresListedShellNativeSpawnCompatibility(mission, missionPeer))
                 {
-                    ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
+                    ClearSelectedTroopIndexCompatibilityCache(missionPeer);
                     continue;
                 }
 
-                int currentTroopIndex = TryResolveSelectedTroopIndexBridgeValue(peer, out int bridgedTroopIndex)
-                    ? bridgedTroopIndex
+                int currentTroopIndex = TryResolveSelectedTroopIndexCompatibilityCacheValue(peer, out int cachedTroopIndex)
+                    ? cachedTroopIndex
                     : -1;
                 MultiplayerClassDivisions.MPHeroClass currentClass = null;
                 List<MultiplayerClassDivisions.MPHeroClass> cultureClasses = MultiplayerClassDivisions
@@ -29144,10 +29139,10 @@ namespace CoopSpectator.MissionBehaviors
                 if (preferredTroopIndex < 0)
                     continue;
 
-                if (currentClass != null && HasSelectedTroopIndexBridgeValue(peer, preferredTroopIndex))
+                if (currentClass != null && HasSelectedTroopIndexCompatibilityCacheValue(peer, preferredTroopIndex))
                     continue;
 
-                ApplySelectedTroopIndexBridge(missionPeer, peer, preferredTroopIndex);
+                ApplySelectedTroopIndexCompatibilityCache(peer, preferredTroopIndex);
 
                 string classId = preferredClass?.HeroCharacter?.StringId ?? "null";
                 string peerName = peer.UserName ?? peer.Index.ToString();
@@ -29155,7 +29150,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (_loggedForcedPreferredClassKeys.Add(logKey))
                 {
                     ModLogger.Info(
-                        "CoopMissionSpawnLogic: synchronized native compatibility troop index from authoritative coop selection (" + source + "). " +
+                        "CoopMissionSpawnLogic: synchronized listed-shell selected-troop compatibility cache from authoritative coop selection (" + source + "). " +
                         "Peer=" + peerName +
                         " Culture=" + (authoritativeCulture?.StringId ?? "null") +
                         " TroopIndex=" + preferredTroopIndex +
@@ -29254,7 +29249,7 @@ namespace CoopSpectator.MissionBehaviors
             if (preferredTroopIndex < 0)
                 return false;
 
-            ApplySelectedTroopIndexBridge(missionPeer, peer, preferredTroopIndex);
+            ApplySelectedTroopIndexCompatibilityCache(peer, preferredTroopIndex);
 
             string peerName = peer?.UserName ?? peer?.Index.ToString() ?? "none";
             string classId = preferredClass?.HeroCharacter?.StringId ?? "null";
@@ -29286,11 +29281,11 @@ namespace CoopSpectator.MissionBehaviors
             if (missionPeer == null)
                 return;
 
-            ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
+            ClearSelectedTroopIndexCompatibilityCache(missionPeer);
 
             NetworkCommunicator peer = missionPeer.GetNetworkPeer();
             ModLogger.Info(
-                "CoopMissionSpawnLogic: cleared listed-shell selected-troop compatibility bridge after direct authoritative spawn. " +
+                "CoopMissionSpawnLogic: cleared listed-shell selected-troop compatibility cache after direct authoritative spawn. " +
                 "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
                 " Source=" + (source ?? "unknown"));
         }
@@ -29357,7 +29352,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (preferredClass?.HeroCharacter == null || preferredTroopIndex < 0)
                     continue;
 
-                ApplySelectedTroopIndexBridge(missionPeer, peer, preferredTroopIndex);
+                ApplySelectedTroopIndexCompatibilityCache(peer, preferredTroopIndex);
                 TrySpawnListedShellDirectPlayerAgent(
                     mission,
                     gameMode,
@@ -29576,107 +29571,17 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static void ApplySelectedTroopIndexBridge(MissionPeer missionPeer, NetworkCommunicator peer, int preferredTroopIndex)
+        private static void ApplySelectedTroopIndexCompatibilityCache(NetworkCommunicator peer, int preferredTroopIndex)
         {
-            if (missionPeer == null || peer == null || preferredTroopIndex < 0)
+            if (peer == null || preferredTroopIndex < 0)
                 return;
 
-            if (HasSelectedTroopIndexBridgeValue(peer, preferredTroopIndex))
+            if (HasSelectedTroopIndexCompatibilityCacheValue(peer, preferredTroopIndex))
             {
                 return;
             }
 
-            missionPeer.SelectedTroopIndex = preferredTroopIndex;
-            _lastBridgedSelectedTroopIndexByPeer[peer.Index] = preferredTroopIndex;
-
-            TryBroadcastSelectedTroopIndexBridge(
-                peer,
-                preferredTroopIndex,
-                "CoopMissionSpawnLogic.ApplySelectedTroopIndexBridge");
-        }
-
-        public static bool IsVanillaSelectedTroopIndexNetworkCompatible(int selectedTroopIndex)
-        {
-            return selectedTroopIndex >= -1 && selectedTroopIndex <= 15;
-        }
-
-        public static bool TryBroadcastSelectedTroopIndexBridge(
-            NetworkCommunicator peer,
-            int selectedTroopIndex,
-            string source,
-            string heroClassId = null)
-        {
-            if (peer == null)
-                return false;
-
-            if (!IsVanillaSelectedTroopIndexNetworkCompatible(selectedTroopIndex))
-            {
-                string logKey = (peer.UserName ?? peer.Index.ToString()) +
-                    "|" + selectedTroopIndex +
-                    "|" + (heroClassId ?? "null") +
-                    "|" + (source ?? "unknown");
-                if (_loggedSuppressedVanillaSelectedTroopIndexBridgeKeys.Add(logKey))
-                {
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: kept local preferred troop index without vanilla UpdateSelectedTroopIndex because it exceeds native compression range. " +
-                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                        " TroopIndex=" + selectedTroopIndex +
-                        " NativeMin=-1" +
-                        " NativeMax=15" +
-                        " HeroClass=" + (heroClassId ?? "null") +
-                        " Source=" + (source ?? "unknown"));
-                }
-
-                return false;
-            }
-
-            Mission mission = Mission.Current;
-            if (ShouldRouteSelectedTroopIndexBridgeThroughSnapshotReadyRecipients(mission))
-            {
-                List<NetworkCommunicator> recipients = GameNetwork.NetworkPeers;
-                if (recipients == null)
-                    return false;
-
-                bool sentToReadyRecipient = false;
-                foreach (NetworkCommunicator recipient in recipients)
-                {
-                    if (recipient == null || recipient.IsServerPeer || !recipient.IsConnectionActive)
-                        continue;
-
-                    if (!CoopMissionNetworkBridge.IsPeerCurrentBattleSnapshotBootstrapReady(recipient, out string readinessSummary))
-                    {
-                        string logKey =
-                            (peer.UserName ?? peer.Index.ToString()) + "|" +
-                            recipient.Index + "|" +
-                            selectedTroopIndex + "|" +
-                            (source ?? "unknown");
-                        if (_loggedDeferredVanillaSelectedTroopIndexBridgeRecipientKeys.Add(logKey))
-                        {
-                            ModLogger.Info(
-                                "CoopMissionSpawnLogic: withheld native UpdateSelectedTroopIndex from snapshot-unready peer. " +
-                                "SubjectPeer=" + (peer.UserName ?? peer.Index.ToString()) +
-                                " Recipient=" + (recipient.UserName ?? recipient.Index.ToString()) +
-                                " TroopIndex=" + selectedTroopIndex +
-                                " Readiness={" + (readinessSummary ?? "unknown") + "}" +
-                                " Source=" + (source ?? "unknown"));
-                        }
-
-                        continue;
-                    }
-
-                    GameNetwork.BeginModuleEventAsServer(recipient);
-                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateSelectedTroopIndex(peer, selectedTroopIndex));
-                    GameNetwork.EndModuleEventAsServer();
-                    sentToReadyRecipient = true;
-                }
-
-                return sentToReadyRecipient;
-            }
-
-            GameNetwork.BeginBroadcastModuleEvent();
-            GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateSelectedTroopIndex(peer, selectedTroopIndex));
-            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
-            return true;
+            _selectedTroopIndexCompatibilityCacheByPeer[peer.Index] = preferredTroopIndex;
         }
 
         private static bool ShouldRouteNativePeerCompatibilityThroughSnapshotReadyRecipients(Mission mission)
@@ -29688,11 +29593,6 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             return mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null;
-        }
-
-        private static bool ShouldRouteSelectedTroopIndexBridgeThroughSnapshotReadyRecipients(Mission mission)
-        {
-            return ShouldRouteNativePeerCompatibilityThroughSnapshotReadyRecipients(mission);
         }
 
         private static void TrySyncCoopClassRestrictions(Mission mission, string source)
