@@ -125,15 +125,9 @@ namespace CoopSpectator.Patches
                 ? new List<MissionBehavior>(originalHandler(mission) ?? Enumerable.Empty<MissionBehavior>())
                 : new List<MissionBehavior>();
 
-            LogWrappedBehaviorStack("before-removal", list);
-
             int removedEntryUiCount = list.RemoveAll(ShouldRemoveVanillaEntryBehavior);
             if (removedEntryUiCount > 0)
                 ModLogger.Info("MissionStateOpenNewPatches: removed vanilla entry behaviors from wrapped TeamDeathmatch stack. RemovedCount=" + removedEntryUiCount);
-            else
-                ModLogger.Info("MissionStateOpenNewPatches: no vanilla entry behaviors matched removal filter in wrapped TeamDeathmatch stack.");
-
-            LogWrappedBehaviorStack("after-removal", list);
 
             if (GameNetwork.IsServer)
             {
@@ -157,33 +151,8 @@ namespace CoopSpectator.Patches
                 ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionClientLogic to vanilla TeamDeathmatch.");
             }
 
-            list.Add(new MissionBehaviorDiagnostic());
-            ModLogger.Info("MissionStateOpenNewPatches: appended MissionBehaviorDiagnostic to vanilla TeamDeathmatch. FinalCount=" + list.Count);
+            ModLogger.Info("MissionStateOpenNewPatches: wrapped TeamDeathmatch shell ready. FinalCount=" + list.Count);
             return list;
-        }
-
-        private static void LogWrappedBehaviorStack(string stage, List<MissionBehavior> list)
-        {
-            try
-            {
-                if (list == null)
-                {
-                    ModLogger.Info("MissionStateOpenNewPatches: wrapped TeamDeathmatch stack " + stage + " = <null>");
-                    return;
-                }
-
-                ModLogger.Info("MissionStateOpenNewPatches: wrapped TeamDeathmatch stack " + stage + " count=" + list.Count);
-                for (int i = 0; i < list.Count; i++)
-                {
-                    MissionBehavior behavior = list[i];
-                    string typeName = behavior?.GetType().FullName ?? "<null>";
-                    ModLogger.Info("MissionStateOpenNewPatches: [" + stage + ":" + i + "] " + typeName);
-                }
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionStateOpenNewPatches: failed to log wrapped TeamDeathmatch stack " + stage + ": " + ex.Message);
-            }
         }
 
         private static bool ShouldRemoveVanillaEntryBehavior(MissionBehavior behavior)
