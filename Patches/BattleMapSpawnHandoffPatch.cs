@@ -8600,6 +8600,20 @@ namespace CoopSpectator.Patches
             return teamFromTeamIndex;
         }
 
+        private static Team ResolveAuthoritativeMissionTeamForPatch(Mission mission, BattleSideEnum side)
+        {
+            if (mission == null)
+                return null;
+
+            if (side == BattleSideEnum.Attacker)
+                return mission.AttackerTeam ?? mission.Teams?.Attacker;
+
+            if (side == BattleSideEnum.Defender)
+                return mission.DefenderTeam ?? mission.Teams?.Defender;
+
+            return null;
+        }
+
         private static BattleSideEnum ResolveCreateAgentPayloadBattleSideForPatch(int teamIndex)
         {
             Team missionTeam = Mission.MissionNetworkHelper.GetTeamFromTeamIndex(teamIndex);
@@ -12660,7 +12674,9 @@ namespace CoopSpectator.Patches
             if (controlledAgent == null || !controlledAgent.IsActive())
                 return false;
 
-            Team team = controlledAgent.Team ?? myMissionPeer.Team ?? mission.PlayerTeam;
+            Team team = controlledAgent.Team ??
+                        ResolveAuthoritativeMissionTeamForPatch(mission, CoopBattleAuthorityState.GetSelectionState(myMissionPeer).Side) ??
+                        mission.PlayerTeam;
             if (!ReferenceEquals(orderController, team?.PlayerOrderController))
                 return false;
 

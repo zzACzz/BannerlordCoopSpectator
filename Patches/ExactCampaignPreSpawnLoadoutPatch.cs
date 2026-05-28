@@ -329,19 +329,29 @@ namespace CoopSpectator.Patches
             if (agentBuildData?.AgentTeam != null && agentBuildData.AgentTeam.Side != BattleSideEnum.None)
                 return agentBuildData.AgentTeam.Side;
 
-            if (agentBuildData?.AgentMissionPeer?.Team != null &&
-                agentBuildData.AgentMissionPeer.Team.Side != BattleSideEnum.None)
+            if (agentBuildData?.AgentOrigin is ExactCampaignSnapshotAgentOrigin exactOrigin &&
+                exactOrigin.Side != BattleSideEnum.None)
             {
-                return agentBuildData.AgentMissionPeer.Team.Side;
+                return exactOrigin.Side;
             }
 
-            if (agentBuildData?.OwningAgentMissionPeer?.Team != null &&
-                agentBuildData.OwningAgentMissionPeer.Team.Side != BattleSideEnum.None)
-            {
-                return agentBuildData.OwningAgentMissionPeer.Team.Side;
-            }
+            BattleSideEnum missionPeerSide = ResolveAuthoritativeSideFromMissionPeer(agentBuildData?.AgentMissionPeer);
+            if (missionPeerSide != BattleSideEnum.None)
+                return missionPeerSide;
+
+            BattleSideEnum owningPeerSide = ResolveAuthoritativeSideFromMissionPeer(agentBuildData?.OwningAgentMissionPeer);
+            if (owningPeerSide != BattleSideEnum.None)
+                return owningPeerSide;
 
             return BattleSideEnum.None;
+        }
+
+        private static BattleSideEnum ResolveAuthoritativeSideFromMissionPeer(MissionPeer missionPeer)
+        {
+            if (missionPeer == null)
+                return BattleSideEnum.None;
+
+            return CoopBattleAuthorityState.GetSelectionState(missionPeer).Side;
         }
 
         private static string ToCanonicalSideKey(BattleSideEnum side)
