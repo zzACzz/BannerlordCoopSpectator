@@ -24370,38 +24370,12 @@ namespace CoopSpectator.MissionBehaviors
                      activeControlledTeam == null);
                 if (lostControlledAgent)
                 {
-                    Team previousTeam =
-                        controlledAgent?.Team ??
-                        ResolveObservedActiveOrAuthoritativeMissionTeam(
-                            mission,
-                            missionPeer,
-                            source + " lost-controlled-agent");
-                    if (controlledAgent != null && !controlledAgent.IsActive())
-                    {
-                        missionPeer.ControlledAgent = null;
-                        missionPeer.FollowedAgent = null;
-                        if (ReferenceEquals(peer.ControlledAgent, controlledAgent))
-                            peer.ControlledAgent = null;
-                    }
-
-                    string lastTroopId = (controlledAgent?.Character as BasicCharacterObject)?.StringId ?? CoopBattleAuthorityState.GetSelectedTroopId(missionPeer);
-                    string lastEntryId = CoopBattleAuthorityState.GetSelectedEntryId(missionPeer);
-                    _spawnedCoopPeerIndices.Remove(peer.Index);
-                    CoopBattleSelectionRequestState.Clear(missionPeer, source + " lost-controlled-agent");
-                    CoopBattleSpawnRequestState.Clear(missionPeer, source + " lost-controlled-agent");
-                    CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " lost-controlled-agent");
-                    TryReleasePeerOrderOwnershipAfterLeavingActiveLife(
+                    TryTransitionPeerToDeadAwaitingRespawn(
                         mission,
                         missionPeer,
                         peer,
-                        previousTeam,
                         controlledAgent,
                         source + " lost-controlled-agent");
-                    MovePeerToSpectatorHoldingState(mission, missionPeer, peer, source + " lost-controlled-agent");
-                    CoopBattlePeerLifecycleRuntimeState.MarkDeadAwaitingRespawn(missionPeer, lastTroopId, lastEntryId, source + " lost-controlled-agent");
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: peer returned to respawnable state (" + source + "). " +
-                        "Peer=" + (peer.UserName ?? peer.Index.ToString()));
                 }
 
                 if (HasActiveControlledAgent(missionPeer))
@@ -24723,6 +24697,84 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        internal static bool TryHandleListedShellPlayerDeathTransition(
+            Mission mission,
+            Agent affectedAgent,
+            string source)
+        {
+            if (mission == null || affectedAgent == null || !GameNetwork.IsServer)
+                return false;
+
+            MissionPeer missionPeer = affectedAgent.MissionPeer;
+            NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
+            if (missionPeer == null || peer == null || peer.IsServerPeer)
+                return false;
+
+            if (affectedAgent.IsMount || !affectedAgent.IsHuman)
+                return false;
+
+            if (mission.GetMissionBehavior<ListedShellCompatibilityMode>() == null)
+                return false;
+
+            return TryTransitionPeerToDeadAwaitingRespawn(
+                mission,
+                missionPeer,
+                peer,
+                affectedAgent,
+                source + " listed-shell-player-death");
+        }
+
+        private static bool TryTransitionPeerToDeadAwaitingRespawn(
+            Mission mission,
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            Agent controlledAgent,
+            string source)
+        {
+            if (mission == null || missionPeer == null || peer == null)
+                return false;
+
+            Team previousTeam =
+                controlledAgent?.Team ??
+                ResolveObservedActiveOrAuthoritativeMissionTeam(
+                    mission,
+                    missionPeer,
+                    source + " previous-team");
+
+            if (controlledAgent != null && !controlledAgent.IsActive())
+            {
+                missionPeer.ControlledAgent = null;
+                missionPeer.FollowedAgent = null;
+                if (ReferenceEquals(peer.ControlledAgent, controlledAgent))
+                    peer.ControlledAgent = null;
+            }
+
+            string lastTroopId =
+                (controlledAgent?.Character as BasicCharacterObject)?.StringId ??
+                CoopBattleAuthorityState.GetSelectedTroopId(missionPeer);
+            string lastEntryId = CoopBattleAuthorityState.GetSelectedEntryId(missionPeer);
+            _spawnedCoopPeerIndices.Remove(peer.Index);
+            CoopBattleSelectionRequestState.Clear(missionPeer, source);
+            CoopBattleSpawnRequestState.Clear(missionPeer, source);
+            CoopBattleSpawnRuntimeState.Clear(missionPeer, source);
+            TryReleasePeerOrderOwnershipAfterLeavingActiveLife(
+                mission,
+                missionPeer,
+                peer,
+                previousTeam,
+                controlledAgent,
+                source);
+            MovePeerToSpectatorHoldingState(mission, missionPeer, peer, source);
+            ResetMissionPeerSpawnTimerForRespawnPeriod(mission, missionPeer);
+            CoopBattlePeerLifecycleRuntimeState.MarkDeadAwaitingRespawn(missionPeer, lastTroopId, lastEntryId, source);
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: transitioned peer to dead-awaiting-respawn through coop-owned runtime. " +
+                "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                " PreviousTeamIndex=" + (previousTeam?.TeamIndex ?? -1) +
+                " Source=" + (source ?? "unknown"));
+            return true;
+        }
+
         private static void TryReleasePeerOrderOwnershipAfterLeavingActiveLife(
             Mission mission,
             MissionPeer missionPeer,
@@ -24886,6 +24938,31 @@ namespace CoopSpectator.MissionBehaviors
             if (missionPeer.SpawnTimer != null)
                 missionPeer.SpawnTimer.Reset(mission.CurrentTime, 0f);
             missionPeer.HasSpawnTimerExpired = true;
+        }
+
+        private static void ResetMissionPeerSpawnTimerForRespawnPeriod(Mission mission, MissionPeer missionPeer)
+        {
+            if (mission == null || missionPeer == null)
+                return;
+
+            int respawnPeriod = -1;
+            try
+            {
+                respawnPeriod = MissionLobbyComponent.GetSpawnPeriodDurationForPeer(missionPeer);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSpawnLogic: failed to resolve listed-shell respawn period: " + ex.Message);
+            }
+
+            if (missionPeer.SpawnTimer != null)
+            {
+                float duration = respawnPeriod >= 0 ? respawnPeriod : 0f;
+                missionPeer.SpawnTimer.Reset(mission.CurrentTime, duration);
+            }
+
+            missionPeer.HasSpawnTimerExpired = false;
+            missionPeer.WantsToSpawnAsBot = false;
         }
 
         private static void MovePeerToSpectatorHoldingState(

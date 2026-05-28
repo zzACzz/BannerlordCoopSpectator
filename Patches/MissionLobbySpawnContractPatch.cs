@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.MissionBehaviors;
 using HarmonyLib;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -97,16 +98,33 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
+                MethodInfo agentRemovedTarget = typeof(MissionLobbyComponent).GetMethod(
+                    nameof(MissionLobbyComponent.OnAgentRemoved),
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    binder: null,
+                    types: new[] { typeof(Agent), typeof(Agent), typeof(AgentState), typeof(KillingBlow) },
+                    modifiers: null);
+                MethodInfo agentRemovedPostfix = typeof(MissionLobbySpawnContractPatch).GetMethod(
+                    nameof(OnAgentRemoved_Postfix),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                if (agentRemovedTarget == null || agentRemovedPostfix == null)
+                {
+                    ModLogger.Info("MissionLobbySpawnContractPatch: agent-removed target or postfix not found. Skip.");
+                    return;
+                }
+
                 harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
                 harmony.Patch(tickTarget, prefix: new HarmonyMethod(tickPrefix));
                 harmony.Patch(stateChangeTarget, prefix: new HarmonyMethod(stateChangePrefix));
                 harmony.Patch(clientSynchronizedTarget, prefix: new HarmonyMethod(clientSynchronizedPrefix));
                 harmony.Patch(peerInformationsTarget, prefix: new HarmonyMethod(peerInformationsPrefix));
+                harmony.Patch(agentRemovedTarget, postfix: new HarmonyMethod(agentRemovedPostfix));
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMissionTick.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventMissionStateChange.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMyClientSynchronized.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.SendPeerInformationsToPeer.");
+                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnAgentRemoved.");
             }
             catch (Exception ex)
             {
@@ -261,6 +279,47 @@ namespace CoopSpectator.Patches
             {
                 ModLogger.Info("MissionLobbySpawnContractPatch: peer-informations prefix failed open: " + ex.Message);
                 return true;
+            }
+        }
+
+        private static void OnAgentRemoved_Postfix(
+            MissionLobbyComponent __instance,
+            Agent affectedAgent,
+            Agent affectorAgent,
+            AgentState agentState,
+            KillingBlow killingBlow)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!ShouldUseListedShellLobbyContract(mission))
+                    return;
+
+                if (!GameNetwork.IsServer ||
+                    __instance.CurrentMultiplayerState == MissionLobbyComponent.MultiplayerGameState.Ending ||
+                    affectedAgent == null ||
+                    !affectedAgent.IsHuman ||
+                    affectedAgent.IsMount ||
+                    affectedAgent.MissionPeer == null)
+                {
+                    return;
+                }
+
+                if (agentState != AgentState.Killed &&
+                    agentState != AgentState.Unconscious &&
+                    agentState != AgentState.Routed)
+                {
+                    return;
+                }
+
+                CoopMissionSpawnLogic.TryHandleListedShellPlayerDeathTransition(
+                    mission,
+                    affectedAgent,
+                    "MissionLobbySpawnContractPatch.OnAgentRemoved");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: agent-removed postfix failed open: " + ex.Message);
             }
         }
 
