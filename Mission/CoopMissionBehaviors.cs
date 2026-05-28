@@ -29290,6 +29290,25 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        internal static void FinalizeListedShellDirectSpawnCompatibilityState(
+            Mission mission,
+            MissionPeer missionPeer,
+            string source)
+        {
+            if (mission == null || missionPeer == null)
+                return;
+
+            bool removedPendingVisuals = ClearMissionPeerPendingNativeSpawnVisualCompatibility(mission, missionPeer);
+            if (!removedPendingVisuals)
+                return;
+
+            NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: cleared stale listed-shell native visual compatibility after direct authoritative spawn. " +
+                "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                " Source=" + (source ?? "unknown"));
+        }
+
         private static void ApplySelectedTroopIndexBridge(MissionPeer missionPeer, NetworkCommunicator peer, int preferredTroopIndex)
         {
             if (missionPeer == null || peer == null || preferredTroopIndex < 0)

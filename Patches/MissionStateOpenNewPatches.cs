@@ -128,9 +128,10 @@ namespace CoopSpectator.Patches
             int removedEntryUiCount = list.RemoveAll(ShouldRemoveVanillaEntryBehavior);
             int removedNativeTeamDeathmatchModeCount = ReplaceNativeTeamDeathmatchModesWithCompatibilityShell(list);
             int removedNativeSpawnComponentCount = ReplaceNativeSpawnComponentWithCompatibilityIngress(list);
-            int removedNativeTeamSelectCount = ReplaceNativeTeamSelectionWithPassiveCompatibilityShell(list);
-            int removedNativeVisualBootstrapCount = ReplaceNativeVisualBootstrapWithPassiveCompatibilityShell(list);
-            int removedNativeEquipmentBootstrapCount = ReplaceNativeEquipmentBootstrapWithPassiveCompatibilityShell(list);
+            int removedNativeTeamSelectCount = RemoveNativeTeamSelectionFromListedShell(list);
+            int removedNativeVisualBootstrapCount = RemoveNativeVisualBootstrapFromListedShell(list);
+            int removedNativeEquipmentBootstrapCount = RemoveNativeEquipmentBootstrapFromListedShell(list);
+            int removedPassiveConsoleMatchShellCount = RemovePassiveConsoleMatchShell(list);
             if (removedEntryUiCount > 0)
                 ModLogger.Info("MissionStateOpenNewPatches: removed vanilla entry behaviors from wrapped TeamDeathmatch stack. RemovedCount=" + removedEntryUiCount);
             if (removedNativeTeamDeathmatchModeCount > 0)
@@ -154,14 +155,20 @@ namespace CoopSpectator.Patches
             if (removedNativeVisualBootstrapCount > 0)
             {
                 ModLogger.Info(
-                    "MissionStateOpenNewPatches: replaced native MultiplayerMissionAgentVisualSpawnComponent in wrapped TeamDeathmatch shell. " +
+                    "MissionStateOpenNewPatches: removed native MultiplayerMissionAgentVisualSpawnComponent from wrapped TeamDeathmatch shell. " +
                     "RemovedCount=" + removedNativeVisualBootstrapCount);
             }
             if (removedNativeEquipmentBootstrapCount > 0)
             {
                 ModLogger.Info(
-                    "MissionStateOpenNewPatches: replaced native MissionLobbyEquipmentNetworkComponent in wrapped TeamDeathmatch shell. " +
+                    "MissionStateOpenNewPatches: removed native MissionLobbyEquipmentNetworkComponent from wrapped TeamDeathmatch shell. " +
                     "RemovedCount=" + removedNativeEquipmentBootstrapCount);
+            }
+            if (removedPassiveConsoleMatchShellCount > 0)
+            {
+                ModLogger.Info(
+                    "MissionStateOpenNewPatches: removed passive native ConsoleMatchStartEndHandler from wrapped TeamDeathmatch shell. " +
+                    "RemovedCount=" + removedPassiveConsoleMatchShellCount);
             }
 
             if (GameNetwork.IsServer)
@@ -269,7 +276,7 @@ namespace CoopSpectator.Patches
             return removedCount;
         }
 
-        private static int ReplaceNativeEquipmentBootstrapWithPassiveCompatibilityShell(List<MissionBehavior> list)
+        private static int RemoveNativeEquipmentBootstrapFromListedShell(List<MissionBehavior> list)
         {
             if (list == null || list.Count == 0)
                 return 0;
@@ -288,13 +295,10 @@ namespace CoopSpectator.Patches
                 removedCount++;
             }
 
-            if (removedCount > 0)
-                list.Add(new ListedShellEquipmentCompatibilityComponent());
-
             return removedCount;
         }
 
-        private static int ReplaceNativeTeamSelectionWithPassiveCompatibilityShell(List<MissionBehavior> list)
+        private static int RemoveNativeTeamSelectionFromListedShell(List<MissionBehavior> list)
         {
             if (list == null || list.Count == 0)
                 return 0;
@@ -316,7 +320,7 @@ namespace CoopSpectator.Patches
             return removedCount;
         }
 
-        private static int ReplaceNativeVisualBootstrapWithPassiveCompatibilityShell(List<MissionBehavior> list)
+        private static int RemoveNativeVisualBootstrapFromListedShell(List<MissionBehavior> list)
         {
             if (list == null || list.Count == 0)
                 return 0;
@@ -335,8 +339,27 @@ namespace CoopSpectator.Patches
                 removedCount++;
             }
 
-            if (removedCount > 0)
-                list.Add(new ListedShellVisualCompatibilityComponent());
+            return removedCount;
+        }
+
+        private static int RemovePassiveConsoleMatchShell(List<MissionBehavior> list)
+        {
+            if (list == null || list.Count == 0)
+                return 0;
+
+            int removedCount = 0;
+            for (int i = list.Count - 1; i >= 0; i--)
+            {
+                MissionBehavior behavior = list[i];
+                if (behavior == null)
+                    continue;
+
+                if (!string.Equals(behavior.GetType().Name, "ConsoleMatchStartEndHandler", StringComparison.Ordinal))
+                    continue;
+
+                list.RemoveAt(i);
+                removedCount++;
+            }
 
             return removedCount;
         }

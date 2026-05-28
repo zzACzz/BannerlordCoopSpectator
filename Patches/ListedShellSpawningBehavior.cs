@@ -1,9 +1,13 @@
 using System;
 using System.Collections.Generic;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.MissionBehaviors;
 using TaleWorlds.Core;
+using TaleWorlds.Engine;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Missions.Multiplayer;
+using TaleWorlds.MountAndBlade.Multiplayer;
 using TaleWorlds.ObjectSystem;
 
 namespace CoopSpectator.Patches
@@ -14,7 +18,10 @@ namespace CoopSpectator.Patches
 
         public override void Initialize(SpawnComponent spawnComponent)
         {
-            base.Initialize(spawnComponent);
+            SpawnComponent = spawnComponent;
+            GameMode = Mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
+            MissionLobbyComponent = Mission.GetMissionBehavior<MissionLobbyComponent>();
+            SpawnCheckTimer = new Timer(Mission.Current.CurrentTime, 0.2f);
 
             string missionKey =
                 (Mission?.SceneName ?? Mission.Current?.SceneName ?? "unknown") +
@@ -33,16 +40,24 @@ namespace CoopSpectator.Patches
                 RequestStartSpawnSession();
         }
 
+        public override void Clear()
+        {
+        }
+
         public override void OnTick(float dt)
         {
+            if (!GameNetwork.IsServer)
+                return;
+
             if (IsSpawningEnabled && SpawnCheckTimer.Check(Mission.CurrentTime))
                 SpawnAgents();
-
-            base.OnTick(dt);
         }
 
         protected override void SpawnAgents()
         {
+            if (Mission == null || GameMode == null || SpawnComponent == null)
+                return;
+
             BasicCultureObject attackerCulture = MBObjectManager.Instance.GetObject<BasicCultureObject>(
                 MultiplayerOptions.OptionType.CultureTeam1.GetStrValue());
             BasicCultureObject defenderCulture = MBObjectManager.Instance.GetObject<BasicCultureObject>(
@@ -57,10 +72,22 @@ namespace CoopSpectator.Patches
                 MissionPeer missionPeer = networkPeer.GetComponent<MissionPeer>();
                 if (missionPeer == null ||
                     missionPeer.ControlledAgent != null ||
-                    missionPeer.HasSpawnedAgentVisuals ||
                     missionPeer.Team == null ||
-                    missionPeer.Team == Mission.SpectatorTeam ||
-                    !missionPeer.TeamInitialPerkInfoReady ||
+                    missionPeer.Team == Mission.SpectatorTeam)
+                {
+                    continue;
+                }
+
+                if (!CoopMissionSpawnLogic.TryArmListedShellNativeSpawnCompatibilityState(
+                        Mission,
+                        missionPeer,
+                        networkPeer,
+                        "ListedShellSpawningBehavior.SpawnAgents"))
+                {
+                    continue;
+                }
+
+                if (!missionPeer.TeamInitialPerkInfoReady ||
                     !missionPeer.SpawnTimer.Check(Mission.CurrentTime))
                 {
                     continue;
@@ -81,6 +108,9 @@ namespace CoopSpectator.Patches
                     foreach ((EquipmentIndex index, EquipmentElement element) in alternativeEquipment)
                         equipment[index] = element;
                 }
+                GameMode.AddCosmeticItemsToEquipment(
+                    equipment,
+                    GameMode.GetUsedCosmeticsFromPeer(missionPeer, heroCharacter));
 
                 MultiplayerBattleColors.MultiplayerCultureColorInfo peerColors = battleColors.GetPeerColors(missionPeer);
                 BasicCultureObject bodyCulture = ResolveBodyCulture(missionPeer, attackerCulture, defenderCulture);
@@ -95,28 +125,36 @@ namespace CoopSpectator.Patches
                     .ClothingColor1(peerColors.ClothingColor1Uint)
                     .ClothingColor2(peerColors.ClothingColor2Uint);
 
-                if (GameMode.ShouldSpawnVisualsForServer(networkPeer))
-                {
-                    AgentVisualSpawnComponent.SpawnAgentVisualsForPeer(
-                        missionPeer,
-                        agentBuildData,
-                        missionPeer.SelectedTroopIndex,
-                        false,
-                        0);
-                    if (agentBuildData.AgentVisualsIndex == 0)
-                    {
-                        missionPeer.HasSpawnedAgentVisuals = true;
-                        missionPeer.EquipmentUpdatingExpired = false;
-                    }
-                }
+                if (!TryApplySpawnFrame(agentBuildData, missionPeer, equipment))
+                    continue;
 
-                GameMode.HandleAgentVisualSpawning(networkPeer, agentBuildData, 0, useCosmetics: true);
+                Agent agent = Mission.SpawnAgent(agentBuildData, spawnFromAgentVisuals: false);
+                if (agent == null)
+                    continue;
+
+                agent.AddComponent(new MPPerksAgentComponent(agent));
+                agent.MountAgent?.UpdateAgentProperties();
+                agent.HealthLimit += onSpawnPerkHandler?.GetHitpoints(isPlayer: true) ?? 0f;
+                agent.Health = agent.HealthLimit;
+                agent.WieldInitialWeapons();
+                missionPeer.SpawnCountThisRound++;
+                missionPeer.FollowedAgent = agent;
+                CoopMissionSpawnLogic.FinalizeListedShellDirectSpawnCompatibilityState(
+                    Mission,
+                    missionPeer,
+                    "ListedShellSpawningBehavior.SpawnAgents");
+                MPPerkObject.GetPerkHandler(missionPeer)?.OnEvent(MPPerkCondition.PerkEventFlags.SpawnEnd);
             }
+        }
+
+        public override bool CanUpdateSpawnEquipment(MissionPeer missionPeer)
+        {
+            return false;
         }
 
         public override bool AllowEarlyAgentVisualsDespawning(MissionPeer lobbyPeer)
         {
-            return true;
+            return false;
         }
 
         public override int GetMaximumReSpawnPeriodForPeer(MissionPeer peer)
@@ -139,6 +177,34 @@ namespace CoopSpectator.Patches
         protected override bool IsRoundInProgress()
         {
             return Mission.Current.CurrentState == Mission.State.Continuing;
+        }
+
+        private bool TryApplySpawnFrame(AgentBuildData agentBuildData, MissionPeer missionPeer, Equipment equipment)
+        {
+            if (agentBuildData == null || missionPeer?.Team == null)
+                return false;
+
+            bool hasMount = equipment[EquipmentIndex.ArmorItemEndSlot].Item != null;
+            MatrixFrame spawnFrame = SpawnComponent.GetSpawnFrame(
+                missionPeer.Team,
+                hasMount,
+                missionPeer.SpawnCountThisRound == 0);
+            if (spawnFrame.IsIdentity)
+            {
+                ModLogger.Info(
+                    "ListedShellSpawningBehavior: skipped direct listed-shell spawn because spawn frame was unavailable. " +
+                    "Mission=" + (Mission?.SceneName ?? "unknown") +
+                    " Peer=" + (missionPeer.GetNetworkPeer()?.UserName ?? missionPeer.GetNetworkPeer()?.Index.ToString() ?? "none") +
+                    " TeamIndex=" + missionPeer.Team.TeamIndex +
+                    " HasMount=" + hasMount +
+                    " InitialSpawn=" + (missionPeer.SpawnCountThisRound == 0));
+                return false;
+            }
+
+            spawnFrame.rotation.OrthonormalizeAccordingToForwardAndKeepUpAsZAxis();
+            agentBuildData.InitialPosition(in spawnFrame.origin);
+            agentBuildData.InitialDirection(spawnFrame.rotation.f.AsVec2.Normalized());
+            return true;
         }
 
         private static BasicCultureObject ResolveBodyCulture(
