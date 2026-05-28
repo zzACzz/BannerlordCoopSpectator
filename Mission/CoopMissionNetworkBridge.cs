@@ -545,6 +545,9 @@ namespace CoopSpectator.MissionBehaviors
             LateJoinPeerBootstrapGatePatch.ClearDeferredPeerBootstrap(
                 networkPeer,
                 "CoopMissionNetworkBridge.HandlePlayerDisconnect");
+            LateJoinPeerStateReplayOwnershipPatch.ClearDeferredPeerState(
+                networkPeer,
+                "CoopMissionNetworkBridge.HandlePlayerDisconnect");
         }
 
         public override void OnRemoveBehavior()
@@ -562,6 +565,8 @@ namespace CoopSpectator.MissionBehaviors
             _acknowledgedBattleSnapshotTransmissionIdByPeer.Clear();
             CoopBattlePeerReconnectState.Reset("CoopMissionNetworkBridge.OnRemoveBehavior");
             LateJoinPeerBootstrapGatePatch.ClearAllDeferredPeerBootstrap(
+                "CoopMissionNetworkBridge.OnRemoveBehavior");
+            LateJoinPeerStateReplayOwnershipPatch.ClearAllDeferredPeerState(
                 "CoopMissionNetworkBridge.OnRemoveBehavior");
             ClearClientBattleSnapshotApplicationState("CoopMissionNetworkBridge.OnRemoveBehavior");
             _lastClientBattleSnapshotBootstrapRequestUtc = DateTime.MinValue;
@@ -592,6 +597,10 @@ namespace CoopSpectator.MissionBehaviors
                         TrySendImmediatePeerStatusPayloads(peer);
                         LateJoinPeerBootstrapGatePatch.TryReplayDeferredPeerBootstrap(
                             peer,
+                            "CoopMissionNetworkBridge.HandleClientSelectionRequest BattleSnapshotReadyAck");
+                        LateJoinPeerStateReplayOwnershipPatch.TryReplayDeferredPeerState(
+                            peer,
+                            Mission,
                             "CoopMissionNetworkBridge.HandleClientSelectionRequest BattleSnapshotReadyAck");
                     }
                     return true;

@@ -936,6 +936,7 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly HashSet<string> _loggedArmedListedShellNativeSpawnCompatibilityKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _loggedDeferredVanillaSelectedTroopIndexBridgeRecipientKeys = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> _loggedDeferredNativePeerCompatibilityRecipientKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly Dictionary<int, int> _lastBridgedSelectedTroopIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _lastBridgedPeerTeamIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, string> _appliedFixedMissionCultureByPeer = new Dictionary<int, string>();
@@ -2734,6 +2735,7 @@ namespace CoopSpectator.MissionBehaviors
             _loggedForcedPreferredClassKeys.Clear();
             _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys.Clear();
             _loggedDeferredVanillaSelectedTroopIndexBridgeRecipientKeys.Clear();
+            _loggedDeferredNativePeerCompatibilityRecipientKeys.Clear();
             _lastBridgedSelectedTroopIndexByPeer.Clear();
             _lastBridgedPeerTeamIndexByPeer.Clear();
             _appliedFixedMissionCultureByPeer.Clear();
@@ -23479,9 +23481,10 @@ namespace CoopSpectator.MissionBehaviors
 
                 try
                 {
-                    GameNetwork.BeginBroadcastModuleEvent();
-                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetPeerTeam(peer, authoritativeTeamIndex));
-                    GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+                    BroadcastNativePeerTeamCompatibility(
+                        peer,
+                        authoritativeTeamIndex,
+                        source + " authoritative-team-sync");
 
                     ModLogger.Info(
                         "CoopMissionSpawnLogic: bridged authoritative peer team into native mission membership (" + source + "). " +
@@ -23547,9 +23550,10 @@ namespace CoopSpectator.MissionBehaviors
 
             try
             {
-                GameNetwork.BeginBroadcastModuleEvent();
-                GameNetwork.WriteMessage(new NetworkMessages.FromServer.ChangeCulture(missionPeer, targetCulture));
-                GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+                BroadcastNativePeerCultureCompatibility(
+                    missionPeer,
+                    targetCulture,
+                    source: "CoopMissionSpawnLogic.TryBroadcastFixedMissionCulture");
 
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: rebroadcast fixed culture after server override. " +
@@ -25045,9 +25049,10 @@ namespace CoopSpectator.MissionBehaviors
                     {
                         if (peer != null)
                         {
-                            GameNetwork.BeginBroadcastModuleEvent();
-                            GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetPeerTeam(peer, spectatorTeam.TeamIndex));
-                            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+                            BroadcastNativePeerTeamCompatibility(
+                                peer,
+                                spectatorTeam.TeamIndex,
+                                source + " spectator-holding-team");
                         }
                     }
                     catch (Exception ex)
@@ -29606,7 +29611,117 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
-        private static bool ShouldRouteSelectedTroopIndexBridgeThroughSnapshotReadyRecipients(Mission mission)
+        private static void BroadcastNativePeerTeamCompatibility(
+            NetworkCommunicator subjectPeer,
+            int teamIndex,
+            string source)
+        {
+            if (subjectPeer == null || !GameNetwork.IsServer)
+                return;
+
+            Mission mission = Mission.Current;
+            if (ShouldRouteNativePeerCompatibilityThroughSnapshotReadyRecipients(mission))
+            {
+                List<NetworkCommunicator> recipients = GameNetwork.NetworkPeers;
+                if (recipients == null)
+                    return;
+
+                foreach (NetworkCommunicator recipient in recipients)
+                {
+                    if (recipient == null || recipient.IsServerPeer || !recipient.IsConnectionActive)
+                        continue;
+
+                    if (!CoopMissionNetworkBridge.IsPeerCurrentBattleSnapshotBootstrapReady(recipient, out string readinessSummary))
+                    {
+                        string logKey =
+                            "team|" +
+                            (subjectPeer.UserName ?? subjectPeer.Index.ToString()) + "|" +
+                            recipient.Index + "|" +
+                            teamIndex + "|" +
+                            (source ?? "unknown");
+                        if (_loggedDeferredNativePeerCompatibilityRecipientKeys.Add(logKey))
+                        {
+                            ModLogger.Info(
+                                "CoopMissionSpawnLogic: withheld native SetPeerTeam from snapshot-unready peer. " +
+                                "SubjectPeer=" + (subjectPeer.UserName ?? subjectPeer.Index.ToString()) +
+                                " Recipient=" + (recipient.UserName ?? recipient.Index.ToString()) +
+                                " TeamIndex=" + teamIndex +
+                                " Readiness={" + (readinessSummary ?? "unknown") + "}" +
+                                " Source=" + (source ?? "unknown"));
+                        }
+
+                        continue;
+                    }
+
+                    GameNetwork.BeginModuleEventAsServer(recipient);
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetPeerTeam(subjectPeer, teamIndex));
+                    GameNetwork.EndModuleEventAsServer();
+                }
+
+                return;
+            }
+
+            GameNetwork.BeginBroadcastModuleEvent();
+            GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetPeerTeam(subjectPeer, teamIndex));
+            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+        }
+
+        private static void BroadcastNativePeerCultureCompatibility(
+            MissionPeer subjectMissionPeer,
+            BasicCultureObject targetCulture,
+            string source)
+        {
+            if (subjectMissionPeer == null || targetCulture == null || !GameNetwork.IsServer)
+                return;
+
+            Mission mission = Mission.Current;
+            if (ShouldRouteNativePeerCompatibilityThroughSnapshotReadyRecipients(mission))
+            {
+                List<NetworkCommunicator> recipients = GameNetwork.NetworkPeers;
+                if (recipients == null)
+                    return;
+
+                foreach (NetworkCommunicator recipient in recipients)
+                {
+                    if (recipient == null || recipient.IsServerPeer || !recipient.IsConnectionActive)
+                        continue;
+
+                    if (!CoopMissionNetworkBridge.IsPeerCurrentBattleSnapshotBootstrapReady(recipient, out string readinessSummary))
+                    {
+                        string logKey =
+                            "culture|" +
+                            (subjectMissionPeer.Peer?.UserName ?? subjectMissionPeer.Peer?.Index.ToString() ?? "none") + "|" +
+                            recipient.Index + "|" +
+                            targetCulture.StringId + "|" +
+                            (source ?? "unknown");
+                        if (_loggedDeferredNativePeerCompatibilityRecipientKeys.Add(logKey))
+                        {
+                            ModLogger.Info(
+                                "CoopMissionSpawnLogic: withheld native ChangeCulture from snapshot-unready peer. " +
+                                "SubjectPeer=" + (subjectMissionPeer.Peer?.UserName ?? subjectMissionPeer.Peer?.Index.ToString() ?? "none") +
+                                " Recipient=" + (recipient.UserName ?? recipient.Index.ToString()) +
+                                " Culture=" + targetCulture.StringId +
+                                " Readiness={" + (readinessSummary ?? "unknown") + "}" +
+                                " Source=" + (source ?? "unknown"));
+                        }
+
+                        continue;
+                    }
+
+                    GameNetwork.BeginModuleEventAsServer(recipient);
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.ChangeCulture(subjectMissionPeer, targetCulture));
+                    GameNetwork.EndModuleEventAsServer();
+                }
+
+                return;
+            }
+
+            GameNetwork.BeginBroadcastModuleEvent();
+            GameNetwork.WriteMessage(new NetworkMessages.FromServer.ChangeCulture(subjectMissionPeer, targetCulture));
+            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+        }
+
+        private static bool ShouldRouteNativePeerCompatibilityThroughSnapshotReadyRecipients(Mission mission)
         {
             if (!GameNetwork.IsServer || mission == null)
                 return false;
@@ -29615,6 +29730,11 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             return mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null;
+        }
+
+        private static bool ShouldRouteSelectedTroopIndexBridgeThroughSnapshotReadyRecipients(Mission mission)
+        {
+            return ShouldRouteNativePeerCompatibilityThroughSnapshotReadyRecipients(mission);
         }
 
         private static void TrySyncCoopClassRestrictions(Mission mission, string source)

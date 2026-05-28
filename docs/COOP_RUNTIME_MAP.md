@@ -215,6 +215,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - native `MissionPeer.Team` уже моститься server-side з coop authority state;
 - native `SelectedTroopIndex` лишається тільки compatibility bridge для live native peer state, але late-join replay цього поля вже не входить у join contract;
 - native `SelectedTroopIndex` bridge більше не активується в custom `CoopBattle` runtime; у listed-shell path він більше не використовується як native late-join sync token, бо цю ділянку вже забрав `CoopMissionNetworkBridge`;
+- native peer-state replay для `SetPeerTeam` / `ChangeCulture` більше не покладається на vanilla loop усередині `MissionNetworkComponent.SendExistingObjectsToPeer(...)`; battle-map ingress збирає цей replay явно через наш patch-layer;
 - listed-shell `TeamInitialPerkInfoReady` більше не залежить виключно від `MissionLobbyEquipmentNetworkComponent`, але після виносу `SpawnComponent`/equipment shell цей gate уже не має live listed-shell читача й більше не моститься server-side;
 - listed-shell `HasSpawnedAgentVisuals` теж більше не піднімається native visual preview-етапом і більше не армується server-side bridge-ем; visual flag тепер лишається очищеним і більше не входить у listed-shell spawn authority;
 - listed-shell spawn ingress більше не використовує native `TeamDeathmatchSpawningBehavior`; TDM gold floor, troop-cost gate і spawn-time gold deduction більше не входять у live listed-shell spawn contract;
@@ -397,6 +398,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - `SelectedTroopIndex` compatibility bridge більше не активується в custom `CoopBattle` runtime; у listed shell він тепер живе тільки як live compatibility output під час authoritative pending-spawn bootstrap window і чистить cached state під час expiry;
 - native `MissionNetworkComponent.SendTroopSelectionInformation(...)` більше не входить у listed late-join contract; authoritative selection для late join тепер приходить через `CoopMissionNetworkBridge` payloads, а не через native `UpdateSelectedTroopIndex` replay;
 - live native `UpdateSelectedTroopIndex` broadcast теж більше не ллється в not-ready peer-и; compatibility output тепер іде тільки snapshot-ready recipient-ам, тому late-join selection window більше не залежить від vanilla replay навіть під час активних змін selection у бою;
+- live native `SetPeerTeam` / `ChangeCulture` compatibility broadcasts теж більше не ллються в snapshot-unready peer-и; якщо `SendExistingObjectsToPeer` спрацював до snapshot readiness, peer-state replay тепер відкладається й дограється вже через `CoopMissionNetworkBridge` readiness ack;
 - listed-shell native `TeamInitialPerkInfoReady` більше не залежить виключно від `MissionLobbyEquipmentNetworkComponent`, але й більше не моститься server-side, бо live listed-shell spawn reader для цього gate вже прибраний;
 - native `MissionLobbyEquipmentNetworkComponent` повністю прибраний із wrapped listed `TeamDeathmatch` shell; listed ingress більше не тримає even passive equipment compatibility component;
 - native `MultiplayerTeamSelectComponent` повністю прибраний із wrapped listed `TeamDeathmatch` shell; listed ingress більше не несе окремий team-select compatibility layer;
@@ -455,7 +457,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - завершити перехід від native team-select stack/UI bootstrap до власної coop-owned authority і readiness-моделі;
 - прибрати останній compatibility-only міст через native `SelectedTroopIndex`, коли навіть live native peer state більше не вимагатиме його;
 - завершити винос late-join peer sync із native `MissionNetworkComponent` corridor у повністю власний coop-owned ingress path без `MissionState.OpenNew` interception.
-- після цього окремо вирішити, чи лишати native `SetPeerTeam` / `ChangeCulture` replay, чи переносити і їх у coop-owned late-join ingress.
+- після цього переоцінити, чи можна повністю забрати native `SetPeerTeam` / `ChangeCulture` message types з compatibility layer, чи вони ще потрібні як мінімальний vanilla peer-state surface.
 
 ### Фаза D: відчепити мод від vanilla listed shell
 
