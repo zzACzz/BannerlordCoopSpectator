@@ -213,6 +213,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - ми вже маємо власну side/entry authority;
 - authoritative troop selection більше не читає native `MissionPeer.SelectedTroopIndex` як джерело істини;
 - native `MissionPeer.Team` уже моститься server-side з coop authority state;
+- coop hero-class resolver, class-restriction sync і listed direct-spawn path більше не читають native `MissionPeer.Team` / `MissionPeer.Culture` як source of truth; вони резолвлять runtime team/culture від authoritative side + entry state, а native peer state лишається compatibility output;
 - native `SelectedTroopIndex` лишається тільки compatibility bridge для live native peer state, але late-join replay цього поля вже не входить у join contract;
 - native `SelectedTroopIndex` bridge більше не активується в custom `CoopBattle` runtime; у listed-shell path він більше не використовується як native late-join sync token, бо цю ділянку вже забрав `CoopMissionNetworkBridge`;
 - native peer-state replay для `SetPeerTeam` / `ChangeCulture` більше не покладається на vanilla loop усередині `MissionNetworkComponent.SendExistingObjectsToPeer(...)`; battle-map ingress збирає цей replay явно через наш patch-layer;
@@ -399,6 +400,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - native `MissionNetworkComponent.SendTroopSelectionInformation(...)` більше не входить у listed late-join contract; authoritative selection для late join тепер приходить через `CoopMissionNetworkBridge` payloads, а не через native `UpdateSelectedTroopIndex` replay;
 - live native `UpdateSelectedTroopIndex` broadcast теж більше не ллється в not-ready peer-и; compatibility output тепер іде тільки snapshot-ready recipient-ам, тому late-join selection window більше не залежить від vanilla replay навіть під час активних змін selection у бою;
 - live native `SetPeerTeam` / `ChangeCulture` compatibility broadcasts теж більше не ллються в snapshot-unready peer-и; якщо `SendExistingObjectsToPeer` спрацював до snapshot readiness, peer-state replay тепер відкладається й дограється вже через `CoopMissionNetworkBridge` readiness ack;
+- coop hero-class resolution, allowed-class sync і listed direct authoritative spawn більше не читають native `MissionPeer.Team` / `MissionPeer.Culture` як runtime input; цей native peer state лишився тільки compatibility surface для vanilla message-layer і color/bootstrap хвостів, які ще треба дорізати;
 - listed-shell native `TeamInitialPerkInfoReady` більше не залежить виключно від `MissionLobbyEquipmentNetworkComponent`, але й більше не моститься server-side, бо live listed-shell spawn reader для цього gate вже прибраний;
 - native `MissionLobbyEquipmentNetworkComponent` повністю прибраний із wrapped listed `TeamDeathmatch` shell; listed ingress більше не тримає even passive equipment compatibility component;
 - native `MultiplayerTeamSelectComponent` повністю прибраний із wrapped listed `TeamDeathmatch` shell; listed ingress більше не несе окремий team-select compatibility layer;

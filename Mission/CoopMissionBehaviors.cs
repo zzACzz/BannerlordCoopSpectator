@@ -28501,6 +28501,63 @@ namespace CoopSpectator.MissionBehaviors
             return null;
         }
 
+        private static bool TryResolveAuthoritativeRuntimePeerContext(
+            Mission mission,
+            MissionPeer missionPeer,
+            string source,
+            out BattleSideEnum authoritativeSide,
+            out Team authoritativeTeam,
+            out BasicCultureObject authoritativeCulture,
+            out string failureReason)
+        {
+            authoritativeSide = BattleSideEnum.None;
+            authoritativeTeam = null;
+            authoritativeCulture = null;
+            failureReason = string.Empty;
+
+            if (mission == null)
+            {
+                failureReason = "mission is null";
+                return false;
+            }
+
+            if (missionPeer == null)
+            {
+                failureReason = "missionPeer is null";
+                return false;
+            }
+
+            authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " authoritative-runtime");
+            if (authoritativeSide == BattleSideEnum.None)
+            {
+                failureReason = "authoritative side not ready";
+                return false;
+            }
+
+            authoritativeTeam = ResolveAuthoritativeMissionTeam(mission, missionPeer, authoritativeSide);
+            if (authoritativeTeam == null || ReferenceEquals(authoritativeTeam, mission.SpectatorTeam))
+            {
+                failureReason = "authoritative mission team not ready";
+                return false;
+            }
+
+            string targetCultureId = ResolveRuntimeMissionCultureIdForPeer(missionPeer, authoritativeSide);
+            if (string.IsNullOrWhiteSpace(targetCultureId))
+            {
+                failureReason = "authoritative mission culture id not ready";
+                return false;
+            }
+
+            authoritativeCulture = MBObjectManager.Instance?.GetObject<BasicCultureObject>(targetCultureId);
+            if (authoritativeCulture == null)
+            {
+                failureReason = "authoritative mission culture object not ready";
+                return false;
+            }
+
+            return true;
+        }
+
         private static bool TryRemovePendingAgentVisuals(Mission mission, MissionPeer missionPeer)
         {
             if (mission == null || missionPeer == null || mission.MissionBehaviors == null)
@@ -28664,15 +28721,23 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (missionPeer == null)
+            Mission mission = Mission.Current;
+            if (mission == null)
             {
-                debugReason = "missionPeer is null";
+                debugReason = "mission is null";
                 return false;
             }
 
-            if (missionPeer.Team == null || missionPeer.Culture == null)
+            if (!TryResolveAuthoritativeRuntimePeerContext(
+                    mission,
+                    missionPeer,
+                    "authoritative-compatibility-hero-class",
+                    out BattleSideEnum _,
+                    out Team _,
+                    out BasicCultureObject authoritativeCulture,
+                    out string authoritativeContextReason))
             {
-                debugReason = "peer team/culture not ready";
+                debugReason = authoritativeContextReason;
                 return false;
             }
 
@@ -28694,7 +28759,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            string targetTroopId = GetPreferredTargetTroopIdForPeerCulture(missionPeer);
+            string targetTroopId = GetPreferredTargetTroopIdForPeerCulture(missionPeer, authoritativeCulture);
             if (string.IsNullOrWhiteSpace(targetTroopId))
             {
                 debugReason = "no selected allowed troop";
@@ -28702,7 +28767,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             List<MultiplayerClassDivisions.MPHeroClass> cultureClasses = MultiplayerClassDivisions
-                .GetMPHeroClasses(missionPeer.Culture)
+                .GetMPHeroClasses(authoritativeCulture)
                 ?.Where(heroClass => heroClass?.HeroCharacter != null)
                 .ToList();
 
@@ -29154,13 +29219,25 @@ namespace CoopSpectator.MissionBehaviors
             if (!IsListedShellMissionLobbyPlaying(mission))
                 return false;
 
+            if (!TryResolveAuthoritativeRuntimePeerContext(
+                    mission,
+                    missionPeer,
+                    "listed-shell-native-spawn-compatibility",
+                    out BattleSideEnum _,
+                    out Team authoritativeTeam,
+                    out BasicCultureObject _,
+                    out string _))
+            {
+                return false;
+            }
+
             if (!CoopBattleSpawnRequestState.HasPendingRequest(missionPeer))
                 return false;
 
             if (missionPeer.ControlledAgent != null)
                 return false;
 
-            if (missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
+            if (ReferenceEquals(authoritativeTeam, mission.SpectatorTeam))
                 return false;
 
             return true;
@@ -29295,10 +29372,7 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                if (missionPeer == null ||
-                    missionPeer.ControlledAgent != null ||
-                    missionPeer.Team == null ||
-                    ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
+                if (missionPeer == null || missionPeer.ControlledAgent != null)
                 {
                     continue;
                 }
@@ -29354,8 +29428,25 @@ namespace CoopSpectator.MissionBehaviors
             string debugReason,
             string source)
         {
-            if (mission == null || gameMode == null || missionPeer?.Team == null || preferredClass?.HeroCharacter == null)
+            if (mission == null || gameMode == null || missionPeer == null || preferredClass?.HeroCharacter == null)
                 return false;
+
+            if (!TryResolveAuthoritativeRuntimePeerContext(
+                    mission,
+                    missionPeer,
+                    (source ?? "unknown") + " listed-shell-direct-spawn",
+                    out BattleSideEnum _,
+                    out Team authoritativeTeam,
+                    out BasicCultureObject _,
+                    out string authoritativeContextReason))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: skipped direct listed-shell spawn because authoritative peer runtime context was unavailable. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Reason=" + authoritativeContextReason +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
 
             BasicCharacterObject heroCharacter = preferredClass.HeroCharacter;
             Equipment equipment = heroCharacter.Equipment.Clone();
@@ -29376,7 +29467,7 @@ namespace CoopSpectator.MissionBehaviors
             var agentBuildData = new AgentBuildData(heroCharacter)
                 .MissionPeer(missionPeer)
                 .Equipment(equipment)
-                .Team(missionPeer.Team)
+                .Team(authoritativeTeam)
                 .TroopOrigin(new BasicBattleAgentOrigin(heroCharacter))
                 .IsFemale(missionPeer.Peer.IsFemale)
                 .VisualsIndex(0)
@@ -29386,7 +29477,7 @@ namespace CoopSpectator.MissionBehaviors
             if (TryResolveListedShellDirectSpawnBodyProperties(missionPeer, out BodyProperties bodyProperties))
                 agentBuildData.BodyProperties(bodyProperties);
 
-            if (!TryApplyListedShellDirectSpawnFrame(agentBuildData, mission, missionPeer, equipment, source))
+            if (!TryApplyListedShellDirectSpawnFrame(agentBuildData, mission, missionPeer, authoritativeTeam, equipment, source))
                 return false;
 
             Agent agent = mission.SpawnAgent(agentBuildData, spawnFromAgentVisuals: false);
@@ -29410,8 +29501,8 @@ namespace CoopSpectator.MissionBehaviors
             ModLogger.Info(
                 "CoopMissionSpawnLogic: completed direct listed-shell authoritative spawn from coop-owned server tick. " +
                 "Peer=" + peerName +
-                " TeamIndex=" + missionPeer.Team.TeamIndex +
-                " TeamSide=" + missionPeer.Team.Side +
+                " TeamIndex=" + authoritativeTeam.TeamIndex +
+                " TeamSide=" + authoritativeTeam.Side +
                 " TroopId=" + heroCharacter.StringId +
                 " SpawnCountThisRound=" + missionPeer.SpawnCountThisRound +
                 " AgentIndex=" + agent.Index +
@@ -29424,16 +29515,17 @@ namespace CoopSpectator.MissionBehaviors
             AgentBuildData agentBuildData,
             Mission mission,
             MissionPeer missionPeer,
+            Team authoritativeTeam,
             Equipment equipment,
             string source)
         {
-            if (agentBuildData == null || mission == null || missionPeer?.Team == null)
+            if (agentBuildData == null || mission == null || authoritativeTeam == null)
                 return false;
 
             bool hasMount = equipment[EquipmentIndex.ArmorItemEndSlot].Item != null;
             if (!ListedShellSpawnFrameBehavior.TryResolveSpawnFrame(
                     mission,
-                    missionPeer.Team,
+                    authoritativeTeam,
                     hasMount,
                     missionPeer.SpawnCountThisRound == 0,
                     out MatrixFrame spawnFrame))
@@ -29442,7 +29534,7 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopMissionSpawnLogic: skipped direct listed-shell spawn because spawn frame was unavailable. " +
                     "Mission=" + (mission.SceneName ?? "unknown") +
                     " Peer=" + (missionPeer.GetNetworkPeer()?.UserName ?? missionPeer.GetNetworkPeer()?.Index.ToString() ?? "none") +
-                    " TeamIndex=" + missionPeer.Team.TeamIndex +
+                    " TeamIndex=" + authoritativeTeam.TeamIndex +
                     " HasMount=" + hasMount +
                     " InitialSpawn=" + (missionPeer.SpawnCountThisRound == 0) +
                     " Source=" + (source ?? "unknown"));
@@ -29785,11 +29877,22 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                if (missionPeer == null || missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
+                if (missionPeer == null)
                     continue;
 
-                BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, "class-restriction-sync");
-                if (authoritativeSide == BattleSideEnum.None)
+                if (!TryResolveAuthoritativeRuntimePeerContext(
+                        mission,
+                        missionPeer,
+                        "class-restriction-sync",
+                        out BattleSideEnum _,
+                        out Team authoritativeTeam,
+                        out BasicCultureObject authoritativeCulture,
+                        out string _))
+                {
+                    continue;
+                }
+
+                if (ReferenceEquals(authoritativeTeam, mission.SpectatorTeam))
                     continue;
 
                 BasicCharacterObject controlledCharacter = missionPeer.ControlledAgent?.Character as BasicCharacterObject;
@@ -29799,7 +29902,7 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
                 }
 
-                foreach (BasicCharacterObject allowedCharacter in ResolveAllowedCharactersForPeerCulture(missionPeer))
+                foreach (BasicCharacterObject allowedCharacter in ResolveAllowedCharactersForPeerCulture(missionPeer, authoritativeCulture))
                 {
                     if (allowedCharacter != null)
                         allowedClasses.Add(allowedCharacter.DefaultFormationClass);
@@ -29854,7 +29957,7 @@ namespace CoopSpectator.MissionBehaviors
             return finalAvailability;
         }
 
-        private static string GetPreferredTargetTroopIdForPeerCulture(MissionPeer missionPeer)
+        private static string GetPreferredTargetTroopIdForPeerCulture(MissionPeer missionPeer, BasicCultureObject runtimeCulture)
         {
             CoopBattleAuthorityState.PeerSelectionState selectionState = CoopBattleAuthorityState.GetSelectionState(missionPeer);
             RosterEntryState preferredEntry = ResolvePreferredAllowedEntryStateForPeer(missionPeer, selectionState);
@@ -29865,12 +29968,12 @@ namespace CoopSpectator.MissionBehaviors
                     : preferredEntry?.CharacterId)
                 : (preferredEntry?.CharacterId ?? selectionState.TroopId);
             if (string.IsNullOrWhiteSpace(authoritativeBaseTroopId))
-                return ResolveAllowedTargetTroopIdsForPeerCulture(missionPeer).FirstOrDefault();
+                return ResolveAllowedTargetTroopIdsForPeerCulture(missionPeer, runtimeCulture).FirstOrDefault();
 
             if (ShouldPreserveExactHeroRuntimeTarget(preferredEntry, authoritativeBaseTroopId))
                 return authoritativeBaseTroopId;
 
-            string cultureSpecificTargetTroopId = ResolveCultureSpecificTargetTroopId(authoritativeBaseTroopId, missionPeer?.Culture);
+            string cultureSpecificTargetTroopId = ResolveCultureSpecificTargetTroopId(authoritativeBaseTroopId, runtimeCulture);
             return string.IsNullOrWhiteSpace(cultureSpecificTargetTroopId)
                 ? authoritativeBaseTroopId
                 : cultureSpecificTargetTroopId;
@@ -29905,7 +30008,7 @@ namespace CoopSpectator.MissionBehaviors
             return orderedEntries;
         }
 
-        private static List<string> ResolveAllowedTargetTroopIdsForPeerCulture(MissionPeer missionPeer)
+        private static List<string> ResolveAllowedTargetTroopIdsForPeerCulture(MissionPeer missionPeer, BasicCultureObject runtimeCulture)
         {
             List<string> targetTroopIds = new List<string>();
             List<RosterEntryState> orderedEntries = ResolveOrderedAllowedEntriesForPeer(missionPeer);
@@ -29919,7 +30022,7 @@ namespace CoopSpectator.MissionBehaviors
             if (allowedBaseTroopIds.Count == 0)
                 return targetTroopIds;
 
-            string cultureToken = ExtractCultureToken(missionPeer?.Culture);
+            string cultureToken = ExtractCultureToken(runtimeCulture);
             HashSet<string> seenTroopIds = new HashSet<string>(StringComparer.Ordinal);
 
             foreach (string baseTargetTroopId in allowedBaseTroopIds)
@@ -29967,13 +30070,13 @@ namespace CoopSpectator.MissionBehaviors
                 : baseTargetTroopId;
         }
 
-        private static IEnumerable<BasicCharacterObject> ResolveAllowedCharactersForPeerCulture(MissionPeer missionPeer)
+        private static IEnumerable<BasicCharacterObject> ResolveAllowedCharactersForPeerCulture(MissionPeer missionPeer, BasicCultureObject runtimeCulture)
         {
             List<RosterEntryState> orderedEntries = ResolveOrderedAllowedEntriesForPeer(missionPeer);
             if (orderedEntries.Count > 0)
             {
                 HashSet<string> yieldedTroopIds = new HashSet<string>(StringComparer.Ordinal);
-                string cultureToken = ExtractCultureToken(missionPeer?.Culture);
+                string cultureToken = ExtractCultureToken(runtimeCulture);
                 foreach (RosterEntryState entry in orderedEntries)
                 {
                     string baseTroopId = entry?.CharacterId;
@@ -30000,7 +30103,7 @@ namespace CoopSpectator.MissionBehaviors
                 yield break;
             }
 
-            foreach (string targetTroopId in ResolveAllowedTargetTroopIdsForPeerCulture(missionPeer))
+            foreach (string targetTroopId in ResolveAllowedTargetTroopIdsForPeerCulture(missionPeer, runtimeCulture))
             {
                 BasicCharacterObject allowedCharacter = ResolveAllowedCharacter(targetTroopId);
                 if (allowedCharacter != null)
