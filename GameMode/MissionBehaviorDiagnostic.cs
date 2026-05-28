@@ -6,10 +6,10 @@ using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.GameMode
 {
-    /// <summary>Логує наявність компонентів, які очікує Gauntlet UI (MissionOptionsComponent, MissionBoundaryCrossingHandler, MultiplayerPollComponent, MissionLobbyEquipmentNetworkComponent).</summary>
+    /// <summary>Логує наявність компонентів, які ще очікує coop/native client shell (MissionOptionsComponent, MissionBoundaryCrossingHandler, MultiplayerPollComponent).</summary>
     public sealed class MissionBehaviorDiagnostic : MissionLogic
     {
-        private static readonly string[] CriticalTypeNames = { "MissionOptionsComponent", "MissionBoundaryCrossingHandler", "MultiplayerPollComponent", "MissionLobbyEquipmentNetworkComponent" };
+        private static readonly string[] CriticalTypeNames = { "MissionOptionsComponent", "MissionBoundaryCrossingHandler", "MultiplayerPollComponent" };
         private static readonly string[] BattleMapUiParityTypeNames =
         {
             "MissionAgentLabelUIHandler",
