@@ -82,14 +82,31 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
+                MethodInfo peerInformationsTarget = typeof(MissionLobbyComponent).GetMethod(
+                    "SendPeerInformationsToPeer",
+                    BindingFlags.Instance | BindingFlags.NonPublic,
+                    binder: null,
+                    types: new[] { typeof(NetworkCommunicator) },
+                    modifiers: null);
+                MethodInfo peerInformationsPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
+                    nameof(SendPeerInformationsToPeer_Prefix),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                if (peerInformationsTarget == null || peerInformationsPrefix == null)
+                {
+                    ModLogger.Info("MissionLobbySpawnContractPatch: peer-informations target or prefix not found. Skip.");
+                    return;
+                }
+
                 harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
                 harmony.Patch(tickTarget, prefix: new HarmonyMethod(tickPrefix));
                 harmony.Patch(stateChangeTarget, prefix: new HarmonyMethod(stateChangePrefix));
                 harmony.Patch(clientSynchronizedTarget, prefix: new HarmonyMethod(clientSynchronizedPrefix));
+                harmony.Patch(peerInformationsTarget, prefix: new HarmonyMethod(peerInformationsPrefix));
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMissionTick.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventMissionStateChange.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMyClientSynchronized.");
+                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.SendPeerInformationsToPeer.");
             }
             catch (Exception ex)
             {
@@ -226,6 +243,27 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool SendPeerInformationsToPeer_Prefix(MissionLobbyComponent __instance, NetworkCommunicator peer)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!ShouldUseListedShellLobbyContract(mission))
+                    return true;
+
+                if (!GameNetwork.IsServer || peer == null || peer.IsServerPeer)
+                    return false;
+
+                SendListedShellPeerInformationsToPeer(mission, peer);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: peer-informations prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static bool HandleWaitingFirstPlayersState(MissionLobbyComponent lobbyComponent, Mission mission)
         {
             if (!GameNetwork.IsServer)
@@ -326,6 +364,80 @@ namespace CoopSpectator.Patches
             }
 
             return null;
+        }
+
+        private static void SendListedShellPeerInformationsToPeer(Mission mission, NetworkCommunicator targetPeer)
+        {
+            IEnumerable<NetworkCommunicator> peers = GameNetwork.NetworkPeersIncludingDisconnectedPeers;
+            if (peers == null)
+                return;
+
+            int replayedKillDeathCount = 0;
+            int replayedBotsControlledCount = 0;
+            foreach (NetworkCommunicator subjectPeer in peers)
+            {
+                if (!ShouldReplayListedShellPeerInformationSubject(subjectPeer))
+                    continue;
+
+                MissionPeer missionPeer = subjectPeer.GetComponent<MissionPeer>();
+                if (missionPeer == null)
+                    continue;
+
+                int replayedDeathCount = ResolveListedShellReplayDeathCount(missionPeer);
+                GameNetwork.BeginModuleEventAsServer(targetPeer);
+                GameNetwork.WriteMessage(new NetworkMessages.FromServer.KillDeathCountChange(
+                    missionPeer.GetNetworkPeer(),
+                    null,
+                    missionPeer.KillCount,
+                    missionPeer.AssistCount,
+                    replayedDeathCount,
+                    missionPeer.Score));
+                GameNetwork.EndModuleEventAsServer();
+                replayedKillDeathCount++;
+
+                if (missionPeer.BotsUnderControlAlive == 0 && missionPeer.BotsUnderControlTotal == 0)
+                    continue;
+
+                GameNetwork.BeginModuleEventAsServer(targetPeer);
+                GameNetwork.WriteMessage(new NetworkMessages.FromServer.BotsControlledChange(
+                    missionPeer.GetNetworkPeer(),
+                    missionPeer.BotsUnderControlAlive,
+                    missionPeer.BotsUnderControlTotal));
+                GameNetwork.EndModuleEventAsServer();
+                replayedBotsControlledCount++;
+            }
+
+            ModLogger.Info(
+                "MissionLobbySpawnContractPatch: replayed listed-shell peer info through coop-owned late-client contract. " +
+                "Peer=" + (targetPeer.UserName ?? targetPeer.Index.ToString()) +
+                " Scene=" + (mission?.SceneName ?? "unknown") +
+                " KillDeathReplays=" + replayedKillDeathCount +
+                " BotsControlledReplays=" + replayedBotsControlledCount);
+        }
+
+        private static bool ShouldReplayListedShellPeerInformationSubject(NetworkCommunicator peer)
+        {
+            if (peer == null)
+                return false;
+
+            VirtualPlayer virtualPlayer = peer.VirtualPlayer;
+            bool isDisconnectedPeer =
+                virtualPlayer != null &&
+                virtualPlayer.Index >= 0 &&
+                virtualPlayer.Index < GameNetwork.VirtualPlayers.Length &&
+                !ReferenceEquals(virtualPlayer, GameNetwork.VirtualPlayers[virtualPlayer.Index]);
+            return isDisconnectedPeer || peer.IsSynchronized || peer.JustReconnecting;
+        }
+
+        private static int ResolveListedShellReplayDeathCount(MissionPeer missionPeer)
+        {
+            if (missionPeer == null)
+                return 0;
+
+            if (!CoopBattlePeerLifecycleRuntimeState.TryGetState(missionPeer, out PeerLifecycleRuntimeState lifecycleState))
+                return missionPeer.DeathCount;
+
+            return Math.Max(missionPeer.DeathCount, lifecycleState.DeathCount);
         }
 
         private static int CountSynchronizedPeers()
