@@ -42,6 +42,7 @@ namespace CoopSpectator.Infrastructure
             if (entryState == null || string.IsNullOrWhiteSpace(entryState.EntryId))
                 return null;
 
+            bool useNativeMountLifecycle = CoopMissionSpawnLogic.ShouldUseNativeMountLifecycleForExactEntry(entryState);
             ExactTransferSpawnContract exactTransferContract = ExactTransferContractBuilder.Build(
                 entryState,
                 contractPlayerControlledOrigin,
@@ -61,6 +62,8 @@ namespace CoopSpectator.Infrastructure
             bool includeCape = exactTransferContract?.Equipment?.IncludeCapeInPreSpawn ?? false;
             bool includeArmorVisuals = exactTransferContract?.Equipment?.IncludeArmorVisualsInPreSpawn ?? false;
             bool includeMountVisuals = exactTransferContract?.Equipment?.IncludeMountVisualsInPreSpawn ?? false;
+            if (useNativeMountLifecycle)
+                includeMountVisuals = false;
             bool useContractDrivenPreSpawnPath =
                 !useCanonicalGeneratedTemplateNativeSpawn &&
                 exactTransferContract?.SpawnPolicy?.RequirePreSpawnInjection == true &&
@@ -158,6 +161,13 @@ namespace CoopSpectator.Infrastructure
                 canInjectBodyPropertiesAtCreateAgentTime = payloadDiagnostic.IncludeBodyProperties;
             }
 
+            if (useNativeMountLifecycle)
+            {
+                includeMountVisuals = false;
+                if (payloadDiagnostic.IsActive)
+                    payloadDiagnostic.IncludeMountVisuals = false;
+            }
+
             bool ordinaryEntryRequiresCanonicalServerNativeBaseline =
                 !useStrictCanonicalFieldBattleOrdinaryExactPreSpawnPath &&
                 RequiresCanonicalFieldBattleServerNativeBaselineForOrdinaryEntry(
@@ -177,7 +187,7 @@ namespace CoopSpectator.Infrastructure
                 includeWeapons = true;
                 includeArmorVisuals = true;
                 includeCape = true;
-                includeMountVisuals = entryState.IsMounted;
+                includeMountVisuals = entryState.IsMounted && !useNativeMountLifecycle;
                 canInjectBodyPropertiesAtCreateAgentTime = false;
                 payloadDiagnostic = new ExactCreateAgentPayloadDiagnosticDecision
                 {
@@ -195,7 +205,7 @@ namespace CoopSpectator.Infrastructure
                     IncludeWeapons = true,
                     IncludeArmorVisuals = true,
                     IncludeCape = true,
-                    IncludeMountVisuals = entryState.IsMounted,
+                    IncludeMountVisuals = entryState.IsMounted && !useNativeMountLifecycle,
                     IncludeBodyProperties = false
                 };
             }

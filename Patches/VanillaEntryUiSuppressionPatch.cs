@@ -177,6 +177,12 @@ namespace CoopSpectator.Patches
             if (entryPolicy == null)
                 return false;
 
+            bool authoritativePathActive = requireAuthoritativeTroopPath
+                ? entryPolicy.UseAuthoritativeTroopPath
+                : entryPolicy.UseAuthoritativeSidePath;
+            if (!authoritativePathActive)
+                return false;
+
             if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay &&
                 (mission.GetMissionBehavior<CoopMissionClientLogic>() != null ||
                  mission.GetMissionBehavior<CoopMissionSelectionView>() != null))
@@ -184,9 +190,7 @@ namespace CoopSpectator.Patches
                 return true;
             }
 
-            return requireAuthoritativeTroopPath
-                ? entryPolicy.UseAuthoritativeTroopPath
-                : entryPolicy.UseAuthoritativeSidePath;
+            return authoritativePathActive;
         }
 
         private static void LogBlockedTeamSelection(string operationName, CoopBattleEntryPolicy.ClientSnapshot entryPolicy)

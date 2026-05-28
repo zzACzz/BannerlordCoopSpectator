@@ -1163,11 +1163,23 @@ namespace CoopSpectator.Infrastructure
             // Keep the preload surface narrow: only synthetic compatibility aliases
             // for raw snapshot ids that are actually present in the current battle.
             return ExactEquipmentCompatibilityCatalog
-                .EnumerateSyntheticAliasItemIds(requestedItemIds)
+                .EnumerateSyntheticAliasItemIds(
+                    requestedItemIds.Where(itemId => !ShouldSuppressSyntheticAliasPreloadForRequestedItem(itemId)))
                 .Where(aliasItemId => DefinitionsById.ContainsKey(aliasItemId))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(aliasItemId => aliasItemId, StringComparer.Ordinal)
                 .ToList();
+        }
+
+        private static bool ShouldSuppressSyntheticAliasPreloadForRequestedItem(string itemId)
+        {
+            if (!ExactEquipmentCompatibilityCatalog.ShouldPreferOrdinaryBattleTwinAlias(itemId))
+                return false;
+
+            return string.Equals(
+                BattleSnapshotRuntimeState.GetCurrent()?.CanonicalBattle?.Context?.MultiplayerGameType,
+                "Battle",
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private static IEnumerable<string> EnumerateEntryEquipmentSlots(RosterEntryState entryState)

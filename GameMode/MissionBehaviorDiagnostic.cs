@@ -79,11 +79,15 @@ namespace CoopSpectator.GameMode
             if (mission == null || GameNetwork.IsServer || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return;
 
+            List<MissionBehavior> behaviors = mission.MissionBehaviors;
+            if (ContainsBehavior(behaviors, nameof(CoopMissionClientLogic)))
+                return;
+
             if (!_loggedBattleMapClientObserverFallback)
             {
                 _loggedBattleMapClientObserverFallback = true;
                 ModLogger.Info(
-                    "MissionBehaviorDiagnostic: running battle-map client exact visual observer fallback because CoopMissionClientLogic is not injected in crash-isolation stack.");
+                    "MissionBehaviorDiagnostic: running battle-map client exact visual observer fallback.");
             }
 
             CoopMissionSpawnLogic.TryRunClientExactCampaignVisualObserver(mission);

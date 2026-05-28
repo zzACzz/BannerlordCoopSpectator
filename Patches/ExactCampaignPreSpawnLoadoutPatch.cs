@@ -115,12 +115,13 @@ namespace CoopSpectator.Patches
             bool forceGeneratedOrdinaryExactPreSpawnInjection =
                 !entryState.IsHero &&
                 BattleSnapshotRuntimeState.UsesGeneratedRuntimeBattleTemplateMaterialization(exactOrigin.EntryId);
+            bool useNativeMountLifecycle = CoopMissionSpawnLogic.ShouldUseNativeMountLifecycleForExactEntry(entryState);
             if (forceGeneratedOrdinaryExactPreSpawnInjection)
             {
                 includeWeapons = true;
                 includeArmorVisuals = true;
                 includeCape = true;
-                includeMountVisuals = entryState.IsMounted;
+                includeMountVisuals = entryState.IsMounted && !useNativeMountLifecycle;
                 payloadDiagnostic.IsActive = false;
                 payloadDiagnostic.Reason = "generated-ordinary-exact-snapshot-pre-spawn";
                 payloadDiagnostic.RequestedProfile = ExactCreateAgentPayloadDiagnosticProfile.FullExact;
@@ -133,7 +134,7 @@ namespace CoopSpectator.Patches
                 payloadDiagnostic.IncludeWeapons = true;
                 payloadDiagnostic.IncludeArmorVisuals = true;
                 payloadDiagnostic.IncludeCape = true;
-                payloadDiagnostic.IncludeMountVisuals = entryState.IsMounted;
+                payloadDiagnostic.IncludeMountVisuals = entryState.IsMounted && !useNativeMountLifecycle;
                 payloadDiagnostic.IncludeBodyProperties = false;
                 weaponDecisionReason = "forced exact snapshot pre-spawn injection for generated ordinary entry";
                 capeDecisionReason = "forced exact snapshot pre-spawn injection for generated ordinary entry";
@@ -251,12 +252,13 @@ namespace CoopSpectator.Patches
             if (!BattleSnapshotRuntimeState.UsesGeneratedRuntimeBattleTemplateMaterialization(entryId))
                 return false;
 
+            bool useNativeMountLifecycle = CoopMissionSpawnLogic.ShouldUseNativeMountLifecycleForExactEntry(entryState);
             Equipment exactEquipment = BuildPreSpawnEquipment(
                 entryState,
                 includeWeapons: true,
                 includeArmorVisuals: true,
                 includeCape: true,
-                includeMountVisuals: entryState.IsMounted);
+                includeMountVisuals: entryState.IsMounted && !useNativeMountLifecycle);
             if (exactEquipment == null)
                 return false;
 
@@ -274,7 +276,7 @@ namespace CoopSpectator.Patches
                 IncludeWeapons = true,
                 IncludeArmorVisuals = true,
                 IncludeCape = true,
-                IncludeMountVisuals = entryState.IsMounted,
+                IncludeMountVisuals = entryState.IsMounted && !useNativeMountLifecycle,
                 IncludeBodyProperties = false,
                 ClientCreateAgentSafe = true,
                 RequestedProfileClientSafe = true,

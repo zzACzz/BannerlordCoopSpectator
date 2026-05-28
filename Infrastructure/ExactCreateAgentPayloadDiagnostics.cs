@@ -307,6 +307,9 @@ namespace CoopSpectator.Infrastructure
             RosterEntryState entryState,
             ExactTransferSpawnContract contract)
         {
+            if (contract?.Equipment?.IncludeMountVisualsInPreSpawn != true)
+                return false;
+
             if (entryState?.IsMounted != true && contract?.Mount?.IsMounted != true)
                 return false;
 

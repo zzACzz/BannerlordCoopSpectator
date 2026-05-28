@@ -268,10 +268,24 @@ namespace CoopSpectator.Patches
 #if !COOPSPECTATOR_DEDICATED
             if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
             {
-                list.Add(new CoopMissionNetworkBridge());
-                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionNetworkBridge to wrapped Battle client stack.");
-                list.Add(new CoopSpectator.UI.CoopMissionSelectionView());
-                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionSelectionView to wrapped Battle client stack.");
+                TryAddBehaviorIfMissing(
+                    list,
+                    () => new CoopMissionNetworkBridge(),
+                    new[] { nameof(CoopMissionNetworkBridge) },
+                    "MissionStateOpenNewPatches: appended CoopMissionNetworkBridge to wrapped Battle client stack.",
+                    "MissionStateOpenNewPatches: CoopMissionNetworkBridge already present in wrapped Battle client stack.");
+                TryAddBehaviorIfMissing(
+                    list,
+                    () => new CoopMissionClientLogic(),
+                    new[] { nameof(CoopMissionClientLogic) },
+                    "MissionStateOpenNewPatches: appended CoopMissionClientLogic to wrapped Battle client stack.",
+                    "MissionStateOpenNewPatches: CoopMissionClientLogic already present in wrapped Battle client stack.");
+                TryAddBehaviorIfMissing(
+                    list,
+                    () => new CoopSpectator.UI.CoopMissionSelectionView(),
+                    new[] { nameof(CoopSpectator.UI.CoopMissionSelectionView) },
+                    "MissionStateOpenNewPatches: appended CoopMissionSelectionView to wrapped Battle client stack.",
+                    "MissionStateOpenNewPatches: CoopMissionSelectionView already present in wrapped Battle client stack.");
             }
 #endif
             list.Add(new MissionBehaviorDiagnostic());
