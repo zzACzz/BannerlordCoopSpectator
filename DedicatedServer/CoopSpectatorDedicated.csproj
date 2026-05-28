@@ -112,6 +112,7 @@
     <Compile Include="Patches\DedicatedKnockoutOutcomePatches.cs" Link="Patches\DedicatedKnockoutOutcomePatches.cs" />
     <Compile Include="Patches\GameModeOverridePatches.cs" Link="Patches\GameModeOverridePatches.cs" />
     <Compile Include="..\Patches\MissionStateOpenNewPatches.cs" Link="Patches\MissionStateOpenNewPatches.cs" />
+    <Compile Include="..\Patches\ListedShellEquipmentCompatibilityComponent.cs" Link="Patches\ListedShellEquipmentCompatibilityComponent.cs" />
     <Compile Include="..\Patches\ExactCampaignArmyBootstrapPatch.cs" Link="Patches\ExactCampaignArmyBootstrapPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignPreSpawnLoadoutPatch.cs" Link="Patches\ExactCampaignPreSpawnLoadoutPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" Link="Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" />

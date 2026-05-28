@@ -58,7 +58,8 @@
 - `MultiplayerTeamSelectComponent` більше не входить у `CoopBattle` server або client stack; він поки ще лишається тільки в listed-shell mission stack як compatibility shell для native multiplayer bootstrap і більше не є джерелом side authority.
 - `MissionScoreboardComponent` повинен лишатись на dedicated listed/custom server, бо native `MissionCustomGameServerComponent.AfterStart()` підписується на його події без null guard.
 - `MultiplayerMissionAgentVisualSpawnComponent` більше не входить у `CoopBattle` client stack; native `CreateAgentVisuals` sender на `MissionNetworkComponent.OnPeerSelectedTeam(...)` тепер глушиться для custom coop runtime.
-- `MissionLobbyEquipmentNetworkComponent` і `MultiplayerMissionAgentVisualSpawnComponent` тепер треба трактувати тільки як listed-shell visual/equipment bootstrap legacy, а не як частину custom coop runtime.
+- native `MissionLobbyEquipmentNetworkComponent` більше не повинен лишатися у wrapped listed shell; його місце тепер займає passive `ListedShellEquipmentCompatibilityComponent`, який тримає тільки мінімальний `SpawningBehaviorBase` type contract без native loadout/message bootstrap.
+- `MultiplayerMissionAgentVisualSpawnComponent` все ще лишається listed-shell native visual bootstrap legacy, а не частиною custom coop runtime.
 
 ### Контракт custom-server join flow, який ще потрібен
 
@@ -139,7 +140,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 | `MultiplayerTeamSelectComponent` | listed-shell native stack/UI bootstrap і частина join-ready очікувань | коли side selection і native team bootstrap повністю підуть у coop-owned path |
 | `MissionScoreboardComponent` | потрібен dedicated `MissionCustomGameServerComponent` | коли dedicated shell більше не буде інстанціювати цей native component |
 | `MultiplayerMissionAgentVisualSpawnComponent` | listed-shell native agent-visual bootstrap legacy | коли listed-shell visual bootstrap буде повністю прибраний |
-| `MissionLobbyEquipmentNetworkComponent` | listed-shell equipment/class bootstrap legacy | коли selected-troop/perk compatibility path більше не буде потрібний |
+| `ListedShellEquipmentCompatibilityComponent` | passive type-shell для `SpawningBehaviorBase` після вирізання native equipment bootstrap | коли `SpawningBehaviorBase` більше не вимагатиме `MissionLobbyEquipmentNetworkComponent`-сумісний behavior |
 | official `TeamDeathmatch` listed shell | безпечна server-list registration і join bootstrap | тільки після доведеного альтернативного listed/custom startup path без TDM shell |
 | official `Battle` id | native entry point для battle mission start | лишається, але вже override-иться в `CoopBattle` |
 
@@ -378,6 +379,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - `HasSpawnedAgentVisuals` більше не використовується в server-side phase/deployment або spawn authority; це вже тільки compatibility state для native/client shell;
 - `SelectedTroopIndex` compatibility bridge звужений до native visual/equipment bootstrap window і більше не живе весь pending-spawn lifecycle;
 - listed-shell native `TeamInitialPerkInfoReady` більше не залежить виключно від `MissionLobbyEquipmentNetworkComponent`; readiness тепер моститься server-side від authoritative `team/culture/troop index` compatibility state;
+- native `MissionLobbyEquipmentNetworkComponent` прибраний із wrapped listed `TeamDeathmatch` shell і замінений на passive `ListedShellEquipmentCompatibilityComponent`, який лишає тільки `SpawningBehaviorBase`-сумісний type shell без native loadout/perk message handling;
 - `MultiplayerTeamSelectComponent` прибраний з `CoopBattle` server і client stack; native team-select shell лишився тільки в listed bootstrap path;
 - `MissionLobbyEquipmentNetworkComponent` прибраний з `CoopBattle` client stack; custom runtime більше не несе native equipment/class bootstrap, лишився тільки listed-shell legacy;
 - `MultiplayerMissionAgentVisualSpawnComponent` прибраний з `CoopBattle` client stack; custom runtime більше не несе native agent-visual bootstrap;
@@ -401,7 +403,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 
 1. Замінити залежність від listed-shell `TeamDeathmatch` тільки після того, як буде доведений альтернативний server-list registration і join path без нього.
 2. Дорізати залишки listed-shell native `MultiplayerTeamSelectComponent` stack/UI bootstrap, хоча authoritative side/team/troop state вже перенесений у coop-owned path і старий client reflection шар уже видалений.
-3. Прибрати listed-shell native agent-visual/equipment bootstrap legacy (`CreateAgentVisuals`, `MissionLobbyEquipmentNetworkComponent`) після перевірки late-join/reconnect contract без нього; `TeamInitialPerkInfoReady` уже не повинен бути причиною залишати цей шар живим.
+3. Прибрати listed-shell native agent-visual bootstrap legacy (`CreateAgentVisuals`, `MultiplayerMissionAgentVisualSpawnComponent`) і потім добити passive `ListedShellEquipmentCompatibilityComponent`, коли `SpawningBehaviorBase` більше не вимагатиме `MissionLobbyEquipmentNetworkComponent`-сумісний type shell.
 4. Прибрати bridge-file fallback-и тоді, коли network transport стане достатньо надійним для selection, spawn, readiness і reconnect flows.
 5. Замінити `MissionStateOpenNew` wrapping на більш явний coop mission assembly path, коли native shell interception більше не буде потрібний.
 6. Окремо переоцінити `LocalJoinAddressPatch` та інші join patch-і, коли public, VPN і self-host join flows будуть розділені чистіше по відповідальності.
