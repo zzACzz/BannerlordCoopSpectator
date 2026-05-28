@@ -665,6 +665,71 @@ namespace CoopSpectator.GameMode
                 return null;
             }
         }
+
+        public static MissionBehavior TryCreateMissionMatchHistoryComponent()
+        {
+            const string fullTypeName = "TaleWorlds.MountAndBlade.MissionMatchHistoryComponent";
+
+            Type type = typeof(Mission).Assembly.GetType(fullTypeName, throwOnError: false)
+                ?? TryResolveTypeFromLoadedAssemblies(fullTypeName);
+            if (type == null)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: MissionMatchHistoryComponent type not found.");
+                return null;
+            }
+
+            try
+            {
+                MethodInfo createMethod = type.GetMethod(
+                    "CreateIfConditionsAreMet",
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    types: Type.EmptyTypes,
+                    modifiers: null);
+                if (createMethod != null)
+                {
+                    object created = createMethod.Invoke(null, null);
+                    if (created is MissionBehavior behavior)
+                    {
+                        ModLogger.Info("MissionBehaviorHelpers: MissionMatchHistoryComponent created via CreateIfConditionsAreMet.");
+                        return behavior;
+                    }
+
+                    if (created == null)
+                    {
+                        ModLogger.Info("MissionBehaviorHelpers: MissionMatchHistoryComponent.CreateIfConditionsAreMet returned null.");
+                        return null;
+                    }
+
+                    ModLogger.Info("MissionBehaviorHelpers: MissionMatchHistoryComponent.CreateIfConditionsAreMet returned non-MissionBehavior instance.");
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: MissionMatchHistoryComponent.CreateIfConditionsAreMet failed: " + ex.Message);
+            }
+
+            try
+            {
+                object created = Activator.CreateInstance(type);
+                if (created is MissionBehavior behavior)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: MissionMatchHistoryComponent created via parameterless constructor fallback.");
+                    return behavior;
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "MissionBehaviorHelpers: MissionMatchHistoryComponent parameterless constructor failed: " +
+                    ex.Message +
+                    ". Constructors: " +
+                    GetConstructorSignatures(type));
+            }
+
+            return null;
+        }
     }
 }
 

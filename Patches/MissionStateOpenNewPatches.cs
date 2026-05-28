@@ -12,8 +12,8 @@ using TaleWorlds.MountAndBlade;
 namespace CoopSpectator.Patches
 {
     /// <summary>
-    /// Logs MissionState.OpenNew lifecycle and wraps only the listed
-    /// TeamDeathmatch shell where the coop runtime still attaches to native MP startup.
+    /// Intercepts only the listed TeamDeathmatch mission open and assembles
+    /// an explicit minimal listed-ingress behavior stack for the coop runtime.
     /// </summary>
     public static class MissionStateOpenNewPatches
     {
@@ -84,9 +84,8 @@ namespace CoopSpectator.Patches
                 return;
             }
 
-            InitializeMissionBehaviorsDelegate originalHandler = handler;
-            handler = mission => WrapVanillaTeamDeathmatchBehaviors(mission, originalHandler);
-            ModLogger.Info("MissionState.OpenNew: wrapped TeamDeathmatch behavior handler for coop runtime injection.");
+            handler = CreateListedTeamDeathmatchIngressBehaviors;
+            ModLogger.Info("MissionState.OpenNew: replaced TeamDeathmatch behavior handler with explicit listed-shell coop ingress assembly.");
         }
 
         private static bool ShouldWrapListedTeamDeathmatchShell(string missionName)
@@ -117,66 +116,18 @@ namespace CoopSpectator.Patches
             return fullName.IndexOf(nameof(MissionMultiplayerCoopBattleMode), StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        private static IEnumerable<MissionBehavior> WrapVanillaTeamDeathmatchBehaviors(
-            Mission mission,
-            InitializeMissionBehaviorsDelegate originalHandler)
+        private static IEnumerable<MissionBehavior> CreateListedTeamDeathmatchIngressBehaviors(Mission mission)
         {
-            List<MissionBehavior> list = originalHandler != null
-                ? new List<MissionBehavior>(originalHandler(mission) ?? Enumerable.Empty<MissionBehavior>())
-                : new List<MissionBehavior>();
-
-            int removedEntryUiCount = list.RemoveAll(ShouldRemoveVanillaEntryBehavior);
-            int removedNativeTeamDeathmatchModeCount = ReplaceNativeTeamDeathmatchModesWithCompatibilityShell(list);
-            int removedNativeSpawnComponentCount = ReplaceNativeSpawnComponentWithCompatibilityIngress(list);
-            int removedNativeTeamSelectCount = RemoveNativeTeamSelectionFromListedShell(list);
-            int removedNativeVisualBootstrapCount = RemoveNativeVisualBootstrapFromListedShell(list);
-            int removedNativeEquipmentBootstrapCount = RemoveNativeEquipmentBootstrapFromListedShell(list);
-            int removedPassiveConsoleMatchShellCount = RemovePassiveConsoleMatchShell(list);
-            if (removedEntryUiCount > 0)
-                ModLogger.Info("MissionStateOpenNewPatches: removed vanilla entry behaviors from wrapped TeamDeathmatch stack. RemovedCount=" + removedEntryUiCount);
-            if (removedNativeTeamDeathmatchModeCount > 0)
-            {
-                ModLogger.Info(
-                    "MissionStateOpenNewPatches: replaced native MissionMultiplayerTeamDeathmatch behaviors in wrapped TeamDeathmatch shell. " +
-                    "RemovedCount=" + removedNativeTeamDeathmatchModeCount);
-            }
-            if (removedNativeSpawnComponentCount > 0)
-            {
-                ModLogger.Info(
-                    "MissionStateOpenNewPatches: replaced native SpawnComponent/TDM spawn behaviors in wrapped TeamDeathmatch shell. " +
-                    "RemovedCount=" + removedNativeSpawnComponentCount);
-            }
-            if (removedNativeTeamSelectCount > 0)
-            {
-                ModLogger.Info(
-                    "MissionStateOpenNewPatches: removed native MultiplayerTeamSelectComponent from wrapped TeamDeathmatch shell. " +
-                    "RemovedCount=" + removedNativeTeamSelectCount);
-            }
-            if (removedNativeVisualBootstrapCount > 0)
-            {
-                ModLogger.Info(
-                    "MissionStateOpenNewPatches: removed native MultiplayerMissionAgentVisualSpawnComponent from wrapped TeamDeathmatch shell. " +
-                    "RemovedCount=" + removedNativeVisualBootstrapCount);
-            }
-            if (removedNativeEquipmentBootstrapCount > 0)
-            {
-                ModLogger.Info(
-                    "MissionStateOpenNewPatches: removed native MissionLobbyEquipmentNetworkComponent from wrapped TeamDeathmatch shell. " +
-                    "RemovedCount=" + removedNativeEquipmentBootstrapCount);
-            }
-            if (removedPassiveConsoleMatchShellCount > 0)
-            {
-                ModLogger.Info(
-                    "MissionStateOpenNewPatches: removed passive native ConsoleMatchStartEndHandler from wrapped TeamDeathmatch shell. " +
-                    "RemovedCount=" + removedPassiveConsoleMatchShellCount);
-            }
+            List<MissionBehavior> list = GameNetwork.IsServer
+                ? BuildListedTeamDeathmatchServerBehaviors(mission)
+                : BuildListedTeamDeathmatchClientBehaviors(mission);
 
             if (GameNetwork.IsServer)
             {
                 list.Add(new CoopMissionNetworkBridge());
                 list.Add(new CoopMissionSpawnLogic());
-                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionNetworkBridge to vanilla TeamDeathmatch.");
-                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionSpawnLogic to vanilla TeamDeathmatch.");
+                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionNetworkBridge to explicit listed TeamDeathmatch server ingress.");
+                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionSpawnLogic to explicit listed TeamDeathmatch server ingress.");
             }
             else
             {
@@ -186,183 +137,140 @@ namespace CoopSpectator.Patches
                 if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
                 {
                     list.Add(new CoopSpectator.UI.CoopMissionSelectionView());
-                    ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionSelectionView to wrapped TeamDeathmatch client stack.");
+                    ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionSelectionView to explicit listed TeamDeathmatch client ingress.");
                 }
 #endif
-                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionNetworkBridge to vanilla TeamDeathmatch.");
-                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionClientLogic to vanilla TeamDeathmatch.");
+                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionNetworkBridge to explicit listed TeamDeathmatch client ingress.");
+                ModLogger.Info("MissionStateOpenNewPatches: appended CoopMissionClientLogic to explicit listed TeamDeathmatch client ingress.");
             }
 
-            ModLogger.Info("MissionStateOpenNewPatches: wrapped TeamDeathmatch shell ready. FinalCount=" + list.Count);
+            ModLogger.Info(
+                "MissionStateOpenNewPatches: explicit listed TeamDeathmatch ingress ready. " +
+                "FinalCount=" + list.Count +
+                " IsServer=" + GameNetwork.IsServer +
+                " Scene=" + (mission?.SceneName ?? "unknown"));
             return list;
         }
 
-        private static bool ShouldRemoveVanillaEntryBehavior(MissionBehavior behavior)
+        private static List<MissionBehavior> BuildListedTeamDeathmatchServerBehaviors(Mission mission)
+        {
+            List<MissionBehavior> list = new List<MissionBehavior>
+            {
+                MissionLobbyComponent.CreateBehavior(),
+                new ListedShellTeamDeathmatchCompatibilityMode(),
+                new ListedShellTeamDeathmatchClientCompatibilityMode(),
+                new MultiplayerTimerComponent()
+            };
+
+            AddRequired(
+                list,
+                TryCreateBehaviorByFullNames("TaleWorlds.MountAndBlade.Multiplayer.Missions.MultiplayerBattleMissionAgentInteractionLogic"),
+                "MultiplayerBattleMissionAgentInteractionLogic");
+            list.Add(new SpawnComponent(new ListedShellSpawnFrameBehavior(), new ListedShellSpawningBehavior()));
+            AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
+            list.Add(new MultiplayerPollComponent());
+            list.Add(new MultiplayerAdminComponent());
+            list.Add(new MultiplayerGameNotificationsComponent());
+            AddRequired(list, MissionBehaviorHelpers.TryCreateMissionOptionsComponent(mission), "MissionOptionsComponent");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateMissionScoreboardComponent(), "MissionScoreboardComponent");
+            list.Add(new MissionAgentPanicHandler());
+            list.Add(new AgentHumanAILogic());
+            list.Add(new EquipmentControllerLeaveLogic());
+            AddRequired(
+                list,
+                TryCreateBehaviorByFullNames("TaleWorlds.MountAndBlade.MultiplayerPreloadHelper"),
+                "MultiplayerPreloadHelper");
+
+            ModLogger.Info("MissionStateOpenNewPatches: assembled explicit listed TeamDeathmatch server ingress without vanilla behavior-list diffing.");
+            return list;
+        }
+
+        private static List<MissionBehavior> BuildListedTeamDeathmatchClientBehaviors(Mission mission)
+        {
+            List<MissionBehavior> list = new List<MissionBehavior>
+            {
+                MissionLobbyComponent.CreateBehavior(),
+                new ListedShellTeamDeathmatchClientCompatibilityMode()
+            };
+
+            AddOptional(
+                list,
+                TryCreateBehaviorByFullNames("TaleWorlds.MountAndBlade.MultiplayerAchievementComponent"),
+                "MultiplayerAchievementComponent");
+            list.Add(new MultiplayerTimerComponent());
+            AddRequired(
+                list,
+                TryCreateBehaviorByFullNames("TaleWorlds.MountAndBlade.Multiplayer.Missions.MultiplayerBattleMissionAgentInteractionLogic"),
+                "MultiplayerBattleMissionAgentInteractionLogic");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
+            list.Add(new MultiplayerPollComponent());
+            list.Add(new MultiplayerAdminComponent());
+            list.Add(new MultiplayerGameNotificationsComponent());
+            AddRequired(list, MissionBehaviorHelpers.TryCreateMissionOptionsComponent(mission), "MissionOptionsComponent");
+            AddRequired(list, MissionBehaviorHelpers.TryCreateMissionScoreboardComponent(), "MissionScoreboardComponent");
+            AddOptional(list, MissionBehaviorHelpers.TryCreateMissionMatchHistoryComponent(), "MissionMatchHistoryComponent");
+            list.Add(new EquipmentControllerLeaveLogic());
+            AddOptional(
+                list,
+                TryCreateBehaviorByFullNames("TaleWorlds.MountAndBlade.MissionRecentPlayersComponent"),
+                "MissionRecentPlayersComponent");
+            AddRequired(
+                list,
+                TryCreateBehaviorByFullNames("TaleWorlds.MountAndBlade.MultiplayerPreloadHelper"),
+                "MultiplayerPreloadHelper");
+
+            ModLogger.Info("MissionStateOpenNewPatches: assembled explicit listed TeamDeathmatch client ingress without vanilla behavior-list diffing.");
+            return list;
+        }
+
+        private static MissionBehavior TryCreateBehaviorByFullNames(params string[] fullTypeNames)
+        {
+            if (fullTypeNames == null)
+                return null;
+
+            for (int i = 0; i < fullTypeNames.Length; i++)
+            {
+                string fullTypeName = fullTypeNames[i];
+                if (string.IsNullOrWhiteSpace(fullTypeName))
+                    continue;
+
+                MissionBehavior behavior =
+                    MissionBehaviorHelpers.TryCreateBehavior(fullTypeName)
+                    ?? MissionBehaviorHelpers.TryCreateBehaviorFromMountAndBlade(fullTypeName)
+                    ?? MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies(fullTypeName);
+                if (behavior != null)
+                    return behavior;
+            }
+
+            return null;
+        }
+
+        private static void AddOptional(List<MissionBehavior> list, MissionBehavior behavior, string behaviorName)
         {
             if (behavior == null)
-                return false;
-
-            string fullName = behavior.GetType().FullName ?? string.Empty;
-            return fullName.IndexOf("MissionGauntletTeamSelection", StringComparison.OrdinalIgnoreCase) >= 0
-                || fullName.IndexOf("MissionGauntletClassLoadout", StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private static int ReplaceNativeTeamDeathmatchModesWithCompatibilityShell(List<MissionBehavior> list)
-        {
-            if (list == null || list.Count == 0)
-                return 0;
-
-            int removedCount = 0;
-            bool removedServerMode = false;
-            bool removedClientMode = false;
-            for (int i = list.Count - 1; i >= 0; i--)
             {
-                MissionBehavior behavior = list[i];
-                if (behavior == null)
-                    continue;
-
-                string typeName = behavior.GetType().Name;
-                if (string.Equals(typeName, nameof(MissionMultiplayerTeamDeathmatch), StringComparison.Ordinal))
-                {
-                    list.RemoveAt(i);
-                    removedCount++;
-                    removedServerMode = true;
-                    continue;
-                }
-
-                if (!string.Equals(typeName, nameof(MissionMultiplayerTeamDeathmatchClient), StringComparison.Ordinal))
-                    continue;
-
-                list.RemoveAt(i);
-                removedCount++;
-                removedClientMode = true;
+                ModLogger.Info("MissionStateOpenNewPatches: optional listed-shell behavior unavailable: " + (behaviorName ?? "unknown") + ".");
+                return;
             }
 
-            if (removedServerMode)
-                list.Add(new ListedShellTeamDeathmatchCompatibilityMode());
-
-            if (removedClientMode)
-                list.Add(new ListedShellTeamDeathmatchClientCompatibilityMode());
-
-            return removedCount;
+            list.Add(behavior);
         }
 
-        private static int ReplaceNativeSpawnComponentWithCompatibilityIngress(List<MissionBehavior> list)
+        private static void AddRequired(List<MissionBehavior> list, MissionBehavior behavior, string behaviorName)
         {
-            if (list == null || list.Count == 0)
-                return 0;
-
-            int removedCount = 0;
-            for (int i = list.Count - 1; i >= 0; i--)
+            if (behavior == null)
             {
-                if (!(list[i] is SpawnComponent spawnComponent))
-                    continue;
-
-                if (!string.Equals(
-                        spawnComponent.SpawningBehavior?.GetType().Name,
-                        nameof(TeamDeathmatchSpawningBehavior),
-                        StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                list.RemoveAt(i);
-                removedCount++;
+                ModLogger.Error(
+                    "MissionStateOpenNewPatches: required listed-shell behavior unavailable: " + (behaviorName ?? "unknown") + ".",
+                    null);
+                return;
             }
 
-            if (removedCount > 0)
-                list.Add(new SpawnComponent(new ListedShellSpawnFrameBehavior(), new ListedShellSpawningBehavior()));
-
-            return removedCount;
+            list.Add(behavior);
         }
-
-        private static int RemoveNativeEquipmentBootstrapFromListedShell(List<MissionBehavior> list)
-        {
-            if (list == null || list.Count == 0)
-                return 0;
-
-            int removedCount = 0;
-            for (int i = list.Count - 1; i >= 0; i--)
-            {
-                MissionBehavior behavior = list[i];
-                if (behavior == null)
-                    continue;
-
-                if (!string.Equals(behavior.GetType().Name, nameof(MissionLobbyEquipmentNetworkComponent), StringComparison.Ordinal))
-                    continue;
-
-                list.RemoveAt(i);
-                removedCount++;
-            }
-
-            return removedCount;
-        }
-
-        private static int RemoveNativeTeamSelectionFromListedShell(List<MissionBehavior> list)
-        {
-            if (list == null || list.Count == 0)
-                return 0;
-
-            int removedCount = 0;
-            for (int i = list.Count - 1; i >= 0; i--)
-            {
-                MissionBehavior behavior = list[i];
-                if (behavior == null)
-                    continue;
-
-                if (!string.Equals(behavior.GetType().Name, nameof(MultiplayerTeamSelectComponent), StringComparison.Ordinal))
-                    continue;
-
-                list.RemoveAt(i);
-                removedCount++;
-            }
-
-            return removedCount;
-        }
-
-        private static int RemoveNativeVisualBootstrapFromListedShell(List<MissionBehavior> list)
-        {
-            if (list == null || list.Count == 0)
-                return 0;
-
-            int removedCount = 0;
-            for (int i = list.Count - 1; i >= 0; i--)
-            {
-                MissionBehavior behavior = list[i];
-                if (behavior == null)
-                    continue;
-
-                if (!string.Equals(behavior.GetType().Name, "MultiplayerMissionAgentVisualSpawnComponent", StringComparison.Ordinal))
-                    continue;
-
-                list.RemoveAt(i);
-                removedCount++;
-            }
-
-            return removedCount;
-        }
-
-        private static int RemovePassiveConsoleMatchShell(List<MissionBehavior> list)
-        {
-            if (list == null || list.Count == 0)
-                return 0;
-
-            int removedCount = 0;
-            for (int i = list.Count - 1; i >= 0; i--)
-            {
-                MissionBehavior behavior = list[i];
-                if (behavior == null)
-                    continue;
-
-                if (!string.Equals(behavior.GetType().Name, "ConsoleMatchStartEndHandler", StringComparison.Ordinal))
-                    continue;
-
-                list.RemoveAt(i);
-                removedCount++;
-            }
-
-            return removedCount;
-        }
-
     }
 }

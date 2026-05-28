@@ -167,15 +167,13 @@ namespace CoopSpectator
             bool modeReady = !string.Equals(modeName, "StartUp", StringComparison.OrdinalIgnoreCase);
             bool hasLobbyComponent = mission.GetMissionBehavior<MissionLobbyComponent>() != null;
             bool hasTimerComponent = mission.GetMissionBehavior<MultiplayerTimerComponent>() != null;
-            bool hasTeamSelectComponent = mission.GetMissionBehavior<MultiplayerTeamSelectComponent>() != null;
 
             details =
                 "Scene=" + (string.IsNullOrWhiteSpace(sceneName) ? "(empty)" : sceneName) +
                 " Mode=" + modeName +
                 " ModeReady=" + modeReady +
                 " HasLobbyComponent=" + hasLobbyComponent +
-                " HasTimerComponent=" + hasTimerComponent +
-                " HasTeamSelectComponent=" + hasTeamSelectComponent;
+                " HasTimerComponent=" + hasTimerComponent;
 
             if (string.IsNullOrWhiteSpace(sceneName))
                 return false;
