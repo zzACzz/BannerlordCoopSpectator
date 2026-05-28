@@ -4353,7 +4353,7 @@ namespace CoopSpectator.Patches
             try
             {
                 Mission mission = __instance?.Mission ?? Mission.Current;
-                if (!ShouldSuppressNativeAgentVisualBootstrapForCoopBattle(mission, missionPeer))
+                if (!ShouldSuppressNativeAgentVisualBootstrap(mission, missionPeer))
                     return true;
 
                 NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
@@ -4366,7 +4366,7 @@ namespace CoopSpectator.Patches
                 {
                     _lastSuppressedNativeAgentVisualBootstrapKey = key;
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed native MissionNetworkComponent.OnPeerSelectedTeam agent-visual bootstrap for CoopBattle runtime. " +
+                        "BattleMapSpawnHandoffPatch: suppressed native MissionNetworkComponent.OnPeerSelectedTeam agent-visual bootstrap for coop-owned runtime shell. " +
                         "Scene=" + (mission?.SceneName ?? "unknown") +
                         " Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "null") +
                         " TeamIndex=" + (missionPeer?.Team?.TeamIndex.ToString() ?? "null") +
@@ -4382,12 +4382,15 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static bool ShouldSuppressNativeAgentVisualBootstrapForCoopBattle(Mission mission, MissionPeer missionPeer)
+        private static bool ShouldSuppressNativeAgentVisualBootstrap(Mission mission, MissionPeer missionPeer)
         {
             if (!GameNetwork.IsServer || mission == null || missionPeer == null)
                 return false;
 
             string sceneName = mission.SceneName ?? string.Empty;
+            if (mission.GetMissionBehavior<ListedShellCompatibilityMode>() != null)
+                return true;
+
             if (!MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(sceneName) ||
                 !SceneRuntimeClassifier.IsCampaignBattleScene(sceneName))
             {

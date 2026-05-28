@@ -29276,7 +29276,7 @@ namespace CoopSpectator.MissionBehaviors
             if (missionPeer.HasSpawnedAgentVisuals || !missionPeer.EquipmentUpdatingExpired)
                 removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
 
-            missionPeer.HasSpawnedAgentVisuals = true;
+            missionPeer.HasSpawnedAgentVisuals = false;
             missionPeer.EquipmentUpdatingExpired = true;
 
             string peerName = peer?.UserName ?? peer?.Index.ToString() ?? "none";
@@ -29290,15 +29290,16 @@ namespace CoopSpectator.MissionBehaviors
             if (_loggedArmedListedShellNativeSpawnCompatibilityKeys.Add(logKey))
             {
                 ModLogger.Info(
-                    "CoopMissionSpawnLogic: armed listed-shell native spawn compatibility state from authoritative coop selection. " +
-                    "Peer=" + peerName +
-                    " TroopIndex=" + preferredTroopIndex +
-                    " HeroClass=" + classId +
-                    " TeamInitialPerkInfoReady=" + missionPeer.TeamInitialPerkInfoReady +
-                    " RemovedPendingVisuals=" + removedPendingVisuals +
-                    " Reason=" + debugReason +
-                    " Source=" + (source ?? "unknown"));
-            }
+                        "CoopMissionSpawnLogic: armed listed-shell selection/perk compatibility state from authoritative coop selection. " +
+                        "Peer=" + peerName +
+                        " TroopIndex=" + preferredTroopIndex +
+                        " HeroClass=" + classId +
+                        " TeamInitialPerkInfoReady=" + missionPeer.TeamInitialPerkInfoReady +
+                        " ClearedStaleVisuals=" + removedPendingVisuals +
+                        " HasSpawnedAgentVisuals=" + missionPeer.HasSpawnedAgentVisuals +
+                        " Reason=" + debugReason +
+                        " Source=" + (source ?? "unknown"));
+                }
 
             return true;
         }
