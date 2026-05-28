@@ -172,7 +172,6 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 ### Точки інтеграції з native shell
 
 - `Patches/MissionStateOpenNewPatches.cs`
-- `Patches/VanillaEntryUiSuppressionPatch.cs`
 - `Patches/BattleMapHudSuppressionPatch.cs`
 - `Patches/MissionScreenCameraPreviewPatch.cs`
 
@@ -204,11 +203,15 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - authoritative troop selection більше не читає native `MissionPeer.SelectedTroopIndex` як джерело істини;
 - native `MissionPeer.Team` уже моститься server-side з coop authority state;
 - native `SelectedTroopIndex` лишається тільки compatibility bridge для vanilla bootstrap/network expectations;
-- native gold/class accounting для preview/materialization compatibility тепер теж резолвиться від authoritative coop selection, а не від `MissionPeer.SelectedTroopIndex` як джерела істини;
+- native class compatibility bridge ще резолвиться від authoritative coop selection, а не від `MissionPeer.SelectedTroopIndex` як джерела істини;
+- старий server-side `MultiplayerHeroClassOverridePatch` для vanilla TDM spawn/class path уже видалений; лишився тільки явний `SelectedTroopIndex` bridge;
 - server-side coop runtime більше не форсить native pending visuals і не переводить їх у vanilla `SpawningBehaviorBase` / `Mission.SpawnAgent(..., spawnFromAgentVisuals: true)` lifecycle;
 - `HasSpawnedAgentVisuals` і `ShouldSpawnVisualsForServer(...)` більше не входять у server-side phase/spawn authority; native preview visuals тепер тільки passive compatibility shell;
 - native visual compatibility state ще чиститься під час possession/reset, але вже не впливає на рішення про spawn або battle phase;
 - старий client-side vanilla-selection reflection шар (hint/menu, class-loadout filtering, team-select/scoreboard culture sync, vanilla spawn/team-change mirror paths) уже видалений;
+- vanilla team/class gauntlet entry views у wrapped `TeamDeathmatch` / `Battle` client stacks тепер зрізаються структурно в `MissionStateOpenNewPatches`, а не глушаться окремим UI suppression patch;
+- local camera preview у `UI/CoopMissionSelectionView.cs` тепер пише тільки в `MissionScreen.SetAgentToFollow(...)`; preview path більше не використовує `LastFollowedAgent` / `MissionPeer.FollowedAgent` network echo;
+- `Patches/MissionScreenCameraPreviewPatch.cs` більше не мутує `MissionLobbyComponent.MissionType` або `MissionPeer.HasSpawnedAgentVisuals`; shim тепер робить postfix override для `MissionScreen.GetSpectatingData(...)`;
 - ми ще не маємо повної заміни native team-selection shell.
 
 ## 9. Як працює materialization агентів
@@ -231,7 +234,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - `MissionLobbyEquipmentNetworkComponent` як обов'язкова частина того ж native visual/equipment bootstrap pair
 - native mission peer spawn timers
 - native team membership
-- native gold preview/deduction contract, який все ще виконується для listed/bootstrap compatibility, але вже живе поверх authoritative coop hero-class resolution
+- native selected-troop/class bridge для listed/bootstrap compatibility
 
 Важливе звуження поточного контракту:
 
@@ -314,9 +317,9 @@ Exact transfer - це спроба зберігати campaign identities, body 
 | Зона | Основні файли |
 | --- | --- |
 | Mission wrapping | `Patches/MissionStateOpenNewPatches.cs` |
-| Native UI suppression | `Patches/VanillaEntryUiSuppressionPatch.cs`, `Patches/BattleMapHudSuppressionPatch.cs`, `Patches/MissionScreenCameraPreviewPatch.cs` |
+| Native UI suppression | `Patches/BattleMapHudSuppressionPatch.cs`, `Patches/MissionScreenCameraPreviewPatch.cs` |
 | Connectivity і local/self join | `Patches/LobbyCustomGameLocalJoinPatch.cs`, `Patches/LobbyJoinResultSelfJoinArmPatch.cs`, `Patches/LocalJoinAddressPatch.cs`, `Patches/LobbyRequestJoinDiagnosticsPatch.cs` |
-| Native class/culture compatibility | `Patches/ClientChangeCultureCanonicalizationPatch.cs`, `Patches/ServerChangeCultureCanonicalizationPatch.cs`, `Patches/MultiplayerHeroClassOverridePatch.cs`, `Patches/MultiplayerCharacterClassFallbackPatch.cs`, `Patches/StartupSafeMpHeroClassBootstrapPatch.cs` |
+| Native class/culture compatibility | `Patches/ClientChangeCultureCanonicalizationPatch.cs`, `Patches/ServerChangeCultureCanonicalizationPatch.cs`, `Patches/MultiplayerCharacterClassFallbackPatch.cs`, `Patches/StartupSafeMpHeroClassBootstrapPatch.cs` |
 | Залишковий crash isolation | `Patches/IntermissionVmCrashGuardPatch.cs` |
 | Listed-shell startup helper | `DedicatedHelper/DedicatedHelperLauncher.cs` |
 
@@ -330,13 +333,13 @@ Exact transfer - це спроба зберігати campaign identities, body 
 | `CoopTdm` і `TdmClone` multiplayer strings | видалено |
 | `EnableTdmCloneExperiment` branch | видалено |
 | `TeamDeathmatch` override path у `GameModeOverridePatches` | видалено |
+| `Patches/VanillaEntryUiSuppressionPatch.cs` | видалено; vanilla entry gauntlets тепер зрізаються в `MissionStateOpenNewPatches.cs` |
 
 ## 13. Що ще лишається legacy-шаром
 
 Ці шматки коду ще потрібні для сумісності з native lifecycle і поки що повинні вважатися тимчасовими:
 
 - `Patches/MissionStateOpenNewPatches.cs`
-- `Patches/VanillaEntryUiSuppressionPatch.cs`
 - `Patches/BattleMapHudSuppressionPatch.cs`
 - `Patches/MissionScreenCameraPreviewPatch.cs`
 - `Patches/IntermissionVmCrashGuardPatch.cs`
@@ -359,7 +362,8 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - прибраний `EnableTdmCloneExperiment` з `Infrastructure/ExperimentalFeatures.cs`;
 - прибраний `EnableBattleMapClientEquipmentNetworkComponent`, бо `MissionLobbyEquipmentNetworkComponent` уже не є опційним у battle-map runtime;
 - прибрана мертва wrapped-Battle crash-isolation гілка, яка намагалась вирізати `MissionLobbyEquipmentNetworkComponent` із client stack;
-- native spawn gold floor/deduction більше не читає `MissionPeer.SelectedTroopIndex` як authority і тепер йде через окремий authoritative compatibility hero-class resolver;
+- прибраний native spawn gold floor/deduction compatibility path навколо `ReplaceBotWithPlayer(...)`, бо coop runtime і client mode більше не використовують vanilla gold economy як spawn contract;
+- прибраний server-only `MultiplayerHeroClassOverridePatch`, який підміняв `MultiplayerClassDivisions.GetMPHeroClassForPeer(...)` для старого vanilla spawn/class path;
 - pending native spawn visuals більше не форсяться в coop server path, якщо native `ShouldSpawnVisualsForServer(...)` не вимагає їх для поточного peer/runtime;
 - `HasSpawnedAgentVisuals` більше не використовується в server-side phase/deployment або spawn authority; це вже тільки compatibility state для native/client shell;
 - видалений мертвий direct-spawn experiment (`EnableDirectCoopPlayerSpawnExperiment`, `TrySpawnPeersIntoCoopControl(...)`, `SpawnCoopControlledAgent(...)`, `TryEnsurePendingSpawnVisuals(...)`), який уже не входив у live runtime tick path;

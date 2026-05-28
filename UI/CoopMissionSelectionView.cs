@@ -924,30 +924,6 @@ namespace CoopSpectator.UI
             return false;
         }
 
-        internal static bool ShouldSuppressLocalPreviewFollowedAgentEcho(MissionPeer missionPeer, Agent followedAgent)
-        {
-            if (!GameNetwork.IsClient ||
-                !GameNetwork.IsSessionActive ||
-                missionPeer == null)
-            {
-                return false;
-            }
-
-            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
-            if (localMissionPeer == null || !ReferenceEquals(localMissionPeer, missionPeer))
-                return false;
-
-            if (followedAgent == null)
-                return _activeCameraPreviewAgentIndex >= 0;
-
-            if (!followedAgent.IsActive())
-                return false;
-
-            return TryGetActiveCameraPreviewAgent(out Agent previewAgent) &&
-                   previewAgent != null &&
-                   previewAgent.Index == followedAgent.Index;
-        }
-
         private static void SetActiveCameraPreviewTarget(Agent previewAgent, string entryId)
         {
             _activeCameraPreviewAgentIndex = previewAgent?.Index ?? -1;
@@ -965,36 +941,13 @@ namespace CoopSpectator.UI
             if (missionScreen == null || agent == null)
                 return false;
 
-            if (TrySetMissionScreenLastFollowedAgent(missionScreen, agent))
+            if (TrySetMissionScreenAgentToFollowOverride(missionScreen, agent))
             {
                 TrySetInstanceProperty(missionScreen, "LastFollowedAgentVisuals", null);
                 return true;
             }
 
-            return TrySetMissionScreenAgentToFollowOverride(missionScreen, agent);
-        }
-
-        private static bool TrySetMissionScreenLastFollowedAgent(ScreenBase missionScreen, Agent agent)
-        {
-            if (missionScreen == null)
-                return false;
-
-            try
-            {
-                PropertyInfo property = missionScreen.GetType().GetProperty(
-                    "LastFollowedAgent",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                MethodInfo setter = property?.GetSetMethod(true);
-                if (setter == null)
-                    return false;
-
-                setter.Invoke(missionScreen, new object[] { agent });
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
+            return false;
         }
 
         private static bool TrySetMissionScreenAgentToFollowOverride(ScreenBase missionScreen, Agent agent)
@@ -1027,10 +980,7 @@ namespace CoopSpectator.UI
             if (missionScreen == null)
                 return;
 
-            TrySetMissionScreenLastFollowedAgent(missionScreen, null);
             TrySetMissionScreenAgentToFollowOverride(missionScreen, null);
-            TrySetInstanceField(missionScreen, "_agentToFollowOverride", null);
-            TrySetInstanceField(missionScreen, "_lastFollowedAgent", null);
             TrySetInstanceProperty(missionScreen, "LastFollowedAgentVisuals", null);
         }
 
@@ -1267,21 +1217,6 @@ namespace CoopSpectator.UI
             {
                 PropertyInfo property = target.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 property?.GetSetMethod(true)?.Invoke(target, new[] { value });
-            }
-            catch
-            {
-            }
-        }
-
-        internal static void TrySetInstanceField(object target, string fieldName, object value)
-        {
-            if (target == null || string.IsNullOrWhiteSpace(fieldName))
-                return;
-
-            try
-            {
-                FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                field?.SetValue(target, value);
             }
             catch
             {

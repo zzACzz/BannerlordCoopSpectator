@@ -22007,7 +22007,6 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || missionPeer == null || peer == null || targetAgent == null || !targetAgent.IsActive())
                 return false;
 
-            MissionMultiplayerGameModeBase gameMode = mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
             Formation targetFormation = targetAgent.Formation;
             if (targetFormation == null)
             {
@@ -22051,7 +22050,6 @@ namespace CoopSpectator.MissionBehaviors
                 missionPeer.FollowedAgent = targetAgent;
                 missionPeer.SpawnCountThisRound = Math.Max(missionPeer.SpawnCountThisRound, 1);
 
-                TryEnsureNativeSpawnGoldCompatibilityFloor(gameMode, peer, missionPeer, source + " replace-bot");
                 Agent replacedAgent = mission.ReplaceBotWithPlayer(targetAgent, missionPeer);
                 if (replacedAgent == null)
                 {
@@ -22091,7 +22089,6 @@ namespace CoopSpectator.MissionBehaviors
                     commanderControlState,
                     source + " replace-bot");
 
-                TryApplyNativeSpawnGoldCompatibilityDeduction(gameMode, peer, missionPeer, source + " replace-bot");
                 bool removedPendingVisuals = ClearMissionPeerPendingNativeSpawnVisualCompatibility(mission, missionPeer);
                 if (IsSceneAwareBattleMapRuntime(mission) &&
                     SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
@@ -28774,32 +28771,6 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
-        private static bool TryResolveAuthoritativeCompatibilityTroopCasualCost(
-            MissionPeer missionPeer,
-            out MultiplayerClassDivisions.MPHeroClass compatibilityClass,
-            out int compatibilityTroopIndex,
-            out int troopCasualCost,
-            out string reason)
-        {
-            troopCasualCost = 0;
-            if (!TryResolveAuthoritativeCompatibilityHeroClassForPeer(
-                    missionPeer,
-                    requireSpawnTimerReady: false,
-                    out compatibilityClass,
-                    out compatibilityTroopIndex,
-                    out reason))
-            {
-                return false;
-            }
-
-            troopCasualCost = compatibilityClass?.TroopCasualCost ?? 0;
-            if (troopCasualCost > 0)
-                return true;
-
-            reason = "compatibility hero class casual cost <= 0";
-            return false;
-        }
-
         private static RosterEntryState ResolvePreferredAllowedEntryStateForPeer(
             MissionPeer missionPeer,
             CoopBattleAuthorityState.PeerSelectionState selectionState)
@@ -29142,75 +29113,6 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             TrySyncCoopClassRestrictions(mission, source);
-        }
-
-        private static void TryEnsureNativeSpawnGoldCompatibilityFloor(
-            MissionMultiplayerGameModeBase gameMode,
-            NetworkCommunicator peer,
-            MissionPeer missionPeer,
-            string source)
-        {
-            if (gameMode == null || peer == null || missionPeer == null)
-                return;
-
-            if (!TryResolveAuthoritativeCompatibilityTroopCasualCost(
-                    missionPeer,
-                    out MultiplayerClassDivisions.MPHeroClass compatibilityClass,
-                    out int compatibilityTroopIndex,
-                    out int troopCasualCost,
-                    out string compatibilityReason))
-            {
-                return;
-            }
-
-            int currentGold = gameMode.GetCurrentGoldForPeer(missionPeer);
-            if (currentGold >= troopCasualCost)
-                return;
-
-            gameMode.ChangeCurrentGoldForPeer(missionPeer, troopCasualCost);
-            ModLogger.Info(
-                "CoopMissionSpawnLogic: raised native spawn gold compatibility floor before visuals finalize. " +
-                "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                " CompatibilityTroopIndex=" + compatibilityTroopIndex +
-                " HeroClass=" + (compatibilityClass?.HeroCharacter?.StringId ?? "null") +
-                " PreviousGold=" + currentGold +
-                " AppliedGold=" + troopCasualCost +
-                " CompatibilityReason=" + compatibilityReason +
-                " Source=" + source);
-        }
-
-        private static void TryApplyNativeSpawnGoldCompatibilityDeduction(
-            MissionMultiplayerGameModeBase gameMode,
-            NetworkCommunicator peer,
-            MissionPeer missionPeer,
-            string source)
-        {
-            if (gameMode == null || peer == null || missionPeer == null)
-                return;
-
-            if (!TryResolveAuthoritativeCompatibilityTroopCasualCost(
-                    missionPeer,
-                    out MultiplayerClassDivisions.MPHeroClass compatibilityClass,
-                    out int compatibilityTroopIndex,
-                    out int troopCasualCost,
-                    out string compatibilityReason))
-            {
-                return;
-            }
-
-            int currentGold = gameMode.GetCurrentGoldForPeer(missionPeer);
-            int appliedGold = Math.Max(0, currentGold - troopCasualCost);
-            gameMode.ChangeCurrentGoldForPeer(missionPeer, appliedGold);
-            ModLogger.Info(
-                "CoopMissionSpawnLogic: applied native spawn gold compatibility deduction after materialized replace-bot. " +
-                "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                " CompatibilityTroopIndex=" + compatibilityTroopIndex +
-                " HeroClass=" + (compatibilityClass?.HeroCharacter?.StringId ?? "null") +
-                " PreviousGold=" + currentGold +
-                " TroopCasualCost=" + troopCasualCost +
-                " AppliedGold=" + appliedGold +
-                " CompatibilityReason=" + compatibilityReason +
-                " Source=" + source);
         }
 
         private static void ApplySelectedTroopIndexBridge(MissionPeer missionPeer, NetworkCommunicator peer, int preferredTroopIndex)

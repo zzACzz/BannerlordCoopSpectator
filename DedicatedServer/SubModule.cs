@@ -318,7 +318,6 @@ namespace CoopSpectator
                         TryApplyBattleShellSuppressionPatch();
                     else
                         ModLogger.Info("CoopSpectatorDedicated: skipped BattleShellSuppressionPatch after mission-load crash triage.");
-                    TryApplyMultiplayerHeroClassOverridePatch();
                     TryApplyMultiplayerCharacterClassFallbackPatch();
                     TryApplyServerChangeCultureCanonicalizationPatch();
                     TryApplyCampaignCombatProfileAgentStatsPatch();
@@ -610,20 +609,6 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: dedicated knockout outcome patch apply failed: " + ex.Message);
-            }
-        }
-
-        private static void TryApplyMultiplayerHeroClassOverridePatch()
-        {
-            try
-            {
-                if (_harmony == null)
-                    _harmony = new Harmony("com.coopspectator.dedicated");
-                MultiplayerHeroClassOverridePatch.Apply(_harmony);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("CoopSpectatorDedicated: MultiplayerHeroClass override patch apply failed: " + ex.Message);
             }
         }
 
