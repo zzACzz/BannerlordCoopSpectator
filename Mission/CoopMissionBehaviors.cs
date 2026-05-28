@@ -931,10 +931,12 @@ namespace CoopSpectator.MissionBehaviors
         private static bool _hasTransferredDiagnosticAllowedAgentToPeer;
         private static readonly HashSet<int> _spawnedCoopPeerIndices = new HashSet<int>();
         private static HashSet<string> _loggedForcedPreferredClassKeys = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> _loggedForcedInitialPerkInfoReadyKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly Dictionary<int, int> _lastBridgedSelectedTroopIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _lastBridgedPeerTeamIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, string> _appliedFixedMissionCultureByPeer = new Dictionary<int, string>();
+        private static readonly int[] _listedShellDefaultInitialPerkIndices = { 0, 0, 0 };
         private static readonly Dictionary<FormationClass, bool> _appliedCoopClassAvailabilityStates = new Dictionary<FormationClass, bool>();
         private static readonly Dictionary<int, int> _lastAlignedControlledAgentIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, string> _materializedArmyEntryIdByAgentIndex = new Dictionary<int, string>();
@@ -2728,6 +2730,7 @@ namespace CoopSpectator.MissionBehaviors
             _hasTransferredDiagnosticAllowedAgentToPeer = false;
             _spawnedCoopPeerIndices.Clear();
             _loggedForcedPreferredClassKeys.Clear();
+            _loggedForcedInitialPerkInfoReadyKeys.Clear();
             _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys.Clear();
             _lastBridgedSelectedTroopIndexByPeer.Clear();
             _lastBridgedPeerTeamIndexByPeer.Clear();
@@ -2889,6 +2892,7 @@ namespace CoopSpectator.MissionBehaviors
             TryBridgeAuthoritativePeerTeams(mission, source);
             TryForceFixedMissionCultures(mission, source);
             TryForcePreferredHeroClassForPeer(mission, source);
+            TryBridgeListedShellInitialPerkInfoReadiness(mission, source);
             if (EnableMaterializedArmyPossessionExperiment)
             {
                 AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "shared-tick", "materialized-possession-before", source);
@@ -29128,6 +29132,60 @@ namespace CoopSpectator.MissionBehaviors
             TrySyncCoopClassRestrictions(mission, source);
         }
 
+        private static void TryBridgeListedShellInitialPerkInfoReadiness(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer || GameNetwork.NetworkPeers == null || GameNetwork.NetworkPeers.Count == 0)
+                return;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    continue;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                if (missionPeer == null || missionPeer.ControlledAgent != null)
+                    continue;
+
+                if (!RequiresNativeSelectedTroopIndexCompatibility(mission, missionPeer))
+                    continue;
+
+                if (missionPeer.TeamInitialPerkInfoReady)
+                    continue;
+
+                if (!TryResolveAuthoritativeCompatibilityHeroClassForPeer(
+                        missionPeer,
+                        false,
+                        out MultiplayerClassDivisions.MPHeroClass preferredClass,
+                        out int preferredTroopIndex,
+                        out string debugReason))
+                {
+                    continue;
+                }
+
+                if (preferredTroopIndex < 0)
+                    continue;
+
+                ApplySelectedTroopIndexBridge(missionPeer, peer, preferredTroopIndex);
+                if (!TryApplyListedShellInitialPerkInfoReadinessBridge(missionPeer))
+                    continue;
+
+                string peerName = peer.UserName ?? peer.Index.ToString();
+                string cultureId = missionPeer.Culture?.StringId ?? "null";
+                string classId = preferredClass?.HeroCharacter?.StringId ?? "null";
+                string logKey = peer.Index + "|compat-team-perk-ready|" + cultureId + "|" + preferredTroopIndex + "|" + classId;
+                if (_loggedForcedInitialPerkInfoReadyKeys.Add(logKey))
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: bridged listed-shell native TeamInitialPerkInfoReady from authoritative coop selection (" + source + "). " +
+                        "Peer=" + peerName +
+                        " Culture=" + cultureId +
+                        " TroopIndex=" + preferredTroopIndex +
+                        " HeroClass=" + classId +
+                        " Reason=" + debugReason);
+                }
+            }
+        }
+
         private static bool RequiresNativeSelectedTroopIndexCompatibility(Mission mission, MissionPeer missionPeer)
         {
             if (mission == null || missionPeer == null)
@@ -29170,6 +29228,28 @@ namespace CoopSpectator.MissionBehaviors
                 peer,
                 preferredTroopIndex,
                 "CoopMissionSpawnLogic.ApplySelectedTroopIndexBridge");
+        }
+
+        private static bool TryApplyListedShellInitialPerkInfoReadinessBridge(MissionPeer missionPeer)
+        {
+            if (missionPeer == null)
+                return false;
+
+            try
+            {
+                missionPeer.OnTeamInitialPerkInfoReceived(_listedShellDefaultInitialPerkIndices);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSpawnLogic: listed-shell TeamInitialPerkInfoReady bridge failed open: " + ex.Message);
+                return false;
+            }
+
+            if (missionPeer.TeamInitialPerkInfoReady)
+                return true;
+
+            SetServerMemberValue(missionPeer, "TeamInitialPerkInfoReady", true);
+            return missionPeer.TeamInitialPerkInfoReady;
         }
 
         public static bool IsVanillaSelectedTroopIndexNetworkCompatible(int selectedTroopIndex)
