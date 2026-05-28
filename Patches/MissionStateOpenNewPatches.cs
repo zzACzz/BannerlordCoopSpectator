@@ -126,9 +126,16 @@ namespace CoopSpectator.Patches
                 : new List<MissionBehavior>();
 
             int removedEntryUiCount = list.RemoveAll(ShouldRemoveVanillaEntryBehavior);
+            int removedNativeVisualBootstrapCount = ReplaceNativeVisualBootstrapWithPassiveCompatibilityShell(list);
             int removedNativeEquipmentBootstrapCount = ReplaceNativeEquipmentBootstrapWithPassiveCompatibilityShell(list);
             if (removedEntryUiCount > 0)
                 ModLogger.Info("MissionStateOpenNewPatches: removed vanilla entry behaviors from wrapped TeamDeathmatch stack. RemovedCount=" + removedEntryUiCount);
+            if (removedNativeVisualBootstrapCount > 0)
+            {
+                ModLogger.Info(
+                    "MissionStateOpenNewPatches: replaced native MultiplayerMissionAgentVisualSpawnComponent in wrapped TeamDeathmatch shell. " +
+                    "RemovedCount=" + removedNativeVisualBootstrapCount);
+            }
             if (removedNativeEquipmentBootstrapCount > 0)
             {
                 ModLogger.Info(
@@ -193,6 +200,31 @@ namespace CoopSpectator.Patches
 
             if (removedCount > 0)
                 list.Add(new ListedShellEquipmentCompatibilityComponent());
+
+            return removedCount;
+        }
+
+        private static int ReplaceNativeVisualBootstrapWithPassiveCompatibilityShell(List<MissionBehavior> list)
+        {
+            if (list == null || list.Count == 0)
+                return 0;
+
+            int removedCount = 0;
+            for (int i = list.Count - 1; i >= 0; i--)
+            {
+                MissionBehavior behavior = list[i];
+                if (behavior == null)
+                    continue;
+
+                if (!string.Equals(behavior.GetType().Name, "MultiplayerMissionAgentVisualSpawnComponent", StringComparison.Ordinal))
+                    continue;
+
+                list.RemoveAt(i);
+                removedCount++;
+            }
+
+            if (removedCount > 0)
+                list.Add(new ListedShellVisualCompatibilityComponent());
 
             return removedCount;
         }

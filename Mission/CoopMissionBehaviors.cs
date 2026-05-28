@@ -912,7 +912,7 @@ namespace CoopSpectator.MissionBehaviors
         // Possessing pre-materialized AI agents is currently experimental. It does not yet
         // reproduce the full vanilla player-spawn lifecycle (economy/finalize/control state),
         // so the stable runtime keeps battlefield armies materialized as AI-only context while
-        // player spawn/respawn still goes through vanilla TDM/SpawningBehaviorBase.
+        // listed-shell player spawn/respawn still uses native SpawningBehaviorBase as ingress.
         // 7b spike: try to hand a peer into an already materialized army body through
         // the vanilla bot-replacement lifecycle, while keeping vanilla player spawn as fallback.
         private const bool EnableMaterializedArmyPossessionExperiment = true;
@@ -932,6 +932,7 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly HashSet<int> _spawnedCoopPeerIndices = new HashSet<int>();
         private static HashSet<string> _loggedForcedPreferredClassKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _loggedForcedInitialPerkInfoReadyKeys = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> _loggedArmedListedShellNativeSpawnCompatibilityKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _loggedSuppressedVanillaSelectedTroopIndexBridgeKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly Dictionary<int, int> _lastBridgedSelectedTroopIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _lastBridgedPeerTeamIndexByPeer = new Dictionary<int, int>();
@@ -2893,6 +2894,7 @@ namespace CoopSpectator.MissionBehaviors
             TryForceFixedMissionCultures(mission, source);
             TryForcePreferredHeroClassForPeer(mission, source);
             TryBridgeListedShellInitialPerkInfoReadiness(mission, source);
+            TryArmListedShellNativeSpawnCompatibilityState(mission, source);
             if (EnableMaterializedArmyPossessionExperiment)
             {
                 AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "shared-tick", "materialized-possession-before", source);
@@ -29080,7 +29082,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam) || missionPeer.Culture == null)
                     continue;
 
-                if (!RequiresNativeSelectedTroopIndexCompatibility(mission, missionPeer))
+                if (!RequiresListedShellNativeSpawnCompatibility(mission, missionPeer))
                 {
                     ClearSelectedTroopIndexBridgeCompatibilityState(missionPeer);
                     continue;
@@ -29146,7 +29148,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (missionPeer == null || missionPeer.ControlledAgent != null)
                     continue;
 
-                if (!RequiresNativeSelectedTroopIndexCompatibility(mission, missionPeer))
+                if (!RequiresListedShellNativeSpawnCompatibility(mission, missionPeer))
                     continue;
 
                 if (missionPeer.TeamInitialPerkInfoReady)
@@ -29186,7 +29188,7 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static bool RequiresNativeSelectedTroopIndexCompatibility(Mission mission, MissionPeer missionPeer)
+        internal static bool RequiresListedShellNativeSpawnCompatibility(Mission mission, MissionPeer missionPeer)
         {
             if (mission == null || missionPeer == null)
                 return false;
@@ -29206,7 +29208,86 @@ namespace CoopSpectator.MissionBehaviors
             if (missionPeer.Team == null || ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
                 return false;
 
-            return missionPeer.HasSpawnedAgentVisuals || !missionPeer.EquipmentUpdatingExpired;
+            return true;
+        }
+
+        private static void TryArmListedShellNativeSpawnCompatibilityState(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer || GameNetwork.NetworkPeers == null || GameNetwork.NetworkPeers.Count == 0)
+                return;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    continue;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                TryArmListedShellNativeSpawnCompatibilityState(
+                    mission,
+                    missionPeer,
+                    peer,
+                    source + " listed-shell-bootstrap");
+            }
+        }
+
+        internal static bool TryArmListedShellNativeSpawnCompatibilityState(
+            Mission mission,
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            string source)
+        {
+            if (!RequiresListedShellNativeSpawnCompatibility(mission, missionPeer))
+                return false;
+
+            if (!TryResolveAuthoritativeCompatibilityHeroClassForPeer(
+                    missionPeer,
+                    false,
+                    out MultiplayerClassDivisions.MPHeroClass preferredClass,
+                    out int preferredTroopIndex,
+                    out string debugReason))
+            {
+                return false;
+            }
+
+            if (preferredTroopIndex < 0)
+                return false;
+
+            ApplySelectedTroopIndexBridge(missionPeer, peer, preferredTroopIndex);
+            if (!missionPeer.TeamInitialPerkInfoReady &&
+                !TryApplyListedShellInitialPerkInfoReadinessBridge(missionPeer))
+            {
+                return false;
+            }
+
+            bool removedPendingVisuals = false;
+            if (missionPeer.HasSpawnedAgentVisuals || !missionPeer.EquipmentUpdatingExpired)
+                removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
+
+            missionPeer.HasSpawnedAgentVisuals = true;
+            missionPeer.EquipmentUpdatingExpired = true;
+
+            string peerName = peer?.UserName ?? peer?.Index.ToString() ?? "none";
+            string classId = preferredClass?.HeroCharacter?.StringId ?? "null";
+            string logKey =
+                (peer?.Index.ToString() ?? peerName) +
+                "|listed-shell-native-spawn-armed|" +
+                preferredTroopIndex +
+                "|" +
+                classId;
+            if (_loggedArmedListedShellNativeSpawnCompatibilityKeys.Add(logKey))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: armed listed-shell native spawn compatibility state from authoritative coop selection. " +
+                    "Peer=" + peerName +
+                    " TroopIndex=" + preferredTroopIndex +
+                    " HeroClass=" + classId +
+                    " TeamInitialPerkInfoReady=" + missionPeer.TeamInitialPerkInfoReady +
+                    " RemovedPendingVisuals=" + removedPendingVisuals +
+                    " Reason=" + debugReason +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            return true;
         }
 
         private static void ApplySelectedTroopIndexBridge(MissionPeer missionPeer, NetworkCommunicator peer, int preferredTroopIndex)

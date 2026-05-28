@@ -307,6 +307,7 @@ namespace CoopSpectator
                     TryConfigureDedicatedHarmonyRuntimeCompat();
                     TryApplyGameModeOverridePatch();
                     TryApplyMissionStateOpenNewPatches();
+                    TryApplyListedShellVisualBootstrapPatch();
                     TryApplyStartupSafeMpHeroClassBootstrapPatch();
                     TryApplyExactCampaignArmyBootstrapPatch();
                     TryApplyExactCampaignPreSpawnLoadoutPatch();
@@ -396,6 +397,20 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: MissionStateOpenNew patches apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyListedShellVisualBootstrapPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                ListedShellVisualBootstrapPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: ListedShellVisualBootstrap patch apply failed: " + ex.Message);
             }
         }
 
