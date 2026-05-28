@@ -13,6 +13,7 @@ using TaleWorlds.InputSystem; // Input, InputKey
 using TaleWorlds.Library; // Vec2, Vec3
 using TaleWorlds.Localization;
 using TaleWorlds.MountAndBlade; // Mission, MissionLogic, GameNetwork, Agent, Team, MissionMode
+using TaleWorlds.MountAndBlade.Missions.Multiplayer;
 using TaleWorlds.MountAndBlade.Multiplayer;
 using TaleWorlds.ObjectSystem; // MBObjectManager
 using CoopSpectator.Campaign; // BattleRosterFileHelper (варіант A: roster з кампанії)
@@ -912,7 +913,8 @@ namespace CoopSpectator.MissionBehaviors
         // Possessing pre-materialized AI agents is currently experimental. It does not yet
         // reproduce the full vanilla player-spawn lifecycle (economy/finalize/control state),
         // so the stable runtime keeps battlefield armies materialized as AI-only context while
-        // listed-shell player spawn/respawn still uses native SpawningBehaviorBase as ingress.
+        // listed-shell lobby still carries only a passive SpawnComponent contract for native
+        // MissionLobbyComponent lookups; active listed player spawn authority is coop-owned.
         // 7b spike: try to hand a peer into an already materialized army body through
         // the vanilla bot-replacement lifecycle, while keeping vanilla player spawn as fallback.
         private const bool EnableMaterializedArmyPossessionExperiment = true;
@@ -2895,6 +2897,7 @@ namespace CoopSpectator.MissionBehaviors
             TryForcePreferredHeroClassForPeer(mission, source);
             TryBridgeListedShellInitialPerkInfoReadiness(mission, source);
             TryArmListedShellNativeSpawnCompatibilityState(mission, source);
+            TryRunListedShellDirectSpawnIngress(mission, source);
             if (EnableMaterializedArmyPossessionExperiment)
             {
                 AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "shared-tick", "materialized-possession-before", source);
@@ -29307,6 +29310,247 @@ namespace CoopSpectator.MissionBehaviors
                 "CoopMissionSpawnLogic: cleared stale listed-shell native visual compatibility after direct authoritative spawn. " +
                 "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
                 " Source=" + (source ?? "unknown"));
+        }
+
+        private static void TryRunListedShellDirectSpawnIngress(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer)
+                return;
+
+            if (mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null ||
+                mission.GetMissionBehavior<MissionMultiplayerCoopBattleClient>() != null ||
+                GameNetwork.NetworkPeers == null ||
+                GameNetwork.NetworkPeers.Count == 0)
+            {
+                return;
+            }
+
+            MissionMultiplayerGameModeBase gameMode = mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
+            if (gameMode == null)
+                return;
+
+            BasicCultureObject attackerCulture = MBObjectManager.Instance.GetObject<BasicCultureObject>(
+                MultiplayerOptions.OptionType.CultureTeam1.GetStrValue());
+            BasicCultureObject defenderCulture = MBObjectManager.Instance.GetObject<BasicCultureObject>(
+                MultiplayerOptions.OptionType.CultureTeam2.GetStrValue());
+            MultiplayerBattleColors battleColors = MultiplayerBattleColors.CreateWith(attackerCulture, defenderCulture);
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    continue;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                if (missionPeer == null ||
+                    missionPeer.ControlledAgent != null ||
+                    missionPeer.Team == null ||
+                    ReferenceEquals(missionPeer.Team, mission.SpectatorTeam))
+                {
+                    continue;
+                }
+
+                if (!TryArmListedShellNativeSpawnCompatibilityState(
+                        mission,
+                        missionPeer,
+                        peer,
+                        (source ?? "unknown") + " direct-listed-spawn"))
+                {
+                    continue;
+                }
+
+                if (!missionPeer.TeamInitialPerkInfoReady ||
+                    missionPeer.SpawnTimer == null ||
+                    !missionPeer.SpawnTimer.Check(mission.CurrentTime))
+                {
+                    continue;
+                }
+
+                if (!TryResolveAuthoritativeCompatibilityHeroClassForPeer(
+                        missionPeer,
+                        requireSpawnTimerReady: false,
+                        out MultiplayerClassDivisions.MPHeroClass preferredClass,
+                        out int preferredTroopIndex,
+                        out string debugReason))
+                {
+                    continue;
+                }
+
+                if (preferredClass?.HeroCharacter == null || preferredTroopIndex < 0)
+                    continue;
+
+                ApplySelectedTroopIndexBridge(missionPeer, peer, preferredTroopIndex);
+                TrySpawnListedShellDirectPlayerAgent(
+                    mission,
+                    gameMode,
+                    missionPeer,
+                    peer,
+                    preferredClass,
+                    battleColors,
+                    debugReason,
+                    source);
+            }
+        }
+
+        private static bool TrySpawnListedShellDirectPlayerAgent(
+            Mission mission,
+            MissionMultiplayerGameModeBase gameMode,
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            MultiplayerClassDivisions.MPHeroClass preferredClass,
+            MultiplayerBattleColors battleColors,
+            string debugReason,
+            string source)
+        {
+            if (mission == null || gameMode == null || missionPeer?.Team == null || preferredClass?.HeroCharacter == null)
+                return false;
+
+            BasicCharacterObject heroCharacter = preferredClass.HeroCharacter;
+            Equipment equipment = heroCharacter.Equipment.Clone();
+            MPPerkObject.MPOnSpawnPerkHandler onSpawnPerkHandler = MPPerkObject.GetOnSpawnPerkHandler(missionPeer);
+            IEnumerable<(EquipmentIndex, EquipmentElement)> alternativeEquipment =
+                onSpawnPerkHandler?.GetAlternativeEquipments(isPlayer: true);
+            if (alternativeEquipment != null)
+            {
+                foreach ((EquipmentIndex index, EquipmentElement element) in alternativeEquipment)
+                    equipment[index] = element;
+            }
+
+            gameMode.AddCosmeticItemsToEquipment(
+                equipment,
+                gameMode.GetUsedCosmeticsFromPeer(missionPeer, heroCharacter));
+
+            MultiplayerBattleColors.MultiplayerCultureColorInfo peerColors = battleColors.GetPeerColors(missionPeer);
+            var agentBuildData = new AgentBuildData(heroCharacter)
+                .MissionPeer(missionPeer)
+                .Equipment(equipment)
+                .Team(missionPeer.Team)
+                .TroopOrigin(new BasicBattleAgentOrigin(heroCharacter))
+                .IsFemale(missionPeer.Peer.IsFemale)
+                .VisualsIndex(0)
+                .ClothingColor1(peerColors.ClothingColor1Uint)
+                .ClothingColor2(peerColors.ClothingColor2Uint);
+
+            if (TryResolveListedShellDirectSpawnBodyProperties(missionPeer, out BodyProperties bodyProperties))
+                agentBuildData.BodyProperties(bodyProperties);
+
+            if (!TryApplyListedShellDirectSpawnFrame(agentBuildData, mission, missionPeer, equipment, source))
+                return false;
+
+            Agent agent = mission.SpawnAgent(agentBuildData, spawnFromAgentVisuals: false);
+            if (agent == null)
+                return false;
+
+            agent.AddComponent(new MPPerksAgentComponent(agent));
+            agent.MountAgent?.UpdateAgentProperties();
+            agent.HealthLimit += onSpawnPerkHandler?.GetHitpoints(isPlayer: true) ?? 0f;
+            agent.Health = agent.HealthLimit;
+            agent.WieldInitialWeapons();
+            missionPeer.SpawnCountThisRound++;
+            missionPeer.FollowedAgent = agent;
+            FinalizeListedShellDirectSpawnCompatibilityState(
+                mission,
+                missionPeer,
+                (source ?? "unknown") + " direct-listed-spawn");
+            MPPerkObject.GetPerkHandler(missionPeer)?.OnEvent(MPPerkCondition.PerkEventFlags.SpawnEnd);
+
+            string peerName = peer?.UserName ?? peer?.Index.ToString() ?? "none";
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: completed direct listed-shell authoritative spawn from coop-owned server tick. " +
+                "Peer=" + peerName +
+                " TeamIndex=" + missionPeer.Team.TeamIndex +
+                " TeamSide=" + missionPeer.Team.Side +
+                " TroopId=" + heroCharacter.StringId +
+                " SpawnCountThisRound=" + missionPeer.SpawnCountThisRound +
+                " AgentIndex=" + agent.Index +
+                " Reason=" + (debugReason ?? "unknown") +
+                " Source=" + (source ?? "unknown"));
+            return true;
+        }
+
+        private static bool TryApplyListedShellDirectSpawnFrame(
+            AgentBuildData agentBuildData,
+            Mission mission,
+            MissionPeer missionPeer,
+            Equipment equipment,
+            string source)
+        {
+            if (agentBuildData == null || mission == null || missionPeer?.Team == null)
+                return false;
+
+            bool hasMount = equipment[EquipmentIndex.ArmorItemEndSlot].Item != null;
+            if (!ListedShellSpawnFrameBehavior.TryResolveSpawnFrame(
+                    mission,
+                    missionPeer.Team,
+                    hasMount,
+                    missionPeer.SpawnCountThisRound == 0,
+                    out MatrixFrame spawnFrame))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: skipped direct listed-shell spawn because spawn frame was unavailable. " +
+                    "Mission=" + (mission.SceneName ?? "unknown") +
+                    " Peer=" + (missionPeer.GetNetworkPeer()?.UserName ?? missionPeer.GetNetworkPeer()?.Index.ToString() ?? "none") +
+                    " TeamIndex=" + missionPeer.Team.TeamIndex +
+                    " HasMount=" + hasMount +
+                    " InitialSpawn=" + (missionPeer.SpawnCountThisRound == 0) +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
+
+            spawnFrame.rotation.OrthonormalizeAccordingToForwardAndKeepUpAsZAxis();
+            agentBuildData.InitialPosition(in spawnFrame.origin);
+            agentBuildData.InitialDirection(spawnFrame.rotation.f.AsVec2.Normalized());
+            return true;
+        }
+
+        private static bool TryResolveListedShellDirectSpawnBodyProperties(
+            MissionPeer missionPeer,
+            out BodyProperties bodyProperties)
+        {
+            bodyProperties = default;
+            object playerConnectionInfo = missionPeer?.GetNetworkPeer()?.PlayerConnectionInfo;
+            if (playerConnectionInfo == null)
+                return false;
+
+            try
+            {
+                Type playerDataType = AppDomain.CurrentDomain
+                    .GetAssemblies()
+                    .Where(asm => asm != null && !asm.IsDynamic)
+                    .Select(asm => asm.GetType("TaleWorlds.MountAndBlade.Diamond.PlayerData", throwOnError: false))
+                    .FirstOrDefault(type => type != null);
+                if (playerDataType == null)
+                    return false;
+
+                MethodInfo getParameterMethod = playerConnectionInfo
+                    .GetType()
+                    .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(method =>
+                        method.Name == "GetParameter" &&
+                        method.IsGenericMethodDefinition &&
+                        method.GetParameters().Length == 1 &&
+                        method.GetParameters()[0].ParameterType == typeof(string));
+                if (getParameterMethod == null)
+                    return false;
+
+                object playerData = getParameterMethod
+                    .MakeGenericMethod(playerDataType)
+                    .Invoke(playerConnectionInfo, new object[] { "PlayerData" });
+                if (playerData == null)
+                    return false;
+
+                PropertyInfo bodyPropertiesProperty = playerDataType.GetProperty(
+                    "BodyProperties",
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (bodyPropertiesProperty == null || bodyPropertiesProperty.PropertyType != typeof(BodyProperties))
+                    return false;
+
+                bodyProperties = (BodyProperties)bodyPropertiesProperty.GetValue(playerData);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static void ApplySelectedTroopIndexBridge(MissionPeer missionPeer, NetworkCommunicator peer, int preferredTroopIndex)
