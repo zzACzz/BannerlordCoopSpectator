@@ -917,7 +917,6 @@ namespace CoopSpectator.MissionBehaviors
         // 7b spike: try to hand a peer into an already materialized army body through
         // the vanilla bot-replacement lifecycle, while keeping vanilla player spawn as fallback.
         private const bool EnableMaterializedArmyPossessionExperiment = true;
-        private const bool EnableCoopClassRestrictionSyncExperiment = false;
         private bool _hasLoggedStart;
         private const float ServerLogIntervalSeconds = 8f;
         private float _timeUntilNextPeerLog;
@@ -931,11 +930,7 @@ namespace CoopSpectator.MissionBehaviors
         private static bool _hasSpawnedDiagnosticAllowedAgent;
         private static bool _hasTransferredDiagnosticAllowedAgentToPeer;
         private static readonly HashSet<int> _spawnedCoopPeerIndices = new HashSet<int>();
-        private static HashSet<string> _loggedForcedPreferredClassKeys = new HashSet<string>(StringComparer.Ordinal);
-        private static readonly HashSet<string> _loggedArmedListedShellNativeSpawnCompatibilityKeys = new HashSet<string>(StringComparer.Ordinal);
-        private static readonly Dictionary<int, int> _selectedTroopIndexCompatibilityCacheByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _lastBridgedPeerTeamIndexByPeer = new Dictionary<int, int>();
-        private static readonly Dictionary<FormationClass, bool> _appliedCoopClassAvailabilityStates = new Dictionary<FormationClass, bool>();
         private static readonly Dictionary<int, int> _lastAlignedControlledAgentIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, string> _materializedArmyEntryIdByAgentIndex = new Dictionary<int, string>();
         private static readonly Dictionary<int, BattleSideEnum> _materializedArmySideByAgentIndex = new Dictionary<int, BattleSideEnum>();
@@ -1451,14 +1446,6 @@ namespace CoopSpectator.MissionBehaviors
             public string LastFailureReason { get; set; }
             public DateTime LastUpdatedUtc { get; set; }
         }
-
-        private static readonly FormationClass[] RestrictableFormationClasses =
-        {
-            FormationClass.Infantry,
-            FormationClass.Ranged,
-            FormationClass.Cavalry,
-            FormationClass.HorseArcher
-        };
 
         public static void ResetClientMissionRuntimeState(string source)
         {
@@ -2725,10 +2712,7 @@ namespace CoopSpectator.MissionBehaviors
             _hasSpawnedDiagnosticAllowedAgent = false;
             _hasTransferredDiagnosticAllowedAgentToPeer = false;
             _spawnedCoopPeerIndices.Clear();
-            _loggedForcedPreferredClassKeys.Clear();
-            _selectedTroopIndexCompatibilityCacheByPeer.Clear();
             _lastBridgedPeerTeamIndexByPeer.Clear();
-            _appliedCoopClassAvailabilityStates.Clear();
             _lastAlignedControlledAgentIndexByPeer.Clear();
             _materializedArmyEntryIdByAgentIndex.Clear();
             _materializedArmySideByAgentIndex.Clear();
@@ -2882,8 +2866,6 @@ namespace CoopSpectator.MissionBehaviors
             TrySyncExactCampaignBattlefieldRuntimeState(mission, source);
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "shared-tick", "runtime-sync-after", source);
             TryBridgeAuthoritativePeerTeams(mission, source);
-            TryForcePreferredHeroClassForPeer(mission, source);
-            TryArmListedShellNativeSpawnCompatibilityState(mission, source);
             TryRunListedShellDirectSpawnIngress(mission, source);
             if (EnableMaterializedArmyPossessionExperiment)
             {
@@ -21637,7 +21619,6 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 _spawnedCoopPeerIndices.Add(peer.Index);
-                ClearSelectedTroopIndexCompatibilityCache(missionPeer);
                 missionPeer.WantsToSpawnAsBot = false;
                 CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
                     peer,
@@ -22089,7 +22070,6 @@ namespace CoopSpectator.MissionBehaviors
                     commanderControlState,
                     source + " replace-bot");
 
-                ClearSelectedTroopIndexCompatibilityCache(missionPeer);
                 if (IsSceneAwareBattleMapRuntime(mission) &&
                     SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
                 {
@@ -24409,7 +24389,6 @@ namespace CoopSpectator.MissionBehaviors
                     _spawnedCoopPeerIndices.Remove(peer.Index);
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " lost-controlled-agent");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " lost-controlled-agent");
-                    ClearSelectedTroopIndexCompatibilityCache(missionPeer);
                     CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " lost-controlled-agent");
                     TryReleasePeerOrderOwnershipAfterLeavingActiveLife(
                         mission,
@@ -24723,7 +24702,6 @@ namespace CoopSpectator.MissionBehaviors
             if (peer != null)
                 _spawnedCoopPeerIndices.Remove(peer.Index);
 
-            ClearSelectedTroopIndexCompatibilityCache(missionPeer);
             ResetMissionPeerSpawnTimerForImmediateRespawn(mission, missionPeer);
             missionPeer.WantsToSpawnAsBot = false;
             MovePeerToSpectatorHoldingState(mission, missionPeer, peer, source + " forced-respawnable");
@@ -24900,33 +24878,6 @@ namespace CoopSpectator.MissionBehaviors
                  ExactCampaignArmyBootstrap.TryGetEntryId(agent, out _));
         }
 
-        private static void ClearSelectedTroopIndexCompatibilityCache(MissionPeer missionPeer)
-        {
-            NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
-            if (peer == null)
-                return;
-
-            _selectedTroopIndexCompatibilityCacheByPeer.Remove(peer.Index);
-        }
-
-        private static bool HasSelectedTroopIndexCompatibilityCacheValue(NetworkCommunicator peer, int troopIndex)
-        {
-            if (peer == null || troopIndex < 0)
-                return false;
-
-            return _selectedTroopIndexCompatibilityCacheByPeer.TryGetValue(peer.Index, out int cachedTroopIndex) &&
-                   cachedTroopIndex == troopIndex;
-        }
-
-        private static bool TryResolveSelectedTroopIndexCompatibilityCacheValue(NetworkCommunicator peer, out int troopIndex)
-        {
-            troopIndex = -1;
-            if (peer == null)
-                return false;
-
-            return _selectedTroopIndexCompatibilityCacheByPeer.TryGetValue(peer.Index, out troopIndex);
-        }
-
         private static void ResetMissionPeerSpawnTimerForImmediateRespawn(Mission mission, MissionPeer missionPeer)
         {
             if (mission == null || missionPeer == null)
@@ -24963,7 +24914,6 @@ namespace CoopSpectator.MissionBehaviors
                 out _,
                 out _);
             missionPeer.WantsToSpawnAsBot = false;
-            ClearSelectedTroopIndexCompatibilityCache(missionPeer);
 
             if (!alreadySpectator)
             {
@@ -28609,44 +28559,6 @@ namespace CoopSpectator.MissionBehaviors
             spawnDirection.Normalize();
         }
 
-        public static bool TryResolvePreferredHeroClassForPeer(
-            MissionPeer missionPeer,
-            MultiplayerClassDivisions.MPHeroClass vanillaClass,
-            out MultiplayerClassDivisions.MPHeroClass preferredClass,
-            out int preferredTroopIndex,
-            out string debugReason)
-        {
-            return TryResolvePreferredHeroClassForPeer(
-                missionPeer,
-                vanillaClass,
-                true,
-                out preferredClass,
-                out preferredTroopIndex,
-                out debugReason);
-        }
-
-        private static bool TryResolvePreferredHeroClassForPeer(
-            MissionPeer missionPeer,
-            MultiplayerClassDivisions.MPHeroClass vanillaClass,
-            bool requireSpawnTimerReady,
-            out MultiplayerClassDivisions.MPHeroClass preferredClass,
-            out int preferredTroopIndex,
-            out string debugReason)
-        {
-            if (!TryResolveAuthoritativeCompatibilityHeroClassForPeer(
-                    missionPeer,
-                    requireSpawnTimerReady,
-                    out preferredClass,
-                    out preferredTroopIndex,
-                    out debugReason))
-            {
-                return false;
-            }
-
-            return !ReferenceEquals(preferredClass, vanillaClass) ||
-                   !HasSelectedTroopIndexCompatibilityCacheValue(missionPeer?.GetNetworkPeer(), preferredTroopIndex);
-        }
-
         private static bool TryResolveAuthoritativeCompatibilityHeroClassForPeer(
             MissionPeer missionPeer,
             bool requireSpawnTimerReady,
@@ -29079,91 +28991,7 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
-        private static void TryForcePreferredHeroClassForPeer(Mission mission, string source)
-        {
-            if (mission == null || !GameNetwork.IsServer || GameNetwork.NetworkPeers == null || GameNetwork.NetworkPeers.Count == 0)
-                return;
-
-            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
-            {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
-                    continue;
-
-                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                if (missionPeer == null || missionPeer.ControlledAgent != null)
-                    continue;
-
-                if (!TryResolveAuthoritativeRuntimePeerContext(
-                        mission,
-                        missionPeer,
-                        source + " compatibility-class-sync",
-                        out BattleSideEnum _,
-                        out Team authoritativeTeam,
-                        out BasicCultureObject authoritativeCulture,
-                        out string authoritativeContextReason))
-                {
-                    continue;
-                }
-
-                if (ReferenceEquals(authoritativeTeam, mission.SpectatorTeam))
-                    continue;
-
-                if (!RequiresListedShellNativeSpawnCompatibility(mission, missionPeer))
-                {
-                    ClearSelectedTroopIndexCompatibilityCache(missionPeer);
-                    continue;
-                }
-
-                int currentTroopIndex = TryResolveSelectedTroopIndexCompatibilityCacheValue(peer, out int cachedTroopIndex)
-                    ? cachedTroopIndex
-                    : -1;
-                MultiplayerClassDivisions.MPHeroClass currentClass = null;
-                List<MultiplayerClassDivisions.MPHeroClass> cultureClasses = MultiplayerClassDivisions
-                    .GetMPHeroClasses(authoritativeCulture)
-                    ?.Where(heroClass => heroClass?.HeroCharacter != null)
-                    .ToList();
-                if (cultureClasses != null && currentTroopIndex >= 0 && currentTroopIndex < cultureClasses.Count)
-                    currentClass = cultureClasses[currentTroopIndex];
-
-                if (!TryResolvePreferredHeroClassForPeer(
-                        missionPeer,
-                        currentClass,
-                        false,
-                        out MultiplayerClassDivisions.MPHeroClass preferredClass,
-                        out int preferredTroopIndex,
-                        out string debugReason))
-                {
-                    continue;
-                }
-
-                if (preferredTroopIndex < 0)
-                    continue;
-
-                if (currentClass != null && HasSelectedTroopIndexCompatibilityCacheValue(peer, preferredTroopIndex))
-                    continue;
-
-                ApplySelectedTroopIndexCompatibilityCache(peer, preferredTroopIndex);
-
-                string classId = preferredClass?.HeroCharacter?.StringId ?? "null";
-                string peerName = peer.UserName ?? peer.Index.ToString();
-                string logKey = peer.Index + "|compat-selected-index|" + preferredTroopIndex + "|" + classId;
-                if (_loggedForcedPreferredClassKeys.Add(logKey))
-                {
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: synchronized listed-shell selected-troop compatibility cache from authoritative coop selection (" + source + "). " +
-                        "Peer=" + peerName +
-                        " Culture=" + (authoritativeCulture?.StringId ?? "null") +
-                        " TroopIndex=" + preferredTroopIndex +
-                        " HeroClass=" + classId +
-                        " Reason=" + debugReason +
-                        " RuntimeContext=" + (authoritativeContextReason ?? "resolved"));
-                }
-            }
-
-            TrySyncCoopClassRestrictions(mission, source);
-        }
-
-        internal static bool RequiresListedShellNativeSpawnCompatibility(Mission mission, MissionPeer missionPeer)
+        internal static bool RequiresListedShellDirectSpawnIngress(Mission mission, MissionPeer missionPeer)
         {
             if (mission == null || missionPeer == null)
                 return false;
@@ -29180,7 +29008,7 @@ namespace CoopSpectator.MissionBehaviors
             if (!TryResolveAuthoritativeRuntimePeerContext(
                     mission,
                     missionPeer,
-                    "listed-shell-native-spawn-compatibility",
+                    "listed-shell-direct-spawn-ingress",
                     out BattleSideEnum _,
                     out Team authoritativeTeam,
                     out BasicCultureObject _,
@@ -29206,88 +29034,6 @@ namespace CoopSpectator.MissionBehaviors
             MissionLobbyComponent lobbyComponent = mission?.GetMissionBehavior<MissionLobbyComponent>();
             return lobbyComponent != null &&
                 lobbyComponent.CurrentMultiplayerState == MissionLobbyComponent.MultiplayerGameState.Playing;
-        }
-
-        private static void TryArmListedShellNativeSpawnCompatibilityState(Mission mission, string source)
-        {
-            if (mission == null || !GameNetwork.IsServer || GameNetwork.NetworkPeers == null || GameNetwork.NetworkPeers.Count == 0)
-                return;
-
-            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
-            {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
-                    continue;
-
-                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                TryArmListedShellNativeSpawnCompatibilityState(
-                    mission,
-                    missionPeer,
-                    peer,
-                    source + " listed-shell-bootstrap");
-            }
-        }
-
-        internal static bool TryArmListedShellNativeSpawnCompatibilityState(
-            Mission mission,
-            MissionPeer missionPeer,
-            NetworkCommunicator peer,
-            string source)
-        {
-            if (!RequiresListedShellNativeSpawnCompatibility(mission, missionPeer))
-                return false;
-
-            if (!TryResolveAuthoritativeCompatibilityHeroClassForPeer(
-                    missionPeer,
-                    false,
-                    out MultiplayerClassDivisions.MPHeroClass preferredClass,
-                    out int preferredTroopIndex,
-                    out string debugReason))
-            {
-                return false;
-            }
-
-            if (preferredTroopIndex < 0)
-                return false;
-
-            ApplySelectedTroopIndexCompatibilityCache(peer, preferredTroopIndex);
-
-            string peerName = peer?.UserName ?? peer?.Index.ToString() ?? "none";
-            string classId = preferredClass?.HeroCharacter?.StringId ?? "null";
-            string logKey =
-                (peer?.Index.ToString() ?? peerName) +
-                "|listed-shell-native-spawn-armed|" +
-                preferredTroopIndex +
-                "|" +
-                classId;
-            if (_loggedArmedListedShellNativeSpawnCompatibilityKeys.Add(logKey))
-            {
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: armed listed-shell selected-troop compatibility state from authoritative coop selection. " +
-                        "Peer=" + peerName +
-                        " TroopIndex=" + preferredTroopIndex +
-                        " HeroClass=" + classId +
-                        " Reason=" + debugReason +
-                        " Source=" + (source ?? "unknown"));
-                }
-
-            return true;
-        }
-
-        internal static void FinalizeListedShellDirectSpawnCompatibilityState(
-            Mission mission,
-            MissionPeer missionPeer,
-            string source)
-        {
-            if (missionPeer == null)
-                return;
-
-            ClearSelectedTroopIndexCompatibilityCache(missionPeer);
-
-            NetworkCommunicator peer = missionPeer.GetNetworkPeer();
-            ModLogger.Info(
-                "CoopMissionSpawnLogic: cleared listed-shell selected-troop compatibility cache after direct authoritative spawn. " +
-                "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
-                " Source=" + (source ?? "unknown"));
         }
 
         private static void TryRunListedShellDirectSpawnIngress(Mission mission, string source)
@@ -29324,11 +29070,7 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
                 }
 
-                if (!TryArmListedShellNativeSpawnCompatibilityState(
-                        mission,
-                        missionPeer,
-                        peer,
-                        (source ?? "unknown") + " direct-listed-spawn"))
+                if (!RequiresListedShellDirectSpawnIngress(mission, missionPeer))
                 {
                     continue;
                 }
@@ -29352,7 +29094,6 @@ namespace CoopSpectator.MissionBehaviors
                 if (preferredClass?.HeroCharacter == null || preferredTroopIndex < 0)
                     continue;
 
-                ApplySelectedTroopIndexCompatibilityCache(peer, preferredTroopIndex);
                 TrySpawnListedShellDirectPlayerAgent(
                     mission,
                     gameMode,
@@ -29439,10 +29180,6 @@ namespace CoopSpectator.MissionBehaviors
             agent.WieldInitialWeapons();
             missionPeer.SpawnCountThisRound++;
             missionPeer.FollowedAgent = agent;
-            FinalizeListedShellDirectSpawnCompatibilityState(
-                mission,
-                missionPeer,
-                (source ?? "unknown") + " direct-listed-spawn");
             MPPerkObject.GetPerkHandler(missionPeer)?.OnEvent(MPPerkCondition.PerkEventFlags.SpawnEnd);
 
             string peerName = peer?.UserName ?? peer?.Index.ToString() ?? "none";
@@ -29571,19 +29308,6 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static void ApplySelectedTroopIndexCompatibilityCache(NetworkCommunicator peer, int preferredTroopIndex)
-        {
-            if (peer == null || preferredTroopIndex < 0)
-                return;
-
-            if (HasSelectedTroopIndexCompatibilityCacheValue(peer, preferredTroopIndex))
-            {
-                return;
-            }
-
-            _selectedTroopIndexCompatibilityCacheByPeer[peer.Index] = preferredTroopIndex;
-        }
-
         private static bool ShouldRouteNativePeerCompatibilityThroughSnapshotReadyRecipients(Mission mission)
         {
             if (!GameNetwork.IsServer || mission == null)
@@ -29593,134 +29317,6 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             return mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null;
-        }
-
-        private static void TrySyncCoopClassRestrictions(Mission mission, string source)
-        {
-            if (!EnableCoopClassRestrictionSyncExperiment)
-                return;
-
-            if (mission == null || !GameNetwork.IsServer)
-                return;
-
-            MissionLobbyComponent lobbyComponent = mission.GetMissionBehavior<MissionLobbyComponent>();
-            if (lobbyComponent == null)
-                return;
-
-            HashSet<FormationClass> allowedClasses = ResolveAllowedFormationClassesForMission(mission);
-            if (allowedClasses.Count == 0)
-                return;
-
-            foreach (FormationClass formationClass in RestrictableFormationClasses)
-            {
-                bool desiredAvailability = allowedClasses.Contains(formationClass);
-                if (_appliedCoopClassAvailabilityStates.TryGetValue(formationClass, out bool appliedAvailability) &&
-                    appliedAvailability == desiredAvailability)
-                {
-                    continue;
-                }
-
-                bool finalAvailability = ApplyCoopClassRestriction(lobbyComponent, formationClass, desiredAvailability);
-                _appliedCoopClassAvailabilityStates[formationClass] = finalAvailability;
-
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: synced class restriction (" + source + "). " +
-                    "FormationClass=" + formationClass +
-                    " DesiredAvailability=" + desiredAvailability +
-                    " FinalAvailability=" + finalAvailability);
-            }
-        }
-
-        private static HashSet<FormationClass> ResolveAllowedFormationClassesForMission(Mission mission)
-        {
-            HashSet<FormationClass> allowedClasses = new HashSet<FormationClass>();
-            if (mission == null || GameNetwork.NetworkPeers == null)
-                return allowedClasses;
-
-            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
-            {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
-                    continue;
-
-                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                if (missionPeer == null)
-                    continue;
-
-                if (!TryResolveAuthoritativeRuntimePeerContext(
-                        mission,
-                        missionPeer,
-                        "class-restriction-sync",
-                        out BattleSideEnum _,
-                        out Team authoritativeTeam,
-                        out BasicCultureObject authoritativeCulture,
-                        out string _))
-                {
-                    continue;
-                }
-
-                if (ReferenceEquals(authoritativeTeam, mission.SpectatorTeam))
-                    continue;
-
-                BasicCharacterObject controlledCharacter = missionPeer.ControlledAgent?.Character as BasicCharacterObject;
-                if (controlledCharacter != null)
-                {
-                    allowedClasses.Add(controlledCharacter.DefaultFormationClass);
-                    continue;
-                }
-
-                foreach (BasicCharacterObject allowedCharacter in ResolveAllowedCharactersForPeerCulture(missionPeer, authoritativeCulture))
-                {
-                    if (allowedCharacter != null)
-                        allowedClasses.Add(allowedCharacter.DefaultFormationClass);
-                }
-            }
-
-            if (allowedClasses.Count == 0)
-            {
-                foreach (string allowedTroopId in GetAllowedControlTroopIdsSnapshot())
-                {
-                    BasicCharacterObject fallbackCharacter = ResolveAllowedCharacter(allowedTroopId);
-                    if (fallbackCharacter != null)
-                        allowedClasses.Add(fallbackCharacter.DefaultFormationClass);
-                }
-            }
-
-            return allowedClasses;
-        }
-
-        private static bool ApplyCoopClassRestriction(
-            MissionLobbyComponent lobbyComponent,
-            FormationClass formationClass,
-            bool desiredAvailability)
-        {
-            bool finalAvailability = desiredAvailability;
-            bool broadcastValue = !desiredAvailability;
-
-            try
-            {
-                lobbyComponent.ChangeClassRestriction(formationClass, broadcastValue);
-                finalAvailability = lobbyComponent.IsClassAvailable(formationClass);
-                if (finalAvailability != desiredAvailability)
-                {
-                    broadcastValue = desiredAvailability;
-                    lobbyComponent.ChangeClassRestriction(formationClass, broadcastValue);
-                    finalAvailability = lobbyComponent.IsClassAvailable(formationClass);
-                }
-
-                GameNetwork.BeginBroadcastModuleEvent();
-                GameNetwork.WriteMessage(new NetworkMessages.FromServer.ChangeClassRestrictions(formationClass, broadcastValue));
-                GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: class restriction sync failed. " +
-                    "FormationClass=" + formationClass +
-                    " DesiredAvailability=" + desiredAvailability +
-                    " Error=" + ex.Message);
-            }
-
-            return finalAvailability;
         }
 
         private static string GetPreferredTargetTroopIdForPeerCulture(MissionPeer missionPeer, BasicCultureObject runtimeCulture)
