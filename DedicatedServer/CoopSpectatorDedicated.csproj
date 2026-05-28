@@ -117,7 +117,6 @@
     <Compile Include="..\Patches\ListedShellCompatibilityModeClient.cs" Link="Patches\ListedShellCompatibilityModeClient.cs" />
     <Compile Include="..\Patches\ListedShellMissionRepresentative.cs" Link="Patches\ListedShellMissionRepresentative.cs" />
     <Compile Include="..\Patches\ListedShellSpawnFrameBehavior.cs" Link="Patches\ListedShellSpawnFrameBehavior.cs" />
-    <Compile Include="..\Patches\ListedShellPassiveSpawningBehavior.cs" Link="Patches\ListedShellPassiveSpawningBehavior.cs" />
     <Compile Include="..\Patches\ExactCampaignArmyBootstrapPatch.cs" Link="Patches\ExactCampaignArmyBootstrapPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignPreSpawnLoadoutPatch.cs" Link="Patches\ExactCampaignPreSpawnLoadoutPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" Link="Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" />

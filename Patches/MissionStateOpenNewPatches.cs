@@ -166,7 +166,6 @@ namespace CoopSpectator.Patches
                 list,
                 TryCreateBehaviorByFullNames("TaleWorlds.MountAndBlade.Multiplayer.Missions.MultiplayerBattleMissionAgentInteractionLogic"),
                 "MultiplayerBattleMissionAgentInteractionLogic");
-            list.Add(new SpawnComponent(new ListedShellSpawnFrameBehavior(), new ListedShellPassiveSpawningBehavior()));
             AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");

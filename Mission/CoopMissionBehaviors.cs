@@ -913,8 +913,8 @@ namespace CoopSpectator.MissionBehaviors
         // Possessing pre-materialized AI agents is currently experimental. It does not yet
         // reproduce the full vanilla player-spawn lifecycle (economy/finalize/control state),
         // so the stable runtime keeps battlefield armies materialized as AI-only context while
-        // listed-shell lobby still carries only a passive SpawnComponent contract for native
-        // MissionLobbyComponent lookups; active listed player spawn authority is coop-owned.
+        // listed-shell lobby now stays alive through patched MissionLobbyComponent contracts,
+        // and active listed player spawn authority remains fully coop-owned.
         // 7b spike: try to hand a peer into an already materialized army body through
         // the vanilla bot-replacement lifecycle, while keeping vanilla player spawn as fallback.
         private const bool EnableMaterializedArmyPossessionExperiment = true;
@@ -29202,6 +29202,9 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (!IsListedShellMissionLobbyPlaying(mission))
+                return false;
+
             if (!CoopBattleSpawnRequestState.HasPendingRequest(missionPeer))
                 return false;
 
@@ -29212,6 +29215,13 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             return true;
+        }
+
+        private static bool IsListedShellMissionLobbyPlaying(Mission mission)
+        {
+            MissionLobbyComponent lobbyComponent = mission?.GetMissionBehavior<MissionLobbyComponent>();
+            return lobbyComponent != null &&
+                lobbyComponent.CurrentMultiplayerState == MissionLobbyComponent.MultiplayerGameState.Playing;
         }
 
         private static void TryArmListedShellNativeSpawnCompatibilityState(Mission mission, string source)
@@ -29326,7 +29336,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             MissionMultiplayerGameModeBase gameMode = mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
-            if (gameMode == null)
+            if (gameMode == null || !IsListedShellMissionLobbyPlaying(mission))
                 return;
 
             BasicCultureObject attackerCulture = MBObjectManager.Instance.GetObject<BasicCultureObject>(
