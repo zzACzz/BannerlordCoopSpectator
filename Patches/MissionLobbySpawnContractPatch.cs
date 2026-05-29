@@ -36,6 +36,12 @@ namespace CoopSpectator.Patches
             binder: null,
             types: new[] { typeof(Agent), typeof(Agent) },
             modifiers: null);
+        private static readonly MethodInfo OnBotDiesMethod = typeof(MissionLobbyComponent).GetMethod(
+            "OnBotDies",
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null,
+            types: new[] { typeof(Agent), typeof(MissionPeer), typeof(MissionPeer) },
+            modifiers: null);
         private static readonly MethodInfo MissionPeerKillCountSetter = typeof(MissionPeer)
             .GetProperty(nameof(MissionPeer.KillCount), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
             .GetSetMethod(nonPublic: true);
@@ -45,6 +51,13 @@ namespace CoopSpectator.Patches
         private static readonly MethodInfo MissionPeerScoreSetter = typeof(MissionPeer)
             .GetProperty(nameof(MissionPeer.Score), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
             .GetSetMethod(nonPublic: true);
+        private static readonly MethodInfo FormationPlayerOwnerGetter = typeof(Formation)
+            .GetProperty("PlayerOwner", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
+            .GetGetMethod(nonPublic: true);
+        private static readonly FieldInfo FormationPlayerOwnerBackingField = typeof(Formation).GetField(
+            "<PlayerOwner>k__BackingField",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        private const int MaxBotsControlledCountForNetworkContract = 255;
 
         public static void Apply(Harmony harmony)
         {
@@ -320,8 +333,7 @@ namespace CoopSpectator.Patches
                     __instance.CurrentMultiplayerState == MissionLobbyComponent.MultiplayerGameState.Ending ||
                     affectedAgent == null ||
                     !affectedAgent.IsHuman ||
-                    affectedAgent.IsMount ||
-                    affectedAgent.MissionPeer == null)
+                    affectedAgent.IsMount)
                 {
                     return true;
                 }
@@ -333,7 +345,18 @@ namespace CoopSpectator.Patches
                     return true;
                 }
 
-                HandleListedShellPlayerDeath(
+                if (affectedAgent.MissionPeer != null)
+                {
+                    HandleListedShellPlayerDeath(
+                        __instance,
+                        mission,
+                        affectedAgent,
+                        affectorAgent,
+                        "MissionLobbySpawnContractPatch.OnAgentRemoved");
+                    return false;
+                }
+
+                HandleListedShellBotDeath(
                     __instance,
                     mission,
                     affectedAgent,
@@ -343,7 +366,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("MissionLobbySpawnContractPatch: agent-removed postfix failed open: " + ex.Message);
+                ModLogger.Info("MissionLobbySpawnContractPatch: agent-removed prefix failed open: " + ex.Message);
                 return true;
             }
         }
@@ -582,6 +605,38 @@ namespace CoopSpectator.Patches
                 ApplyListedPlayerSuicide(mission, directKillerPeer, affectedAgent);
         }
 
+        private static void HandleListedShellBotDeath(
+            MissionLobbyComponent lobbyComponent,
+            Mission mission,
+            Agent affectedAgent,
+            Agent affectorAgent,
+            string source)
+        {
+            if (lobbyComponent == null || mission == null || affectedAgent == null)
+                return;
+
+            MissionPeer directKillerPeer = affectorAgent?.MissionPeer;
+            MissionPeer affectorPeer = directKillerPeer ?? affectorAgent?.OwningAgentMissionPeer;
+            MissionPeer assistorPeer = TryResolveAssistorPeer(lobbyComponent, directKillerPeer, affectedAgent);
+
+            if (!TryHandleListedShellControlledBotDeath(mission, affectedAgent, affectorPeer, assistorPeer))
+                TryInvokeNativeOnBotDies(lobbyComponent, affectedAgent, affectorPeer, assistorPeer);
+
+            if (affectorAgent == null || !affectorAgent.IsHuman || ReferenceEquals(affectorAgent, affectedAgent))
+                return;
+
+            if (directKillerPeer != null)
+            {
+                ApplyListedPlayerKill(mission, directKillerPeer, affectedAgent);
+                return;
+            }
+
+            if (TryHandleListedShellPlayerOwnedBotKill(mission, affectorAgent, affectedAgent))
+                return;
+
+            TryInvokeNativeOnBotKills(lobbyComponent, affectorAgent, affectedAgent);
+        }
+
         private static MissionPeer TryResolveAssistorPeer(
             MissionLobbyComponent lobbyComponent,
             MissionPeer killerPeer,
@@ -608,7 +663,7 @@ namespace CoopSpectator.Patches
             if (mission == null || killerPeer == null || killedAgent == null)
                 return;
 
-            MissionPeer killedPeer = killedAgent.MissionPeer;
+            MissionPeer killedPeer = ResolveListedKilledPeerForKillContract(killedAgent);
             if (killedPeer != null)
                 killerPeer.OnKillAnotherPeer(killedPeer);
 
@@ -633,6 +688,194 @@ namespace CoopSpectator.Patches
                 killerPeer.AssistCount,
                 killerPeer.DeathCount,
                 killerPeer.Score);
+        }
+
+        private static bool TryHandleListedShellControlledBotDeath(
+            Mission mission,
+            Agent botAgent,
+            MissionPeer affectorPeer,
+            MissionPeer assistorPeer)
+        {
+            if (mission == null || botAgent == null)
+                return false;
+
+            MissionPeer ownerPeer = TryResolveListedControlledBotOwnerPeer(botAgent);
+            NetworkCommunicator ownerNetworkPeer = ownerPeer?.GetNetworkPeer();
+            if (ownerPeer == null || ownerNetworkPeer == null)
+                return false;
+
+            if (assistorPeer != null)
+            {
+                BroadcastKillDeathCountChange(
+                    assistorPeer.GetNetworkPeer(),
+                    affectorPeer?.GetNetworkPeer(),
+                    assistorPeer.KillCount,
+                    assistorPeer.AssistCount,
+                    assistorPeer.DeathCount,
+                    assistorPeer.Score);
+            }
+
+            TrySetMissionPeerIntProperty(ownerPeer, MissionPeerDeathCountSetter, ownerPeer.DeathCount + 1);
+            ownerPeer.BotsUnderControlAlive = ClampBotsControlledCount(ownerPeer.BotsUnderControlAlive - 1);
+            int botsAlive = ClampBotsControlledCount(ownerPeer.BotsUnderControlAlive);
+            int botsTotal = ClampBotsControlledCount(ownerPeer.BotsUnderControlTotal);
+            if (botsAlive > botsTotal)
+            {
+                botsAlive = botsTotal;
+                ownerPeer.BotsUnderControlAlive = botsAlive;
+            }
+
+            MissionScoreboardComponent scoreboard = mission.GetMissionBehavior<MissionScoreboardComponent>();
+            scoreboard?.PlayerPropertiesChanged(ownerNetworkPeer);
+            if (botAgent.Team != null)
+                scoreboard?.BotPropertiesChanged(botAgent.Team.Side);
+
+            BroadcastKillDeathCountChange(
+                ownerNetworkPeer,
+                affectorPeer?.GetNetworkPeer(),
+                ownerPeer.KillCount,
+                ownerPeer.AssistCount,
+                ownerPeer.DeathCount,
+                ownerPeer.Score);
+            BroadcastBotsControlledChange(ownerNetworkPeer, botsAlive, botsTotal);
+            return true;
+        }
+
+        private static bool TryHandleListedShellPlayerOwnedBotKill(
+            Mission mission,
+            Agent botAgent,
+            Agent killedAgent)
+        {
+            if (mission == null || botAgent == null || killedAgent == null)
+                return false;
+
+            MissionPeer killerPeer = TryResolveListedControlledBotOwnerPeer(botAgent);
+            NetworkCommunicator killerNetworkPeer = killerPeer?.GetNetworkPeer();
+            if (killerPeer == null || killerNetworkPeer == null)
+                return false;
+
+            MissionPeer killedPeer = ResolveListedKilledPeerForKillContract(killedAgent);
+            if (killedPeer != null)
+                killerPeer.OnKillAnotherPeer(killedPeer);
+
+            MissionMultiplayerGameModeBase gameMode = mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
+            int killScore = gameMode?.GetScoreForKill(killedAgent) ?? 0;
+            if (botAgent.Team != null && killedAgent.Team != null && botAgent.Team.IsEnemyOf(killedAgent.Team))
+            {
+                TrySetMissionPeerIntProperty(killerPeer, MissionPeerKillCountSetter, killerPeer.KillCount + 1);
+                TrySetMissionPeerIntProperty(killerPeer, MissionPeerScoreSetter, killerPeer.Score + killScore);
+            }
+            else
+            {
+                TrySetMissionPeerIntProperty(killerPeer, MissionPeerKillCountSetter, killerPeer.KillCount - 1);
+                TrySetMissionPeerIntProperty(killerPeer, MissionPeerScoreSetter, killerPeer.Score - (int)(killScore * 1.5f));
+            }
+
+            MissionScoreboardComponent scoreboard = mission.GetMissionBehavior<MissionScoreboardComponent>();
+            scoreboard?.PlayerPropertiesChanged(killerNetworkPeer);
+            if (botAgent.Team != null)
+                scoreboard?.BotPropertiesChanged(botAgent.Team.Side);
+
+            BroadcastKillDeathCountChange(
+                killerNetworkPeer,
+                null,
+                killerPeer.KillCount,
+                killerPeer.AssistCount,
+                killerPeer.DeathCount,
+                killerPeer.Score);
+            return true;
+        }
+
+        private static MissionPeer ResolveListedKilledPeerForKillContract(Agent killedAgent)
+        {
+            if (killedAgent == null)
+                return null;
+
+            return killedAgent.MissionPeer ?? TryResolveListedControlledBotOwnerPeer(killedAgent);
+        }
+
+        private static MissionPeer TryResolveListedControlledBotOwnerPeer(Agent botAgent)
+        {
+            Formation formation = botAgent?.Formation;
+            if (formation == null)
+                return null;
+
+            Agent formationPlayerOwner = TryGetFormationPlayerOwner(formation);
+            MissionPeer ownerPeer = formationPlayerOwner?.MissionPeer ?? formationPlayerOwner?.OwningAgentMissionPeer;
+            if (ownerPeer != null)
+                return ownerPeer;
+
+            if (GameNetwork.NetworkPeers == null)
+                return null;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                MissionPeer missionPeer = peer?.GetComponent<MissionPeer>();
+                if (missionPeer?.ControlledFormation == formation)
+                    return missionPeer;
+            }
+
+            return null;
+        }
+
+        private static Agent TryGetFormationPlayerOwner(Formation formation)
+        {
+            if (formation == null)
+                return null;
+
+            try
+            {
+                if (FormationPlayerOwnerGetter != null)
+                    return FormationPlayerOwnerGetter.Invoke(formation, Array.Empty<object>()) as Agent;
+
+                return FormationPlayerOwnerBackingField?.GetValue(formation) as Agent;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: failed to resolve formation PlayerOwner through reflection: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static bool TryInvokeNativeOnBotDies(
+            MissionLobbyComponent lobbyComponent,
+            Agent botAgent,
+            MissionPeer affectorPeer,
+            MissionPeer assistorPeer)
+        {
+            if (lobbyComponent == null || OnBotDiesMethod == null || botAgent == null)
+                return false;
+
+            try
+            {
+                OnBotDiesMethod.Invoke(lobbyComponent, new object[] { botAgent, affectorPeer, assistorPeer });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: native OnBotDies fallback failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool TryInvokeNativeOnBotKills(
+            MissionLobbyComponent lobbyComponent,
+            Agent botAgent,
+            Agent killedAgent)
+        {
+            if (lobbyComponent == null || OnBotKillsMethod == null || botAgent == null || killedAgent == null)
+                return false;
+
+            try
+            {
+                OnBotKillsMethod.Invoke(lobbyComponent, new object[] { botAgent, killedAgent });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: native OnBotKills fallback failed: " + ex.Message);
+                return false;
+            }
         }
 
         private static void ApplyListedPlayerSuicide(Mission mission, MissionPeer killerPeer, Agent killedAgent)
@@ -673,6 +916,23 @@ namespace CoopSpectator.Patches
                 deathCount,
                 score));
             GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+        }
+
+        private static void BroadcastBotsControlledChange(NetworkCommunicator peer, int aliveCount, int totalCount)
+        {
+            if (peer == null)
+                return;
+
+            int clampedTotalCount = ClampBotsControlledCount(totalCount);
+            int clampedAliveCount = Math.Min(ClampBotsControlledCount(aliveCount), clampedTotalCount);
+            GameNetwork.BeginBroadcastModuleEvent();
+            GameNetwork.WriteMessage(new NetworkMessages.FromServer.BotsControlledChange(peer, clampedAliveCount, clampedTotalCount));
+            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+        }
+
+        private static int ClampBotsControlledCount(int value)
+        {
+            return Math.Max(0, Math.Min(MaxBotsControlledCountForNetworkContract, value));
         }
 
         private static void TrySetMissionPeerIntProperty(MissionPeer missionPeer, MethodInfo setter, int value)
