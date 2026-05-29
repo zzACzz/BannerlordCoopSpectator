@@ -43,9 +43,11 @@ namespace CoopSpectator.GameMode
             if (_lobbyClient == null)
                 return;
 
+            Mission mission = Mission ?? Mission.Current;
+            bool isEnding = ListedShellLobbyRuntime.IsMissionLobbyState(mission, MultiplayerGameState.Ending);
             if (GameNetwork.IsServer)
             {
-                if (CurrentMultiplayerState != MultiplayerGameState.Ending &&
+                if (!isEnding &&
                     IsLobbyClientLoggedIn(_lobbyClient) &&
                     ResolveLobbyClientState(_lobbyClient) == 14)
                 {
@@ -56,7 +58,7 @@ namespace CoopSpectator.GameMode
             }
 
             if (!_isServerEndedBeforeClientLoaded &&
-                CurrentMultiplayerState != MultiplayerGameState.Ending &&
+                !isEnding &&
                 IsLobbyClientLoggedIn(_lobbyClient) &&
                 ResolveLobbyClientState(_lobbyClient) == 16)
             {
@@ -111,7 +113,6 @@ namespace CoopSpectator.GameMode
         {
             ListedShellLobbyRuntime.TryApplyListedShellMissionStateChange(
                 Mission,
-                this,
                 baseMessage,
                 nameof(ListedShellMissionLobbyClientComponent));
         }

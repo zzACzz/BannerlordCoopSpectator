@@ -22,11 +22,6 @@ namespace CoopSpectator.GameMode
 
         private static readonly FieldInfo NetworkFromServerBaseHandlersField =
             AccessTools.Field(typeof(GameNetwork.NetworkMessageHandlerRegistererContainer), "_fromServerBaseHandlers");
-        private static readonly MethodInfo CurrentMultiplayerStateSetterMethod = typeof(MissionLobbyComponent)
-            .GetProperty(
-                nameof(MissionLobbyComponent.CurrentMultiplayerState),
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
-            .GetSetMethod(nonPublic: true);
         private static readonly Type MissionStateChangeType = AccessTools.TypeByName("TaleWorlds.MountAndBlade.MissionStateChange");
         private static readonly MethodInfo GameNetworkWriteMessageMethod = ResolveGameNetworkWriteMessageMethod();
         private static readonly MethodInfo MissionPeerKillCountSetter = typeof(MissionPeer)
@@ -238,7 +233,6 @@ namespace CoopSpectator.GameMode
 
         internal static bool TryApplyListedShellMissionStateChange(
             Mission mission,
-            MissionLobbyComponent lobbyComponent,
             object baseMessage,
             string source)
         {
@@ -263,11 +257,6 @@ namespace CoopSpectator.GameMode
                     return false;
                 }
 
-                if (lobbyComponent == null)
-                    lobbyComponent = mission?.GetMissionBehavior<MissionLobbyComponent>();
-
-                if (lobbyComponent != null)
-                    CurrentMultiplayerStateSetterMethod?.Invoke(lobbyComponent, new object[] { currentState });
                 RememberListedShellMissionState(mission, currentState);
                 if (currentState != MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers)
                 {
@@ -423,7 +412,7 @@ namespace CoopSpectator.GameMode
             if (!shouldStart)
                 return false;
 
-            SetListedShellStatePlayingAsServer(lobbyComponent, mission, timer);
+            SetListedShellStatePlayingAsServer(mission, timer);
             ModLogger.Info(
                 "ListedShellLobbyRuntime: advanced listed-shell lobby from WaitingFirstPlayers to Playing via explicit coop-owned lobby contract. " +
                 "Peers=" + synchronizedPeerCount +
@@ -433,18 +422,12 @@ namespace CoopSpectator.GameMode
             return false;
         }
 
-        private static void SetListedShellStatePlayingAsServer(
-            MissionLobbyComponent lobbyComponent,
-            Mission mission,
-            MultiplayerTimerComponent timer)
+        private static void SetListedShellStatePlayingAsServer(Mission mission, MultiplayerTimerComponent timer)
         {
             MultiplayerWarmupComponent warmup = mission?.GetMissionBehavior<MultiplayerWarmupComponent>();
             if (warmup != null)
                 mission.RemoveMissionBehavior(warmup);
 
-            CurrentMultiplayerStateSetterMethod?.Invoke(
-                lobbyComponent,
-                new object[] { MissionLobbyComponent.MultiplayerGameState.Playing });
             RememberListedShellMissionState(mission, MissionLobbyComponent.MultiplayerGameState.Playing);
             timer.StartTimerAsServer(MultiplayerOptions.OptionType.MapTimeLimit.GetIntValue() * 60f);
             BroadcastMissionStateChange(
@@ -458,9 +441,6 @@ namespace CoopSpectator.GameMode
             if (lobbyComponent == null || timer == null)
                 return;
 
-            CurrentMultiplayerStateSetterMethod?.Invoke(
-                lobbyComponent,
-                new object[] { MissionLobbyComponent.MultiplayerGameState.Ending });
             RememberListedShellMissionState(lobbyComponent?.Mission, MissionLobbyComponent.MultiplayerGameState.Ending);
             timer.StartTimerAsServer(MissionLobbyComponent.PostMatchWaitDuration);
             BroadcastMissionStateChange(
