@@ -73,7 +73,8 @@ namespace CoopSpectator.Infrastructure
 
                 string action = CoopSessionTransportPrimitives.CompletePeerFinishedLoadingTransportStep(
                     networkPeer,
-                    shouldUnload);
+                    shouldUnload,
+                    "PendingBattleFinishedLoadingTransportRuntime.HandleDeferredServerFinishedLoadingValidationAsync");
 
                 ModLogger.Info(
                     "PendingBattleFinishedLoadingTransportRuntime: processed deferred FinishedLoading validation. " +

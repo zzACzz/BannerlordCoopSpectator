@@ -291,6 +291,15 @@ namespace CoopSpectator.Infrastructure
             if (message == null || !ShouldOwnUnloadMissionReceive())
                 return true;
 
+            if (ShouldSuppressListedBattleIndexMismatchUnload(message, out string suppressionSummary))
+            {
+                ModLogger.Info(
+                    "ListedShellNetworkBootstrapRuntime: suppressed listed UnloadMission receive during active battle bootstrap. " +
+                    suppressionSummary +
+                    " Source=" + Normalize(source) + ".");
+                return false;
+            }
+
             _ = HandleListedUnloadMissionReceiveAsync(baseNetworkComponentInstance, message);
             ModLogger.Info(
                 "ListedShellNetworkBootstrapRuntime: intercepted listed UnloadMission receive. " +
@@ -310,6 +319,34 @@ namespace CoopSpectator.Infrastructure
             }
 
             return ListedShellClientSessionOwnershipState.ShouldOwnReceiveBootstrap();
+        }
+
+        private static bool ShouldSuppressListedBattleIndexMismatchUnload(UnloadMission message, out string summary)
+        {
+            summary = string.Empty;
+            if (message == null || !message.UnloadingForBattleIndexMismatch)
+                return false;
+
+            Mission mission = Mission.Current;
+            if (mission == null || !SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase >= CoopBattlePhase.BattleActive || currentPhase == CoopBattlePhase.None)
+                return false;
+
+            if (!ListedShellMissionSessionState.TryResolveTransportToken(mission, out int token) || token <= 0)
+                return false;
+
+            if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string readinessSummary))
+                return false;
+
+            summary =
+                "MissionScene=" + (mission.SceneName ?? "null") +
+                " MissionPhase=" + currentPhase +
+                " MissionToken=" + token +
+                " SnapshotReadiness={" + (readinessSummary ?? "unknown") + "}";
+            return true;
         }
 
         public static async Task HandleListedUnloadMissionReceiveAsync(object baseNetworkComponentInstance, UnloadMission message)

@@ -111,7 +111,8 @@ namespace CoopSpectator.Infrastructure
 
             string action = CoopSessionTransportPrimitives.CompletePeerFinishedLoadingTransportStep(
                 networkPeer,
-                shouldUnload);
+                shouldUnload,
+                source);
 
             ModLogger.Info(
                 "ListedShellSessionTransportRuntime: completed listed peer finished-loading transport step. " +

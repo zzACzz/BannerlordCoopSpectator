@@ -1625,6 +1625,10 @@ namespace CoopSpectator.MissionBehaviors
                 _acknowledgedBattleSnapshotTransmissionIdByPeer[peer.Index] = message.TransmissionId;
                 _lastCompletedBattleSnapshotTransmissionUtcByPeer.Remove(peer.Index);
                 _lastBattleSnapshotRetryUtcByPeer.Remove(peer.Index);
+                TryMarkPeerFinishedLoadingFromListedBattleSnapshotAck(
+                    peer,
+                    message.TransmissionId,
+                    "CoopMissionNetworkBridge.AcceptClientBattleSnapshotCompleteAck");
                 TrySendImmediatePeerStatusPayloads(peer);
                 LateJoinPeerBootstrapGatePatch.TryReplayDeferredPeerBootstrap(
                     peer,
@@ -1643,6 +1647,42 @@ namespace CoopSpectator.MissionBehaviors
                 " ExpectedCatalogHash=" + (string.IsNullOrWhiteSpace(expectedCatalogHash) ? "null" : expectedCatalogHash) +
                 " BootstrapReady=" + bootstrapReady +
                 " ExpectedCatalogSummary={" + (expectedCatalogSummary ?? "unknown") + "}");
+        }
+
+        private void TryMarkPeerFinishedLoadingFromListedBattleSnapshotAck(
+            NetworkCommunicator peer,
+            int transmissionId,
+            string source)
+        {
+            if (!GameNetwork.IsServer || Mission == null || peer == null || peer.IsServerPeer || !peer.IsConnectionActive)
+                return;
+
+            if (peer.IsSynchronized)
+                return;
+
+            if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(Mission.SceneName ?? string.Empty))
+                return;
+
+            ListedShellSessionTransportRuntime.TryPromotePendingBattleTransportTokenToListedSession(
+                Mission,
+                source + " promote-pending-token");
+            bool hasListedToken = ListedShellMissionSessionState.TryResolveTransportToken(Mission, out int listedToken) &&
+                                  listedToken > 0;
+            bool hasPendingToken = PendingBattleMissionStartupState.TryResolveAuthoritativeTransportToken(Mission, out int pendingToken) &&
+                                   pendingToken > 0;
+
+            CoopSessionTransportPrimitives.MarkPeerFinishedLoading(
+                peer,
+                source + " force-finished-loading");
+
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: forced peer finished-loading from listed battle snapshot completion ack. " +
+                "Peer=" + (peer.UserName ?? "null") +
+                " TransmissionId=" + transmissionId +
+                " MissionScene=" + (Mission.SceneName ?? "null") +
+                " ListedToken=" + (hasListedToken ? listedToken.ToString() : "0") +
+                " PendingToken=" + (hasPendingToken ? pendingToken.ToString() : "0") +
+                " Source=" + (source ?? "unknown") + ".");
         }
 
         private void AcceptClientBattleSnapshotAbort(NetworkCommunicator peer, CoopBattleSnapshotAbortMessage message)

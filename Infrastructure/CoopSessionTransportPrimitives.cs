@@ -93,28 +93,37 @@ namespace CoopSpectator.Infrastructure
             BannerlordNetwork.CreateServerPeer();
         }
 
-        public static void MarkPeerFinishedLoading(NetworkCommunicator networkPeer)
+        public static void MarkPeerFinishedLoading(NetworkCommunicator networkPeer, string source = null)
         {
             if (networkPeer == null || networkPeer.IsServerPeer)
                 return;
 
+            bool wasSynchronized = networkPeer.IsSynchronized;
             GameNetwork.ClientFinishedLoading(networkPeer);
+
+            ModLogger.Info(
+                "CoopSessionTransportPrimitives: marked peer finished loading. " +
+                "Peer=" + (networkPeer.UserName ?? "unknown") +
+                " WasSynchronized=" + wasSynchronized +
+                " IsSynchronized=" + networkPeer.IsSynchronized +
+                " Source=" + NormalizeSource(source) + ".");
         }
 
         public static string CompletePeerFinishedLoadingTransportStep(
             NetworkCommunicator networkPeer,
-            bool shouldUnload)
+            bool shouldUnload,
+            string source = null)
         {
             if (networkPeer == null || networkPeer.IsServerPeer)
                 return "Skipped";
 
             if (shouldUnload)
             {
-                SendUnloadMission(networkPeer, true);
+                SendUnloadMission(networkPeer, true, source);
                 return "UnloadMission";
             }
 
-            MarkPeerFinishedLoading(networkPeer);
+            MarkPeerFinishedLoading(networkPeer, source);
             return "ClientFinishedLoading";
         }
 
@@ -137,10 +146,16 @@ namespace CoopSpectator.Infrastructure
             MarkLocalPeerUnsynchronized();
         }
 
-        public static void SendUnloadMission(NetworkCommunicator networkPeer, bool unloadingForBattleIndexMismatch)
+        public static void SendUnloadMission(NetworkCommunicator networkPeer, bool unloadingForBattleIndexMismatch, string source = null)
         {
             if (networkPeer == null || networkPeer.IsServerPeer)
                 return;
+
+            ModLogger.Info(
+                "CoopSessionTransportPrimitives: sending UnloadMission to peer. " +
+                "Peer=" + (networkPeer.UserName ?? "unknown") +
+                " UnloadingForBattleIndexMismatch=" + unloadingForBattleIndexMismatch +
+                " Source=" + NormalizeSource(source) + ".");
 
             ExecuteServerPeerEnvelope(networkPeer, () =>
                 GameNetwork.WriteMessage(new UnloadMission(unloadingForBattleIndexMismatch)));
@@ -275,6 +290,11 @@ namespace CoopSpectator.Infrastructure
             GameNetwork.BeginBroadcastModuleEvent();
             writeMessage();
             GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+        }
+
+        private static string NormalizeSource(string source)
+        {
+            return string.IsNullOrWhiteSpace(source) ? string.Empty : source.Trim();
         }
     }
 }
