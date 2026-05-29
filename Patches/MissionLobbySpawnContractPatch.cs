@@ -169,45 +169,6 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                MethodInfo behaviorInitializeTarget = typeof(MissionLobbyComponent).GetMethod(
-                    nameof(MissionLobbyComponent.OnBehaviorInitialize),
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                MethodInfo behaviorInitializePostfix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(OnBehaviorInitialize_Postfix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-                if (behaviorInitializeTarget == null || behaviorInitializePostfix == null)
-                {
-                    ModLogger.Info("MissionLobbySpawnContractPatch: behavior-initialize target or postfix not found. Skip.");
-                    return;
-                }
-
-                MethodInfo afterStartTarget = typeof(MissionLobbyComponent).GetMethod(
-                    nameof(MissionLobbyComponent.AfterStart),
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                MethodInfo afterStartPostfix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(AfterStart_Postfix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-                if (afterStartTarget == null || afterStartPostfix == null)
-                {
-                    ModLogger.Info("MissionLobbySpawnContractPatch: after-start target or postfix not found. Skip.");
-                    return;
-                }
-
-                MethodInfo addRemoveHandlersTarget = typeof(MissionLobbyComponent).GetMethod(
-                    "AddRemoveMessageHandlers",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                    binder: null,
-                    types: new[] { typeof(GameNetwork.NetworkMessageHandlerRegistererContainer) },
-                    modifiers: null);
-                MethodInfo addRemoveHandlersPostfix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(AddRemoveMessageHandlers_Postfix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-                if (addRemoveHandlersTarget == null || addRemoveHandlersPostfix == null)
-                {
-                    ModLogger.Info("MissionLobbySpawnContractPatch: add-remove-message-handlers target or postfix not found. Skip.");
-                    return;
-                }
-
                 MethodInfo clientSynchronizedTarget = typeof(MissionLobbyComponent).GetMethod(
                     "OnMyClientSynchronized",
                     BindingFlags.Instance | BindingFlags.NonPublic);
@@ -292,9 +253,6 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                harmony.Patch(behaviorInitializeTarget, postfix: new HarmonyMethod(behaviorInitializePostfix));
-                harmony.Patch(afterStartTarget, postfix: new HarmonyMethod(afterStartPostfix));
-                harmony.Patch(addRemoveHandlersTarget, postfix: new HarmonyMethod(addRemoveHandlersPostfix));
                 harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
                 harmony.Patch(tickTarget, prefix: new HarmonyMethod(tickPrefix));
                 harmony.Patch(clientSynchronizedTarget, prefix: new HarmonyMethod(clientSynchronizedPrefix));
@@ -312,9 +270,6 @@ namespace CoopSpectator.Patches
                 if (changeCultureTarget != null && changeCulturePrefix != null)
                     harmony.Patch(changeCultureTarget, prefix: new HarmonyMethod(changeCulturePrefix));
                 harmony.Patch(agentRemovedTarget, prefix: new HarmonyMethod(agentRemovedPrefix));
-                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnBehaviorInitialize.");
-                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.AfterStart.");
-                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.AddRemoveMessageHandlers.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMissionTick.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMyClientSynchronized.");
@@ -339,11 +294,10 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void OnBehaviorInitialize_Postfix(MissionLobbyComponent __instance)
+        internal static void InitializeListedShellLobbyState(Mission mission)
         {
             try
             {
-                Mission mission = __instance?.Mission ?? Mission.Current;
                 if (!ShouldUseListedShellLobbyContract(mission))
                     return;
 
@@ -355,11 +309,10 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void AfterStart_Postfix(MissionLobbyComponent __instance)
+        internal static void AfterListedShellLobbyStart(Mission mission, MissionLobbyComponent lobbyComponent)
         {
             try
             {
-                Mission mission = __instance?.Mission ?? Mission.Current;
                 if (!ShouldUseListedShellLobbyContract(mission) || !GameNetwork.IsClient)
                     return;
 
@@ -377,7 +330,7 @@ namespace CoopSpectator.Patches
 
                 Delegate handler = Delegate.CreateDelegate(
                     synchronizedEvent.EventHandlerType,
-                    __instance,
+                    lobbyComponent,
                     MissionLobbyOnMyClientSynchronizedMethod,
                     throwOnBindFailure: false);
                 if (handler == null)
@@ -391,7 +344,7 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void AddRemoveMessageHandlers_Postfix(
+        internal static void PruneListedShellLobbyMessageRegistrations(
             MissionLobbyComponent __instance,
             GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
         {

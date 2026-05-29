@@ -44,7 +44,9 @@
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattle.cs" Link="GameMode\MissionMultiplayerCoopBattle.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattleClient.cs" Link="GameMode\MissionMultiplayerCoopBattleClient.cs" />
     <Compile Include="..\GameMode\MissionBehaviorHelpers.cs" Link="GameMode\MissionBehaviorHelpers.cs" />
+    <Compile Include="..\GameMode\ListedShellMissionLobbyClientComponent.cs" Link="GameMode\ListedShellMissionLobbyClientComponent.cs" />
     <Compile Include="..\GameMode\MissionBehaviorDiagnostic.cs" Link="GameMode\MissionBehaviorDiagnostic.cs" />
+    <Compile Include="ListedShellMissionLobbyServerComponent.cs" Link="GameMode\ListedShellMissionLobbyServerComponent.cs" />
     <Compile Include="..\Mission\CoopMissionBehaviors.cs" Link="Mission\CoopMissionBehaviors.cs" />
     <Compile Include="..\Mission\CoopMissionNetworkBridge.cs" Link="Mission\CoopMissionNetworkBridge.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
@@ -156,6 +158,10 @@
       <HintPath>$(_RefBinDir)\TaleWorlds.MountAndBlade.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade.DedicatedCustomServer" Condition="Exists('$(DedicatedServerBinDir)\TaleWorlds.MountAndBlade.DedicatedCustomServer.dll')">
+      <HintPath>$(DedicatedServerBinDir)\TaleWorlds.MountAndBlade.DedicatedCustomServer.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="TaleWorlds.DotNet">
       <HintPath>$(_RefBinDir)\TaleWorlds.DotNet.dll</HintPath>
       <Private>false</Private>
@@ -201,6 +207,10 @@
     </Reference>
     <Reference Include="TaleWorlds.MountAndBlade">
       <HintPath>..\TaleWorlds.MountAndBlade.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade.DedicatedCustomServer" Condition="Exists('$(DedicatedServerBinDir)\TaleWorlds.MountAndBlade.DedicatedCustomServer.dll')">
+      <HintPath>$(DedicatedServerBinDir)\TaleWorlds.MountAndBlade.DedicatedCustomServer.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="TaleWorlds.DotNet" Condition="Exists('..\TaleWorlds.DotNet.dll')">

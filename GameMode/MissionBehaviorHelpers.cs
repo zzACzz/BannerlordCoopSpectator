@@ -38,24 +38,24 @@ namespace CoopSpectator.GameMode
             {
                 try
                 {
-                    return new MissionCustomGameClientComponent();
+                    return new ListedShellMissionLobbyClientComponent();
                 }
                 catch (Exception ex)
                 {
-                    ModLogger.Info("MissionBehaviorHelpers: MissionCustomGameClientComponent creation failed: " + ex.Message);
+                    ModLogger.Info("MissionBehaviorHelpers: ListedShellMissionLobbyClientComponent creation failed: " + ex.Message);
                     return null;
                 }
             }
 
             MissionBehavior dedicatedLobby = TryCreateBehaviorFromLoadedAssemblies(
-                "TaleWorlds.MountAndBlade.DedicatedCustomServer.MissionCustomGameServerComponent");
+                "CoopSpectator.GameMode.ListedShellMissionLobbyServerComponent");
             if (dedicatedLobby != null)
             {
-                ModLogger.Info("MissionBehaviorHelpers: MissionCustomGameServerComponent created from loaded dedicated assembly.");
+                ModLogger.Info("MissionBehaviorHelpers: ListedShellMissionLobbyServerComponent created from loaded dedicated assembly.");
                 return dedicatedLobby;
             }
 
-            ModLogger.Info("MissionBehaviorHelpers: MissionCustomGameServerComponent could not be created from loaded assemblies.");
+            ModLogger.Info("MissionBehaviorHelpers: ListedShellMissionLobbyServerComponent could not be created from loaded assemblies.");
             return null;
         }
 
