@@ -58,6 +58,33 @@ namespace CoopSpectator.Infrastructure
             _statesByMission.Remove(mission);
         }
 
+        public static void InitializeMission(
+            Mission mission,
+            string source)
+        {
+            if (mission == null)
+                return;
+
+            Apply(
+                mission,
+                BattleSideEnum.Defender,
+                0,
+                0,
+                0,
+                0,
+                ResolveDefaultBotAliveCountForSide(BattleSideEnum.Defender),
+                source);
+            Apply(
+                mission,
+                BattleSideEnum.Attacker,
+                0,
+                0,
+                0,
+                0,
+                ResolveDefaultBotAliveCountForSide(BattleSideEnum.Attacker),
+                source);
+        }
+
         public static bool TryGetState(
             Mission mission,
             BattleSideEnum side,
@@ -85,16 +112,15 @@ namespace CoopSpectator.Infrastructure
             if (TryGetState(mission, side, out state))
                 return true;
 
-            MissionScoreboardComponent.MissionScoreboardSide nativeSide = scoreboardComponent?.GetSideSafe(side);
-            BotData botData = nativeSide?.BotScores;
+            int defaultBotAliveCount = ResolveDefaultBotAliveCountForSide(side);
             Apply(
                 mission,
                 side,
-                nativeSide?.SideScore ?? 0,
-                botData?.KillCount ?? 0,
-                botData?.AssistCount ?? 0,
-                botData?.DeathCount ?? 0,
-                botData?.AliveCount ?? 0,
+                0,
+                0,
+                0,
+                0,
+                defaultBotAliveCount,
                 source);
             return TryGetState(mission, side, out state);
         }
@@ -252,6 +278,17 @@ namespace CoopSpectator.Infrastructure
         private static bool IsSupportedSide(BattleSideEnum side)
         {
             return side == BattleSideEnum.Attacker || side == BattleSideEnum.Defender;
+        }
+
+        private static int ResolveDefaultBotAliveCountForSide(BattleSideEnum side)
+        {
+            if (side == BattleSideEnum.Attacker)
+                return NormalizeBotAliveCount(MultiplayerOptions.OptionType.NumberOfBotsTeam2.GetIntValue());
+
+            if (side == BattleSideEnum.Defender)
+                return NormalizeBotAliveCount(MultiplayerOptions.OptionType.NumberOfBotsTeam1.GetIntValue());
+
+            return 0;
         }
 
         private static int NormalizeStat(int value)

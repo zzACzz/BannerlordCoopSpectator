@@ -163,6 +163,9 @@ namespace CoopSpectator.GameMode
 
                 CoopBattlePeerStatsRuntimeState.Reset();
                 CoopBattleScoreboardRuntimeState.Reset(mission);
+                CoopBattleScoreboardRuntimeState.InitializeMission(
+                    mission,
+                    "ListedShellLobbyRuntime.InitializeListedShellLobbyState");
                 RememberListedShellMissionState(mission, MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers);
             }
             catch (Exception ex)
@@ -592,6 +595,7 @@ namespace CoopSpectator.GameMode
             long stateStartTimeInTicks = ResolveListedShellMissionStateStartTimeInTicks(lobbyComponent, mission, state);
             SendMissionStateChangeToPeer(targetPeer, state, stateStartTimeInTicks);
             SendListedShellPeerInformationsToPeer(mission, targetPeer);
+            SendListedShellScoreboardStateToPeer(mission, targetPeer);
         }
 
         private static long ResolveListedShellMissionStateStartTimeInTicks(
@@ -656,6 +660,48 @@ namespace CoopSpectator.GameMode
                 " Scene=" + (mission?.SceneName ?? "unknown") +
                 " KillDeathReplays=" + replayedKillDeathCount +
                 " BotsControlledReplays=" + replayedBotsControlledCount);
+        }
+
+        private static void SendListedShellScoreboardStateToPeer(Mission mission, NetworkCommunicator targetPeer)
+        {
+            if (mission == null || targetPeer == null)
+                return;
+
+            MissionScoreboardComponent scoreboard = mission.GetMissionBehavior<MissionScoreboardComponent>();
+            bool hasAttackerState = ListedShellMissionScoreboardComponent.TryResolveListedShellSideRuntimeState(
+                scoreboard,
+                BattleSideEnum.Attacker,
+                "ListedShellLobbyRuntime.SendListedShellScoreboardStateToPeer attacker",
+                out ScoreboardSideRuntimeState attackerState);
+            bool hasDefenderState = ListedShellMissionScoreboardComponent.TryResolveListedShellSideRuntimeState(
+                scoreboard,
+                BattleSideEnum.Defender,
+                "ListedShellLobbyRuntime.SendListedShellScoreboardStateToPeer defender",
+                out ScoreboardSideRuntimeState defenderState);
+            if (!hasAttackerState && !hasDefenderState)
+                return;
+
+            if (hasAttackerState || hasDefenderState)
+            {
+                GameNetwork.BeginModuleEventAsServer(targetPeer);
+                GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateRoundScores(
+                    hasAttackerState ? attackerState.SideScore : 0,
+                    hasDefenderState ? defenderState.SideScore : 0));
+                GameNetwork.EndModuleEventAsServer();
+            }
+
+            if (hasAttackerState)
+                SendListedShellBotDataToPeer(targetPeer, attackerState);
+
+            if (hasDefenderState)
+                SendListedShellBotDataToPeer(targetPeer, defenderState);
+
+            ModLogger.Info(
+                "ListedShellLobbyRuntime: replayed listed-shell scoreboard state through coop-owned late-client contract. " +
+                "Peer=" + (targetPeer.UserName ?? targetPeer.Index.ToString()) +
+                " Scene=" + (mission.SceneName ?? "unknown") +
+                " AttackerScore=" + (hasAttackerState ? attackerState.SideScore : 0) +
+                " DefenderScore=" + (hasDefenderState ? defenderState.SideScore : 0));
         }
 
         private static bool ShouldReplayListedShellPeerInformationSubject(NetworkCommunicator peer)
@@ -1179,6 +1225,23 @@ namespace CoopSpectator.GameMode
                 sideState.BotDeathCount,
                 sideState.BotAliveCount));
             GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+        }
+
+        private static void SendListedShellBotDataToPeer(
+            NetworkCommunicator targetPeer,
+            ScoreboardSideRuntimeState sideState)
+        {
+            if (targetPeer == null)
+                return;
+
+            GameNetwork.BeginModuleEventAsServer(targetPeer);
+            GameNetwork.WriteMessage(new NetworkMessages.FromServer.BotData(
+                sideState.Side,
+                sideState.BotKillCount,
+                sideState.BotAssistCount,
+                sideState.BotDeathCount,
+                sideState.BotAliveCount));
+            GameNetwork.EndModuleEventAsServer();
         }
 
         private static PeerStatsRuntimeState ResolveListedShellPeerStats(MissionPeer missionPeer)

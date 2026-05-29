@@ -37,6 +37,13 @@ namespace CoopSpectator.GameMode
         {
             base.AfterStart();
 
+            SyncListedShellSideRuntimeToNativeMirror(
+                BattleSideEnum.Attacker,
+                "ListedShellMissionScoreboardComponent.AfterStart attacker");
+            SyncListedShellSideRuntimeToNativeMirror(
+                BattleSideEnum.Defender,
+                "ListedShellMissionScoreboardComponent.AfterStart defender");
+
             if (!GameNetwork.IsServerOrRecorder)
                 return;
 
