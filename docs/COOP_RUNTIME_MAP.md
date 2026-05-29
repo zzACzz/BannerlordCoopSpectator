@@ -75,7 +75,7 @@
 - Цей native path далі викликає `GameNetwork.StartMultiplayerOnClient(...)` і стартує native custom lobby mission.
 - Поточний connectivity shell ще залежить від таких patch-ів:
   - `Patches/ListedShellClientWrapperOwnershipPatch.cs`
-  - `Patches/LocalJoinAddressPatch.cs`
+  - `Infrastructure/CoopSessionTransportPrimitives.cs`
   - `Patches/LobbyRequestJoinDiagnosticsPatch.cs`
 
 Якщо код лежить всередині цього контракту, а ми ще не маємо coop-native replacement, його не можна викидати навмання.
@@ -398,7 +398,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 | Listed TDM startup ingress | `GameMode/MissionMultiplayerListedShellMode.cs`, `GameMode/ListedShellMissionBehaviorFactory.cs`, `DedicatedServer/Patches/GameModeOverridePatches.cs` |
 | Listed mission assembly | `GameMode/MissionMultiplayerListedShellMode.cs`, `GameMode/ListedShellMissionBehaviorFactory.cs` |
 | Native UI suppression | `Patches/BattleMapHudSuppressionPatch.cs`, `Patches/MissionScreenCameraPreviewPatch.cs` |
-| Connectivity і local/self join | `Patches/ListedShellClientWrapperOwnershipPatch.cs`, `Infrastructure/ListedShellWrapperInteropRuntime.cs`, `Patches/LocalJoinAddressPatch.cs`, `Patches/LobbyRequestJoinDiagnosticsPatch.cs` |
+| Connectivity і local/self join | `Patches/ListedShellClientWrapperOwnershipPatch.cs`, `Infrastructure/ListedShellWrapperInteropRuntime.cs`, `Infrastructure/CoopSessionTransportPrimitives.cs`, `Patches/LobbyRequestJoinDiagnosticsPatch.cs` |
 | Native class compatibility | `Patches/MultiplayerCharacterClassFallbackPatch.cs`, `Patches/StartupSafeMpHeroClassBootstrapPatch.cs` |
 | Залишковий crash isolation | `Patches/IntermissionVmCrashGuardPatch.cs` |
 | Listed-shell startup helper | `DedicatedHelper/DedicatedHelperLauncher.cs` |
@@ -422,9 +422,8 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - `Patches/BattleMapHudSuppressionPatch.cs`
 - `Patches/MissionScreenCameraPreviewPatch.cs`
 - `Patches/IntermissionVmCrashGuardPatch.cs`
-- видалений `Patches/LobbyCustomGameLocalJoinPatch.cs`; low-level decompile active DLL не показує live `LobbyGameStateCustomGameClient.StartMultiplayer(string,int,int,int)`, а one-shot localhost rewrite вже owner-иться на `GameNetwork.StartMultiplayerOnClient` через `LocalJoinAddressPatch`;
+- видалений `Patches/LobbyCustomGameLocalJoinPatch.cs`; low-level decompile active DLL не показує live `LobbyGameStateCustomGameClient.StartMultiplayer(string,int,int,int)`, а one-shot localhost rewrite тепер owner-иться безпосередньо в `CoopSessionTransportPrimitives.StartClientTransport(...)`;
 - `Patches/ListedShellClientWrapperOwnershipPatch.cs`
-- `Patches/LocalJoinAddressPatch.cs`
 - `Patches/LobbyRequestJoinDiagnosticsPatch.cs`
 - `DedicatedHelper/DedicatedHelperLauncher.cs`
 
@@ -444,6 +443,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - `ListedShellMissionSessionState` забирає listed mission-instance token з native `BaseNetworkComponentData.CurrentBattleIndex`: explicit listed startup тепер arm-ить власний session token на server start, передає його через `InitializeCustomGameMessage`, приймає його на client receive path і використовує його ж у server-side `FinishedLoading` validation без `CurrentBattleIndex` fallback-а або mirror-write з нашого боку;
 - `ListedShellClientSessionOwnershipState` тепер тримає listed client ingress як один явний lifecycle: join-result arm для wrapper-entry, promotion у receive-bootstrap після `GameNetwork.StartMultiplayerOnClient(...)` і фінальний disarm після listed transport teardown; `CustomGameJoinContextState` після цього лишився тільки join-address/local-roster fallback state, а не listed startup ownership gate;
 - direct listed session bring-up примітиви `GameNetwork.StartMultiplayerOnClient(...)`, `GameNetwork.PreStartMultiplayerOnServer()`, `GameNetwork.StartMultiplayerOnServer(...)`, `BannerlordNetwork.CreateServerPeer()`, listed `ClientFinishedLoading(...)`, `UnloadMission(...)` і send-side bootstrap messages більше не висять прямо в listed runtime helper-ах; `CoopSessionTransportPrimitives` тепер локалізує цей нижній native MP transport layer, а `ListedShellSessionTransportRuntime`, `ListedShellNetworkBootstrapRuntime` і `PendingBattleFinishedLoadingTransportRuntime` лишили собі orchestration та ownership;
+- видалений `Patches/LocalJoinAddressPatch.cs`; one-shot localhost self-join rewrite більше не owner-иться global Harmony hook-ом на `GameNetwork.StartMultiplayerOnClient`, а виконується прямо в `CoopSessionTransportPrimitives.StartClientTransport(...)` як частина explicit listed client transport bring-up;
 - `FinishedLoadingMissionReadyGatePatch` більше не несе навіть non-listed deferred transport lifecycle: listed server-side `FinishedLoading` validation маршрутизується в `ListedShellSessionTransportRuntime`, а deferred validation для `PendingBattleMissionStartupState` тепер owner-иться окремим `PendingBattleFinishedLoadingTransportRuntime`, тому сам patch лишився лише router-ом між двома runtime helper-ами;
 - listed `BaseNetworkComponent` bootstrap message graph теж більше не розмазаний по трьох receive patch-ах і send patch-у: `HandleNewClientConnect`, `InitializeCustomGame`, `LoadMission` і `UnloadMission` тепер owner-яться через `ListedShellNetworkBootstrapRuntime`, а patch-класи лишили собі тільки interception і ownership-gate;
 - прибрані `CoopTdm` і `TdmClone` ids з `Infrastructure/CoopGameModeIds.cs`;
@@ -513,7 +513,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 2. Прибрати решту native `MissionLobbyComponent` shell тоді, коли listed ingress уже не потребуватиме його для server-list startup/join contract.
 3. Прибрати bridge-file fallback-и тоді, коли network transport стане достатньо надійним для selection, spawn, readiness і reconnect flows.
 4. Після переносу listed startup у `Module.StartMultiplayerGame("TeamDeathmatch", scene)` -> `MissionMultiplayerListedShellMode` добивати решту native ingress shell уже без `MissionStateOpenNew` interception: далі ціллю є повний відрив від official listed startup/join path.
-5. Окремо переоцінити `LocalJoinAddressPatch` та інші join patch-і, коли public, VPN і self-host join flows будуть розділені чистіше по відповідальності.
+5. Окремо переоцінити `CoopSessionTransportPrimitives.StartClientTransport(...)` і решту join patch-ів, коли public, VPN і self-host join flows будуть розділені чистіше по відповідальності.
 6. Прибрати crash-isolation patch-і на кшталт `IntermissionVmCrashGuardPatch`, коли battle-map lobby/intermission lifecycle буде вже нашим, а не native.
 
 ## 16. План переходу до clean coop core без TDM

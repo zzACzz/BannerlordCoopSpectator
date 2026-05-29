@@ -6,9 +6,25 @@ namespace CoopSpectator.Infrastructure
 {
     internal static class CoopSessionTransportPrimitives
     {
-        public static void StartClientTransport(string address, int port, int sessionKey, int peerIndex)
+        public static void StartClientTransport(string address, int port, int sessionKey, int peerIndex, string source)
         {
-            GameNetwork.StartMultiplayerOnClient(address, port, sessionKey, peerIndex);
+            string finalAddress = address;
+            bool selfJoinRedirect = HostSelfJoinRedirectState.TryConsumeLoopbackRewrite(
+                ref finalAddress,
+                port,
+                "CoopSessionTransportPrimitives.StartClientTransport");
+
+            GameNetwork.StartMultiplayerOnClient(finalAddress, port, sessionKey, peerIndex);
+
+            ModLogger.Info(
+                "CoopSessionTransportPrimitives: started client transport. " +
+                "OriginalAddress=" + (address ?? string.Empty) +
+                " FinalAddress=" + (finalAddress ?? string.Empty) +
+                " Port=" + port +
+                " SessionKey=" + sessionKey +
+                " PeerIndex=" + peerIndex +
+                " SelfJoinRedirect=" + selfJoinRedirect +
+                " Source=" + (string.IsNullOrWhiteSpace(source) ? string.Empty : source.Trim()) + ".");
         }
 
         public static void PreStartServerTransport()

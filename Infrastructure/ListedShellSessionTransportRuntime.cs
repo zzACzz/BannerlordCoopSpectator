@@ -29,7 +29,7 @@ namespace CoopSpectator.Infrastructure
                     sessionKey,
                     peerIndex,
                     source);
-                CoopSessionTransportPrimitives.StartClientTransport(address, port, sessionKey, peerIndex);
+                CoopSessionTransportPrimitives.StartClientTransport(address, port, sessionKey, peerIndex, source);
                 ModLogger.Info(
                     "ListedShellSessionTransportRuntime: started listed client transport. " +
                     "GameType=" + Normalize(gameType) +
