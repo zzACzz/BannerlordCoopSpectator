@@ -11,12 +11,20 @@ namespace CoopSpectator.GameMode
     {
         private static readonly FieldInfo RoundPreEndingEventField = typeof(MultiplayerRoundComponent)
             .GetField("OnPreRoundEnding", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo RoundEndingEventField = typeof(MultiplayerRoundComponent)
+            .GetField("OnRoundEnding", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo SetPeerAsMvpMethod = typeof(MissionScoreboardComponent)
             .GetMethod("SetPeerAsMVP", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo OnPlayerPropertiesChangedEventField = typeof(MissionScoreboardComponent)
             .GetField("OnPlayerPropertiesChanged", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo OnMvpSelectedEventField = typeof(MissionScoreboardComponent)
             .GetField("OnMVPSelected", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo OnRoundPropertiesChangedEventField = typeof(MissionScoreboardComponent)
+            .GetField("OnRoundPropertiesChanged", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo OnBotPropertiesChangedEventField = typeof(MissionScoreboardComponent)
+            .GetField("OnBotPropertiesChanged", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo RoundWinnerListField = typeof(MissionScoreboardComponent)
+            .GetField("_roundWinnerList", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private readonly Dictionary<int, int> _lastRoundScoreByPeerIndex = new Dictionary<int, int>();
 
@@ -38,6 +46,7 @@ namespace CoopSpectator.GameMode
                 return;
 
             TryReplaceNativePreRoundEndingHandler(roundComponent);
+            TryReplaceNativeRoundEndingHandler(roundComponent);
         }
 
         public override void OnScoreHit(
@@ -113,14 +122,64 @@ namespace CoopSpectator.GameMode
             }
         }
 
+        private void TryReplaceNativeRoundEndingHandler(MultiplayerRoundComponent roundComponent)
+        {
+            try
+            {
+                MulticastDelegate currentDelegate = RoundEndingEventField?.GetValue(roundComponent) as MulticastDelegate;
+                if (currentDelegate != null)
+                {
+                    foreach (Delegate handler in currentDelegate.GetInvocationList())
+                    {
+                        if (!ReferenceEquals(handler.Target, this) ||
+                            !string.Equals(handler.Method?.Name, "OnRoundEnding", StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        roundComponent.OnRoundEnding -= (Action)handler;
+                    }
+                }
+
+                roundComponent.OnRoundEnding -= HandleListedShellRoundEnding;
+                roundComponent.OnRoundEnding += HandleListedShellRoundEnding;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("ListedShellMissionScoreboardComponent: failed to replace native round-ending score handler: " + ex.Message);
+            }
+        }
+
         private void HandleListedShellUpdateRoundScoresMessage(GameNetworkMessage baseMessage)
         {
-            HandleServerUpdateRoundScoresMessage(baseMessage);
+            NetworkMessages.FromServer.UpdateRoundScores updateRoundScores =
+                baseMessage as NetworkMessages.FromServer.UpdateRoundScores;
+            if (updateRoundScores == null || Sides == null || Sides.Length < 2)
+                return;
+
+            Sides[1].SideScore = updateRoundScores.AttackerTeamScore;
+            if (!IsOneSided && Sides[0] != null)
+                Sides[0].SideScore = updateRoundScores.DefenderTeamScore;
+
+            NotifyListedShellRoundPropertiesChanged();
         }
 
         private void HandleListedShellBotDataMessage(GameNetworkMessage baseMessage)
         {
-            HandleServerEventBotDataMessage(baseMessage);
+            NetworkMessages.FromServer.BotData botData =
+                baseMessage as NetworkMessages.FromServer.BotData;
+            if (botData == null)
+                return;
+
+            MissionScoreboardSide side = GetSideSafe(botData.Side);
+            if (side?.BotScores == null)
+                return;
+
+            side.BotScores.KillCount = botData.KillCount;
+            side.BotScores.AssistCount = botData.AssistCount;
+            side.BotScores.DeathCount = botData.DeathCount;
+            side.BotScores.AliveCount = botData.AliveBotCount;
+            NotifyListedShellBotPropertiesChanged(botData.Side);
         }
 
         private void HandleListedShellSetRoundMvpMessage(GameNetworkMessage baseMessage)
@@ -140,6 +199,41 @@ namespace CoopSpectator.GameMode
             catch (Exception ex)
             {
                 ModLogger.Info("ListedShellMissionScoreboardComponent: failed to apply listed-shell SetRoundMVP without native player refresh path: " + ex.Message);
+            }
+        }
+
+        private void HandleListedShellRoundEnding()
+        {
+            if (!GameNetwork.IsServerOrRecorder || Sides == null)
+                return;
+
+            try
+            {
+                if (RoundWinnerListField?.GetValue(this) is List<BattleSideEnum> roundWinnerList)
+                    roundWinnerList.Add(RoundWinner);
+
+                if (RoundWinner == BattleSideEnum.Attacker || RoundWinner == BattleSideEnum.Defender)
+                {
+                    MissionScoreboardSide winnerSide = GetSideSafe(RoundWinner);
+                    if (winnerSide != null)
+                        winnerSide.SideScore++;
+                }
+
+                NotifyListedShellRoundPropertiesChanged();
+
+                if (GameNetwork.IsServer)
+                {
+                    int defenderTeamScore = !IsOneSided && Sides[0] != null ? Sides[0].SideScore : 0;
+                    GameNetwork.BeginBroadcastModuleEvent();
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateRoundScores(
+                        Sides[1]?.SideScore ?? 0,
+                        defenderTeamScore));
+                    GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("ListedShellMissionScoreboardComponent: failed to own listed-shell round-ending score loop: " + ex.Message);
             }
         }
 
@@ -280,6 +374,52 @@ namespace CoopSpectator.GameMode
             catch (Exception ex)
             {
                 ModLogger.Info("ListedShellMissionScoreboardComponent: failed to notify listed-shell player property change without native totals path: " + ex.Message);
+            }
+        }
+
+        internal static void NotifyListedShellBotPropertiesChanged(
+            MissionScoreboardComponent scoreboardComponent,
+            BattleSideEnum side)
+        {
+            if (scoreboardComponent is ListedShellMissionScoreboardComponent listedShellScoreboard)
+            {
+                listedShellScoreboard.NotifyListedShellBotPropertiesChanged(side);
+                return;
+            }
+
+            scoreboardComponent?.BotPropertiesChanged(side);
+        }
+
+        private void NotifyListedShellBotPropertiesChanged(BattleSideEnum side)
+        {
+            if (GameNetwork.IsDedicatedServer)
+                return;
+
+            try
+            {
+                Action<BattleSideEnum> handler =
+                    OnBotPropertiesChangedEventField?.GetValue(this) as Action<BattleSideEnum>;
+                handler?.Invoke(side);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("ListedShellMissionScoreboardComponent: failed to notify listed-shell bot property change without native BotData apply path: " + ex.Message);
+            }
+        }
+
+        private void NotifyListedShellRoundPropertiesChanged()
+        {
+            if (GameNetwork.IsDedicatedServer)
+                return;
+
+            try
+            {
+                Action handler = OnRoundPropertiesChangedEventField?.GetValue(this) as Action;
+                handler?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("ListedShellMissionScoreboardComponent: failed to notify listed-shell round property change without native round-score apply path: " + ex.Message);
             }
         }
     }

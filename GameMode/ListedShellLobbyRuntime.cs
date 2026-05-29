@@ -889,7 +889,9 @@ namespace CoopSpectator.GameMode
                 scoreboard,
                 ownerNetworkPeer);
             if (botAgent.Team != null)
-                scoreboard?.BotPropertiesChanged(botAgent.Team.Side);
+                ListedShellMissionScoreboardComponent.NotifyListedShellBotPropertiesChanged(
+                    scoreboard,
+                    botAgent.Team.Side);
 
             PeerStatsRuntimeState ownerStats = ResolveListedShellPeerStats(ownerPeer);
             BroadcastKillDeathCountChange(
@@ -936,7 +938,9 @@ namespace CoopSpectator.GameMode
                 scoreboard,
                 killerNetworkPeer);
             if (botAgent.Team != null)
-                scoreboard?.BotPropertiesChanged(botAgent.Team.Side);
+                ListedShellMissionScoreboardComponent.NotifyListedShellBotPropertiesChanged(
+                    scoreboard,
+                    botAgent.Team.Side);
 
             PeerStatsRuntimeState killerStats = ResolveListedShellPeerStats(killerPeer);
             BroadcastKillDeathCountChange(
@@ -977,7 +981,9 @@ namespace CoopSpectator.GameMode
 
             scoreboardSide.BotScores.DeathCount++;
             scoreboardSide.BotScores.AliveCount = Math.Max(0, scoreboardSide.BotScores.AliveCount - 1);
-            scoreboard.BotPropertiesChanged(scoreboardSide.Side);
+            ListedShellMissionScoreboardComponent.NotifyListedShellBotPropertiesChanged(
+                scoreboard,
+                scoreboardSide.Side);
             BroadcastBotData(scoreboardSide);
             return true;
         }
@@ -1000,7 +1006,9 @@ namespace CoopSpectator.GameMode
             else
                 scoreboardSide.BotScores.KillCount--;
 
-            scoreboard.BotPropertiesChanged(scoreboardSide.Side);
+            ListedShellMissionScoreboardComponent.NotifyListedShellBotPropertiesChanged(
+                scoreboard,
+                scoreboardSide.Side);
             BroadcastBotData(scoreboardSide);
             return true;
         }
