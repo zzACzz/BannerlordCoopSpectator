@@ -24,15 +24,6 @@ namespace CoopSpectator.GameMode
             AccessTools.Field(typeof(GameNetwork.NetworkMessageHandlerRegistererContainer), "_fromServerBaseHandlers");
         private static readonly Type MissionStateChangeType = AccessTools.TypeByName("TaleWorlds.MountAndBlade.MissionStateChange");
         private static readonly MethodInfo GameNetworkWriteMessageMethod = ResolveGameNetworkWriteMessageMethod();
-        private static readonly MethodInfo MissionPeerKillCountSetter = typeof(MissionPeer)
-            .GetProperty(nameof(MissionPeer.KillCount), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
-            .GetSetMethod(nonPublic: true);
-        private static readonly MethodInfo MissionPeerAssistCountSetter = typeof(MissionPeer)
-            .GetProperty(nameof(MissionPeer.AssistCount), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
-            .GetSetMethod(nonPublic: true);
-        private static readonly MethodInfo MissionPeerDeathCountSetter = typeof(MissionPeer)
-            .GetProperty(nameof(MissionPeer.DeathCount), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
-            .GetSetMethod(nonPublic: true);
         private static readonly MethodInfo MissionPeerScoreSetter = typeof(MissionPeer)
             .GetProperty(nameof(MissionPeer.Score), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
             .GetSetMethod(nonPublic: true);
@@ -1178,9 +1169,6 @@ namespace CoopSpectator.GameMode
                 deathCount,
                 score,
                 source);
-            TrySetMissionPeerIntProperty(missionPeer, MissionPeerKillCountSetter, killCount);
-            TrySetMissionPeerIntProperty(missionPeer, MissionPeerAssistCountSetter, assistCount);
-            TrySetMissionPeerIntProperty(missionPeer, MissionPeerDeathCountSetter, deathCount);
             TrySetMissionPeerIntProperty(missionPeer, MissionPeerScoreSetter, score);
         }
 
