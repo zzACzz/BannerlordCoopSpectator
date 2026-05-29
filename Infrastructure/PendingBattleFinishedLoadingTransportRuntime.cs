@@ -71,14 +71,9 @@ namespace CoopSpectator.Infrastructure
 
                 Debug.Print("Server: " + networkPeer.UserName + " has finished loading. From now on, I will include him in the broadcasted messages");
 
-                if (shouldUnload)
-                {
-                    CoopSessionTransportPrimitives.SendUnloadMission(networkPeer, true);
-                }
-                else
-                {
-                    CoopSessionTransportPrimitives.MarkPeerFinishedLoading(networkPeer);
-                }
+                string action = CoopSessionTransportPrimitives.CompletePeerFinishedLoadingTransportStep(
+                    networkPeer,
+                    shouldUnload);
 
                 ModLogger.Info(
                     "PendingBattleFinishedLoadingTransportRuntime: processed deferred FinishedLoading validation. " +
@@ -90,7 +85,7 @@ namespace CoopSpectator.Infrastructure
                     " MissionState=" + (currentMission?.CurrentState.ToString() ?? "null") +
                     " MissionSessionToken=" + missionSessionToken +
                     " FinishedLoadingBattleIndex=" + message.BattleIndex +
-                    " Action=" + (shouldUnload ? "UnloadMission" : "ClientFinishedLoading") +
+                    " Action=" + action +
                     " Source=" + Normalize(source) + ".");
             }
             catch (Exception ex)

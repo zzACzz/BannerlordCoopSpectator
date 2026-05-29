@@ -53,6 +53,23 @@ namespace CoopSpectator.Infrastructure
             GameNetwork.ClientFinishedLoading(networkPeer);
         }
 
+        public static string CompletePeerFinishedLoadingTransportStep(
+            NetworkCommunicator networkPeer,
+            bool shouldUnload)
+        {
+            if (networkPeer == null || networkPeer.IsServerPeer)
+                return "Skipped";
+
+            if (shouldUnload)
+            {
+                SendUnloadMission(networkPeer, true);
+                return "UnloadMission";
+            }
+
+            MarkPeerFinishedLoading(networkPeer);
+            return "ClientFinishedLoading";
+        }
+
         public static void MarkHostedLocalPeerFinishedLoading()
         {
             if (GameNetwork.IsDedicatedServer || GameNetwork.MyPeer == null)

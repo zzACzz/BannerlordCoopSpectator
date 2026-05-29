@@ -116,19 +116,14 @@ namespace CoopSpectator.Infrastructure
             if (networkPeer == null || networkPeer.IsServerPeer)
                 return;
 
-            if (shouldUnload)
-            {
-                CoopSessionTransportPrimitives.SendUnloadMission(networkPeer, true);
-            }
-            else
-            {
-                CoopSessionTransportPrimitives.MarkPeerFinishedLoading(networkPeer);
-            }
+            string action = CoopSessionTransportPrimitives.CompletePeerFinishedLoadingTransportStep(
+                networkPeer,
+                shouldUnload);
 
             ModLogger.Info(
                 "ListedShellSessionTransportRuntime: completed listed peer finished-loading transport step. " +
                 "Peer=" + (networkPeer.UserName ?? "unknown") +
-                " Action=" + (shouldUnload ? "UnloadMission" : "ClientFinishedLoading") +
+                " Action=" + action +
                 " Source=" + Normalize(source) + ".");
         }
 
