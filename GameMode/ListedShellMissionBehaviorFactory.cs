@@ -8,8 +8,7 @@ using TaleWorlds.MountAndBlade;
 namespace CoopSpectator.GameMode
 {
     /// <summary>
-    /// Explicit listed-ingress mission stack shared by the direct listed startup path
-    /// and the legacy MissionState.OpenNew fallback interception.
+    /// Explicit listed-ingress mission stack used by the coop-owned listed startup path.
     /// </summary>
     internal static class ListedShellMissionBehaviorFactory
     {
@@ -107,7 +106,6 @@ namespace CoopSpectator.GameMode
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
             list.Add(new MultiplayerAdminComponent());
             AddRequired(list, MissionBehaviorHelpers.TryCreateMissionOptionsComponent(mission), "MissionOptionsComponent");
-            AddOptional(list, MissionBehaviorHelpers.TryCreateMissionMatchHistoryComponent(), "MissionMatchHistoryComponent");
             list.Add(new EquipmentControllerLeaveLogic());
             AddRequired(
                 list,
