@@ -161,10 +161,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ModLogger.Info("CoopBattle server: retained MultiplayerPollComponent and MultiplayerAdminComponent for battle-map native peer-sync compatibility.");
             }
 
-            if (!isDedicated && !minimalBattleMapRuntime)
-                list.Add(new MultiplayerGameNotificationsComponent());
-            else if (minimalBattleMapRuntime)
-                ModLogger.Info("CoopBattle server: skipped MultiplayerGameNotificationsComponent for minimal battle-map runtime.");
+            ModLogger.Info("CoopBattle server: skipped MultiplayerGameNotificationsComponent; native team-targeted notification shell is no longer part of coop battle runtime.");
 
             AddOptional(list, MissionBehaviorHelpers.TryCreateMissionOptionsComponent(mission), "MissionOptionsComponent");
             if (minimalBattleMapRuntime)
@@ -258,31 +255,13 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ModLogger.Info("CoopBattle client: retained MultiplayerPollComponent and MultiplayerAdminComponent for battle-map native bootstrap compatibility.");
             }
 
-            if (!isDedicated)
-                list.Add(new MultiplayerGameNotificationsComponent());
-            else if (minimalBattleMapRuntime)
-                ModLogger.Info("CoopBattle client: skipped MultiplayerGameNotificationsComponent for minimal battle-map runtime.");
-            if (minimalBattleMapRuntime && !isDedicated)
-                ModLogger.Info("CoopBattle client: retained MultiplayerGameNotificationsComponent for battle-map native bootstrap compatibility.");
+            ModLogger.Info("CoopBattle client: skipped MultiplayerGameNotificationsComponent; native team-targeted notification shell is no longer part of coop battle runtime.");
 
             AddOptional(list, MissionBehaviorHelpers.TryCreateMissionOptionsComponent(mission), "MissionOptionsComponent");
             if (minimalBattleMapRuntime)
                 ModLogger.Info("CoopBattle client: retained MissionOptionsComponent for battle-map mission-entry bootstrap.");
 
-            if (!isDedicated)
-            {
-                MissionBehavior clientScoreboard = MissionBehaviorHelpers.TryCreateMissionScoreboardComponent();
-                if (clientScoreboard != null)
-                {
-                    list.Add(clientScoreboard);
-                    if (minimalBattleMapRuntime)
-                        ModLogger.Info("CoopBattle client: retained MissionScoreboardComponent for battle-map native bootstrap compatibility.");
-                }
-                else if (minimalBattleMapRuntime)
-                {
-                    ModLogger.Info("CoopBattle client: MissionScoreboardComponent unavailable for battle-map bootstrap; continuing without it.");
-                }
-            }
+            ModLogger.Info("CoopBattle client: skipped MissionScoreboardComponent; scoreboard remains server-side compatibility only.");
 
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionRecentPlayersComponent"));
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerPreloadHelper"));
