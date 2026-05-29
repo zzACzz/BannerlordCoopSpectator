@@ -120,6 +120,27 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
+                MethodInfo requestCultureChangeTarget = typeof(MissionLobbyComponent).GetMethod(
+                    "HandleClientEventRequestCultureChange",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo requestCultureChangePrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
+                    nameof(HandleClientEventRequestCultureChange_Prefix),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+
+                MethodInfo requestChangeCharacterTarget = typeof(MissionLobbyComponent).GetMethod(
+                    "HandleClientEventRequestChangeCharacterMessage",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo requestChangeCharacterPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
+                    nameof(HandleClientEventRequestChangeCharacterMessage_Prefix),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+
+                MethodInfo changeClassRestrictionsTarget = typeof(MissionLobbyComponent).GetMethod(
+                    "HandleServerEventChangeClassRestrictions",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo changeClassRestrictionsPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
+                    nameof(HandleServerEventChangeClassRestrictions_Prefix),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+
                 MethodInfo agentRemovedTarget = typeof(MissionLobbyComponent).GetMethod(
                     nameof(MissionLobbyComponent.OnAgentRemoved),
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
@@ -140,12 +161,24 @@ namespace CoopSpectator.Patches
                 harmony.Patch(stateChangeTarget, prefix: new HarmonyMethod(stateChangePrefix));
                 harmony.Patch(clientSynchronizedTarget, prefix: new HarmonyMethod(clientSynchronizedPrefix));
                 harmony.Patch(peerInformationsTarget, prefix: new HarmonyMethod(peerInformationsPrefix));
+                if (requestCultureChangeTarget != null && requestCultureChangePrefix != null)
+                    harmony.Patch(requestCultureChangeTarget, prefix: new HarmonyMethod(requestCultureChangePrefix));
+                if (requestChangeCharacterTarget != null && requestChangeCharacterPrefix != null)
+                    harmony.Patch(requestChangeCharacterTarget, prefix: new HarmonyMethod(requestChangeCharacterPrefix));
+                if (changeClassRestrictionsTarget != null && changeClassRestrictionsPrefix != null)
+                    harmony.Patch(changeClassRestrictionsTarget, prefix: new HarmonyMethod(changeClassRestrictionsPrefix));
                 harmony.Patch(agentRemovedTarget, prefix: new HarmonyMethod(agentRemovedPrefix));
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMissionTick.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventMissionStateChange.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMyClientSynchronized.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.SendPeerInformationsToPeer.");
+                if (requestCultureChangeTarget != null && requestCultureChangePrefix != null)
+                    ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleClientEventRequestCultureChange.");
+                if (requestChangeCharacterTarget != null && requestChangeCharacterPrefix != null)
+                    ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleClientEventRequestChangeCharacterMessage.");
+                if (changeClassRestrictionsTarget != null && changeClassRestrictionsPrefix != null)
+                    ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventChangeClassRestrictions.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnAgentRemoved.");
             }
             catch (Exception ex)
@@ -279,6 +312,65 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info("MissionLobbySpawnContractPatch: client-synchronized prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool HandleClientEventRequestCultureChange_Prefix(
+            MissionLobbyComponent __instance,
+            NetworkCommunicator peer,
+            object baseMessage)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!ShouldUseListedShellLobbyContract(mission))
+                    return true;
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: request-culture-change prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool HandleClientEventRequestChangeCharacterMessage_Prefix(
+            MissionLobbyComponent __instance,
+            NetworkCommunicator peer,
+            object baseMessage)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!ShouldUseListedShellLobbyContract(mission))
+                    return true;
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: request-change-character prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool HandleServerEventChangeClassRestrictions_Prefix(
+            MissionLobbyComponent __instance,
+            object baseMessage)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!ShouldUseListedShellLobbyContract(mission))
+                    return true;
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: class-restrictions prefix failed open: " + ex.Message);
                 return true;
             }
         }
