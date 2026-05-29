@@ -186,6 +186,34 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static bool TryResolveTransportToken(Mission mission, out int token)
+        {
+            string missionScene = Normalize(mission?.SceneName);
+
+            lock (Sync)
+            {
+                if (_activeToken > 0 &&
+                    (ReferenceEquals(_activeMission, mission) ||
+                     (!string.IsNullOrEmpty(missionScene) &&
+                      string.Equals(_activeScene, missionScene, StringComparison.Ordinal))))
+                {
+                    token = _activeToken;
+                    return true;
+                }
+
+                if (_pendingServerToken > 0 &&
+                    !string.IsNullOrEmpty(missionScene) &&
+                    string.Equals(_pendingServerScene, missionScene, StringComparison.Ordinal))
+                {
+                    token = _pendingServerToken;
+                    return true;
+                }
+
+                token = 0;
+                return false;
+            }
+        }
+
         public static bool ShouldOwnServerFinishedLoadingValidation(Mission mission)
         {
             lock (Sync)

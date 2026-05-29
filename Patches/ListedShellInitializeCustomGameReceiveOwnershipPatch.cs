@@ -16,8 +16,6 @@ namespace CoopSpectator.Patches
     /// </summary>
     internal static class ListedShellInitializeCustomGameReceiveOwnershipPatch
     {
-        private static FieldInfo _baseNetworkComponentDataField;
-        private static MethodInfo _ensureBaseNetworkComponentDataMethod;
         private static MethodInfo _syncRelevantGameOptionsToServerMethod;
         private static bool _isApplied;
 
@@ -50,8 +48,6 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                _baseNetworkComponentDataField = targetType.GetField("_baseNetworkComponentData", BindingFlags.Instance | BindingFlags.NonPublic);
-                _ensureBaseNetworkComponentDataMethod = targetType.GetMethod("EnsureBaseNetworkComponentData", BindingFlags.Instance | BindingFlags.NonPublic);
                 _syncRelevantGameOptionsToServerMethod = typeof(GameNetwork).GetMethod(
                     "SyncRelevantGameOptionsToServer",
                     BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
@@ -100,7 +96,6 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                EnsureBaseNetworkComponentData(instance);
                 await Task.Delay(200);
                 await WaitForListedBootstrapReadinessAsync();
 
@@ -116,7 +111,6 @@ namespace CoopSpectator.Patches
                         message.Map,
                         message.BattleIndex,
                         "ListedShellInitializeCustomGameReceiveOwnershipPatch.InitializeListedCustomGameAsync");
-                    MirrorCompatibilityCurrentBattleIndex(instance, message.BattleIndex);
                     if (!TaleWorlds.MountAndBlade.Module.CurrentModule.StartMultiplayerGame(message.GameType, message.Map))
                     {
                         ModLogger.Info("ListedShellInitializeCustomGameReceiveOwnershipPatch: StartMultiplayerGame returned false for listed receive path.");
@@ -152,31 +146,6 @@ namespace CoopSpectator.Patches
         {
             GameStateManager manager = GameStateManager.Current;
             return manager?.ActiveState != null && TaleWorlds.MountAndBlade.Module.CurrentModule != null;
-        }
-
-        private static void EnsureBaseNetworkComponentData(object instance)
-        {
-            try
-            {
-                _ensureBaseNetworkComponentDataMethod?.Invoke(instance, Array.Empty<object>());
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("ListedShellInitializeCustomGameReceiveOwnershipPatch: EnsureBaseNetworkComponentData invoke failed: " + ex.Message);
-            }
-        }
-
-        private static void MirrorCompatibilityCurrentBattleIndex(object instance, int currentBattleIndex)
-        {
-            try
-            {
-                BaseNetworkComponentData data = _baseNetworkComponentDataField?.GetValue(instance) as BaseNetworkComponentData;
-                data?.UpdateCurrentBattleIndex(currentBattleIndex);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("ListedShellInitializeCustomGameReceiveOwnershipPatch: failed to mirror compatibility CurrentBattleIndex: " + ex.Message);
-            }
         }
 
         private static void TrySyncRelevantGameOptionsToServer()

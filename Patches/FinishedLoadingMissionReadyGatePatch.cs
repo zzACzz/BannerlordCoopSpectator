@@ -157,15 +157,14 @@ namespace CoopSpectator.Patches
 
             try
             {
-                EnsureBaseNetworkComponentData(instance);
                 Mission currentMission = Mission.Current;
                 if (ListedShellMissionSessionState.ShouldDelayServerFinishedLoadingValidation(currentMission, out delayDetails))
                 {
-                    _ = HandleListedShellFinishedLoadingValidationDeferred(instance, networkPeer, message, delayDetails);
+                    _ = HandleListedShellFinishedLoadingValidationDeferred(networkPeer, message, delayDetails);
                     return;
                 }
 
-                ProcessListedShellFinishedLoadingValidation(instance, networkPeer, message, startedUtc, delayDetails);
+                ProcessListedShellFinishedLoadingValidation(networkPeer, message, startedUtc, delayDetails);
             }
             catch (Exception ex)
             {
@@ -177,7 +176,6 @@ namespace CoopSpectator.Patches
         }
 
         private static async Task HandleListedShellFinishedLoadingValidationDeferred(
-            object instance,
             NetworkCommunicator networkPeer,
             FinishedLoading message,
             string initialDelayDetails)
@@ -193,7 +191,7 @@ namespace CoopSpectator.Patches
                     await Task.Delay(1);
                 }
 
-                ProcessListedShellFinishedLoadingValidation(instance, networkPeer, message, startedUtc, finalDelayDetails);
+                ProcessListedShellFinishedLoadingValidation(networkPeer, message, startedUtc, finalDelayDetails);
             }
             catch (Exception ex)
             {
@@ -207,7 +205,6 @@ namespace CoopSpectator.Patches
         }
 
         private static void ProcessListedShellFinishedLoadingValidation(
-            object instance,
             NetworkCommunicator networkPeer,
             FinishedLoading message,
             DateTime startedUtc,
@@ -217,7 +214,7 @@ namespace CoopSpectator.Patches
                 return;
 
             Mission currentMission = Mission.Current;
-            int authoritativeToken = ResolveListedShellMissionSessionToken(currentMission, instance);
+            int authoritativeToken = ResolveListedShellMissionSessionToken(currentMission);
             bool shouldUnload = currentMission == null || authoritativeToken != message.BattleIndex;
 
             Debug.Print("Server: " + networkPeer.UserName + " has finished loading explicit listed shell.");
@@ -257,12 +254,12 @@ namespace CoopSpectator.Patches
                 mission.GetMissionBehavior<ListedShellCompatibilityModeClient>() != null;
         }
 
-        private static int ResolveListedShellMissionSessionToken(Mission mission, object instance)
+        private static int ResolveListedShellMissionSessionToken(Mission mission)
         {
-            if (ListedShellMissionSessionState.TryResolveAuthoritativeToken(mission, out int token))
+            if (ListedShellMissionSessionState.TryResolveTransportToken(mission, out int token))
                 return token;
 
-            return GetCurrentBattleIndex(instance);
+            return 0;
         }
 
         private static void EnsureBaseNetworkComponentData(object instance)

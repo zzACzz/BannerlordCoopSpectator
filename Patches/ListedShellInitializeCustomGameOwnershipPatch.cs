@@ -13,9 +13,6 @@ namespace CoopSpectator.Patches
     /// </summary>
     internal static class ListedShellInitializeCustomGameOwnershipPatch
     {
-        private static FieldInfo _baseNetworkComponentDataField;
-        private static MethodInfo _ensureBaseNetworkComponentDataMethod;
-
         public static void Apply(Harmony harmony)
         {
             try
@@ -45,8 +42,6 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                _baseNetworkComponentDataField = targetType.GetField("_baseNetworkComponentData", BindingFlags.Instance | BindingFlags.NonPublic);
-                _ensureBaseNetworkComponentDataMethod = targetType.GetMethod("EnsureBaseNetworkComponentData", BindingFlags.Instance | BindingFlags.NonPublic);
                 harmony.Patch(targetMethod, prefix: new HarmonyMethod(prefixMethod), postfix: new HarmonyMethod(postfixMethod));
                 ModLogger.Info("ListedShellInitializeCustomGameOwnershipPatch: patched BaseNetworkComponent.HandleNewClientConnect.");
             }
@@ -70,8 +65,6 @@ namespace CoopSpectator.Patches
             Mission mission = Mission.Current;
             if (!ShouldOwnListedShellInitializeCustomGameIngress(mission))
                 return;
-
-            EnsureBaseNetworkComponentData(__instance);
             __state = true;
         }
 
@@ -102,7 +95,7 @@ namespace CoopSpectator.Patches
                 "Peer=" + (targetPeer.UserName ?? "unknown") +
                 " Scene=" + scene +
                 " GameType=" + gameType +
-                " CurrentBattleIndex=" + currentBattleIndex +
+                " MissionSessionToken=" + currentBattleIndex +
                 " OwnershipState=owned-listed-bootstrap.");
         }
 
@@ -115,38 +108,16 @@ namespace CoopSpectator.Patches
                 mission.GetMissionBehavior<ListedShellCompatibilityModeClient>() != null;
         }
 
-        private static void EnsureBaseNetworkComponentData(object instance)
-        {
-            try
-            {
-                _ensureBaseNetworkComponentDataMethod?.Invoke(instance, Array.Empty<object>());
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("ListedShellInitializeCustomGameOwnershipPatch: EnsureBaseNetworkComponentData invoke failed: " + ex.Message);
-            }
-        }
-
         private static int ResolveListedShellMissionSessionToken(Mission mission, object instance)
         {
-            if (ListedShellMissionSessionState.TryResolveAuthoritativeToken(mission, out int token))
+            if (ListedShellMissionSessionState.TryResolveTransportToken(mission, out int token))
                 return token;
 
-            return GetCurrentBattleIndexCompatibility(instance);
-        }
-
-        private static int GetCurrentBattleIndexCompatibility(object instance)
-        {
-            try
-            {
-                BaseNetworkComponentData data = _baseNetworkComponentDataField?.GetValue(instance) as BaseNetworkComponentData;
-                return data?.CurrentBattleIndex ?? -1;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("ListedShellInitializeCustomGameOwnershipPatch: failed to read compatibility CurrentBattleIndex: " + ex.Message);
-                return -1;
-            }
+            ModLogger.Info(
+                "ListedShellInitializeCustomGameOwnershipPatch: listed mission-session token was unavailable during HandleNewClientConnect. " +
+                "Scene=" + (mission?.SceneName ?? string.Empty) +
+                " OwnershipState=missing-listed-session-token.");
+            return 0;
         }
     }
 }
