@@ -194,28 +194,31 @@ namespace CoopSpectator.Patches
                 return true;
 
             Mission currentMission = Mission.Current;
-            if (ListedShellSessionTransportRuntime.ShouldOwnListedServerFinishedLoadingValidation(currentMission))
+            bool listedOwnsFinishedLoading =
+                ListedShellSessionTransportRuntime.ShouldOwnListedServerFinishedLoadingValidation(currentMission);
+            bool listedBattleFallbackOwnsFinishedLoading =
+                !listedOwnsFinishedLoading &&
+                ListedShellSessionTransportRuntime.ShouldFallbackOwnListedBattleFinishedLoadingValidation(currentMission);
+            if (listedOwnsFinishedLoading || listedBattleFallbackOwnsFinishedLoading)
             {
+                if (listedBattleFallbackOwnsFinishedLoading)
+                {
+                    PendingBattleMissionStartupState.Clear(
+                        "ListedShellBaseNetworkTransportOwnershipPatch listed-battle-finished-loading precedence");
+                }
+
                 ListedShellSessionTransportRuntime.HandleListedServerFinishedLoadingValidation(
                     networkPeer,
                     message,
-                    "ListedShellBaseNetworkTransportOwnershipPatch");
+                    listedBattleFallbackOwnsFinishedLoading
+                        ? "ListedShellBaseNetworkTransportOwnershipPatch battle-runtime-precedence"
+                        : "ListedShellBaseNetworkTransportOwnershipPatch");
                 __result = true;
                 return false;
             }
 
             if (!PendingBattleFinishedLoadingTransportRuntime.ShouldOwnDeferredServerFinishedLoadingValidation(currentMission, out string delayDetails))
-            {
-                if (!ListedShellSessionTransportRuntime.ShouldFallbackOwnListedBattleFinishedLoadingValidation(currentMission))
-                    return true;
-
-                ListedShellSessionTransportRuntime.HandleListedServerFinishedLoadingValidation(
-                    networkPeer,
-                    message,
-                    "ListedShellBaseNetworkTransportOwnershipPatch battle-runtime-fallback");
-                __result = true;
-                return false;
-            }
+                return true;
 
             PendingBattleFinishedLoadingTransportRuntime.HandleDeferredServerFinishedLoadingValidation(
                 networkPeer,

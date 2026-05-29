@@ -140,6 +140,9 @@ namespace CoopSpectator.Infrastructure
             if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName ?? string.Empty))
                 return false;
 
+            if (!ListedShellMissionSessionState.TryResolveTransportToken(mission, out int listedToken) || listedToken <= 0)
+                return false;
+
             return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null &&
                 mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null;
         }
