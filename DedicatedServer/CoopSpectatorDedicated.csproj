@@ -41,9 +41,11 @@
     <Compile Include="SubModule.cs" />
     <Compile Include="SceneContractProbe.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattleMode.cs" Link="GameMode\MissionMultiplayerCoopBattleMode.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerListedShellMode.cs" Link="GameMode\MissionMultiplayerListedShellMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattle.cs" Link="GameMode\MissionMultiplayerCoopBattle.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattleClient.cs" Link="GameMode\MissionMultiplayerCoopBattleClient.cs" />
     <Compile Include="..\GameMode\MissionBehaviorHelpers.cs" Link="GameMode\MissionBehaviorHelpers.cs" />
+    <Compile Include="..\GameMode\ListedShellMissionBehaviorFactory.cs" Link="GameMode\ListedShellMissionBehaviorFactory.cs" />
     <Compile Include="..\GameMode\ListedShellMissionLobbyClientComponent.cs" Link="GameMode\ListedShellMissionLobbyClientComponent.cs" />
     <Compile Include="..\GameMode\ListedShellMissionScoreboardComponent.cs" Link="GameMode\ListedShellMissionScoreboardComponent.cs" />
     <Compile Include="..\GameMode\ListedShellScoreboardData.cs" Link="GameMode\ListedShellScoreboardData.cs" />

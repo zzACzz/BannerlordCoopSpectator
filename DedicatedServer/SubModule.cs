@@ -375,7 +375,7 @@ namespace CoopSpectator
                 if (_harmony == null)
                     _harmony = new Harmony("com.coopspectator.dedicated");
                 GameModeOverridePatches.Apply(_harmony);
-                ModLogger.Info("[GameModeReg] Battle override available; TeamDeathmatch stays vanilla for listed flow.");
+                ModLogger.Info("[GameModeReg] Battle override available; TeamDeathmatch startup can be rerouted into explicit listed shell mode.");
             }
             catch (Exception ex)
             {
@@ -829,8 +829,11 @@ namespace CoopSpectator
                 TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(new MissionMultiplayerCoopBattleMode(MissionMultiplayerCoopBattleMode.GameModeId));
                 var battleOverride = new MissionMultiplayerCoopBattleMode(CoopGameModeIds.OfficialBattle);
                 GameModeOverridePatches.SetBattleOverride(battleOverride);
+                var listedShellOverride = new MissionMultiplayerListedShellMode(CoopGameModeIds.OfficialTeamDeathmatch);
+                GameModeOverridePatches.SetTeamDeathmatchOverride(listedShellOverride);
                 ModLogger.Info("[GameModeReg] Battle override armed via Harmony. GetMultiplayerGameMode(Battle) will return CoopBattle runtime.");
-                ModLogger.Info("[GameModeReg] Listed flow keeps vanilla TeamDeathmatch. Registered custom mode set = [CoopBattle].");
+                ModLogger.Info("[GameModeReg] TeamDeathmatch listed ingress override armed via Harmony. Module.StartMultiplayerGame(TeamDeathmatch, scene) will enter explicit listed shell mode.");
+                ModLogger.Info("[GameModeReg] Registered custom mode set = [CoopBattle]; official TeamDeathmatch id stays public, but startup path is coop-owned.");
             }
             catch (Exception ex)
             {

@@ -38,7 +38,7 @@
 - official `TeamDeathmatch` все ще лишається listed-server shell;
 - official `Battle` вже override-иться в наш `CoopBattle` runtime;
 - join flow все ще спирається на native custom-game lobby і native mission bootstrap;
-- listed ingress зараз збирається явно всередині `MissionStateOpenNew` interception; це вже не diff-over-vanilla list, але ще не окремий startup entry point без official shell.
+- listed ingress більше не входить у native `MissionBasedMultiplayerGameMode.StartMultiplayerGame()` для `TeamDeathmatch`; основний startup path тепер перехоплює `Module.StartMultiplayerGame("TeamDeathmatch", scene)` і заводить наш `MissionMultiplayerListedShellMode`, а `MissionStateOpenNew` interception лишився fallback-страховкою для legacy native open path.
 
 ## 2. Startup/join контракт, який зараз не можна ламати
 
@@ -49,6 +49,7 @@
 - `TaleWorlds.MountAndBlade.Module.GetMultiplayerGameMode(string)` є центральною точкою lookup-а runtime режиму.
 - `TaleWorlds.MountAndBlade.Module.AddMultiplayerGameMode(...)` безпечно додає custom ids, але не є чистим механізмом заміни вже зареєстрованого official id.
 - Override official `Battle` зараз безпечний через Harmony postfix у `DedicatedServer/Patches/GameModeOverridePatches.cs`.
+- Low-level decompile показує, що listed/custom-game startup реально йде через `TaleWorlds.MountAndBlade.Module.StartMultiplayerGame(string, string)`, а не через `GetMultiplayerGameMode(...)`; саме тому listed ingress тепер треба owner-ити на рівні `StartMultiplayerGame`, а не тільки lookup-а.
 - Заміна official `TeamDeathmatch` на окремий custom id більше не є частиною clean path.
 
 ### Мінімальний mission bootstrap контракт, який ще потрібен
@@ -90,6 +91,7 @@ Client/host startup починається в `SubModule.cs`.
 2. Далі ставляться Harmony patch-і для lobby, mission-open wrapping, battle-map UI suppression, spawn handoff, finished-loading gates і exact-transfer hooks.
 3. Якщо multiplayer game-mode layer доступний у збірці, мод реєструє `MissionMultiplayerCoopBattleMode` під id `CoopBattle`.
 4. Далі озброюється override для official `Battle`, щоб native `GetMultiplayerGameMode("Battle")` повертав наш coop runtime.
+5. Паралельно озброюється listed ingress override для official `TeamDeathmatch`, щоб native `Module.StartMultiplayerGame("TeamDeathmatch", scene)` заходив у `MissionMultiplayerListedShellMode`, а не у vanilla `MissionBasedMultiplayerGameMode.StartMultiplayerGame()`.
 
 Поточний висновок:
 
@@ -104,9 +106,10 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 
 1. `DedicatedHelperLauncher` пише startup config з official `TeamDeathmatch`.
 2. Dedicated module завантажується і ставить Harmony patch-і.
-3. `RegisterCoopBattleGameMode()` реєструє тільки `MissionMultiplayerCoopBattleMode`.
+3. `RegisterCoopBattleGameMode()` реєструє `MissionMultiplayerCoopBattleMode` і озброює explicit listed ingress override через `MissionMultiplayerListedShellMode`.
 4. `GameModeOverridePatches.SetBattleOverride(...)` озброює official `Battle` на запуск `CoopBattle`.
-5. Dedicated observer не запускається одразу, а чекає стабілізацію multiplayer bootstrap contract.
+5. `GameModeOverridePatches.SetTeamDeathmatchOverride(...)` озброює official `TeamDeathmatch` на coop-owned listed startup path без vanilla `MissionBasedMultiplayerGameMode.StartMultiplayerGame()`.
+6. Dedicated observer не запускається одразу, а чекає стабілізацію multiplayer bootstrap contract.
 
 Поточний ready heuristic на dedicated:
 
@@ -125,17 +128,19 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 2. Клієнт робить join через native multiplayer UI.
 3. Native join result проходить через наші join-context patch-і для self-join і local/VPN address correction.
 4. Native lobby startup викликає `GameNetwork.StartMultiplayerOnClient(...)`.
-5. Стартує native custom lobby mission.
-6. Коли відкривається місія `MultiplayerTeamDeathmatch`, `Patches/MissionStateOpenNewPatches.cs` більше не diff-ить vanilla behavior list, а збирає explicit listed-ingress stack у native order.
-7. У цей explicit stack входять тільки мінімальні native shell behaviors, які ще лишилися потрібними для listed join/bootstrap, плюс наші compatibility replacements:
+5. Native `BaseNetworkComponent` викликає `Module.StartMultiplayerGame("TeamDeathmatch", scene)`.
+6. `GameModeOverridePatches` перехоплює цей виклик і переводить його в `MissionMultiplayerListedShellMode.StartMultiplayerGame(scene)`.
+7. `MissionMultiplayerListedShellMode` відкриває місію `MultiplayerTeamDeathmatch` уже з нашим explicit handler-ом `ListedShellMissionBehaviorFactory.CreateMissionBehaviors`.
+8. Якщо якийсь legacy native path усе ще відкриє `MultiplayerTeamDeathmatch` напряму, `Patches/MissionStateOpenNewPatches.cs` лишається fallback-страховкою і підміняє handler на той самий factory.
+9. У цей explicit stack входять тільки мінімальні native shell behaviors, які ще лишилися потрібними для listed join/bootstrap, плюс наші compatibility replacements:
    - `ListedShellCompatibilityMode` / `ListedShellCompatibilityModeClient`
    - explicit coop-owned lobby shell (`ListedShellMissionLobbyClientComponent` або `ListedShellMissionLobbyServerComponent`) + `MultiplayerTimerComponent` з lobby-contract через `ListedShellLobbyRuntime`
    - boundary/admin/options/preload contract + server-side scoreboard compatibility only
-8. Після цього explicit listed ingress додає наші coop runtime behaviors:
+10. Після цього explicit listed ingress додає наші coop runtime behaviors:
    - `Mission/CoopMissionNetworkBridge.cs`
    - `Mission/CoopMissionBehaviors.cs` (`CoopMissionClientLogic` або `CoopMissionSpawnLogic`)
    - `UI/CoopMissionSelectionView.cs`
-9. Коли runtime потім просить official `Battle`, override повертає `MissionMultiplayerCoopBattleMode`, і фактична battle mission стартує вже в нашому coop-owned runtime, а не в vanilla battle runtime.
+11. Коли runtime потім просить official `Battle`, override повертає `MissionMultiplayerCoopBattleMode`, і фактична battle mission стартує вже в нашому coop-owned runtime, а не в vanilla battle runtime.
 
 Саме тому поточний безпечний стан такий: "vanilla listed shell + coop battle runtime", а не "повністю custom режим без TDM shell".
 
@@ -150,6 +155,8 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 | `MissionScoreboardComponent` | потрібен тільки dedicated listed lobby shell як compatibility container для `BotData`, round-score readers і частини scoreboard-side surface; active `OnScoreHit(...)`, host-side `kill/death/assist/score` headers, listed MVP selection, side-score і listed `BotData` bookkeeping уже йдуть через наші `CoopBattlePeerStatsRuntimeState` + `CoopBattleScoreboardRuntimeState`, а native `MissionPeer` stats і native scoreboard side storage більше не є source of truth | коли dedicated shell більше не буде залежати від цього native scoreboard container |
 | `ListedShellCompatibilityMode` | generic listed-shell server mode: team/banner setup, representative bootstrap, без native TDM score/gold/match-end authority; `AllowCustomPlayerBanners()` примусово вимкнений, тож listed shell більше не приймає peer-driven banner mutation як live contract | коли listed ingress більше не залежатиме від official `TeamDeathmatch` mission shell |
 | `ListedShellCompatibilityModeClient` | generic listed-shell client mode: `MissionMode.Battle` + representative sync, без native gold/sound authority; `MissionStateChange` і `KillDeathCountChange` registration/apply вже переїхали в `ListedShellMissionLobbyClientComponent`, тож compatibility mode лишився тільки як client mission-mode/representative shell | коли listed ingress більше не залежатиме від official `TeamDeathmatch` mission shell |
+| `MissionMultiplayerListedShellMode` | coop-owned runtime entry point, який тепер займає official `Module.StartMultiplayerGame("TeamDeathmatch", scene)` path і відкриває listed місію з explicit handler-ом замість vanilla `MissionBasedMultiplayerGameMode.StartMultiplayerGame()` | коли official listed startup ingress взагалі перестане бути потрібним |
+| `ListedShellMissionBehaviorFactory` | shared explicit listed mission assembly для `MissionMultiplayerListedShellMode` і fallback `MissionStateOpenNew` interception; саме він тепер є джерелом правди для listed mission stack, а не wrapper всередині patch-класу | коли fallback `MissionStateOpenNew` interception можна буде прибрати повністю |
 | `ListedShellLobbyRuntime` | coop-owned listed lobby runtime helper: він тримає mission-state cache/resolver, `WaitingFirstPlayers -> Playing`, `Playing -> Ending`, server/client `MissionStateChange`, late-client mission-state/K-D/bots replay, post-match endgame timeout/unload path і весь listed death/K-D/`BotData` path у `OnAgentRemoved(...)`; listed flow більше не читає і не оновлює `MissionLobbyComponent.CurrentMultiplayerState`, explicit listed shell уже не входить і в native `MissionLobbyComponent.OnBehaviorInitialize()`, а player K/D/assist/score тепер канонічно живуть у `CoopBattlePeerStatsRuntimeState` з reconnect migration | коли listed ingress більше не потребуватиме навіть native `MissionLobbyComponent` shell |
 | `CoopMissionSpawnLogic` listed ingress spawn path | custom direct listed ingress без TDM gold gate/cost deduction, без native visual/equipment bootstrap і без mission-stack `SpawnComponent`; саме тут тепер живе active listed player spawn authority | коли listed ingress більше не потребуватиме навіть native `MissionLobbyComponent` shell |
 | official `TeamDeathmatch` listed shell | безпечна server-list registration і join bootstrap | тільки після доведеного альтернативного listed/custom startup path без TDM shell |
@@ -384,7 +391,8 @@ Exact transfer - це спроба зберігати campaign identities, body 
 
 | Зона | Основні файли |
 | --- | --- |
-| Listed TDM shell wrapping | `Patches/MissionStateOpenNewPatches.cs` |
+| Listed TDM startup ingress | `GameMode/MissionMultiplayerListedShellMode.cs`, `GameMode/ListedShellMissionBehaviorFactory.cs`, `DedicatedServer/Patches/GameModeOverridePatches.cs` |
+| Listed TDM shell wrapping fallback | `Patches/MissionStateOpenNewPatches.cs` |
 | Native UI suppression | `Patches/BattleMapHudSuppressionPatch.cs`, `Patches/MissionScreenCameraPreviewPatch.cs` |
 | Connectivity і local/self join | `Patches/LobbyCustomGameLocalJoinPatch.cs`, `Patches/LobbyJoinResultSelfJoinArmPatch.cs`, `Patches/LocalJoinAddressPatch.cs`, `Patches/LobbyRequestJoinDiagnosticsPatch.cs` |
 | Native class compatibility | `Patches/MultiplayerCharacterClassFallbackPatch.cs`, `Patches/StartupSafeMpHeroClassBootstrapPatch.cs` |
@@ -400,7 +408,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 | `GameMode/MissionMinimal*DiagnosticMode.cs` | видалено |
 | `CoopTdm` і `TdmClone` multiplayer strings | видалено |
 | `EnableTdmCloneExperiment` branch | видалено |
-| `TeamDeathmatch` override path у `GameModeOverridePatches` | видалено |
+| старий `TeamDeathmatch` override path, який підміняв live TDM runtime | видалено; замість нього тепер лишився тільки explicit listed startup override на `Module.StartMultiplayerGame("TeamDeathmatch", scene)` |
 | `Patches/VanillaEntryUiSuppressionPatch.cs` | видалено; vanilla entry gauntlets тепер зрізаються в `MissionStateOpenNewPatches.cs` |
 
 ## 13. Що ще лишається legacy-шаром
@@ -478,7 +486,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - видалений мертвий direct-spawn experiment (`EnableDirectCoopPlayerSpawnExperiment`, `TrySpawnPeersIntoCoopControl(...)`, `SpawnCoopControlledAgent(...)`, `TryEnsurePendingSpawnVisuals(...)`), який уже не входив у live runtime tick path;
 - видалений active vanilla spawn-bridge hook (`RunVanillaSpawnBridgeTick(...)` / `TryFinalizePendingNativeSpawnVisualCompatibility(...)`), який переводив native preview visuals у `SpawningBehaviorBase` і `Mission.SpawnAgent(..., spawnFromAgentVisuals: true)`;
 - прибраний старий feature-flag `EnableVanillaMissionWrapping`; listed `TeamDeathmatch` shell wrapping тепер є явною частиною поточного join/startup контракту, а не runtime toggle;
-- прибрана логіка `TeamDeathmatch` override з `DedicatedServer/Patches/GameModeOverridePatches.cs`;
+- прибрана стара логіка `TeamDeathmatch` override, яка підміняла live TDM runtime; замість неї тепер живе explicit listed startup override на `Module.StartMultiplayerGame("TeamDeathmatch", scene)` з `MissionMultiplayerListedShellMode`;
 - прибрані `CoopTdm` і `TdmClone` strings з `Module/CoopSpectator/ModuleData/multiplayer_strings.xml`;
 - прибрані dedicated-project compile includes для видалених TDM файлів;
 - wrapper vanilla mission-open більше не інжектить `MissionMinimalServerDiagnosticMode` і `MissionMinimalClientDiagnosticMode`;
@@ -492,7 +500,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 1. Замінити залежність від official listed-shell `TeamDeathmatch` тільки після того, як буде доведений альтернативний server-list registration і join path без нього; live mission-mode/spawn layer всередині wrapper вже більше не повинен тримати native TDM authority.
 2. Прибрати решту native `MissionLobbyComponent` shell тоді, коли listed ingress уже не потребуватиме його для server-list startup/join contract.
 3. Прибрати bridge-file fallback-и тоді, коли network transport стане достатньо надійним для selection, spawn, readiness і reconnect flows.
-4. Винести вже explicit listed-shell assembly з `MissionStateOpenNew` interception у ще чистіший coop startup entry point, коли native shell interception більше не буде потрібний.
+4. Дорізати fallback-залежність від `MissionStateOpenNew` interception тепер, коли основний listed startup path уже йде через `Module.StartMultiplayerGame("TeamDeathmatch", scene)` -> `MissionMultiplayerListedShellMode`; після цього native shell interception можна буде прибрати повністю.
 5. Окремо переоцінити `LocalJoinAddressPatch` та інші join patch-і, коли public, VPN і self-host join flows будуть розділені чистіше по відповідальності.
 6. Прибрати crash-isolation patch-і на кшталт `IntermissionVmCrashGuardPatch`, коли battle-map lobby/intermission lifecycle буде вже нашим, а не native.
 
@@ -507,7 +515,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 
 ### Фаза B: зменшити native mission wrapping
 
-- виносити логіку з `MissionStateOpenNewPatches.cs` у більш явні coop runtime entry points;
+- дотискати fallback `MissionStateOpenNewPatches.cs` до повного зникнення, бо основний listed startup entry point уже винесений у `MissionMultiplayerListedShellMode` + `ListedShellMissionBehaviorFactory`;
 - зменшувати кількість UI suppression patch-ів, замінюючи native entry/intermission views власними coop views, а не приховуючи їх постфактум.
 
 ### Фаза C: повністю забрати side selection і materialization
