@@ -312,6 +312,7 @@ namespace CoopSpectator
                     TryApplyLateJoinPeerBootstrapGatePatch();
                     TryApplyLateJoinPeerStateReplayOwnershipPatch();
                     TryApplyFinishedLoadingMissionReadyGatePatch();
+                    TryApplyListedShellInitializeCustomGameOwnershipPatch();
                     if (EnableBattleShellSuppressionPatch)
                         TryApplyBattleShellSuppressionPatch();
                     else
@@ -472,6 +473,20 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: FinishedLoadingMissionReadyGate patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyListedShellInitializeCustomGameOwnershipPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                ListedShellInitializeCustomGameOwnershipPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: ListedShellInitializeCustomGameOwnership patch apply failed: " + ex.Message);
             }
         }
 
