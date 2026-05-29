@@ -28,6 +28,8 @@ namespace CoopSpectator.Infrastructure
             string serverName,
             string serverAddress,
             int serverPort,
+            int sessionKey,
+            int peerIndex,
             string source)
         {
             lock (Sync)
@@ -37,8 +39,8 @@ namespace CoopSpectator.Infrastructure
                 _serverName = Normalize(serverName);
                 _serverAddress = Normalize(serverAddress);
                 _serverPort = serverPort;
-                _sessionKey = 0;
-                _peerIndex = 0;
+                _sessionKey = sessionKey;
+                _peerIndex = peerIndex;
                 _armedUtc = DateTime.UtcNow;
             }
 
@@ -48,6 +50,8 @@ namespace CoopSpectator.Infrastructure
                 " ServerName=" + Normalize(serverName) +
                 " Address=" + Normalize(serverAddress) +
                 " Port=" + serverPort +
+                " SessionKey=" + sessionKey +
+                " PeerIndex=" + peerIndex +
                 " Source=" + Normalize(source) + ".");
         }
 
@@ -94,6 +98,38 @@ namespace CoopSpectator.Infrastructure
             lock (Sync)
             {
                 return IsPhaseActive_NoLock(ListedShellClientSessionPhase.ReceiveBootstrap);
+            }
+        }
+
+        public static bool TryResolveWrapperStartTransportContext(
+            out string gameType,
+            out string serverAddress,
+            out int serverPort,
+            out int sessionKey,
+            out int peerIndex)
+        {
+            lock (Sync)
+            {
+                if (!IsPhaseActive_NoLock(ListedShellClientSessionPhase.WrapperStart))
+                {
+                    gameType = string.Empty;
+                    serverAddress = string.Empty;
+                    serverPort = 0;
+                    sessionKey = 0;
+                    peerIndex = 0;
+                    return false;
+                }
+
+                gameType = _gameType;
+                serverAddress = _serverAddress;
+                serverPort = _serverPort;
+                sessionKey = _sessionKey;
+                peerIndex = _peerIndex;
+                return !string.IsNullOrEmpty(gameType) &&
+                    !string.IsNullOrEmpty(serverAddress) &&
+                    serverPort > 0 &&
+                    sessionKey > 0 &&
+                    peerIndex >= 0;
             }
         }
 

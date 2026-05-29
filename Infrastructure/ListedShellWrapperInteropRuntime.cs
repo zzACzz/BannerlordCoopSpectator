@@ -8,17 +8,7 @@ namespace CoopSpectator.Infrastructure
 {
     internal static class ListedShellWrapperInteropRuntime
     {
-        private static Type _customClientType;
-        private static Type _communityClientType;
         private static Type _playerBasedCustomServerType;
-        private static FieldInfo _customClientAddressField;
-        private static FieldInfo _customClientPortField;
-        private static FieldInfo _customClientSessionKeyField;
-        private static FieldInfo _customClientPeerIndexField;
-        private static FieldInfo _communityClientAddressField;
-        private static FieldInfo _communityClientPortField;
-        private static FieldInfo _communityClientSessionKeyField;
-        private static FieldInfo _communityClientPeerIndexField;
         private static FieldInfo _playerBasedCustomServerGameClientField;
         private static MethodInfo _platformShowRestrictedInformationMethod;
         private static MethodInfo _platformCheckPrivilegeMethod;
@@ -26,16 +16,11 @@ namespace CoopSpectator.Infrastructure
         private static Type _platformPrivilegeEnumType;
         private static Type _platformPrivilegeResultType;
 
-        public static void InitializeWrapperContracts(
-            Type customClientType,
-            Type communityClientType,
-            Type playerBasedCustomServerType)
+        public static void InitializeWrapperContracts(Type playerBasedCustomServerType)
         {
-            _customClientType = customClientType;
-            _communityClientType = communityClientType;
             _playerBasedCustomServerType = playerBasedCustomServerType;
 
-            CacheNativeFieldContracts();
+            CacheHostedServerFieldContract();
             CachePlatformPrivilegeContracts();
         }
 
@@ -94,6 +79,8 @@ namespace CoopSpectator.Infrastructure
                             serverName,
                             serverAddress,
                             serverPort,
+                            sessionKey,
+                            peerIndex,
                             source);
                     }
                     else
@@ -135,26 +122,14 @@ namespace CoopSpectator.Infrastructure
             return ListedShellClientSessionOwnershipState.ShouldOwnWrapperStart();
         }
 
-        public static bool TryOwnCustomGameClientStart(object instance, string source)
+        public static bool TryOwnCustomGameClientStart(string source)
         {
-            return TryOwnListedShellClientStart(
-                instance,
-                _customClientAddressField,
-                _customClientPortField,
-                _customClientSessionKeyField,
-                _customClientPeerIndexField,
-                source);
+            return TryOwnListedShellClientStart(source);
         }
 
-        public static bool TryOwnCommunityClientStart(object instance, string source)
+        public static bool TryOwnCommunityClientStart(string source)
         {
-            return TryOwnListedShellClientStart(
-                instance,
-                _communityClientAddressField,
-                _communityClientPortField,
-                _communityClientSessionKeyField,
-                _communityClientPeerIndexField,
-                source);
+            return TryOwnListedShellClientStart(source);
         }
 
         public static bool TryOwnHostedListedServerStart(object instance, string source)
@@ -183,23 +158,23 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        private static bool TryOwnListedShellClientStart(
-            object instance,
-            FieldInfo addressField,
-            FieldInfo portField,
-            FieldInfo sessionKeyField,
-            FieldInfo peerIndexField,
-            string source)
+        private static bool TryOwnListedShellClientStart(string source)
         {
             try
             {
-                string address = addressField?.GetValue(instance) as string ?? string.Empty;
-                int port = portField?.GetValue(instance) is int portValue ? portValue : 0;
-                int sessionKey = sessionKeyField?.GetValue(instance) is int sessionKeyValue ? sessionKeyValue : 0;
-                int peerIndex = peerIndexField?.GetValue(instance) is int peerIndexValue ? peerIndexValue : 0;
+                if (!ListedShellClientSessionOwnershipState.TryResolveWrapperStartTransportContext(
+                        out string gameType,
+                        out string address,
+                        out int port,
+                        out int sessionKey,
+                        out int peerIndex))
+                {
+                    ListedShellClientSessionOwnershipState.Disarm(source + " missing-wrapper-start-context");
+                    return true;
+                }
 
                 if (!ListedShellSessionTransportRuntime.TryStartListedClientTransport(
-                        CoopGameModeIds.OfficialTeamDeathmatch,
+                        gameType,
                         address,
                         port,
                         sessionKey,
@@ -277,18 +252,8 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        private static void CacheNativeFieldContracts()
+        private static void CacheHostedServerFieldContract()
         {
-            _customClientAddressField = _customClientType?.GetField("_address", BindingFlags.Instance | BindingFlags.NonPublic);
-            _customClientPortField = _customClientType?.GetField("_port", BindingFlags.Instance | BindingFlags.NonPublic);
-            _customClientSessionKeyField = _customClientType?.GetField("_sessionKey", BindingFlags.Instance | BindingFlags.NonPublic);
-            _customClientPeerIndexField = _customClientType?.GetField("_peerIndex", BindingFlags.Instance | BindingFlags.NonPublic);
-
-            _communityClientAddressField = _communityClientType?.GetField("_address", BindingFlags.Instance | BindingFlags.NonPublic);
-            _communityClientPortField = _communityClientType?.GetField("_port", BindingFlags.Instance | BindingFlags.NonPublic);
-            _communityClientSessionKeyField = _communityClientType?.GetField("_sessionKey", BindingFlags.Instance | BindingFlags.NonPublic);
-            _communityClientPeerIndexField = _communityClientType?.GetField("_peerIndex", BindingFlags.Instance | BindingFlags.NonPublic);
-
             _playerBasedCustomServerGameClientField = _playerBasedCustomServerType?.GetField("_gameClient", BindingFlags.Instance | BindingFlags.NonPublic);
         }
 

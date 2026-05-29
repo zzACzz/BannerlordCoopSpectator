@@ -75,10 +75,7 @@ namespace CoopSpectator.Patches
                 return;
             }
 
-            ListedShellWrapperInteropRuntime.InitializeWrapperContracts(
-                customClientType,
-                communityClientType,
-                playerBasedCustomServerType);
+            ListedShellWrapperInteropRuntime.InitializeWrapperContracts(playerBasedCustomServerType);
 
             PatchClientStateStart(harmony, customClientType, nameof(CustomGameClientStartMultiplayer_Prefix));
             PatchClientStateStart(harmony, communityClientType, nameof(CommunityClientStartMultiplayer_Prefix));
@@ -122,7 +119,6 @@ namespace CoopSpectator.Patches
                 return true;
 
             return ListedShellWrapperInteropRuntime.TryOwnCustomGameClientStart(
-                __instance,
                 "ListedShellClientWrapperOwnershipPatch.CustomGameClientStart");
         }
 
@@ -132,7 +128,6 @@ namespace CoopSpectator.Patches
                 return true;
 
             return ListedShellWrapperInteropRuntime.TryOwnCommunityClientStart(
-                __instance,
                 "ListedShellClientWrapperOwnershipPatch.CommunityClientStart");
         }
 
