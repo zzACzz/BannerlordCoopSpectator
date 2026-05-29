@@ -141,10 +141,10 @@ namespace CoopSpectator.Infrastructure
             if (message == null)
                 return false;
 
-            if (!string.Equals(message.GameType, CoopGameModeIds.OfficialTeamDeathmatch, StringComparison.Ordinal))
-                return false;
+            if (ListedShellClientSessionOwnershipState.ShouldOwnReceiveBootstrap())
+                return true;
 
-            return ListedShellClientSessionOwnershipState.ShouldOwnReceiveBootstrap();
+            return string.Equals(message.GameType, CoopGameModeIds.OfficialTeamDeathmatch, StringComparison.Ordinal);
         }
 
         public static async Task HandleListedInitializeCustomGameReceiveAsync(InitializeCustomGameMessage message)
@@ -229,10 +229,10 @@ namespace CoopSpectator.Infrastructure
             if (message == null)
                 return false;
 
-            if (!string.Equals(message.GameType, CoopGameModeIds.OfficialTeamDeathmatch, StringComparison.Ordinal))
-                return false;
+            if (ListedShellClientSessionOwnershipState.ShouldOwnReceiveBootstrap())
+                return true;
 
-            return ListedShellClientSessionOwnershipState.ShouldOwnReceiveBootstrap();
+            return string.Equals(message.GameType, CoopGameModeIds.OfficialTeamDeathmatch, StringComparison.Ordinal);
         }
 
         public static async Task HandleListedLoadMissionReceiveAsync(object baseNetworkComponentInstance, LoadMission message)
