@@ -134,32 +134,17 @@ namespace CoopSpectator.Infrastructure
 
         public static bool ShouldFallbackOwnListedBattleFinishedLoadingValidation(Mission mission)
         {
-            if (mission == null)
+            if (!HasListedBattleRuntimeOwnershipShape(mission))
                 return false;
 
-            if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName ?? string.Empty))
-                return false;
-
-            if (!ListedShellMissionSessionState.TryResolveTransportToken(mission, out int listedToken) || listedToken <= 0)
-                return false;
-
-            return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null &&
-                mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null;
+            return ListedShellMissionSessionState.TryResolveTransportToken(mission, out int listedToken) &&
+                listedToken > 0;
         }
 
         public static bool TryPromotePendingBattleTransportTokenToListedSession(Mission mission, string source)
         {
-            if (mission == null)
+            if (!HasListedBattleRuntimeOwnershipShape(mission))
                 return false;
-
-            if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName ?? string.Empty))
-                return false;
-
-            if (mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() == null ||
-                mission.GetMissionBehavior<CoopMissionNetworkBridge>() == null)
-            {
-                return false;
-            }
 
             if (ListedShellMissionSessionState.TryResolveTransportToken(mission, out int listedToken) && listedToken > 0)
                 return false;
@@ -325,6 +310,45 @@ namespace CoopSpectator.Infrastructure
                 return token;
 
             return 0;
+        }
+
+        public static string DescribeFinishedLoadingValidationRoute(Mission mission, int finishedLoadingBattleIndex)
+        {
+            bool sceneAwareBattle = mission != null &&
+                SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName ?? string.Empty);
+            bool hasListedToken = ListedShellMissionSessionState.TryResolveTransportToken(mission, out int listedToken) &&
+                listedToken > 0;
+            bool hasPendingToken = PendingBattleMissionStartupState.TryResolveAuthoritativeTransportToken(mission, out int pendingToken) &&
+                pendingToken > 0;
+            bool hasCoopBattleServer = mission?.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null;
+            bool hasCoopSpawnLogic = mission?.GetMissionBehavior<CoopMissionSpawnLogic>() != null;
+            bool hasNetworkBridge = mission?.GetMissionBehavior<CoopMissionNetworkBridge>() != null;
+
+            return
+                "MissionScene=" + (mission?.SceneName ?? "null") +
+                " MissionState=" + (mission?.CurrentState.ToString() ?? "null") +
+                " FinishedLoadingBattleIndex=" + finishedLoadingBattleIndex +
+                " SceneAwareBattle=" + sceneAwareBattle +
+                " ListedToken=" + (hasListedToken ? listedToken.ToString() : "0") +
+                " PendingToken=" + (hasPendingToken ? pendingToken.ToString() : "0") +
+                " HasCoopBattleServer=" + hasCoopBattleServer +
+                " HasCoopSpawnLogic=" + hasCoopSpawnLogic +
+                " HasNetworkBridge=" + hasNetworkBridge;
+        }
+
+        private static bool HasListedBattleRuntimeOwnershipShape(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            if (mission.GetMissionBehavior<CoopMissionNetworkBridge>() == null)
+                return false;
+
+            return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null ||
+                mission.GetMissionBehavior<CoopMissionSpawnLogic>() != null;
         }
     }
 }

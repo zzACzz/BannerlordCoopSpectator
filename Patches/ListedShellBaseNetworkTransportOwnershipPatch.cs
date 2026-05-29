@@ -202,6 +202,22 @@ namespace CoopSpectator.Patches
             bool listedBattleFallbackOwnsFinishedLoading =
                 !listedOwnsFinishedLoading &&
                 ListedShellSessionTransportRuntime.ShouldFallbackOwnListedBattleFinishedLoadingValidation(currentMission);
+            string delayDetails = string.Empty;
+            bool pendingOwnsFinishedLoading =
+                !listedOwnsFinishedLoading &&
+                !listedBattleFallbackOwnsFinishedLoading &&
+                PendingBattleFinishedLoadingTransportRuntime.ShouldOwnDeferredServerFinishedLoadingValidation(currentMission, out delayDetails);
+
+            ModLogger.Info(
+                "ListedShellBaseNetworkTransportOwnershipPatch: evaluated FinishedLoading ownership route. " +
+                "Peer=" + (networkPeer.UserName ?? "unknown") +
+                " ListedOwns=" + listedOwnsFinishedLoading +
+                " ListedBattleFallbackOwns=" + listedBattleFallbackOwnsFinishedLoading +
+                " PendingOwns=" + pendingOwnsFinishedLoading +
+                " DelayDetails=" + (pendingOwnsFinishedLoading ? delayDetails : string.Empty) +
+                " " + ListedShellSessionTransportRuntime.DescribeFinishedLoadingValidationRoute(currentMission, message.BattleIndex) +
+                ".");
+
             if (listedOwnsFinishedLoading || listedBattleFallbackOwnsFinishedLoading)
             {
                 if (listedBattleFallbackOwnsFinishedLoading)
@@ -220,7 +236,7 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (!PendingBattleFinishedLoadingTransportRuntime.ShouldOwnDeferredServerFinishedLoadingValidation(currentMission, out string delayDetails))
+            if (!pendingOwnsFinishedLoading)
                 return true;
 
             PendingBattleFinishedLoadingTransportRuntime.HandleDeferredServerFinishedLoadingValidation(
