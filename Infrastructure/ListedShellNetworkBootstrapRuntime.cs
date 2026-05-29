@@ -65,11 +65,11 @@ namespace CoopSpectator.Infrastructure
                 if (targetPeer == null || targetPeer.IsServerPeer)
                     return false;
 
-                SendServerMessage(targetPeer, new MultiplayerOptionsInitial());
-                SendServerMessage(targetPeer, new MultiplayerOptionsImmediate());
+                CoopSessionTransportPrimitives.SendServerMessage(targetPeer, new MultiplayerOptionsInitial());
+                CoopSessionTransportPrimitives.SendServerMessage(targetPeer, new MultiplayerOptionsImmediate());
 
                 if (targetPeer.IsAdmin)
-                    SendServerMessage(targetPeer, new MultiplayerOptionsDefault());
+                    CoopSessionTransportPrimitives.SendServerMessage(targetPeer, new MultiplayerOptionsDefault());
 
                 bool inMission = !GameNetwork.IsDedicatedServer || mission != null;
                 string scene = inMission ? (mission?.SceneName ?? string.Empty) : string.Empty;
@@ -83,7 +83,7 @@ namespace CoopSpectator.Infrastructure
                     return false;
                 }
 
-                SendServerMessage(targetPeer, new InitializeCustomGameMessage(inMission, gameType, scene, token));
+                CoopSessionTransportPrimitives.SendServerMessage(targetPeer, new InitializeCustomGameMessage(inMission, gameType, scene, token));
 
                 ModLogger.Info(
                     "ListedShellNetworkBootstrapRuntime: sent coop-owned listed new-client bootstrap. " +
@@ -295,13 +295,6 @@ namespace CoopSpectator.Infrastructure
             {
                 ModLogger.Error("ListedShellNetworkBootstrapRuntime.HandleListedUnloadMissionReceiveAsync failed.", ex);
             }
-        }
-
-        private static void SendServerMessage(NetworkCommunicator targetPeer, TaleWorlds.MountAndBlade.Network.Messages.GameNetworkMessage message)
-        {
-            GameNetwork.BeginModuleEventAsServer(targetPeer);
-            GameNetwork.WriteMessage(message);
-            GameNetwork.EndModuleEventAsServer();
         }
 
         private static bool ShouldOwnListedShellInitializeCustomGameIngress(Mission mission)

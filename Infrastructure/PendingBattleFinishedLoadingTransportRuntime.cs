@@ -79,13 +79,11 @@ namespace CoopSpectator.Infrastructure
 
                 if (shouldUnload)
                 {
-                    GameNetwork.BeginModuleEventAsServer(networkPeer);
-                    GameNetwork.WriteMessage(new UnloadMission(true));
-                    GameNetwork.EndModuleEventAsServer();
+                    CoopSessionTransportPrimitives.SendUnloadMission(networkPeer, true);
                 }
                 else
                 {
-                    GameNetwork.ClientFinishedLoading(networkPeer);
+                    CoopSessionTransportPrimitives.MarkPeerFinishedLoading(networkPeer);
                 }
 
                 ModLogger.Info(

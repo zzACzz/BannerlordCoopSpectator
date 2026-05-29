@@ -29,7 +29,7 @@ namespace CoopSpectator.Infrastructure
                     sessionKey,
                     peerIndex,
                     source);
-                GameNetwork.StartMultiplayerOnClient(address, port, sessionKey, peerIndex);
+                CoopSessionTransportPrimitives.StartClientTransport(address, port, sessionKey, peerIndex);
                 ModLogger.Info(
                     "ListedShellSessionTransportRuntime: started listed client transport. " +
                     "GameType=" + Normalize(gameType) +
@@ -65,7 +65,7 @@ namespace CoopSpectator.Infrastructure
         {
             try
             {
-                GameNetwork.PreStartMultiplayerOnServer();
+                CoopSessionTransportPrimitives.PreStartServerTransport();
                 if (!TaleWorlds.MountAndBlade.Module.CurrentModule.StartMultiplayerGame(gameType, scene))
                 {
                     ModLogger.Info(
@@ -79,12 +79,11 @@ namespace CoopSpectator.Infrastructure
                 while (Mission.Current == null || (int)Mission.Current.CurrentState != 2)
                     await Task.Delay(1);
 
-                GameNetwork.StartMultiplayerOnServer(StartMultiplayerServerSessionPort);
+                CoopSessionTransportPrimitives.StartServerTransport(StartMultiplayerServerSessionPort);
                 if (isInGame)
                 {
-                    BannerlordNetwork.CreateServerPeer();
-                    if (!GameNetwork.IsDedicatedServer)
-                        GameNetwork.ClientFinishedLoading(GameNetwork.MyPeer);
+                    CoopSessionTransportPrimitives.CreateServerPeer();
+                    CoopSessionTransportPrimitives.MarkHostedLocalPeerFinishedLoading();
                 }
 
                 ModLogger.Info(
@@ -119,13 +118,11 @@ namespace CoopSpectator.Infrastructure
 
             if (shouldUnload)
             {
-                GameNetwork.BeginModuleEventAsServer(networkPeer);
-                GameNetwork.WriteMessage(new UnloadMission(true));
-                GameNetwork.EndModuleEventAsServer();
+                CoopSessionTransportPrimitives.SendUnloadMission(networkPeer, true);
             }
             else
             {
-                GameNetwork.ClientFinishedLoading(networkPeer);
+                CoopSessionTransportPrimitives.MarkPeerFinishedLoading(networkPeer);
             }
 
             ModLogger.Info(
