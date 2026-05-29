@@ -21,8 +21,6 @@ namespace CoopSpectator.GameMode
 
         protected override void AddRemoveMessageHandlers(GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
         {
-            base.AddRemoveMessageHandlers(registerer);
-            MissionLobbySpawnContractPatch.PruneListedShellLobbyMessageRegistrations(this, registerer);
         }
 
         public override void OnMissionTick(float dt)

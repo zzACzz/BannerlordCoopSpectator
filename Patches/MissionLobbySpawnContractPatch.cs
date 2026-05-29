@@ -27,18 +27,6 @@ namespace CoopSpectator.Patches
             BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo NetworkFromServerBaseHandlersField =
             AccessTools.Field(typeof(GameNetwork.NetworkMessageHandlerRegistererContainer), "_fromServerBaseHandlers");
-        private static readonly FieldInfo NetworkFromClientBaseHandlersField =
-            AccessTools.Field(typeof(GameNetwork.NetworkMessageHandlerRegistererContainer), "_fromClientBaseHandlers");
-        private static readonly Type ChangeCultureMessageType =
-            AccessTools.TypeByName("NetworkMessages.FromServer.ChangeCulture");
-        private static readonly Type ChangeClassRestrictionsMessageType =
-            AccessTools.TypeByName("NetworkMessages.FromServer.ChangeClassRestrictions");
-        private static readonly Type ServerCreateBannerMessageType = typeof(NetworkMessages.FromServer.CreateBanner);
-        private static readonly Type ClientCreateBannerMessageType = typeof(NetworkMessages.FromClient.CreateBanner);
-        private static readonly Type RequestCultureChangeMessageType =
-            AccessTools.TypeByName("NetworkMessages.FromClient.RequestCultureChange");
-        private static readonly Type RequestChangeCharacterMessageType =
-            AccessTools.TypeByName("NetworkMessages.FromClient.RequestChangeCharacterMessage");
         private static readonly MethodInfo CurrentMultiplayerStateSetterMethod = typeof(MissionLobbyComponent)
             .GetProperty(
                 nameof(MissionLobbyComponent.CurrentMultiplayerState),
@@ -154,74 +142,8 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                MethodInfo requestCultureChangeTarget = typeof(MissionLobbyComponent).GetMethod(
-                    "HandleClientEventRequestCultureChange",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                MethodInfo requestCultureChangePrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(HandleClientEventRequestCultureChange_Prefix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-
-                MethodInfo requestChangeCharacterTarget = typeof(MissionLobbyComponent).GetMethod(
-                    "HandleClientEventRequestChangeCharacterMessage",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                MethodInfo requestChangeCharacterPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(HandleClientEventRequestChangeCharacterMessage_Prefix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-
-                MethodInfo requestCreateBannerTarget = typeof(MissionLobbyComponent).GetMethod(
-                    "HandleClientEventCreateBannerForPeer",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                MethodInfo requestCreateBannerPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(HandleClientEventCreateBannerForPeer_Prefix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-
-                MethodInfo changeClassRestrictionsTarget = typeof(MissionLobbyComponent).GetMethod(
-                    "HandleServerEventChangeClassRestrictions",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                MethodInfo changeClassRestrictionsPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(HandleServerEventChangeClassRestrictions_Prefix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-
-                MethodInfo applyCreateBannerTarget = typeof(MissionLobbyComponent).GetMethod(
-                    "HandleServerEventCreateBannerForPeer",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                MethodInfo applyCreateBannerPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(HandleServerEventCreateBannerForPeer_Prefix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-
-                MethodInfo changeCultureTarget = typeof(MissionLobbyComponent).GetMethod(
-                    "HandleServerEventChangeCulture",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                MethodInfo changeCulturePrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(HandleServerEventChangeCulture_Prefix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-
                 harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
-                if (requestCultureChangeTarget != null && requestCultureChangePrefix != null)
-                    harmony.Patch(requestCultureChangeTarget, prefix: new HarmonyMethod(requestCultureChangePrefix));
-                if (requestChangeCharacterTarget != null && requestChangeCharacterPrefix != null)
-                    harmony.Patch(requestChangeCharacterTarget, prefix: new HarmonyMethod(requestChangeCharacterPrefix));
-                if (requestCreateBannerTarget != null && requestCreateBannerPrefix != null)
-                    harmony.Patch(requestCreateBannerTarget, prefix: new HarmonyMethod(requestCreateBannerPrefix));
-                if (changeClassRestrictionsTarget != null && changeClassRestrictionsPrefix != null)
-                    harmony.Patch(changeClassRestrictionsTarget, prefix: new HarmonyMethod(changeClassRestrictionsPrefix));
-                if (applyCreateBannerTarget != null && applyCreateBannerPrefix != null)
-                    harmony.Patch(applyCreateBannerTarget, prefix: new HarmonyMethod(applyCreateBannerPrefix));
-                if (changeCultureTarget != null && changeCulturePrefix != null)
-                    harmony.Patch(changeCultureTarget, prefix: new HarmonyMethod(changeCulturePrefix));
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
-                if (requestCultureChangeTarget != null && requestCultureChangePrefix != null)
-                    ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleClientEventRequestCultureChange.");
-                if (requestChangeCharacterTarget != null && requestChangeCharacterPrefix != null)
-                    ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleClientEventRequestChangeCharacterMessage.");
-                if (requestCreateBannerTarget != null && requestCreateBannerPrefix != null)
-                    ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleClientEventCreateBannerForPeer.");
-                if (changeClassRestrictionsTarget != null && changeClassRestrictionsPrefix != null)
-                    ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventChangeClassRestrictions.");
-                if (applyCreateBannerTarget != null && applyCreateBannerPrefix != null)
-                    ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventCreateBannerForPeer.");
-                if (changeCultureTarget != null && changeCulturePrefix != null)
-                    ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventChangeCulture.");
             }
             catch (Exception ex)
             {
@@ -319,83 +241,6 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info("MissionLobbySpawnContractPatch: after-start postfix failed open: " + ex.Message);
-            }
-        }
-
-        internal static void PruneListedShellLobbyMessageRegistrations(
-            MissionLobbyComponent __instance,
-            GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
-        {
-            try
-            {
-                Mission mission = __instance?.Mission ?? Mission.Current;
-                if (!ShouldUseListedShellLobbyContract(mission) || registerer == null)
-                    return;
-
-                int removedServerBaseHandlers =
-                    RemoveListedShellBaseHandlerRegistration(
-                        registerer,
-                        NetworkFromServerBaseHandlersField,
-                        typeof(NetworkMessages.FromServer.KillDeathCountChange),
-                        __instance,
-                        "HandleServerEventKillDeathCountChangeEvent") +
-                    RemoveListedShellBaseHandlerRegistration(
-                        registerer,
-                        NetworkFromServerBaseHandlersField,
-                        ServerCreateBannerMessageType,
-                        __instance,
-                        "HandleServerEventCreateBannerForPeer") +
-                    RemoveListedShellBaseHandlerRegistration(
-                        registerer,
-                        NetworkFromServerBaseHandlersField,
-                        MissionStateChangeType,
-                        __instance,
-                        "HandleServerEventMissionStateChange") +
-                    RemoveListedShellBaseHandlerRegistration(
-                        registerer,
-                        NetworkFromServerBaseHandlersField,
-                        ChangeCultureMessageType,
-                        __instance,
-                        "HandleServerEventChangeCulture") +
-                    RemoveListedShellBaseHandlerRegistration(
-                        registerer,
-                        NetworkFromServerBaseHandlersField,
-                        ChangeClassRestrictionsMessageType,
-                        __instance,
-                        "HandleServerEventChangeClassRestrictions");
-
-                int removedClientBaseHandlers =
-                    RemoveListedShellBaseHandlerRegistration(
-                        registerer,
-                        NetworkFromClientBaseHandlersField,
-                        RequestCultureChangeMessageType,
-                        __instance,
-                        "HandleClientEventRequestCultureChange") +
-                    RemoveListedShellBaseHandlerRegistration(
-                        registerer,
-                        NetworkFromClientBaseHandlersField,
-                        RequestChangeCharacterMessageType,
-                        __instance,
-                        "HandleClientEventRequestChangeCharacterMessage") +
-                    RemoveListedShellBaseHandlerRegistration(
-                        registerer,
-                        NetworkFromClientBaseHandlersField,
-                        ClientCreateBannerMessageType,
-                        __instance,
-                        "HandleClientEventCreateBannerForPeer");
-
-                if (removedServerBaseHandlers > 0 || removedClientBaseHandlers > 0)
-                {
-                    ModLogger.Info(
-                        "MissionLobbySpawnContractPatch: pruned dead listed-shell MissionLobbyComponent message registrations. " +
-                        "Mission=" + (mission?.SceneName ?? "unknown") +
-                        " RemovedServerBaseHandlers=" + removedServerBaseHandlers +
-                        " RemovedClientBaseHandlers=" + removedClientBaseHandlers);
-                }
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionLobbySpawnContractPatch: add-remove-message-handlers postfix failed open: " + ex.Message);
             }
         }
 
@@ -562,123 +407,6 @@ namespace CoopSpectator.Patches
             (scoreboardComponent ?? Mission.Current?.GetMissionBehavior<MissionScoreboardComponent>())
                 ?.PlayerPropertiesChanged(killDeathCountChange.VictimPeer);
             return true;
-        }
-
-        private static bool HandleClientEventRequestCultureChange_Prefix(
-            MissionLobbyComponent __instance,
-            NetworkCommunicator peer,
-            object baseMessage)
-        {
-            try
-            {
-                Mission mission = __instance?.Mission ?? Mission.Current;
-                if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionLobbySpawnContractPatch: request-culture-change prefix failed open: " + ex.Message);
-                return true;
-            }
-        }
-
-        private static bool HandleClientEventRequestChangeCharacterMessage_Prefix(
-            MissionLobbyComponent __instance,
-            NetworkCommunicator peer,
-            object baseMessage)
-        {
-            try
-            {
-                Mission mission = __instance?.Mission ?? Mission.Current;
-                if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionLobbySpawnContractPatch: request-change-character prefix failed open: " + ex.Message);
-                return true;
-            }
-        }
-
-        private static bool HandleClientEventCreateBannerForPeer_Prefix(
-            MissionLobbyComponent __instance,
-            NetworkCommunicator peer,
-            object baseMessage)
-        {
-            try
-            {
-                Mission mission = __instance?.Mission ?? Mission.Current;
-                if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionLobbySpawnContractPatch: request-create-banner prefix failed open: " + ex.Message);
-                return true;
-            }
-        }
-
-        private static bool HandleServerEventChangeClassRestrictions_Prefix(
-            MissionLobbyComponent __instance,
-            object baseMessage)
-        {
-            try
-            {
-                Mission mission = __instance?.Mission ?? Mission.Current;
-                if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionLobbySpawnContractPatch: class-restrictions prefix failed open: " + ex.Message);
-                return true;
-            }
-        }
-
-        private static bool HandleServerEventCreateBannerForPeer_Prefix(
-            MissionLobbyComponent __instance,
-            object baseMessage)
-        {
-            try
-            {
-                Mission mission = __instance?.Mission ?? Mission.Current;
-                if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionLobbySpawnContractPatch: apply-create-banner prefix failed open: " + ex.Message);
-                return true;
-            }
-        }
-
-        private static bool HandleServerEventChangeCulture_Prefix(
-            MissionLobbyComponent __instance,
-            object baseMessage)
-        {
-            try
-            {
-                Mission mission = __instance?.Mission ?? Mission.Current;
-                if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionLobbySpawnContractPatch: change-culture prefix failed open: " + ex.Message);
-                return true;
-            }
         }
 
         private static bool OnAgentRemoved_Prefix(
@@ -1504,49 +1232,6 @@ namespace CoopSpectator.Patches
             object tuple = Activator.CreateInstance(tupleType, handler, messageType);
             registrations.Add(tuple);
             return true;
-        }
-
-        private static int RemoveListedShellBaseHandlerRegistration(
-            GameNetwork.NetworkMessageHandlerRegistererContainer registerer,
-            FieldInfo registrationsField,
-            Type messageType,
-            MissionLobbyComponent lobbyComponent,
-            string expectedHandlerMethodName)
-        {
-            if (registerer == null ||
-                registrationsField == null ||
-                messageType == null ||
-                lobbyComponent == null ||
-                string.IsNullOrWhiteSpace(expectedHandlerMethodName))
-            {
-                return 0;
-            }
-
-            IList registrations = registrationsField.GetValue(registerer) as IList;
-            if (registrations == null || registrations.Count == 0)
-                return 0;
-
-            int removedCount = 0;
-            for (int i = registrations.Count - 1; i >= 0; i--)
-            {
-                object registration = registrations[i];
-                if (registration == null)
-                    continue;
-
-                Type registrationType = registration.GetType();
-                Type registeredMessageType = registrationType.GetProperty("Item2")?.GetValue(registration) as Type;
-                if (!ReferenceEquals(registeredMessageType, messageType))
-                    continue;
-
-                Delegate handler = registrationType.GetProperty("Item1")?.GetValue(registration) as Delegate;
-                if (handler?.Target != lobbyComponent || handler.Method?.Name != expectedHandlerMethodName)
-                    continue;
-
-                registrations.RemoveAt(i);
-                removedCount++;
-            }
-
-            return removedCount;
         }
 
         private static bool ShouldUseListedShellLobbyContract(Mission mission)
