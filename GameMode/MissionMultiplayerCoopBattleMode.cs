@@ -120,11 +120,10 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
         {
             bool minimalBattleMapRuntime = IsSceneAwareBattleMap(mission);
             var list = new List<MissionBehavior>();
-            if (!minimalBattleMapRuntime)
-                list.Add(MissionLobbyComponent.CreateBehavior());
-            else
+            MissionBehavior lobbyComponent = MissionBehaviorHelpers.TryCreateMissionLobbyComponent();
+            AddRequired(list, lobbyComponent, "MissionLobbyComponent");
+            if (minimalBattleMapRuntime)
             {
-                list.Add(MissionLobbyComponent.CreateBehavior());
                 ModLogger.Info("CoopBattle server: retained MissionLobbyComponent for battle-map runtime while isolating post-AfterStart native crash without MissionScoreboardComponent.");
             }
 
@@ -223,7 +222,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
         {
             bool minimalBattleMapRuntime = IsSceneAwareBattleMap(mission);
             var list = new List<MissionBehavior>();
-            list.Add(MissionLobbyComponent.CreateBehavior());
+            AddRequired(list, MissionBehaviorHelpers.TryCreateMissionLobbyComponent(), "MissionLobbyComponent");
             if (minimalBattleMapRuntime)
                 ModLogger.Info("CoopBattle client: retained MissionLobbyComponent for battle-map mission-entry bootstrap.");
 

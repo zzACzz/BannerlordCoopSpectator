@@ -32,6 +32,33 @@ namespace CoopSpectator.GameMode
 
         private static bool _missionOptionsDumpDone;
 
+        public static MissionBehavior TryCreateMissionLobbyComponent()
+        {
+            if (!GameNetwork.IsDedicatedServer)
+            {
+                try
+                {
+                    return new MissionCustomGameClientComponent();
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: MissionCustomGameClientComponent creation failed: " + ex.Message);
+                    return null;
+                }
+            }
+
+            MissionBehavior dedicatedLobby = TryCreateBehaviorFromLoadedAssemblies(
+                "TaleWorlds.MountAndBlade.DedicatedCustomServer.MissionCustomGameServerComponent");
+            if (dedicatedLobby != null)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: MissionCustomGameServerComponent created from loaded dedicated assembly.");
+                return dedicatedLobby;
+            }
+
+            ModLogger.Info("MissionBehaviorHelpers: MissionCustomGameServerComponent could not be created from loaded assemblies.");
+            return null;
+        }
+
         /// <summary>Повертає рядок з сигнатурами всіх public instance конструкторів типу (для діагностики).</summary>
         private static string GetConstructorSignatures(Type type)
         {

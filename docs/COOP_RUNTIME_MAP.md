@@ -127,7 +127,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 6. Коли відкривається місія `MultiplayerTeamDeathmatch`, `Patches/MissionStateOpenNewPatches.cs` більше не diff-ить vanilla behavior list, а збирає explicit listed-ingress stack у native order.
 7. У цей explicit stack входять тільки мінімальні native shell behaviors, які ще лишилися потрібними для listed join/bootstrap, плюс наші compatibility replacements:
    - `ListedShellCompatibilityMode` / `ListedShellCompatibilityModeClient`
-   - `MissionLobbyComponent` + `MultiplayerTimerComponent` з patched lobby-contract через `MissionLobbySpawnContractPatch`
+   - explicit custom lobby component (`MissionCustomGameClientComponent` або dedicated `MissionCustomGameServerComponent`) + `MultiplayerTimerComponent` з patched lobby-contract через `MissionLobbySpawnContractPatch`
    - boundary/poll/admin/notifications/options/scoreboard/preload contract
 8. Після цього explicit listed ingress додає наші coop runtime behaviors:
    - `Mission/CoopMissionNetworkBridge.cs`
@@ -143,7 +143,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 
 | Native частина | Чому лишається зараз | Коли можна прибирати |
 | --- | --- | --- |
-| `MissionLobbyComponent` | native mission-state message surface; server-side lobby state transitions, client bootstrap/state application, listed request-culture / request-change-character / class-restriction surface, late-client K/D/bots replay, `ChangeCulture` apply і весь listed death bookkeeping уже перехоплені patch-layer-ом / coop runtime | коли coop runtime візьме на себе еквівалент mission-state message surface, death/respawn bookkeeping і peer bootstrap |
+| `MissionLobbyComponent` | native mission-state message surface; тепер інстанціюється нашими stack builder-ами явно як concrete custom lobby component, а не через global `MissionLobbyComponent.CreateBehavior()` factory; server-side lobby state transitions, client bootstrap/state application, listed request-culture / request-change-character / class-restriction surface, late-client K/D/bots replay, `ChangeCulture` apply і весь listed death bookkeeping уже перехоплені patch-layer-ом / coop runtime | коли coop runtime візьме на себе еквівалент mission-state message surface, death/respawn bookkeeping і peer bootstrap |
 | `MultiplayerTimerComponent` | потрібен lobby lifecycle | коли буде свій lobby shell |
 | `MissionScoreboardComponent` | потрібен dedicated `MissionCustomGameServerComponent` | коли dedicated shell більше не буде інстанціювати цей native component |
 | `ListedShellCompatibilityMode` | generic listed-shell server mode: team/banner setup, representative bootstrap, без native TDM score/gold/match-end authority | коли listed ingress більше не залежатиме від official `TeamDeathmatch` mission shell |
@@ -274,6 +274,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - client-side `MissionLobbyComponent.HandleServerEventMissionStateChange(...)` і `OnMyClientSynchronized()` теж більше не є source of truth для listed ingress bootstrap; state apply, client timer start, warmup removal і suppression native culture-selection request тепер теж сидять у `MissionLobbySpawnContractPatch`;
 - listed-shell mission-state readers у нашому коді теж більше не читають `MissionLobbyComponent.CurrentMultiplayerState` напряму; `CoopMissionBehaviors`, `ListedShellCompatibilityModeClient` і `BattleShellSuppressionPatch` тепер ідуть через resolver усередині `MissionLobbySpawnContractPatch`;
 - наш runtime також більше не викликає native `MissionLobbyComponent.GetSpawnPeriodDurationForPeer(...)` напряму; authoritative respawn-period тепер резолвиться через `MissionLobbySpawnContractPatch.ResolveAuthoritativeRespawnPeriodForPeer(...)`, а native static helper лишився тільки як перехоплений compatibility entry point;
+- `CoopBattle` і explicit listed ingress теж більше не покладаються на global `MissionLobbyComponent.CreateBehavior()` factory; stack builder-и тепер явно створюють `MissionCustomGameClientComponent` або dedicated `MissionCustomGameServerComponent`, тож lobby shell більше не залежить від прихованої `LobbyMissionType` registration path;
 - native `MissionLobbyComponent.SendPeerInformationsToPeer(...)` теж більше не є late-client replay джерелом для listed ingress; `KillDeathCountChange` і `BotsControlledChange` на late join тепер шлються через `MissionLobbySpawnContractPatch`, а не з native lobby shell;
 - listed-shell player death теж більше не чекає polling-only `lost-controlled-agent` path: `MissionLobbySpawnContractPatch` тепер перехоплює `MissionLobbyComponent.OnAgentRemoved(...)`, одразу переводить dead peer у coop-owned spectator/`DeadAwaitingRespawn` transition з authoritative respawn-timer normalization і сам веде listed player death / player kill / suicide `KillDeathCountChange` path без native `OnPlayerDies(...)` / `OnPlayerKills(...)`;
 - listed-shell respawn period у `MissionLobbySpawnContractPatch` тепер теж більше не читає `MissionPeer.Team.Side`; він резолвиться від `CoopBattleAuthorityState.GetAssignedSide(...)`, тому lobby timer contract уже не залежить від native peer-team cache;
