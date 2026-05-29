@@ -1334,9 +1334,10 @@ namespace CoopSpectator.Infrastructure
             if (mission == null)
                 return false;
 
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
             bool anySeeded =
-                TrySeedFormationBannerCodesForTeam(mission.AttackerTeam, BattleSideEnum.Attacker, playerSide, out string attackerDiagnostics) |
-                TrySeedFormationBannerCodesForTeam(mission.DefenderTeam, BattleSideEnum.Defender, playerSide, out string defenderDiagnostics);
+                TrySeedFormationBannerCodesForTeam(mission.AttackerTeam, BattleSideEnum.Attacker, runtimeState, out string attackerDiagnostics) |
+                TrySeedFormationBannerCodesForTeam(mission.DefenderTeam, BattleSideEnum.Defender, runtimeState, out string defenderDiagnostics);
 
             diagnostics =
                 "Attacker={" + attackerDiagnostics + "} " +
@@ -1356,14 +1357,14 @@ namespace CoopSpectator.Infrastructure
         private static bool TrySeedFormationBannerCodesForTeam(
             Team team,
             BattleSideEnum side,
-            BattleSideEnum playerSide,
+            BattleRuntimeState runtimeState,
             out string diagnostics)
         {
             diagnostics = "team-null";
             if (team == null)
                 return false;
 
-            string bannerCode = ResolvePreferredFormationBannerCodeForTeam(team, side, playerSide, out string bannerSource);
+            string bannerCode = ResolvePreferredFormationBannerCodeForTeam(team, side, runtimeState, out string bannerSource);
             if (string.IsNullOrWhiteSpace(bannerCode))
             {
                 diagnostics =
@@ -1406,28 +1407,18 @@ namespace CoopSpectator.Infrastructure
         private static string ResolvePreferredFormationBannerCodeForTeam(
             Team team,
             BattleSideEnum side,
-            BattleSideEnum playerSide,
+            BattleRuntimeState runtimeState,
             out string source)
         {
             source = "none";
             if (team == null)
                 return null;
 
-            string assignedPeerBannerCode = TryResolveAssignedPeerBannerCodeForSide(side);
-            if (!string.IsNullOrWhiteSpace(assignedPeerBannerCode))
+            string canonicalSideBannerCode = TryResolveCanonicalSideBannerCode(runtimeState, side);
+            if (!string.IsNullOrWhiteSpace(canonicalSideBannerCode))
             {
-                source = "coop-side-peer";
-                return assignedPeerBannerCode;
-            }
-
-            if (side == playerSide)
-            {
-                string singleActivePeerBannerCode = TryResolveSingleActivePlayerPeerBannerCode();
-                if (!string.IsNullOrWhiteSpace(singleActivePeerBannerCode))
-                {
-                    source = "single-active-peer";
-                    return singleActivePeerBannerCode;
-                }
+                source = "canonical-side";
+                return canonicalSideBannerCode;
             }
 
             string teamBannerCode = team.Banner?.BannerCode;
@@ -1440,60 +1431,14 @@ namespace CoopSpectator.Infrastructure
             return null;
         }
 
-        private static string TryResolveAssignedPeerBannerCodeForSide(BattleSideEnum side)
+        private static string TryResolveCanonicalSideBannerCode(BattleRuntimeState runtimeState, BattleSideEnum side)
         {
-            if (side == BattleSideEnum.None || GameNetwork.NetworkPeers == null)
+            if (side == BattleSideEnum.None)
                 return null;
 
-            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
-            {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive)
-                    continue;
-
-                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                if (missionPeer == null)
-                    continue;
-
-                CoopBattleAuthorityState.PeerSelectionState selectionState = CoopBattleAuthorityState.GetSelectionState(missionPeer);
-                BattleSideEnum peerSide = selectionState.Side != BattleSideEnum.None
-                    ? selectionState.Side
-                    : selectionState.RequestedSide;
-                if (peerSide != side)
-                    continue;
-
-                string bannerCode = missionPeer.Peer?.BannerCode;
-                if (!string.IsNullOrWhiteSpace(bannerCode))
-                    return bannerCode;
-            }
-
-            return null;
-        }
-
-        private static string TryResolveSingleActivePlayerPeerBannerCode()
-        {
-            if (GameNetwork.NetworkPeers == null)
-                return null;
-
-            string resolvedBannerCode = null;
-            int candidateCount = 0;
-            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
-            {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive)
-                    continue;
-
-                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                string bannerCode = missionPeer?.Peer?.BannerCode;
-                if (string.IsNullOrWhiteSpace(bannerCode))
-                    continue;
-
-                candidateCount++;
-                if (candidateCount > 1)
-                    return null;
-
-                resolvedBannerCode = bannerCode;
-            }
-
-            return resolvedBannerCode;
+            CanonicalBattleSide canonicalSide = runtimeState?.Snapshot?.CanonicalBattle?.Sides?.FirstOrDefault(
+                candidate => candidate != null && ResolveBattleSide(candidate.SideId) == side);
+            return canonicalSide?.BannerCode;
         }
 
         private static void PushSpawnLogicInitTeamSideOverride(Mission mission, BattleSideEnum playerSide)
