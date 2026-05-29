@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -23,6 +24,18 @@ namespace CoopSpectator.Patches
         private static readonly MethodInfo MissionLobbyOnMyClientSynchronizedMethod = typeof(MissionLobbyComponent).GetMethod(
             "OnMyClientSynchronized",
             BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo NetworkFromServerBaseHandlersField =
+            AccessTools.Field(typeof(GameNetwork.NetworkMessageHandlerRegistererContainer), "_fromServerBaseHandlers");
+        private static readonly FieldInfo NetworkFromClientBaseHandlersField =
+            AccessTools.Field(typeof(GameNetwork.NetworkMessageHandlerRegistererContainer), "_fromClientBaseHandlers");
+        private static readonly Type ChangeCultureMessageType =
+            AccessTools.TypeByName("NetworkMessages.FromServer.ChangeCulture");
+        private static readonly Type ChangeClassRestrictionsMessageType =
+            AccessTools.TypeByName("NetworkMessages.FromServer.ChangeClassRestrictions");
+        private static readonly Type RequestCultureChangeMessageType =
+            AccessTools.TypeByName("NetworkMessages.FromClient.RequestCultureChange");
+        private static readonly Type RequestChangeCharacterMessageType =
+            AccessTools.TypeByName("NetworkMessages.FromClient.RequestChangeCharacterMessage");
         private static readonly MethodInfo CurrentMultiplayerStateSetterMethod = typeof(MissionLobbyComponent)
             .GetProperty(
                 nameof(MissionLobbyComponent.CurrentMultiplayerState),
@@ -167,6 +180,21 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
+                MethodInfo addRemoveHandlersTarget = typeof(MissionLobbyComponent).GetMethod(
+                    "AddRemoveMessageHandlers",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    binder: null,
+                    types: new[] { typeof(GameNetwork.NetworkMessageHandlerRegistererContainer) },
+                    modifiers: null);
+                MethodInfo addRemoveHandlersPostfix = typeof(MissionLobbySpawnContractPatch).GetMethod(
+                    nameof(AddRemoveMessageHandlers_Postfix),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                if (addRemoveHandlersTarget == null || addRemoveHandlersPostfix == null)
+                {
+                    ModLogger.Info("MissionLobbySpawnContractPatch: add-remove-message-handlers target or postfix not found. Skip.");
+                    return;
+                }
+
                 MethodInfo stateChangeTarget = typeof(MissionLobbyComponent).GetMethod(
                     "HandleServerEventMissionStateChange",
                     BindingFlags.Instance | BindingFlags.NonPublic);
@@ -251,6 +279,7 @@ namespace CoopSpectator.Patches
 
                 harmony.Patch(behaviorInitializeTarget, postfix: new HarmonyMethod(behaviorInitializePostfix));
                 harmony.Patch(afterStartTarget, postfix: new HarmonyMethod(afterStartPostfix));
+                harmony.Patch(addRemoveHandlersTarget, postfix: new HarmonyMethod(addRemoveHandlersPostfix));
                 harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
                 harmony.Patch(tickTarget, prefix: new HarmonyMethod(tickPrefix));
                 harmony.Patch(stateChangeTarget, prefix: new HarmonyMethod(stateChangePrefix));
@@ -267,6 +296,7 @@ namespace CoopSpectator.Patches
                 harmony.Patch(agentRemovedTarget, prefix: new HarmonyMethod(agentRemovedPrefix));
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnBehaviorInitialize.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.AfterStart.");
+                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.AddRemoveMessageHandlers.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMissionTick.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventMissionStateChange.");
@@ -337,6 +367,59 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info("MissionLobbySpawnContractPatch: after-start postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static void AddRemoveMessageHandlers_Postfix(
+            MissionLobbyComponent __instance,
+            GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!ShouldUseListedShellLobbyContract(mission) || registerer == null)
+                    return;
+
+                int removedServerBaseHandlers =
+                    RemoveListedShellBaseHandlerRegistration(
+                        registerer,
+                        NetworkFromServerBaseHandlersField,
+                        ChangeCultureMessageType,
+                        __instance,
+                        "HandleServerEventChangeCulture") +
+                    RemoveListedShellBaseHandlerRegistration(
+                        registerer,
+                        NetworkFromServerBaseHandlersField,
+                        ChangeClassRestrictionsMessageType,
+                        __instance,
+                        "HandleServerEventChangeClassRestrictions");
+
+                int removedClientBaseHandlers =
+                    RemoveListedShellBaseHandlerRegistration(
+                        registerer,
+                        NetworkFromClientBaseHandlersField,
+                        RequestCultureChangeMessageType,
+                        __instance,
+                        "HandleClientEventRequestCultureChange") +
+                    RemoveListedShellBaseHandlerRegistration(
+                        registerer,
+                        NetworkFromClientBaseHandlersField,
+                        RequestChangeCharacterMessageType,
+                        __instance,
+                        "HandleClientEventRequestChangeCharacterMessage");
+
+                if (removedServerBaseHandlers > 0 || removedClientBaseHandlers > 0)
+                {
+                    ModLogger.Info(
+                        "MissionLobbySpawnContractPatch: pruned dead listed-shell MissionLobbyComponent message registrations. " +
+                        "Mission=" + (mission?.SceneName ?? "unknown") +
+                        " RemovedServerBaseHandlers=" + removedServerBaseHandlers +
+                        " RemovedClientBaseHandlers=" + removedClientBaseHandlers);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: add-remove-message-handlers postfix failed open: " + ex.Message);
             }
         }
 
@@ -1304,6 +1387,49 @@ namespace CoopSpectator.Patches
 
                 missionPeer.WantsToSpawnAsBot = false;
             }
+        }
+
+        private static int RemoveListedShellBaseHandlerRegistration(
+            GameNetwork.NetworkMessageHandlerRegistererContainer registerer,
+            FieldInfo registrationsField,
+            Type messageType,
+            MissionLobbyComponent lobbyComponent,
+            string expectedHandlerMethodName)
+        {
+            if (registerer == null ||
+                registrationsField == null ||
+                messageType == null ||
+                lobbyComponent == null ||
+                string.IsNullOrWhiteSpace(expectedHandlerMethodName))
+            {
+                return 0;
+            }
+
+            IList registrations = registrationsField.GetValue(registerer) as IList;
+            if (registrations == null || registrations.Count == 0)
+                return 0;
+
+            int removedCount = 0;
+            for (int i = registrations.Count - 1; i >= 0; i--)
+            {
+                object registration = registrations[i];
+                if (registration == null)
+                    continue;
+
+                Type registrationType = registration.GetType();
+                Type registeredMessageType = registrationType.GetProperty("Item2")?.GetValue(registration) as Type;
+                if (!ReferenceEquals(registeredMessageType, messageType))
+                    continue;
+
+                Delegate handler = registrationType.GetProperty("Item1")?.GetValue(registration) as Delegate;
+                if (handler?.Target != lobbyComponent || handler.Method?.Name != expectedHandlerMethodName)
+                    continue;
+
+                registrations.RemoveAt(i);
+                removedCount++;
+            }
+
+            return removedCount;
         }
 
         private static bool ShouldUseListedShellLobbyContract(Mission mission)
