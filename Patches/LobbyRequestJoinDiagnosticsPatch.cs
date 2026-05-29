@@ -24,6 +24,7 @@ namespace CoopSpectator.Patches
                 string hostName = GetStringPropertyValue(selectedEntry, "HostName");
                 string map = GetStringPropertyValue(selectedEntry, "Map");
                 string uniqueMapId = GetStringPropertyValue(selectedEntry, "UniqueMapId");
+                string gameType = GetStringPropertyValue(selectedEntry, "GameType");
                 bool isOfficial = GetBoolPropertyValue(selectedEntry, "IsOfficial");
 
                 DedicatedServerLaunchSettings currentSettings = DedicatedHelperLauncher.GetCurrentLaunchSettings();
@@ -43,6 +44,7 @@ namespace CoopSpectator.Patches
                     " hostName=" + hostName +
                     " address=" + serverAddress +
                     " port=" + serverPort +
+                    " gameType=" + gameType +
                     " map=" + map +
                     " uniqueMapId=" + uniqueMapId +
                     " isOfficial=" + isOfficial +

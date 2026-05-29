@@ -26,6 +26,7 @@ namespace CoopSpectator.Patches
                 string hostName = GetStringPropertyValue(gameServerProperties, "HostName");
                 string serverAddress = GetStringPropertyValue(gameServerProperties, "Address");
                 int serverPort = GetIntPropertyValue(gameServerProperties, "Port");
+                string gameType = GetStringPropertyValue(gameServerProperties, "GameType");
                 bool isOfficial = GetBoolPropertyValue(gameServerProperties, "IsOfficial");
                 int peerIndex = GetIntPropertyValue(joinGameData, "PeerIndex");
                 int sessionKey = GetIntPropertyValue(joinGameData, "SessionKey");
@@ -51,6 +52,8 @@ namespace CoopSpectator.Patches
                         serverName,
                         serverAddress,
                         serverPort,
+                        gameType,
+                        isOfficial,
                         allowLocalBattleRosterFileFallback: armedSelfJoin,
                         source: "LobbyJoinResultSelfJoinArmPatch");
                     BattleSnapshotRuntimeState.Clear("LobbyJoinResultSelfJoinArmPatch join-result");
@@ -64,6 +67,7 @@ namespace CoopSpectator.Patches
                     " hostName=" + hostName +
                     " address=" + serverAddress +
                     " port=" + serverPort +
+                    " gameType=" + gameType +
                     " isOfficial=" + isOfficial +
                     " peerIndex=" + peerIndex +
                     " sessionKey=" + sessionKey +
