@@ -139,6 +139,7 @@
     <Compile Include="..\Patches\BattleMapSpawnHandoffPatch.cs" Link="Patches\BattleMapSpawnHandoffPatch.cs" />
     <Compile Include="..\Patches\LateJoinPeerBootstrapGatePatch.cs" Link="Patches\LateJoinPeerBootstrapGatePatch.cs" />
     <Compile Include="..\Patches\LateJoinPeerStateReplayOwnershipPatch.cs" Link="Patches\LateJoinPeerStateReplayOwnershipPatch.cs" />
+    <Compile Include="..\Patches\PendingBattleLoadMissionTransportTokenPatch.cs" Link="Patches\PendingBattleLoadMissionTransportTokenPatch.cs" />
     <Compile Include="..\Patches\ListedShellBaseNetworkTransportOwnershipPatch.cs" Link="Patches\ListedShellBaseNetworkTransportOwnershipPatch.cs" />
     <Compile Include="..\Patches\BattleShellSuppressionPatch.cs" Link="Patches\BattleShellSuppressionPatch.cs" />
     <Compile Include="..\Patches\MultiplayerCharacterClassFallbackPatch.cs" Link="Patches\MultiplayerCharacterClassFallbackPatch.cs" />

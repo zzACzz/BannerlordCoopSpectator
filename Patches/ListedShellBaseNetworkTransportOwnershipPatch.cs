@@ -32,8 +32,6 @@ namespace CoopSpectator.Patches
                 }
 
                 ListedShellNetworkBootstrapRuntime.InitializeBaseNetworkContracts(targetType);
-                PendingBattleFinishedLoadingTransportRuntime.InitializeBaseNetworkContracts(targetType);
-
                 PatchHandleNewClientConnect(harmony, targetType);
                 PatchHandleServerEventInitializeCustomGame(harmony, targetType);
                 PatchHandleServerEventLoadMission(harmony, targetType);
@@ -210,7 +208,6 @@ namespace CoopSpectator.Patches
                 return true;
 
             PendingBattleFinishedLoadingTransportRuntime.HandleDeferredServerFinishedLoadingValidation(
-                __instance,
                 networkPeer,
                 message,
                 delayDetails,

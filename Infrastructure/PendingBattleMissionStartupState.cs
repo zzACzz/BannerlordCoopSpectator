@@ -11,6 +11,7 @@ namespace CoopSpectator.Infrastructure
         private static bool _pending;
         private static string _pendingSceneName = string.Empty;
         private static DateTime _pendingSinceUtc = DateTime.MinValue;
+        private static int _pendingTransportToken;
         private static Mission _activeMission;
         private static int _activeTransportToken;
         private static string _activeSceneName = string.Empty;
@@ -26,6 +27,7 @@ namespace CoopSpectator.Infrastructure
                 _pending = true;
                 _pendingSceneName = normalizedSceneName;
                 _pendingSinceUtc = DateTime.UtcNow;
+                _pendingTransportToken = 0;
                 _activeMission = null;
                 _activeTransportToken = 0;
                 _activeSceneName = string.Empty;
@@ -77,6 +79,7 @@ namespace CoopSpectator.Infrastructure
                 {
                     details =
                         "PendingTimeout=true PendingScene=" + _pendingSceneName +
+                        " PendingToken=" + _pendingTransportToken +
                         " ElapsedSeconds=" + (nowUtc - _pendingSinceUtc).TotalSeconds.ToString("0.000");
                     ClearNoLock("timeout");
                     return false;
@@ -86,6 +89,7 @@ namespace CoopSpectator.Infrastructure
                 {
                     details =
                         "Pending=true PendingScene=" + _pendingSceneName +
+                        " PendingToken=" + _pendingTransportToken +
                         " Mission=null";
                     return true;
                 }
@@ -95,15 +99,35 @@ namespace CoopSpectator.Infrastructure
                 if (SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(missionSceneName) &&
                     missionState == Mission.State.Continuing)
                 {
+                    if (_pendingTransportToken <= 0)
+                    {
+                        details =
+                            "PendingMissionReadyAwaitingTransportToken=true PendingScene=" + _pendingSceneName +
+                            " MissionScene=" + missionSceneName +
+                            " MissionState=" + missionState;
+                        return true;
+                    }
+
+                    string pendingSceneName = _pendingSceneName;
+                    _activeMission = mission;
+                    _activeTransportToken = _pendingTransportToken;
+                    _activeSceneName = _pendingSceneName;
+                    _pending = false;
+                    _pendingSceneName = string.Empty;
+                    _pendingSinceUtc = DateTime.MinValue;
+                    _pendingTransportToken = 0;
+
                     details =
-                        "PendingResolved=true PendingScene=" + _pendingSceneName +
+                        "PendingResolved=true PendingScene=" + pendingSceneName +
                         " MissionScene=" + missionSceneName +
-                        " MissionState=" + missionState;
+                        " MissionState=" + missionState +
+                        " Token=" + _activeTransportToken;
                     return false;
                 }
 
                 details =
                     "Pending=true PendingScene=" + _pendingSceneName +
+                    " PendingToken=" + _pendingTransportToken +
                     " MissionScene=" + missionSceneName +
                     " MissionState=" + missionState;
                 return true;
@@ -138,48 +162,32 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        public static bool TryBindAuthoritativeTransportToken(Mission mission, int transportToken, string source)
+        public static bool TryCapturePendingTransportToken(string sceneName, int transportToken, string source)
         {
-            if (mission == null || transportToken <= 0)
+            if (transportToken <= 0)
                 return false;
 
-            string missionSceneName = Normalize(mission.SceneName);
-            if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(missionSceneName))
+            string normalizedSceneName = Normalize(sceneName);
+            if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(normalizedSceneName))
                 return false;
 
             lock (Sync)
             {
-                if (_activeTransportToken == transportToken &&
-                    (ReferenceEquals(_activeMission, mission) ||
-                     string.Equals(_activeSceneName, missionSceneName, StringComparison.Ordinal)))
+                if (!_pending ||
+                    !string.Equals(_pendingSceneName, normalizedSceneName, StringComparison.Ordinal))
                 {
+                    return false;
+                }
+
+                if (_pendingTransportToken == transportToken)
                     return true;
-                }
 
-                if (!_pending &&
-                    (_activeTransportToken <= 0 ||
-                     !string.Equals(_activeSceneName, missionSceneName, StringComparison.Ordinal)))
-                {
-                    return false;
-                }
-
-                if (_pending &&
-                    !string.Equals(_pendingSceneName, missionSceneName, StringComparison.Ordinal))
-                {
-                    return false;
-                }
-
-                _pending = false;
-                _pendingSceneName = string.Empty;
-                _pendingSinceUtc = DateTime.MinValue;
-                _activeMission = mission;
-                _activeTransportToken = transportToken;
-                _activeSceneName = missionSceneName;
+                _pendingTransportToken = transportToken;
             }
 
             ModLogger.Info(
-                "PendingBattleMissionStartupState: bound authoritative pending battle transport token. " +
-                "Scene=" + missionSceneName +
+                "PendingBattleMissionStartupState: captured pending battle transport token from native LoadMission send. " +
+                "Scene=" + normalizedSceneName +
                 " Token=" + transportToken +
                 " Source=" + Normalize(source) + ".");
             return true;
@@ -190,6 +198,7 @@ namespace CoopSpectator.Infrastructure
             if (!_pending &&
                 string.IsNullOrEmpty(_pendingSceneName) &&
                 _pendingSinceUtc == DateTime.MinValue &&
+                _pendingTransportToken == 0 &&
                 _activeMission == null &&
                 _activeTransportToken == 0 &&
                 string.IsNullOrEmpty(_activeSceneName))
@@ -200,6 +209,7 @@ namespace CoopSpectator.Infrastructure
             ModLogger.Info(
                 "PendingBattleMissionStartupState: cleared pending battle mission startup. " +
                 "PendingScene=" + _pendingSceneName +
+                " PendingToken=" + _pendingTransportToken +
                 " ActiveScene=" + _activeSceneName +
                 " ActiveToken=" + _activeTransportToken +
                 " Source=" + Normalize(source) + ".");
@@ -207,6 +217,7 @@ namespace CoopSpectator.Infrastructure
             _pending = false;
             _pendingSceneName = string.Empty;
             _pendingSinceUtc = DateTime.MinValue;
+            _pendingTransportToken = 0;
             _activeMission = null;
             _activeTransportToken = 0;
             _activeSceneName = string.Empty;

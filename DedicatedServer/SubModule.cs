@@ -467,6 +467,7 @@ namespace CoopSpectator
             {
                 if (_harmony == null)
                     _harmony = new Harmony("com.coopspectator.dedicated");
+                PendingBattleLoadMissionTransportTokenPatch.Apply(_harmony);
                 ListedShellBaseNetworkTransportOwnershipPatch.Apply(_harmony);
             }
             catch (Exception ex)
