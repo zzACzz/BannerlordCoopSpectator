@@ -58,6 +58,7 @@
 - `MultiplayerTeamSelectComponent` більше не входить у `CoopBattle` server або client stack і більше не лишається у wrapped listed shell; listed ingress більше не тримає окремий team-select compatibility shell.
 - `MissionScoreboardComponent` повинен лишатись тільки на dedicated listed/custom server, бо native `MissionCustomGameServerComponent.AfterStart()` підписується на його події без null guard; client-side native scoreboard shell уже прибраний з `CoopBattle` і listed ingress stack-ів.
 - `MultiplayerGameNotificationsComponent` більше не входить ні в listed ingress, ні в `CoopBattle` stack; native team-targeted notification shell більше не є частиною startup/join контракту.
+- `MultiplayerPollComponent` більше не входить ні в listed ingress, ні в `CoopBattle` stack; native team-scoped kick/change-game poll shell більше не є частиною coop runtime або listed bootstrap.
 - listed-shell mission stack більше не несе `SpawnComponent`, `SpawningBehaviorBase` або official TDM spawn-point behavior; direct listed spawn і spawn-frame resolution тепер ідуть напряму через `CoopMissionSpawnLogic` та helper `ListedShellSpawnFrameBehavior` без TDM gold gate, troop-cost deduction або official TDM spawn-point class.
 - `MissionLobbyComponent` більше не повинен hard-read `SpawnComponent` ні для `GetSpawnPeriodDurationForPeer(...)`, ні для server-side `OnMissionTick(...)`; `WaitingFirstPlayers -> Playing`, `Playing -> Ending`, server-side `MissionStateChange` broadcast, client-side `MissionStateChange` application, `OnMyClientSynchronized` bootstrap, `SendPeerInformationsToPeer(...)` replay, respawn-period contract і весь listed bot-death/kill routing тепер перехоплює `MissionLobbySpawnContractPatch`.
 - native `MissionMultiplayerTeamDeathmatch` / `MissionMultiplayerTeamDeathmatchClient` теж більше не повинні лишатися у wrapped listed shell; їх місце тепер займають `ListedShellCompatibilityMode` і `ListedShellCompatibilityModeClient`, які зберігають тільки мінімальний mission-mode/team/bootstrap contract без TDM score/gold authority.
@@ -129,7 +130,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 7. У цей explicit stack входять тільки мінімальні native shell behaviors, які ще лишилися потрібними для listed join/bootstrap, плюс наші compatibility replacements:
    - `ListedShellCompatibilityMode` / `ListedShellCompatibilityModeClient`
    - explicit custom lobby component (`MissionCustomGameClientComponent` або dedicated `MissionCustomGameServerComponent`) + `MultiplayerTimerComponent` з patched lobby-contract через `MissionLobbySpawnContractPatch`
-   - boundary/poll/admin/options/preload contract + server-side scoreboard compatibility only
+   - boundary/admin/options/preload contract + server-side scoreboard compatibility only
 8. Після цього explicit listed ingress додає наші coop runtime behaviors:
    - `Mission/CoopMissionNetworkBridge.cs`
    - `Mission/CoopMissionBehaviors.cs` (`CoopMissionClientLogic` або `CoopMissionSpawnLogic`)

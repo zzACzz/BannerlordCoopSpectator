@@ -151,14 +151,12 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
             if (!minimalBattleMapRuntime)
             {
-                list.Add(new MultiplayerPollComponent());
                 list.Add(new MultiplayerAdminComponent());
             }
             else
             {
-                list.Add(new MultiplayerPollComponent());
                 list.Add(new MultiplayerAdminComponent());
-                ModLogger.Info("CoopBattle server: retained MultiplayerPollComponent and MultiplayerAdminComponent for battle-map native peer-sync compatibility.");
+                ModLogger.Info("CoopBattle server: retained MultiplayerAdminComponent for battle-map native peer-sync compatibility after removing native poll shell.");
             }
 
             ModLogger.Info("CoopBattle server: skipped MultiplayerGameNotificationsComponent; native team-targeted notification shell is no longer part of coop battle runtime.");
@@ -245,14 +243,12 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
             if (!minimalBattleMapRuntime)
             {
-                list.Add(new MultiplayerPollComponent());
                 list.Add(new MultiplayerAdminComponent());
             }
             else
             {
-                list.Add(new MultiplayerPollComponent());
                 list.Add(new MultiplayerAdminComponent());
-                ModLogger.Info("CoopBattle client: retained MultiplayerPollComponent and MultiplayerAdminComponent for battle-map native bootstrap compatibility.");
+                ModLogger.Info("CoopBattle client: retained MultiplayerAdminComponent for battle-map native bootstrap compatibility after removing native poll shell.");
             }
 
             ModLogger.Info("CoopBattle client: skipped MultiplayerGameNotificationsComponent; native team-targeted notification shell is no longer part of coop battle runtime.");

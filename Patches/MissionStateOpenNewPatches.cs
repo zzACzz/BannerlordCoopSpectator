@@ -167,7 +167,6 @@ namespace CoopSpectator.Patches
             AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
-            list.Add(new MultiplayerPollComponent());
             list.Add(new MultiplayerAdminComponent());
             AddRequired(list, MissionBehaviorHelpers.TryCreateMissionOptionsComponent(mission), "MissionOptionsComponent");
             AddRequired(list, MissionBehaviorHelpers.TryCreateMissionScoreboardComponent(), "MissionScoreboardComponent");
@@ -201,7 +200,6 @@ namespace CoopSpectator.Patches
             AddRequired(list, MissionBehaviorHelpers.TryCreateHardBorderPlacer(), "MissionHardBorderPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryPlacer(), "MissionBoundaryPlacer");
             AddRequired(list, MissionBehaviorHelpers.TryCreateBoundaryCrossingHandler(mission), "MissionBoundaryCrossingHandler");
-            list.Add(new MultiplayerPollComponent());
             list.Add(new MultiplayerAdminComponent());
             AddRequired(list, MissionBehaviorHelpers.TryCreateMissionOptionsComponent(mission), "MissionOptionsComponent");
             AddOptional(list, MissionBehaviorHelpers.TryCreateMissionMatchHistoryComponent(), "MissionMatchHistoryComponent");
