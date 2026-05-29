@@ -1,5 +1,7 @@
 using System;
 using System.Threading.Tasks;
+using CoopSpectator.GameMode;
+using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Patches;
 using NetworkMessages.FromClient;
 using NetworkMessages.FromServer;
@@ -130,6 +132,18 @@ namespace CoopSpectator.Infrastructure
                 mission.GetMissionBehavior<ListedShellCompatibilityModeClient>() != null;
         }
 
+        public static bool ShouldFallbackOwnListedBattleFinishedLoadingValidation(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null &&
+                mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null;
+        }
+
         public static void HandleListedServerFinishedLoadingValidation(
             NetworkCommunicator networkPeer,
             FinishedLoading message,
@@ -225,7 +239,26 @@ namespace CoopSpectator.Infrastructure
 
             Mission currentMission = Mission.Current;
             int authoritativeToken = ResolveListedShellMissionSessionToken(currentMission);
-            bool shouldUnload = currentMission == null || authoritativeToken != finishedLoadingBattleIndex;
+            bool compatibilityZeroBattleIndex =
+                finishedLoadingBattleIndex <= 0 &&
+                ShouldFallbackOwnListedBattleFinishedLoadingValidation(currentMission);
+            bool matchedAuthoritativeToken =
+                currentMission != null &&
+                authoritativeToken > 0 &&
+                authoritativeToken == finishedLoadingBattleIndex;
+            bool shouldUnload =
+                currentMission == null ||
+                (!compatibilityZeroBattleIndex && !matchedAuthoritativeToken);
+            string validationMode =
+                currentMission == null
+                    ? "MissionNull"
+                    : compatibilityZeroBattleIndex
+                        ? "CompatibilityZeroBattleIndexAccepted"
+                        : matchedAuthoritativeToken
+                            ? "AuthoritativeMissionSessionTokenMatched"
+                            : authoritativeToken <= 0
+                                ? "AuthoritativeMissionSessionTokenUnavailable"
+                                : "AuthoritativeMissionSessionTokenMismatch";
 
             Debug.Print("Server: " + networkPeer.UserName + " has finished loading explicit listed shell.");
 
@@ -243,6 +276,7 @@ namespace CoopSpectator.Infrastructure
                 " MissionState=" + (currentMission?.CurrentState.ToString() ?? "null") +
                 " MissionSessionToken=" + authoritativeToken +
                 " FinishedLoadingBattleIndex=" + finishedLoadingBattleIndex +
+                " ValidationMode=" + validationMode +
                 " Action=" + (shouldUnload ? "UnloadMission" : "ClientFinishedLoading") +
                 " Source=" + Normalize(source) + ".");
         }

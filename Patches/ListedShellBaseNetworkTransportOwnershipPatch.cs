@@ -205,7 +205,17 @@ namespace CoopSpectator.Patches
             }
 
             if (!PendingBattleFinishedLoadingTransportRuntime.ShouldOwnDeferredServerFinishedLoadingValidation(currentMission, out string delayDetails))
-                return true;
+            {
+                if (!ListedShellSessionTransportRuntime.ShouldFallbackOwnListedBattleFinishedLoadingValidation(currentMission))
+                    return true;
+
+                ListedShellSessionTransportRuntime.HandleListedServerFinishedLoadingValidation(
+                    networkPeer,
+                    message,
+                    "ListedShellBaseNetworkTransportOwnershipPatch battle-runtime-fallback");
+                __result = true;
+                return false;
+            }
 
             PendingBattleFinishedLoadingTransportRuntime.HandleDeferredServerFinishedLoadingValidation(
                 networkPeer,
