@@ -154,18 +154,6 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                MethodInfo clientSynchronizedTarget = typeof(MissionLobbyComponent).GetMethod(
-                    "OnMyClientSynchronized",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                MethodInfo clientSynchronizedPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(OnMyClientSynchronized_Prefix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-                if (clientSynchronizedTarget == null || clientSynchronizedPrefix == null)
-                {
-                    ModLogger.Info("MissionLobbySpawnContractPatch: client-synchronized target or prefix not found. Skip.");
-                    return;
-                }
-
                 MethodInfo requestCultureChangeTarget = typeof(MissionLobbyComponent).GetMethod(
                     "HandleClientEventRequestCultureChange",
                     BindingFlags.Instance | BindingFlags.NonPublic);
@@ -209,7 +197,6 @@ namespace CoopSpectator.Patches
                     BindingFlags.NonPublic | BindingFlags.Static);
 
                 harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
-                harmony.Patch(clientSynchronizedTarget, prefix: new HarmonyMethod(clientSynchronizedPrefix));
                 if (requestCultureChangeTarget != null && requestCultureChangePrefix != null)
                     harmony.Patch(requestCultureChangeTarget, prefix: new HarmonyMethod(requestCultureChangePrefix));
                 if (requestChangeCharacterTarget != null && requestChangeCharacterPrefix != null)
@@ -223,7 +210,6 @@ namespace CoopSpectator.Patches
                 if (changeCultureTarget != null && changeCulturePrefix != null)
                     harmony.Patch(changeCultureTarget, prefix: new HarmonyMethod(changeCulturePrefix));
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
-                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMyClientSynchronized.");
                 if (requestCultureChangeTarget != null && requestCultureChangePrefix != null)
                     ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleClientEventRequestCultureChange.");
                 if (requestChangeCharacterTarget != null && requestChangeCharacterPrefix != null)
@@ -576,23 +562,6 @@ namespace CoopSpectator.Patches
             (scoreboardComponent ?? Mission.Current?.GetMissionBehavior<MissionScoreboardComponent>())
                 ?.PlayerPropertiesChanged(killDeathCountChange.VictimPeer);
             return true;
-        }
-
-        private static bool OnMyClientSynchronized_Prefix(MissionLobbyComponent __instance)
-        {
-            try
-            {
-                Mission mission = __instance?.Mission ?? Mission.Current;
-                if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionLobbySpawnContractPatch: client-synchronized prefix failed open: " + ex.Message);
-                return true;
-            }
         }
 
         private static bool HandleClientEventRequestCultureChange_Prefix(
