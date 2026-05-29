@@ -20,6 +20,9 @@ namespace CoopSpectator.Patches
         private static readonly MethodInfo SetStateEndingAsClientMethod = typeof(MissionLobbyComponent).GetMethod(
             "SetStateEndingAsClient",
             BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo MissionLobbyOnMyClientSynchronizedMethod = typeof(MissionLobbyComponent).GetMethod(
+            "OnMyClientSynchronized",
+            BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo CurrentMultiplayerStateSetterMethod = typeof(MissionLobbyComponent)
             .GetProperty(
                 nameof(MissionLobbyComponent.CurrentMultiplayerState),
@@ -152,6 +155,18 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
+                MethodInfo afterStartTarget = typeof(MissionLobbyComponent).GetMethod(
+                    nameof(MissionLobbyComponent.AfterStart),
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                MethodInfo afterStartPostfix = typeof(MissionLobbySpawnContractPatch).GetMethod(
+                    nameof(AfterStart_Postfix),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                if (afterStartTarget == null || afterStartPostfix == null)
+                {
+                    ModLogger.Info("MissionLobbySpawnContractPatch: after-start target or postfix not found. Skip.");
+                    return;
+                }
+
                 MethodInfo stateChangeTarget = typeof(MissionLobbyComponent).GetMethod(
                     "HandleServerEventMissionStateChange",
                     BindingFlags.Instance | BindingFlags.NonPublic);
@@ -235,6 +250,7 @@ namespace CoopSpectator.Patches
                 }
 
                 harmony.Patch(behaviorInitializeTarget, postfix: new HarmonyMethod(behaviorInitializePostfix));
+                harmony.Patch(afterStartTarget, postfix: new HarmonyMethod(afterStartPostfix));
                 harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
                 harmony.Patch(tickTarget, prefix: new HarmonyMethod(tickPrefix));
                 harmony.Patch(stateChangeTarget, prefix: new HarmonyMethod(stateChangePrefix));
@@ -250,6 +266,7 @@ namespace CoopSpectator.Patches
                     harmony.Patch(changeCultureTarget, prefix: new HarmonyMethod(changeCulturePrefix));
                 harmony.Patch(agentRemovedTarget, prefix: new HarmonyMethod(agentRemovedPrefix));
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnBehaviorInitialize.");
+                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.AfterStart.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMissionTick.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventMissionStateChange.");
@@ -284,6 +301,42 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info("MissionLobbySpawnContractPatch: behavior-initialize postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static void AfterStart_Postfix(MissionLobbyComponent __instance)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!ShouldUseListedShellLobbyContract(mission) || !GameNetwork.IsClient)
+                    return;
+
+                MissionNetworkComponent missionNetwork = mission?.GetMissionBehavior<MissionNetworkComponent>();
+                EventInfo synchronizedEvent = typeof(MissionNetworkComponent).GetEvent(
+                    "OnMyClientSynchronized",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (missionNetwork == null ||
+                    synchronizedEvent == null ||
+                    synchronizedEvent.EventHandlerType == null ||
+                    MissionLobbyOnMyClientSynchronizedMethod == null)
+                {
+                    return;
+                }
+
+                Delegate handler = Delegate.CreateDelegate(
+                    synchronizedEvent.EventHandlerType,
+                    __instance,
+                    MissionLobbyOnMyClientSynchronizedMethod,
+                    throwOnBindFailure: false);
+                if (handler == null)
+                    return;
+
+                synchronizedEvent.RemoveEventHandler(missionNetwork, handler);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: after-start postfix failed open: " + ex.Message);
             }
         }
 
