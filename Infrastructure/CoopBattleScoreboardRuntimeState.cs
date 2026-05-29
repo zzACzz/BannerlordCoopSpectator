@@ -45,6 +45,8 @@ namespace CoopSpectator.Infrastructure
         {
             public readonly Dictionary<BattleSideEnum, ScoreboardSideRuntimeState> StatesBySide =
                 new Dictionary<BattleSideEnum, ScoreboardSideRuntimeState>();
+
+            public readonly List<BattleSideEnum> RoundWinners = new List<BattleSideEnum>();
         }
 
         private static readonly ConditionalWeakTable<Mission, MissionScoreboardRuntimeStateHolder> _statesByMission =
@@ -96,6 +98,17 @@ namespace CoopSpectator.Infrastructure
 
             return _statesByMission.TryGetValue(mission, out MissionScoreboardRuntimeStateHolder holder) &&
                 holder.StatesBySide.TryGetValue(side, out state);
+        }
+
+        public static IReadOnlyList<BattleSideEnum> GetRoundWinners(Mission mission)
+        {
+            if (mission == null)
+                return Array.Empty<BattleSideEnum>();
+
+            if (!_statesByMission.TryGetValue(mission, out MissionScoreboardRuntimeStateHolder holder))
+                return Array.Empty<BattleSideEnum>();
+
+            return holder.RoundWinners;
         }
 
         public static bool TryGetOrSeedState(
@@ -273,6 +286,25 @@ namespace CoopSpectator.Infrastructure
                 currentState.BotDeathCount,
                 currentState.BotAliveCount,
                 source);
+        }
+
+        public static void AppendRoundWinner(
+            Mission mission,
+            BattleSideEnum side,
+            string source)
+        {
+            if (mission == null || side == BattleSideEnum.None)
+                return;
+
+            MissionScoreboardRuntimeStateHolder holder = _statesByMission.GetOrCreateValue(mission);
+            holder.RoundWinners.Add(side);
+
+            ModLogger.Info(
+                "CoopBattleScoreboardRuntimeState: round winner appended. " +
+                "Mission=" + (mission.SceneName ?? "unknown") +
+                " Side=" + side +
+                " TotalRounds=" + holder.RoundWinners.Count +
+                " Source=" + (source ?? "unknown"));
         }
 
         private static bool IsSupportedSide(BattleSideEnum side)

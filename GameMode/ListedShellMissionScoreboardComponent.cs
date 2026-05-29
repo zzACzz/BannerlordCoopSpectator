@@ -37,6 +37,7 @@ namespace CoopSpectator.GameMode
         {
             base.AfterStart();
 
+            SyncListedShellRoundWinnerHistoryToNativeMirror("ListedShellMissionScoreboardComponent.AfterStart");
             SyncListedShellSideRuntimeToNativeMirror(
                 BattleSideEnum.Attacker,
                 "ListedShellMissionScoreboardComponent.AfterStart attacker");
@@ -228,8 +229,15 @@ namespace CoopSpectator.GameMode
 
             try
             {
-                if (RoundWinnerListField?.GetValue(this) is List<BattleSideEnum> roundWinnerList)
-                    roundWinnerList.Add(RoundWinner);
+                if (RoundWinner == BattleSideEnum.Attacker || RoundWinner == BattleSideEnum.Defender)
+                {
+                    CoopBattleScoreboardRuntimeState.AppendRoundWinner(
+                        mission,
+                        RoundWinner,
+                        "ListedShellMissionScoreboardComponent.HandleListedShellRoundEnding");
+                    SyncListedShellRoundWinnerHistoryToNativeMirror(
+                        "ListedShellMissionScoreboardComponent.HandleListedShellRoundEnding");
+                }
 
                 if (RoundWinner == BattleSideEnum.Attacker || RoundWinner == BattleSideEnum.Defender)
                 {
@@ -498,6 +506,30 @@ namespace CoopSpectator.GameMode
             catch (Exception ex)
             {
                 ModLogger.Info("ListedShellMissionScoreboardComponent: failed to notify listed-shell round property change without native round-score apply path: " + ex.Message);
+            }
+        }
+
+        private void SyncListedShellRoundWinnerHistoryToNativeMirror(string source)
+        {
+            try
+            {
+                List<BattleSideEnum> nativeRoundWinners =
+                    RoundWinnerListField?.GetValue(this) as List<BattleSideEnum>;
+                if (nativeRoundWinners == null)
+                    return;
+
+                IReadOnlyList<BattleSideEnum> runtimeRoundWinners =
+                    CoopBattleScoreboardRuntimeState.GetRoundWinners(Mission ?? Mission.Current);
+                nativeRoundWinners.Clear();
+                for (int i = 0; i < runtimeRoundWinners.Count; i++)
+                    nativeRoundWinners.Add(runtimeRoundWinners[i]);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "ListedShellMissionScoreboardComponent: failed to sync listed-shell round winner history to native mirror. " +
+                    "Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
             }
         }
 
