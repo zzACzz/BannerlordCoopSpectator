@@ -154,12 +154,18 @@ namespace CoopSpectator.GameMode
         {
             NetworkMessages.FromServer.UpdateRoundScores updateRoundScores =
                 baseMessage as NetworkMessages.FromServer.UpdateRoundScores;
-            if (updateRoundScores == null || Sides == null || Sides.Length < 2)
+            Mission mission = Mission ?? Mission.Current;
+            if (updateRoundScores == null || mission == null || Sides == null || Sides.Length < 2)
                 return;
 
-            Sides[1].SideScore = updateRoundScores.AttackerTeamScore;
-            if (!IsOneSided && Sides[0] != null)
-                Sides[0].SideScore = updateRoundScores.DefenderTeamScore;
+            CoopBattleScoreboardRuntimeState.ApplyRoundScores(
+                mission,
+                this,
+                updateRoundScores.AttackerTeamScore,
+                updateRoundScores.DefenderTeamScore,
+                "ListedShellMissionScoreboardComponent.HandleListedShellUpdateRoundScoresMessage");
+            SyncListedShellSideRuntimeToNativeMirror(BattleSideEnum.Attacker, "ListedShellMissionScoreboardComponent.HandleListedShellUpdateRoundScoresMessage attacker");
+            SyncListedShellSideRuntimeToNativeMirror(BattleSideEnum.Defender, "ListedShellMissionScoreboardComponent.HandleListedShellUpdateRoundScoresMessage defender");
 
             NotifyListedShellRoundPropertiesChanged();
         }
@@ -168,17 +174,22 @@ namespace CoopSpectator.GameMode
         {
             NetworkMessages.FromServer.BotData botData =
                 baseMessage as NetworkMessages.FromServer.BotData;
-            if (botData == null)
+            Mission mission = Mission ?? Mission.Current;
+            if (botData == null || mission == null)
                 return;
 
-            MissionScoreboardSide side = GetSideSafe(botData.Side);
-            if (side?.BotScores == null)
-                return;
-
-            side.BotScores.KillCount = botData.KillCount;
-            side.BotScores.AssistCount = botData.AssistCount;
-            side.BotScores.DeathCount = botData.DeathCount;
-            side.BotScores.AliveCount = botData.AliveBotCount;
+            CoopBattleScoreboardRuntimeState.ApplyBotData(
+                mission,
+                this,
+                botData.Side,
+                botData.KillCount,
+                botData.AssistCount,
+                botData.DeathCount,
+                botData.AliveBotCount,
+                "ListedShellMissionScoreboardComponent.HandleListedShellBotDataMessage");
+            SyncListedShellSideRuntimeToNativeMirror(
+                botData.Side,
+                "ListedShellMissionScoreboardComponent.HandleListedShellBotDataMessage");
             NotifyListedShellBotPropertiesChanged(botData.Side);
         }
 
@@ -204,7 +215,8 @@ namespace CoopSpectator.GameMode
 
         private void HandleListedShellRoundEnding()
         {
-            if (!GameNetwork.IsServerOrRecorder || Sides == null)
+            Mission mission = Mission ?? Mission.Current;
+            if (!GameNetwork.IsServerOrRecorder || mission == null || Sides == null)
                 return;
 
             try
@@ -214,19 +226,31 @@ namespace CoopSpectator.GameMode
 
                 if (RoundWinner == BattleSideEnum.Attacker || RoundWinner == BattleSideEnum.Defender)
                 {
-                    MissionScoreboardSide winnerSide = GetSideSafe(RoundWinner);
-                    if (winnerSide != null)
-                        winnerSide.SideScore++;
+                    CoopBattleScoreboardRuntimeState.IncrementSideScore(
+                        mission,
+                        this,
+                        RoundWinner,
+                        "ListedShellMissionScoreboardComponent.HandleListedShellRoundEnding");
+                    SyncListedShellSideRuntimeToNativeMirror(
+                        RoundWinner,
+                        "ListedShellMissionScoreboardComponent.HandleListedShellRoundEnding");
                 }
 
                 NotifyListedShellRoundPropertiesChanged();
 
                 if (GameNetwork.IsServer)
                 {
-                    int defenderTeamScore = !IsOneSided && Sides[0] != null ? Sides[0].SideScore : 0;
+                    int attackerTeamScore = ResolveListedShellSideScore(
+                        BattleSideEnum.Attacker,
+                        "ListedShellMissionScoreboardComponent.HandleListedShellRoundEnding attacker");
+                    int defenderTeamScore = !IsOneSided
+                        ? ResolveListedShellSideScore(
+                            BattleSideEnum.Defender,
+                            "ListedShellMissionScoreboardComponent.HandleListedShellRoundEnding defender")
+                        : 0;
                     GameNetwork.BeginBroadcastModuleEvent();
                     GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateRoundScores(
-                        Sides[1]?.SideScore ?? 0,
+                        attackerTeamScore,
                         defenderTeamScore));
                     GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
                 }
@@ -390,6 +414,53 @@ namespace CoopSpectator.GameMode
             scoreboardComponent?.BotPropertiesChanged(side);
         }
 
+        internal static bool TryResolveListedShellSideRuntimeState(
+            MissionScoreboardComponent scoreboardComponent,
+            BattleSideEnum side,
+            string source,
+            out ScoreboardSideRuntimeState state)
+        {
+            state = default;
+            if (!(side == BattleSideEnum.Attacker || side == BattleSideEnum.Defender))
+                return false;
+
+            if (scoreboardComponent is ListedShellMissionScoreboardComponent listedShellScoreboard)
+                return listedShellScoreboard.TryResolveListedShellSideRuntimeState(side, source, out state);
+
+            Mission mission = scoreboardComponent?.Mission ?? Mission.Current;
+            return CoopBattleScoreboardRuntimeState.TryGetOrSeedState(
+                mission,
+                scoreboardComponent,
+                side,
+                source,
+                out state);
+        }
+
+        internal static void SyncListedShellSideRuntimeToNativeMirror(
+            MissionScoreboardComponent scoreboardComponent,
+            BattleSideEnum side,
+            string source)
+        {
+            if (scoreboardComponent is ListedShellMissionScoreboardComponent listedShellScoreboard)
+            {
+                listedShellScoreboard.SyncListedShellSideRuntimeToNativeMirror(side, source);
+                return;
+            }
+
+            if (!TryResolveListedShellSideRuntimeState(scoreboardComponent, side, source, out ScoreboardSideRuntimeState state))
+                return;
+
+            MissionScoreboardSide nativeSide = scoreboardComponent?.GetSideSafe(side);
+            if (nativeSide?.BotScores == null)
+                return;
+
+            nativeSide.SideScore = state.SideScore;
+            nativeSide.BotScores.KillCount = state.BotKillCount;
+            nativeSide.BotScores.AssistCount = state.BotAssistCount;
+            nativeSide.BotScores.DeathCount = state.BotDeathCount;
+            nativeSide.BotScores.AliveCount = state.BotAliveCount;
+        }
+
         private void NotifyListedShellBotPropertiesChanged(BattleSideEnum side)
         {
             if (GameNetwork.IsDedicatedServer)
@@ -421,6 +492,42 @@ namespace CoopSpectator.GameMode
             {
                 ModLogger.Info("ListedShellMissionScoreboardComponent: failed to notify listed-shell round property change without native round-score apply path: " + ex.Message);
             }
+        }
+
+        private bool TryResolveListedShellSideRuntimeState(
+            BattleSideEnum side,
+            string source,
+            out ScoreboardSideRuntimeState state)
+        {
+            return CoopBattleScoreboardRuntimeState.TryGetOrSeedState(
+                Mission ?? Mission.Current,
+                this,
+                side,
+                source,
+                out state);
+        }
+
+        private int ResolveListedShellSideScore(BattleSideEnum side, string source)
+        {
+            return TryResolveListedShellSideRuntimeState(side, source, out ScoreboardSideRuntimeState state)
+                ? state.SideScore
+                : 0;
+        }
+
+        private void SyncListedShellSideRuntimeToNativeMirror(BattleSideEnum side, string source)
+        {
+            if (!TryResolveListedShellSideRuntimeState(side, source, out ScoreboardSideRuntimeState state))
+                return;
+
+            MissionScoreboardSide nativeSide = GetSideSafe(side);
+            if (nativeSide?.BotScores == null)
+                return;
+
+            nativeSide.SideScore = state.SideScore;
+            nativeSide.BotScores.KillCount = state.BotKillCount;
+            nativeSide.BotScores.AssistCount = state.BotAssistCount;
+            nativeSide.BotScores.DeathCount = state.BotDeathCount;
+            nativeSide.BotScores.AliveCount = state.BotAliveCount;
         }
     }
 }

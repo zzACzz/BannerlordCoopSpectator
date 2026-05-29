@@ -162,6 +162,7 @@ namespace CoopSpectator.GameMode
                     return;
 
                 CoopBattlePeerStatsRuntimeState.Reset();
+                CoopBattleScoreboardRuntimeState.Reset(mission);
                 RememberListedShellMissionState(mission, MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers);
             }
             catch (Exception ex)
@@ -963,9 +964,14 @@ namespace CoopSpectator.GameMode
                 return false;
 
             MissionScoreboardComponent scoreboard = mission.GetMissionBehavior<MissionScoreboardComponent>();
-            MissionScoreboardComponent.MissionScoreboardSide scoreboardSide = scoreboard?.GetSideSafe(botAgent.Team.Side);
-            if (scoreboardSide?.BotScores == null)
+            if (!ListedShellMissionScoreboardComponent.TryResolveListedShellSideRuntimeState(
+                    scoreboard,
+                    botAgent.Team.Side,
+                    "ListedShellLobbyRuntime.TryHandleListedShellSideBotDeath seed",
+                    out ScoreboardSideRuntimeState sideState))
+            {
                 return false;
+            }
 
             if (assistorPeer != null)
             {
@@ -979,12 +985,23 @@ namespace CoopSpectator.GameMode
                     assistorStats.Score);
             }
 
-            scoreboardSide.BotScores.DeathCount++;
-            scoreboardSide.BotScores.AliveCount = Math.Max(0, scoreboardSide.BotScores.AliveCount - 1);
+            CoopBattleScoreboardRuntimeState.ApplyBotData(
+                mission,
+                scoreboard,
+                sideState.Side,
+                sideState.BotKillCount,
+                sideState.BotAssistCount,
+                sideState.BotDeathCount + 1,
+                Math.Max(0, sideState.BotAliveCount - 1),
+                "ListedShellLobbyRuntime.TryHandleListedShellSideBotDeath");
+            ListedShellMissionScoreboardComponent.SyncListedShellSideRuntimeToNativeMirror(
+                scoreboard,
+                sideState.Side,
+                "ListedShellLobbyRuntime.TryHandleListedShellSideBotDeath");
             ListedShellMissionScoreboardComponent.NotifyListedShellBotPropertiesChanged(
                 scoreboard,
-                scoreboardSide.Side);
-            BroadcastBotData(scoreboardSide);
+                sideState.Side);
+            BroadcastBotData(scoreboard, sideState.Side);
             return true;
         }
 
@@ -997,19 +1014,44 @@ namespace CoopSpectator.GameMode
                 return false;
 
             MissionScoreboardComponent scoreboard = mission.GetMissionBehavior<MissionScoreboardComponent>();
-            MissionScoreboardComponent.MissionScoreboardSide scoreboardSide = scoreboard?.GetSideSafe(botAgent.Team.Side);
-            if (scoreboardSide?.BotScores == null)
+            if (!ListedShellMissionScoreboardComponent.TryResolveListedShellSideRuntimeState(
+                    scoreboard,
+                    botAgent.Team.Side,
+                    "ListedShellLobbyRuntime.TryHandleListedShellSideBotKill seed",
+                    out ScoreboardSideRuntimeState sideState))
+            {
                 return false;
+            }
 
             if (botAgent.Team.IsEnemyOf(killedAgent.Team))
-                scoreboardSide.BotScores.KillCount++;
+                CoopBattleScoreboardRuntimeState.ApplyBotData(
+                    mission,
+                    scoreboard,
+                    sideState.Side,
+                    sideState.BotKillCount + 1,
+                    sideState.BotAssistCount,
+                    sideState.BotDeathCount,
+                    sideState.BotAliveCount,
+                    "ListedShellLobbyRuntime.TryHandleListedShellSideBotKill enemy");
             else
-                scoreboardSide.BotScores.KillCount--;
+                CoopBattleScoreboardRuntimeState.ApplyBotData(
+                    mission,
+                    scoreboard,
+                    sideState.Side,
+                    sideState.BotKillCount - 1,
+                    sideState.BotAssistCount,
+                    sideState.BotDeathCount,
+                    sideState.BotAliveCount,
+                    "ListedShellLobbyRuntime.TryHandleListedShellSideBotKill friendly");
 
+            ListedShellMissionScoreboardComponent.SyncListedShellSideRuntimeToNativeMirror(
+                scoreboard,
+                sideState.Side,
+                "ListedShellLobbyRuntime.TryHandleListedShellSideBotKill");
             ListedShellMissionScoreboardComponent.NotifyListedShellBotPropertiesChanged(
                 scoreboard,
-                scoreboardSide.Side);
-            BroadcastBotData(scoreboardSide);
+                sideState.Side);
+            BroadcastBotData(scoreboard, sideState.Side);
             return true;
         }
 
@@ -1116,18 +1158,26 @@ namespace CoopSpectator.GameMode
             GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
         }
 
-        private static void BroadcastBotData(MissionScoreboardComponent.MissionScoreboardSide scoreboardSide)
+        private static void BroadcastBotData(
+            MissionScoreboardComponent scoreboard,
+            BattleSideEnum side)
         {
-            if (scoreboardSide?.BotScores == null)
+            if (!ListedShellMissionScoreboardComponent.TryResolveListedShellSideRuntimeState(
+                    scoreboard,
+                    side,
+                    "ListedShellLobbyRuntime.BroadcastBotData",
+                    out ScoreboardSideRuntimeState sideState))
+            {
                 return;
+            }
 
             GameNetwork.BeginBroadcastModuleEvent();
             GameNetwork.WriteMessage(new NetworkMessages.FromServer.BotData(
-                scoreboardSide.Side,
-                scoreboardSide.BotScores.KillCount,
-                scoreboardSide.BotScores.AssistCount,
-                scoreboardSide.BotScores.DeathCount,
-                scoreboardSide.BotScores.AliveCount));
+                sideState.Side,
+                sideState.BotKillCount,
+                sideState.BotAssistCount,
+                sideState.BotDeathCount,
+                sideState.BotAliveCount));
             GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
         }
 

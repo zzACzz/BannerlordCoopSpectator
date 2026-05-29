@@ -110,6 +110,7 @@
     <Compile Include="..\Infrastructure\CoopBattleSpawnRuntimeState.cs" Link="Infrastructure\CoopBattleSpawnRuntimeState.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePeerLifecycleRuntimeState.cs" Link="Infrastructure\CoopBattlePeerLifecycleRuntimeState.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePeerStatsRuntimeState.cs" Link="Infrastructure\CoopBattlePeerStatsRuntimeState.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleScoreboardRuntimeState.cs" Link="Infrastructure\CoopBattleScoreboardRuntimeState.cs" />
   <Compile Include="..\Infrastructure\AssemblyDiagnostics.cs" Link="Infrastructure\AssemblyDiagnostics.cs" />
     <Compile Include="..\Infrastructure\ExperimentalFeatures.cs" Link="Infrastructure\ExperimentalFeatures.cs" />
     <Compile Include="..\Infrastructure\CoopGameModeIds.cs" Link="Infrastructure\CoopGameModeIds.cs" />
