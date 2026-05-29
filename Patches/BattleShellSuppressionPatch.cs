@@ -562,8 +562,12 @@ namespace CoopSpectator.Patches
             if (!IsCoopBattleMapRuntime(mission))
                 return false;
 
-            MissionLobbyComponent lobbyComponent = mission.GetMissionBehavior<MissionLobbyComponent>();
-            MissionLobbyComponent.MultiplayerGameState? lobbyState = lobbyComponent?.CurrentMultiplayerState;
+            MissionLobbyComponent.MultiplayerGameState? lobbyState =
+                MissionLobbySpawnContractPatch.TryResolveMissionLobbyState(
+                    mission,
+                    out MissionLobbyComponent.MultiplayerGameState resolvedLobbyState)
+                    ? resolvedLobbyState
+                    : (MissionLobbyComponent.MultiplayerGameState?)null;
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
             if (lobbyState == MissionLobbyComponent.MultiplayerGameState.Ending ||
                 currentPhase >= CoopBattlePhase.BattleEnded)

@@ -44,7 +44,10 @@ namespace CoopSpectator.Patches
 
         public override void OnGoldAmountChangedForRepresentative(MissionRepresentativeBase representative, int goldAmount)
         {
-            if (representative != null && MissionLobbyComponent.CurrentMultiplayerState != MissionLobbyComponent.MultiplayerGameState.Ending)
+            if (representative != null &&
+                !MissionLobbySpawnContractPatch.IsMissionLobbyState(
+                    Mission,
+                    MissionLobbyComponent.MultiplayerGameState.Ending))
             {
                 representative.UpdateGold(goldAmount);
                 ScoreboardComponent?.PlayerPropertiesChanged(representative.MissionPeer);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using HarmonyLib;
@@ -11,6 +12,11 @@ namespace CoopSpectator.Patches
 {
     internal static class MissionLobbySpawnContractPatch
     {
+        private sealed class ListedShellMissionStateHolder
+        {
+            public MissionLobbyComponent.MultiplayerGameState State;
+        }
+
         private static readonly MethodInfo SetStateEndingAsClientMethod = typeof(MissionLobbyComponent).GetMethod(
             "SetStateEndingAsClient",
             BindingFlags.Instance | BindingFlags.NonPublic);
@@ -45,7 +51,40 @@ namespace CoopSpectator.Patches
         private static readonly FieldInfo FormationPlayerOwnerBackingField = typeof(Formation).GetField(
             "<PlayerOwner>k__BackingField",
             BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly ConditionalWeakTable<Mission, ListedShellMissionStateHolder> ListedShellMissionStateByMission =
+            new ConditionalWeakTable<Mission, ListedShellMissionStateHolder>();
         private const int MaxBotsControlledCountForNetworkContract = 255;
+
+        internal static bool TryResolveMissionLobbyState(
+            Mission mission,
+            out MissionLobbyComponent.MultiplayerGameState state)
+        {
+            if (mission != null &&
+                ShouldUseListedShellLobbyContract(mission) &&
+                ListedShellMissionStateByMission.TryGetValue(mission, out ListedShellMissionStateHolder holder))
+            {
+                state = holder.State;
+                return true;
+            }
+
+            MissionLobbyComponent lobbyComponent = mission?.GetMissionBehavior<MissionLobbyComponent>();
+            if (lobbyComponent != null)
+            {
+                state = lobbyComponent.CurrentMultiplayerState;
+                return true;
+            }
+
+            state = default;
+            return false;
+        }
+
+        internal static bool IsMissionLobbyState(
+            Mission mission,
+            MissionLobbyComponent.MultiplayerGameState expectedState)
+        {
+            return TryResolveMissionLobbyState(mission, out MissionLobbyComponent.MultiplayerGameState currentState) &&
+                currentState == expectedState;
+        }
 
         public static void Apply(Harmony harmony)
         {
@@ -279,6 +318,7 @@ namespace CoopSpectator.Patches
                 }
 
                 CurrentMultiplayerStateSetterMethod?.Invoke(__instance, new object[] { currentState });
+                RememberListedShellMissionState(mission, currentState);
                 if (currentState != MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers)
                 {
                     if (currentState == MissionLobbyComponent.MultiplayerGameState.Playing)
@@ -530,6 +570,7 @@ namespace CoopSpectator.Patches
             CurrentMultiplayerStateSetterMethod?.Invoke(
                 lobbyComponent,
                 new object[] { MissionLobbyComponent.MultiplayerGameState.Playing });
+            RememberListedShellMissionState(mission, MissionLobbyComponent.MultiplayerGameState.Playing);
             timer.StartTimerAsServer(MultiplayerOptions.OptionType.MapTimeLimit.GetIntValue() * 60f);
             BroadcastMissionStateChange(
                 MissionLobbyComponent.MultiplayerGameState.Playing,
@@ -543,6 +584,7 @@ namespace CoopSpectator.Patches
             CurrentMultiplayerStateSetterMethod?.Invoke(
                 lobbyComponent,
                 new object[] { MissionLobbyComponent.MultiplayerGameState.Ending });
+            RememberListedShellMissionState(lobbyComponent?.Mission, MissionLobbyComponent.MultiplayerGameState.Ending);
             timer.StartTimerAsServer(MissionLobbyComponent.PostMatchWaitDuration);
             BroadcastMissionStateChange(
                 MissionLobbyComponent.MultiplayerGameState.Ending,
@@ -581,6 +623,17 @@ namespace CoopSpectator.Patches
             }
 
             return null;
+        }
+
+        private static void RememberListedShellMissionState(
+            Mission mission,
+            MissionLobbyComponent.MultiplayerGameState state)
+        {
+            if (mission == null || !ShouldUseListedShellLobbyContract(mission))
+                return;
+
+            ListedShellMissionStateHolder holder = ListedShellMissionStateByMission.GetOrCreateValue(mission);
+            holder.State = state;
         }
 
         private static void SendListedShellPeerInformationsToPeer(Mission mission, NetworkCommunicator targetPeer)

@@ -29108,9 +29108,9 @@ namespace CoopSpectator.MissionBehaviors
 
         private static bool IsListedShellMissionLobbyPlaying(Mission mission)
         {
-            MissionLobbyComponent lobbyComponent = mission?.GetMissionBehavior<MissionLobbyComponent>();
-            return lobbyComponent != null &&
-                lobbyComponent.CurrentMultiplayerState == MissionLobbyComponent.MultiplayerGameState.Playing;
+            return MissionLobbySpawnContractPatch.IsMissionLobbyState(
+                mission,
+                MissionLobbyComponent.MultiplayerGameState.Playing);
         }
 
         private static void TryRunListedShellDirectSpawnIngress(Mission mission, string source)
