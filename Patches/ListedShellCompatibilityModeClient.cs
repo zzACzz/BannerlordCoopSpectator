@@ -2,6 +2,7 @@ using System;
 using CoopSpectator.Infrastructure;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Network.Messages;
 
 namespace CoopSpectator.Patches
 {
@@ -37,6 +38,27 @@ namespace CoopSpectator.Patches
                 " Side=" + (GameNetwork.IsServer ? "server" : "client") + ".");
         }
 
+        protected override void AddRemoveMessageHandlers(GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
+        {
+            base.AddRemoveMessageHandlers(registerer);
+
+            if (!GameNetwork.IsClient || registerer == null)
+                return;
+
+            registerer.RegisterBaseHandler<NetworkMessages.FromServer.KillDeathCountChange>(
+                HandleListedShellKillDeathCountChange);
+            if (MissionLobbySpawnContractPatch.TryRegisterListedShellMissionStateHandler(
+                registerer,
+                HandleListedShellMissionStateChange))
+            {
+                ModLogger.Info(
+                    "ListedShellCompatibilityModeClient: registered coop-owned listed-shell MissionStateChange handler outside native MissionLobbyComponent container.");
+            }
+
+            ModLogger.Info(
+                "ListedShellCompatibilityModeClient: registered coop-owned listed-shell KillDeathCountChange handler outside native MissionLobbyComponent container.");
+        }
+
         public override void AfterStart()
         {
             Mission.SetMissionMode(MissionMode.Battle, atStart: true);
@@ -70,6 +92,22 @@ namespace CoopSpectator.Patches
         private void OnMyClientSynchronized()
         {
             _myRepresentative = GameNetwork.MyPeer?.GetComponent<MissionRepresentativeBase>();
+        }
+
+        private void HandleListedShellMissionStateChange(GameNetworkMessage baseMessage)
+        {
+            MissionLobbySpawnContractPatch.TryApplyListedShellMissionStateChange(
+                Mission,
+                MissionLobbyComponent,
+                baseMessage,
+                "ListedShellCompatibilityModeClient");
+        }
+
+        private void HandleListedShellKillDeathCountChange(GameNetworkMessage baseMessage)
+        {
+            MissionLobbySpawnContractPatch.TryApplyListedShellKillDeathCountChange(
+                baseMessage,
+                ScoreboardComponent);
         }
     }
 }

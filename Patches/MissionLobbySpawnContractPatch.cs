@@ -8,6 +8,7 @@ using CoopSpectator.MissionBehaviors;
 using HarmonyLib;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Network.Messages;
 
 namespace CoopSpectator.Patches
 {
@@ -54,6 +55,9 @@ namespace CoopSpectator.Patches
             modifiers: null);
         private static readonly MethodInfo MissionPeerKillCountSetter = typeof(MissionPeer)
             .GetProperty(nameof(MissionPeer.KillCount), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
+            .GetSetMethod(nonPublic: true);
+        private static readonly MethodInfo MissionPeerAssistCountSetter = typeof(MissionPeer)
+            .GetProperty(nameof(MissionPeer.AssistCount), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
             .GetSetMethod(nonPublic: true);
         private static readonly MethodInfo MissionPeerDeathCountSetter = typeof(MissionPeer)
             .GetProperty(nameof(MissionPeer.DeathCount), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
@@ -104,6 +108,13 @@ namespace CoopSpectator.Patches
         {
             return TryResolveMissionLobbyState(mission, out MissionLobbyComponent.MultiplayerGameState currentState) &&
                 currentState == expectedState;
+        }
+
+        internal static bool TryRegisterListedShellMissionStateHandler(
+            GameNetwork.NetworkMessageHandlerRegistererContainer registerer,
+            GameNetworkMessage.ServerMessageHandlerDelegate<GameNetworkMessage> handler)
+        {
+            return TryRegisterBaseServerHandler(registerer, MissionStateChangeType, handler);
         }
 
         internal static int ResolveAuthoritativeRespawnPeriodForPeer(Mission mission, MissionPeer peer)
@@ -195,18 +206,6 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                MethodInfo stateChangeTarget = typeof(MissionLobbyComponent).GetMethod(
-                    "HandleServerEventMissionStateChange",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                MethodInfo stateChangePrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(HandleServerEventMissionStateChange_Prefix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-                if (stateChangeTarget == null || stateChangePrefix == null)
-                {
-                    ModLogger.Info("MissionLobbySpawnContractPatch: mission-state-change target or prefix not found. Skip.");
-                    return;
-                }
-
                 MethodInfo clientSynchronizedTarget = typeof(MissionLobbyComponent).GetMethod(
                     "OnMyClientSynchronized",
                     BindingFlags.Instance | BindingFlags.NonPublic);
@@ -282,7 +281,6 @@ namespace CoopSpectator.Patches
                 harmony.Patch(addRemoveHandlersTarget, postfix: new HarmonyMethod(addRemoveHandlersPostfix));
                 harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
                 harmony.Patch(tickTarget, prefix: new HarmonyMethod(tickPrefix));
-                harmony.Patch(stateChangeTarget, prefix: new HarmonyMethod(stateChangePrefix));
                 harmony.Patch(clientSynchronizedTarget, prefix: new HarmonyMethod(clientSynchronizedPrefix));
                 harmony.Patch(peerInformationsTarget, prefix: new HarmonyMethod(peerInformationsPrefix));
                 if (requestCultureChangeTarget != null && requestCultureChangePrefix != null)
@@ -299,7 +297,6 @@ namespace CoopSpectator.Patches
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.AddRemoveMessageHandlers.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMissionTick.");
-                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventMissionStateChange.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMyClientSynchronized.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.SendPeerInformationsToPeer.");
                 if (requestCultureChangeTarget != null && requestCultureChangePrefix != null)
@@ -381,6 +378,18 @@ namespace CoopSpectator.Patches
                     return;
 
                 int removedServerBaseHandlers =
+                    RemoveListedShellBaseHandlerRegistration(
+                        registerer,
+                        NetworkFromServerBaseHandlersField,
+                        typeof(NetworkMessages.FromServer.KillDeathCountChange),
+                        __instance,
+                        "HandleServerEventKillDeathCountChangeEvent") +
+                    RemoveListedShellBaseHandlerRegistration(
+                        registerer,
+                        NetworkFromServerBaseHandlersField,
+                        MissionStateChangeType,
+                        __instance,
+                        "HandleServerEventMissionStateChange") +
                     RemoveListedShellBaseHandlerRegistration(
                         registerer,
                         NetworkFromServerBaseHandlersField,
@@ -483,16 +492,20 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static bool HandleServerEventMissionStateChange_Prefix(MissionLobbyComponent __instance, object baseMessage)
+        internal static bool TryApplyListedShellMissionStateChange(
+            Mission mission,
+            MissionLobbyComponent lobbyComponent,
+            object baseMessage,
+            string source)
         {
             try
             {
-                Mission mission = __instance?.Mission ?? Mission.Current;
+                mission = mission ?? Mission.Current;
                 if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
+                    return false;
 
                 if (!GameNetwork.IsClient)
-                    return true;
+                    return false;
 
                 object currentStateValue = baseMessage?.GetType()
                     .GetProperty("CurrentState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
@@ -503,10 +516,14 @@ namespace CoopSpectator.Patches
                 if (!(currentStateValue is MissionLobbyComponent.MultiplayerGameState currentState) ||
                     !(stateStartTimeValue is long stateStartTimeInSeconds))
                 {
-                    return true;
+                    return false;
                 }
 
-                CurrentMultiplayerStateSetterMethod?.Invoke(__instance, new object[] { currentState });
+                if (lobbyComponent == null)
+                    lobbyComponent = mission?.GetMissionBehavior<MissionLobbyComponent>();
+
+                if (lobbyComponent != null)
+                    CurrentMultiplayerStateSetterMethod?.Invoke(lobbyComponent, new object[] { currentState });
                 RememberListedShellMissionState(mission, currentState);
                 if (currentState != MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers)
                 {
@@ -527,16 +544,57 @@ namespace CoopSpectator.Patches
                     }
                 }
 
-                if (currentState == MissionLobbyComponent.MultiplayerGameState.Ending)
-                    SetStateEndingAsClientMethod?.Invoke(__instance, Array.Empty<object>());
+                if (currentState == MissionLobbyComponent.MultiplayerGameState.Ending && lobbyComponent != null)
+                    SetStateEndingAsClientMethod?.Invoke(lobbyComponent, Array.Empty<object>());
 
-                return false;
+                ModLogger.Info(
+                    "MissionLobbySpawnContractPatch: applied listed-shell mission state through coop-owned handler. " +
+                    "Source=" + (source ?? "unknown") +
+                    " Mission=" + (mission?.SceneName ?? "unknown") +
+                    " State=" + currentState +
+                    " StateStartTimeInSeconds=" + stateStartTimeInSeconds);
+                return true;
             }
             catch (Exception ex)
             {
-                ModLogger.Info("MissionLobbySpawnContractPatch: mission-state-change prefix failed open: " + ex.Message);
-                return true;
+                ModLogger.Info(
+                    "MissionLobbySpawnContractPatch: listed-shell mission-state apply failed open. " +
+                    "Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+                return false;
             }
+        }
+
+        internal static bool TryApplyListedShellKillDeathCountChange(
+            GameNetworkMessage baseMessage,
+            MissionScoreboardComponent scoreboardComponent)
+        {
+            NetworkMessages.FromServer.KillDeathCountChange killDeathCountChange =
+                baseMessage as NetworkMessages.FromServer.KillDeathCountChange;
+            if (killDeathCountChange?.VictimPeer == null)
+                return false;
+
+            MissionPeer victimPeer = killDeathCountChange.VictimPeer.GetComponent<MissionPeer>();
+            MissionPeer attackerPeer = killDeathCountChange.AttackerPeer?.GetComponent<MissionPeer>();
+            if (victimPeer != null)
+            {
+                TrySetMissionPeerIntProperty(victimPeer, MissionPeerKillCountSetter, killDeathCountChange.KillCount);
+                TrySetMissionPeerIntProperty(victimPeer, MissionPeerAssistCountSetter, killDeathCountChange.AssistCount);
+                TrySetMissionPeerIntProperty(victimPeer, MissionPeerDeathCountSetter, killDeathCountChange.DeathCount);
+                TrySetMissionPeerIntProperty(victimPeer, MissionPeerScoreSetter, killDeathCountChange.Score);
+                attackerPeer?.OnKillAnotherPeer(victimPeer);
+                if (killDeathCountChange.KillCount == 0 &&
+                    killDeathCountChange.AssistCount == 0 &&
+                    killDeathCountChange.DeathCount == 0 &&
+                    killDeathCountChange.Score == 0)
+                {
+                    victimPeer.ResetKillRegistry();
+                }
+            }
+
+            (scoreboardComponent ?? Mission.Current?.GetMissionBehavior<MissionScoreboardComponent>())
+                ?.PlayerPropertiesChanged(killDeathCountChange.VictimPeer);
+            return true;
         }
 
         private static bool OnMyClientSynchronized_Prefix(MissionLobbyComponent __instance)
@@ -1387,6 +1445,50 @@ namespace CoopSpectator.Patches
 
                 missionPeer.WantsToSpawnAsBot = false;
             }
+        }
+
+        private static bool TryRegisterBaseServerHandler(
+            GameNetwork.NetworkMessageHandlerRegistererContainer registerer,
+            Type messageType,
+            GameNetworkMessage.ServerMessageHandlerDelegate<GameNetworkMessage> handler)
+        {
+            if (registerer == null ||
+                messageType == null ||
+                handler == null ||
+                NetworkFromServerBaseHandlersField == null)
+            {
+                return false;
+            }
+
+            IList registrations = NetworkFromServerBaseHandlersField.GetValue(registerer) as IList;
+            if (registrations == null)
+                return false;
+
+            for (int i = 0; i < registrations.Count; i++)
+            {
+                object registration = registrations[i];
+                if (registration == null)
+                    continue;
+
+                Type registrationType = registration.GetType();
+                Type registeredMessageType = registrationType.GetProperty("Item2")?.GetValue(registration) as Type;
+                Delegate registeredHandler = registrationType.GetProperty("Item1")?.GetValue(registration) as Delegate;
+                if (!ReferenceEquals(registeredMessageType, messageType) ||
+                    registeredHandler?.Target != handler.Target ||
+                    registeredHandler?.Method != handler.Method)
+                {
+                    continue;
+                }
+
+                return false;
+            }
+
+            Type tupleType = typeof(Tuple<,>).MakeGenericType(
+                typeof(GameNetworkMessage.ServerMessageHandlerDelegate<GameNetworkMessage>),
+                typeof(Type));
+            object tuple = Activator.CreateInstance(tupleType, handler, messageType);
+            registrations.Add(tuple);
+            return true;
         }
 
         private static int RemoveListedShellBaseHandlerRegistration(
