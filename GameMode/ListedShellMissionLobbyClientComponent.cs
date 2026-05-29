@@ -25,11 +25,12 @@ namespace CoopSpectator.GameMode
 
         public override void OnBehaviorInitialize()
         {
-            base.OnBehaviorInitialize();
+            Mission mission = Mission ?? Mission.Current;
+            GameNetwork.AddNetworkHandler(this);
             _lobbyClient = ResolveLobbyClient();
-            if (!GameNetwork.IsServerOrRecorder && (Mission ?? Mission.Current) != null)
-                _inactivityTimer = new Timer((Mission ?? Mission.Current).CurrentTime, ListedShellClientInactivityThresholdSeconds);
-            ListedShellLobbyRuntime.InitializeListedShellLobbyState(Mission ?? Mission.Current);
+            if (!GameNetwork.IsServerOrRecorder && mission != null)
+                _inactivityTimer = new Timer(mission.CurrentTime, ListedShellClientInactivityThresholdSeconds);
+            ListedShellLobbyRuntime.InitializeListedShellLobbyState(mission);
         }
 
         public void SetServerEndingBeforeClientLoaded(bool isServerEndingBeforeClientLoaded)

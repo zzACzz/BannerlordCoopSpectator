@@ -7,8 +7,9 @@ namespace CoopSpectator.GameMode
     {
         public override void OnBehaviorInitialize()
         {
-            base.OnBehaviorInitialize();
-            ListedShellLobbyRuntime.InitializeListedShellLobbyState(Mission ?? Mission.Current);
+            Mission mission = Mission ?? Mission.Current;
+            GameNetwork.AddNetworkHandler(this);
+            ListedShellLobbyRuntime.InitializeListedShellLobbyState(mission);
         }
 
         public override void AfterStart()
