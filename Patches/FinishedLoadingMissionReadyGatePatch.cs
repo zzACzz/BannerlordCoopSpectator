@@ -14,9 +14,6 @@ namespace CoopSpectator.Patches
 {
     public static class FinishedLoadingMissionReadyGatePatch
     {
-        private static FieldInfo _baseNetworkComponentDataField;
-        private static MethodInfo _ensureBaseNetworkComponentDataMethod;
-
         public static void Apply(Harmony harmony)
         {
             try
@@ -43,8 +40,7 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                _baseNetworkComponentDataField = targetType.GetField("_baseNetworkComponentData", BindingFlags.Instance | BindingFlags.NonPublic);
-                _ensureBaseNetworkComponentDataMethod = targetType.GetMethod("EnsureBaseNetworkComponentData", BindingFlags.Instance | BindingFlags.NonPublic);
+                PendingBattleFinishedLoadingTransportRuntime.InitializeBaseNetworkContracts(targetType);
 
                 harmony.Patch(targetMethod, prefix: new HarmonyMethod(prefixMethod));
                 ModLogger.Info("FinishedLoadingMissionReadyGatePatch: patched BaseNetworkComponent.HandleClientEventFinishedLoading.");
@@ -81,99 +77,17 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (!PendingBattleMissionStartupState.ShouldDelayServerFinishedLoadingValidation(currentMission, out string delayDetails))
+            if (!PendingBattleFinishedLoadingTransportRuntime.ShouldOwnDeferredServerFinishedLoadingValidation(currentMission, out string delayDetails))
                 return true;
 
-            HandleClientEventFinishedLoadingDeferred(__instance, networkPeer, message, delayDetails);
+            PendingBattleFinishedLoadingTransportRuntime.HandleDeferredServerFinishedLoadingValidation(
+                __instance,
+                networkPeer,
+                message,
+                delayDetails,
+                "FinishedLoadingMissionReadyGatePatch");
             __result = true;
             return false;
-        }
-
-        private static async void HandleClientEventFinishedLoadingDeferred(
-            object instance,
-            NetworkCommunicator networkPeer,
-            FinishedLoading message,
-            string initialDelayDetails)
-        {
-            DateTime startedUtc = DateTime.UtcNow;
-            string finalDelayDetails = initialDelayDetails ?? string.Empty;
-
-            try
-            {
-                EnsureBaseNetworkComponentData(instance);
-                while (PendingBattleMissionStartupState.ShouldDelayServerFinishedLoadingValidation(Mission.Current, out string delayDetails))
-                {
-                    finalDelayDetails = delayDetails ?? string.Empty;
-                    await Task.Delay(1);
-                }
-
-                if (networkPeer == null || networkPeer.IsServerPeer)
-                    return;
-
-                int currentBattleIndex = GetCurrentBattleIndex(instance);
-                Mission currentMission = Mission.Current;
-                bool shouldUnload = currentMission == null || currentBattleIndex != message.BattleIndex;
-
-                Debug.Print("Server: " + networkPeer.UserName + " has finished loading. From now on, I will include him in the broadcasted messages");
-
-                if (shouldUnload)
-                {
-                    GameNetwork.BeginModuleEventAsServer(networkPeer);
-                    GameNetwork.WriteMessage(new UnloadMission(true));
-                    GameNetwork.EndModuleEventAsServer();
-                }
-                else
-                {
-                    GameNetwork.ClientFinishedLoading(networkPeer);
-                }
-
-                ModLogger.Info(
-                    "FinishedLoadingMissionReadyGatePatch: processed deferred FinishedLoading validation. " +
-                    "Peer=" + (networkPeer.UserName ?? "unknown") +
-                    " DeferredForMs=" + (DateTime.UtcNow - startedUtc).TotalMilliseconds.ToString("0") +
-                    " InitialDelayDetails=" + (initialDelayDetails ?? string.Empty) +
-                    " FinalDelayDetails=" + (finalDelayDetails ?? string.Empty) +
-                    " MissionScene=" + (currentMission?.SceneName ?? "null") +
-                    " MissionState=" + (currentMission?.CurrentState.ToString() ?? "null") +
-                    " CurrentBattleIndex=" + currentBattleIndex +
-                    " FinishedLoadingBattleIndex=" + message.BattleIndex +
-                    " Action=" + (shouldUnload ? "UnloadMission" : "ClientFinishedLoading") + ".");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Error(
-                    "FinishedLoadingMissionReadyGatePatch: deferred FinishedLoading handling failed. " +
-                    "Peer=" + (networkPeer?.UserName ?? "unknown") +
-                    " InitialDelayDetails=" + (initialDelayDetails ?? string.Empty) +
-                    " FinalDelayDetails=" + (finalDelayDetails ?? string.Empty) + ".",
-                    ex);
-            }
-        }
-
-        private static void EnsureBaseNetworkComponentData(object instance)
-        {
-            try
-            {
-                _ensureBaseNetworkComponentDataMethod?.Invoke(instance, Array.Empty<object>());
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("FinishedLoadingMissionReadyGatePatch: EnsureBaseNetworkComponentData invoke failed: " + ex.Message);
-            }
-        }
-
-        private static int GetCurrentBattleIndex(object instance)
-        {
-            try
-            {
-                BaseNetworkComponentData data = _baseNetworkComponentDataField?.GetValue(instance) as BaseNetworkComponentData;
-                return data?.CurrentBattleIndex ?? -1;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("FinishedLoadingMissionReadyGatePatch: failed to read CurrentBattleIndex: " + ex.Message);
-                return -1;
-            }
         }
     }
 }
