@@ -219,16 +219,10 @@ namespace CoopSpectator.Patches
 
             Debug.Print("Server: " + networkPeer.UserName + " has finished loading explicit listed shell.");
 
-            if (shouldUnload)
-            {
-                GameNetwork.BeginModuleEventAsServer(networkPeer);
-                GameNetwork.WriteMessage(new UnloadMission(true));
-                GameNetwork.EndModuleEventAsServer();
-            }
-            else
-            {
-                GameNetwork.ClientFinishedLoading(networkPeer);
-            }
+            ListedShellSessionTransportRuntime.CompleteListedPeerFinishedLoading(
+                networkPeer,
+                shouldUnload,
+                "FinishedLoadingMissionReadyGatePatch.ProcessListedShellFinishedLoadingValidation");
 
             ModLogger.Info(
                 "FinishedLoadingMissionReadyGatePatch: processed listed FinishedLoading validation via authoritative mission-session token. " +

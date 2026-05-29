@@ -14,8 +14,6 @@ namespace CoopSpectator.Patches
     /// </summary>
     internal static class ListedShellLobbyGameStateOwnershipPatch
     {
-        private const int StartMultiplayerServerSessionPort = 0x270f;
-
         private static bool _isApplied;
         private static Type _customClientType;
         private static Type _communityClientType;
@@ -158,14 +156,19 @@ namespace CoopSpectator.Patches
                 int sessionKey = sessionKeyField?.GetValue(instance) is int sessionKeyValue ? sessionKeyValue : 0;
                 int peerIndex = peerIndexField?.GetValue(instance) is int peerIndexValue ? peerIndexValue : 0;
 
-                ListedShellTransportBootstrapState.ArmClientReceiveBootstrap(
+                if (!ListedShellSessionTransportRuntime.TryStartListedClientTransport(
                     CoopGameModeIds.OfficialTeamDeathmatch,
                     address,
                     port,
                     sessionKey,
                     peerIndex,
-                    "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart");
-                GameNetwork.StartMultiplayerOnClient(address, port, sessionKey, peerIndex);
+                    "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart"))
+                {
+                    ListedShellClientStartOwnershipState.DisarmClientStart(
+                        "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart client-transport-failed");
+                    return true;
+                }
+
                 ListedShellClientStartOwnershipState.DisarmClientStart(
                     "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart success");
                 TryCheckMultiplayerPrivilege(promptOnRestricted: true);
@@ -182,8 +185,6 @@ namespace CoopSpectator.Patches
             {
                 ListedShellClientStartOwnershipState.DisarmClientStart(
                     "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart failure");
-                ListedShellTransportBootstrapState.DisarmClientReceiveBootstrap(
-                    "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart failure");
                 ModLogger.Error("ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart failed for " + source + ".", ex);
                 return true;
             }
@@ -193,26 +194,13 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                GameNetwork.PreStartMultiplayerOnServer();
-                if (!TaleWorlds.MountAndBlade.Module.CurrentModule.StartMultiplayerGame(gameType, scene))
+                if (!await ListedShellSessionTransportRuntime.TryStartHostedListedServerTransportAsync(
+                        gameType,
+                        scene,
+                        isInGame,
+                        "ListedShellLobbyGameStateOwnershipPatch.RunHostedListedStartAsync"))
                 {
-                    ModLogger.Info(
-                        "ListedShellLobbyGameStateOwnershipPatch: hosted listed StartMultiplayerGame returned false. " +
-                        "GameType=" + gameType +
-                        " Scene=" + scene + ".");
                     return;
-                }
-
-                while (Mission.Current == null || (int)Mission.Current.CurrentState != 2)
-                    await Task.Delay(1);
-
-                GameNetwork.StartMultiplayerOnServer(StartMultiplayerServerSessionPort);
-                if (isInGame)
-                {
-                    BannerlordNetwork.CreateServerPeer();
-                    ModLogger.Info("ListedShellLobbyGameStateOwnershipPatch: hosted listed shell created server peer and entered server list visibility.");
-                    if (!GameNetwork.IsDedicatedServer)
-                        GameNetwork.ClientFinishedLoading(GameNetwork.MyPeer);
                 }
 
                 TryCheckMultiplayerPrivilege(promptOnRestricted: false);
