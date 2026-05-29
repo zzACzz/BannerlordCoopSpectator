@@ -27,6 +27,22 @@ namespace CoopSpectator.GameMode
             base.OnBehaviorInitialize();
             _hasInitialized = false;
             _hasLoggedFirstServerTick = false;
+            if (GameNetwork.IsServer)
+            {
+                ListedShellMissionSessionState.InitializeMission(
+                    Mission,
+                    "CoopBattle.OnBehaviorInitialize");
+                if (ListedShellMissionSessionState.TryResolveTransportToken(Mission, out int listedToken) && listedToken > 0)
+                {
+                    PendingBattleMissionStartupState.Clear(
+                        "CoopBattle.OnBehaviorInitialize listed mission-session token precedence");
+                    ModLogger.Info(
+                        "CoopBattle server: activated listed mission-session token on battle runtime initialization. " +
+                        "Scene=" + (Mission?.SceneName ?? "null") +
+                        " Token=" + listedToken + ".");
+                }
+            }
+
             CoopBattlePhaseRuntimeState.StartMission(Mission, "CoopBattle.OnBehaviorInitialize");
         }
 
