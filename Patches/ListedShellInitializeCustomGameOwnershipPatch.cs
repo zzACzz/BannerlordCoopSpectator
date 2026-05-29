@@ -33,16 +33,13 @@ namespace CoopSpectator.Patches
                 MethodInfo prefixMethod = typeof(ListedShellInitializeCustomGameOwnershipPatch).GetMethod(
                     nameof(HandleNewClientConnect_Prefix),
                     BindingFlags.Static | BindingFlags.NonPublic);
-                MethodInfo postfixMethod = typeof(ListedShellInitializeCustomGameOwnershipPatch).GetMethod(
-                    nameof(HandleNewClientConnect_Postfix),
-                    BindingFlags.Static | BindingFlags.NonPublic);
-                if (targetMethod == null || prefixMethod == null || postfixMethod == null)
+                if (targetMethod == null || prefixMethod == null)
                 {
-                    ModLogger.Info("ListedShellInitializeCustomGameOwnershipPatch: target/prefix/postfix method not found. Skip.");
+                    ModLogger.Info("ListedShellInitializeCustomGameOwnershipPatch: target/prefix method not found. Skip.");
                     return;
                 }
 
-                harmony.Patch(targetMethod, prefix: new HarmonyMethod(prefixMethod), postfix: new HarmonyMethod(postfixMethod));
+                harmony.Patch(targetMethod, prefix: new HarmonyMethod(prefixMethod));
                 ModLogger.Info("ListedShellInitializeCustomGameOwnershipPatch: patched BaseNetworkComponent.HandleNewClientConnect.");
             }
             catch (Exception ex)
@@ -51,52 +48,20 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void HandleNewClientConnect_Prefix(object __instance, PlayerConnectionInfo playerConnectionInfo, ref bool __state)
+        private static bool HandleNewClientConnect_Prefix(object __instance, PlayerConnectionInfo playerConnectionInfo)
         {
-            __state = false;
-
             if (!GameNetwork.IsServer)
-                return;
+                return true;
 
             NetworkCommunicator targetPeer = playerConnectionInfo?.NetworkPeer;
             if (targetPeer == null || targetPeer.IsServerPeer)
-                return;
+                return true;
 
             Mission mission = Mission.Current;
             if (!ShouldOwnListedShellInitializeCustomGameIngress(mission))
-                return;
-            __state = true;
-        }
+                return true;
 
-        private static void HandleNewClientConnect_Postfix(object __instance, PlayerConnectionInfo playerConnectionInfo, bool __state)
-        {
-            if (!__state || !GameNetwork.IsServer)
-                return;
-
-            NetworkCommunicator targetPeer = playerConnectionInfo?.NetworkPeer;
-            if (targetPeer == null || targetPeer.IsServerPeer)
-                return;
-
-            Mission mission = Mission.Current;
-            if (!ShouldOwnListedShellInitializeCustomGameIngress(mission))
-                return;
-
-            bool inMission = !GameNetwork.IsDedicatedServer || mission != null;
-            string scene = inMission ? (mission?.SceneName ?? string.Empty) : string.Empty;
-            string gameType = inMission ? CoopGameModeIds.OfficialTeamDeathmatch : string.Empty;
-            int currentBattleIndex = ResolveListedShellMissionSessionToken(mission, __instance);
-
-            GameNetwork.BeginModuleEventAsServer(targetPeer);
-            GameNetwork.WriteMessage(new InitializeCustomGameMessage(inMission, gameType, scene, currentBattleIndex));
-            GameNetwork.EndModuleEventAsServer();
-
-            ModLogger.Info(
-                "ListedShellInitializeCustomGameOwnershipPatch: sent coop-owned listed InitializeCustomGameMessage from HandleNewClientConnect. " +
-                "Peer=" + (targetPeer.UserName ?? "unknown") +
-                " Scene=" + scene +
-                " GameType=" + gameType +
-                " MissionSessionToken=" + currentBattleIndex +
-                " OwnershipState=owned-listed-bootstrap.");
+            return !TryOwnListedShellNewClientConnect(mission, targetPeer);
         }
 
         private static bool ShouldOwnListedShellInitializeCustomGameIngress(Mission mission)
@@ -108,16 +73,53 @@ namespace CoopSpectator.Patches
                 mission.GetMissionBehavior<ListedShellCompatibilityModeClient>() != null;
         }
 
-        private static int ResolveListedShellMissionSessionToken(Mission mission, object instance)
+        private static bool TryOwnListedShellNewClientConnect(Mission mission, NetworkCommunicator targetPeer)
         {
-            if (ListedShellMissionSessionState.TryResolveTransportToken(mission, out int token))
-                return token;
+            try
+            {
+                SendServerMessage(targetPeer, new MultiplayerOptionsInitial());
+                SendServerMessage(targetPeer, new MultiplayerOptionsImmediate());
 
-            ModLogger.Info(
-                "ListedShellInitializeCustomGameOwnershipPatch: listed mission-session token was unavailable during HandleNewClientConnect. " +
-                "Scene=" + (mission?.SceneName ?? string.Empty) +
-                " OwnershipState=missing-listed-session-token.");
-            return 0;
+                if (targetPeer.IsAdmin)
+                    SendServerMessage(targetPeer, new MultiplayerOptionsDefault());
+
+                bool inMission = !GameNetwork.IsDedicatedServer || mission != null;
+                string scene = inMission ? (mission?.SceneName ?? string.Empty) : string.Empty;
+                string gameType = inMission ? CoopGameModeIds.OfficialTeamDeathmatch : string.Empty;
+                if (!ListedShellMissionSessionState.TryResolveTransportToken(mission, out int token))
+                {
+                    ModLogger.Info(
+                        "ListedShellInitializeCustomGameOwnershipPatch: listed mission-session token was unavailable during HandleNewClientConnect. " +
+                        "Scene=" + (mission?.SceneName ?? string.Empty) +
+                        " OwnershipState=missing-listed-session-token.");
+                    return false;
+                }
+
+                SendServerMessage(targetPeer, new InitializeCustomGameMessage(inMission, gameType, scene, token));
+
+                ModLogger.Info(
+                    "ListedShellInitializeCustomGameOwnershipPatch: owned listed HandleNewClientConnect bootstrap without native intermission/custom-lobby replay. " +
+                    "Peer=" + (targetPeer.UserName ?? "unknown") +
+                    " Scene=" + scene +
+                    " GameType=" + gameType +
+                    " MissionSessionToken=" + token +
+                    " SentMessages=MultiplayerOptionsInitial,MultiplayerOptionsImmediate" +
+                    (targetPeer.IsAdmin ? ",MultiplayerOptionsDefault" : string.Empty) +
+                    ",InitializeCustomGameMessage.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error("ListedShellInitializeCustomGameOwnershipPatch.TryOwnListedShellNewClientConnect failed.", ex);
+                return false;
+            }
+        }
+
+        private static void SendServerMessage(NetworkCommunicator targetPeer, TaleWorlds.MountAndBlade.Network.Messages.GameNetworkMessage message)
+        {
+            GameNetwork.BeginModuleEventAsServer(targetPeer);
+            GameNetwork.WriteMessage(message);
+            GameNetwork.EndModuleEventAsServer();
         }
     }
 }
