@@ -19,7 +19,7 @@ namespace CoopSpectator.Infrastructure
         {
             try
             {
-                ListedShellTransportBootstrapState.ArmClientReceiveBootstrap(
+                ListedShellClientSessionOwnershipState.PromoteToReceiveBootstrap(
                     gameType,
                     address,
                     port,
@@ -39,7 +39,7 @@ namespace CoopSpectator.Infrastructure
             }
             catch (Exception ex)
             {
-                ListedShellTransportBootstrapState.DisarmClientReceiveBootstrap(
+                ListedShellClientSessionOwnershipState.Disarm(
                     "ListedShellSessionTransportRuntime.TryStartListedClientTransport failure");
                 ModLogger.Error(
                     "ListedShellSessionTransportRuntime.TryStartListedClientTransport failed. " +

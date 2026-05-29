@@ -87,7 +87,7 @@ namespace CoopSpectator.Infrastructure
             if (!string.Equals(message.GameType, CoopGameModeIds.OfficialTeamDeathmatch, StringComparison.Ordinal))
                 return false;
 
-            return ListedShellTransportBootstrapState.ShouldOwnClientReceiveBootstrap();
+            return ListedShellClientSessionOwnershipState.ShouldOwnReceiveBootstrap();
         }
 
         public static async Task HandleListedInitializeCustomGameReceiveAsync(InitializeCustomGameMessage message)
@@ -135,7 +135,7 @@ namespace CoopSpectator.Infrastructure
             if (!string.Equals(message.GameType, CoopGameModeIds.OfficialTeamDeathmatch, StringComparison.Ordinal))
                 return false;
 
-            return ListedShellTransportBootstrapState.ShouldOwnClientReceiveBootstrap();
+            return ListedShellClientSessionOwnershipState.ShouldOwnReceiveBootstrap();
         }
 
         public static async Task HandleListedLoadMissionReceiveAsync(object baseNetworkComponentInstance, LoadMission message)
@@ -187,7 +187,7 @@ namespace CoopSpectator.Infrastructure
                 return true;
             }
 
-            return ListedShellTransportBootstrapState.ShouldOwnClientReceiveBootstrap();
+            return ListedShellClientSessionOwnershipState.ShouldOwnReceiveBootstrap();
         }
 
         public static async Task HandleListedUnloadMissionReceiveAsync(object baseNetworkComponentInstance, UnloadMission message)
@@ -207,7 +207,7 @@ namespace CoopSpectator.Infrastructure
                 Game.Current?.GetGameHandler<ChatBox>()?.ResetMuteList();
 
                 await WaitForMissionUnloadAsync();
-                ListedShellTransportBootstrapState.DisarmClientReceiveBootstrap(
+                ListedShellClientSessionOwnershipState.Disarm(
                     "ListedShellNetworkBootstrapRuntime.HandleListedUnloadMissionReceiveAsync");
                 LoadingWindow.DisableGlobalLoadingWindow();
             }

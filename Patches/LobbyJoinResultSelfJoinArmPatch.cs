@@ -60,7 +60,7 @@ namespace CoopSpectator.Patches
 
                     if (string.Equals(gameType, CoopGameModeIds.OfficialTeamDeathmatch, StringComparison.Ordinal))
                     {
-                        ListedShellClientStartOwnershipState.ArmClientStart(
+                        ListedShellClientSessionOwnershipState.ArmWrapperStart(
                             gameType,
                             serverName,
                             serverAddress,
@@ -69,13 +69,13 @@ namespace CoopSpectator.Patches
                     }
                     else
                     {
-                        ListedShellClientStartOwnershipState.DisarmClientStart(
+                        ListedShellClientSessionOwnershipState.Disarm(
                             "LobbyJoinResultSelfJoinArmPatch non-listed join result");
                     }
                 }
                 else
                 {
-                    ListedShellClientStartOwnershipState.DisarmClientStart(
+                    ListedShellClientSessionOwnershipState.Disarm(
                         "LobbyJoinResultSelfJoinArmPatch failed-or-invalid join result");
                 }
 

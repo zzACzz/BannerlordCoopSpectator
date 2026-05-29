@@ -104,7 +104,7 @@
     <Compile Include="..\Infrastructure\CustomGameJoinContextState.cs" Link="Infrastructure\CustomGameJoinContextState.cs" />
     <Compile Include="..\Infrastructure\HostSelfJoinRedirectState.cs" Link="Infrastructure\HostSelfJoinRedirectState.cs" />
     <Compile Include="..\Infrastructure\PendingBattleMissionStartupState.cs" Link="Infrastructure\PendingBattleMissionStartupState.cs" />
-    <Compile Include="..\Infrastructure\ListedShellTransportBootstrapState.cs" Link="Infrastructure\ListedShellTransportBootstrapState.cs" />
+    <Compile Include="..\Infrastructure\ListedShellClientSessionOwnershipState.cs" Link="Infrastructure\ListedShellClientSessionOwnershipState.cs" />
     <Compile Include="..\Infrastructure\ListedShellSessionTransportRuntime.cs" Link="Infrastructure\ListedShellSessionTransportRuntime.cs" />
     <Compile Include="..\Infrastructure\ListedShellNetworkBootstrapRuntime.cs" Link="Infrastructure\ListedShellNetworkBootstrapRuntime.cs" />
     <Compile Include="..\Infrastructure\ListedShellMissionSessionState.cs" Link="Infrastructure\ListedShellMissionSessionState.cs" />

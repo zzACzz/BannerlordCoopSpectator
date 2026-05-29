@@ -164,12 +164,12 @@ namespace CoopSpectator.Patches
                     peerIndex,
                     "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart"))
                 {
-                    ListedShellClientStartOwnershipState.DisarmClientStart(
+                    ListedShellClientSessionOwnershipState.Disarm(
                         "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart client-transport-failed");
                     return true;
                 }
 
-                ListedShellClientStartOwnershipState.DisarmClientStart(
+                ListedShellClientSessionOwnershipState.Disarm(
                     "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart success");
                 TryCheckMultiplayerPrivilege(promptOnRestricted: true);
                 ModLogger.Info(
@@ -183,7 +183,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ListedShellClientStartOwnershipState.DisarmClientStart(
+                ListedShellClientSessionOwnershipState.Disarm(
                     "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart failure");
                 ModLogger.Error("ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart failed for " + source + ".", ex);
                 return true;
@@ -213,7 +213,7 @@ namespace CoopSpectator.Patches
 
         private static bool ShouldOwnListedShellClientStart()
         {
-            return ListedShellClientStartOwnershipState.ShouldOwnClientStart();
+            return ListedShellClientSessionOwnershipState.ShouldOwnWrapperStart();
         }
 
         private static bool TryResolveHostedListedStartContext(object instance, out string gameType, out string scene, out bool isInGame)
