@@ -86,6 +86,22 @@ namespace CoopSpectator.Patches
                 currentState == expectedState;
         }
 
+        internal static int ResolveAuthoritativeRespawnPeriodForPeer(Mission mission, MissionPeer peer)
+        {
+            MissionMultiplayerGameModeBase gameMode = mission?.GetMissionBehavior<MissionMultiplayerGameModeBase>();
+            if (gameMode?.WarmupComponent != null && gameMode.WarmupComponent.IsInWarmup)
+                return 3;
+
+            BattleSideEnum authoritativeSide = CoopBattleAuthorityState.GetAssignedSide(peer);
+            if (authoritativeSide == BattleSideEnum.Attacker)
+                return MultiplayerOptions.OptionType.RespawnPeriodTeam2.GetIntValue();
+
+            if (authoritativeSide == BattleSideEnum.Defender)
+                return MultiplayerOptions.OptionType.RespawnPeriodTeam1.GetIntValue();
+
+            return -1;
+        }
+
         public static void Apply(Harmony harmony)
         {
             try
@@ -245,7 +261,7 @@ namespace CoopSpectator.Patches
                 if (!ShouldUseListedShellLobbyContract(mission))
                     return true;
 
-                __result = ResolveListedShellRespawnPeriodForPeer(mission, peer);
+                __result = ResolveAuthoritativeRespawnPeriodForPeer(mission, peer);
                 return false;
             }
             catch (Exception ex)
@@ -1165,22 +1181,6 @@ namespace CoopSpectator.Patches
             }
 
             return count;
-        }
-
-        private static int ResolveListedShellRespawnPeriodForPeer(Mission mission, MissionPeer peer)
-        {
-            MissionMultiplayerGameModeBase gameMode = mission?.GetMissionBehavior<MissionMultiplayerGameModeBase>();
-            if (gameMode?.WarmupComponent != null && gameMode.WarmupComponent.IsInWarmup)
-                return 3;
-
-            BattleSideEnum authoritativeSide = CoopBattleAuthorityState.GetAssignedSide(peer);
-            if (authoritativeSide == BattleSideEnum.Attacker)
-                return MultiplayerOptions.OptionType.RespawnPeriodTeam2.GetIntValue();
-
-            if (authoritativeSide == BattleSideEnum.Defender)
-                return MultiplayerOptions.OptionType.RespawnPeriodTeam1.GetIntValue();
-
-            return -1;
         }
 
         private static void SetRemainingAgentsInvulnerable(Mission mission)

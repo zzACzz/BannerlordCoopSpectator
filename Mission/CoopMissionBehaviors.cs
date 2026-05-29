@@ -24948,11 +24948,13 @@ namespace CoopSpectator.MissionBehaviors
             int respawnPeriod = -1;
             try
             {
-                respawnPeriod = MissionLobbyComponent.GetSpawnPeriodDurationForPeer(missionPeer);
+                respawnPeriod = MissionLobbySpawnContractPatch.ResolveAuthoritativeRespawnPeriodForPeer(
+                    mission,
+                    missionPeer);
             }
             catch (Exception ex)
             {
-                ModLogger.Info("CoopMissionSpawnLogic: failed to resolve listed-shell respawn period: " + ex.Message);
+                ModLogger.Info("CoopMissionSpawnLogic: failed to resolve authoritative respawn period: " + ex.Message);
             }
 
             if (missionPeer.SpawnTimer != null)
