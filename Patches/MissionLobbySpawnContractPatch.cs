@@ -123,34 +123,6 @@ namespace CoopSpectator.Patches
             return -1;
         }
 
-        public static void Apply(Harmony harmony)
-        {
-            try
-            {
-                MethodInfo respawnTarget = typeof(MissionLobbyComponent).GetMethod(
-                    nameof(MissionLobbyComponent.GetSpawnPeriodDurationForPeer),
-                    BindingFlags.Public | BindingFlags.Static,
-                    binder: null,
-                    types: new[] { typeof(MissionPeer) },
-                    modifiers: null);
-                MethodInfo respawnPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(GetSpawnPeriodDurationForPeer_Prefix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-                if (respawnTarget == null || respawnPrefix == null)
-                {
-                    ModLogger.Info("MissionLobbySpawnContractPatch: respawn-period target or prefix not found. Skip.");
-                    return;
-                }
-
-                harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
-                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionLobbySpawnContractPatch.Apply failed: " + ex.Message);
-            }
-        }
-
         internal static bool ShouldCallNativeOnMissionTick(MissionLobbyComponent lobbyComponent, float dt)
         {
             return OnMissionTick_Prefix(lobbyComponent, dt);
@@ -241,24 +213,6 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info("MissionLobbySpawnContractPatch: after-start postfix failed open: " + ex.Message);
-            }
-        }
-
-        private static bool GetSpawnPeriodDurationForPeer_Prefix(MissionPeer peer, ref int __result)
-        {
-            try
-            {
-                Mission mission = Mission.Current;
-                if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
-
-                __result = ResolveAuthoritativeRespawnPeriodForPeer(mission, peer);
-                return false;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionLobbySpawnContractPatch: prefix failed open: " + ex.Message);
-                return true;
             }
         }
 
