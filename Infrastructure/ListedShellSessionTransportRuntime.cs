@@ -65,21 +65,15 @@ namespace CoopSpectator.Infrastructure
         {
             try
             {
-                CoopSessionTransportPrimitives.PreStartServerTransport();
-                if (!CoopSessionTransportPrimitives.TryStartMissionSessionGame(
+                if (!await CoopSessionTransportPrimitives.TryBringUpHostedMissionSessionAsync(
                         gameType,
                         scene,
+                        StartMultiplayerServerSessionPort,
+                        isInGame,
                         "ListedShellSessionTransportRuntime.TryStartHostedListedServerTransportAsync"))
                 {
                     return false;
                 }
-
-                while (Mission.Current == null || (int)Mission.Current.CurrentState != 2)
-                    await Task.Delay(1);
-
-                CoopSessionTransportPrimitives.FinalizeHostedServerTransportStart(
-                    StartMultiplayerServerSessionPort,
-                    isInGame);
 
                 ModLogger.Info(
                     "ListedShellSessionTransportRuntime: started hosted listed server transport. " +

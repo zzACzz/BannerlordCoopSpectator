@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Threading.Tasks;
 using NetworkMessages.FromServer;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
@@ -67,6 +68,24 @@ namespace CoopSpectator.Infrastructure
 
             CreateServerPeer();
             MarkHostedLocalPeerFinishedLoading();
+        }
+
+        public static async Task<bool> TryBringUpHostedMissionSessionAsync(
+            string gameType,
+            string scene,
+            int port,
+            bool attachHostedLocalPeer,
+            string source)
+        {
+            PreStartServerTransport();
+            if (!TryStartMissionSessionGame(gameType, scene, source))
+                return false;
+
+            while (Mission.Current == null || (int)Mission.Current.CurrentState != 2)
+                await Task.Delay(1);
+
+            FinalizeHostedServerTransportStart(port, attachHostedLocalPeer);
+            return true;
         }
 
         public static void CreateServerPeer()
