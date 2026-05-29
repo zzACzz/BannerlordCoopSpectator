@@ -563,7 +563,7 @@ namespace CoopSpectator.Patches
                 return false;
 
             MissionLobbyComponent.MultiplayerGameState? lobbyState =
-                MissionLobbySpawnContractPatch.TryResolveMissionLobbyState(
+                ListedShellLobbyRuntime.TryResolveMissionLobbyState(
                     mission,
                     out MissionLobbyComponent.MultiplayerGameState resolvedLobbyState)
                     ? resolvedLobbyState

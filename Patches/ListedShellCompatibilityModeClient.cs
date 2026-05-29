@@ -1,4 +1,5 @@
 using System;
+using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -47,7 +48,7 @@ namespace CoopSpectator.Patches
 
             registerer.RegisterBaseHandler<NetworkMessages.FromServer.KillDeathCountChange>(
                 HandleListedShellKillDeathCountChange);
-            if (MissionLobbySpawnContractPatch.TryRegisterListedShellMissionStateHandler(
+            if (ListedShellLobbyRuntime.TryRegisterListedShellMissionStateHandler(
                 registerer,
                 HandleListedShellMissionStateChange))
             {
@@ -67,7 +68,7 @@ namespace CoopSpectator.Patches
         public override void OnGoldAmountChangedForRepresentative(MissionRepresentativeBase representative, int goldAmount)
         {
             if (representative != null &&
-                !MissionLobbySpawnContractPatch.IsMissionLobbyState(
+                !ListedShellLobbyRuntime.IsMissionLobbyState(
                     Mission,
                     MissionLobbyComponent.MultiplayerGameState.Ending))
             {
@@ -96,7 +97,7 @@ namespace CoopSpectator.Patches
 
         private void HandleListedShellMissionStateChange(GameNetworkMessage baseMessage)
         {
-            MissionLobbySpawnContractPatch.TryApplyListedShellMissionStateChange(
+            ListedShellLobbyRuntime.TryApplyListedShellMissionStateChange(
                 Mission,
                 MissionLobbyComponent,
                 baseMessage,
@@ -105,7 +106,7 @@ namespace CoopSpectator.Patches
 
         private void HandleListedShellKillDeathCountChange(GameNetworkMessage baseMessage)
         {
-            MissionLobbySpawnContractPatch.TryApplyListedShellKillDeathCountChange(
+            ListedShellLobbyRuntime.TryApplyListedShellKillDeathCountChange(
                 baseMessage,
                 ScoreboardComponent);
         }

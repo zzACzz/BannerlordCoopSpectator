@@ -5,14 +5,15 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Patches;
 using HarmonyLib;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Network.Messages;
 
-namespace CoopSpectator.Patches
+namespace CoopSpectator.GameMode
 {
-    internal static class MissionLobbySpawnContractPatch
+    internal static class ListedShellLobbyRuntime
     {
         private sealed class ListedShellMissionStateHolder
         {
@@ -161,7 +162,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("MissionLobbySpawnContractPatch: late-new-client bootstrap failed open: " + ex.Message);
+                ModLogger.Info("ListedShellLobbyRuntime: late-new-client bootstrap failed open: " + ex.Message);
                 return true;
             }
         }
@@ -177,7 +178,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("MissionLobbySpawnContractPatch: behavior-initialize postfix failed open: " + ex.Message);
+                ModLogger.Info("ListedShellLobbyRuntime: behavior-initialize failed open: " + ex.Message);
             }
         }
 
@@ -212,7 +213,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("MissionLobbySpawnContractPatch: after-start postfix failed open: " + ex.Message);
+                ModLogger.Info("ListedShellLobbyRuntime: after-start failed open: " + ex.Message);
             }
         }
 
@@ -253,7 +254,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("MissionLobbySpawnContractPatch: mission-tick prefix failed open: " + ex.Message);
+                ModLogger.Info("ListedShellLobbyRuntime: mission-tick failed open: " + ex.Message);
                 return true;
             }
         }
@@ -314,7 +315,7 @@ namespace CoopSpectator.Patches
                     SetStateEndingAsClientMethod?.Invoke(lobbyComponent, Array.Empty<object>());
 
                 ModLogger.Info(
-                    "MissionLobbySpawnContractPatch: applied listed-shell mission state through coop-owned handler. " +
+                    "ListedShellLobbyRuntime: applied listed-shell mission state through coop-owned handler. " +
                     "Source=" + (source ?? "unknown") +
                     " Mission=" + (mission?.SceneName ?? "unknown") +
                     " State=" + currentState +
@@ -324,7 +325,7 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info(
-                    "MissionLobbySpawnContractPatch: listed-shell mission-state apply failed open. " +
+                    "ListedShellLobbyRuntime: listed-shell mission-state apply failed open. " +
                     "Source=" + (source ?? "unknown") +
                     " Error=" + ex.Message);
                 return false;
@@ -402,7 +403,7 @@ namespace CoopSpectator.Patches
                         mission,
                         affectedAgent,
                         affectorAgent,
-                        "MissionLobbySpawnContractPatch.OnAgentRemoved");
+                        "ListedShellLobbyRuntime.OnAgentRemoved");
                     return false;
                 }
 
@@ -411,12 +412,12 @@ namespace CoopSpectator.Patches
                     mission,
                     affectedAgent,
                     affectorAgent,
-                    "MissionLobbySpawnContractPatch.OnAgentRemoved");
+                    "ListedShellLobbyRuntime.OnAgentRemoved");
                 return false;
             }
             catch (Exception ex)
             {
-                ModLogger.Info("MissionLobbySpawnContractPatch: agent-removed prefix failed open: " + ex.Message);
+                ModLogger.Info("ListedShellLobbyRuntime: agent-removed failed open: " + ex.Message);
                 return true;
             }
         }
@@ -450,7 +451,7 @@ namespace CoopSpectator.Patches
 
             SetListedShellStatePlayingAsServer(lobbyComponent, mission, timer);
             ModLogger.Info(
-                "MissionLobbySpawnContractPatch: advanced listed-shell lobby from WaitingFirstPlayers to Playing via explicit coop-owned lobby contract. " +
+                "ListedShellLobbyRuntime: advanced listed-shell lobby from WaitingFirstPlayers to Playing via explicit coop-owned lobby contract. " +
                 "Peers=" + synchronizedPeerCount +
                 " Bots=" + configuredBotCount +
                 " MinPlayers=" + minPlayersToStart +
@@ -625,7 +626,7 @@ namespace CoopSpectator.Patches
             }
 
             ModLogger.Info(
-                "MissionLobbySpawnContractPatch: replayed listed-shell peer info through coop-owned late-client contract. " +
+                "ListedShellLobbyRuntime: replayed listed-shell peer info through coop-owned late-client contract. " +
                 "Peer=" + (targetPeer.UserName ?? targetPeer.Index.ToString()) +
                 " Scene=" + (mission?.SceneName ?? "unknown") +
                 " KillDeathReplays=" + replayedKillDeathCount +
@@ -770,7 +771,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("MissionLobbySpawnContractPatch: failed to resolve assistor peer for listed player death: " + ex.Message);
+                ModLogger.Info("ListedShellLobbyRuntime: failed to resolve assistor peer for listed player death: " + ex.Message);
                 return null;
             }
         }
@@ -1004,7 +1005,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("MissionLobbySpawnContractPatch: failed to resolve formation PlayerOwner through reflection: " + ex.Message);
+                ModLogger.Info("ListedShellLobbyRuntime: failed to resolve formation PlayerOwner through reflection: " + ex.Message);
                 return null;
             }
         }
@@ -1093,7 +1094,7 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info(
-                    "MissionLobbySpawnContractPatch: failed to set MissionPeer int property through nonpublic contract. " +
+                    "ListedShellLobbyRuntime: failed to set MissionPeer int property through nonpublic contract. " +
                     "Peer=" + (missionPeer.GetNetworkPeer()?.UserName ?? missionPeer.GetNetworkPeer()?.Index.ToString() ?? "none") +
                     " Error=" + ex.Message);
             }

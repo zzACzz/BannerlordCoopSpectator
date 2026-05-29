@@ -24948,7 +24948,7 @@ namespace CoopSpectator.MissionBehaviors
             int respawnPeriod = -1;
             try
             {
-                respawnPeriod = MissionLobbySpawnContractPatch.ResolveAuthoritativeRespawnPeriodForPeer(
+                respawnPeriod = ListedShellLobbyRuntime.ResolveAuthoritativeRespawnPeriodForPeer(
                     mission,
                     missionPeer);
             }
@@ -29110,7 +29110,7 @@ namespace CoopSpectator.MissionBehaviors
 
         private static bool IsListedShellMissionLobbyPlaying(Mission mission)
         {
-            return MissionLobbySpawnContractPatch.IsMissionLobbyState(
+            return ListedShellLobbyRuntime.IsMissionLobbyState(
                 mission,
                 MissionLobbyComponent.MultiplayerGameState.Playing);
         }
