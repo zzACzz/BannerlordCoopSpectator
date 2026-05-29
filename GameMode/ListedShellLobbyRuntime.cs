@@ -243,6 +243,9 @@ namespace CoopSpectator.GameMode
                 if (!ShouldUseListedShellLobbyContract(mission))
                     return true;
 
+                if (GameNetwork.IsClient)
+                    return false;
+
                 if (!GameNetwork.IsServerOrRecorder)
                     return true;
 

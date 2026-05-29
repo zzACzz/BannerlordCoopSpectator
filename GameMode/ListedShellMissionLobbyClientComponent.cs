@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Network.Messages;
 
@@ -9,7 +10,16 @@ namespace CoopSpectator.GameMode
 {
     internal sealed class ListedShellMissionLobbyClientComponent : MissionLobbyComponent
     {
+        private const float ListedShellClientInactivityThresholdSeconds = 2f;
+        private static readonly FieldInfo MbApiNetworkField = typeof(MBAPI).GetField(
+            "IMBNetwork",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly MethodInfo ElapsedTimeSinceLastUdpPacketArrivedMethod = MbApiNetworkField?.FieldType.GetMethod(
+            "ElapsedTimeSinceLastUdpPacketArrived",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
         private object _lobbyClient;
+        private Timer _inactivityTimer;
 
         private bool _isServerEndedBeforeClientLoaded;
 
@@ -17,6 +27,8 @@ namespace CoopSpectator.GameMode
         {
             base.OnBehaviorInitialize();
             _lobbyClient = ResolveLobbyClient();
+            if (!GameNetwork.IsServerOrRecorder && (Mission ?? Mission.Current) != null)
+                _inactivityTimer = new Timer((Mission ?? Mission.Current).CurrentTime, ListedShellClientInactivityThresholdSeconds);
             ListedShellLobbyRuntime.InitializeListedShellLobbyState(Mission ?? Mission.Current);
         }
 
@@ -79,6 +91,7 @@ namespace CoopSpectator.GameMode
 
         public override void OnMissionTick(float dt)
         {
+            UpdateLobbyClientCriticalState();
             if (ListedShellLobbyRuntime.ShouldCallNativeOnMissionTick(this, dt))
                 base.OnMissionTick(dt);
         }
@@ -165,6 +178,51 @@ namespace CoopSpectator.GameMode
             }
             catch
             {
+            }
+        }
+
+        private void UpdateLobbyClientCriticalState()
+        {
+            try
+            {
+                if (!GameNetwork.IsClient)
+                    return;
+
+                Mission mission = Mission ?? Mission.Current;
+                if (mission == null)
+                    return;
+
+                if (_inactivityTimer == null)
+                    _inactivityTimer = new Timer(mission.CurrentTime, ListedShellClientInactivityThresholdSeconds);
+
+                if (!_inactivityTimer.Check(mission.CurrentTime))
+                    return;
+
+                if (_lobbyClient == null)
+                    _lobbyClient = ResolveLobbyClient();
+
+                double elapsedSeconds = ResolveElapsedSecondsSinceLastUdpPacketArrived();
+                _lobbyClient?.GetType()
+                    .GetProperty("IsInCriticalState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
+                    .SetValue(_lobbyClient, elapsedSeconds > ListedShellClientInactivityThresholdSeconds);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("ListedShellMissionLobbyClientComponent: failed to update listed-shell inactivity critical-state locally: " + ex.Message);
+            }
+        }
+
+        private static double ResolveElapsedSecondsSinceLastUdpPacketArrived()
+        {
+            try
+            {
+                object mbNetwork = MbApiNetworkField?.GetValue(null);
+                object elapsedSeconds = ElapsedTimeSinceLastUdpPacketArrivedMethod?.Invoke(mbNetwork, null);
+                return elapsedSeconds is double value ? value : 0d;
+            }
+            catch
+            {
+                return 0d;
             }
         }
     }
