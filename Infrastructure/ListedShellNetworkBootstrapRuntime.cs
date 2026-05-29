@@ -34,6 +34,30 @@ namespace CoopSpectator.Infrastructure
             _contractsInitialized = true;
         }
 
+        public static bool TryHandleListedNewClientConnect(Mission mission, PlayerConnectionInfo playerConnectionInfo, string source)
+        {
+            if (!GameNetwork.IsServer)
+                return true;
+
+            NetworkCommunicator targetPeer = playerConnectionInfo?.NetworkPeer;
+            if (targetPeer == null || targetPeer.IsServerPeer)
+                return true;
+
+            if (!ShouldOwnListedShellInitializeCustomGameIngress(mission))
+                return true;
+
+            bool shouldContinueNative = !TrySendListedNewClientBootstrap(mission, targetPeer);
+            if (!shouldContinueNative)
+            {
+                ModLogger.Info(
+                    "ListedShellNetworkBootstrapRuntime: owned listed HandleNewClientConnect bootstrap send. " +
+                    "Peer=" + (targetPeer.UserName ?? "unknown") +
+                    " Source=" + Normalize(source) + ".");
+            }
+
+            return shouldContinueNative;
+        }
+
         public static bool TrySendListedNewClientBootstrap(Mission mission, NetworkCommunicator targetPeer)
         {
             try
@@ -77,6 +101,26 @@ namespace CoopSpectator.Infrastructure
                 ModLogger.Error("ListedShellNetworkBootstrapRuntime.TrySendListedNewClientBootstrap failed.", ex);
                 return false;
             }
+        }
+
+        public static bool TryHandleInitializeCustomGameReceive(object baseMessage, string source)
+        {
+            if (!GameNetwork.IsClient)
+                return true;
+
+            InitializeCustomGameMessage message = baseMessage as InitializeCustomGameMessage;
+            if (message == null || !ShouldOwnInitializeCustomGameReceive(message))
+                return true;
+
+            _ = HandleListedInitializeCustomGameReceiveAsync(message);
+            ModLogger.Info(
+                "ListedShellNetworkBootstrapRuntime: intercepted listed InitializeCustomGame receive. " +
+                "InMission=" + message.InMission +
+                " GameType=" + (message.GameType ?? string.Empty) +
+                " Map=" + (message.Map ?? string.Empty) +
+                " BattleIndex=" + message.BattleIndex +
+                " Source=" + Normalize(source) + ".");
+            return false;
         }
 
         public static bool ShouldOwnInitializeCustomGameReceive(InitializeCustomGameMessage message)
@@ -125,6 +169,25 @@ namespace CoopSpectator.Infrastructure
             {
                 ModLogger.Error("ListedShellNetworkBootstrapRuntime.HandleListedInitializeCustomGameReceiveAsync failed.", ex);
             }
+        }
+
+        public static bool TryHandleLoadMissionReceive(object baseNetworkComponentInstance, object baseMessage, string source)
+        {
+            if (!GameNetwork.IsClient)
+                return true;
+
+            LoadMission message = baseMessage as LoadMission;
+            if (message == null || !ShouldOwnLoadMissionReceive(message))
+                return true;
+
+            _ = HandleListedLoadMissionReceiveAsync(baseNetworkComponentInstance, message);
+            ModLogger.Info(
+                "ListedShellNetworkBootstrapRuntime: intercepted listed LoadMission receive. " +
+                "GameType=" + (message.GameType ?? string.Empty) +
+                " Map=" + (message.Map ?? string.Empty) +
+                " BattleIndex=" + message.BattleIndex +
+                " Source=" + Normalize(source) + ".");
+            return false;
         }
 
         public static bool ShouldOwnLoadMissionReceive(LoadMission message)
@@ -177,6 +240,23 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static bool TryHandleUnloadMissionReceive(object baseNetworkComponentInstance, object baseMessage, string source)
+        {
+            if (!GameNetwork.IsClient)
+                return true;
+
+            UnloadMission message = baseMessage as UnloadMission;
+            if (message == null || !ShouldOwnUnloadMissionReceive())
+                return true;
+
+            _ = HandleListedUnloadMissionReceiveAsync(baseNetworkComponentInstance, message);
+            ModLogger.Info(
+                "ListedShellNetworkBootstrapRuntime: intercepted listed UnloadMission receive. " +
+                "UnloadingForBattleIndexMismatch=" + message.UnloadingForBattleIndexMismatch +
+                " Source=" + Normalize(source) + ".");
+            return false;
+        }
+
         public static bool ShouldOwnUnloadMissionReceive()
         {
             Mission mission = Mission.Current;
@@ -222,6 +302,15 @@ namespace CoopSpectator.Infrastructure
             GameNetwork.BeginModuleEventAsServer(targetPeer);
             GameNetwork.WriteMessage(message);
             GameNetwork.EndModuleEventAsServer();
+        }
+
+        private static bool ShouldOwnListedShellInitializeCustomGameIngress(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            return mission.GetMissionBehavior<ListedShellCompatibilityMode>() != null ||
+                mission.GetMissionBehavior<ListedShellCompatibilityModeClient>() != null;
         }
 
         private static async Task WaitForListedBootstrapReadinessAsync()

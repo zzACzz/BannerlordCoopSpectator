@@ -127,80 +127,33 @@ namespace CoopSpectator.Patches
 
         private static bool HandleNewClientConnect_Prefix(object __instance, PlayerConnectionInfo playerConnectionInfo)
         {
-            if (!GameNetwork.IsServer)
-                return true;
-
-            NetworkCommunicator targetPeer = playerConnectionInfo?.NetworkPeer;
-            if (targetPeer == null || targetPeer.IsServerPeer)
-                return true;
-
-            Mission mission = Mission.Current;
-            if (!ShouldOwnListedShellInitializeCustomGameIngress(mission))
-                return true;
-
-            return !ListedShellNetworkBootstrapRuntime.TrySendListedNewClientBootstrap(mission, targetPeer);
+            return ListedShellNetworkBootstrapRuntime.TryHandleListedNewClientConnect(
+                Mission.Current,
+                playerConnectionInfo,
+                "ListedShellBaseNetworkTransportOwnershipPatch");
         }
 
         private static bool HandleServerEventInitializeCustomGame_Prefix(object __instance, object baseMessage)
         {
-            if (!GameNetwork.IsClient)
-                return true;
-
-            InitializeCustomGameMessage message = baseMessage as InitializeCustomGameMessage;
-            if (message == null || !ListedShellNetworkBootstrapRuntime.ShouldOwnInitializeCustomGameReceive(message))
-                return true;
-
-            _ = ListedShellNetworkBootstrapRuntime.HandleListedInitializeCustomGameReceiveAsync(message);
-            ModLogger.Info(
-                "ListedShellBaseNetworkTransportOwnershipPatch: intercepted listed InitializeCustomGameMessage and bypassed native custom/community client state gate. " +
-                "InMission=" + message.InMission +
-                " GameType=" + (message.GameType ?? string.Empty) +
-                " Map=" + (message.Map ?? string.Empty) +
-                " BattleIndex=" + message.BattleIndex + ".");
-            return false;
+            return ListedShellNetworkBootstrapRuntime.TryHandleInitializeCustomGameReceive(
+                baseMessage,
+                "ListedShellBaseNetworkTransportOwnershipPatch");
         }
 
         private static bool HandleServerEventLoadMission_Prefix(object __instance, object baseMessage)
         {
-            if (!GameNetwork.IsClient)
-                return true;
-
-            LoadMission message = baseMessage as LoadMission;
-            if (message == null || !ListedShellNetworkBootstrapRuntime.ShouldOwnLoadMissionReceive(message))
-                return true;
-
-            _ = ListedShellNetworkBootstrapRuntime.HandleListedLoadMissionReceiveAsync(__instance, message);
-            ModLogger.Info(
-                "ListedShellBaseNetworkTransportOwnershipPatch: intercepted listed LoadMission and bypassed native BaseNetworkComponent mission-open path. " +
-                "GameType=" + (message.GameType ?? string.Empty) +
-                " Map=" + (message.Map ?? string.Empty) +
-                " BattleIndex=" + message.BattleIndex + ".");
-            return false;
+            return ListedShellNetworkBootstrapRuntime.TryHandleLoadMissionReceive(
+                __instance,
+                baseMessage,
+                "ListedShellBaseNetworkTransportOwnershipPatch");
         }
 
         private static bool HandleServerEventUnloadMission_Prefix(object __instance, object baseMessage)
         {
-            if (!GameNetwork.IsClient)
-                return true;
-
-            UnloadMission message = baseMessage as UnloadMission;
-            if (message == null || !ListedShellNetworkBootstrapRuntime.ShouldOwnUnloadMissionReceive())
-                return true;
-
-            _ = ListedShellNetworkBootstrapRuntime.HandleListedUnloadMissionReceiveAsync(__instance, message);
-            ModLogger.Info(
-                "ListedShellBaseNetworkTransportOwnershipPatch: intercepted listed UnloadMission and bypassed native BaseNetworkComponent unload coroutine. " +
-                "UnloadingForBattleIndexMismatch=" + message.UnloadingForBattleIndexMismatch + ".");
-            return false;
-        }
-
-        private static bool ShouldOwnListedShellInitializeCustomGameIngress(Mission mission)
-        {
-            if (mission == null)
-                return false;
-
-            return mission.GetMissionBehavior<ListedShellCompatibilityMode>() != null ||
-                mission.GetMissionBehavior<ListedShellCompatibilityModeClient>() != null;
+            return ListedShellNetworkBootstrapRuntime.TryHandleUnloadMissionReceive(
+                __instance,
+                baseMessage,
+                "ListedShellBaseNetworkTransportOwnershipPatch");
         }
     }
 }
