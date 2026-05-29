@@ -147,6 +147,41 @@ namespace CoopSpectator.Infrastructure
                 mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null;
         }
 
+        public static bool TryPromotePendingBattleTransportTokenToListedSession(Mission mission, string source)
+        {
+            if (mission == null)
+                return false;
+
+            if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            if (mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() == null ||
+                mission.GetMissionBehavior<CoopMissionNetworkBridge>() == null)
+            {
+                return false;
+            }
+
+            if (ListedShellMissionSessionState.TryResolveTransportToken(mission, out int listedToken) && listedToken > 0)
+                return false;
+
+            if (!PendingBattleMissionStartupState.TryResolveAuthoritativeTransportToken(mission, out int pendingToken) || pendingToken <= 0)
+                return false;
+
+            ListedShellMissionSessionState.BindServerMissionTransportToken(
+                mission,
+                pendingToken,
+                "ListedShellSessionTransportRuntime.TryPromotePendingBattleTransportTokenToListedSession");
+            PendingBattleMissionStartupState.Clear(
+                "ListedShellSessionTransportRuntime.TryPromotePendingBattleTransportTokenToListedSession");
+
+            ModLogger.Info(
+                "ListedShellSessionTransportRuntime: promoted pending battle transport token into listed session ownership. " +
+                "MissionScene=" + (mission.SceneName ?? "null") +
+                " Token=" + pendingToken +
+                " Source=" + Normalize(source) + ".");
+            return true;
+        }
+
         public static void HandleListedServerFinishedLoadingValidation(
             NetworkCommunicator networkPeer,
             FinishedLoading message,

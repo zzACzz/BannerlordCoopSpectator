@@ -194,6 +194,9 @@ namespace CoopSpectator.Patches
                 return true;
 
             Mission currentMission = Mission.Current;
+            ListedShellSessionTransportRuntime.TryPromotePendingBattleTransportTokenToListedSession(
+                currentMission,
+                "ListedShellBaseNetworkTransportOwnershipPatch pre-finished-loading");
             bool listedOwnsFinishedLoading =
                 ListedShellSessionTransportRuntime.ShouldOwnListedServerFinishedLoadingValidation(currentMission);
             bool listedBattleFallbackOwnsFinishedLoading =

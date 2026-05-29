@@ -108,6 +108,32 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static void BindServerMissionTransportToken(Mission mission, int token, string source)
+        {
+            if (mission == null || token <= 0)
+                return;
+
+            string missionScene = Normalize(mission.SceneName);
+            if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(missionScene))
+                return;
+
+            lock (Sync)
+            {
+                _pendingServerToken = 0;
+                _pendingServerScene = string.Empty;
+                _pendingServerSinceUtc = DateTime.MinValue;
+                _activeMission = mission;
+                _activeToken = token;
+                _activeScene = missionScene;
+            }
+
+            ModLogger.Info(
+                "ListedShellMissionSessionState: bound authoritative server mission-session token to active mission. " +
+                "Scene=" + missionScene +
+                " Token=" + token +
+                " Source=" + Normalize(source) + ".");
+        }
+
         public static bool ShouldDelayServerFinishedLoadingValidation(Mission mission, out string details)
         {
             lock (Sync)
