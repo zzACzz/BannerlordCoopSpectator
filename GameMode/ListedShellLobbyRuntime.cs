@@ -516,9 +516,7 @@ namespace CoopSpectator.GameMode
             if (!GameNetwork.IsServer)
                 return;
 
-            GameNetwork.BeginBroadcastModuleEvent();
-            GameNetwork.WriteMessage(new NetworkMessages.FromServer.UnloadMission());
-            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+            CoopSessionTransportPrimitives.BroadcastServerMessage(new NetworkMessages.FromServer.UnloadMission());
             GameNetwork.UnSynchronizeEveryone();
             BannerlordNetwork.EndMultiplayerLobbyMission();
         }
@@ -534,9 +532,7 @@ namespace CoopSpectator.GameMode
             if (message == null)
                 return;
 
-            GameNetwork.BeginBroadcastModuleEvent();
-            GameNetworkWriteMessageMethod.Invoke(null, new[] { message });
-            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+            CoopSessionTransportPrimitives.BroadcastReflectedServerMessage(GameNetworkWriteMessageMethod, message);
         }
 
         private static void SendMissionStateChangeToPeer(
@@ -551,9 +547,7 @@ namespace CoopSpectator.GameMode
             if (message == null)
                 return;
 
-            GameNetwork.BeginModuleEventAsServer(peer);
-            GameNetworkWriteMessageMethod.Invoke(null, new[] { message });
-            GameNetwork.EndModuleEventAsServer();
+            CoopSessionTransportPrimitives.SendReflectedServerMessage(peer, GameNetworkWriteMessageMethod, message);
         }
 
         private static MethodInfo ResolveGameNetworkWriteMessageMethod()
@@ -634,26 +628,22 @@ namespace CoopSpectator.GameMode
 
                 PeerStatsRuntimeState statsState = ResolveListedShellPeerStats(missionPeer);
                 int replayedDeathCount = ResolveListedShellReplayDeathCount(missionPeer);
-                GameNetwork.BeginModuleEventAsServer(targetPeer);
-                GameNetwork.WriteMessage(new NetworkMessages.FromServer.KillDeathCountChange(
+                CoopSessionTransportPrimitives.SendServerMessage(targetPeer, new NetworkMessages.FromServer.KillDeathCountChange(
                     missionPeer.GetNetworkPeer(),
                     null,
                     statsState.KillCount,
                     statsState.AssistCount,
                     replayedDeathCount,
                     statsState.Score));
-                GameNetwork.EndModuleEventAsServer();
                 replayedKillDeathCount++;
 
                 if (missionPeer.BotsUnderControlAlive == 0 && missionPeer.BotsUnderControlTotal == 0)
                     continue;
 
-                GameNetwork.BeginModuleEventAsServer(targetPeer);
-                GameNetwork.WriteMessage(new NetworkMessages.FromServer.BotsControlledChange(
+                CoopSessionTransportPrimitives.SendServerMessage(targetPeer, new NetworkMessages.FromServer.BotsControlledChange(
                     missionPeer.GetNetworkPeer(),
                     missionPeer.BotsUnderControlAlive,
                     missionPeer.BotsUnderControlTotal));
-                GameNetwork.EndModuleEventAsServer();
                 replayedBotsControlledCount++;
             }
 
@@ -686,11 +676,9 @@ namespace CoopSpectator.GameMode
 
             if (hasAttackerState || hasDefenderState)
             {
-                GameNetwork.BeginModuleEventAsServer(targetPeer);
-                GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateRoundScores(
+                CoopSessionTransportPrimitives.SendServerMessage(targetPeer, new NetworkMessages.FromServer.UpdateRoundScores(
                     hasAttackerState ? attackerState.SideScore : 0,
                     hasDefenderState ? defenderState.SideScore : 0));
-                GameNetwork.EndModuleEventAsServer();
             }
 
             if (hasAttackerState)
@@ -1184,15 +1172,13 @@ namespace CoopSpectator.GameMode
             if (victimPeer == null)
                 return;
 
-            GameNetwork.BeginBroadcastModuleEvent();
-            GameNetwork.WriteMessage(new NetworkMessages.FromServer.KillDeathCountChange(
+            CoopSessionTransportPrimitives.BroadcastServerMessage(new NetworkMessages.FromServer.KillDeathCountChange(
                 victimPeer,
                 attackerPeer,
                 killCount,
                 assistCount,
                 deathCount,
                 score));
-            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
         }
 
         private static void BroadcastBotsControlledChange(NetworkCommunicator peer, int aliveCount, int totalCount)
@@ -1202,9 +1188,8 @@ namespace CoopSpectator.GameMode
 
             int clampedTotalCount = ClampBotsControlledCount(totalCount);
             int clampedAliveCount = Math.Min(ClampBotsControlledCount(aliveCount), clampedTotalCount);
-            GameNetwork.BeginBroadcastModuleEvent();
-            GameNetwork.WriteMessage(new NetworkMessages.FromServer.BotsControlledChange(peer, clampedAliveCount, clampedTotalCount));
-            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+            CoopSessionTransportPrimitives.BroadcastServerMessage(
+                new NetworkMessages.FromServer.BotsControlledChange(peer, clampedAliveCount, clampedTotalCount));
         }
 
         private static void BroadcastBotData(
@@ -1220,14 +1205,12 @@ namespace CoopSpectator.GameMode
                 return;
             }
 
-            GameNetwork.BeginBroadcastModuleEvent();
-            GameNetwork.WriteMessage(new NetworkMessages.FromServer.BotData(
+            CoopSessionTransportPrimitives.BroadcastServerMessage(new NetworkMessages.FromServer.BotData(
                 sideState.Side,
                 sideState.BotKillCount,
                 sideState.BotAssistCount,
                 sideState.BotDeathCount,
                 sideState.BotAliveCount));
-            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
         }
 
         private static void SendListedShellBotDataToPeer(
@@ -1237,14 +1220,12 @@ namespace CoopSpectator.GameMode
             if (targetPeer == null)
                 return;
 
-            GameNetwork.BeginModuleEventAsServer(targetPeer);
-            GameNetwork.WriteMessage(new NetworkMessages.FromServer.BotData(
+            CoopSessionTransportPrimitives.SendServerMessage(targetPeer, new NetworkMessages.FromServer.BotData(
                 sideState.Side,
                 sideState.BotKillCount,
                 sideState.BotAssistCount,
                 sideState.BotDeathCount,
                 sideState.BotAliveCount));
-            GameNetwork.EndModuleEventAsServer();
         }
 
         private static PeerStatsRuntimeState ResolveListedShellPeerStats(MissionPeer missionPeer)

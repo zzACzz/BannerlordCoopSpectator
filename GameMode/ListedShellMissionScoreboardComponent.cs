@@ -263,11 +263,9 @@ namespace CoopSpectator.GameMode
                             BattleSideEnum.Defender,
                             "ListedShellMissionScoreboardComponent.HandleListedShellRoundEnding defender")
                         : 0;
-                    GameNetwork.BeginBroadcastModuleEvent();
-                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.UpdateRoundScores(
+                    CoopSessionTransportPrimitives.BroadcastServerMessage(new NetworkMessages.FromServer.UpdateRoundScores(
                         attackerTeamScore,
                         defenderTeamScore));
-                    GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
                 }
             }
             catch (Exception ex)

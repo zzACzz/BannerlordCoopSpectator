@@ -1,3 +1,4 @@
+using System.Reflection;
 using NetworkMessages.FromServer;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Network.Messages;
@@ -76,6 +77,36 @@ namespace CoopSpectator.Infrastructure
             GameNetwork.BeginModuleEventAsServer(targetPeer);
             GameNetwork.WriteMessage(message);
             GameNetwork.EndModuleEventAsServer();
+        }
+
+        public static void BroadcastServerMessage(GameNetworkMessage message)
+        {
+            if (message == null)
+                return;
+
+            GameNetwork.BeginBroadcastModuleEvent();
+            GameNetwork.WriteMessage(message);
+            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+        }
+
+        public static void SendReflectedServerMessage(NetworkCommunicator targetPeer, MethodInfo writeMessageMethod, object message)
+        {
+            if (targetPeer == null || targetPeer.IsServerPeer || writeMessageMethod == null || message == null)
+                return;
+
+            GameNetwork.BeginModuleEventAsServer(targetPeer);
+            writeMessageMethod.Invoke(null, new[] { message });
+            GameNetwork.EndModuleEventAsServer();
+        }
+
+        public static void BroadcastReflectedServerMessage(MethodInfo writeMessageMethod, object message)
+        {
+            if (writeMessageMethod == null || message == null)
+                return;
+
+            GameNetwork.BeginBroadcastModuleEvent();
+            writeMessageMethod.Invoke(null, new[] { message });
+            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
         }
     }
 }
