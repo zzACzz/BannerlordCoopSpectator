@@ -311,7 +311,6 @@ namespace CoopSpectator
                     TryApplyBattleMapSpawnHandoffPatch();
                     TryApplyLateJoinPeerBootstrapGatePatch();
                     TryApplyLateJoinPeerStateReplayOwnershipPatch();
-                    TryApplyFinishedLoadingMissionReadyGatePatch();
                     TryApplyListedShellBaseNetworkTransportOwnershipPatch();
                     if (EnableBattleShellSuppressionPatch)
                         TryApplyBattleShellSuppressionPatch();
@@ -459,20 +458,6 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: BattleShellSuppression patch apply failed: " + ex.Message);
-            }
-        }
-
-        private static void TryApplyFinishedLoadingMissionReadyGatePatch()
-        {
-            try
-            {
-                if (_harmony == null)
-                    _harmony = new Harmony("com.coopspectator.dedicated");
-                FinishedLoadingMissionReadyGatePatch.Apply(_harmony);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("CoopSpectatorDedicated: FinishedLoadingMissionReadyGate patch apply failed: " + ex.Message);
             }
         }
 

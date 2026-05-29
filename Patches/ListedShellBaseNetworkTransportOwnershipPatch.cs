@@ -2,8 +2,10 @@ using System;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
 using HarmonyLib;
+using NetworkMessages.FromClient;
 using NetworkMessages.FromServer;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Network.Messages;
 
 namespace CoopSpectator.Patches
 {
@@ -30,11 +32,13 @@ namespace CoopSpectator.Patches
                 }
 
                 ListedShellNetworkBootstrapRuntime.InitializeBaseNetworkContracts(targetType);
+                PendingBattleFinishedLoadingTransportRuntime.InitializeBaseNetworkContracts(targetType);
 
                 PatchHandleNewClientConnect(harmony, targetType);
                 PatchHandleServerEventInitializeCustomGame(harmony, targetType);
                 PatchHandleServerEventLoadMission(harmony, targetType);
                 PatchHandleServerEventUnloadMission(harmony, targetType);
+                PatchHandleClientEventFinishedLoading(harmony, targetType);
 
                 _isApplied = true;
                 ModLogger.Info("ListedShellBaseNetworkTransportOwnershipPatch: patched listed BaseNetworkComponent transport graph.");
@@ -125,6 +129,26 @@ namespace CoopSpectator.Patches
             harmony.Patch(targetMethod, prefix: new HarmonyMethod(prefixMethod));
         }
 
+        private static void PatchHandleClientEventFinishedLoading(Harmony harmony, Type targetType)
+        {
+            MethodInfo targetMethod = targetType.GetMethod(
+                "HandleClientEventFinishedLoading",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) },
+                null);
+            MethodInfo prefixMethod = typeof(ListedShellBaseNetworkTransportOwnershipPatch).GetMethod(
+                nameof(HandleClientEventFinishedLoading_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (targetMethod == null || prefixMethod == null)
+            {
+                ModLogger.Info("ListedShellBaseNetworkTransportOwnershipPatch: HandleClientEventFinishedLoading target/prefix not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(targetMethod, prefix: new HarmonyMethod(prefixMethod));
+        }
+
         private static bool HandleNewClientConnect_Prefix(object __instance, PlayerConnectionInfo playerConnectionInfo)
         {
             return ListedShellNetworkBootstrapRuntime.TryHandleListedNewClientConnect(
@@ -154,6 +178,45 @@ namespace CoopSpectator.Patches
                 __instance,
                 baseMessage,
                 "ListedShellBaseNetworkTransportOwnershipPatch");
+        }
+
+        private static bool HandleClientEventFinishedLoading_Prefix(
+            object __instance,
+            NetworkCommunicator networkPeer,
+            GameNetworkMessage baseMessage,
+            ref bool __result)
+        {
+            if (!GameNetwork.IsServer)
+                return true;
+
+            if (!(baseMessage is FinishedLoading message))
+                return true;
+
+            if (networkPeer == null || networkPeer.IsServerPeer)
+                return true;
+
+            Mission currentMission = Mission.Current;
+            if (ListedShellSessionTransportRuntime.ShouldOwnListedServerFinishedLoadingValidation(currentMission))
+            {
+                ListedShellSessionTransportRuntime.HandleListedServerFinishedLoadingValidation(
+                    networkPeer,
+                    message,
+                    "ListedShellBaseNetworkTransportOwnershipPatch");
+                __result = true;
+                return false;
+            }
+
+            if (!PendingBattleFinishedLoadingTransportRuntime.ShouldOwnDeferredServerFinishedLoadingValidation(currentMission, out string delayDetails))
+                return true;
+
+            PendingBattleFinishedLoadingTransportRuntime.HandleDeferredServerFinishedLoadingValidation(
+                __instance,
+                networkPeer,
+                message,
+                delayDetails,
+                "ListedShellBaseNetworkTransportOwnershipPatch");
+            __result = true;
+            return false;
         }
     }
 }
