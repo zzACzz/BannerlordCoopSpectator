@@ -59,10 +59,14 @@ namespace CoopSpectator.Patches
             Mission mission,
             out MissionLobbyComponent.MultiplayerGameState state)
         {
-            if (mission != null &&
-                ShouldUseListedShellLobbyContract(mission) &&
-                ListedShellMissionStateByMission.TryGetValue(mission, out ListedShellMissionStateHolder holder))
+            if (mission != null && ShouldUseListedShellLobbyContract(mission))
             {
+                if (!ListedShellMissionStateByMission.TryGetValue(mission, out ListedShellMissionStateHolder holder))
+                {
+                    holder = ListedShellMissionStateByMission.GetOrCreateValue(mission);
+                    holder.State = MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers;
+                }
+
                 state = holder.State;
                 return true;
             }
@@ -133,6 +137,18 @@ namespace CoopSpectator.Patches
                 if (tickTarget == null || tickPrefix == null)
                 {
                     ModLogger.Info("MissionLobbySpawnContractPatch: mission-tick target or prefix not found. Skip.");
+                    return;
+                }
+
+                MethodInfo behaviorInitializeTarget = typeof(MissionLobbyComponent).GetMethod(
+                    nameof(MissionLobbyComponent.OnBehaviorInitialize),
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                MethodInfo behaviorInitializePostfix = typeof(MissionLobbySpawnContractPatch).GetMethod(
+                    nameof(OnBehaviorInitialize_Postfix),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                if (behaviorInitializeTarget == null || behaviorInitializePostfix == null)
+                {
+                    ModLogger.Info("MissionLobbySpawnContractPatch: behavior-initialize target or postfix not found. Skip.");
                     return;
                 }
 
@@ -218,6 +234,7 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
+                harmony.Patch(behaviorInitializeTarget, postfix: new HarmonyMethod(behaviorInitializePostfix));
                 harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
                 harmony.Patch(tickTarget, prefix: new HarmonyMethod(tickPrefix));
                 harmony.Patch(stateChangeTarget, prefix: new HarmonyMethod(stateChangePrefix));
@@ -232,6 +249,7 @@ namespace CoopSpectator.Patches
                 if (changeCultureTarget != null && changeCulturePrefix != null)
                     harmony.Patch(changeCultureTarget, prefix: new HarmonyMethod(changeCulturePrefix));
                 harmony.Patch(agentRemovedTarget, prefix: new HarmonyMethod(agentRemovedPrefix));
+                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnBehaviorInitialize.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMissionTick.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventMissionStateChange.");
@@ -250,6 +268,22 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info("MissionLobbySpawnContractPatch.Apply failed: " + ex.Message);
+            }
+        }
+
+        private static void OnBehaviorInitialize_Postfix(MissionLobbyComponent __instance)
+        {
+            try
+            {
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (!ShouldUseListedShellLobbyContract(mission))
+                    return;
+
+                RememberListedShellMissionState(mission, MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: behavior-initialize postfix failed open: " + ex.Message);
             }
         }
 
@@ -282,10 +316,13 @@ namespace CoopSpectator.Patches
                 if (!GameNetwork.IsServerOrRecorder)
                     return true;
 
-                if (__instance.CurrentMultiplayerState == MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers)
+                if (!TryResolveMissionLobbyState(mission, out MissionLobbyComponent.MultiplayerGameState listedState))
+                    return true;
+
+                if (listedState == MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers)
                     return HandleWaitingFirstPlayersState(__instance, mission);
 
-                if (__instance.CurrentMultiplayerState != MissionLobbyComponent.MultiplayerGameState.Playing)
+                if (listedState != MissionLobbyComponent.MultiplayerGameState.Playing)
                     return true;
 
                 MissionMultiplayerGameModeBase gameMode = mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
@@ -495,8 +532,11 @@ namespace CoopSpectator.Patches
                 if (!ShouldUseListedShellLobbyContract(mission))
                     return true;
 
+                if (!TryResolveMissionLobbyState(mission, out MissionLobbyComponent.MultiplayerGameState listedState))
+                    return true;
+
                 if (!GameNetwork.IsServer ||
-                    __instance.CurrentMultiplayerState == MissionLobbyComponent.MultiplayerGameState.Ending ||
+                    listedState == MissionLobbyComponent.MultiplayerGameState.Ending ||
                     affectedAgent == null ||
                     !affectedAgent.IsHuman ||
                     affectedAgent.IsMount)
