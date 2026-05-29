@@ -31,7 +31,25 @@ namespace CoopSpectator.Infrastructure
 
         public static bool ShouldOwnDeferredServerFinishedLoadingValidation(Mission mission, out string details)
         {
-            return PendingBattleMissionStartupState.ShouldDelayServerFinishedLoadingValidation(mission, out details);
+            if (!PendingBattleMissionStartupState.ShouldOwnServerFinishedLoadingValidation(mission))
+            {
+                details = "PendingBattleOwnership=false";
+                return false;
+            }
+
+            if (PendingBattleMissionStartupState.ShouldDelayServerFinishedLoadingValidation(mission, out details))
+                return true;
+
+            if (PendingBattleMissionStartupState.TryResolveAuthoritativeTransportToken(mission, out int token))
+            {
+                details =
+                    "PendingBattleTokenReady=true" +
+                    " MissionSessionToken=" + token;
+                return true;
+            }
+
+            details = "PendingBattleTokenCaptureRequired=true";
+            return true;
         }
 
         public static void HandleDeferredServerFinishedLoadingValidation(
@@ -61,7 +79,6 @@ namespace CoopSpectator.Infrastructure
 
             try
             {
-                EnsureBaseNetworkComponentData(baseNetworkComponentInstance);
                 while (PendingBattleMissionStartupState.ShouldDelayServerFinishedLoadingValidation(Mission.Current, out string delayDetails))
                 {
                     finalDelayDetails = delayDetails ?? string.Empty;
@@ -71,9 +88,12 @@ namespace CoopSpectator.Infrastructure
                 if (networkPeer == null || networkPeer.IsServerPeer || message == null)
                     return;
 
-                int currentBattleIndex = GetCurrentBattleIndex(baseNetworkComponentInstance);
                 Mission currentMission = Mission.Current;
-                bool shouldUnload = currentMission == null || currentBattleIndex != message.BattleIndex;
+                int missionSessionToken = ResolvePendingBattleMissionSessionToken(
+                    baseNetworkComponentInstance,
+                    currentMission,
+                    source);
+                bool shouldUnload = currentMission == null || missionSessionToken != message.BattleIndex;
 
                 Debug.Print("Server: " + networkPeer.UserName + " has finished loading. From now on, I will include him in the broadcasted messages");
 
@@ -94,7 +114,7 @@ namespace CoopSpectator.Infrastructure
                     " FinalDelayDetails=" + (finalDelayDetails ?? string.Empty) +
                     " MissionScene=" + (currentMission?.SceneName ?? "null") +
                     " MissionState=" + (currentMission?.CurrentState.ToString() ?? "null") +
-                    " CurrentBattleIndex=" + currentBattleIndex +
+                    " MissionSessionToken=" + missionSessionToken +
                     " FinishedLoadingBattleIndex=" + message.BattleIndex +
                     " Action=" + (shouldUnload ? "UnloadMission" : "ClientFinishedLoading") +
                     " Source=" + Normalize(source) + ".");
@@ -109,6 +129,32 @@ namespace CoopSpectator.Infrastructure
                     " Source=" + Normalize(source) + ".",
                     ex);
             }
+        }
+
+        private static int ResolvePendingBattleMissionSessionToken(
+            object baseNetworkComponentInstance,
+            Mission mission,
+            string source)
+        {
+            if (PendingBattleMissionStartupState.TryResolveAuthoritativeTransportToken(mission, out int token))
+                return token;
+
+            EnsureBaseNetworkComponentData(baseNetworkComponentInstance);
+            int currentBattleIndex = GetCurrentBattleIndex(baseNetworkComponentInstance);
+            if (PendingBattleMissionStartupState.TryBindAuthoritativeTransportToken(
+                mission,
+                currentBattleIndex,
+                "PendingBattleFinishedLoadingTransportRuntime.ResolvePendingBattleMissionSessionToken"))
+            {
+                return currentBattleIndex;
+            }
+
+            ModLogger.Info(
+                "PendingBattleFinishedLoadingTransportRuntime: failed to bind authoritative pending battle mission-session token from native transport state. " +
+                "MissionScene=" + (mission?.SceneName ?? "null") +
+                " CurrentBattleIndex=" + currentBattleIndex +
+                " Source=" + Normalize(source) + ".");
+            return 0;
         }
 
         private static void EnsureBaseNetworkComponentData(object instance)
