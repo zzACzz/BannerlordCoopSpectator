@@ -516,8 +516,7 @@ namespace CoopSpectator.GameMode
             if (!GameNetwork.IsServer)
                 return;
 
-            CoopSessionTransportPrimitives.BroadcastUnloadMission();
-            CoopSessionTransportPrimitives.EndServerLobbyMissionAfterUnloadBroadcast();
+            CoopSessionTransportPrimitives.CompleteServerLobbyMissionShutdown();
         }
 
         private static void BroadcastMissionStateChange(

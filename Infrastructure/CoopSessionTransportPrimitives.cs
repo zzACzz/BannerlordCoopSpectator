@@ -187,6 +187,12 @@ namespace CoopSpectator.Infrastructure
             BannerlordNetwork.EndMultiplayerLobbyMission();
         }
 
+        public static void CompleteServerLobbyMissionShutdown(bool unloadingForBattleIndexMismatch = false)
+        {
+            BroadcastUnloadMission(unloadingForBattleIndexMismatch);
+            EndServerLobbyMissionAfterUnloadBroadcast();
+        }
+
         public static void DisableGlobalLoadingWindow()
         {
             LoadingWindow.DisableGlobalLoadingWindow();
