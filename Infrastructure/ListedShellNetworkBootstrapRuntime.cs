@@ -212,7 +212,7 @@ namespace CoopSpectator.Infrastructure
 
                 await WaitForListedMissionOpenReadinessAsync(message.Map, message.BattleIndex);
 
-                CoopSessionTransportPrimitives.MarkLocalPeerUnsynchronized();
+                CoopSessionTransportPrimitives.BeginClientMissionReceiveTransition();
 
                 ResetClientIntermissionState(baseNetworkComponentInstance);
 
@@ -273,7 +273,7 @@ namespace CoopSpectator.Infrastructure
         {
             try
             {
-                CoopSessionTransportPrimitives.MarkLocalPeerUnsynchronized();
+                CoopSessionTransportPrimitives.BeginClientLobbyMissionUnload();
 
                 ResetClientIntermissionState(baseNetworkComponentInstance);
 
@@ -281,12 +281,10 @@ namespace CoopSpectator.Infrastructure
                 ListedShellMissionLobbyClientComponent listedClient = currentMission?.GetMissionBehavior<ListedShellMissionLobbyClientComponent>();
                 listedClient?.SetServerEndingBeforeClientLoaded(message.UnloadingForBattleIndexMismatch);
 
-                CoopSessionTransportPrimitives.EndClientLobbyMissionAndResetChat();
-
                 await WaitForMissionUnloadAsync();
                 ListedShellClientSessionOwnershipState.Disarm(
                     "ListedShellNetworkBootstrapRuntime.HandleListedUnloadMissionReceiveAsync");
-                CoopSessionTransportPrimitives.DisableGlobalLoadingWindow();
+                CoopSessionTransportPrimitives.CompleteClientLobbyMissionUnload();
             }
             catch (Exception ex)
             {

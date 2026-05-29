@@ -94,6 +94,11 @@ namespace CoopSpectator.Infrastructure
                 GameNetwork.MyPeer.IsSynchronized = false;
         }
 
+        public static void BeginClientMissionReceiveTransition()
+        {
+            MarkLocalPeerUnsynchronized();
+        }
+
         public static void SendUnloadMission(NetworkCommunicator networkPeer, bool unloadingForBattleIndexMismatch)
         {
             if (networkPeer == null || networkPeer.IsServerPeer)
@@ -170,6 +175,12 @@ namespace CoopSpectator.Infrastructure
             Game.Current?.GetGameHandler<ChatBox>()?.ResetMuteList();
         }
 
+        public static void BeginClientLobbyMissionUnload()
+        {
+            MarkLocalPeerUnsynchronized();
+            EndClientLobbyMissionAndResetChat();
+        }
+
         public static void EndServerLobbyMissionAfterUnloadBroadcast()
         {
             GameNetwork.UnSynchronizeEveryone();
@@ -179,6 +190,11 @@ namespace CoopSpectator.Infrastructure
         public static void DisableGlobalLoadingWindow()
         {
             LoadingWindow.DisableGlobalLoadingWindow();
+        }
+
+        public static void CompleteClientLobbyMissionUnload()
+        {
+            DisableGlobalLoadingWindow();
         }
     }
 }
