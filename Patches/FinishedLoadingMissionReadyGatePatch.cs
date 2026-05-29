@@ -71,9 +71,12 @@ namespace CoopSpectator.Patches
                 return true;
 
             Mission currentMission = Mission.Current;
-            if (ShouldOwnListedShellFinishedLoadingValidation(currentMission))
+            if (ListedShellSessionTransportRuntime.ShouldOwnListedServerFinishedLoadingValidation(currentMission))
             {
-                HandleListedShellFinishedLoadingValidation(__instance, networkPeer, message);
+                ListedShellSessionTransportRuntime.HandleListedServerFinishedLoadingValidation(
+                    networkPeer,
+                    message,
+                    "FinishedLoadingMissionReadyGatePatch");
                 __result = true;
                 return false;
             }
@@ -145,115 +148,6 @@ namespace CoopSpectator.Patches
                     " FinalDelayDetails=" + (finalDelayDetails ?? string.Empty) + ".",
                     ex);
             }
-        }
-
-        private static void HandleListedShellFinishedLoadingValidation(
-            object instance,
-            NetworkCommunicator networkPeer,
-            FinishedLoading message)
-        {
-            DateTime startedUtc = DateTime.UtcNow;
-            string delayDetails = string.Empty;
-
-            try
-            {
-                Mission currentMission = Mission.Current;
-                if (ListedShellMissionSessionState.ShouldDelayServerFinishedLoadingValidation(currentMission, out delayDetails))
-                {
-                    _ = HandleListedShellFinishedLoadingValidationDeferred(networkPeer, message, delayDetails);
-                    return;
-                }
-
-                ProcessListedShellFinishedLoadingValidation(networkPeer, message, startedUtc, delayDetails);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Error(
-                    "FinishedLoadingMissionReadyGatePatch: listed FinishedLoading validation failed. " +
-                    "Peer=" + (networkPeer?.UserName ?? "unknown") + ".",
-                    ex);
-            }
-        }
-
-        private static async Task HandleListedShellFinishedLoadingValidationDeferred(
-            NetworkCommunicator networkPeer,
-            FinishedLoading message,
-            string initialDelayDetails)
-        {
-            DateTime startedUtc = DateTime.UtcNow;
-            string finalDelayDetails = initialDelayDetails ?? string.Empty;
-
-            try
-            {
-                while (ListedShellMissionSessionState.ShouldDelayServerFinishedLoadingValidation(Mission.Current, out string delayDetails))
-                {
-                    finalDelayDetails = delayDetails ?? string.Empty;
-                    await Task.Delay(1);
-                }
-
-                ProcessListedShellFinishedLoadingValidation(networkPeer, message, startedUtc, finalDelayDetails);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Error(
-                    "FinishedLoadingMissionReadyGatePatch: deferred listed FinishedLoading validation failed. " +
-                    "Peer=" + (networkPeer?.UserName ?? "unknown") +
-                    " InitialDelayDetails=" + (initialDelayDetails ?? string.Empty) +
-                    " FinalDelayDetails=" + (finalDelayDetails ?? string.Empty) + ".",
-                    ex);
-            }
-        }
-
-        private static void ProcessListedShellFinishedLoadingValidation(
-            NetworkCommunicator networkPeer,
-            FinishedLoading message,
-            DateTime startedUtc,
-            string delayDetails)
-        {
-            if (networkPeer == null || networkPeer.IsServerPeer)
-                return;
-
-            Mission currentMission = Mission.Current;
-            int authoritativeToken = ResolveListedShellMissionSessionToken(currentMission);
-            bool shouldUnload = currentMission == null || authoritativeToken != message.BattleIndex;
-
-            Debug.Print("Server: " + networkPeer.UserName + " has finished loading explicit listed shell.");
-
-            ListedShellSessionTransportRuntime.CompleteListedPeerFinishedLoading(
-                networkPeer,
-                shouldUnload,
-                "FinishedLoadingMissionReadyGatePatch.ProcessListedShellFinishedLoadingValidation");
-
-            ModLogger.Info(
-                "FinishedLoadingMissionReadyGatePatch: processed listed FinishedLoading validation via authoritative mission-session token. " +
-                "Peer=" + (networkPeer.UserName ?? "unknown") +
-                " DeferredForMs=" + (DateTime.UtcNow - startedUtc).TotalMilliseconds.ToString("0") +
-                " DelayDetails=" + (delayDetails ?? string.Empty) +
-                " MissionScene=" + (currentMission?.SceneName ?? "null") +
-                " MissionState=" + (currentMission?.CurrentState.ToString() ?? "null") +
-                " MissionSessionToken=" + authoritativeToken +
-                " FinishedLoadingBattleIndex=" + message.BattleIndex +
-                " Action=" + (shouldUnload ? "UnloadMission" : "ClientFinishedLoading") + ".");
-        }
-
-        private static bool ShouldOwnListedShellFinishedLoadingValidation(Mission mission)
-        {
-            if (ListedShellMissionSessionState.ShouldOwnServerFinishedLoadingValidation(mission))
-                return true;
-
-            if (mission == null)
-                return false;
-
-            return mission.GetMissionBehavior<ListedShellCompatibilityMode>() != null ||
-                mission.GetMissionBehavior<ListedShellCompatibilityModeClient>() != null;
-        }
-
-        private static int ResolveListedShellMissionSessionToken(Mission mission)
-        {
-            if (ListedShellMissionSessionState.TryResolveTransportToken(mission, out int token))
-                return token;
-
-            return 0;
         }
 
         private static void EnsureBaseNetworkComponentData(object instance)
