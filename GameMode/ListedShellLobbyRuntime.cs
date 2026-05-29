@@ -182,6 +182,74 @@ namespace CoopSpectator.GameMode
             }
         }
 
+        internal static bool TryHandleListedShellScoreHit(
+            MissionScoreboardComponent scoreboardComponent,
+            Agent affectedAgent,
+            Agent affectorAgent,
+            bool isBlocked,
+            float damagedHp)
+        {
+            Mission mission = scoreboardComponent?.Mission ?? Mission.Current;
+            if (!ShouldUseListedShellLobbyContract(mission))
+                return false;
+
+            if (affectorAgent == null || !GameNetwork.IsServer || isBlocked || !(damagedHp > 0f))
+                return true;
+
+            if (affectorAgent.IsMount)
+                affectorAgent = affectorAgent.RiderAgent;
+
+            if (affectorAgent == null)
+                return true;
+
+            MissionPeer affectorPeer = affectorAgent.MissionPeer ??
+                (affectorAgent.IsAIControlled ? affectorAgent.OwningAgentMissionPeer : null);
+            if (affectorPeer == null)
+                return true;
+
+            int scoreDelta = (int)damagedHp;
+            if (affectedAgent?.IsMount == true)
+            {
+                scoreDelta = (int)(damagedHp * 0.35f);
+                affectedAgent = affectedAgent.RiderAgent;
+            }
+
+            if (affectedAgent == null || ReferenceEquals(affectorAgent, affectedAgent))
+                return true;
+
+            if (!affectorAgent.IsFriendOf(affectedAgent))
+            {
+                AdjustListedShellPeerStats(
+                    affectorPeer,
+                    0,
+                    0,
+                    0,
+                    scoreDelta,
+                    "ListedShellLobbyRuntime.TryHandleListedShellScoreHit enemy");
+            }
+            else
+            {
+                AdjustListedShellPeerStats(
+                    affectorPeer,
+                    0,
+                    0,
+                    0,
+                    -(int)(scoreDelta * 1.5f),
+                    "ListedShellLobbyRuntime.TryHandleListedShellScoreHit friendly");
+            }
+
+            PeerStatsRuntimeState statsState = ResolveListedShellPeerStats(affectorPeer);
+            scoreboardComponent?.PlayerPropertiesChanged(affectorPeer.GetNetworkPeer());
+            BroadcastKillDeathCountChange(
+                affectorPeer.GetNetworkPeer(),
+                null,
+                statsState.KillCount,
+                statsState.AssistCount,
+                statsState.DeathCount,
+                statsState.Score);
+            return true;
+        }
+
         private static void OnListedShellMissionTick(MissionLobbyComponent __instance, float dt)
         {
             try

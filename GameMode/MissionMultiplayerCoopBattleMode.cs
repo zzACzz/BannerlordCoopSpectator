@@ -334,7 +334,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             bool hasDedicatedLobbyShell =
                 GameNetwork.IsDedicatedServer &&
                 MissionBehaviorHelpers.ListContainsBehaviorAssignableTo(list, typeof(MissionLobbyComponent));
-            bool hasScoreboard = MissionBehaviorHelpers.ListContainsBehaviorType(list, "MissionScoreboardComponent");
+            bool hasScoreboard = MissionBehaviorHelpers.ListContainsBehaviorAssignableTo(list, typeof(MissionScoreboardComponent));
             if (hasDedicatedLobbyShell && !hasScoreboard)
             {
                 MissionBehavior scoreboard = MissionBehaviorHelpers.TryCreateMissionScoreboardComponent();

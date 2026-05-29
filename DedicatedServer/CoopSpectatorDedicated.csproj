@@ -45,6 +45,8 @@
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattleClient.cs" Link="GameMode\MissionMultiplayerCoopBattleClient.cs" />
     <Compile Include="..\GameMode\MissionBehaviorHelpers.cs" Link="GameMode\MissionBehaviorHelpers.cs" />
     <Compile Include="..\GameMode\ListedShellMissionLobbyClientComponent.cs" Link="GameMode\ListedShellMissionLobbyClientComponent.cs" />
+    <Compile Include="..\GameMode\ListedShellMissionScoreboardComponent.cs" Link="GameMode\ListedShellMissionScoreboardComponent.cs" />
+    <Compile Include="..\GameMode\ListedShellScoreboardData.cs" Link="GameMode\ListedShellScoreboardData.cs" />
     <Compile Include="..\GameMode\MissionBehaviorDiagnostic.cs" Link="GameMode\MissionBehaviorDiagnostic.cs" />
     <Compile Include="ListedShellMissionLobbyServerComponent.cs" Link="GameMode\ListedShellMissionLobbyServerComponent.cs" />
     <Compile Include="..\Mission\CoopMissionBehaviors.cs" Link="Mission\CoopMissionBehaviors.cs" />

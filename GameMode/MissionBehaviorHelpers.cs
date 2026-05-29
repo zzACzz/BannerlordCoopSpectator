@@ -694,16 +694,16 @@ namespace CoopSpectator.GameMode
                 ?? TryCreateBehaviorFromAnyAssembly("TaleWorlds.MountAndBlade.MissionBoundaryPlacer");
         }
 
-        /// <summary>MissionScoreboardComponent — потрібен для listed lobby K/D, bot-death і scoreboard bookkeeping на dedicated. Повертає null при помилці (інший build/assembly).</summary>
+        /// <summary>Listed scoreboard shell — потрібен для listed lobby K/D, bot-death, score-hit bookkeeping і scoreboard bookkeeping на dedicated. Повертає null при помилці.</summary>
         public static MissionBehavior TryCreateMissionScoreboardComponent()
         {
             try
             {
-                return new MissionScoreboardComponent(new TDMScoreboardData());
+                return new ListedShellMissionScoreboardComponent();
             }
             catch (Exception ex)
             {
-                ModLogger.Error("[MultiplayerBootstrap] MissionScoreboardComponent create failed (listed lobby scoreboard bookkeeping will degrade): " + ex.Message, ex);
+                ModLogger.Error("[MultiplayerBootstrap] ListedShellMissionScoreboardComponent create failed (listed lobby scoreboard bookkeeping will degrade): " + ex.Message, ex);
                 return null;
             }
         }
