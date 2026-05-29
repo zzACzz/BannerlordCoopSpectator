@@ -20,9 +20,6 @@ namespace CoopSpectator.GameMode
             public MissionLobbyComponent.MultiplayerGameState State;
         }
 
-        private static readonly MethodInfo SetStateEndingAsClientMethod = typeof(MissionLobbyComponent).GetMethod(
-            "SetStateEndingAsClient",
-            BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo NetworkFromServerBaseHandlersField =
             AccessTools.Field(typeof(GameNetwork.NetworkMessageHandlerRegistererContainer), "_fromServerBaseHandlers");
         private static readonly MethodInfo CurrentMultiplayerStateSetterMethod = typeof(MissionLobbyComponent)
@@ -30,9 +27,6 @@ namespace CoopSpectator.GameMode
                 nameof(MissionLobbyComponent.CurrentMultiplayerState),
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
             .GetSetMethod(nonPublic: true);
-        private static readonly FieldInfo OnPostMatchEndedField = typeof(MissionLobbyComponent).GetField(
-            "OnPostMatchEnded",
-            BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly Type MissionStateChangeType = AccessTools.TypeByName("TaleWorlds.MountAndBlade.MissionStateChange");
         private static readonly MethodInfo GameNetworkWriteMessageMethod = ResolveGameNetworkWriteMessageMethod();
         private static readonly MethodInfo MissionPeerKillCountSetter = typeof(MissionPeer)
@@ -294,9 +288,6 @@ namespace CoopSpectator.GameMode
                     }
                 }
 
-                if (currentState == MissionLobbyComponent.MultiplayerGameState.Ending && lobbyComponent != null)
-                    SetStateEndingAsClientMethod?.Invoke(lobbyComponent, Array.Empty<object>());
-
                 ModLogger.Info(
                     "ListedShellLobbyRuntime: applied listed-shell mission state through coop-owned handler. " +
                     "Source=" + (source ?? "unknown") +
@@ -475,7 +466,6 @@ namespace CoopSpectator.GameMode
             BroadcastMissionStateChange(
                 MissionLobbyComponent.MultiplayerGameState.Ending,
                 timer.GetCurrentTimerStartTime().NumberOfTicks);
-            (OnPostMatchEndedField?.GetValue(lobbyComponent) as Action)?.Invoke();
         }
 
         internal static void EndListedShellMissionAsServer()
