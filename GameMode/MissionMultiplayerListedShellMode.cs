@@ -20,6 +20,9 @@ namespace CoopSpectator.GameMode
 
         public override void StartMultiplayerGame(string scene)
         {
+            if (GameNetwork.IsServer)
+                ListedShellMissionSessionState.ArmServerStartup(scene, "MissionMultiplayerListedShellMode.StartMultiplayerGame");
+
             ModLogger.Info(
                 "MissionMultiplayerListedShellMode: opening explicit listed ingress. " +
                 "Scene=" + (scene ?? string.Empty) +

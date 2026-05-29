@@ -166,6 +166,9 @@ namespace CoopSpectator.GameMode
                 CoopBattleScoreboardRuntimeState.InitializeMission(
                     mission,
                     "ListedShellLobbyRuntime.InitializeListedShellLobbyState");
+                ListedShellMissionSessionState.InitializeMission(
+                    mission,
+                    "ListedShellLobbyRuntime.InitializeListedShellLobbyState");
                 RememberListedShellMissionState(mission, MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers);
             }
             catch (Exception ex)

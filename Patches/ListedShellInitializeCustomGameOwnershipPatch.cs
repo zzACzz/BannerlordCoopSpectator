@@ -91,7 +91,7 @@ namespace CoopSpectator.Patches
             bool inMission = !GameNetwork.IsDedicatedServer || mission != null;
             string scene = inMission ? (mission?.SceneName ?? string.Empty) : string.Empty;
             string gameType = inMission ? CoopGameModeIds.OfficialTeamDeathmatch : string.Empty;
-            int currentBattleIndex = GetCurrentBattleIndex(__instance);
+            int currentBattleIndex = ResolveListedShellMissionSessionToken(mission, __instance);
 
             GameNetwork.BeginModuleEventAsServer(targetPeer);
             GameNetwork.WriteMessage(new InitializeCustomGameMessage(inMission, gameType, scene, currentBattleIndex));
@@ -127,7 +127,15 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static int GetCurrentBattleIndex(object instance)
+        private static int ResolveListedShellMissionSessionToken(Mission mission, object instance)
+        {
+            if (ListedShellMissionSessionState.TryResolveAuthoritativeToken(mission, out int token))
+                return token;
+
+            return GetCurrentBattleIndexCompatibility(instance);
+        }
+
+        private static int GetCurrentBattleIndexCompatibility(object instance)
         {
             try
             {
@@ -136,7 +144,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("ListedShellInitializeCustomGameOwnershipPatch: failed to read CurrentBattleIndex: " + ex.Message);
+                ModLogger.Info("ListedShellInitializeCustomGameOwnershipPatch: failed to read compatibility CurrentBattleIndex: " + ex.Message);
                 return -1;
             }
         }

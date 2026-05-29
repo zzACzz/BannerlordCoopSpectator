@@ -112,7 +112,11 @@ namespace CoopSpectator.Patches
                         " Map=" + (message.Map ?? string.Empty) +
                         " BattleIndex=" + message.BattleIndex + ".");
 
-                    UpdateCurrentBattleIndex(instance, message.BattleIndex);
+                    ListedShellMissionSessionState.AdoptRemoteMissionToken(
+                        message.Map,
+                        message.BattleIndex,
+                        "ListedShellInitializeCustomGameReceiveOwnershipPatch.InitializeListedCustomGameAsync");
+                    MirrorCompatibilityCurrentBattleIndex(instance, message.BattleIndex);
                     if (!TaleWorlds.MountAndBlade.Module.CurrentModule.StartMultiplayerGame(message.GameType, message.Map))
                     {
                         ModLogger.Info("ListedShellInitializeCustomGameReceiveOwnershipPatch: StartMultiplayerGame returned false for listed receive path.");
@@ -162,7 +166,7 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void UpdateCurrentBattleIndex(object instance, int currentBattleIndex)
+        private static void MirrorCompatibilityCurrentBattleIndex(object instance, int currentBattleIndex)
         {
             try
             {
@@ -171,7 +175,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("ListedShellInitializeCustomGameReceiveOwnershipPatch: failed to update CurrentBattleIndex: " + ex.Message);
+                ModLogger.Info("ListedShellInitializeCustomGameReceiveOwnershipPatch: failed to mirror compatibility CurrentBattleIndex: " + ex.Message);
             }
         }
 
