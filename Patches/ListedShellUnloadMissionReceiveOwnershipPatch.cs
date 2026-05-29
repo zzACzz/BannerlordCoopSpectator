@@ -17,8 +17,6 @@ namespace CoopSpectator.Patches
     /// </summary>
     internal static class ListedShellUnloadMissionReceiveOwnershipPatch
     {
-        private static MethodInfo _setCurrentIntermissionTimerMethod;
-        private static MethodInfo _setClientIntermissionStateMethod;
         private static bool _isApplied;
 
         public static void Apply(Harmony harmony)
@@ -50,12 +48,7 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                _setCurrentIntermissionTimerMethod = targetType.GetMethod(
-                    "set_CurrentIntermissionTimer",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                _setClientIntermissionStateMethod = targetType.GetMethod(
-                    "set_ClientIntermissionState",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                ListedShellNetworkBootstrapRuntime.InitializeBaseNetworkContracts(targetType);
 
                 harmony.Patch(targetMethod, prefix: new HarmonyMethod(prefixMethod));
                 _isApplied = true;
@@ -73,85 +66,14 @@ namespace CoopSpectator.Patches
                 return true;
 
             UnloadMission message = baseMessage as UnloadMission;
-            if (message == null || !ShouldOwnListedShellUnloadMissionReceive())
+            if (message == null || !ListedShellNetworkBootstrapRuntime.ShouldOwnUnloadMissionReceive())
                 return true;
 
-            _ = HandleListedShellUnloadMissionAsync(__instance, message);
+            _ = ListedShellNetworkBootstrapRuntime.HandleListedUnloadMissionReceiveAsync(__instance, message);
             ModLogger.Info(
                 "ListedShellUnloadMissionReceiveOwnershipPatch: intercepted listed UnloadMission and bypassed native BaseNetworkComponent unload coroutine. " +
                 "UnloadingForBattleIndexMismatch=" + message.UnloadingForBattleIndexMismatch + ".");
             return false;
-        }
-
-        private static bool ShouldOwnListedShellUnloadMissionReceive()
-        {
-            Mission mission = Mission.Current;
-            if (mission != null &&
-                (mission.GetMissionBehavior<ListedShellCompatibilityMode>() != null ||
-                 mission.GetMissionBehavior<ListedShellCompatibilityModeClient>() != null))
-            {
-                return true;
-            }
-
-            return ListedShellTransportBootstrapState.ShouldOwnClientReceiveBootstrap();
-        }
-
-        private static async Task HandleListedShellUnloadMissionAsync(object instance, UnloadMission message)
-        {
-            try
-            {
-                if (GameNetwork.MyPeer != null)
-                    GameNetwork.MyPeer.IsSynchronized = false;
-
-                ResetClientIntermissionState(instance);
-
-                Mission currentMission = Mission.Current;
-                ListedShellMissionLobbyClientComponent listedClient = currentMission?.GetMissionBehavior<ListedShellMissionLobbyClientComponent>();
-                listedClient?.SetServerEndingBeforeClientLoaded(message.UnloadingForBattleIndexMismatch);
-
-                BannerlordNetwork.EndMultiplayerLobbyMission();
-                Game.Current?.GetGameHandler<ChatBox>()?.ResetMuteList();
-
-                await WaitForMissionUnloadAsync();
-                ListedShellTransportBootstrapState.DisarmClientReceiveBootstrap(
-                    "ListedShellUnloadMissionReceiveOwnershipPatch.HandleListedShellUnloadMissionAsync");
-                LoadingWindow.DisableGlobalLoadingWindow();
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Error("ListedShellUnloadMissionReceiveOwnershipPatch.HandleListedShellUnloadMissionAsync failed.", ex);
-            }
-        }
-
-        private static async Task WaitForMissionUnloadAsync()
-        {
-            for (int i = 0; i < 5000; i++)
-            {
-                if (Mission.Current == null)
-                    return;
-
-                await Task.Delay(1);
-            }
-
-            ModLogger.Info("ListedShellUnloadMissionReceiveOwnershipPatch: mission unload wait timed out after coop-owned listed unload path.");
-        }
-
-        private static void ResetClientIntermissionState(object instance)
-        {
-            try
-            {
-                _setCurrentIntermissionTimerMethod?.Invoke(instance, new object[] { 0f });
-
-                if (_setClientIntermissionStateMethod != null)
-                {
-                    object intermissionState = Enum.ToObject(_setClientIntermissionStateMethod.GetParameters()[0].ParameterType, 0);
-                    _setClientIntermissionStateMethod.Invoke(instance, new[] { intermissionState });
-                }
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("ListedShellUnloadMissionReceiveOwnershipPatch: failed to reset client intermission state: " + ex.Message);
-            }
         }
     }
 }

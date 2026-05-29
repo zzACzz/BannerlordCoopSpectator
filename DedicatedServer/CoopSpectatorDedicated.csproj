@@ -106,6 +106,7 @@
     <Compile Include="..\Infrastructure\PendingBattleMissionStartupState.cs" Link="Infrastructure\PendingBattleMissionStartupState.cs" />
     <Compile Include="..\Infrastructure\ListedShellTransportBootstrapState.cs" Link="Infrastructure\ListedShellTransportBootstrapState.cs" />
     <Compile Include="..\Infrastructure\ListedShellSessionTransportRuntime.cs" Link="Infrastructure\ListedShellSessionTransportRuntime.cs" />
+    <Compile Include="..\Infrastructure\ListedShellNetworkBootstrapRuntime.cs" Link="Infrastructure\ListedShellNetworkBootstrapRuntime.cs" />
     <Compile Include="..\Infrastructure\ListedShellMissionSessionState.cs" Link="Infrastructure\ListedShellMissionSessionState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSelectionIntentState.cs" Link="Infrastructure\CoopBattleSelectionIntentState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSpawnBridgeFile.cs" Link="Infrastructure\CoopBattleSpawnBridgeFile.cs" />

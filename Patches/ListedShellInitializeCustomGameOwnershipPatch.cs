@@ -75,51 +75,7 @@ namespace CoopSpectator.Patches
 
         private static bool TryOwnListedShellNewClientConnect(Mission mission, NetworkCommunicator targetPeer)
         {
-            try
-            {
-                SendServerMessage(targetPeer, new MultiplayerOptionsInitial());
-                SendServerMessage(targetPeer, new MultiplayerOptionsImmediate());
-
-                if (targetPeer.IsAdmin)
-                    SendServerMessage(targetPeer, new MultiplayerOptionsDefault());
-
-                bool inMission = !GameNetwork.IsDedicatedServer || mission != null;
-                string scene = inMission ? (mission?.SceneName ?? string.Empty) : string.Empty;
-                string gameType = inMission ? CoopGameModeIds.OfficialTeamDeathmatch : string.Empty;
-                if (!ListedShellMissionSessionState.TryResolveTransportToken(mission, out int token))
-                {
-                    ModLogger.Info(
-                        "ListedShellInitializeCustomGameOwnershipPatch: listed mission-session token was unavailable during HandleNewClientConnect. " +
-                        "Scene=" + (mission?.SceneName ?? string.Empty) +
-                        " OwnershipState=missing-listed-session-token.");
-                    return false;
-                }
-
-                SendServerMessage(targetPeer, new InitializeCustomGameMessage(inMission, gameType, scene, token));
-
-                ModLogger.Info(
-                    "ListedShellInitializeCustomGameOwnershipPatch: owned listed HandleNewClientConnect bootstrap without native intermission/custom-lobby replay. " +
-                    "Peer=" + (targetPeer.UserName ?? "unknown") +
-                    " Scene=" + scene +
-                    " GameType=" + gameType +
-                    " MissionSessionToken=" + token +
-                    " SentMessages=MultiplayerOptionsInitial,MultiplayerOptionsImmediate" +
-                    (targetPeer.IsAdmin ? ",MultiplayerOptionsDefault" : string.Empty) +
-                    ",InitializeCustomGameMessage.");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Error("ListedShellInitializeCustomGameOwnershipPatch.TryOwnListedShellNewClientConnect failed.", ex);
-                return false;
-            }
-        }
-
-        private static void SendServerMessage(NetworkCommunicator targetPeer, TaleWorlds.MountAndBlade.Network.Messages.GameNetworkMessage message)
-        {
-            GameNetwork.BeginModuleEventAsServer(targetPeer);
-            GameNetwork.WriteMessage(message);
-            GameNetwork.EndModuleEventAsServer();
+            return ListedShellNetworkBootstrapRuntime.TrySendListedNewClientBootstrap(mission, targetPeer);
         }
     }
 }
