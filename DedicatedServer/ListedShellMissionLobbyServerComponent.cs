@@ -1,4 +1,5 @@
 using CoopSpectator.Patches;
+using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.DedicatedCustomServer;
 
@@ -22,6 +23,18 @@ namespace CoopSpectator.GameMode
         {
             base.AddRemoveMessageHandlers(registerer);
             MissionLobbySpawnContractPatch.PruneListedShellLobbyMessageRegistrations(this, registerer);
+        }
+
+        public override void OnMissionTick(float dt)
+        {
+            if (MissionLobbySpawnContractPatch.ShouldCallNativeOnMissionTick(this, dt))
+                base.OnMissionTick(dt);
+        }
+
+        public override void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, AgentState agentState, KillingBlow killingBlow)
+        {
+            if (MissionLobbySpawnContractPatch.ShouldCallNativeOnAgentRemoved(this, affectedAgent, affectorAgent, agentState, killingBlow))
+                base.OnAgentRemoved(affectedAgent, affectorAgent, agentState, killingBlow);
         }
     }
 }

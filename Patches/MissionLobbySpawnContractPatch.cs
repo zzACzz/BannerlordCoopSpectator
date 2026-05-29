@@ -154,21 +154,6 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                MethodInfo tickTarget = typeof(MissionLobbyComponent).GetMethod(
-                    nameof(MissionLobbyComponent.OnMissionTick),
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                    binder: null,
-                    types: new[] { typeof(float) },
-                    modifiers: null);
-                MethodInfo tickPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(OnMissionTick_Prefix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-                if (tickTarget == null || tickPrefix == null)
-                {
-                    ModLogger.Info("MissionLobbySpawnContractPatch: mission-tick target or prefix not found. Skip.");
-                    return;
-                }
-
                 MethodInfo clientSynchronizedTarget = typeof(MissionLobbyComponent).GetMethod(
                     "OnMyClientSynchronized",
                     BindingFlags.Instance | BindingFlags.NonPublic);
@@ -238,23 +223,7 @@ namespace CoopSpectator.Patches
                     nameof(HandleServerEventChangeCulture_Prefix),
                     BindingFlags.NonPublic | BindingFlags.Static);
 
-                MethodInfo agentRemovedTarget = typeof(MissionLobbyComponent).GetMethod(
-                    nameof(MissionLobbyComponent.OnAgentRemoved),
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                    binder: null,
-                    types: new[] { typeof(Agent), typeof(Agent), typeof(AgentState), typeof(KillingBlow) },
-                    modifiers: null);
-                MethodInfo agentRemovedPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(OnAgentRemoved_Prefix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-                if (agentRemovedTarget == null || agentRemovedPrefix == null)
-                {
-                    ModLogger.Info("MissionLobbySpawnContractPatch: agent-removed target or prefix not found. Skip.");
-                    return;
-                }
-
                 harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
-                harmony.Patch(tickTarget, prefix: new HarmonyMethod(tickPrefix));
                 harmony.Patch(clientSynchronizedTarget, prefix: new HarmonyMethod(clientSynchronizedPrefix));
                 harmony.Patch(peerInformationsTarget, prefix: new HarmonyMethod(peerInformationsPrefix));
                 if (requestCultureChangeTarget != null && requestCultureChangePrefix != null)
@@ -269,9 +238,7 @@ namespace CoopSpectator.Patches
                     harmony.Patch(applyCreateBannerTarget, prefix: new HarmonyMethod(applyCreateBannerPrefix));
                 if (changeCultureTarget != null && changeCulturePrefix != null)
                     harmony.Patch(changeCultureTarget, prefix: new HarmonyMethod(changeCulturePrefix));
-                harmony.Patch(agentRemovedTarget, prefix: new HarmonyMethod(agentRemovedPrefix));
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
-                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMissionTick.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMyClientSynchronized.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.SendPeerInformationsToPeer.");
                 if (requestCultureChangeTarget != null && requestCultureChangePrefix != null)
@@ -286,12 +253,31 @@ namespace CoopSpectator.Patches
                     ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventCreateBannerForPeer.");
                 if (changeCultureTarget != null && changeCulturePrefix != null)
                     ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleServerEventChangeCulture.");
-                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnAgentRemoved.");
             }
             catch (Exception ex)
             {
                 ModLogger.Info("MissionLobbySpawnContractPatch.Apply failed: " + ex.Message);
             }
+        }
+
+        internal static bool ShouldCallNativeOnMissionTick(MissionLobbyComponent lobbyComponent, float dt)
+        {
+            return OnMissionTick_Prefix(lobbyComponent, dt);
+        }
+
+        internal static bool ShouldCallNativeOnAgentRemoved(
+            MissionLobbyComponent lobbyComponent,
+            Agent affectedAgent,
+            Agent affectorAgent,
+            AgentState agentState,
+            KillingBlow killingBlow)
+        {
+            return OnAgentRemoved_Prefix(
+                lobbyComponent,
+                affectedAgent,
+                affectorAgent,
+                agentState,
+                killingBlow);
         }
 
         internal static void InitializeListedShellLobbyState(Mission mission)
