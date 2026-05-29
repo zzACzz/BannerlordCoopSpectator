@@ -40,6 +40,16 @@ namespace CoopSpectator.Infrastructure
             GameNetwork.StartMultiplayerOnServer(port);
         }
 
+        public static void FinalizeHostedServerTransportStart(int port, bool attachHostedLocalPeer)
+        {
+            StartServerTransport(port);
+            if (!attachHostedLocalPeer)
+                return;
+
+            CreateServerPeer();
+            MarkHostedLocalPeerFinishedLoading();
+        }
+
         public static void CreateServerPeer()
         {
             BannerlordNetwork.CreateServerPeer();
@@ -92,6 +102,11 @@ namespace CoopSpectator.Infrastructure
             GameNetwork.BeginModuleEventAsServer(networkPeer);
             GameNetwork.WriteMessage(new UnloadMission(unloadingForBattleIndexMismatch));
             GameNetwork.EndModuleEventAsServer();
+        }
+
+        public static void BroadcastUnloadMission(bool unloadingForBattleIndexMismatch = false)
+        {
+            BroadcastServerMessage(new UnloadMission(unloadingForBattleIndexMismatch));
         }
 
         public static void SendExistingObjectsBegin(NetworkCommunicator targetPeer)
