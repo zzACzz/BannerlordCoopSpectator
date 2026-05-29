@@ -253,7 +253,7 @@ namespace CoopSpectator.GameMode
                     return HandleWaitingFirstPlayersState(__instance, mission);
 
                 if (listedState != MissionLobbyComponent.MultiplayerGameState.Playing)
-                    return true;
+                    return false;
 
                 MissionMultiplayerGameModeBase gameMode = mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
                 MultiplayerTimerComponent timer = mission.GetMissionBehavior<MultiplayerTimerComponent>();
@@ -262,7 +262,7 @@ namespace CoopSpectator.GameMode
 
                 bool timerPassed = timer.CheckIfTimerPassed();
                 if (!timerPassed && !gameMode.CheckForMatchEnd())
-                    return true;
+                    return false;
 
                 gameMode.GetWinnerTeam();
                 SetRemainingAgentsInvulnerable(mission);
