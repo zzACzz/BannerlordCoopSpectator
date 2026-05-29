@@ -237,7 +237,7 @@ namespace CoopSpectator.Patches
                         missionPeer,
                         source + " subject-replay",
                         out int teamIndex,
-                        out BasicCultureObject culture,
+                        out _,
                         out string _))
                 {
                     continue;
@@ -247,14 +247,6 @@ namespace CoopSpectator.Patches
                 {
                     GameNetwork.BeginModuleEventAsServer(networkPeer);
                     GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetPeerTeam(subjectPeer, teamIndex));
-                    GameNetwork.EndModuleEventAsServer();
-                    sentAny = true;
-                }
-
-                if (culture != null)
-                {
-                    GameNetwork.BeginModuleEventAsServer(networkPeer);
-                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.ChangeCulture(missionPeer, culture));
                     GameNetwork.EndModuleEventAsServer();
                     sentAny = true;
                 }
@@ -270,7 +262,7 @@ namespace CoopSpectator.Patches
                 if (LoggedDiagnosticKeys.Add(logKey))
                 {
                     ModLogger.Info(
-                        "LateJoinPeerStateReplayOwnershipPatch: sent authoritative peer team/culture replay through owned ingress path. " +
+                        "LateJoinPeerStateReplayOwnershipPatch: sent authoritative peer-team replay through owned ingress path. " +
                         "Peer=" + (networkPeer.UserName ?? networkPeer.Index.ToString()) +
                         " Scene=" + (mission.SceneName ?? "unknown") +
                         " Source=" + (source ?? "unknown"));
