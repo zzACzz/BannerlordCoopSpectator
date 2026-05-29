@@ -75,7 +75,6 @@
 - Цей native path далі викликає `GameNetwork.StartMultiplayerOnClient(...)` і стартує native custom lobby mission.
 - Поточний connectivity shell ще залежить від таких patch-ів:
   - `Patches/LobbyJoinResultSelfJoinArmPatch.cs`
-  - `Patches/LobbyCustomGameLocalJoinPatch.cs`
   - `Patches/LocalJoinAddressPatch.cs`
   - `Patches/LobbyRequestJoinDiagnosticsPatch.cs`
 
@@ -312,6 +311,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 - `CoopBattle` і explicit listed ingress теж більше не покладаються на global `MissionLobbyComponent.CreateBehavior()` factory; stack builder-и тепер явно створюють `ListedShellMissionLobbyClientComponent` або `ListedShellMissionLobbyServerComponent`, тож lobby shell більше не залежить ні від прихованої `LobbyMissionType` registration path, ні від native custom-game lobby base-класів;
 - `MissionMatchHistoryComponent` більше не входить у explicit listed ingress; client listed stack більше не має живого consumer-а `BannerlordNetwork.LobbyMissionType`, який потрібен тільки для native local match-history/presence surface, а не для battle startup/join contract;
 - `BaseNetworkComponent.HandleNewClientConnect(...)` для listed shell теж більше не покладається на native `BannerlordNetwork.LobbyMissionType == Custom/Community` як send-gate для `InitializeCustomGameMessage`; explicit listed mission marker тепер disarm-ить цей native gate і шле listed bootstrap повідомлення сам, з official `TeamDeathmatch` id, поточною сценою і `CurrentBattleIndex`;
+- receive-side `BaseNetworkComponent.InitializeCustomGameAux(...)` для listed shell теж більше не hard-wait-ить на active state `LobbyGameStateCustomGameClient` / `LobbyGameStateCommunityClient`; `ListedShellInitializeCustomGameReceiveOwnershipPatch` перехоплює listed `InitializeCustomGameMessage` і запускає listed startup із coop-owned receive path;
 - native `BannerlordNetwork.StartMultiplayerLobbyMission(...)` для listed `TeamDeathmatch` більше не армує `LobbyMissionType=Custom/Community` ні в custom/community client join, ні в host-side `LobbyGameStatePlayerBasedCustomServer.HandleServerStartMultiplayer()`; `ListedShellLobbyMissionTypeNeutralizationPatch` переписує цей arm у neutral/matchmaker state, якщо активний join-context already вказує на `GameType=TeamDeathmatch` або якщо йде explicit listed host-start scope;
 - native `MissionLobbyComponent.SendPeerInformationsToPeer(...)` теж більше не є late-client replay джерелом для listed ingress; `HandleLateNewClientAfterLoadingFinished(...)` у наших listed lobby shell-класах тепер сам шле `MissionStateChange`, `KillDeathCountChange` і `BotsControlledChange` через `ListedShellLobbyRuntime`, а не через native private replay path;
 - listed-shell player death теж більше не чекає polling-only `lost-controlled-agent` path: `ListedShellLobbyRuntime` тепер перехоплює `MissionLobbyComponent.OnAgentRemoved(...)`, одразу переводить dead peer у coop-owned spectator/`DeadAwaitingRespawn` transition з authoritative respawn-timer normalization і сам веде listed player death / player kill / suicide `KillDeathCountChange` path без native `OnPlayerDies(...)` / `OnPlayerKills(...)`;
@@ -395,7 +395,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 | Listed TDM startup ingress | `GameMode/MissionMultiplayerListedShellMode.cs`, `GameMode/ListedShellMissionBehaviorFactory.cs`, `DedicatedServer/Patches/GameModeOverridePatches.cs` |
 | Listed mission assembly | `GameMode/MissionMultiplayerListedShellMode.cs`, `GameMode/ListedShellMissionBehaviorFactory.cs` |
 | Native UI suppression | `Patches/BattleMapHudSuppressionPatch.cs`, `Patches/MissionScreenCameraPreviewPatch.cs` |
-| Connectivity і local/self join | `Patches/LobbyCustomGameLocalJoinPatch.cs`, `Patches/LobbyJoinResultSelfJoinArmPatch.cs`, `Patches/LocalJoinAddressPatch.cs`, `Patches/LobbyRequestJoinDiagnosticsPatch.cs` |
+| Connectivity і local/self join | `Patches/LobbyJoinResultSelfJoinArmPatch.cs`, `Patches/LocalJoinAddressPatch.cs`, `Patches/LobbyRequestJoinDiagnosticsPatch.cs` |
 | Native class compatibility | `Patches/MultiplayerCharacterClassFallbackPatch.cs`, `Patches/StartupSafeMpHeroClassBootstrapPatch.cs` |
 | Залишковий crash isolation | `Patches/IntermissionVmCrashGuardPatch.cs` |
 | Listed-shell startup helper | `DedicatedHelper/DedicatedHelperLauncher.cs` |
@@ -419,7 +419,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - `Patches/BattleMapHudSuppressionPatch.cs`
 - `Patches/MissionScreenCameraPreviewPatch.cs`
 - `Patches/IntermissionVmCrashGuardPatch.cs`
-- `Patches/LobbyCustomGameLocalJoinPatch.cs`
+- видалений `Patches/LobbyCustomGameLocalJoinPatch.cs`; low-level decompile active DLL не показує live `LobbyGameStateCustomGameClient.StartMultiplayer(string,int,int,int)`, а one-shot localhost rewrite вже owner-иться на `GameNetwork.StartMultiplayerOnClient` через `LocalJoinAddressPatch`;
 - `Patches/LobbyJoinResultSelfJoinArmPatch.cs`
 - `Patches/LocalJoinAddressPatch.cs`
 - `Patches/LobbyRequestJoinDiagnosticsPatch.cs`
@@ -437,6 +437,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - видалений `Patches/MissionStateOpenNewPatches.cs`; після low-level підтвердження native call graph listed startup повністю owner-иться на `Module.StartMultiplayerGame("TeamDeathmatch", scene)` -> `MissionMultiplayerListedShellMode`, тому окремий mission-open fallback більше не потрібен;
 - видалений listed-shell `MissionMatchHistoryComponent` і helper `MissionBehaviorHelpers.TryCreateMissionMatchHistoryComponent()`; hidden consumer `BannerlordNetwork.LobbyMissionType` для local match-history surface більше не входить у наш explicit listed mission stack;
 - `ListedShellInitializeCustomGameOwnershipPatch` забирає send-side `InitializeCustomGameMessage` з native `BaseNetworkComponent.HandleNewClientConnect(...)`: для explicit listed місії patch disarm-ить `BannerlordNetwork.LobbyMissionType` до neutral state і шле listed bootstrap від mission marker-а, а не від official custom/community gate;
+- `ListedShellInitializeCustomGameReceiveOwnershipPatch` забирає receive-side listed bootstrap з native `BaseNetworkComponent.InitializeCustomGameAux(...)`: listed `InitializeCustomGameMessage` більше не чекає hard-coded active state `LobbyGameStateCustomGameClient` / `LobbyGameStateCommunityClient`, а запускає explicit listed startup напряму через coop-owned receive path;
 - `ListedShellLobbyMissionTypeNeutralizationPatch` прибирає official listed `Custom|Community` arm і на client join, і на host custom-server start: під час `LobbyGameStateCustomGameClient.StartMultiplayer(...)` / `LobbyGameStateCommunityClient.StartMultiplayer(...)` та `LobbyGameStatePlayerBasedCustomServer.HandleServerStartMultiplayer()` native `StartMultiplayerLobbyMission(Custom|Community)` уже не залишає listed `TeamDeathmatch` у global `LobbyMissionType`, якщо join-context каже, що це наш listed shell, або якщо активний explicit listed host-start scope;
 - прибрані `CoopTdm` і `TdmClone` ids з `Infrastructure/CoopGameModeIds.cs`;
 - прибраний `EnableTdmCloneExperiment` з `Infrastructure/ExperimentalFeatures.cs`;
