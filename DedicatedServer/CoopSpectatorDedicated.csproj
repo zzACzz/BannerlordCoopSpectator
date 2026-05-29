@@ -119,7 +119,6 @@
     <Compile Include="Patches\DedicatedWebPanelPatches.cs" Link="Patches\DedicatedWebPanelPatches.cs" />
     <Compile Include="Patches\DedicatedKnockoutOutcomePatches.cs" Link="Patches\DedicatedKnockoutOutcomePatches.cs" />
     <Compile Include="Patches\GameModeOverridePatches.cs" Link="Patches\GameModeOverridePatches.cs" />
-    <Compile Include="..\Patches\MissionStateOpenNewPatches.cs" Link="Patches\MissionStateOpenNewPatches.cs" />
     <Compile Include="..\GameMode\ListedShellLobbyRuntime.cs" Link="GameMode\ListedShellLobbyRuntime.cs" />
     <Compile Include="..\Patches\ListedShellCompatibilityMode.cs" Link="Patches\ListedShellCompatibilityMode.cs" />
     <Compile Include="..\Patches\ListedShellCompatibilityModeClient.cs" Link="Patches\ListedShellCompatibilityModeClient.cs" />

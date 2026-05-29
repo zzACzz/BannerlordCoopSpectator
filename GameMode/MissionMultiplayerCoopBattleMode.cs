@@ -34,7 +34,10 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             bool battleMapRuntime = IsBattleMapSceneName(scene);
             string missionShell = battleMapRuntime ? BattleMissionShell : TeamDeathmatchMissionShell;
             if (battleMapRuntime && GameNetwork.IsServer)
+            {
+                PendingBattleMissionStartupState.Arm(scene, "MissionMultiplayerCoopBattleMode.StartMultiplayerGame");
                 TryApplyBattleMapTimerOptionOverrides();
+            }
             ModLogger.Info("StartMultiplayerGame CoopBattle called, scene=" + (scene ?? ""));
             if (GameNetwork.IsServer)
                 ModLogger.Info("[CoopSpectator] Server starting mission, GameType=" + GameModeId + " (must match client GetMultiplayerGameMode and multiplayer_strings).");
