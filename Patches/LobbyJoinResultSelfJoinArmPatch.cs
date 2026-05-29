@@ -57,6 +57,26 @@ namespace CoopSpectator.Patches
                         allowLocalBattleRosterFileFallback: armedSelfJoin,
                         source: "LobbyJoinResultSelfJoinArmPatch");
                     BattleSnapshotRuntimeState.Clear("LobbyJoinResultSelfJoinArmPatch join-result");
+
+                    if (string.Equals(gameType, CoopGameModeIds.OfficialTeamDeathmatch, StringComparison.Ordinal))
+                    {
+                        ListedShellClientStartOwnershipState.ArmClientStart(
+                            gameType,
+                            serverName,
+                            serverAddress,
+                            serverPort,
+                            "LobbyJoinResultSelfJoinArmPatch");
+                    }
+                    else
+                    {
+                        ListedShellClientStartOwnershipState.DisarmClientStart(
+                            "LobbyJoinResultSelfJoinArmPatch non-listed join result");
+                    }
+                }
+                else
+                {
+                    ListedShellClientStartOwnershipState.DisarmClientStart(
+                        "LobbyJoinResultSelfJoinArmPatch failed-or-invalid join result");
                 }
 
                 ModLogger.Info(

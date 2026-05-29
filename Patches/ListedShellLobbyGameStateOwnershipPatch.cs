@@ -166,6 +166,8 @@ namespace CoopSpectator.Patches
                     peerIndex,
                     "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart");
                 GameNetwork.StartMultiplayerOnClient(address, port, sessionKey, peerIndex);
+                ListedShellClientStartOwnershipState.DisarmClientStart(
+                    "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart success");
                 TryCheckMultiplayerPrivilege(promptOnRestricted: true);
                 ModLogger.Info(
                     "ListedShellLobbyGameStateOwnershipPatch: owned listed client StartMultiplayer wrapper. " +
@@ -178,6 +180,8 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
+                ListedShellClientStartOwnershipState.DisarmClientStart(
+                    "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart failure");
                 ListedShellTransportBootstrapState.DisarmClientReceiveBootstrap(
                     "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart failure");
                 ModLogger.Error("ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart failed for " + source + ".", ex);
@@ -221,7 +225,7 @@ namespace CoopSpectator.Patches
 
         private static bool ShouldOwnListedShellClientStart()
         {
-            return CustomGameJoinContextState.ShouldOwnListedShellCustomGameBootstrap();
+            return ListedShellClientStartOwnershipState.ShouldOwnClientStart();
         }
 
         private static bool TryResolveHostedListedStartContext(object instance, out string gameType, out string scene, out bool isInGame)
