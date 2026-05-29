@@ -8,19 +8,14 @@ namespace CoopSpectator.Infrastructure
 {
     internal static class ListedShellWrapperInteropRuntime
     {
-        private static Type _playerBasedCustomServerType;
-        private static FieldInfo _playerBasedCustomServerGameClientField;
         private static MethodInfo _platformShowRestrictedInformationMethod;
         private static MethodInfo _platformCheckPrivilegeMethod;
         private static PropertyInfo _platformServicesInstanceProperty;
         private static Type _platformPrivilegeEnumType;
         private static Type _platformPrivilegeResultType;
 
-        public static void InitializeWrapperContracts(Type playerBasedCustomServerType)
+        public static void InitializeWrapperContracts()
         {
-            _playerBasedCustomServerType = playerBasedCustomServerType;
-
-            CacheHostedServerFieldContract();
             CachePlatformPrivilegeContracts();
         }
 
@@ -132,16 +127,20 @@ namespace CoopSpectator.Infrastructure
             return TryOwnListedShellClientStart(source);
         }
 
-        public static bool TryOwnHostedListedServerStart(object instance, string source)
+        public static bool TryOwnHostedListedServerStart(string source)
         {
             try
             {
-                if (!TryResolveHostedListedStartContext(instance, out string gameType, out string scene, out bool isInGame))
+                if (!ListedShellHostedServerStartContextState.TryResolve(
+                        out string gameType,
+                        out string scene,
+                        out bool isInGame))
+                {
+                    ListedShellHostedServerStartContextState.Disarm(source + " missing-hosted-start-context");
                     return true;
+                }
 
-                if (!string.Equals(gameType, CoopGameModeIds.OfficialTeamDeathmatch, StringComparison.Ordinal))
-                    return true;
-
+                ListedShellHostedServerStartContextState.Disarm(source + " success");
                 _ = RunHostedListedStartAsync(gameType, scene, isInGame, source);
                 ModLogger.Info(
                     "ListedShellWrapperInteropRuntime: intercepted hosted listed server wrapper start. " +
@@ -155,6 +154,41 @@ namespace CoopSpectator.Infrastructure
             {
                 ModLogger.Error("ListedShellWrapperInteropRuntime.TryOwnHostedListedServerStart failed.", ex);
                 return true;
+            }
+        }
+
+        public static void HandleHostedServerStartingParameters(object lobbyGameClientHandler, string source)
+        {
+            try
+            {
+                object gameClient = GetPropertyValue(lobbyGameClientHandler, "GameClient");
+                if (gameClient == null)
+                {
+                    ListedShellHostedServerStartContextState.Disarm(source + " missing-game-client");
+                    return;
+                }
+
+                string gameType = Normalize(GetPropertyValue(gameClient, "CustomGameType") as string);
+                string scene = Normalize(GetPropertyValue(gameClient, "CustomGameScene") as string);
+                bool isInGame = GetPropertyValue(gameClient, "IsInGame") is bool isInGameValue && isInGameValue;
+
+                if (!string.Equals(gameType, CoopGameModeIds.OfficialTeamDeathmatch, StringComparison.Ordinal))
+                {
+                    ListedShellHostedServerStartContextState.Disarm(source + " non-listed-game-type");
+                    return;
+                }
+
+                ListedShellHostedServerStartContextState.Arm(gameType, scene, isInGame, source);
+                ModLogger.Info(
+                    "ListedShellWrapperInteropRuntime: observed hosted listed server starting parameters. " +
+                    "GameType=" + gameType +
+                    " Scene=" + scene +
+                    " IsInGame=" + isInGame +
+                    " Source=" + Normalize(source) + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error("ListedShellWrapperInteropRuntime.HandleHostedServerStartingParameters failed.", ex);
             }
         }
 
@@ -223,38 +257,6 @@ namespace CoopSpectator.Infrastructure
             {
                 ModLogger.Error("ListedShellWrapperInteropRuntime.RunHostedListedStartAsync failed.", ex);
             }
-        }
-
-        private static bool TryResolveHostedListedStartContext(object instance, out string gameType, out string scene, out bool isInGame)
-        {
-            gameType = string.Empty;
-            scene = string.Empty;
-            isInGame = false;
-
-            try
-            {
-                object gameClient = _playerBasedCustomServerGameClientField?.GetValue(instance);
-                if (gameClient == null)
-                    return false;
-
-                PropertyInfo customGameTypeProperty = gameClient.GetType().GetProperty("CustomGameType", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                PropertyInfo customGameSceneProperty = gameClient.GetType().GetProperty("CustomGameScene", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                PropertyInfo isInGameProperty = gameClient.GetType().GetProperty("IsInGame", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                gameType = Normalize(customGameTypeProperty?.GetValue(gameClient) as string);
-                scene = Normalize(customGameSceneProperty?.GetValue(gameClient) as string);
-                isInGame = isInGameProperty?.GetValue(gameClient) is bool isInGameValue && isInGameValue;
-                return !string.IsNullOrEmpty(gameType);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("ListedShellWrapperInteropRuntime: failed to resolve hosted listed start context: " + ex.Message);
-                return false;
-            }
-        }
-
-        private static void CacheHostedServerFieldContract()
-        {
-            _playerBasedCustomServerGameClientField = _playerBasedCustomServerType?.GetField("_gameClient", BindingFlags.Instance | BindingFlags.NonPublic);
         }
 
         private static void CachePlatformPrivilegeContracts()

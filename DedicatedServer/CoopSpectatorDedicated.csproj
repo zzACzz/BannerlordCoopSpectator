@@ -106,6 +106,7 @@
     <Compile Include="..\Infrastructure\HostSelfJoinRedirectState.cs" Link="Infrastructure\HostSelfJoinRedirectState.cs" />
     <Compile Include="..\Infrastructure\PendingBattleMissionStartupState.cs" Link="Infrastructure\PendingBattleMissionStartupState.cs" />
     <Compile Include="..\Infrastructure\ListedShellClientSessionOwnershipState.cs" Link="Infrastructure\ListedShellClientSessionOwnershipState.cs" />
+    <Compile Include="..\Infrastructure\ListedShellHostedServerStartContextState.cs" Link="Infrastructure\ListedShellHostedServerStartContextState.cs" />
     <Compile Include="..\Infrastructure\CoopSessionTransportPrimitives.cs" Link="Infrastructure\CoopSessionTransportPrimitives.cs" />
     <Compile Include="..\Infrastructure\ListedShellWrapperInteropRuntime.cs" Link="Infrastructure\ListedShellWrapperInteropRuntime.cs" />
     <Compile Include="..\Infrastructure\ListedShellSessionTransportRuntime.cs" Link="Infrastructure\ListedShellSessionTransportRuntime.cs" />
