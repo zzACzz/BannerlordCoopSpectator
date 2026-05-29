@@ -41,6 +41,24 @@ namespace CoopSpectator.Infrastructure
             GameNetwork.StartMultiplayerOnServer(port);
         }
 
+        public static bool TryStartMissionSessionGame(string gameType, string scene, string source)
+        {
+            bool started = TaleWorlds.MountAndBlade.Module.CurrentModule.StartMultiplayerGame(
+                gameType ?? string.Empty,
+                scene ?? string.Empty);
+
+            if (!started)
+            {
+                ModLogger.Info(
+                    "CoopSessionTransportPrimitives: StartMultiplayerGame returned false. " +
+                    "GameType=" + (gameType ?? string.Empty) +
+                    " Scene=" + (scene ?? string.Empty) +
+                    " Source=" + (string.IsNullOrWhiteSpace(source) ? string.Empty : source.Trim()) + ".");
+            }
+
+            return started;
+        }
+
         public static void FinalizeHostedServerTransportStart(int port, bool attachHostedLocalPeer)
         {
             StartServerTransport(port);

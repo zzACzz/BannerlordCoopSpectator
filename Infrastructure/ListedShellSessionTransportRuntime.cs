@@ -66,13 +66,11 @@ namespace CoopSpectator.Infrastructure
             try
             {
                 CoopSessionTransportPrimitives.PreStartServerTransport();
-                if (!TaleWorlds.MountAndBlade.Module.CurrentModule.StartMultiplayerGame(gameType, scene))
+                if (!CoopSessionTransportPrimitives.TryStartMissionSessionGame(
+                        gameType,
+                        scene,
+                        "ListedShellSessionTransportRuntime.TryStartHostedListedServerTransportAsync"))
                 {
-                    ModLogger.Info(
-                        "ListedShellSessionTransportRuntime: hosted listed StartMultiplayerGame returned false. " +
-                        "GameType=" + Normalize(gameType) +
-                        " Scene=" + Normalize(scene) +
-                        " Source=" + Normalize(source) + ".");
                     return false;
                 }
 

@@ -151,9 +151,12 @@ namespace CoopSpectator.Infrastructure
                         message.Map,
                         message.BattleIndex,
                         "ListedShellNetworkBootstrapRuntime.HandleListedInitializeCustomGameReceiveAsync");
-                    if (!TaleWorlds.MountAndBlade.Module.CurrentModule.StartMultiplayerGame(message.GameType, message.Map))
+                    if (!CoopSessionTransportPrimitives.TryStartMissionSessionGame(
+                            message.GameType,
+                            message.Map,
+                            "ListedShellNetworkBootstrapRuntime.HandleListedInitializeCustomGameReceiveAsync"))
                     {
-                        ModLogger.Info("ListedShellNetworkBootstrapRuntime: StartMultiplayerGame returned false for listed InitializeCustomGame receive path.");
+                        ModLogger.Info("ListedShellNetworkBootstrapRuntime: listed InitializeCustomGame receive path did not start mission session.");
                     }
 
                     return;
@@ -223,12 +226,12 @@ namespace CoopSpectator.Infrastructure
                     return;
                 }
 
-                if (!TaleWorlds.MountAndBlade.Module.CurrentModule.StartMultiplayerGame(message.GameType, message.Map))
+                if (!CoopSessionTransportPrimitives.TryStartMissionSessionGame(
+                        message.GameType,
+                        message.Map,
+                        "ListedShellNetworkBootstrapRuntime.HandleListedLoadMissionReceiveAsync"))
                 {
-                    ModLogger.Info(
-                        "ListedShellNetworkBootstrapRuntime: StartMultiplayerGame returned false for listed LoadMission receive path. " +
-                        "GameType=" + (message.GameType ?? string.Empty) +
-                        " Map=" + (message.Map ?? string.Empty) + ".");
+                    ModLogger.Info("ListedShellNetworkBootstrapRuntime: listed LoadMission receive path did not start mission session.");
                 }
             }
             catch (Exception ex)
