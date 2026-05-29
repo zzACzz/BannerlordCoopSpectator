@@ -517,8 +517,7 @@ namespace CoopSpectator.GameMode
                 return;
 
             CoopSessionTransportPrimitives.BroadcastServerMessage(new NetworkMessages.FromServer.UnloadMission());
-            GameNetwork.UnSynchronizeEveryone();
-            BannerlordNetwork.EndMultiplayerLobbyMission();
+            CoopSessionTransportPrimitives.EndServerLobbyMissionAfterUnloadBroadcast();
         }
 
         private static void BroadcastMissionStateChange(

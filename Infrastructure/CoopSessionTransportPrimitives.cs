@@ -1,5 +1,7 @@
 using System.Reflection;
 using NetworkMessages.FromServer;
+using TaleWorlds.Core;
+using TaleWorlds.Engine;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Network.Messages;
 
@@ -59,6 +61,12 @@ namespace CoopSpectator.Infrastructure
             GameNetwork.ClientFinishedLoading(GameNetwork.MyPeer);
         }
 
+        public static void MarkLocalPeerUnsynchronized()
+        {
+            if (GameNetwork.MyPeer != null)
+                GameNetwork.MyPeer.IsSynchronized = false;
+        }
+
         public static void SendUnloadMission(NetworkCommunicator networkPeer, bool unloadingForBattleIndexMismatch)
         {
             if (networkPeer == null || networkPeer.IsServerPeer)
@@ -107,6 +115,23 @@ namespace CoopSpectator.Infrastructure
             GameNetwork.BeginBroadcastModuleEvent();
             writeMessageMethod.Invoke(null, new[] { message });
             GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+        }
+
+        public static void EndClientLobbyMissionAndResetChat()
+        {
+            BannerlordNetwork.EndMultiplayerLobbyMission();
+            Game.Current?.GetGameHandler<ChatBox>()?.ResetMuteList();
+        }
+
+        public static void EndServerLobbyMissionAfterUnloadBroadcast()
+        {
+            GameNetwork.UnSynchronizeEveryone();
+            BannerlordNetwork.EndMultiplayerLobbyMission();
+        }
+
+        public static void DisableGlobalLoadingWindow()
+        {
+            LoadingWindow.DisableGlobalLoadingWindow();
         }
     }
 }

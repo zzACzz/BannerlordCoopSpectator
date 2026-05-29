@@ -161,7 +161,7 @@ namespace CoopSpectator.Infrastructure
                     return;
                 }
 
-                LoadingWindow.DisableGlobalLoadingWindow();
+                CoopSessionTransportPrimitives.DisableGlobalLoadingWindow();
                 TrySyncRelevantGameOptionsToServer();
                 ModLogger.Info("ListedShellNetworkBootstrapRuntime: completed listed non-mission InitializeCustomGame receive path.");
             }
@@ -212,8 +212,7 @@ namespace CoopSpectator.Infrastructure
 
                 await WaitForListedMissionOpenReadinessAsync(message.Map, message.BattleIndex);
 
-                if (GameNetwork.MyPeer != null)
-                    GameNetwork.MyPeer.IsSynchronized = false;
+                CoopSessionTransportPrimitives.MarkLocalPeerUnsynchronized();
 
                 ResetClientIntermissionState(baseNetworkComponentInstance);
 
@@ -274,8 +273,7 @@ namespace CoopSpectator.Infrastructure
         {
             try
             {
-                if (GameNetwork.MyPeer != null)
-                    GameNetwork.MyPeer.IsSynchronized = false;
+                CoopSessionTransportPrimitives.MarkLocalPeerUnsynchronized();
 
                 ResetClientIntermissionState(baseNetworkComponentInstance);
 
@@ -283,13 +281,12 @@ namespace CoopSpectator.Infrastructure
                 ListedShellMissionLobbyClientComponent listedClient = currentMission?.GetMissionBehavior<ListedShellMissionLobbyClientComponent>();
                 listedClient?.SetServerEndingBeforeClientLoaded(message.UnloadingForBattleIndexMismatch);
 
-                BannerlordNetwork.EndMultiplayerLobbyMission();
-                Game.Current?.GetGameHandler<ChatBox>()?.ResetMuteList();
+                CoopSessionTransportPrimitives.EndClientLobbyMissionAndResetChat();
 
                 await WaitForMissionUnloadAsync();
                 ListedShellClientSessionOwnershipState.Disarm(
                     "ListedShellNetworkBootstrapRuntime.HandleListedUnloadMissionReceiveAsync");
-                LoadingWindow.DisableGlobalLoadingWindow();
+                CoopSessionTransportPrimitives.DisableGlobalLoadingWindow();
             }
             catch (Exception ex)
             {
