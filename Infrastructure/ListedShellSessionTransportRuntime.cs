@@ -30,6 +30,8 @@ namespace CoopSpectator.Infrastructure
                     peerIndex,
                     source);
                 CoopSessionTransportPrimitives.StartClientTransport(address, port, sessionKey, peerIndex, source);
+                ListedShellNetworkBootstrapRuntime.BeginListedClientBattleRuntimeLateAttachFromTransportStart(
+                    "ListedShellSessionTransportRuntime.TryStartListedClientTransport");
                 ModLogger.Info(
                     "ListedShellSessionTransportRuntime: started listed client transport. " +
                     "GameType=" + Normalize(gameType) +

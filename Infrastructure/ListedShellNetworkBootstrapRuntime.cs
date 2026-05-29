@@ -108,8 +108,22 @@ namespace CoopSpectator.Infrastructure
                 return true;
 
             InitializeCustomGameMessage message = baseMessage as InitializeCustomGameMessage;
-            if (message == null || !ShouldOwnInitializeCustomGameReceive(message))
+            if (message == null)
                 return true;
+
+            if (!ShouldOwnInitializeCustomGameReceive(message))
+            {
+                bool shouldOwnReceiveBootstrap = ListedShellClientSessionOwnershipState.ShouldOwnReceiveBootstrap();
+                ModLogger.Info(
+                    "ListedShellNetworkBootstrapRuntime: observed listed InitializeCustomGame receive without ownership. " +
+                    "InMission=" + message.InMission +
+                    " GameType=" + (message.GameType ?? string.Empty) +
+                    " Map=" + (message.Map ?? string.Empty) +
+                    " BattleIndex=" + message.BattleIndex +
+                    " ShouldOwnReceiveBootstrap=" + shouldOwnReceiveBootstrap +
+                    " Source=" + Normalize(source) + ".");
+                return true;
+            }
 
             _ = HandleListedInitializeCustomGameReceiveAsync(message);
             ModLogger.Info(
@@ -184,8 +198,21 @@ namespace CoopSpectator.Infrastructure
                 return true;
 
             LoadMission message = baseMessage as LoadMission;
-            if (message == null || !ShouldOwnLoadMissionReceive(message))
+            if (message == null)
                 return true;
+
+            if (!ShouldOwnLoadMissionReceive(message))
+            {
+                bool shouldOwnReceiveBootstrap = ListedShellClientSessionOwnershipState.ShouldOwnReceiveBootstrap();
+                ModLogger.Info(
+                    "ListedShellNetworkBootstrapRuntime: observed listed LoadMission receive without ownership. " +
+                    "GameType=" + (message.GameType ?? string.Empty) +
+                    " Map=" + (message.Map ?? string.Empty) +
+                    " BattleIndex=" + message.BattleIndex +
+                    " ShouldOwnReceiveBootstrap=" + shouldOwnReceiveBootstrap +
+                    " Source=" + Normalize(source) + ".");
+                return true;
+            }
 
             _ = HandleListedLoadMissionReceiveAsync(baseNetworkComponentInstance, message);
             ModLogger.Info(
@@ -400,6 +427,14 @@ namespace CoopSpectator.Infrastructure
             ModLogger.Info("ListedShellNetworkBootstrapRuntime: mission unload wait timed out after coop-owned listed unload path.");
         }
 
+        public static void BeginListedClientBattleRuntimeLateAttachFromTransportStart(string source)
+        {
+            if (!GameNetwork.IsClient)
+                return;
+
+            _ = EnsureListedClientBattleRuntimeBehaviorsFromTransportStartAsync(source);
+        }
+
         private static async Task EnsureListedClientBattleRuntimeBehaviorsAsync(string sceneName, int token, string source)
         {
             if (!GameNetwork.IsClient)
@@ -430,6 +465,36 @@ namespace CoopSpectator.Infrastructure
                 "Scene=" + normalizedScene +
                 " BattleIndex=" + token +
                 " Source=" + Normalize(source) + ".");
+        }
+
+        private static async Task EnsureListedClientBattleRuntimeBehaviorsFromTransportStartAsync(string source)
+        {
+            if (!GameNetwork.IsClient)
+                return;
+
+            for (int i = 0; i < 20000; i++)
+            {
+                Mission mission = Mission.Current;
+                if (mission != null &&
+                    mission.Mode == MissionMode.Battle &&
+                    mission.GetMissionBehavior<ListedShellMissionLobbyClientComponent>() != null)
+                {
+                    ListedShellMissionSessionState.InitializeMission(
+                        mission,
+                        Normalize(source) + " transport-start-fallback");
+                    TryEnsureListedClientBattleRuntimeBehaviors(
+                        mission,
+                        0,
+                        source + " transport-start-fallback");
+                    return;
+                }
+
+                await Task.Delay(1);
+            }
+
+            ModLogger.Info(
+                "ListedShellNetworkBootstrapRuntime: transport-start fallback timed out while waiting for listed battle mission. " +
+                "Source=" + Normalize(source) + ".");
         }
 
         private static void TryEnsureListedClientBattleRuntimeBehaviors(Mission mission, int token, string source)
