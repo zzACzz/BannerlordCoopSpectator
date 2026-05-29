@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
-
+using TaleWorlds.MountAndBlade.Network.Messages;
 namespace CoopSpectator.GameMode
 {
     internal sealed class ListedShellMissionScoreboardComponent : MissionScoreboardComponent
@@ -15,6 +15,8 @@ namespace CoopSpectator.GameMode
             .GetMethod("SetPeerAsMVP", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo OnPlayerPropertiesChangedEventField = typeof(MissionScoreboardComponent)
             .GetField("OnPlayerPropertiesChanged", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo OnMvpSelectedEventField = typeof(MissionScoreboardComponent)
+            .GetField("OnMVPSelected", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private readonly Dictionary<int, int> _lastRoundScoreByPeerIndex = new Dictionary<int, int>();
 
@@ -73,6 +75,16 @@ namespace CoopSpectator.GameMode
                 shotDifficulty);
         }
 
+        protected override void AddRemoveMessageHandlers(GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
+        {
+            if (!GameNetwork.IsClient || registerer == null)
+                return;
+
+            registerer.RegisterBaseHandler<NetworkMessages.FromServer.UpdateRoundScores>(HandleListedShellUpdateRoundScoresMessage);
+            registerer.RegisterBaseHandler<NetworkMessages.FromServer.SetRoundMVP>(HandleListedShellSetRoundMvpMessage);
+            registerer.RegisterBaseHandler<NetworkMessages.FromServer.BotData>(HandleListedShellBotDataMessage);
+        }
+
         private void TryReplaceNativePreRoundEndingHandler(MultiplayerRoundComponent roundComponent)
         {
             try
@@ -98,6 +110,36 @@ namespace CoopSpectator.GameMode
             catch (Exception ex)
             {
                 ModLogger.Info("ListedShellMissionScoreboardComponent: failed to replace native pre-round-ending MVP handler: " + ex.Message);
+            }
+        }
+
+        private void HandleListedShellUpdateRoundScoresMessage(GameNetworkMessage baseMessage)
+        {
+            HandleServerUpdateRoundScoresMessage(baseMessage);
+        }
+
+        private void HandleListedShellBotDataMessage(GameNetworkMessage baseMessage)
+        {
+            HandleServerEventBotDataMessage(baseMessage);
+        }
+
+        private void HandleListedShellSetRoundMvpMessage(GameNetworkMessage baseMessage)
+        {
+            NetworkMessages.FromServer.SetRoundMVP setRoundMvp = baseMessage as NetworkMessages.FromServer.SetRoundMVP;
+            MissionPeer missionPeer = setRoundMvp?.MVPPeer?.GetComponent<MissionPeer>();
+            if (missionPeer == null)
+                return;
+
+            try
+            {
+                Action<MissionPeer, int> handler =
+                    OnMvpSelectedEventField?.GetValue(this) as Action<MissionPeer, int>;
+                handler?.Invoke(missionPeer, setRoundMvp.MVPCount);
+                NotifyListedShellPlayerPropertiesChanged(missionPeer);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("ListedShellMissionScoreboardComponent: failed to apply listed-shell SetRoundMVP without native player refresh path: " + ex.Message);
             }
         }
 
