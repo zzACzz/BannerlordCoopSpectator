@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using System.Threading.Tasks;
 using CoopSpectator.GameMode;
+using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Patches;
 using NetworkMessages.FromServer;
 using TaleWorlds.Core;
@@ -159,6 +160,11 @@ namespace CoopSpectator.Infrastructure
                         ModLogger.Info("ListedShellNetworkBootstrapRuntime: listed InitializeCustomGame receive path did not start mission session.");
                     }
 
+                    _ = EnsureListedClientBattleRuntimeBehaviorsAsync(
+                        message.Map,
+                        message.BattleIndex,
+                        "ListedShellNetworkBootstrapRuntime.HandleListedInitializeCustomGameReceiveAsync");
+
                     return;
                 }
 
@@ -223,6 +229,10 @@ namespace CoopSpectator.Infrastructure
                         "ListedShellNetworkBootstrapRuntime: listed mission already active for received LoadMission; skipped duplicate StartMultiplayerGame. " +
                         "Map=" + (message.Map ?? string.Empty) +
                         " BattleIndex=" + message.BattleIndex + ".");
+                    _ = EnsureListedClientBattleRuntimeBehaviorsAsync(
+                        message.Map,
+                        message.BattleIndex,
+                        "ListedShellNetworkBootstrapRuntime.HandleListedLoadMissionReceiveAsync duplicate-active");
                     return;
                 }
 
@@ -233,6 +243,11 @@ namespace CoopSpectator.Infrastructure
                 {
                     ModLogger.Info("ListedShellNetworkBootstrapRuntime: listed LoadMission receive path did not start mission session.");
                 }
+
+                _ = EnsureListedClientBattleRuntimeBehaviorsAsync(
+                    message.Map,
+                    message.BattleIndex,
+                    "ListedShellNetworkBootstrapRuntime.HandleListedLoadMissionReceiveAsync");
             }
             catch (Exception ex)
             {
@@ -383,6 +398,101 @@ namespace CoopSpectator.Infrastructure
             }
 
             ModLogger.Info("ListedShellNetworkBootstrapRuntime: mission unload wait timed out after coop-owned listed unload path.");
+        }
+
+        private static async Task EnsureListedClientBattleRuntimeBehaviorsAsync(string sceneName, int token, string source)
+        {
+            if (!GameNetwork.IsClient)
+                return;
+
+            string normalizedScene = Normalize(sceneName);
+            for (int i = 0; i < 5000; i++)
+            {
+                Mission mission = Mission.Current;
+                if (mission != null &&
+                    string.Equals(Normalize(mission.SceneName), normalizedScene, StringComparison.Ordinal))
+                {
+                    ListedShellMissionSessionState.InitializeMission(
+                        mission,
+                        Normalize(source) + " ensure-client-runtime");
+                    TryEnsureListedClientBattleRuntimeBehaviors(
+                        mission,
+                        token,
+                        source);
+                    return;
+                }
+
+                await Task.Delay(1);
+            }
+
+            ModLogger.Info(
+                "ListedShellNetworkBootstrapRuntime: timed out while waiting to ensure listed client battle runtime behaviors. " +
+                "Scene=" + normalizedScene +
+                " BattleIndex=" + token +
+                " Source=" + Normalize(source) + ".");
+        }
+
+        private static void TryEnsureListedClientBattleRuntimeBehaviors(Mission mission, int token, string source)
+        {
+            if (mission == null || !GameNetwork.IsClient)
+                return;
+
+            bool attachedModeClient = false;
+            bool attachedDiagnostic = false;
+            bool attachedNetworkBridge = false;
+
+            try
+            {
+                if (mission.GetMissionBehavior<MissionMultiplayerCoopBattleClient>() == null)
+                {
+                    var modeClient = new MissionMultiplayerCoopBattleClient();
+                    mission.AddMissionBehavior(modeClient);
+                    modeClient.OnBehaviorInitialize();
+                    modeClient.AfterStart();
+                    attachedModeClient = true;
+                }
+
+                if (mission.GetMissionBehavior<MissionBehaviorDiagnostic>() == null)
+                {
+                    var diagnostic = new MissionBehaviorDiagnostic();
+                    mission.AddMissionBehavior(diagnostic);
+                    diagnostic.OnBehaviorInitialize();
+                    diagnostic.AfterStart();
+                    attachedDiagnostic = true;
+                }
+
+                if (mission.GetMissionBehavior<CoopMissionNetworkBridge>() == null)
+                {
+                    var bridge = new CoopMissionNetworkBridge();
+                    mission.AddMissionBehavior(bridge);
+                    bridge.OnAfterMissionCreated();
+                    bridge.OnBehaviorInitialize();
+                    bridge.AfterStart();
+                    attachedNetworkBridge = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error(
+                    "ListedShellNetworkBootstrapRuntime.TryEnsureListedClientBattleRuntimeBehaviors failed. " +
+                    "Scene=" + Normalize(mission.SceneName) +
+                    " BattleIndex=" + token +
+                    " Source=" + Normalize(source) + ".",
+                    ex);
+                return;
+            }
+
+            if (!attachedModeClient && !attachedDiagnostic && !attachedNetworkBridge)
+                return;
+
+            ModLogger.Info(
+                "ListedShellNetworkBootstrapRuntime: attached missing listed client battle runtime behaviors after mission open. " +
+                "Scene=" + Normalize(mission.SceneName) +
+                " BattleIndex=" + token +
+                " AttachedModeClient=" + attachedModeClient +
+                " AttachedDiagnostic=" + attachedDiagnostic +
+                " AttachedNetworkBridge=" + attachedNetworkBridge +
+                " Source=" + Normalize(source) + ".");
         }
 
         private static void ResetClientIntermissionState(object instance)
