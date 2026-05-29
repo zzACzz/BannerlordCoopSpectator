@@ -22307,7 +22307,9 @@ namespace CoopSpectator.MissionBehaviors
             {
                 try
                 {
-                    Mission.Current?.GetMissionBehavior<MissionScoreboardComponent>()?.PlayerPropertiesChanged(peer);
+                    ListedShellMissionScoreboardComponent.NotifyListedShellPlayerPropertiesChanged(
+                        Mission.Current?.GetMissionBehavior<MissionScoreboardComponent>(),
+                        peer);
                     GameNetwork.BeginBroadcastModuleEvent();
                     WriteBotsControlledChangeClamped(peer, 0, 0, source + " clear-non-commander");
                     GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);

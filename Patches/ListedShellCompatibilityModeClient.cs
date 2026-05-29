@@ -57,7 +57,9 @@ namespace CoopSpectator.Patches
                     MissionLobbyComponent.MultiplayerGameState.Ending))
             {
                 representative.UpdateGold(goldAmount);
-                ScoreboardComponent?.PlayerPropertiesChanged(representative.MissionPeer);
+                ListedShellMissionScoreboardComponent.NotifyListedShellPlayerPropertiesChanged(
+                    ScoreboardComponent,
+                    representative.MissionPeer);
             }
         }
 

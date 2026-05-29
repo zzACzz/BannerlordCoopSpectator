@@ -227,7 +227,9 @@ namespace CoopSpectator.GameMode
             }
 
             PeerStatsRuntimeState statsState = ResolveListedShellPeerStats(affectorPeer);
-            scoreboardComponent?.PlayerPropertiesChanged(affectorPeer.GetNetworkPeer());
+            ListedShellMissionScoreboardComponent.NotifyListedShellPlayerPropertiesChanged(
+                scoreboardComponent,
+                affectorPeer.GetNetworkPeer());
             BroadcastKillDeathCountChange(
                 affectorPeer.GetNetworkPeer(),
                 null,
@@ -378,8 +380,9 @@ namespace CoopSpectator.GameMode
                 }
             }
 
-            (scoreboardComponent ?? Mission.Current?.GetMissionBehavior<MissionScoreboardComponent>())
-                ?.PlayerPropertiesChanged(killDeathCountChange.VictimPeer);
+            ListedShellMissionScoreboardComponent.NotifyListedShellPlayerPropertiesChanged(
+                scoreboardComponent ?? Mission.Current?.GetMissionBehavior<MissionScoreboardComponent>(),
+                killDeathCountChange.VictimPeer);
             return true;
         }
 
@@ -714,7 +717,9 @@ namespace CoopSpectator.GameMode
 
             AdjustListedShellPeerStats(victimPeer, 0, 0, 1, 0, "ListedShellLobbyRuntime.HandleListedShellPlayerDeath victim");
             PeerStatsRuntimeState victimStats = ResolveListedShellPeerStats(victimPeer);
-            mission.GetMissionBehavior<MissionScoreboardComponent>()?.PlayerPropertiesChanged(victimPeer.GetNetworkPeer());
+            ListedShellMissionScoreboardComponent.NotifyListedShellPlayerPropertiesChanged(
+                mission.GetMissionBehavior<MissionScoreboardComponent>(),
+                victimPeer.GetNetworkPeer());
             BroadcastKillDeathCountChange(
                 victimPeer.GetNetworkPeer(),
                 affectorPeer?.GetNetworkPeer(),
@@ -831,7 +836,9 @@ namespace CoopSpectator.GameMode
             }
 
             PeerStatsRuntimeState killerStats = ResolveListedShellPeerStats(killerPeer);
-            mission.GetMissionBehavior<MissionScoreboardComponent>()?.PlayerPropertiesChanged(killerPeer.GetNetworkPeer());
+            ListedShellMissionScoreboardComponent.NotifyListedShellPlayerPropertiesChanged(
+                mission.GetMissionBehavior<MissionScoreboardComponent>(),
+                killerPeer.GetNetworkPeer());
             BroadcastKillDeathCountChange(
                 killerPeer.GetNetworkPeer(),
                 null,
@@ -878,7 +885,9 @@ namespace CoopSpectator.GameMode
             }
 
             MissionScoreboardComponent scoreboard = mission.GetMissionBehavior<MissionScoreboardComponent>();
-            scoreboard?.PlayerPropertiesChanged(ownerNetworkPeer);
+            ListedShellMissionScoreboardComponent.NotifyListedShellPlayerPropertiesChanged(
+                scoreboard,
+                ownerNetworkPeer);
             if (botAgent.Team != null)
                 scoreboard?.BotPropertiesChanged(botAgent.Team.Side);
 
@@ -923,7 +932,9 @@ namespace CoopSpectator.GameMode
             }
 
             MissionScoreboardComponent scoreboard = mission.GetMissionBehavior<MissionScoreboardComponent>();
-            scoreboard?.PlayerPropertiesChanged(killerNetworkPeer);
+            ListedShellMissionScoreboardComponent.NotifyListedShellPlayerPropertiesChanged(
+                scoreboard,
+                killerNetworkPeer);
             if (botAgent.Team != null)
                 scoreboard?.BotPropertiesChanged(botAgent.Team.Side);
 
@@ -1051,7 +1062,9 @@ namespace CoopSpectator.GameMode
             int killScore = gameMode?.GetScoreForKill(killedAgent) ?? 0;
             AdjustListedShellPeerStats(killerPeer, 0, 0, 0, -(int)(killScore * 1.5f), "ListedShellLobbyRuntime.ApplyListedPlayerSuicide");
             PeerStatsRuntimeState killerStats = ResolveListedShellPeerStats(killerPeer);
-            mission.GetMissionBehavior<MissionScoreboardComponent>()?.PlayerPropertiesChanged(killerPeer.GetNetworkPeer());
+            ListedShellMissionScoreboardComponent.NotifyListedShellPlayerPropertiesChanged(
+                mission.GetMissionBehavior<MissionScoreboardComponent>(),
+                killerPeer.GetNetworkPeer());
             BroadcastKillDeathCountChange(
                 killerPeer.GetNetworkPeer(),
                 killedAgent.MissionPeer?.GetNetworkPeer(),
@@ -1117,13 +1130,17 @@ namespace CoopSpectator.GameMode
 
             if (!CoopBattlePeerStatsRuntimeState.TryGetState(missionPeer, out PeerStatsRuntimeState statsState))
             {
+                int authoritativeDeathCount =
+                    CoopBattlePeerLifecycleRuntimeState.TryGetState(missionPeer, out PeerLifecycleRuntimeState lifecycleState)
+                        ? lifecycleState.DeathCount
+                        : 0;
                 CoopBattlePeerStatsRuntimeState.Apply(
                     missionPeer,
-                    missionPeer.KillCount,
-                    missionPeer.AssistCount,
-                    missionPeer.DeathCount,
-                    missionPeer.Score,
-                    "ListedShellLobbyRuntime.ResolveListedShellPeerStats seed");
+                    0,
+                    0,
+                    authoritativeDeathCount,
+                    0,
+                    "ListedShellLobbyRuntime.ResolveListedShellPeerStats authoritative seed");
                 CoopBattlePeerStatsRuntimeState.TryGetState(missionPeer, out statsState);
             }
 

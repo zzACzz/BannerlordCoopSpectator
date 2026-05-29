@@ -13,6 +13,8 @@ namespace CoopSpectator.GameMode
             .GetField("OnPreRoundEnding", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo SetPeerAsMvpMethod = typeof(MissionScoreboardComponent)
             .GetMethod("SetPeerAsMVP", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo OnPlayerPropertiesChangedEventField = typeof(MissionScoreboardComponent)
+            .GetField("OnPlayerPropertiesChanged", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private readonly Dictionary<int, int> _lastRoundScoreByPeerIndex = new Dictionary<int, int>();
 
@@ -175,7 +177,7 @@ namespace CoopSpectator.GameMode
                 return runtimeState.Score;
             }
 
-            return player?.Score ?? 0;
+            return 0;
         }
 
         private void TrySetListedShellPeerAsMvp(MissionPeer peer)
@@ -190,6 +192,52 @@ namespace CoopSpectator.GameMode
             catch (Exception ex)
             {
                 ModLogger.Info("ListedShellMissionScoreboardComponent: failed to set listed-shell MVP through native scoreboard contract: " + ex.Message);
+            }
+        }
+
+        internal static void NotifyListedShellPlayerPropertiesChanged(
+            MissionScoreboardComponent scoreboardComponent,
+            NetworkCommunicator networkPeer)
+        {
+            if (networkPeer == null)
+                return;
+
+            NotifyListedShellPlayerPropertiesChanged(
+                scoreboardComponent,
+                networkPeer.GetComponent<MissionPeer>());
+        }
+
+        internal static void NotifyListedShellPlayerPropertiesChanged(
+            MissionScoreboardComponent scoreboardComponent,
+            MissionPeer player)
+        {
+            if (scoreboardComponent is ListedShellMissionScoreboardComponent listedShellScoreboard)
+            {
+                listedShellScoreboard.NotifyListedShellPlayerPropertiesChanged(player);
+                return;
+            }
+
+            scoreboardComponent?.PlayerPropertiesChanged(player);
+        }
+
+        private void NotifyListedShellPlayerPropertiesChanged(MissionPeer player)
+        {
+            if (GameNetwork.IsDedicatedServer || player?.Team == null)
+                return;
+
+            Mission mission = Mission ?? Mission.Current;
+            if (mission?.SpectatorTeam != null && player.Team == mission.SpectatorTeam)
+                return;
+
+            try
+            {
+                Action<BattleSideEnum, MissionPeer> handler =
+                    OnPlayerPropertiesChangedEventField?.GetValue(this) as Action<BattleSideEnum, MissionPeer>;
+                handler?.Invoke(player.Team.Side, player);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("ListedShellMissionScoreboardComponent: failed to notify listed-shell player property change without native totals path: " + ex.Message);
             }
         }
     }
