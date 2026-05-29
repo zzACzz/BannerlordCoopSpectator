@@ -113,6 +113,7 @@
     <Compile Include="..\Infrastructure\ListedShellNetworkBootstrapRuntime.cs" Link="Infrastructure\ListedShellNetworkBootstrapRuntime.cs" />
     <Compile Include="..\Infrastructure\PendingBattleFinishedLoadingTransportRuntime.cs" Link="Infrastructure\PendingBattleFinishedLoadingTransportRuntime.cs" />
     <Compile Include="..\Infrastructure\ListedShellMissionSessionState.cs" Link="Infrastructure\ListedShellMissionSessionState.cs" />
+    <Compile Include="..\Infrastructure\ListedShellLobbyClientInteropRuntime.cs" Link="Infrastructure\ListedShellLobbyClientInteropRuntime.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSelectionIntentState.cs" Link="Infrastructure\CoopBattleSelectionIntentState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSpawnBridgeFile.cs" Link="Infrastructure\CoopBattleSpawnBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSpawnIntentState.cs" Link="Infrastructure\CoopBattleSpawnIntentState.cs" />

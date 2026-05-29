@@ -27,7 +27,7 @@ namespace CoopSpectator.GameMode
         {
             Mission mission = Mission ?? Mission.Current;
             GameNetwork.AddNetworkHandler(this);
-            _lobbyClient = ResolveLobbyClient();
+            _lobbyClient = ListedShellLobbyClientInteropRuntime.ResolveLobbyClient();
             if (!GameNetwork.IsServerOrRecorder && mission != null)
                 _inactivityTimer = new Timer(mission.CurrentTime, ListedShellClientInactivityThresholdSeconds);
             ListedShellLobbyRuntime.InitializeListedShellLobbyState(mission);
@@ -41,30 +41,13 @@ namespace CoopSpectator.GameMode
         public override void QuitMission()
         {
             base.QuitMission();
-            if (_lobbyClient == null)
-                return;
-
             Mission mission = Mission ?? Mission.Current;
             bool isEnding = ListedShellLobbyRuntime.IsMissionLobbyState(mission, MultiplayerGameState.Ending);
-            if (GameNetwork.IsServer)
-            {
-                if (!isEnding &&
-                    IsLobbyClientLoggedIn(_lobbyClient) &&
-                    ResolveLobbyClientState(_lobbyClient) == 14)
-                {
-                    TryInvokeLobbyClientMethod(_lobbyClient, "EndCustomGame");
-                }
-
-                return;
-            }
-
-            if (!_isServerEndedBeforeClientLoaded &&
-                !isEnding &&
-                IsLobbyClientLoggedIn(_lobbyClient) &&
-                ResolveLobbyClientState(_lobbyClient) == 16)
-            {
-                TryInvokeLobbyClientMethod(_lobbyClient, "QuitFromCustomGame");
-            }
+            ListedShellLobbyClientInteropRuntime.HandleQuitMissionInterop(
+                _lobbyClient,
+                GameNetwork.IsServer,
+                isEnding,
+                _isServerEndedBeforeClientLoaded);
         }
 
         public override void AfterStart()
@@ -122,63 +105,6 @@ namespace CoopSpectator.GameMode
                 Mission?.GetMissionBehavior<MissionScoreboardComponent>());
         }
 
-        private static object ResolveLobbyClient()
-        {
-            try
-            {
-                return typeof(NetworkMain)
-                    .GetProperty("GameClient", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?
-                    .GetValue(null);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static bool IsLobbyClientLoggedIn(object lobbyClient)
-        {
-            try
-            {
-                object loggedInValue = lobbyClient?.GetType()
-                    .GetProperty("LoggedIn", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
-                    .GetValue(lobbyClient);
-                return loggedInValue is bool loggedIn && loggedIn;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static int ResolveLobbyClientState(object lobbyClient)
-        {
-            try
-            {
-                object currentState = lobbyClient?.GetType()
-                    .GetProperty("CurrentState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
-                    .GetValue(lobbyClient);
-                return currentState != null ? Convert.ToInt32(currentState) : -1;
-            }
-            catch
-            {
-                return -1;
-            }
-        }
-
-        private static void TryInvokeLobbyClientMethod(object lobbyClient, string methodName)
-        {
-            try
-            {
-                lobbyClient?.GetType()
-                    .GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
-                    .Invoke(lobbyClient, null);
-            }
-            catch
-            {
-            }
-        }
-
         private void UpdateLobbyClientCriticalState()
         {
             try
@@ -197,12 +123,12 @@ namespace CoopSpectator.GameMode
                     return;
 
                 if (_lobbyClient == null)
-                    _lobbyClient = ResolveLobbyClient();
+                    _lobbyClient = ListedShellLobbyClientInteropRuntime.ResolveLobbyClient();
 
                 double elapsedSeconds = ResolveElapsedSecondsSinceLastUdpPacketArrived();
-                _lobbyClient?.GetType()
-                    .GetProperty("IsInCriticalState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
-                    .SetValue(_lobbyClient, elapsedSeconds > ListedShellClientInactivityThresholdSeconds);
+                ListedShellLobbyClientInteropRuntime.TrySetCriticalState(
+                    _lobbyClient,
+                    elapsedSeconds > ListedShellClientInactivityThresholdSeconds);
             }
             catch (Exception ex)
             {
