@@ -23,9 +23,6 @@ namespace CoopSpectator.GameMode
         private static readonly MethodInfo SetStateEndingAsClientMethod = typeof(MissionLobbyComponent).GetMethod(
             "SetStateEndingAsClient",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        private static readonly MethodInfo MissionLobbyOnMyClientSynchronizedMethod = typeof(MissionLobbyComponent).GetMethod(
-            "OnMyClientSynchronized",
-            BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo NetworkFromServerBaseHandlersField =
             AccessTools.Field(typeof(GameNetwork.NetworkMessageHandlerRegistererContainer), "_fromServerBaseHandlers");
         private static readonly MethodInfo CurrentMultiplayerStateSetterMethod = typeof(MissionLobbyComponent)
@@ -197,41 +194,6 @@ namespace CoopSpectator.GameMode
             catch (Exception ex)
             {
                 ModLogger.Info("ListedShellLobbyRuntime: behavior-initialize failed open: " + ex.Message);
-            }
-        }
-
-        internal static void AfterListedShellLobbyStart(Mission mission, MissionLobbyComponent lobbyComponent)
-        {
-            try
-            {
-                if (!ShouldUseListedShellLobbyContract(mission) || !GameNetwork.IsClient)
-                    return;
-
-                MissionNetworkComponent missionNetwork = mission?.GetMissionBehavior<MissionNetworkComponent>();
-                EventInfo synchronizedEvent = typeof(MissionNetworkComponent).GetEvent(
-                    "OnMyClientSynchronized",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (missionNetwork == null ||
-                    synchronizedEvent == null ||
-                    synchronizedEvent.EventHandlerType == null ||
-                    MissionLobbyOnMyClientSynchronizedMethod == null)
-                {
-                    return;
-                }
-
-                Delegate handler = Delegate.CreateDelegate(
-                    synchronizedEvent.EventHandlerType,
-                    lobbyComponent,
-                    MissionLobbyOnMyClientSynchronizedMethod,
-                    throwOnBindFailure: false);
-                if (handler == null)
-                    return;
-
-                synchronizedEvent.RemoveEventHandler(missionNetwork, handler);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("ListedShellLobbyRuntime: after-start failed open: " + ex.Message);
             }
         }
 

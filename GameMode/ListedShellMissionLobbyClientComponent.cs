@@ -66,8 +66,7 @@ namespace CoopSpectator.GameMode
 
         public override void AfterStart()
         {
-            base.AfterStart();
-            ListedShellLobbyRuntime.AfterListedShellLobbyStart(Mission ?? Mission.Current, this);
+            (Mission ?? Mission.Current)?.DeploymentPlan.MakeDefaultDeploymentPlans();
         }
 
         protected override void AddRemoveMessageHandlers(GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
