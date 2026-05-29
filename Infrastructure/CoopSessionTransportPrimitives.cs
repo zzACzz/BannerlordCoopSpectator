@@ -1,3 +1,4 @@
+using System;
 using System.Reflection;
 using NetworkMessages.FromServer;
 using TaleWorlds.Core;
@@ -104,9 +105,8 @@ namespace CoopSpectator.Infrastructure
             if (networkPeer == null || networkPeer.IsServerPeer)
                 return;
 
-            GameNetwork.BeginModuleEventAsServer(networkPeer);
-            GameNetwork.WriteMessage(new UnloadMission(unloadingForBattleIndexMismatch));
-            GameNetwork.EndModuleEventAsServer();
+            ExecuteServerPeerEnvelope(networkPeer, () =>
+                GameNetwork.WriteMessage(new UnloadMission(unloadingForBattleIndexMismatch)));
         }
 
         public static void BroadcastUnloadMission(bool unloadingForBattleIndexMismatch = false)
@@ -134,9 +134,7 @@ namespace CoopSpectator.Infrastructure
             if (targetPeer == null || targetPeer.IsServerPeer || message == null)
                 return;
 
-            GameNetwork.BeginModuleEventAsServer(targetPeer);
-            GameNetwork.WriteMessage(message);
-            GameNetwork.EndModuleEventAsServer();
+            ExecuteServerPeerEnvelope(targetPeer, () => GameNetwork.WriteMessage(message));
         }
 
         public static void BroadcastServerMessage(GameNetworkMessage message)
@@ -144,9 +142,7 @@ namespace CoopSpectator.Infrastructure
             if (message == null)
                 return;
 
-            GameNetwork.BeginBroadcastModuleEvent();
-            GameNetwork.WriteMessage(message);
-            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+            ExecuteBroadcastEnvelope(() => GameNetwork.WriteMessage(message));
         }
 
         public static void SendReflectedServerMessage(NetworkCommunicator targetPeer, MethodInfo writeMessageMethod, object message)
@@ -154,9 +150,7 @@ namespace CoopSpectator.Infrastructure
             if (targetPeer == null || targetPeer.IsServerPeer || writeMessageMethod == null || message == null)
                 return;
 
-            GameNetwork.BeginModuleEventAsServer(targetPeer);
-            writeMessageMethod.Invoke(null, new[] { message });
-            GameNetwork.EndModuleEventAsServer();
+            ExecuteServerPeerEnvelope(targetPeer, () => writeMessageMethod.Invoke(null, new[] { message }));
         }
 
         public static void BroadcastReflectedServerMessage(MethodInfo writeMessageMethod, object message)
@@ -164,9 +158,7 @@ namespace CoopSpectator.Infrastructure
             if (writeMessageMethod == null || message == null)
                 return;
 
-            GameNetwork.BeginBroadcastModuleEvent();
-            writeMessageMethod.Invoke(null, new[] { message });
-            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+            ExecuteBroadcastEnvelope(() => writeMessageMethod.Invoke(null, new[] { message }));
         }
 
         public static void EndClientLobbyMissionAndResetChat()
@@ -201,6 +193,26 @@ namespace CoopSpectator.Infrastructure
         public static void CompleteClientLobbyMissionUnload()
         {
             DisableGlobalLoadingWindow();
+        }
+
+        private static void ExecuteServerPeerEnvelope(NetworkCommunicator targetPeer, Action writeMessage)
+        {
+            if (targetPeer == null || targetPeer.IsServerPeer || writeMessage == null)
+                return;
+
+            GameNetwork.BeginModuleEventAsServer(targetPeer);
+            writeMessage();
+            GameNetwork.EndModuleEventAsServer();
+        }
+
+        private static void ExecuteBroadcastEnvelope(Action writeMessage)
+        {
+            if (writeMessage == null)
+                return;
+
+            GameNetwork.BeginBroadcastModuleEvent();
+            writeMessage();
+            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
         }
     }
 }
