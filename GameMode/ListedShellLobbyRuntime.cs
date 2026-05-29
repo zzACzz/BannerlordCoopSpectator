@@ -24,9 +24,6 @@ namespace CoopSpectator.GameMode
             AccessTools.Field(typeof(GameNetwork.NetworkMessageHandlerRegistererContainer), "_fromServerBaseHandlers");
         private static readonly Type MissionStateChangeType = AccessTools.TypeByName("TaleWorlds.MountAndBlade.MissionStateChange");
         private static readonly MethodInfo GameNetworkWriteMessageMethod = ResolveGameNetworkWriteMessageMethod();
-        private static readonly MethodInfo MissionPeerScoreSetter = typeof(MissionPeer)
-            .GetProperty(nameof(MissionPeer.Score), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
-            .GetSetMethod(nonPublic: true);
         private static readonly ConditionalWeakTable<Mission, ListedShellMissionStateHolder> ListedShellMissionStateByMission =
             new ConditionalWeakTable<Mission, ListedShellMissionStateHolder>();
         private const int MaxBotsControlledCountForNetworkContract = 255;
@@ -1169,30 +1166,11 @@ namespace CoopSpectator.GameMode
                 deathCount,
                 score,
                 source);
-            TrySetMissionPeerIntProperty(missionPeer, MissionPeerScoreSetter, score);
         }
 
         private static int ClampBotsControlledCount(int value)
         {
             return Math.Max(0, Math.Min(MaxBotsControlledCountForNetworkContract, value));
-        }
-
-        private static void TrySetMissionPeerIntProperty(MissionPeer missionPeer, MethodInfo setter, int value)
-        {
-            if (missionPeer == null || setter == null)
-                return;
-
-            try
-            {
-                setter.Invoke(missionPeer, new object[] { value });
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info(
-                    "ListedShellLobbyRuntime: failed to set MissionPeer int property through nonpublic contract. " +
-                    "Peer=" + (missionPeer.GetNetworkPeer()?.UserName ?? missionPeer.GetNetworkPeer()?.Index.ToString() ?? "none") +
-                    " Error=" + ex.Message);
-            }
         }
 
         private static int CountSynchronizedPeers()
