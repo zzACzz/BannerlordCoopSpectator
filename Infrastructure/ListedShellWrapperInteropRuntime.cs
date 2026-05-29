@@ -219,7 +219,6 @@ namespace CoopSpectator.Infrastructure
                     return true;
                 }
 
-                ListedShellClientSessionOwnershipState.Disarm(source + " success");
                 TryCheckMultiplayerPrivilege(promptOnRestricted: true);
                 ModLogger.Info(
                     "ListedShellWrapperInteropRuntime: owned listed client StartMultiplayer wrapper. " +
@@ -227,7 +226,8 @@ namespace CoopSpectator.Infrastructure
                     " Address=" + address +
                     " Port=" + port +
                     " SessionKey=" + sessionKey +
-                    " PeerIndex=" + peerIndex + ".");
+                    " PeerIndex=" + peerIndex +
+                    " OwnershipRetainedForReceiveBootstrap=True.");
                 return false;
             }
             catch (Exception ex)
