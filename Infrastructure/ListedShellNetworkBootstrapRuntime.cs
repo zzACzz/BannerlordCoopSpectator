@@ -65,12 +65,6 @@ namespace CoopSpectator.Infrastructure
                 if (targetPeer == null || targetPeer.IsServerPeer)
                     return false;
 
-                CoopSessionTransportPrimitives.SendServerMessage(targetPeer, new MultiplayerOptionsInitial());
-                CoopSessionTransportPrimitives.SendServerMessage(targetPeer, new MultiplayerOptionsImmediate());
-
-                if (targetPeer.IsAdmin)
-                    CoopSessionTransportPrimitives.SendServerMessage(targetPeer, new MultiplayerOptionsDefault());
-
                 bool inMission = !GameNetwork.IsDedicatedServer || mission != null;
                 string scene = inMission ? (mission?.SceneName ?? string.Empty) : string.Empty;
                 string gameType = inMission ? CoopGameModeIds.OfficialTeamDeathmatch : string.Empty;
@@ -83,7 +77,13 @@ namespace CoopSpectator.Infrastructure
                     return false;
                 }
 
-                CoopSessionTransportPrimitives.SendServerMessage(targetPeer, new InitializeCustomGameMessage(inMission, gameType, scene, token));
+                string sentMessages = CoopSessionTransportPrimitives.SendInitializeCustomGameBootstrapBundle(
+                    targetPeer,
+                    targetPeer.IsAdmin,
+                    inMission,
+                    gameType,
+                    scene,
+                    token);
 
                 ModLogger.Info(
                     "ListedShellNetworkBootstrapRuntime: sent coop-owned listed new-client bootstrap. " +
@@ -91,9 +91,7 @@ namespace CoopSpectator.Infrastructure
                     " Scene=" + scene +
                     " GameType=" + gameType +
                     " MissionSessionToken=" + token +
-                    " SentMessages=MultiplayerOptionsInitial,MultiplayerOptionsImmediate" +
-                    (targetPeer.IsAdmin ? ",MultiplayerOptionsDefault" : string.Empty) +
-                    ",InitializeCustomGameMessage.");
+                    " SentMessages=" + sentMessages + ".");
                 return true;
             }
             catch (Exception ex)

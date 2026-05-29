@@ -129,6 +129,31 @@ namespace CoopSpectator.Infrastructure
             SendServerMessage(targetPeer, new ExistingObjectsEnd());
         }
 
+        public static string SendInitializeCustomGameBootstrapBundle(
+            NetworkCommunicator targetPeer,
+            bool includeDefaultOptions,
+            bool inMission,
+            string gameType,
+            string scene,
+            int token)
+        {
+            if (targetPeer == null || targetPeer.IsServerPeer)
+                return string.Empty;
+
+            SendServerMessage(targetPeer, new MultiplayerOptionsInitial());
+            SendServerMessage(targetPeer, new MultiplayerOptionsImmediate());
+
+            string sentMessages = "MultiplayerOptionsInitial,MultiplayerOptionsImmediate";
+            if (includeDefaultOptions)
+            {
+                SendServerMessage(targetPeer, new MultiplayerOptionsDefault());
+                sentMessages += ",MultiplayerOptionsDefault";
+            }
+
+            SendServerMessage(targetPeer, new InitializeCustomGameMessage(inMission, gameType ?? string.Empty, scene ?? string.Empty, token));
+            return sentMessages + ",InitializeCustomGameMessage";
+        }
+
         public static void SendServerMessage(NetworkCommunicator targetPeer, GameNetworkMessage message)
         {
             if (targetPeer == null || targetPeer.IsServerPeer || message == null)
