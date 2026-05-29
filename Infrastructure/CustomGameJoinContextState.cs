@@ -13,7 +13,7 @@ namespace CoopSpectator.Infrastructure
         private static bool _isOfficial;
         private static bool _allowLocalBattleRosterFileFallback = true;
         private static DateTime _updatedUtc = DateTime.MinValue;
-        private static readonly TimeSpan ListedShellLobbyMissionTypeJoinContextLifetime = TimeSpan.FromMinutes(2);
+        private static readonly TimeSpan ListedShellBootstrapJoinContextLifetime = TimeSpan.FromMinutes(2);
 
         public static void Update(
             string serverName,
@@ -54,12 +54,12 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        public static bool ShouldNeutralizeListedShellLobbyMissionType()
+        public static bool ShouldOwnListedShellCustomGameBootstrap()
         {
             lock (Sync)
             {
                 if (_updatedUtc == DateTime.MinValue ||
-                    DateTime.UtcNow - _updatedUtc > ListedShellLobbyMissionTypeJoinContextLifetime)
+                    DateTime.UtcNow - _updatedUtc > ListedShellBootstrapJoinContextLifetime)
                 {
                     return false;
                 }

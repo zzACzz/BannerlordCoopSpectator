@@ -8,20 +8,13 @@ using TaleWorlds.MountAndBlade;
 namespace CoopSpectator.Patches
 {
     /// <summary>
-    /// Owns the listed-shell InitializeCustomGameMessage send gate so late join no longer
-    /// depends on BannerlordNetwork.LobbyMissionType staying in the native custom/community state.
+    /// Owns the listed-shell InitializeCustomGameMessage send gate so late join bootstrap
+    /// is driven directly from the explicit listed mission marker instead of custom/community lobby state.
     /// </summary>
     internal static class ListedShellInitializeCustomGameOwnershipPatch
     {
-        private const int NativeLobbyMissionTypeMatchmaker = 0;
-        private const int NativeLobbyMissionTypeCustom = 1;
-        private const int NativeLobbyMissionTypeCommunity = 2;
-
         private static FieldInfo _baseNetworkComponentDataField;
         private static MethodInfo _ensureBaseNetworkComponentDataMethod;
-        private static Type _lobbyMissionTypeEnumType;
-        private static PropertyInfo _lobbyMissionTypeProperty;
-        private static MethodInfo _startMultiplayerLobbyMissionMethod;
 
         public static void Apply(Harmony harmony)
         {
@@ -54,15 +47,6 @@ namespace CoopSpectator.Patches
 
                 _baseNetworkComponentDataField = targetType.GetField("_baseNetworkComponentData", BindingFlags.Instance | BindingFlags.NonPublic);
                 _ensureBaseNetworkComponentDataMethod = targetType.GetMethod("EnsureBaseNetworkComponentData", BindingFlags.Instance | BindingFlags.NonPublic);
-                _lobbyMissionTypeProperty = typeof(BannerlordNetwork).GetProperty("LobbyMissionType", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-                _lobbyMissionTypeEnumType = _lobbyMissionTypeProperty?.PropertyType;
-                _startMultiplayerLobbyMissionMethod = typeof(BannerlordNetwork).GetMethod(
-                    "StartMultiplayerLobbyMission",
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                    null,
-                    _lobbyMissionTypeEnumType == null ? Type.EmptyTypes : new[] { _lobbyMissionTypeEnumType },
-                    null);
-
                 harmony.Patch(targetMethod, prefix: new HarmonyMethod(prefixMethod), postfix: new HarmonyMethod(postfixMethod));
                 ModLogger.Info("ListedShellInitializeCustomGameOwnershipPatch: patched BaseNetworkComponent.HandleNewClientConnect.");
             }
@@ -72,9 +56,9 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void HandleNewClientConnect_Prefix(object __instance, PlayerConnectionInfo playerConnectionInfo, ref int __state)
+        private static void HandleNewClientConnect_Prefix(object __instance, PlayerConnectionInfo playerConnectionInfo, ref bool __state)
         {
-            __state = 0;
+            __state = false;
 
             if (!GameNetwork.IsServer)
                 return;
@@ -88,34 +72,12 @@ namespace CoopSpectator.Patches
                 return;
 
             EnsureBaseNetworkComponentData(__instance);
-
-            int currentLobbyMissionType = GetCurrentLobbyMissionTypeCode();
-            if (currentLobbyMissionType == NativeLobbyMissionTypeCustom ||
-                currentLobbyMissionType == NativeLobbyMissionTypeCommunity)
-            {
-                if (!TrySetCurrentLobbyMissionTypeCode(NativeLobbyMissionTypeMatchmaker))
-                {
-                    ModLogger.Info(
-                        "ListedShellInitializeCustomGameOwnershipPatch: failed to disarm native LobbyMissionType gate before listed HandleNewClientConnect. " +
-                        "Peer=" + (targetPeer.UserName ?? "unknown") +
-                        " LobbyMissionTypeCode=" + currentLobbyMissionType + ".");
-                    return;
-                }
-
-                __state = 2;
-                ModLogger.Info(
-                    "ListedShellInitializeCustomGameOwnershipPatch: disarmed native LobbyMissionType gate for explicit listed shell before HandleNewClientConnect. " +
-                    "Peer=" + (targetPeer.UserName ?? "unknown") +
-                    " PreviousLobbyMissionTypeCode=" + currentLobbyMissionType + ".");
-                return;
-            }
-
-            __state = 1;
+            __state = true;
         }
 
-        private static void HandleNewClientConnect_Postfix(object __instance, PlayerConnectionInfo playerConnectionInfo, int __state)
+        private static void HandleNewClientConnect_Postfix(object __instance, PlayerConnectionInfo playerConnectionInfo, bool __state)
         {
-            if (__state == 0 || !GameNetwork.IsServer)
+            if (!__state || !GameNetwork.IsServer)
                 return;
 
             NetworkCommunicator targetPeer = playerConnectionInfo?.NetworkPeer;
@@ -141,7 +103,7 @@ namespace CoopSpectator.Patches
                 " Scene=" + scene +
                 " GameType=" + gameType +
                 " CurrentBattleIndex=" + currentBattleIndex +
-                " OwnershipState=" + __state + ".");
+                " OwnershipState=owned-listed-bootstrap.");
         }
 
         private static bool ShouldOwnListedShellInitializeCustomGameIngress(Mission mission)
@@ -151,41 +113,6 @@ namespace CoopSpectator.Patches
 
             return mission.GetMissionBehavior<ListedShellCompatibilityMode>() != null ||
                 mission.GetMissionBehavior<ListedShellCompatibilityModeClient>() != null;
-        }
-
-        private static int GetCurrentLobbyMissionTypeCode()
-        {
-            try
-            {
-                object value = _lobbyMissionTypeProperty?.GetValue(null);
-                if (value == null)
-                    return -1;
-
-                return Convert.ToInt32(value);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("ListedShellInitializeCustomGameOwnershipPatch: failed to read LobbyMissionType: " + ex.Message);
-                return -1;
-            }
-        }
-
-        private static bool TrySetCurrentLobbyMissionTypeCode(int missionTypeCode)
-        {
-            try
-            {
-                if (_startMultiplayerLobbyMissionMethod == null || _lobbyMissionTypeEnumType == null)
-                    return false;
-
-                object lobbyMissionType = Enum.ToObject(_lobbyMissionTypeEnumType, missionTypeCode);
-                _startMultiplayerLobbyMissionMethod.Invoke(null, new[] { lobbyMissionType });
-                return true;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("ListedShellInitializeCustomGameOwnershipPatch: failed to set LobbyMissionType via StartMultiplayerLobbyMission: " + ex.Message);
-                return false;
-            }
         }
 
         private static void EnsureBaseNetworkComponentData(object instance)
