@@ -179,7 +179,6 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                     ModLogger.Info("CoopBattle server: MissionScoreboardComponent unavailable for battle-map runtime; continuing with known crash risk.");
             }
 
-            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionRecentPlayersComponent"));
             if (!minimalBattleMapRuntime)
             {
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionMatchHistoryComponent"));
@@ -195,7 +194,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerPreloadHelper"));
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionAgentPanicHandler"));
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.AgentHumanAILogic"));
-                ModLogger.Info("CoopBattle server: retained recent players, match history, equipment leave logic, preload helper, panic handler, and human AI for battle-map native peer-sync compatibility.");
+                ModLogger.Info("CoopBattle server: retained match history, equipment leave logic, preload helper, panic handler, and human AI for battle-map native peer-sync compatibility after removing recent-players shell.");
             }
 
             list.Add(new CoopMissionNetworkBridge());
@@ -259,12 +258,11 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
             ModLogger.Info("CoopBattle client: skipped MissionScoreboardComponent; scoreboard remains server-side compatibility only.");
 
-            AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionRecentPlayersComponent"));
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerPreloadHelper"));
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionMatchHistoryComponent"));
             AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.EquipmentControllerLeaveLogic"));
             if (minimalBattleMapRuntime)
-                ModLogger.Info("CoopBattle client: retained recent players, preload, match history, and equipment leave logic for battle-map native bootstrap compatibility.");
+                ModLogger.Info("CoopBattle client: retained preload, match history, and equipment leave logic for battle-map native bootstrap compatibility after removing recent-players shell.");
 
             list.Add(new MissionBehaviorDiagnostic());
             list.Add(new CoopMissionNetworkBridge());

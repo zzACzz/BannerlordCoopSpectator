@@ -204,10 +204,6 @@ namespace CoopSpectator.Patches
             AddRequired(list, MissionBehaviorHelpers.TryCreateMissionOptionsComponent(mission), "MissionOptionsComponent");
             AddOptional(list, MissionBehaviorHelpers.TryCreateMissionMatchHistoryComponent(), "MissionMatchHistoryComponent");
             list.Add(new EquipmentControllerLeaveLogic());
-            AddOptional(
-                list,
-                TryCreateBehaviorByFullNames("TaleWorlds.MountAndBlade.MissionRecentPlayersComponent"),
-                "MissionRecentPlayersComponent");
             AddRequired(
                 list,
                 TryCreateBehaviorByFullNames("TaleWorlds.MountAndBlade.MultiplayerPreloadHelper"),

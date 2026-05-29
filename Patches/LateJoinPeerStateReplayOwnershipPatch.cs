@@ -96,7 +96,7 @@ namespace CoopSpectator.Patches
 
             DeferredPeerStateReplayPeerIndices.Remove(peer.Index);
             ModLogger.Info(
-                "LateJoinPeerStateReplayOwnershipPatch: replayed deferred authoritative peer team/culture state. " +
+                "LateJoinPeerStateReplayOwnershipPatch: replayed deferred authoritative late-join bootstrap gate without native peer-team replay. " +
                 "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
                 " Scene=" + (mission?.SceneName ?? "unknown") +
                 " Source=" + (source ?? "unknown"));
@@ -211,7 +211,7 @@ namespace CoopSpectator.Patches
                 if (LoggedDiagnosticKeys.Add(logKey))
                 {
                     ModLogger.Info(
-                        "LateJoinPeerStateReplayOwnershipPatch: deferred authoritative peer team/culture replay until snapshot-ready. " +
+                        "LateJoinPeerStateReplayOwnershipPatch: deferred authoritative late-join bootstrap gate until snapshot-ready. " +
                         "Peer=" + (networkPeer.UserName ?? networkPeer.Index.ToString()) +
                         " Scene=" + (mission.SceneName ?? "unknown") +
                         " Readiness={" + (readinessSummary ?? "unknown") + "}" +
@@ -221,55 +221,21 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            IEnumerable<NetworkCommunicator> subjects = GameNetwork.NetworkPeersIncludingDisconnectedPeers;
-            if (subjects == null)
-                return false;
-
-            bool sentAny = false;
-            foreach (NetworkCommunicator subjectPeer in subjects)
+            string appliedLogKey =
+                "owned-peer-state|" +
+                networkPeer.Index + "|" +
+                (source ?? "unknown") + "|" +
+                (mission.SceneName ?? "unknown");
+            if (LoggedDiagnosticKeys.Add(appliedLogKey))
             {
-                MissionPeer missionPeer = subjectPeer?.GetComponent<MissionPeer>();
-                if (missionPeer == null)
-                    continue;
-
-                if (!CoopMissionSpawnLogic.TryResolveAuthoritativeNativePeerCompatibilityStateForReplay(
-                        mission,
-                        missionPeer,
-                        source + " subject-replay",
-                        out int teamIndex,
-                        out _,
-                        out string _))
-                {
-                    continue;
-                }
-
-                if (teamIndex >= 0)
-                {
-                    GameNetwork.BeginModuleEventAsServer(networkPeer);
-                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetPeerTeam(subjectPeer, teamIndex));
-                    GameNetwork.EndModuleEventAsServer();
-                    sentAny = true;
-                }
+                ModLogger.Info(
+                    "LateJoinPeerStateReplayOwnershipPatch: snapshot-ready late-join bootstrap no longer sends native SetPeerTeam replay. " +
+                    "Peer=" + (networkPeer.UserName ?? networkPeer.Index.ToString()) +
+                    " Scene=" + (mission.SceneName ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
             }
 
-            if (sentAny)
-            {
-                string logKey =
-                    "owned-peer-state|" +
-                    networkPeer.Index + "|" +
-                    (source ?? "unknown") + "|" +
-                    (mission.SceneName ?? "unknown");
-                if (LoggedDiagnosticKeys.Add(logKey))
-                {
-                    ModLogger.Info(
-                        "LateJoinPeerStateReplayOwnershipPatch: sent authoritative peer-team replay through owned ingress path. " +
-                        "Peer=" + (networkPeer.UserName ?? networkPeer.Index.ToString()) +
-                        " Scene=" + (mission.SceneName ?? "unknown") +
-                        " Source=" + (source ?? "unknown"));
-                }
-            }
-
-            return sentAny;
+            return true;
         }
 
         private static void InvokePrivateNetworkPeerMethod(object instance, MethodInfo method, NetworkCommunicator networkPeer)
