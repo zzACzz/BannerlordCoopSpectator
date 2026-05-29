@@ -38,12 +38,6 @@ namespace CoopSpectator.GameMode
             BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly Type MissionStateChangeType = AccessTools.TypeByName("TaleWorlds.MountAndBlade.MissionStateChange");
         private static readonly MethodInfo GameNetworkWriteMessageMethod = ResolveGameNetworkWriteMessageMethod();
-        private static readonly MethodInfo RemoveHittersAndGetAssistorPeerMethod = typeof(MissionLobbyComponent).GetMethod(
-            "RemoveHittersAndGetAssistorPeer",
-            BindingFlags.Instance | BindingFlags.NonPublic,
-            binder: null,
-            types: new[] { typeof(MissionPeer), typeof(Agent) },
-            modifiers: null);
         private static readonly MethodInfo MissionPeerKillCountSetter = typeof(MissionPeer)
             .GetProperty(nameof(MissionPeer.KillCount), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
             .GetSetMethod(nonPublic: true);
@@ -56,12 +50,6 @@ namespace CoopSpectator.GameMode
         private static readonly MethodInfo MissionPeerScoreSetter = typeof(MissionPeer)
             .GetProperty(nameof(MissionPeer.Score), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
             .GetSetMethod(nonPublic: true);
-        private static readonly MethodInfo FormationPlayerOwnerGetter = typeof(Formation)
-            .GetProperty("PlayerOwner", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
-            .GetGetMethod(nonPublic: true);
-        private static readonly FieldInfo FormationPlayerOwnerBackingField = typeof(Formation).GetField(
-            "<PlayerOwner>k__BackingField",
-            BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly ConditionalWeakTable<Mission, ListedShellMissionStateHolder> ListedShellMissionStateByMission =
             new ConditionalWeakTable<Mission, ListedShellMissionStateHolder>();
         private const int MaxBotsControlledCountForNetworkContract = 255;
@@ -671,7 +659,7 @@ namespace CoopSpectator.GameMode
 
             MissionPeer directKillerPeer = affectorAgent?.MissionPeer;
             MissionPeer affectorPeer = directKillerPeer ?? affectorAgent?.OwningAgentMissionPeer;
-            MissionPeer assistorPeer = TryResolveAssistorPeer(lobbyComponent, directKillerPeer, affectedAgent);
+            MissionPeer assistorPeer = TryResolveAssistorPeer(directKillerPeer, affectedAgent);
 
             CoopMissionSpawnLogic.TryHandleListedShellPlayerDeathTransition(
                 mission,
@@ -735,7 +723,7 @@ namespace CoopSpectator.GameMode
 
             MissionPeer directKillerPeer = affectorAgent?.MissionPeer;
             MissionPeer affectorPeer = directKillerPeer ?? affectorAgent?.OwningAgentMissionPeer;
-            MissionPeer assistorPeer = TryResolveAssistorPeer(lobbyComponent, directKillerPeer, affectedAgent);
+            MissionPeer assistorPeer = TryResolveAssistorPeer(directKillerPeer, affectedAgent);
 
             if (!TryHandleListedShellControlledBotDeath(mission, affectedAgent, affectorPeer, assistorPeer))
                 TryHandleListedShellSideBotDeath(mission, affectedAgent, affectorPeer, assistorPeer);
@@ -756,22 +744,29 @@ namespace CoopSpectator.GameMode
         }
 
         private static MissionPeer TryResolveAssistorPeer(
-            MissionLobbyComponent lobbyComponent,
             MissionPeer killerPeer,
             Agent killedAgent)
         {
-            if (lobbyComponent == null || RemoveHittersAndGetAssistorPeerMethod == null || killedAgent == null)
+            if (killedAgent == null)
                 return null;
 
             try
             {
-                return RemoveHittersAndGetAssistorPeerMethod.Invoke(
-                    lobbyComponent,
-                    new object[] { killerPeer, killedAgent }) as MissionPeer;
+                Agent.Hitter assistingHitter = killedAgent.GetAssistingHitter(killerPeer);
+                MissionPeer assistorPeer = assistingHitter?.HitterPeer;
+                if (assistorPeer == null)
+                    return null;
+
+                int assistCountDelta = assistingHitter.IsFriendlyHit ? -1 : 1;
+                TrySetMissionPeerIntProperty(
+                    assistorPeer,
+                    MissionPeerAssistCountSetter,
+                    assistorPeer.AssistCount + assistCountDelta);
+                return assistorPeer;
             }
             catch (Exception ex)
             {
-                ModLogger.Info("ListedShellLobbyRuntime: failed to resolve assistor peer for listed player death: " + ex.Message);
+                ModLogger.Info("ListedShellLobbyRuntime: failed to resolve assistor peer for listed player death through direct hitter contract: " + ex.Message);
                 return null;
             }
         }
@@ -998,14 +993,11 @@ namespace CoopSpectator.GameMode
 
             try
             {
-                if (FormationPlayerOwnerGetter != null)
-                    return FormationPlayerOwnerGetter.Invoke(formation, Array.Empty<object>()) as Agent;
-
-                return FormationPlayerOwnerBackingField?.GetValue(formation) as Agent;
+                return formation.PlayerOwner;
             }
             catch (Exception ex)
             {
-                ModLogger.Info("ListedShellLobbyRuntime: failed to resolve formation PlayerOwner through reflection: " + ex.Message);
+                ModLogger.Info("ListedShellLobbyRuntime: failed to resolve formation PlayerOwner through direct contract: " + ex.Message);
                 return null;
             }
         }
