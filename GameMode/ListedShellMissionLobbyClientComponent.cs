@@ -93,20 +93,17 @@ namespace CoopSpectator.GameMode
         public override void OnMissionTick(float dt)
         {
             UpdateLobbyClientCriticalState();
-            if (ListedShellLobbyRuntime.ShouldCallNativeOnMissionTick(this, dt))
-                base.OnMissionTick(dt);
+            ListedShellLobbyRuntime.HandleListedShellMissionTick(this, dt);
         }
 
         public override void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, AgentState agentState, KillingBlow killingBlow)
         {
-            if (ListedShellLobbyRuntime.ShouldCallNativeOnAgentRemoved(this, affectedAgent, affectorAgent, agentState, killingBlow))
-                base.OnAgentRemoved(affectedAgent, affectorAgent, agentState, killingBlow);
+            ListedShellLobbyRuntime.HandleListedShellAgentRemoved(this, affectedAgent, affectorAgent, agentState, killingBlow);
         }
 
         protected override void HandleLateNewClientAfterLoadingFinished(NetworkCommunicator networkPeer)
         {
-            if (ListedShellLobbyRuntime.ShouldCallNativeHandleLateNewClientAfterLoadingFinished(this, networkPeer))
-                base.HandleLateNewClientAfterLoadingFinished(networkPeer);
+            ListedShellLobbyRuntime.HandleListedShellLateNewClientAfterLoadingFinished(this, networkPeer);
         }
 
         private void HandleListedShellMissionStateChange(GameNetworkMessage baseMessage)

@@ -98,19 +98,19 @@ namespace CoopSpectator.GameMode
             return -1;
         }
 
-        internal static bool ShouldCallNativeOnMissionTick(MissionLobbyComponent lobbyComponent, float dt)
+        internal static void HandleListedShellMissionTick(MissionLobbyComponent lobbyComponent, float dt)
         {
-            return OnMissionTick_Prefix(lobbyComponent, dt);
+            OnListedShellMissionTick(lobbyComponent, dt);
         }
 
-        internal static bool ShouldCallNativeOnAgentRemoved(
+        internal static void HandleListedShellAgentRemoved(
             MissionLobbyComponent lobbyComponent,
             Agent affectedAgent,
             Agent affectorAgent,
             AgentState agentState,
             KillingBlow killingBlow)
         {
-            return OnAgentRemoved_Prefix(
+            OnListedShellAgentRemoved(
                 lobbyComponent,
                 affectedAgent,
                 affectorAgent,
@@ -118,7 +118,7 @@ namespace CoopSpectator.GameMode
                 killingBlow);
         }
 
-        internal static bool ShouldCallNativeHandleLateNewClientAfterLoadingFinished(
+        internal static void HandleListedShellLateNewClientAfterLoadingFinished(
             MissionLobbyComponent lobbyComponent,
             NetworkCommunicator networkPeer)
         {
@@ -126,48 +126,43 @@ namespace CoopSpectator.GameMode
             {
                 Mission mission = lobbyComponent?.Mission ?? Mission.Current;
                 if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
+                    return;
 
                 if (!GameNetwork.IsServer || networkPeer == null || networkPeer.IsServerPeer)
-                    return false;
+                    return;
 
                 SendListedShellLateJoinBootstrapToPeer(lobbyComponent, mission, networkPeer);
-                return false;
             }
             catch (Exception ex)
             {
-                ModLogger.Info("ListedShellLobbyRuntime: late-new-client bootstrap failed open: " + ex.Message);
-                return true;
+                ModLogger.Info("ListedShellLobbyRuntime: late-new-client bootstrap failed: " + ex.Message);
             }
         }
 
-        internal static bool ShouldCallNativeOnUdpNetworkHandlerTick(MissionLobbyComponent lobbyComponent)
+        internal static void HandleListedShellUdpNetworkHandlerTick(MissionLobbyComponent lobbyComponent)
         {
             try
             {
                 Mission mission = lobbyComponent?.Mission ?? Mission.Current;
                 if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
+                    return;
 
                 if (!GameNetwork.IsServer)
-                    return false;
+                    return;
 
                 if (!TryResolveMissionLobbyState(mission, out MissionLobbyComponent.MultiplayerGameState listedState) ||
                     listedState != MissionLobbyComponent.MultiplayerGameState.Ending)
                 {
-                    return false;
+                    return;
                 }
 
                 MultiplayerTimerComponent timer = mission?.GetMissionBehavior<MultiplayerTimerComponent>();
                 if (timer != null && timer.CheckIfTimerPassed())
                     EndListedShellMissionAsServer();
-
-                return false;
             }
             catch (Exception ex)
             {
-                ModLogger.Info("ListedShellLobbyRuntime: udp-network-handler-tick failed open: " + ex.Message);
-                return true;
+                ModLogger.Info("ListedShellLobbyRuntime: udp-network-handler-tick failed: " + ex.Message);
             }
         }
 
@@ -186,48 +181,49 @@ namespace CoopSpectator.GameMode
             }
         }
 
-        private static bool OnMissionTick_Prefix(MissionLobbyComponent __instance, float dt)
+        private static void OnListedShellMissionTick(MissionLobbyComponent __instance, float dt)
         {
             try
             {
                 Mission mission = __instance?.Mission ?? Mission.Current;
                 if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
+                    return;
 
                 if (GameNetwork.IsClient)
-                    return false;
+                    return;
 
                 if (!GameNetwork.IsServerOrRecorder)
-                    return true;
+                    return;
 
                 if (!TryResolveMissionLobbyState(mission, out MissionLobbyComponent.MultiplayerGameState listedState))
-                    return true;
+                    return;
 
                 if (listedState == MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers)
-                    return HandleWaitingFirstPlayersState(__instance, mission);
+                {
+                    HandleWaitingFirstPlayersState(__instance, mission);
+                    return;
+                }
 
                 if (listedState != MissionLobbyComponent.MultiplayerGameState.Playing)
-                    return false;
+                    return;
 
                 MissionMultiplayerGameModeBase gameMode = mission.GetMissionBehavior<MissionMultiplayerGameModeBase>();
                 MultiplayerTimerComponent timer = mission.GetMissionBehavior<MultiplayerTimerComponent>();
                 if (gameMode == null || timer == null || gameMode.RoundController != null)
-                    return true;
+                    return;
 
                 bool timerPassed = timer.CheckIfTimerPassed();
                 if (!timerPassed && !gameMode.CheckForMatchEnd())
-                    return false;
+                    return;
 
                 gameMode.GetWinnerTeam();
                 SetRemainingAgentsInvulnerable(mission);
                 ClearListedShellSpawnCompatibilityState();
                 __instance.SetStateEndingAsServer();
-                return false;
             }
             catch (Exception ex)
             {
-                ModLogger.Info("ListedShellLobbyRuntime: mission-tick failed open: " + ex.Message);
-                return true;
+                ModLogger.Info("ListedShellLobbyRuntime: mission-tick failed: " + ex.Message);
             }
         }
 
@@ -327,7 +323,7 @@ namespace CoopSpectator.GameMode
             return true;
         }
 
-        private static bool OnAgentRemoved_Prefix(
+        private static void OnListedShellAgentRemoved(
             MissionLobbyComponent __instance,
             Agent affectedAgent,
             Agent affectorAgent,
@@ -338,10 +334,10 @@ namespace CoopSpectator.GameMode
             {
                 Mission mission = __instance?.Mission ?? Mission.Current;
                 if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
+                    return;
 
                 if (!TryResolveMissionLobbyState(mission, out MissionLobbyComponent.MultiplayerGameState listedState))
-                    return true;
+                    return;
 
                 if (!GameNetwork.IsServer ||
                     listedState == MissionLobbyComponent.MultiplayerGameState.Ending ||
@@ -349,14 +345,14 @@ namespace CoopSpectator.GameMode
                     !affectedAgent.IsHuman ||
                     affectedAgent.IsMount)
                 {
-                    return true;
+                    return;
                 }
 
                 if (agentState != AgentState.Killed &&
                     agentState != AgentState.Unconscious &&
                     agentState != AgentState.Routed)
                 {
-                    return true;
+                    return;
                 }
 
                 if (affectedAgent.MissionPeer != null)
@@ -367,7 +363,7 @@ namespace CoopSpectator.GameMode
                         affectedAgent,
                         affectorAgent,
                         "ListedShellLobbyRuntime.OnAgentRemoved");
-                    return false;
+                    return;
                 }
 
                 HandleListedShellBotDeath(
@@ -376,30 +372,28 @@ namespace CoopSpectator.GameMode
                     affectedAgent,
                     affectorAgent,
                     "ListedShellLobbyRuntime.OnAgentRemoved");
-                return false;
             }
             catch (Exception ex)
             {
-                ModLogger.Info("ListedShellLobbyRuntime: agent-removed failed open: " + ex.Message);
-                return true;
+                ModLogger.Info("ListedShellLobbyRuntime: agent-removed failed: " + ex.Message);
             }
         }
 
-        private static bool HandleWaitingFirstPlayersState(MissionLobbyComponent lobbyComponent, Mission mission)
+        private static void HandleWaitingFirstPlayersState(MissionLobbyComponent lobbyComponent, Mission mission)
         {
             if (!GameNetwork.IsServer)
-                return true;
+                return;
 
             MultiplayerTimerComponent timer = mission?.GetMissionBehavior<MultiplayerTimerComponent>();
             if (timer == null)
-                return true;
+                return;
 
             MultiplayerWarmupComponent warmup = mission.GetMissionBehavior<MultiplayerWarmupComponent>();
             if (warmup != null && warmup.IsInWarmup)
-                return false;
+                return;
 
             if (!timer.CheckIfTimerPassed())
-                return false;
+                return;
 
             int synchronizedPeerCount = CountSynchronizedPeers();
             int configuredBotCount =
@@ -410,7 +404,7 @@ namespace CoopSpectator.GameMode
                 synchronizedPeerCount + configuredBotCount >= minPlayersToStart ||
                 MBCommon.CurrentGameType == MBCommon.GameType.MultiClientServer;
             if (!shouldStart)
-                return false;
+                return;
 
             SetListedShellStatePlayingAsServer(mission, timer);
             ModLogger.Info(
@@ -419,7 +413,6 @@ namespace CoopSpectator.GameMode
                 " Bots=" + configuredBotCount +
                 " MinPlayers=" + minPlayersToStart +
                 " Mission=" + (mission?.SceneName ?? "unknown"));
-            return false;
         }
 
         private static void SetListedShellStatePlayingAsServer(Mission mission, MultiplayerTimerComponent timer)
