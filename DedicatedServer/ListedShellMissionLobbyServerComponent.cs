@@ -1,6 +1,5 @@
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
-using NetworkMessages.FromServer;
 
 namespace CoopSpectator.GameMode
 {
@@ -40,15 +39,20 @@ namespace CoopSpectator.GameMode
                 base.HandleLateNewClientAfterLoadingFinished(networkPeer);
         }
 
+        protected override void OnUdpNetworkHandlerTick()
+        {
+            if (ListedShellLobbyRuntime.ShouldCallNativeOnUdpNetworkHandlerTick(this))
+                base.OnUdpNetworkHandlerTick();
+        }
+
+        public override void SetStateEndingAsServer()
+        {
+            ListedShellLobbyRuntime.SetListedShellStateEndingAsServer(this);
+        }
+
         protected override void EndGameAsServer()
         {
-            base.EndGameAsServer();
-            TaleWorlds.Library.Debug.Print("EndGameAsServer called");
-            GameNetwork.BeginBroadcastModuleEvent();
-            GameNetwork.WriteMessage(new UnloadMission());
-            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
-            GameNetwork.UnSynchronizeEveryone();
-            BannerlordNetwork.EndMultiplayerLobbyMission();
+            ListedShellLobbyRuntime.EndListedShellMissionAsServer();
         }
     }
 }

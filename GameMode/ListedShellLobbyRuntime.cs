@@ -155,6 +155,36 @@ namespace CoopSpectator.GameMode
             }
         }
 
+        internal static bool ShouldCallNativeOnUdpNetworkHandlerTick(MissionLobbyComponent lobbyComponent)
+        {
+            try
+            {
+                Mission mission = lobbyComponent?.Mission ?? Mission.Current;
+                if (!ShouldUseListedShellLobbyContract(mission))
+                    return true;
+
+                if (!GameNetwork.IsServer)
+                    return false;
+
+                if (!TryResolveMissionLobbyState(mission, out MissionLobbyComponent.MultiplayerGameState listedState) ||
+                    listedState != MissionLobbyComponent.MultiplayerGameState.Ending)
+                {
+                    return false;
+                }
+
+                MultiplayerTimerComponent timer = mission?.GetMissionBehavior<MultiplayerTimerComponent>();
+                if (timer != null && timer.CheckIfTimerPassed())
+                    EndListedShellMissionAsServer();
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("ListedShellLobbyRuntime: udp-network-handler-tick failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         internal static void InitializeListedShellLobbyState(Mission mission)
         {
             try
@@ -237,7 +267,7 @@ namespace CoopSpectator.GameMode
                 gameMode.GetWinnerTeam();
                 SetRemainingAgentsInvulnerable(mission);
                 ClearListedShellSpawnCompatibilityState();
-                SetListedShellStateEndingAsServer(__instance, timer);
+                __instance.SetStateEndingAsServer();
                 return false;
             }
             catch (Exception ex)
@@ -466,10 +496,12 @@ namespace CoopSpectator.GameMode
                 timer.GetCurrentTimerStartTime().NumberOfTicks);
         }
 
-        private static void SetListedShellStateEndingAsServer(
-            MissionLobbyComponent lobbyComponent,
-            MultiplayerTimerComponent timer)
+        internal static void SetListedShellStateEndingAsServer(MissionLobbyComponent lobbyComponent)
         {
+            MultiplayerTimerComponent timer = lobbyComponent?.Mission?.GetMissionBehavior<MultiplayerTimerComponent>();
+            if (lobbyComponent == null || timer == null)
+                return;
+
             CurrentMultiplayerStateSetterMethod?.Invoke(
                 lobbyComponent,
                 new object[] { MissionLobbyComponent.MultiplayerGameState.Ending });
@@ -479,6 +511,18 @@ namespace CoopSpectator.GameMode
                 MissionLobbyComponent.MultiplayerGameState.Ending,
                 timer.GetCurrentTimerStartTime().NumberOfTicks);
             (OnPostMatchEndedField?.GetValue(lobbyComponent) as Action)?.Invoke();
+        }
+
+        internal static void EndListedShellMissionAsServer()
+        {
+            if (!GameNetwork.IsServer)
+                return;
+
+            GameNetwork.BeginBroadcastModuleEvent();
+            GameNetwork.WriteMessage(new NetworkMessages.FromServer.UnloadMission());
+            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+            GameNetwork.UnSynchronizeEveryone();
+            BannerlordNetwork.EndMultiplayerLobbyMission();
         }
 
         private static void BroadcastMissionStateChange(
