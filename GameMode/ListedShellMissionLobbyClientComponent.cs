@@ -35,5 +35,11 @@ namespace CoopSpectator.GameMode
             if (MissionLobbySpawnContractPatch.ShouldCallNativeOnAgentRemoved(this, affectedAgent, affectorAgent, agentState, killingBlow))
                 base.OnAgentRemoved(affectedAgent, affectorAgent, agentState, killingBlow);
         }
+
+        protected override void HandleLateNewClientAfterLoadingFinished(NetworkCommunicator networkPeer)
+        {
+            if (MissionLobbySpawnContractPatch.ShouldCallNativeHandleLateNewClientAfterLoadingFinished(this, networkPeer))
+                base.HandleLateNewClientAfterLoadingFinished(networkPeer);
+        }
     }
 }

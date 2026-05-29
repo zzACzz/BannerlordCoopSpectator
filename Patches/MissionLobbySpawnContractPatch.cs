@@ -166,21 +166,6 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                MethodInfo peerInformationsTarget = typeof(MissionLobbyComponent).GetMethod(
-                    "SendPeerInformationsToPeer",
-                    BindingFlags.Instance | BindingFlags.NonPublic,
-                    binder: null,
-                    types: new[] { typeof(NetworkCommunicator) },
-                    modifiers: null);
-                MethodInfo peerInformationsPrefix = typeof(MissionLobbySpawnContractPatch).GetMethod(
-                    nameof(SendPeerInformationsToPeer_Prefix),
-                    BindingFlags.NonPublic | BindingFlags.Static);
-                if (peerInformationsTarget == null || peerInformationsPrefix == null)
-                {
-                    ModLogger.Info("MissionLobbySpawnContractPatch: peer-informations target or prefix not found. Skip.");
-                    return;
-                }
-
                 MethodInfo requestCultureChangeTarget = typeof(MissionLobbyComponent).GetMethod(
                     "HandleClientEventRequestCultureChange",
                     BindingFlags.Instance | BindingFlags.NonPublic);
@@ -225,7 +210,6 @@ namespace CoopSpectator.Patches
 
                 harmony.Patch(respawnTarget, prefix: new HarmonyMethod(respawnPrefix));
                 harmony.Patch(clientSynchronizedTarget, prefix: new HarmonyMethod(clientSynchronizedPrefix));
-                harmony.Patch(peerInformationsTarget, prefix: new HarmonyMethod(peerInformationsPrefix));
                 if (requestCultureChangeTarget != null && requestCultureChangePrefix != null)
                     harmony.Patch(requestCultureChangeTarget, prefix: new HarmonyMethod(requestCultureChangePrefix));
                 if (requestChangeCharacterTarget != null && requestChangeCharacterPrefix != null)
@@ -240,7 +224,6 @@ namespace CoopSpectator.Patches
                     harmony.Patch(changeCultureTarget, prefix: new HarmonyMethod(changeCulturePrefix));
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.GetSpawnPeriodDurationForPeer.");
                 ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.OnMyClientSynchronized.");
-                ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.SendPeerInformationsToPeer.");
                 if (requestCultureChangeTarget != null && requestCultureChangePrefix != null)
                     ModLogger.Info("MissionLobbySpawnContractPatch: patched MissionLobbyComponent.HandleClientEventRequestCultureChange.");
                 if (requestChangeCharacterTarget != null && requestChangeCharacterPrefix != null)
@@ -278,6 +261,29 @@ namespace CoopSpectator.Patches
                 affectorAgent,
                 agentState,
                 killingBlow);
+        }
+
+        internal static bool ShouldCallNativeHandleLateNewClientAfterLoadingFinished(
+            MissionLobbyComponent lobbyComponent,
+            NetworkCommunicator networkPeer)
+        {
+            try
+            {
+                Mission mission = lobbyComponent?.Mission ?? Mission.Current;
+                if (!ShouldUseListedShellLobbyContract(mission))
+                    return true;
+
+                if (!GameNetwork.IsServer || networkPeer == null || networkPeer.IsServerPeer)
+                    return false;
+
+                SendListedShellLateJoinBootstrapToPeer(lobbyComponent, mission, networkPeer);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionLobbySpawnContractPatch: late-new-client bootstrap failed open: " + ex.Message);
+                return true;
+            }
         }
 
         internal static void InitializeListedShellLobbyState(Mission mission)
@@ -706,27 +712,6 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static bool SendPeerInformationsToPeer_Prefix(MissionLobbyComponent __instance, NetworkCommunicator peer)
-        {
-            try
-            {
-                Mission mission = __instance?.Mission ?? Mission.Current;
-                if (!ShouldUseListedShellLobbyContract(mission))
-                    return true;
-
-                if (!GameNetwork.IsServer || peer == null || peer.IsServerPeer)
-                    return false;
-
-                SendListedShellPeerInformationsToPeer(mission, peer);
-                return false;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("MissionLobbySpawnContractPatch: peer-informations prefix failed open: " + ex.Message);
-                return true;
-            }
-        }
-
         private static bool OnAgentRemoved_Prefix(
             MissionLobbyComponent __instance,
             Agent affectedAgent,
@@ -872,6 +857,23 @@ namespace CoopSpectator.Patches
             GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
         }
 
+        private static void SendMissionStateChangeToPeer(
+            NetworkCommunicator peer,
+            MissionLobbyComponent.MultiplayerGameState state,
+            long stateStartTimeInTicks)
+        {
+            if (peer == null || MissionStateChangeType == null || GameNetworkWriteMessageMethod == null)
+                return;
+
+            object message = Activator.CreateInstance(MissionStateChangeType, state, stateStartTimeInTicks);
+            if (message == null)
+                return;
+
+            GameNetwork.BeginModuleEventAsServer(peer);
+            GameNetworkWriteMessageMethod.Invoke(null, new[] { message });
+            GameNetwork.EndModuleEventAsServer();
+        }
+
         private static MethodInfo ResolveGameNetworkWriteMessageMethod()
         {
             MethodInfo[] methods = typeof(GameNetwork).GetMethods(BindingFlags.Public | BindingFlags.Static);
@@ -898,6 +900,36 @@ namespace CoopSpectator.Patches
 
             ListedShellMissionStateHolder holder = ListedShellMissionStateByMission.GetOrCreateValue(mission);
             holder.State = state;
+        }
+
+        private static void SendListedShellLateJoinBootstrapToPeer(
+            MissionLobbyComponent lobbyComponent,
+            Mission mission,
+            NetworkCommunicator targetPeer)
+        {
+            if (targetPeer == null)
+                return;
+
+            if (!TryResolveMissionLobbyState(mission, out MissionLobbyComponent.MultiplayerGameState state))
+                state = MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers;
+
+            long stateStartTimeInTicks = ResolveListedShellMissionStateStartTimeInTicks(lobbyComponent, mission, state);
+            SendMissionStateChangeToPeer(targetPeer, state, stateStartTimeInTicks);
+            SendListedShellPeerInformationsToPeer(mission, targetPeer);
+        }
+
+        private static long ResolveListedShellMissionStateStartTimeInTicks(
+            MissionLobbyComponent lobbyComponent,
+            Mission mission,
+            MissionLobbyComponent.MultiplayerGameState state)
+        {
+            if (state == MissionLobbyComponent.MultiplayerGameState.WaitingFirstPlayers)
+                return 0L;
+
+            MultiplayerTimerComponent timer =
+                mission?.GetMissionBehavior<MultiplayerTimerComponent>() ??
+                lobbyComponent?.Mission?.GetMissionBehavior<MultiplayerTimerComponent>();
+            return timer?.GetCurrentTimerStartTime().NumberOfTicks ?? 0L;
         }
 
         private static void SendListedShellPeerInformationsToPeer(Mission mission, NetworkCommunicator targetPeer)
