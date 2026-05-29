@@ -1,7 +1,9 @@
 using System;
 using System.Reflection;
+using CoopSpectator.Infrastructure;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Network.Messages;
 
 namespace CoopSpectator.GameMode
 {
@@ -58,6 +60,21 @@ namespace CoopSpectator.GameMode
 
         protected override void AddRemoveMessageHandlers(GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
         {
+            if (!GameNetwork.IsClient || registerer == null)
+                return;
+
+            registerer.RegisterBaseHandler<NetworkMessages.FromServer.KillDeathCountChange>(
+                HandleListedShellKillDeathCountChange);
+            if (ListedShellLobbyRuntime.TryRegisterListedShellMissionStateHandler(
+                registerer,
+                HandleListedShellMissionStateChange))
+            {
+                ModLogger.Info(
+                    "ListedShellMissionLobbyClientComponent: registered coop-owned listed-shell MissionStateChange handler inside explicit lobby shell.");
+            }
+
+            ModLogger.Info(
+                "ListedShellMissionLobbyClientComponent: registered coop-owned listed-shell KillDeathCountChange handler inside explicit lobby shell.");
         }
 
         public override void OnMissionTick(float dt)
@@ -76,6 +93,22 @@ namespace CoopSpectator.GameMode
         {
             if (ListedShellLobbyRuntime.ShouldCallNativeHandleLateNewClientAfterLoadingFinished(this, networkPeer))
                 base.HandleLateNewClientAfterLoadingFinished(networkPeer);
+        }
+
+        private void HandleListedShellMissionStateChange(GameNetworkMessage baseMessage)
+        {
+            ListedShellLobbyRuntime.TryApplyListedShellMissionStateChange(
+                Mission,
+                this,
+                baseMessage,
+                nameof(ListedShellMissionLobbyClientComponent));
+        }
+
+        private void HandleListedShellKillDeathCountChange(GameNetworkMessage baseMessage)
+        {
+            ListedShellLobbyRuntime.TryApplyListedShellKillDeathCountChange(
+                baseMessage,
+                Mission?.GetMissionBehavior<MissionScoreboardComponent>());
         }
 
         private static object ResolveLobbyClient()

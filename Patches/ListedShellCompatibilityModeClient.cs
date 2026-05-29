@@ -42,22 +42,6 @@ namespace CoopSpectator.Patches
         protected override void AddRemoveMessageHandlers(GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
         {
             base.AddRemoveMessageHandlers(registerer);
-
-            if (!GameNetwork.IsClient || registerer == null)
-                return;
-
-            registerer.RegisterBaseHandler<NetworkMessages.FromServer.KillDeathCountChange>(
-                HandleListedShellKillDeathCountChange);
-            if (ListedShellLobbyRuntime.TryRegisterListedShellMissionStateHandler(
-                registerer,
-                HandleListedShellMissionStateChange))
-            {
-                ModLogger.Info(
-                    "ListedShellCompatibilityModeClient: registered coop-owned listed-shell MissionStateChange handler outside native MissionLobbyComponent container.");
-            }
-
-            ModLogger.Info(
-                "ListedShellCompatibilityModeClient: registered coop-owned listed-shell KillDeathCountChange handler outside native MissionLobbyComponent container.");
         }
 
         public override void AfterStart()
@@ -93,22 +77,6 @@ namespace CoopSpectator.Patches
         private void OnMyClientSynchronized()
         {
             _myRepresentative = GameNetwork.MyPeer?.GetComponent<MissionRepresentativeBase>();
-        }
-
-        private void HandleListedShellMissionStateChange(GameNetworkMessage baseMessage)
-        {
-            ListedShellLobbyRuntime.TryApplyListedShellMissionStateChange(
-                Mission,
-                MissionLobbyComponent,
-                baseMessage,
-                "ListedShellCompatibilityModeClient");
-        }
-
-        private void HandleListedShellKillDeathCountChange(GameNetworkMessage baseMessage)
-        {
-            ListedShellLobbyRuntime.TryApplyListedShellKillDeathCountChange(
-                baseMessage,
-                ScoreboardComponent);
         }
     }
 }
