@@ -91,7 +91,7 @@ namespace CoopSpectator.Patches
             if (!string.Equals(message.GameType, CoopGameModeIds.OfficialTeamDeathmatch, StringComparison.Ordinal))
                 return false;
 
-            return CustomGameJoinContextState.ShouldOwnListedShellCustomGameBootstrap();
+            return ListedShellTransportBootstrapState.ShouldOwnClientReceiveBootstrap();
         }
 
         private static async Task HandleListedShellLoadMissionAsync(object instance, LoadMission message)

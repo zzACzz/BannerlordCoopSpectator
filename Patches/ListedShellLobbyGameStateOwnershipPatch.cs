@@ -158,6 +158,13 @@ namespace CoopSpectator.Patches
                 int sessionKey = sessionKeyField?.GetValue(instance) is int sessionKeyValue ? sessionKeyValue : 0;
                 int peerIndex = peerIndexField?.GetValue(instance) is int peerIndexValue ? peerIndexValue : 0;
 
+                ListedShellTransportBootstrapState.ArmClientReceiveBootstrap(
+                    CoopGameModeIds.OfficialTeamDeathmatch,
+                    address,
+                    port,
+                    sessionKey,
+                    peerIndex,
+                    "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart");
                 GameNetwork.StartMultiplayerOnClient(address, port, sessionKey, peerIndex);
                 TryCheckMultiplayerPrivilege(promptOnRestricted: true);
                 ModLogger.Info(
@@ -171,6 +178,8 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
+                ListedShellTransportBootstrapState.DisarmClientReceiveBootstrap(
+                    "ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart failure");
                 ModLogger.Error("ListedShellLobbyGameStateOwnershipPatch.TryOwnListedShellClientStart failed for " + source + ".", ex);
                 return true;
             }

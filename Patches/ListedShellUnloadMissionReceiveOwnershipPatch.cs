@@ -93,7 +93,7 @@ namespace CoopSpectator.Patches
                 return true;
             }
 
-            return CustomGameJoinContextState.ShouldOwnListedShellCustomGameBootstrap();
+            return ListedShellTransportBootstrapState.ShouldOwnClientReceiveBootstrap();
         }
 
         private static async Task HandleListedShellUnloadMissionAsync(object instance, UnloadMission message)
@@ -113,6 +113,8 @@ namespace CoopSpectator.Patches
                 Game.Current?.GetGameHandler<ChatBox>()?.ResetMuteList();
 
                 await WaitForMissionUnloadAsync();
+                ListedShellTransportBootstrapState.DisarmClientReceiveBootstrap(
+                    "ListedShellUnloadMissionReceiveOwnershipPatch.HandleListedShellUnloadMissionAsync");
                 LoadingWindow.DisableGlobalLoadingWindow();
             }
             catch (Exception ex)
