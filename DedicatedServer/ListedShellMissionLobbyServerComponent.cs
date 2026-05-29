@@ -1,10 +1,10 @@
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
-using TaleWorlds.MountAndBlade.DedicatedCustomServer;
+using NetworkMessages.FromServer;
 
 namespace CoopSpectator.GameMode
 {
-    internal sealed class ListedShellMissionLobbyServerComponent : MissionCustomGameServerComponent
+    internal sealed class ListedShellMissionLobbyServerComponent : MissionLobbyComponent
     {
         public override void OnBehaviorInitialize()
         {
@@ -38,6 +38,17 @@ namespace CoopSpectator.GameMode
         {
             if (ListedShellLobbyRuntime.ShouldCallNativeHandleLateNewClientAfterLoadingFinished(this, networkPeer))
                 base.HandleLateNewClientAfterLoadingFinished(networkPeer);
+        }
+
+        protected override void EndGameAsServer()
+        {
+            base.EndGameAsServer();
+            TaleWorlds.Library.Debug.Print("EndGameAsServer called");
+            GameNetwork.BeginBroadcastModuleEvent();
+            GameNetwork.WriteMessage(new UnloadMission());
+            GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+            GameNetwork.UnSynchronizeEveryone();
+            BannerlordNetwork.EndMultiplayerLobbyMission();
         }
     }
 }

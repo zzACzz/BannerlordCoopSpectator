@@ -174,9 +174,9 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 MissionBehavior serverScoreboard = MissionBehaviorHelpers.TryCreateMissionScoreboardComponent();
                 AddOptional(list, serverScoreboard, "MissionScoreboardComponent");
                 if (serverScoreboard != null)
-                    ModLogger.Info("CoopBattle server: retained MissionScoreboardComponent for battle-map dedicated custom lobby compatibility.");
+                    ModLogger.Info("CoopBattle server: retained MissionScoreboardComponent for battle-map listed lobby bookkeeping.");
                 else
-                    ModLogger.Info("CoopBattle server: MissionScoreboardComponent unavailable for battle-map runtime; continuing with known crash risk.");
+                    ModLogger.Info("CoopBattle server: MissionScoreboardComponent unavailable for battle-map runtime; continuing with degraded listed lobby bookkeeping risk.");
             }
 
             if (!minimalBattleMapRuntime)
@@ -341,11 +341,11 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 if (scoreboard != null)
                 {
                     list.Add(scoreboard);
-                    ModLogger.Error("CoopBattle server validation: MissionScoreboardComponent was missing; added it because dedicated custom lobby shell may crash without it.", null);
+                    ModLogger.Error("CoopBattle server validation: MissionScoreboardComponent was missing; added it because listed lobby bookkeeping depends on it.", null);
                 }
                 else
                 {
-                    ModLogger.Error("CoopBattle server validation: MissionScoreboardComponent missing and could not be created. Dedicated custom lobby shell may crash.", null);
+                    ModLogger.Error("CoopBattle server validation: MissionScoreboardComponent missing and could not be created. Listed lobby bookkeeping will be incomplete.", null);
                 }
             }
         }
