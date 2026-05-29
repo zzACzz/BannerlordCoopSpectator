@@ -446,6 +446,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 - direct listed session bring-up примітиви `GameNetwork.StartMultiplayerOnClient(...)`, `GameNetwork.PreStartMultiplayerOnServer()`, `GameNetwork.StartMultiplayerOnServer(...)`, `BannerlordNetwork.CreateServerPeer()`, listed `ClientFinishedLoading(...)`, `UnloadMission(...)` і send-side bootstrap messages більше не висять прямо в listed runtime helper-ах; `CoopSessionTransportPrimitives` тепер локалізує цей нижній native MP transport layer, а `ListedShellSessionTransportRuntime`, `ListedShellNetworkBootstrapRuntime` і `PendingBattleFinishedLoadingTransportRuntime` лишили собі orchestration та ownership;
 - deferred non-listed `FinishedLoading` для `PendingBattleMissionStartupState` більше не читає native `BaseNetworkComponentData.CurrentBattleIndex` взагалі; explicit pending-battle startup state тепер захоплює `LoadMission.BattleIndex` прямо на server-side `GameNetwork.WriteMessage(LoadMission)` send path, активує цей token при резолюції місії і далі порівнює client `FinishedLoading.BattleIndex` уже тільки з own-ed mission-session state;
 - listed server message fan-out теж більше не розмазаний по runtime helper-ах: `KillDeathCountChange`, `BotsControlledChange`, `BotData`, `UpdateRoundScores`, listed `UnloadMission` broadcast і reflected `MissionStateChange` send path тепер проходять через `CoopSessionTransportPrimitives`, тому `ListedShellLobbyRuntime` і `ListedShellMissionScoreboardComponent` уже не тримають сирі `BeginBroadcastModuleEvent` / `BeginModuleEventAsServer` як власний transport contract;
+- `LateJoinPeerStateReplayOwnershipPatch` теж більше не тримає сирі `ExistingObjectsBegin`, `SynchronizeMissionTimeTracker` і `ExistingObjectsEnd` send-и; replay boundary для `SendExistingObjectsToPeer(...)` тепер проходить через `CoopSessionTransportPrimitives`, тож у patch-layer уже не лишилося прямих `GameNetwork.BeginModuleEventAsServer(...)` / `WriteMessage(...)` викликів;
 - client/server session teardown дрібниці теж зібрані там само: local `MyPeer.IsSynchronized = false`, `BannerlordNetwork.EndMultiplayerLobbyMission()`, `UnSynchronizeEveryone()`, chat mute reset і `LoadingWindow.DisableGlobalLoadingWindow()` більше не викликаються напряму з listed runtime helper-ів, а проходять через `CoopSessionTransportPrimitives` як один нижній session-lifecycle шар;
 - видалений `Patches/LocalJoinAddressPatch.cs`; one-shot localhost self-join rewrite більше не owner-иться global Harmony hook-ом на `GameNetwork.StartMultiplayerOnClient`, а виконується прямо в `CoopSessionTransportPrimitives.StartClientTransport(...)` як частина explicit listed client transport bring-up;
 - видалений `Patches/FinishedLoadingMissionReadyGatePatch.cs`; `HandleClientEventFinishedLoading(...)` тепер входить до того ж explicit `BaseNetworkComponent` transport shell, що й `HandleNewClientConnect(...)`, `InitializeCustomGame`, `LoadMission` і `UnloadMission`: listed validation маршрутизується в `ListedShellSessionTransportRuntime`, а deferred validation для `PendingBattleMissionStartupState` — у `PendingBattleFinishedLoadingTransportRuntime`, без окремого historical patch-файлу;
@@ -545,6 +546,20 @@ Exact transfer - це спроба зберігати campaign identities, body 
 
 - повернутися до питання server-list registration тільки після того, як coop runtime зможе стартувати і приймати клієнта без TDM mission shell;
 - тільки після цього можна реально розглядати прибирання official `TeamDeathmatch` із startup config.
+
+### Відкладений шлях 2: повний transport replacement
+
+- це свідомо не поточний пріоритет; зараз ми йдемо шляхом 1 і лишаємо native `GameNetwork` / `BaseNetworkComponent` як нижній carrier, але послідовно забираємо з нього orchestration, listed bootstrap, lobby flow і runtime authority;
+- шлях 2 стане доречним тільки якщо шлях 1 упреться в системні обмеження під час подальшої розробки модa або нових battle-family runtime-ів;
+- що він може дати:
+  - повний контроль над session startup/join/bootstrap lifecycle без official listed/custom-game wrapper-ів;
+  - власний transport/container contract замість залежності від native `BaseNetworkComponent` message graph;
+  - чистішу основу для майбутніх siege/ambush/raid/hideout runtime-ів, якщо native MP carrier почне жорстко обмежувати архітектуру;
+  - простіше reasoning про coop state, бо transport ownership і gameplay ownership житимуть в одному модульному шарі;
+- що він коштує:
+  - найвищий ризик зламати server-browser visibility, hosted/dedicated join і late-client bootstrap;
+  - майже напевно це буде не один cleanup-зріз, а окрема велика фаза;
+  - до перших повноцінних runtime-прогонів цей шлях брати передчасно, бо шлях 1 уже дає значно безпечніший маршрут до working clean field-battle validation.
 
 ### Робоче правило для наступних cleanup-ів
 

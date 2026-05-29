@@ -77,6 +77,21 @@ namespace CoopSpectator.Infrastructure
             GameNetwork.EndModuleEventAsServer();
         }
 
+        public static void SendExistingObjectsBegin(NetworkCommunicator targetPeer)
+        {
+            SendServerMessage(targetPeer, new ExistingObjectsBegin());
+        }
+
+        public static void SendSynchronizeMissionTimeTracker(NetworkCommunicator targetPeer, float missionTimeSeconds)
+        {
+            SendServerMessage(targetPeer, new SynchronizeMissionTimeTracker(missionTimeSeconds));
+        }
+
+        public static void SendExistingObjectsEnd(NetworkCommunicator targetPeer)
+        {
+            SendServerMessage(targetPeer, new ExistingObjectsEnd());
+        }
+
         public static void SendServerMessage(NetworkCommunicator targetPeer, GameNetworkMessage message)
         {
             if (targetPeer == null || targetPeer.IsServerPeer || message == null)

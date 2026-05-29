@@ -151,13 +151,8 @@ namespace CoopSpectator.Patches
 
         private static void SendExistingObjectsToPeerOwned(object instance, Mission mission, NetworkCommunicator networkPeer)
         {
-            GameNetwork.BeginModuleEventAsServer(networkPeer);
-            GameNetwork.WriteMessage(new NetworkMessages.FromServer.ExistingObjectsBegin());
-            GameNetwork.EndModuleEventAsServer();
-
-            GameNetwork.BeginModuleEventAsServer(networkPeer);
-            GameNetwork.WriteMessage(new NetworkMessages.FromServer.SynchronizeMissionTimeTracker((float)MissionTime.Now.ToSeconds));
-            GameNetwork.EndModuleEventAsServer();
+            CoopSessionTransportPrimitives.SendExistingObjectsBegin(networkPeer);
+            CoopSessionTransportPrimitives.SendSynchronizeMissionTimeTracker(networkPeer, (float)MissionTime.Now.ToSeconds);
 
             InvokePrivateNetworkPeerMethod(instance, _sendTeamsToPeerMethod, networkPeer);
             InvokePrivateNetworkPeerMethod(instance, _sendTeamRelationsToPeerMethod, networkPeer);
@@ -183,9 +178,7 @@ namespace CoopSpectator.Patches
             InvokePrivateNetworkPeerMethod(instance, _sendTroopSelectionInformationMethod, networkPeer);
             networkPeer.SendExistingObjects(mission);
 
-            GameNetwork.BeginModuleEventAsServer(networkPeer);
-            GameNetwork.WriteMessage(new NetworkMessages.FromServer.ExistingObjectsEnd());
-            GameNetwork.EndModuleEventAsServer();
+            CoopSessionTransportPrimitives.SendExistingObjectsEnd(networkPeer);
         }
 
         private static bool TrySendAuthoritativePeerStateReplayToPeer(
