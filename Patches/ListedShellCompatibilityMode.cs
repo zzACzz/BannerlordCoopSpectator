@@ -15,6 +15,8 @@ namespace CoopSpectator.Patches
 
         public override bool IsGameModeUsingOpposingTeams => true;
 
+        public override bool AllowCustomPlayerBanners() => false;
+
         public override MultiplayerGameType GetMissionType()
         {
             return MultiplayerGameType.TeamDeathmatch;
