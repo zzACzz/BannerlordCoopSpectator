@@ -179,7 +179,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 MissionBehavior serverScoreboard = MissionBehaviorHelpers.TryCreateMissionScoreboardComponent();
                 AddOptional(list, serverScoreboard, "MissionScoreboardComponent");
                 if (serverScoreboard != null)
-                    ModLogger.Info("CoopBattle server: retained MissionScoreboardComponent for battle-map MissionCustomGameServerComponent.AfterStart compatibility.");
+                    ModLogger.Info("CoopBattle server: retained MissionScoreboardComponent for battle-map dedicated custom lobby compatibility.");
                 else
                     ModLogger.Info("CoopBattle server: MissionScoreboardComponent unavailable for battle-map runtime; continuing with known crash risk.");
             }
@@ -358,19 +358,21 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             if (removed == 0)
                 ModLogger.Info("CoopBattle server validation passed.");
 
-            bool hasCustomServer = MissionBehaviorHelpers.ListContainsBehaviorType(list, "MissionCustomGameServerComponent");
+            bool hasDedicatedLobbyShell =
+                GameNetwork.IsDedicatedServer &&
+                MissionBehaviorHelpers.ListContainsBehaviorAssignableTo(list, typeof(MissionLobbyComponent));
             bool hasScoreboard = MissionBehaviorHelpers.ListContainsBehaviorType(list, "MissionScoreboardComponent");
-            if (hasCustomServer && !hasScoreboard)
+            if (hasDedicatedLobbyShell && !hasScoreboard)
             {
                 MissionBehavior scoreboard = MissionBehaviorHelpers.TryCreateMissionScoreboardComponent();
                 if (scoreboard != null)
                 {
                     list.Add(scoreboard);
-                    ModLogger.Error("CoopBattle server validation: MissionScoreboardComponent was missing; added it because MissionCustomGameServerComponent.AfterStart may crash without it.", null);
+                    ModLogger.Error("CoopBattle server validation: MissionScoreboardComponent was missing; added it because dedicated custom lobby shell may crash without it.", null);
                 }
                 else
                 {
-                    ModLogger.Error("CoopBattle server validation: MissionScoreboardComponent missing and could not be created. MissionCustomGameServerComponent.AfterStart may crash.", null);
+                    ModLogger.Error("CoopBattle server validation: MissionScoreboardComponent missing and could not be created. Dedicated custom lobby shell may crash.", null);
                 }
             }
         }
