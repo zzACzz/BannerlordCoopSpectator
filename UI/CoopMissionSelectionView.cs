@@ -61,15 +61,15 @@ namespace CoopSpectator.UI
         {
             base.OnBehaviorInitialize();
 
-            if (GameNetwork.IsClient && ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
-                ModLogger.Info("CoopMissionSelectionView: OnBehaviorInitialize.");
+            if (SupportsSelectionOverlayRuntime())
+                ModLogger.Info("CoopMissionSelectionView: OnBehaviorInitialize. Runtime=" + DescribeOverlayRuntime());
         }
 
         public override void OnMissionScreenInitialize()
         {
             base.OnMissionScreenInitialize();
 
-            if (!GameNetwork.IsClient || !ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
+            if (!SupportsSelectionOverlayRuntime())
                 return;
 
             ViewOrderPriority = 25;
@@ -87,7 +87,7 @@ namespace CoopSpectator.UI
         {
             base.OnMissionScreenTick(dt);
 
-            if (!GameNetwork.IsClient || !ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
+            if (!SupportsSelectionOverlayRuntime())
                 return;
 
             bool hasLocalControlledAgent = HasLocalControlledAgent();
@@ -153,7 +153,7 @@ namespace CoopSpectator.UI
 
         private void TryEnsureLayer()
         {
-            if (_gauntletLayer != null || !GameNetwork.IsClient || !ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
+            if (_gauntletLayer != null || !SupportsSelectionOverlayRuntime())
                 return;
 
             try
@@ -804,7 +804,7 @@ namespace CoopSpectator.UI
             CoopSelectionScreen desiredScreen,
             bool hasLocalControlledAgent)
         {
-            if (!GameNetwork.IsClient ||
+            if (!SupportsSelectionOverlayRuntime() ||
                 hasLocalControlledAgent ||
                 snapshot?.ShouldSuppressLivePreview == true ||
                 desiredScreen != CoopSelectionScreen.ClassLoadout ||
@@ -1008,7 +1008,7 @@ namespace CoopSpectator.UI
 
         private void TryHandleStartBattleHotkey(float dt, bool hasLocalControlledAgent)
         {
-            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+            if (!SupportsSelectionTransportRuntime())
                 return;
 
             _startBattleHotkeyCooldown -= dt;
@@ -1040,7 +1040,7 @@ namespace CoopSpectator.UI
 
         private void TryShowStartBattleInstruction(bool hasLocalControlledAgent)
         {
-            if (_startBattleInstructionShown || !hasLocalControlledAgent || !GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+            if (_startBattleInstructionShown || !hasLocalControlledAgent || !SupportsSelectionTransportRuntime())
                 return;
 
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
@@ -1055,7 +1055,7 @@ namespace CoopSpectator.UI
 
         private void TryHandleReopenSelectionHotkey(float dt, bool hasLocalControlledAgent)
         {
-            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+            if (!SupportsSelectionTransportRuntime())
                 return;
 
             _reopenSelectionHotkeyCooldown -= dt;
@@ -1070,16 +1070,50 @@ namespace CoopSpectator.UI
 
         internal static bool HasLocalControlledAgent()
         {
+            Agent mainAgent = Agent.Main;
+            if (mainAgent != null &&
+                mainAgent.IsActive() &&
+                (mainAgent.MissionPeer != null || IsLocalCampaignHostBattleRuntime()))
+                return true;
+
             if (!GameNetwork.IsClient)
                 return false;
-
-            Agent mainAgent = Agent.Main;
-            if (mainAgent != null && mainAgent.IsActive() && mainAgent.MissionPeer != null)
-                return true;
 
             MissionPeer missionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
             Agent controlledAgent = missionPeer?.ControlledAgent;
             return controlledAgent != null && controlledAgent.IsActive();
+        }
+
+        private static bool SupportsSelectionOverlayRuntime()
+        {
+            return ExperimentalFeatures.EnableCustomCoopSelectionOverlay &&
+                   (GameNetwork.IsClient || IsLocalCampaignHostBattleRuntime());
+        }
+
+        private static bool SupportsSelectionTransportRuntime()
+        {
+            return (GameNetwork.IsClient && GameNetwork.IsSessionActive) ||
+                   IsLocalCampaignHostBattleRuntime();
+        }
+
+        private static bool IsLocalCampaignHostBattleRuntime()
+        {
+            if (GameNetwork.IsClient || GameNetwork.IsServer || GameNetwork.IsDedicatedServer)
+                return false;
+
+            Mission mission = Mission.Current;
+            return mission != null &&
+                   SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName ?? string.Empty);
+        }
+
+        private static string DescribeOverlayRuntime()
+        {
+            if (GameNetwork.IsClient)
+                return GameNetwork.IsSessionActive ? "network-client" : "client-no-session";
+
+            return IsLocalCampaignHostBattleRuntime()
+                ? "campaign-host-battle"
+                : "unsupported";
         }
 
         internal static void TrySetLayerActiveState(ScreenLayer layer, bool isActive)

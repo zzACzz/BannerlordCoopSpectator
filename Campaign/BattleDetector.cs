@@ -5,6 +5,7 @@ using CoopSpectator.DedicatedHelper; // SendStartMission / SendEndMission до D
 using CoopSpectator.Infrastructure; // Підключаємо логер і UI feedback
 using CoopSpectator.Network; // Підключаємо NetworkRole для перевірки ролі
 using CoopSpectator.Network.Messages; // Підключаємо DTO + кодек для BATTLE_START:{json}
+using CoopSpectator.UI;
 using TaleWorlds.CampaignSystem; // Підключаємо Campaign (для доступу до поточної кампанії)
 using TaleWorlds.CampaignSystem.Party; // Підключаємо MobileParty (партія гравця в кампанії)
 using TaleWorlds.MountAndBlade; // Підключаємо Mission (детекція входу в місію/битву)
@@ -387,6 +388,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _nextBattleStartAttemptUtc = DateTime.MinValue;
             _nextBattleStartWaitLogUtc = DateTime.MinValue;
             TryAttachCampaignBattleDamageDiagnosticsMissionLogic();
+            TryAttachCampaignHostBattleSelectionView();
             ModLogger.Info("BattleDetector: mission entered (Mission.Current set). Notifying dedicated if applicable.");
             TryStartMissionForCurrentRole();
         } // Завершуємо блок методу
@@ -437,6 +439,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         {
             if (_hasSentBattleStartForThisMission)
                 return;
+
+            TryAttachCampaignHostBattleSelectionView();
 
             if (TryGetUnsupportedCoopMissionReason(out string unsupportedReason, out string unsupportedSummary))
             {
@@ -4757,6 +4761,51 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             catch
             {
                 return null;
+            }
+        }
+
+        private static void TryAttachCampaignHostBattleSelectionView()
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (mission == null || TaleWorlds.CampaignSystem.Campaign.Current == null)
+                    return;
+
+                if (GameNetwork.IsClient || GameNetwork.IsServer || GameNetwork.IsDedicatedServer)
+                    return;
+
+                if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName ?? string.Empty))
+                    return;
+
+                if (TryGetCurrentBattleObject() == null)
+                    return;
+
+                if (mission.GetMissionBehavior<CoopMissionSelectionView>() != null)
+                    return;
+
+                var selectionView = new CoopMissionSelectionView();
+                mission.AddMissionBehavior(selectionView);
+                selectionView.OnAfterMissionCreated();
+                selectionView.OnBehaviorInitialize();
+                selectionView.AfterStart();
+                try
+                {
+                    selectionView.OnMissionScreenInitialize();
+                }
+                catch (Exception missionScreenInitEx)
+                {
+                    ModLogger.Info("BattleDetector: delayed host battle selection view mission-screen init. " + missionScreenInitEx.Message);
+                }
+
+                ModLogger.Info(
+                    "BattleDetector: attached CoopMissionSelectionView to local campaign-host battle mission. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " Mode=" + mission.Mode + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to attach CoopMissionSelectionView to local campaign-host battle mission. " + ex.Message);
             }
         }
 
