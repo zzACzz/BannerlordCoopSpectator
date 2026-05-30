@@ -68,11 +68,11 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         /// <summary>Конфіг + /dedicatedcustomserverconfigfile — авто start_game (ізоляція: не ламає). Разом з AddPortOnly працює.</summary>
         private const bool AddConfigFileOnly = true;
         /// <summary>
-        /// У modded official flow listed-registration зараз стабільніша без eager `start_game`
-        /// з config-файлу: сервер спочатку має стати у Custom Server List і тримати heartbeat,
-        /// а battle mission стартує вже пізніше через explicit handoff/runtime path.
+        /// У modded official flow listed visibility still depends on official intermission startup:
+        /// startup config applies server name / map / game type and issues `start_game`, which
+        /// creates the visible custom-server session before coop handoff takes over.
         /// </summary>
-        private const bool UseStartupConfigInModdedOfficialFlow = false;
+        private const bool UseStartupConfigInModdedOfficialFlow = true;
         /// <summary>Для контрольного тесту: ім'я сервера в списку (однозначно наше).</summary>
         private const string TestListedServerName = "AC_COOP";
         /// <summary>Для контрольного тесту: сцена TDM (listed flow safer за mp_skirmish_spawn_test).</summary>
