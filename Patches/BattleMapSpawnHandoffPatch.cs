@@ -2406,6 +2406,39 @@ namespace CoopSpectator.Patches
             return false;
         }
 
+        private static bool ShouldDeferMissingClientAgentBootstrapMessage(
+            Mission mission,
+            int agentIndex,
+            out string deferralReason)
+        {
+            deferralReason = null;
+            if (agentIndex < 0)
+                return false;
+
+            if (HasDeferredClientCreateAgentPayload(agentIndex))
+            {
+                deferralReason = "agent-createagent-deferred";
+                return true;
+            }
+
+            if (HasAnyDeferredClientAgentBootstrapPayload(agentIndex))
+            {
+                deferralReason = "agent-bootstrap-deferred";
+                return true;
+            }
+
+            if (mission == null || !ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                return false;
+
+            if (CoopMissionSpawnLogic.ShouldDeferClientExactRuntimeBootstrapForSelectionScreen(out string selectionGateReason))
+            {
+                deferralReason = "selection-gate:" + (selectionGateReason ?? "unknown");
+                return true;
+            }
+
+            return false;
+        }
+
         internal static void ClearDeferredClientMountedHeroCreateAgents(string source)
         {
             int clearedCount;
@@ -9108,14 +9141,19 @@ namespace CoopSpectator.Patches
                 }
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(synchronizeAgentSpawnEquipment.AgentIndex, canBeNull: true);
-                if (agent == null && HasDeferredClientCreateAgentPayload(synchronizeAgentSpawnEquipment.AgentIndex))
+                if (agent == null &&
+                    ShouldDeferMissingClientAgentBootstrapMessage(
+                        mission,
+                        synchronizeAgentSpawnEquipment.AgentIndex,
+                        out string missingAgentBootstrapReason))
                 {
                     RegisterDeferredClientSynchronizeAgentEquipmentPayload(
                         synchronizeAgentSpawnEquipment,
-                        "agent-createagent-deferred");
+                        missingAgentBootstrapReason ?? "agent-bootstrap-deferred");
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: deferred client SynchronizeAgentSpawnEquipment because CreateAgent is still deferred. " +
-                        "AgentIndex=" + synchronizeAgentSpawnEquipment.AgentIndex);
+                        "BattleMapSpawnHandoffPatch: deferred client SynchronizeAgentSpawnEquipment because agent bootstrap is still deferred. " +
+                        "AgentIndex=" + synchronizeAgentSpawnEquipment.AgentIndex +
+                        " Reason=" + (missingAgentBootstrapReason ?? "unknown"));
                     return false;
                 }
 
@@ -9895,16 +9933,19 @@ namespace CoopSpectator.Patches
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWeaponReloadPhase.AgentIndex, canBeNull: true);
                 if (agent == null &&
-                    (HasDeferredClientCreateAgentPayload(setWeaponReloadPhase.AgentIndex) ||
-                     HasAnyDeferredClientAgentBootstrapPayload(setWeaponReloadPhase.AgentIndex)))
+                    ShouldDeferMissingClientAgentBootstrapMessage(
+                        mission,
+                        setWeaponReloadPhase.AgentIndex,
+                        out string missingAgentBootstrapReason))
                 {
                     RegisterDeferredClientSetWeaponReloadPhasePayload(
                         setWeaponReloadPhase,
-                        "agent-bootstrap-deferred");
+                        missingAgentBootstrapReason ?? "agent-bootstrap-deferred");
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: deferred client SetWeaponReloadPhase because agent bootstrap is still deferred. " +
                         "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
-                        " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex);
+                        " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
+                        " Reason=" + (missingAgentBootstrapReason ?? "unknown"));
                     return false;
                 }
 
@@ -9966,17 +10007,20 @@ namespace CoopSpectator.Patches
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(startSwitchingWeaponUsageIndex.AgentIndex, canBeNull: true);
                 if (agent == null &&
-                    (HasDeferredClientCreateAgentPayload(startSwitchingWeaponUsageIndex.AgentIndex) ||
-                     HasAnyDeferredClientAgentBootstrapPayload(startSwitchingWeaponUsageIndex.AgentIndex)))
+                    ShouldDeferMissingClientAgentBootstrapMessage(
+                        mission,
+                        startSwitchingWeaponUsageIndex.AgentIndex,
+                        out string missingAgentBootstrapReason))
                 {
                     RegisterDeferredClientStartSwitchingWeaponUsageIndexPayload(
                         startSwitchingWeaponUsageIndex,
-                        "agent-bootstrap-deferred");
+                        missingAgentBootstrapReason ?? "agent-bootstrap-deferred");
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: deferred client StartSwitchingWeaponUsageIndex because agent bootstrap is still deferred. " +
                         "AgentIndex=" + startSwitchingWeaponUsageIndex.AgentIndex +
                         " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
-                        " UsageIndex=" + startSwitchingWeaponUsageIndex.UsageIndex);
+                        " UsageIndex=" + startSwitchingWeaponUsageIndex.UsageIndex +
+                        " Reason=" + (missingAgentBootstrapReason ?? "unknown"));
                     return false;
                 }
 
@@ -10039,17 +10083,20 @@ namespace CoopSpectator.Patches
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(weaponUsageIndexChangeMessage.AgentIndex, canBeNull: true);
                 if (agent == null &&
-                    (HasDeferredClientCreateAgentPayload(weaponUsageIndexChangeMessage.AgentIndex) ||
-                     HasAnyDeferredClientAgentBootstrapPayload(weaponUsageIndexChangeMessage.AgentIndex)))
+                    ShouldDeferMissingClientAgentBootstrapMessage(
+                        mission,
+                        weaponUsageIndexChangeMessage.AgentIndex,
+                        out string missingAgentBootstrapReason))
                 {
                     RegisterDeferredClientWeaponUsageIndexChangePayload(
                         weaponUsageIndexChangeMessage,
-                        "agent-bootstrap-deferred");
+                        missingAgentBootstrapReason ?? "agent-bootstrap-deferred");
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: deferred client WeaponUsageIndexChangeMessage because agent bootstrap is still deferred. " +
                         "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
                         " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
-                        " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex);
+                        " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex +
+                        " Reason=" + (missingAgentBootstrapReason ?? "unknown"));
                     return false;
                 }
 
@@ -10589,17 +10636,20 @@ namespace CoopSpectator.Patches
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWieldedItemIndex.AgentIndex, canBeNull: true);
                 if (agent == null &&
-                    ShouldUseSafeStringIdCreateAgentPathOnClient(mission) &&
-                    HasDeferredClientCreateAgentPayload(setWieldedItemIndex.AgentIndex))
+                    ShouldDeferMissingClientAgentBootstrapMessage(
+                        mission,
+                        setWieldedItemIndex.AgentIndex,
+                        out string missingAgentBootstrapReason))
                 {
                     RegisterDeferredClientSetWieldedItemIndexPayload(
                         setWieldedItemIndex,
-                        "agent-createagent-deferred");
+                        missingAgentBootstrapReason ?? "agent-bootstrap-deferred");
                     __state = true;
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: deferred client SetWieldedItemIndex because CreateAgent is still deferred. " +
+                        "BattleMapSpawnHandoffPatch: deferred client SetWieldedItemIndex because agent bootstrap is still deferred. " +
                         "AgentIndex=" + setWieldedItemIndex.AgentIndex +
-                        " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex);
+                        " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                        " Reason=" + (missingAgentBootstrapReason ?? "unknown"));
                     return false;
                 }
 
