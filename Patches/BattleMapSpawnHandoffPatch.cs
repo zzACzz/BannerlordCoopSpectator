@@ -2688,6 +2688,27 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            if (status != null && !status.HasAgent)
+            {
+                string allowKey =
+                    "allow-during-selection|" +
+                    (selectionGateReason ?? string.Empty) +
+                    "|" + pendingSummary;
+                if (!string.Equals(_lastDeferredClientRecoverySelectionGateKey, allowKey, StringComparison.Ordinal))
+                {
+                    _lastDeferredClientRecoverySelectionGateKey = allowKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: continued deferred client bootstrap replay while local peer remains in selection gate so battlefield materialization can finish before unlock. " +
+                        "Mission=" + (mission.SceneName ?? "null") +
+                        " Reason=" + (selectionGateReason ?? "unknown") +
+                        " " + pendingSummary +
+                        " Source=" + (source ?? "unknown"));
+                }
+
+                return false;
+            }
+
             string logKey =
                 (selectionGateReason ?? string.Empty) +
                 "|" + mountedHeroPendingCount +

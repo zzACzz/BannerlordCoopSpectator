@@ -27007,6 +27007,17 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (currentPhase < CoopBattlePhase.BattleActive &&
+                !ArePrebattleAuthoritativeBattlefieldAgentsReadyForPeer(
+                    mission,
+                    missionPeer,
+                    side,
+                    out string authoritativeMaterializationReason))
+            {
+                reason = authoritativeMaterializationReason;
+                return false;
+            }
+
             reason = "ready";
             return true;
         }
@@ -27063,6 +27074,92 @@ namespace CoopSpectator.MissionBehaviors
                 " Ready=" + (selectableEntryIds?.Count ?? 0) +
                 " LiveMaterialized=" + liveMaterializedEntrySet.Count +
                 " Missing=" + missingSummary;
+            return false;
+        }
+
+        private static bool ArePrebattleAuthoritativeBattlefieldAgentsReadyForPeer(
+            Mission mission,
+            MissionPeer missionPeer,
+            BattleSideEnum side,
+            out string reason)
+        {
+            reason = "materialization-incomplete";
+            if (mission == null || missionPeer == null || side == BattleSideEnum.None)
+                return false;
+
+            IReadOnlyList<string> requiredEntryIds = FilterClaimedSelectableEntryIdsForPeer(
+                GetAllowedSelectableEntryIdsForSide(side),
+                missionPeer,
+                "allowed-prebattle-authoritative-readiness",
+                out _);
+            if (requiredEntryIds == null || requiredEntryIds.Count <= 0)
+            {
+                reason = "allowed-entries-empty";
+                return false;
+            }
+
+            int expectedActiveCount = Math.Max(0, GetBattleSideAvailableCount(side));
+            int trackedActiveCount = 0;
+            var trackedEntryIds = new HashSet<string>(StringComparer.Ordinal);
+            if (mission.AllAgents != null)
+            {
+                for (int i = 0; i < mission.AllAgents.Count; i++)
+                {
+                    Agent agent = mission.AllAgents[i];
+                    if (agent == null ||
+                        !agent.IsActive() ||
+                        agent.IsMount ||
+                        !agent.IsHuman ||
+                        agent.Team == null ||
+                        agent.Team.Side != side)
+                    {
+                        continue;
+                    }
+
+                    if (!_materializedArmySideByAgentIndex.TryGetValue(agent.Index, out BattleSideEnum trackedSide) ||
+                        trackedSide != side)
+                    {
+                        continue;
+                    }
+
+                    if (!_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string trackedEntryId) ||
+                        string.IsNullOrWhiteSpace(trackedEntryId))
+                    {
+                        continue;
+                    }
+
+                    trackedActiveCount++;
+                    trackedEntryIds.Add(trackedEntryId);
+                }
+            }
+
+            var missingEntryIds = new List<string>();
+            foreach (string requiredEntryId in requiredEntryIds)
+            {
+                if (string.IsNullOrWhiteSpace(requiredEntryId) || trackedEntryIds.Contains(requiredEntryId))
+                    continue;
+
+                missingEntryIds.Add(requiredEntryId);
+            }
+
+            if (expectedActiveCount > 0 &&
+                trackedActiveCount >= expectedActiveCount &&
+                missingEntryIds.Count <= 0)
+            {
+                return true;
+            }
+
+            string missingSummary = string.Join(",", missingEntryIds.Take(5));
+            if (missingEntryIds.Count > 5)
+                missingSummary += ",...";
+
+            reason =
+                "materialization-incomplete" +
+                " ExpectedBattlefieldAgents=" + expectedActiveCount +
+                " TrackedActiveAgents=" + trackedActiveCount +
+                " RequiredEntries=" + requiredEntryIds.Count +
+                " TrackedEntries=" + trackedEntryIds.Count +
+                " MissingEntries=" + (string.IsNullOrWhiteSpace(missingSummary) ? "none" : missingSummary);
             return false;
         }
 

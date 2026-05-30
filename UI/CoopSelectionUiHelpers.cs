@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using TaleWorlds.CampaignSystem;
+using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using TaleWorlds.Core;
@@ -116,9 +117,32 @@ namespace CoopSpectator.UI
             CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot currentSelection = CoopBattleSelectionBridgeFile.ReadCurrentSelection();
             BattleRuntimeState battleState = BattleSnapshotRuntimeState.GetState();
             bool battleDataReady = status?.BattleDataReady == true;
+            string localMaterializationBlockReason = string.Empty;
+            if (battleDataReady &&
+                GameNetwork.IsClient &&
+                !GameNetwork.IsServer &&
+                status != null &&
+                !status.HasAgent)
+            {
+                Mission currentMission = Mission.Current;
+                if (currentMission != null &&
+                    MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(currentMission.SceneName))
+                {
+                    int pendingRecoveryCount = CoopSpectator.Patches.BattleMapSpawnHandoffPatch.GetDeferredClientRecoveryPendingCount(out _);
+                    if (pendingRecoveryCount > 0)
+                    {
+                        battleDataReady = false;
+                        localMaterializationBlockReason =
+                            "Waiting for battlefield units to materialize... (" + pendingRecoveryCount + " pending)";
+                    }
+                }
+            }
+
             string battleDataLoadingProgressText = battleDataReady
                 ? string.Empty
-                : BuildBattleDataLoadingProgressText(status);
+                : !string.IsNullOrWhiteSpace(localMaterializationBlockReason)
+                    ? localMaterializationBlockReason
+                    : BuildBattleDataLoadingProgressText(status);
             string[] attackerSelectableEntryIds = battleDataReady
                 ? ResolveSelectableEntryIds(status, BattleSideEnum.Attacker)
                 : Array.Empty<string>();
@@ -226,7 +250,9 @@ namespace CoopSpectator.UI
                 IsBattleEnded = string.Equals(status?.BattlePhase, nameof(CoopBattlePhase.BattleEnded), StringComparison.OrdinalIgnoreCase),
                 BattleDataReady = battleDataReady,
                 BattleDataReadinessStage = status?.BattleDataReadinessStage ?? string.Empty,
-                BattleDataReadinessReason = status?.BattleDataReadinessReason ?? string.Empty,
+                BattleDataReadinessReason = !string.IsNullOrWhiteSpace(localMaterializationBlockReason)
+                    ? localMaterializationBlockReason
+                    : status?.BattleDataReadinessReason ?? string.Empty,
                 BattleDataLoadingProgressText = battleDataLoadingProgressText,
                 CanSpawn = battleDataReady && (status?.CanRespawn ?? false) && !string.IsNullOrWhiteSpace(selectedEntryId),
                 CanShowOverlay = ShouldOverlayBeVisible(status, hasLocalControlledAgent),
