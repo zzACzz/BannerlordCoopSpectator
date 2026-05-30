@@ -2441,6 +2441,49 @@ namespace CoopSpectator.Patches
             return false;
         }
 
+        private static bool ShouldDeferClientAuthoritativeMaterializationWeaponCorridorMessage(
+            Mission mission,
+            Agent agent,
+            int agentIndex,
+            out string deferralReason)
+        {
+            deferralReason = null;
+            if (agentIndex < 0 ||
+                mission == null ||
+                !ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+            {
+                return false;
+            }
+
+            if (!CoopMissionSpawnLogic.ShouldDeferClientExactRuntimeBootstrapForSelectionScreen(
+                    out string selectionGateReason))
+            {
+                return false;
+            }
+
+            if (agent == null)
+            {
+                deferralReason = "selection-gate:" + (selectionGateReason ?? "unknown");
+                return true;
+            }
+
+            if (agent.IsMount ||
+                !agent.IsHuman ||
+                agent.Team == null ||
+                agent.Team.Side == BattleSideEnum.None)
+            {
+                return false;
+            }
+
+            if (CoopMissionSpawnLogic.TryResolveClientAuthoritativeMaterializedEntryId(agentIndex, out _))
+                return false;
+
+            deferralReason =
+                "selection-gate-authoritative-materialization-pending:" +
+                (selectionGateReason ?? "unknown");
+            return true;
+        }
+
         internal static void ClearDeferredClientMountedHeroCreateAgents(string source)
         {
             int clearedCount;
@@ -6164,6 +6207,15 @@ namespace CoopSpectator.Patches
                 if (agent == null || !agent.IsActive())
                     continue;
 
+                if (ShouldDeferClientAuthoritativeMaterializationWeaponCorridorMessage(
+                        mission,
+                        agent,
+                        synchronizeAgentSpawnEquipment.AgentIndex,
+                        out _))
+                {
+                    continue;
+                }
+
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
                 try
@@ -6890,6 +6942,15 @@ namespace CoopSpectator.Patches
                 if (agent == null || !agent.IsActive())
                     continue;
 
+                if (ShouldDeferClientAuthoritativeMaterializationWeaponCorridorMessage(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.AgentIndex,
+                        out _))
+                {
+                    continue;
+                }
+
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
                 try
@@ -7232,6 +7293,15 @@ namespace CoopSpectator.Patches
                 if (agent == null || !agent.IsActive())
                     continue;
 
+                if (ShouldDeferClientAuthoritativeMaterializationWeaponCorridorMessage(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.AgentIndex,
+                        out _))
+                {
+                    continue;
+                }
+
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
                 try
@@ -7302,6 +7372,15 @@ namespace CoopSpectator.Patches
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(startSwitchingWeaponUsageIndex.AgentIndex, canBeNull: true);
                 if (agent == null || !agent.IsActive())
                     continue;
+
+                if (ShouldDeferClientAuthoritativeMaterializationWeaponCorridorMessage(
+                        mission,
+                        agent,
+                        startSwitchingWeaponUsageIndex.AgentIndex,
+                        out _))
+                {
+                    continue;
+                }
 
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
@@ -7377,6 +7456,15 @@ namespace CoopSpectator.Patches
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(weaponUsageIndexChangeMessage.AgentIndex, canBeNull: true);
                 if (agent == null || !agent.IsActive())
                     continue;
+
+                if (ShouldDeferClientAuthoritativeMaterializationWeaponCorridorMessage(
+                        mission,
+                        agent,
+                        weaponUsageIndexChangeMessage.AgentIndex,
+                        out _))
+                {
+                    continue;
+                }
 
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
@@ -9230,6 +9318,22 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (ShouldDeferClientAuthoritativeMaterializationWeaponCorridorMessage(
+                        mission,
+                        agent,
+                        synchronizeAgentSpawnEquipment.AgentIndex,
+                        out string authoritativeMaterializationReason))
+                {
+                    RegisterDeferredClientSynchronizeAgentEquipmentPayload(
+                        synchronizeAgentSpawnEquipment,
+                        authoritativeMaterializationReason ?? "authoritative-materialization-pending");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SynchronizeAgentSpawnEquipment until authoritative materialization mapping is ready during selection gate. " +
+                        "AgentIndex=" + synchronizeAgentSpawnEquipment.AgentIndex +
+                        " Reason=" + (authoritativeMaterializationReason ?? "unknown"));
+                    return false;
+                }
+
                 TryCanonicalizeStrictMountedHeroSynchronizeAgentEquipmentPayload(
                     synchronizeAgentSpawnEquipment,
                     agent);
@@ -10022,6 +10126,23 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (ShouldDeferClientAuthoritativeMaterializationWeaponCorridorMessage(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.AgentIndex,
+                        out string authoritativeMaterializationReason))
+                {
+                    RegisterDeferredClientSetWeaponReloadPhasePayload(
+                        setWeaponReloadPhase,
+                        authoritativeMaterializationReason ?? "authoritative-materialization-pending");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetWeaponReloadPhase until authoritative materialization mapping is ready during selection gate. " +
+                        "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
+                        " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
+                        " Reason=" + (authoritativeMaterializationReason ?? "unknown"));
+                    return false;
+                }
+
                 if (agent != null && IsMountedUsageLifecycleAgent(agent))
                 {
                     string logKey =
@@ -10094,6 +10215,24 @@ namespace CoopSpectator.Patches
                         " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
                         " UsageIndex=" + startSwitchingWeaponUsageIndex.UsageIndex +
                         " Reason=" + (missingAgentBootstrapReason ?? "unknown"));
+                    return false;
+                }
+
+                if (ShouldDeferClientAuthoritativeMaterializationWeaponCorridorMessage(
+                        mission,
+                        agent,
+                        startSwitchingWeaponUsageIndex.AgentIndex,
+                        out string authoritativeMaterializationReason))
+                {
+                    RegisterDeferredClientStartSwitchingWeaponUsageIndexPayload(
+                        startSwitchingWeaponUsageIndex,
+                        authoritativeMaterializationReason ?? "authoritative-materialization-pending");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client StartSwitchingWeaponUsageIndex until authoritative materialization mapping is ready during selection gate. " +
+                        "AgentIndex=" + startSwitchingWeaponUsageIndex.AgentIndex +
+                        " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
+                        " UsageIndex=" + startSwitchingWeaponUsageIndex.UsageIndex +
+                        " Reason=" + (authoritativeMaterializationReason ?? "unknown"));
                     return false;
                 }
 
@@ -10170,6 +10309,24 @@ namespace CoopSpectator.Patches
                         " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
                         " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex +
                         " Reason=" + (missingAgentBootstrapReason ?? "unknown"));
+                    return false;
+                }
+
+                if (ShouldDeferClientAuthoritativeMaterializationWeaponCorridorMessage(
+                        mission,
+                        agent,
+                        weaponUsageIndexChangeMessage.AgentIndex,
+                        out string authoritativeMaterializationReason))
+                {
+                    RegisterDeferredClientWeaponUsageIndexChangePayload(
+                        weaponUsageIndexChangeMessage,
+                        authoritativeMaterializationReason ?? "authoritative-materialization-pending");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client WeaponUsageIndexChangeMessage until authoritative materialization mapping is ready during selection gate. " +
+                        "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
+                        " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
+                        " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex +
+                        " Reason=" + (authoritativeMaterializationReason ?? "unknown"));
                     return false;
                 }
 
@@ -10723,6 +10880,24 @@ namespace CoopSpectator.Patches
                         "AgentIndex=" + setWieldedItemIndex.AgentIndex +
                         " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
                         " Reason=" + (missingAgentBootstrapReason ?? "unknown"));
+                    return false;
+                }
+
+                if (ShouldDeferClientAuthoritativeMaterializationWeaponCorridorMessage(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.AgentIndex,
+                        out string authoritativeMaterializationReason))
+                {
+                    RegisterDeferredClientSetWieldedItemIndexPayload(
+                        setWieldedItemIndex,
+                        authoritativeMaterializationReason ?? "authoritative-materialization-pending");
+                    __state = true;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetWieldedItemIndex until authoritative materialization mapping is ready during selection gate. " +
+                        "AgentIndex=" + setWieldedItemIndex.AgentIndex +
+                        " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                        " Reason=" + (authoritativeMaterializationReason ?? "unknown"));
                     return false;
                 }
 
