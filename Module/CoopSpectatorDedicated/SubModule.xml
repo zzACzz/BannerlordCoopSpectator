@@ -64,11 +64,5 @@
         <GameType value="MultiplayerGame" />
       </IncludedGameTypes>
     </XmlNode>
-    <XmlNode>
-      <XmlName id="MPClassDivisions" path="coopspectator_generated_runtime_mpclassdivisions" />
-      <IncludedGameTypes>
-        <GameType value="MultiplayerGame" />
-      </IncludedGameTypes>
-    </XmlNode>
   </Xmls>
 </Module>
