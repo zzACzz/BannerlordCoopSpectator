@@ -122,6 +122,7 @@ namespace CoopSpectator.Patches
         private static string _lastForcedExactCommanderTroopSelectionInputsKey;
         private static string _lastExactCommanderOrderItemExecutionKey;
         private static string _lastSuppressedNativeAgentVisualBootstrapKey;
+        private static string _lastDeferredClientRecoverySelectionGateKey;
         private static bool _suppressExactCommanderOrderHotkeyFallbackUntilRelease;
         private static object _activeExactCommanderMissionOrderVm;
         private static PendingLocalCommanderOrderControlFinalization _pendingLocalCommanderOrderControlFinalization;
@@ -722,6 +723,7 @@ namespace CoopSpectator.Patches
             _lastExactCommanderOrderBarMovieBindingKey = null;
             _lastForcedExactCommanderTroopSelectionInputsKey = null;
             _lastExactCommanderOrderItemExecutionKey = null;
+            _lastDeferredClientRecoverySelectionGateKey = null;
             if (!preserveCommanderOrderControlState)
             {
                 _suppressExactCommanderOrderHotkeyFallbackUntilRelease = false;
@@ -2545,6 +2547,9 @@ namespace CoopSpectator.Patches
             if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
                 return;
 
+            if (ShouldPauseDeferredClientRecoveryForSelectionGate(mission, source))
+                return;
+
             TryReplayDeferredClientCreateAgents(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientAgentSetFormation(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSetAgentActionSet(mission, source, snapshotReadinessSummary);
@@ -2578,6 +2583,9 @@ namespace CoopSpectator.Patches
             }
 
             if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                return;
+
+            if (ShouldPauseDeferredClientRecoveryForSelectionGate(mission, source))
                 return;
 
             List<DeferredMountedHeroCreateAgentPayload> deferredPayloads;
@@ -2654,6 +2662,50 @@ namespace CoopSpectator.Patches
                     " Attempts=" + deferredPayload.Attempts +
                     " Source=" + (source ?? "unknown"));
             }
+        }
+
+        private static bool ShouldPauseDeferredClientRecoveryForSelectionGate(Mission mission, string source)
+        {
+            if (mission == null ||
+                !GameNetwork.IsClient ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                _lastDeferredClientRecoverySelectionGateKey = null;
+                return false;
+            }
+
+            if (!CoopMissionSpawnLogic.ShouldDeferClientExactRuntimeBootstrapForSelectionScreen(out string selectionGateReason))
+            {
+                _lastDeferredClientRecoverySelectionGateKey = null;
+                return false;
+            }
+
+            int mountedHeroPendingCount = DeferredMountedHeroCreateAgentPayloads.Count;
+            int totalPending = GetDeferredClientRecoveryPendingCount(out string pendingSummary);
+            if (mountedHeroPendingCount <= 0 && totalPending <= 0)
+            {
+                _lastDeferredClientRecoverySelectionGateKey = null;
+                return false;
+            }
+
+            string logKey =
+                (selectionGateReason ?? string.Empty) +
+                "|" + mountedHeroPendingCount +
+                "|" + totalPending +
+                "|" + pendingSummary;
+            if (!string.Equals(_lastDeferredClientRecoverySelectionGateKey, logKey, StringComparison.Ordinal))
+            {
+                _lastDeferredClientRecoverySelectionGateKey = logKey;
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: paused deferred client bootstrap replay while local peer remains in selection gate. " +
+                    "Mission=" + (mission.SceneName ?? "null") +
+                    " Reason=" + (selectionGateReason ?? "unknown") +
+                    " MountedHeroCreateAgentPending=" + mountedHeroPendingCount +
+                    " " + pendingSummary +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            return true;
         }
 
         private static void RegisterDeferredClientCreateAgentPayload(CreateAgent createAgent, string snapshotReadinessSummary)

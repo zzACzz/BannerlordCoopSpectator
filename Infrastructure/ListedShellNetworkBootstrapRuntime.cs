@@ -557,6 +557,9 @@ namespace CoopSpectator.Infrastructure
             bool attachedModeClient = false;
             bool attachedDiagnostic = false;
             bool attachedNetworkBridge = false;
+#if !COOPSPECTATOR_DEDICATED
+            bool attachedSelectionView = false;
+#endif
 
             try
             {
@@ -587,6 +590,20 @@ namespace CoopSpectator.Infrastructure
                     bridge.AfterStart();
                     attachedNetworkBridge = true;
                 }
+
+#if !COOPSPECTATOR_DEDICATED
+                if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay &&
+                    mission.GetMissionBehavior<CoopSpectator.UI.CoopMissionSelectionView>() == null)
+                {
+                    var selectionView = new CoopSpectator.UI.CoopMissionSelectionView();
+                    mission.AddMissionBehavior(selectionView);
+                    selectionView.OnAfterMissionCreated();
+                    selectionView.OnBehaviorInitialize();
+                    selectionView.AfterStart();
+                    selectionView.OnMissionScreenInitialize();
+                    attachedSelectionView = true;
+                }
+#endif
             }
             catch (Exception ex)
             {
@@ -599,8 +616,13 @@ namespace CoopSpectator.Infrastructure
                 return;
             }
 
+#if !COOPSPECTATOR_DEDICATED
+            if (!attachedModeClient && !attachedDiagnostic && !attachedNetworkBridge && !attachedSelectionView)
+                return;
+#else
             if (!attachedModeClient && !attachedDiagnostic && !attachedNetworkBridge)
                 return;
+#endif
 
             ModLogger.Info(
                 "ListedShellNetworkBootstrapRuntime: attached missing listed client battle runtime behaviors after mission open. " +
@@ -609,6 +631,9 @@ namespace CoopSpectator.Infrastructure
                 " AttachedModeClient=" + attachedModeClient +
                 " AttachedDiagnostic=" + attachedDiagnostic +
                 " AttachedNetworkBridge=" + attachedNetworkBridge +
+#if !COOPSPECTATOR_DEDICATED
+                " AttachedSelectionView=" + attachedSelectionView +
+#endif
                 " Source=" + Normalize(source) + ".");
         }
 
