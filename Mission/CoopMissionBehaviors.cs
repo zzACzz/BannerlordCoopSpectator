@@ -9570,7 +9570,11 @@ namespace CoopSpectator.MissionBehaviors
                         continue;
 
                     assignedPeerCount++;
-                    if (missionPeer.ControlledAgent != null)
+                    TryClearInactiveControlledAgentReference(
+                        missionPeer,
+                        peer,
+                        source + " phase-update");
+                    if (HasActiveControlledAgent(missionPeer))
                         controlledPeerCount++;
                 }
             }
@@ -21595,7 +21599,14 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                if (missionPeer == null || missionPeer.ControlledAgent != null)
+                if (missionPeer == null)
+                    continue;
+
+                TryClearInactiveControlledAgentReference(
+                    missionPeer,
+                    peer,
+                    source + " materialized-army-possession");
+                if (HasActiveControlledAgent(missionPeer))
                     continue;
 
                 if (!CoopBattleSpawnRequestState.TryGetPendingRequest(missionPeer, out CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest))
@@ -24519,6 +24530,28 @@ namespace CoopSpectator.MissionBehaviors
             return controlledAgent != null && controlledAgent.IsActive();
         }
 
+        private static bool TryClearInactiveControlledAgentReference(
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            string source)
+        {
+            Agent controlledAgent = missionPeer?.ControlledAgent;
+            if (controlledAgent == null || controlledAgent.IsActive())
+                return false;
+
+            missionPeer.ControlledAgent = null;
+            missionPeer.FollowedAgent = null;
+            if (peer != null && ReferenceEquals(peer.ControlledAgent, controlledAgent))
+                peer.ControlledAgent = null;
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: cleared stale inactive controlled agent reference before spawn/selection processing. " +
+                "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                " AgentIndex=" + controlledAgent.Index +
+                " Source=" + (source ?? "unknown"));
+            return true;
+        }
+
         private static bool IsPeerOccupyingActiveCoopLife(MissionPeer missionPeer)
         {
             if (missionPeer == null)
@@ -25290,8 +25323,17 @@ namespace CoopSpectator.MissionBehaviors
             if (missionPeer == null)
                 return;
 
-            if (missionPeer.ControlledAgent != null)
+            NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+            TryClearInactiveControlledAgentReference(
+                missionPeer,
+                peer,
+                source + " spawn-intent");
+            if (HasActiveControlledAgent(missionPeer))
             {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected spawn intent because peer still controls an active agent. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Source=" + source);
                 CoopBattleSpawnIntentState.Clear(source + " already-controlled");
                 return;
             }
@@ -25736,8 +25778,19 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || missionPeer == null || !GameNetwork.IsServer)
                 return false;
 
-            if (missionPeer.ControlledAgent != null)
+            NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+            TryClearInactiveControlledAgentReference(
+                missionPeer,
+                peer,
+                source + " spawn-ready");
+            if (HasActiveControlledAgent(missionPeer))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected spawn request because peer still controls an active agent. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Source=" + source);
                 return false;
+            }
 
             CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
             if (!CoopBattleSelectionRequestState.TryGetRequest(missionPeer, out CoopBattleSelectionRequestState.PeerSelectionRequestState selectionRequest))
@@ -25756,7 +25809,6 @@ namespace CoopSpectator.MissionBehaviors
                     out int defenderActive,
                     out string spawnAvailabilityReason))
             {
-                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: rejected spawn request because peer is not spawn-ready. " +
                     "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
@@ -25775,7 +25827,6 @@ namespace CoopSpectator.MissionBehaviors
             if (!string.IsNullOrWhiteSpace(selectionRequest.EntryId) &&
                 !selectableEntryIds.Contains(selectionRequest.EntryId, StringComparer.Ordinal))
             {
-                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: rejected spawn request because current entry is not selectable. " +
                     "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
@@ -28680,6 +28731,12 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
+            TryClearInactiveControlledAgentReference(
+                missionPeer,
+                peer,
+                "authoritative-compatibility-hero-class");
+
             Mission mission = Mission.Current;
             if (mission == null)
             {
@@ -28700,7 +28757,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (missionPeer.ControlledAgent != null)
+            if (HasActiveControlledAgent(missionPeer))
             {
                 debugReason = "peer already has controlled agent";
                 return false;
@@ -29100,6 +29157,12 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || missionPeer == null)
                 return false;
 
+            NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+            TryClearInactiveControlledAgentReference(
+                missionPeer,
+                peer,
+                "listed-shell-direct-spawn-ingress");
+
             if (mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null ||
                 mission.GetMissionBehavior<MissionMultiplayerCoopBattleClient>() != null)
             {
@@ -29124,7 +29187,7 @@ namespace CoopSpectator.MissionBehaviors
             if (!CoopBattleSpawnRequestState.HasPendingRequest(missionPeer))
                 return false;
 
-            if (missionPeer.ControlledAgent != null)
+            if (HasActiveControlledAgent(missionPeer))
                 return false;
 
             if (ReferenceEquals(authoritativeTeam, mission.SpectatorTeam))
@@ -29169,7 +29232,16 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
-                if (missionPeer == null || missionPeer.ControlledAgent != null)
+                if (missionPeer == null)
+                {
+                    continue;
+                }
+
+                TryClearInactiveControlledAgentReference(
+                    missionPeer,
+                    peer,
+                    source + " listed-shell-direct-spawn");
+                if (HasActiveControlledAgent(missionPeer))
                 {
                     continue;
                 }
