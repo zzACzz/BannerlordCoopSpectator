@@ -7995,7 +7995,7 @@ namespace CoopSpectator.MissionBehaviors
                     out clientVisualRefreshBypassReason);
             if (clientVisualRefreshAlreadySatisfied)
             {
-                clientVisibleWeaponProjectionApplied = !requiresClientVisibleWeaponProjection;
+                clientVisibleWeaponProjectionApplied = true;
                 clientMountedVisualProjectionApplied = true;
             }
             else if (clientVisualOnly)
@@ -18567,15 +18567,26 @@ namespace CoopSpectator.MissionBehaviors
             var matchedScopes = new List<string>();
             if (includeWeapons)
             {
-                AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon0", expectedEquipment[EquipmentIndex.Weapon0].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon0].Item?.StringId, entryState);
-                AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon1", expectedEquipment[EquipmentIndex.Weapon1].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon1].Item?.StringId, entryState);
-                AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon2", expectedEquipment[EquipmentIndex.Weapon2].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon2].Item?.StringId, entryState);
-                AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon3", expectedEquipment[EquipmentIndex.Weapon3].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon3].Item?.StringId, entryState);
-                AppendRuntimeMissionEquipmentItemMismatch(mismatches, "MissionWeapon0", expectedEquipment[EquipmentIndex.Weapon0].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon0, entryState);
-                AppendRuntimeMissionEquipmentItemMismatch(mismatches, "MissionWeapon1", expectedEquipment[EquipmentIndex.Weapon1].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon1, entryState);
-                AppendRuntimeMissionEquipmentItemMismatch(mismatches, "MissionWeapon2", expectedEquipment[EquipmentIndex.Weapon2].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon2, entryState);
-                AppendRuntimeMissionEquipmentItemMismatch(mismatches, "MissionWeapon3", expectedEquipment[EquipmentIndex.Weapon3].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon3, entryState);
-                matchedScopes.Add("weapons-ready");
+                if (CanTreatClientMissionWeaponProjectionAsSatisfied(
+                        agent,
+                        entryState,
+                        expectedEquipment,
+                        out string missionWeaponProjectionReason))
+                {
+                    matchedScopes.Add("weapons-ready(" + (missionWeaponProjectionReason ?? "mission-live-projection") + ")");
+                }
+                else
+                {
+                    AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon0", expectedEquipment[EquipmentIndex.Weapon0].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon0].Item?.StringId, entryState);
+                    AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon1", expectedEquipment[EquipmentIndex.Weapon1].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon1].Item?.StringId, entryState);
+                    AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon2", expectedEquipment[EquipmentIndex.Weapon2].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon2].Item?.StringId, entryState);
+                    AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon3", expectedEquipment[EquipmentIndex.Weapon3].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon3].Item?.StringId, entryState);
+                    AppendRuntimeMissionEquipmentItemMismatch(mismatches, "MissionWeapon0", expectedEquipment[EquipmentIndex.Weapon0].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon0, entryState);
+                    AppendRuntimeMissionEquipmentItemMismatch(mismatches, "MissionWeapon1", expectedEquipment[EquipmentIndex.Weapon1].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon1, entryState);
+                    AppendRuntimeMissionEquipmentItemMismatch(mismatches, "MissionWeapon2", expectedEquipment[EquipmentIndex.Weapon2].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon2, entryState);
+                    AppendRuntimeMissionEquipmentItemMismatch(mismatches, "MissionWeapon3", expectedEquipment[EquipmentIndex.Weapon3].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon3, entryState);
+                    matchedScopes.Add("weapons-ready");
+                }
             }
 
             if (includeArmorVisuals)
@@ -18620,6 +18631,50 @@ namespace CoopSpectator.MissionBehaviors
             reason = matchedScopes.Count > 0
                 ? string.Join(", ", matchedScopes)
                 : "no-visual-delta-requested";
+            return true;
+        }
+
+        private static bool CanTreatClientMissionWeaponProjectionAsSatisfied(
+            Agent agent,
+            RosterEntryState entryState,
+            Equipment expectedEquipment,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                agent == null ||
+                entryState == null ||
+                expectedEquipment == null ||
+                !entryState.IsHero)
+            {
+                return false;
+            }
+
+            if (!TryGetClientCreateAgentExactVisualState(agent.Index, out ClientCreateAgentExactVisualRuntimeState state) ||
+                state == null)
+            {
+                reason = "create-agent-runtime-unobserved";
+                return false;
+            }
+
+            if (!HasClientTroopObservedStablePostCreateSignal(state, out string stableSignalReason))
+            {
+                reason = stableSignalReason ?? "post-create-stage-pending";
+                return false;
+            }
+
+            var missionWeaponMismatches = new List<string>();
+            AppendRuntimeMissionEquipmentItemMismatch(missionWeaponMismatches, "MissionWeapon0", expectedEquipment[EquipmentIndex.Weapon0].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon0, entryState);
+            AppendRuntimeMissionEquipmentItemMismatch(missionWeaponMismatches, "MissionWeapon1", expectedEquipment[EquipmentIndex.Weapon1].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon1, entryState);
+            AppendRuntimeMissionEquipmentItemMismatch(missionWeaponMismatches, "MissionWeapon2", expectedEquipment[EquipmentIndex.Weapon2].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon2, entryState);
+            AppendRuntimeMissionEquipmentItemMismatch(missionWeaponMismatches, "MissionWeapon3", expectedEquipment[EquipmentIndex.Weapon3].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon3, entryState);
+            if (missionWeaponMismatches.Count > 0)
+            {
+                reason = "mission-weapon-mismatch|" + string.Join(" | ", missionWeaponMismatches);
+                return false;
+            }
+
+            reason = "mission-live-projection|" + (stableSignalReason ?? "stable-post-create");
             return true;
         }
 
