@@ -26825,12 +26825,15 @@ namespace CoopSpectator.MissionBehaviors
                         currentPhase,
                         out _,
                         out _,
-                        out _))
+                        out string sideReadinessReason))
                 {
                     readinessStage = currentPhase < CoopBattlePhase.BattleActive
                         ? "Loading"
                         : "RespawnSelection";
-                    readinessReason = "Loading battle data...";
+                    readinessReason = ResolveBlockedBattleDataReadinessReason(
+                        currentPhase,
+                        statusSide,
+                        sideReadinessReason);
                     return false;
                 }
 
@@ -26854,9 +26857,12 @@ namespace CoopSpectator.MissionBehaviors
                         currentPhase,
                         out _,
                         out _,
-                        out _))
+                        out string sideReadinessReason))
                 {
-                    readinessReason = "Loading battle data...";
+                    readinessReason = ResolveBlockedBattleDataReadinessReason(
+                        currentPhase,
+                        side,
+                        sideReadinessReason);
                     return false;
                 }
 
@@ -26872,6 +26878,22 @@ namespace CoopSpectator.MissionBehaviors
             readinessStage = "SideSelection";
             readinessReason = "Battle data ready.";
             return true;
+        }
+
+        private static string ResolveBlockedBattleDataReadinessReason(
+            CoopBattlePhase currentPhase,
+            BattleSideEnum side,
+            string sideReadinessReason)
+        {
+            if (currentPhase < CoopBattlePhase.BattleActive &&
+                IsPrebattleMaterializationBarrierReason(sideReadinessReason))
+            {
+                return side == BattleSideEnum.None
+                    ? "Waiting for battlefield units to materialize..."
+                    : "Waiting for " + side.ToString().ToLowerInvariant() + " battlefield units to materialize...";
+            }
+
+            return "Loading battle data...";
         }
 
         private static void TryLogBattleSnapshotAckReadinessBlock(
@@ -26973,8 +26995,81 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (currentPhase < CoopBattlePhase.BattleActive &&
+                !ArePrebattleSelectableRepresentativesReadyForPeer(
+                    mission,
+                    missionPeer,
+                    side,
+                    selectableEntryIds,
+                    out string materializationReason))
+            {
+                reason = materializationReason;
+                return false;
+            }
+
             reason = "ready";
             return true;
+        }
+
+        private static bool ArePrebattleSelectableRepresentativesReadyForPeer(
+            Mission mission,
+            MissionPeer missionPeer,
+            BattleSideEnum side,
+            IReadOnlyList<string> selectableEntryIds,
+            out string reason)
+        {
+            reason = "materialization-incomplete";
+            if (mission == null || missionPeer == null || side == BattleSideEnum.None)
+                return false;
+
+            IReadOnlyList<string> requiredEntryIds = FilterClaimedSelectableEntryIdsForPeer(
+                GetAllowedSelectableEntryIdsForSide(side),
+                missionPeer,
+                "allowed-prebattle-readiness",
+                out _);
+            if (requiredEntryIds == null || requiredEntryIds.Count <= 0)
+            {
+                reason = "allowed-entries-empty";
+                return false;
+            }
+
+            IReadOnlyList<string> liveMaterializedEntryIds = FilterClaimedSelectableEntryIdsForPeer(
+                GetLiveSelectableEntryIdsSnapshot(mission, side),
+                missionPeer,
+                "live-prebattle-readiness",
+                out _);
+            var liveMaterializedEntrySet = new HashSet<string>(
+                liveMaterializedEntryIds ?? Array.Empty<string>(),
+                StringComparer.Ordinal);
+            var missingEntryIds = new List<string>();
+            foreach (string requiredEntryId in requiredEntryIds)
+            {
+                if (string.IsNullOrWhiteSpace(requiredEntryId) || liveMaterializedEntrySet.Contains(requiredEntryId))
+                    continue;
+
+                missingEntryIds.Add(requiredEntryId);
+            }
+
+            if (missingEntryIds.Count <= 0)
+                return true;
+
+            string missingSummary = string.Join(",", missingEntryIds.Take(5));
+            if (missingEntryIds.Count > 5)
+                missingSummary += ",...";
+
+            reason =
+                "materialization-incomplete" +
+                " Expected=" + requiredEntryIds.Count +
+                " Ready=" + (selectableEntryIds?.Count ?? 0) +
+                " LiveMaterialized=" + liveMaterializedEntrySet.Count +
+                " Missing=" + missingSummary;
+            return false;
+        }
+
+        private static bool IsPrebattleMaterializationBarrierReason(string reason)
+        {
+            return !string.IsNullOrWhiteSpace(reason) &&
+                   reason.StartsWith("materialization-incomplete", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsExplicitSelectableSourceReady(CoopBattlePhase currentPhase, string selectableSource)

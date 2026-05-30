@@ -988,6 +988,13 @@ namespace CoopSpectator.UI
                     : "Waiting for first data chunk...";
             }
 
+            if (!string.IsNullOrWhiteSpace(readinessReason) &&
+                progress.ChunkCount > 0 &&
+                progress.ReceivedChunkCount >= progress.ChunkCount)
+            {
+                return readinessReason;
+            }
+
             string prefix =
                 "Progress: " +
                 progress.ReceivedChunkCount +
