@@ -5902,6 +5902,9 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
                 }
 
+                if (ShouldPauseClientPostPossessionExactVisualForAgent(agent, out _))
+                    continue;
+
                 _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex[agent.Index] = nowUtc;
                 _exactNativeClientVisualOverlayAppliedAgentIndices.Remove(agent.Index);
                 _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.Remove(agent.Index);
@@ -6068,6 +6071,9 @@ namespace CoopSpectator.MissionBehaviors
                 _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agent.Index);
                 return false;
             }
+
+            if (ShouldPauseClientPostPossessionExactVisualForAgent(agent, out _))
+                return false;
 
             UpdateStrictExactHeroTransferEntryState(agent.Index, entryId, entryState, source ?? "client exact-visual finalize");
             if (ShouldAwaitMountedHeroEquipmentSyncBeforeClientExactVisualRefresh(
@@ -7851,7 +7857,6 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
             if (clientVisualOnly &&
-                !clientHeroEntry &&
                 ShouldPauseClientPostPossessionExactVisualForAgent(agent, out _))
             {
                 return false;
