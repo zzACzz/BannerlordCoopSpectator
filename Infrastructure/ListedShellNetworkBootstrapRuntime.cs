@@ -332,20 +332,35 @@ namespace CoopSpectator.Infrastructure
                 return false;
 
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
-            if (currentPhase >= CoopBattlePhase.BattleActive || currentPhase == CoopBattlePhase.None)
+            if (currentPhase >= CoopBattlePhase.BattleActive)
                 return false;
 
             if (!ListedShellMissionSessionState.TryResolveTransportToken(mission, out int token) || token <= 0)
                 return false;
 
-            if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string readinessSummary))
+            bool snapshotApplied = CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string readinessSummary);
+            bool snapshotBootstrapInFlight = CoopMissionNetworkBridge.TryGetClientBattleSnapshotProgress(out CoopMissionNetworkBridge.ClientBattleSnapshotProgressInfo progress) &&
+                progress.TransmissionId > 0 &&
+                progress.ReceivedChunkCount > 0;
+            bool bootstrapOwnershipActive = ListedShellClientSessionOwnershipState.ShouldOwnReceiveBootstrap();
+            if (!snapshotApplied && !snapshotBootstrapInFlight && !bootstrapOwnershipActive)
                 return false;
 
             summary =
                 "MissionScene=" + (mission.SceneName ?? "null") +
                 " MissionPhase=" + currentPhase +
                 " MissionToken=" + token +
-                " SnapshotReadiness={" + (readinessSummary ?? "unknown") + "}";
+                " SnapshotApplied=" + snapshotApplied +
+                " SnapshotBootstrapInFlight=" + snapshotBootstrapInFlight +
+                " BootstrapOwnershipActive=" + bootstrapOwnershipActive +
+                " SnapshotReadiness={" + (readinessSummary ?? "unknown") + "}" +
+                (snapshotBootstrapInFlight
+                    ? " SnapshotProgress={TransmissionId=" + progress.TransmissionId +
+                      " Received=" + progress.ReceivedChunkCount +
+                      "/" + progress.ChunkCount +
+                      " HighestContiguous=" + progress.HighestContiguousChunkIndex +
+                      " Stalled=" + progress.IsStalled + "}"
+                    : string.Empty);
             return true;
         }
 
