@@ -2093,34 +2093,19 @@ namespace CoopSpectator.MissionBehaviors
                     "afterstart",
                     "runtime-init-complete",
                     "CoopMissionSpawnLogic.AfterStart battle-map deferred");
-                ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(
-                    BattleSnapshotRuntimeState.GetState(),
-                    "CoopMissionSpawnLogic.AfterStart battle-map deferred");
-                ExactCampaignRuntimeObjectRegistry.SyncFromState(
-                    BattleSnapshotRuntimeState.GetState(),
-                    "CoopMissionSpawnLogic.AfterStart battle-map deferred");
                 AppendExactBattleAgentSpawnTraceLifecycleStep(
                     mission,
                     "afterstart",
-                    "exact-item-registry-ready",
+                    "exact-runtime-catalog-bootstrap-deferred",
                     "CoopMissionSpawnLogic.AfterStart battle-map deferred");
-                LogImportedEquipmentAvailabilityDiagnostics();
-                AppendExactBattleAgentSpawnTraceLifecycleStep(
-                    mission,
-                    "afterstart",
-                    "imported-equipment-diagnostics-ready",
-                    "CoopMissionSpawnLogic.AfterStart battle-map deferred");
-                LogHeroEquipmentResolutionAudit();
-                AppendExactBattleAgentSpawnTraceLifecycleStep(
-                    mission,
-                    "afterstart",
-                    "hero-equipment-audit-ready",
-                    "CoopMissionSpawnLogic.AfterStart battle-map deferred",
-                    "CompatibilityAuditDeferred=True");
                 ModLogger.Info(
-                    "CoopMissionSpawnLogic: deferred exact entry compatibility audit out of battle-map AfterStart hot path. " +
+                    "CoopMissionSpawnLogic: deferred exact runtime catalog hydration and compatibility diagnostics out of battle-map AfterStart hot path. " +
                     "Source=CoopMissionSpawnLogic.AfterStart battle-map deferred");
-                ModLogger.Info("CoopMissionSpawnLogic: battle-map AfterStart using minimal deferred startup path. BuildMarker=" + BattleMapStartupBuildMarker);
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: battle-map AfterStart using minimal deferred startup path. " +
+                    "BuildMarker=" + BattleMapStartupBuildMarker +
+                    " ExactRuntimeCatalogsBootstrappedBySnapshotState=True" +
+                    " HeavyDiagnosticsDeferred=True.");
                 _timeUntilNextPeerLog = ServerLogIntervalSeconds;
                 AppendExactBattleAgentSpawnTraceLifecycleStep(
                     mission,
@@ -2631,9 +2616,19 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopMissionSpawnLogic: dedicated observer applied fallback runtime init. " +
                     "Mission=" + (mission.SceneName ?? "null") +
                     " Source=" + (_lastServerRuntimeInitializationSource ?? "unknown"));
-                LogImportedEquipmentAvailabilityDiagnostics();
-                LogHeroEquipmentResolutionAudit();
-                TryWriteExactEntryCompatibilityAuditSafely("dedicated observer mission detected");
+                if (!GameNetwork.IsDedicatedServer || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                {
+                    LogImportedEquipmentAvailabilityDiagnostics();
+                    LogHeroEquipmentResolutionAudit();
+                    TryWriteExactEntryCompatibilityAuditSafely("dedicated observer mission detected");
+                }
+                else
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: skipped heavy compatibility diagnostics during dedicated battle-map observer fallback init. " +
+                        "Mission=" + (mission.SceneName ?? "null") +
+                        " Source=dedicated observer mission detected.");
+                }
                 CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, "dedicated observer mission detected", mission);
             }
 
@@ -2785,15 +2780,34 @@ namespace CoopSpectator.MissionBehaviors
             _diagnosticAllowedAgent = null;
             ExactTransferContractRuntimeCache.Reset((_lastServerRuntimeInitializationSource ?? source ?? "unknown") + " server-runtime-init");
 
+            bool deferHeavyBattleMapRuntimeContracts =
+                GameNetwork.IsDedicatedServer &&
+                MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName);
             RefreshAllowedTroopsFromRoster(source);
-            CampaignMapPatchMissionInit.TryRepairLiveMissionContract(
-                mission,
-                (_lastServerRuntimeInitializationSource ?? source ?? "unknown") + " live-contract-repair");
             ModLogger.Info(
                 "CoopMissionSpawnLogic: server runtime initialized. " +
                 "Mission=" + (mission.SceneName ?? "null") +
                 " Source=" + (_lastServerRuntimeInitializationSource ?? "unknown") +
                 " CampaignRosterTroops=" + CampaignRosterTroopIds.Count);
+            if (deferHeavyBattleMapRuntimeContracts)
+            {
+                if (!string.IsNullOrEmpty(SelectedAllowedTroopId))
+                    ModLogger.Info("CoopMissionSpawnLogic: runtime selected allowed troop id = " + SelectedAllowedTroopId);
+                else
+                    ModLogger.Info("CoopMissionSpawnLogic: runtime found no allowed troop id (roster empty).");
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: deferred live mission contract repair and runtime diagnostics out of dedicated battle-map init hot path. " +
+                    "Mission=" + (mission.SceneName ?? "null") +
+                    " Source=" + (_lastServerRuntimeInitializationSource ?? "unknown") +
+                    " SelectedAllowedEntryId=" + (SelectedAllowedEntryId ?? "null") +
+                    " SelectedAllowedTroopId=" + (SelectedAllowedTroopId ?? "null"));
+                return true;
+            }
+
+            CampaignMapPatchMissionInit.TryRepairLiveMissionContract(
+                mission,
+                (_lastServerRuntimeInitializationSource ?? source ?? "unknown") + " live-contract-repair");
             BattleMapContractDiagnostics.LogMissionRuntimeContract(mission, source + " runtime-init");
             if (!string.IsNullOrEmpty(SelectedAllowedTroopId))
                 ModLogger.Info("CoopMissionSpawnLogic: runtime selected allowed troop id = " + SelectedAllowedTroopId);
@@ -2801,6 +2815,18 @@ namespace CoopSpectator.MissionBehaviors
                 ModLogger.Info("CoopMissionSpawnLogic: runtime found no allowed troop id (roster empty).");
             LogAllowedCharacterResolution();
             return true;
+        }
+
+        private static bool IsRuntimeReadyPeer(NetworkCommunicator peer)
+        {
+            if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive)
+                return false;
+
+            if (peer.IsSynchronized)
+                return true;
+
+            return GameNetwork.IsServer &&
+                CoopMissionNetworkBridge.IsPeerCurrentBattleSnapshotBootstrapReady(peer, out _);
         }
 
         // Keep mission behavior and dedicated observer on the same battle-lifecycle pipeline.
@@ -2892,7 +2918,7 @@ namespace CoopSpectator.MissionBehaviors
 
             string missionMode = "unknown";
             float missionTime = -1f;
-            int synchronizedPeerCount = 0;
+            int runtimeReadyPeerCount = 0;
             bool isExactCampaignBattleScene = false;
 
             try { missionMode = mission.Mode.ToString(); } catch { }
@@ -2903,10 +2929,10 @@ namespace CoopSpectator.MissionBehaviors
             {
                 foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
                 {
-                    if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    if (!IsRuntimeReadyPeer(peer))
                         continue;
 
-                    synchronizedPeerCount++;
+                    runtimeReadyPeerCount++;
                 }
             }
 
@@ -2915,7 +2941,7 @@ namespace CoopSpectator.MissionBehaviors
                 reason =
                     "MissionMode=" + missionMode +
                     " MissionTime=" + missionTime.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) +
-                    " SynchronizedPeers=" + synchronizedPeerCount;
+                    " RuntimeReadyPeers=" + runtimeReadyPeerCount;
                 return true;
             }
 
@@ -2924,16 +2950,16 @@ namespace CoopSpectator.MissionBehaviors
                 reason =
                     "MissionMode=" + missionMode +
                     " MissionTime=" + missionTime.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) +
-                    " SynchronizedPeers=" + synchronizedPeerCount;
+                    " RuntimeReadyPeers=" + runtimeReadyPeerCount;
                 return true;
             }
 
-            if (isExactCampaignBattleScene && synchronizedPeerCount <= 0)
+            if (isExactCampaignBattleScene && runtimeReadyPeerCount <= 0)
             {
                 reason =
                     "MissionMode=" + missionMode +
                     " MissionTime=" + missionTime.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) +
-                    " SynchronizedPeers=" + synchronizedPeerCount +
+                    " RuntimeReadyPeers=" + runtimeReadyPeerCount +
                     " ExactScenePeerGate=pending";
                 return true;
             }
@@ -9532,7 +9558,7 @@ namespace CoopSpectator.MissionBehaviors
             {
                 foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
                 {
-                    if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    if (!IsRuntimeReadyPeer(peer))
                         continue;
 
                     MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
@@ -9582,7 +9608,7 @@ namespace CoopSpectator.MissionBehaviors
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                if (!IsRuntimeReadyPeer(peer))
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
@@ -10040,7 +10066,7 @@ namespace CoopSpectator.MissionBehaviors
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                if (!IsRuntimeReadyPeer(peer))
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
@@ -10230,7 +10256,7 @@ namespace CoopSpectator.MissionBehaviors
             {
                 foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
                 {
-                    if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    if (!IsRuntimeReadyPeer(peer))
                         continue;
 
                     MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
@@ -10852,7 +10878,7 @@ namespace CoopSpectator.MissionBehaviors
         private static bool HasExactSceneMaterializationAuthorityAnchor(Mission mission, out string reason)
         {
             reason = string.Empty;
-            int synchronizedPeerCount = 0;
+            int runtimeReadyPeerCount = 0;
             int requestedPeerCount = 0;
             int assignedPeerCount = 0;
             int selectedPeerCount = 0;
@@ -10861,10 +10887,10 @@ namespace CoopSpectator.MissionBehaviors
             {
                 foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
                 {
-                    if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    if (!IsRuntimeReadyPeer(peer))
                         continue;
 
-                    synchronizedPeerCount++;
+                    runtimeReadyPeerCount++;
                     MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
                     if (missionPeer == null)
                         continue;
@@ -10893,7 +10919,7 @@ namespace CoopSpectator.MissionBehaviors
 
             reason =
                 "Scene=" + (mission?.SceneName ?? "null") +
-                " SynchronizedPeers=" + synchronizedPeerCount +
+                " RuntimeReadyPeers=" + runtimeReadyPeerCount +
                 " RequestedPeers=" + requestedPeerCount +
                 " AssignedPeers=" + assignedPeerCount +
                 " SelectedPeers=" + selectedPeerCount;
@@ -10924,7 +10950,7 @@ namespace CoopSpectator.MissionBehaviors
             {
                 foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
                 {
-                    if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                    if (!IsRuntimeReadyPeer(peer))
                         continue;
 
                     MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
@@ -21565,7 +21591,7 @@ namespace CoopSpectator.MissionBehaviors
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                if (!IsRuntimeReadyPeer(peer))
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
@@ -21912,7 +21938,7 @@ namespace CoopSpectator.MissionBehaviors
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                if (!IsRuntimeReadyPeer(peer))
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
@@ -23337,7 +23363,7 @@ namespace CoopSpectator.MissionBehaviors
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                if (!IsRuntimeReadyPeer(peer))
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
@@ -24355,7 +24381,7 @@ namespace CoopSpectator.MissionBehaviors
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                if (!IsRuntimeReadyPeer(peer))
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
@@ -25791,7 +25817,7 @@ namespace CoopSpectator.MissionBehaviors
             MissionPeer sideAssignedPeer = null;
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                if (!IsRuntimeReadyPeer(peer))
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
@@ -25896,7 +25922,7 @@ namespace CoopSpectator.MissionBehaviors
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                if (!IsRuntimeReadyPeer(peer))
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
@@ -26464,10 +26490,7 @@ namespace CoopSpectator.MissionBehaviors
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
-                if (peer == null ||
-                    peer.IsServerPeer ||
-                    !peer.IsConnectionActive ||
-                    !peer.IsSynchronized ||
+                if (!IsRuntimeReadyPeer(peer) ||
                     !string.Equals(peer.UserName, hostedLocalUserName, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -29142,7 +29165,7 @@ namespace CoopSpectator.MissionBehaviors
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                if (!IsRuntimeReadyPeer(peer))
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
@@ -29878,7 +29901,7 @@ namespace CoopSpectator.MissionBehaviors
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
-                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
+                if (!IsRuntimeReadyPeer(peer))
                     continue;
 
                 MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
