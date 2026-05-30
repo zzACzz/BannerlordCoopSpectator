@@ -2685,6 +2685,24 @@ namespace CoopSpectator.MissionBehaviors
                 isNewMission,
                 "CoopMissionSpawnLogic.TryEnsureDedicatedObserverMissionBehavior");
 
+            if (MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                if (mission.GetMissionBehavior<CoopMissionSpawnLogic>() == null)
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: dedicated observer skipped attaching CoopMissionSpawnLogic mission behavior on active battle-map mission. " +
+                        "Mission=" + (mission.SceneName ?? "null") +
+                        " IsNewMission=" + isNewMission +
+                        " UsingStaticFallbackTick=True.");
+                }
+
+                // Keep dedicated battle-map observer on the static fallback pipeline.
+                // Attaching a second live CoopMissionSpawnLogic behavior into an already
+                // active mission creates a hotter and more fragile lifecycle surface than
+                // the coop-owned observer tick actually needs here.
+                return false;
+            }
+
             CoopMissionSpawnLogic existingBehavior = mission.GetMissionBehavior<CoopMissionSpawnLogic>();
             if (existingBehavior != null)
                 return ensuredNetworkBridge;
