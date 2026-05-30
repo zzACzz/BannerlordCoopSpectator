@@ -88,12 +88,24 @@ namespace CoopSpectator
                 _pendingDedicatedObserverFirstSeenUtc = DateTime.UtcNow;
                 _pendingDedicatedObserverStableReadyTickCount = 0;
                 _lastDedicatedObserverActivationWaitDiagnosticKey = string.Empty;
+                CoopMissionSpawnLogic.TryEnsureDedicatedObserverNetworkBridge(
+                    mission,
+                    isNewMission: true,
+                    source: "CoopSpectatorDedicated.ShouldDelayDedicatedMissionObserverActivation first-seen");
                 ModLogger.Info(
                     "CoopSpectatorDedicated: deferred dedicated mission observer activation pending multiplayer bootstrap contract. " +
                     "Mission=" + (mission.SceneName ?? "null") +
                     " RequiredStableTicks=" + DedicatedObserverRequiredStableReadyTicks +
                     " FallbackTimeoutSeconds=" + DedicatedObserverFallbackActivationTimeoutSeconds.ToString("0.0"));
                 return true;
+            }
+
+            if (!ReferenceEquals(_activatedDedicatedObserverMission, mission))
+            {
+                CoopMissionSpawnLogic.TryEnsureDedicatedObserverNetworkBridge(
+                    mission,
+                    isNewMission: false,
+                    source: "CoopSpectatorDedicated.ShouldDelayDedicatedMissionObserverActivation waiting");
             }
 
             if (ReferenceEquals(_activatedDedicatedObserverMission, mission))

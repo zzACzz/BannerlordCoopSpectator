@@ -2642,32 +2642,48 @@ namespace CoopSpectator.MissionBehaviors
             RunCoopBattlePhaseOwnerTick(mission, "dedicated observer");
         }
 
+        internal static bool TryEnsureDedicatedObserverNetworkBridge(Mission mission, bool isNewMission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer)
+                return false;
+
+            if (mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null)
+                return true;
+
+            try
+            {
+                var networkBridge = new CoopMissionNetworkBridge();
+                mission.AddMissionBehavior(networkBridge);
+                networkBridge.OnAfterMissionCreated();
+                networkBridge.OnBehaviorInitialize();
+                networkBridge.AfterStart();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: attached CoopMissionNetworkBridge to active dedicated battle mission. " +
+                    "Mission=" + (mission.SceneName ?? "null") +
+                    " IsNewMission=" + isNewMission +
+                    " Source=" + (source ?? "unknown") + ".");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: failed to attach CoopMissionNetworkBridge to active dedicated battle mission. " +
+                    "Mission=" + (mission.SceneName ?? "null") +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+                return false;
+            }
+        }
+
         private static bool TryEnsureDedicatedObserverMissionBehavior(Mission mission, bool isNewMission)
         {
             if (mission == null || !GameNetwork.IsServer)
                 return false;
 
-            bool ensuredNetworkBridge = true;
-            if (mission.GetMissionBehavior<CoopMissionNetworkBridge>() == null)
-            {
-                try
-                {
-                    var networkBridge = new CoopMissionNetworkBridge();
-                    mission.AddMissionBehavior(networkBridge);
-                    networkBridge.OnAfterMissionCreated();
-                    networkBridge.OnBehaviorInitialize();
-                    networkBridge.AfterStart();
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: dedicated observer attached CoopMissionNetworkBridge mission behavior to active mission. " +
-                        "Mission=" + (mission.SceneName ?? "null") +
-                        " IsNewMission=" + isNewMission + ".");
-                }
-                catch (Exception ex)
-                {
-                    ensuredNetworkBridge = false;
-                    ModLogger.Info("CoopMissionSpawnLogic: dedicated observer failed to attach network bridge mission behavior: " + ex.Message);
-                }
-            }
+            bool ensuredNetworkBridge = TryEnsureDedicatedObserverNetworkBridge(
+                mission,
+                isNewMission,
+                "CoopMissionSpawnLogic.TryEnsureDedicatedObserverMissionBehavior");
 
             CoopMissionSpawnLogic existingBehavior = mission.GetMissionBehavior<CoopMissionSpawnLogic>();
             if (existingBehavior != null)
