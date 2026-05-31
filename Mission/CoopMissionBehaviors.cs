@@ -8243,10 +8243,29 @@ namespace CoopSpectator.MissionBehaviors
             out Equipment.InitialWeaponEquipPreference initialWeaponEquipPreference,
             out string canonicalWieldReason)
         {
-            desiredMainHandIndex = ToContractWeaponEquipmentIndex(preBattleWeaponState?.PreferredMainHandSlotIndex);
-            desiredOffHandIndex = ToContractWeaponEquipmentIndex(preBattleWeaponState?.PreferredOffHandSlotIndex);
-            initialWeaponEquipPreference = preBattleWeaponState?.InitialWeaponEquipPreference ??
-                                           Equipment.InitialWeaponEquipPreference.Any;
+            EquipmentIndex preferredMainHandIndex =
+                ToContractWeaponEquipmentIndex(preBattleWeaponState?.PreferredMainHandSlotIndex);
+            EquipmentIndex preferredOffHandIndex =
+                ToContractWeaponEquipmentIndex(preBattleWeaponState?.PreferredOffHandSlotIndex);
+            EquipmentIndex safeHoldMainHandIndex =
+                ToContractWeaponEquipmentIndex(preBattleWeaponState?.SafeHoldMainHandSlotIndex);
+            EquipmentIndex safeHoldOffHandIndex =
+                ToContractWeaponEquipmentIndex(preBattleWeaponState?.SafeHoldOffHandSlotIndex);
+            Equipment.InitialWeaponEquipPreference preferredInitialWeaponEquipPreference =
+                preBattleWeaponState?.InitialWeaponEquipPreference ??
+                Equipment.InitialWeaponEquipPreference.Any;
+            Equipment.InitialWeaponEquipPreference safeHoldInitialWeaponEquipPreference =
+                preBattleWeaponState?.SafeHoldInitialWeaponEquipPreference ??
+                Equipment.InitialWeaponEquipPreference.Any;
+            ExactTransferPreBattleWeaponReadinessMode readinessMode =
+                preBattleWeaponState?.ReadinessMode ?? ExactTransferPreBattleWeaponReadinessMode.None;
+
+            bool useSafeHoldPair = readinessMode == ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive;
+            desiredMainHandIndex = useSafeHoldPair ? safeHoldMainHandIndex : preferredMainHandIndex;
+            desiredOffHandIndex = useSafeHoldPair ? safeHoldOffHandIndex : preferredOffHandIndex;
+            initialWeaponEquipPreference = useSafeHoldPair
+                ? safeHoldInitialWeaponEquipPreference
+                : preferredInitialWeaponEquipPreference;
             canonicalWieldReason = null;
 
             if (preBattleWeaponState == null ||
@@ -8270,8 +8289,13 @@ namespace CoopSpectator.MissionBehaviors
             EquipmentIndex expectedAmmoIndex = ToContractWeaponEquipmentIndex(preBattleWeaponState.ExpectedAmmoSlotIndex);
             canonicalWieldReason =
                 "contract-prebattle-" + preBattleWeaponState.Mode +
-                "{Main=" + FormatWeaponEquipmentIndex(equipment, desiredMainHandIndex) +
-                ",Off=" + FormatWeaponEquipmentIndex(equipment, desiredOffHandIndex) +
+                "{Readiness=" + readinessMode +
+                ",SelectedMain=" + FormatWeaponEquipmentIndex(equipment, desiredMainHandIndex) +
+                ",SelectedOff=" + FormatWeaponEquipmentIndex(equipment, desiredOffHandIndex) +
+                ",PreferredMain=" + FormatWeaponEquipmentIndex(equipment, preferredMainHandIndex) +
+                ",PreferredOff=" + FormatWeaponEquipmentIndex(equipment, preferredOffHandIndex) +
+                ",SafeHoldMain=" + FormatWeaponEquipmentIndex(equipment, safeHoldMainHandIndex) +
+                ",SafeHoldOff=" + FormatWeaponEquipmentIndex(equipment, safeHoldOffHandIndex) +
                 ",Ammo=" + FormatWeaponEquipmentIndex(equipment, expectedAmmoIndex) +
                 ",ExpectAmmoAttached=" + preBattleWeaponState.ExpectAmmoAttachedToMainHand +
                 ",InitialWeaponEquipPreference=" + initialWeaponEquipPreference +

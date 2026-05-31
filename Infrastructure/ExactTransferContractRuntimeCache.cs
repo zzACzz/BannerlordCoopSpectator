@@ -389,11 +389,15 @@ namespace CoopSpectator.Infrastructure
                     ",MountedWeaponLayoutNormalized=" + contract.Equipment?.MountedWeaponLayoutNormalized +
                     ",MountedWeaponLayout=" + (contract.Equipment?.MountedWeaponLayoutSummary ?? "null") +
                     ",PreBattleWeaponStateMode=" + contract.PreBattleWeaponState?.Mode +
+                    ",PreBattleReadinessMode=" + contract.PreBattleWeaponState?.ReadinessMode +
                     ",PreBattleMain=" + (contract.PreBattleWeaponState?.PreferredMainHandSlotIndex?.ToString() ?? "null") +
                     ",PreBattleOff=" + (contract.PreBattleWeaponState?.PreferredOffHandSlotIndex?.ToString() ?? "null") +
                     ",PreBattleAmmo=" + (contract.PreBattleWeaponState?.ExpectedAmmoSlotIndex?.ToString() ?? "null") +
                     ",PreBattleAmmoAttached=" + contract.PreBattleWeaponState?.ExpectAmmoAttachedToMainHand +
                     ",PreBattleInitialPreference=" + contract.PreBattleWeaponState?.InitialWeaponEquipPreference +
+                    ",PreBattleSafeHoldMain=" + (contract.PreBattleWeaponState?.SafeHoldMainHandSlotIndex?.ToString() ?? "null") +
+                    ",PreBattleSafeHoldOff=" + (contract.PreBattleWeaponState?.SafeHoldOffHandSlotIndex?.ToString() ?? "null") +
+                    ",PreBattleSafeHoldInitialPreference=" + contract.PreBattleWeaponState?.SafeHoldInitialWeaponEquipPreference +
                     ",PreBattleReason=" + (contract.PreBattleWeaponState?.DecisionReason ?? "null") +
                     ",PeerDrivenBody=" + contract.PeerBinding?.AllowPeerDrivenBodyAtCreateAgentTime +
                     ",PeerDrivenBanner=" + contract.PeerBinding?.AllowPeerDrivenBannerAtCreateAgentTime +

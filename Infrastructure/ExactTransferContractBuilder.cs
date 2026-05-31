@@ -286,11 +286,15 @@ namespace CoopSpectator.Infrastructure
                 return;
 
             preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.None;
+            preBattleWeaponState.ReadinessMode = ExactTransferPreBattleWeaponReadinessMode.None;
             preBattleWeaponState.PreferredMainHandSlotIndex = null;
             preBattleWeaponState.PreferredOffHandSlotIndex = null;
             preBattleWeaponState.ExpectedAmmoSlotIndex = null;
             preBattleWeaponState.ExpectAmmoAttachedToMainHand = false;
             preBattleWeaponState.InitialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.Any;
+            preBattleWeaponState.SafeHoldMainHandSlotIndex = null;
+            preBattleWeaponState.SafeHoldOffHandSlotIndex = null;
+            preBattleWeaponState.SafeHoldInitialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.Any;
             preBattleWeaponState.DecisionReason = "prebattle-weapon-state-unresolved";
 
             if (entryState == null || equipment?.SpawnEquipment == null)
@@ -309,6 +313,15 @@ namespace CoopSpectator.Infrastructure
             MountedWeaponSlotState firstArrowAmmo = slots.FirstOrDefault(IsArrowAmmoSlot);
             MountedWeaponSlotState firstBoltAmmo = slots.FirstOrDefault(IsBoltAmmoSlot);
             MountedWeaponSlotState firstSlingAmmo = slots.FirstOrDefault(IsSlingAmmoSlot);
+            ResolveSafeHoldPair(
+                firstPrimaryMelee,
+                firstShield,
+                out int? safeHoldMainHandSlotIndex,
+                out int? safeHoldOffHandSlotIndex,
+                out Equipment.InitialWeaponEquipPreference safeHoldInitialWeaponEquipPreference);
+            preBattleWeaponState.SafeHoldMainHandSlotIndex = safeHoldMainHandSlotIndex;
+            preBattleWeaponState.SafeHoldOffHandSlotIndex = safeHoldOffHandSlotIndex;
+            preBattleWeaponState.SafeHoldInitialWeaponEquipPreference = safeHoldInitialWeaponEquipPreference;
             bool isMainHeroPlayerEntry =
                 isPlayerControlledOrigin &&
                 string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase);
@@ -316,8 +329,13 @@ namespace CoopSpectator.Infrastructure
             if (isMainHeroPlayerEntry)
             {
                 preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.PlayerControlledOverride;
-                preBattleWeaponState.PreferredMainHandSlotIndex = initialWield?.PreferredMainHandSlotIndex;
-                preBattleWeaponState.PreferredOffHandSlotIndex = initialWield?.PreferredOffHandSlotIndex;
+                preBattleWeaponState.ReadinessMode = ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive;
+                preBattleWeaponState.PreferredMainHandSlotIndex = IsWeaponSlotIndex(initialWield?.PreferredMainHandSlotIndex)
+                    ? initialWield?.PreferredMainHandSlotIndex
+                    : null;
+                preBattleWeaponState.PreferredOffHandSlotIndex = IsWeaponSlotIndex(initialWield?.PreferredOffHandSlotIndex)
+                    ? initialWield?.PreferredOffHandSlotIndex
+                    : null;
                 preBattleWeaponState.InitialWeaponEquipPreference =
                     ResolveInitialWeaponEquipPreferenceFromPreferredSlot(
                         equipment.SpawnEquipment,
@@ -329,6 +347,7 @@ namespace CoopSpectator.Infrastructure
             if (firstCrossbow != null && firstBoltAmmo != null)
             {
                 preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.CrossbowLoaded;
+                preBattleWeaponState.ReadinessMode = ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive;
                 preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstCrossbow.Slot;
                 preBattleWeaponState.ExpectedAmmoSlotIndex = (int)firstBoltAmmo.Slot;
                 preBattleWeaponState.ExpectAmmoAttachedToMainHand = true;
@@ -340,6 +359,7 @@ namespace CoopSpectator.Infrastructure
             if (firstBow != null && firstArrowAmmo != null)
             {
                 preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.BowArmed;
+                preBattleWeaponState.ReadinessMode = ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive;
                 preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstBow.Slot;
                 preBattleWeaponState.ExpectedAmmoSlotIndex = (int)firstArrowAmmo.Slot;
                 preBattleWeaponState.ExpectAmmoAttachedToMainHand = true;
@@ -351,6 +371,7 @@ namespace CoopSpectator.Infrastructure
             if (firstThrown != null && firstSlingAmmo != null)
             {
                 preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.SlingReady;
+                preBattleWeaponState.ReadinessMode = ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive;
                 preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstThrown.Slot;
                 preBattleWeaponState.ExpectedAmmoSlotIndex = (int)firstSlingAmmo.Slot;
                 preBattleWeaponState.ExpectAmmoAttachedToMainHand = false;
@@ -362,6 +383,7 @@ namespace CoopSpectator.Infrastructure
             if (firstThrown != null)
             {
                 preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.ThrownReady;
+                preBattleWeaponState.ReadinessMode = ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive;
                 preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstThrown.Slot;
                 preBattleWeaponState.PreferredOffHandSlotIndex =
                     CanPairShieldWithWeapon(firstThrown)
@@ -377,6 +399,7 @@ namespace CoopSpectator.Infrastructure
             if (firstPrimaryMelee != null)
             {
                 preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.MeleeHold;
+                preBattleWeaponState.ReadinessMode = ExactTransferPreBattleWeaponReadinessMode.AllowImmediateNativeActivation;
                 preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstPrimaryMelee.Slot;
                 preBattleWeaponState.PreferredOffHandSlotIndex =
                     CanPairShieldWithWeapon(firstPrimaryMelee)
@@ -386,6 +409,33 @@ namespace CoopSpectator.Infrastructure
                 preBattleWeaponState.DecisionReason = firstShield != null
                     ? "ai-melee-hold-with-shield-prebattle-state"
                     : "ai-melee-hold-prebattle-state";
+            }
+        }
+
+        private static void ResolveSafeHoldPair(
+            MountedWeaponSlotState firstPrimaryMelee,
+            MountedWeaponSlotState firstShield,
+            out int? mainHandSlotIndex,
+            out int? offHandSlotIndex,
+            out Equipment.InitialWeaponEquipPreference initialWeaponEquipPreference)
+        {
+            mainHandSlotIndex = null;
+            offHandSlotIndex = null;
+            initialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.Any;
+
+            if (firstPrimaryMelee != null)
+            {
+                mainHandSlotIndex = (int)firstPrimaryMelee.Slot;
+                offHandSlotIndex = CanPairShieldWithWeapon(firstPrimaryMelee)
+                    ? (int?)firstShield?.Slot
+                    : null;
+                initialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.MeleeForMainHand;
+                return;
+            }
+
+            if (firstShield != null)
+            {
+                offHandSlotIndex = (int)firstShield.Slot;
             }
         }
 
@@ -1742,6 +1792,11 @@ namespace CoopSpectator.Infrastructure
                 default:
                     return Equipment.InitialWeaponEquipPreference.Any;
             }
+        }
+
+        private static bool IsWeaponSlotIndex(int? slotIndex)
+        {
+            return ToWeaponEquipmentIndex(slotIndex) != EquipmentIndex.None;
         }
 
         private static EquipmentIndex ToWeaponEquipmentIndex(int? slotIndex)

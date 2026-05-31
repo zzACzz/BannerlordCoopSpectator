@@ -134,14 +134,25 @@ namespace CoopSpectator.Infrastructure
         PlayerControlledOverride = 6
     }
 
+    public enum ExactTransferPreBattleWeaponReadinessMode
+    {
+        None = 0,
+        AllowImmediateNativeActivation = 1,
+        DeferActivationUntilBattleActive = 2
+    }
+
     public sealed class ExactTransferPreBattleWeaponStateContract
     {
         public ExactTransferPreBattleWeaponStateMode Mode { get; set; }
+        public ExactTransferPreBattleWeaponReadinessMode ReadinessMode { get; set; }
         public int? PreferredMainHandSlotIndex { get; set; }
         public int? PreferredOffHandSlotIndex { get; set; }
         public int? ExpectedAmmoSlotIndex { get; set; }
         public bool ExpectAmmoAttachedToMainHand { get; set; }
         public Equipment.InitialWeaponEquipPreference InitialWeaponEquipPreference { get; set; }
+        public int? SafeHoldMainHandSlotIndex { get; set; }
+        public int? SafeHoldOffHandSlotIndex { get; set; }
+        public Equipment.InitialWeaponEquipPreference SafeHoldInitialWeaponEquipPreference { get; set; }
         public string DecisionReason { get; set; }
     }
 

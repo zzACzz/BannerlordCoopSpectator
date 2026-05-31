@@ -190,6 +190,11 @@ namespace CoopSpectator.Infrastructure
             if (preBattleWeaponState.Mode == ExactTransferPreBattleWeaponStateMode.None)
                 return;
 
+            if (preBattleWeaponState.ReadinessMode == ExactTransferPreBattleWeaponReadinessMode.None)
+            {
+                result.Errors.Add("pre-battle weapon state readiness mode is unresolved");
+            }
+
             if (!IsValidWeaponSlotIndex(preBattleWeaponState.PreferredMainHandSlotIndex) &&
                 !IsValidWeaponSlotIndex(preBattleWeaponState.PreferredOffHandSlotIndex))
             {
@@ -212,6 +217,25 @@ namespace CoopSpectator.Infrastructure
                 !IsValidWeaponSlotIndex(preBattleWeaponState.ExpectedAmmoSlotIndex))
             {
                 result.Errors.Add("pre-battle weapon state expects attached ammo but ammo slot is invalid");
+            }
+
+            if (preBattleWeaponState.SafeHoldMainHandSlotIndex.HasValue &&
+                !IsValidWeaponSlotIndex(preBattleWeaponState.SafeHoldMainHandSlotIndex))
+            {
+                result.Errors.Add("pre-battle weapon state has invalid safe-hold main-hand slot");
+            }
+
+            if (preBattleWeaponState.SafeHoldOffHandSlotIndex.HasValue &&
+                !IsValidWeaponSlotIndex(preBattleWeaponState.SafeHoldOffHandSlotIndex))
+            {
+                result.Errors.Add("pre-battle weapon state has invalid safe-hold off-hand slot");
+            }
+
+            if (preBattleWeaponState.ReadinessMode == ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive &&
+                !IsValidWeaponSlotIndex(preBattleWeaponState.SafeHoldMainHandSlotIndex) &&
+                !IsValidWeaponSlotIndex(preBattleWeaponState.SafeHoldOffHandSlotIndex))
+            {
+                result.Errors.Add("pre-battle weapon state defers activation until battle-active but does not define a valid safe-hold pair");
             }
         }
 
