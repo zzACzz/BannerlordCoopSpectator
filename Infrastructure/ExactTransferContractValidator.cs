@@ -37,6 +37,7 @@ namespace CoopSpectator.Infrastructure
             ValidateMount(contract, result);
             ValidatePeerPolicy(contract, result);
             ValidateInitialWield(contract, result);
+            ValidatePreBattleWeaponState(contract, result);
             ValidateControl(contract, result);
             return result;
         }
@@ -177,6 +178,43 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        private static void ValidatePreBattleWeaponState(ExactTransferSpawnContract contract, ExactTransferValidationResult result)
+        {
+            if (contract.PreBattleWeaponState == null)
+            {
+                result.Errors.Add("pre-battle weapon state contract is missing");
+                return;
+            }
+
+            ExactTransferPreBattleWeaponStateContract preBattleWeaponState = contract.PreBattleWeaponState;
+            if (preBattleWeaponState.Mode == ExactTransferPreBattleWeaponStateMode.None)
+                return;
+
+            if (!IsValidWeaponSlotIndex(preBattleWeaponState.PreferredMainHandSlotIndex) &&
+                !IsValidWeaponSlotIndex(preBattleWeaponState.PreferredOffHandSlotIndex))
+            {
+                result.Errors.Add("pre-battle weapon state does not define a valid main-hand or off-hand slot");
+            }
+
+            if (preBattleWeaponState.PreferredMainHandSlotIndex.HasValue &&
+                !IsValidWeaponSlotIndex(preBattleWeaponState.PreferredMainHandSlotIndex))
+            {
+                result.Errors.Add("pre-battle weapon state has invalid preferred main-hand slot");
+            }
+
+            if (preBattleWeaponState.PreferredOffHandSlotIndex.HasValue &&
+                !IsValidWeaponSlotIndex(preBattleWeaponState.PreferredOffHandSlotIndex))
+            {
+                result.Errors.Add("pre-battle weapon state has invalid preferred off-hand slot");
+            }
+
+            if (preBattleWeaponState.ExpectAmmoAttachedToMainHand &&
+                !IsValidWeaponSlotIndex(preBattleWeaponState.ExpectedAmmoSlotIndex))
+            {
+                result.Errors.Add("pre-battle weapon state expects attached ammo but ammo slot is invalid");
+            }
+        }
+
         private static void ValidateControl(ExactTransferSpawnContract contract, ExactTransferValidationResult result)
         {
             if (contract.Control == null)
@@ -190,6 +228,17 @@ namespace CoopSpectator.Infrastructure
             {
                 result.Errors.Add("commander entry must be gated on exact-ready stage");
             }
+        }
+
+        private static bool IsValidWeaponSlotIndex(int? slotIndex)
+        {
+            if (!slotIndex.HasValue)
+                return false;
+
+            return slotIndex.Value == (int)TaleWorlds.Core.EquipmentIndex.Weapon0 ||
+                   slotIndex.Value == (int)TaleWorlds.Core.EquipmentIndex.Weapon1 ||
+                   slotIndex.Value == (int)TaleWorlds.Core.EquipmentIndex.Weapon2 ||
+                   slotIndex.Value == (int)TaleWorlds.Core.EquipmentIndex.Weapon3;
         }
     }
 }

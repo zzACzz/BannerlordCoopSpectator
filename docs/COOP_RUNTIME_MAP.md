@@ -103,6 +103,7 @@ C:\dev\projects\BannerlordCoopSpectator3\docs\COOP_RUNTIME_MAP.md
 - coop-owned death/respawn loop теж уже доведений: `DeadAwaitingRespawn -> RespawnSelection -> SpawnQueued -> Alive` проходить без повторного materialization deadlock-а;
 - активний proven blocker тепер змістився з respawn/materialization у missile lifecycle: клієнт отримує `CreateMissile`, але частина `HandleMissileCollisionReaction` усе ще defer-иться до моменту, коли local missile entity відсутня, через що метальні списи й інші projectile-и можуть візуально не пролітати або replay-итись на пізнішому reused missile index;
 - pre-battle reload loop main hero, foot archer companion і looters зі sling усе ще лишається супутнім незакритим corridor-ом і, ймовірно, частково пов’язаний з тим самим ranged/missile state surface.
+- структурна переробка вже стартувала саме в цьому підшарі: deferred `CreateMissile` / `HandleMissileCollisionReaction` state, observation generation і reused-index replay policy більше не живуть тільки як сирі локальні колекції всередині `BattleMapSpawnHandoffPatch`, а винесені в окремий runtime `Infrastructure/BattleMapClientMissileReplayRuntime.cs`.
 
 Поточна робоча гіпотеза:
 
@@ -372,6 +373,11 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
   - `SetWeaponReloadPhase` під час pre-battle hold
   - `SetWeaponAmmoData`
   - ammo-semantic `SetWeaponNetworkData`
+- structural rework для battle-map missile corridor уже почалась: `BattleMapSpawnHandoffPatch` тепер не є єдиним власником deferred missile queue/state; `BattleMapClientMissileReplayRuntime` уже тримає:
+  - deferred `CreateMissile`
+  - deferred `HandleMissileCollisionReaction`
+  - latest observed `CreateMissile` generation по `MissileIndex`
+  - reuse-detection policy для collision replay
 - мета цього шару - не "полагодити reload visuals", а не пустити клієнт назад у proven native ammo mutation corridor, який раніше валив гру в `TaleWorlds.Native.dll+0x5e4aa8`;
 - local peer / currently controlled main hero до цього suppress cohort навмисно не входить;
 - наслідок current-state: до старту бою можливі visible reload loops для main hero і частини ranged exact AI, але після `BattleActive` battle у latest successful run доходить до `BattleEnded` без crash-а.
@@ -649,6 +655,7 @@ Exact transfer - це спроба зберігати campaign identities, body 
 5. Окремо переоцінити `CoopSessionTransportPrimitives.StartClientTransport(...)` і решту join patch-ів, коли public, VPN і self-host join flows будуть розділені чистіше по відповідальності.
 6. Прибрати crash-isolation patch-і на кшталт `IntermissionVmCrashGuardPatch`, коли battle-map lobby/intermission lifecycle буде вже нашим, а не native.
 7. Переоцінити і прибрати тимчасовий pre-battle ranged exact crash-containment у `BattleMapSpawnHandoffPatch.cs`, коли буде доведений чистий ammo/reload contract без suppress `SetWeaponReloadPhase`, `SetWeaponAmmoData` і ammo-semantic `SetWeaponNetworkData`.
+8. Довести structural rework battle-map client handoff: deferred missile/weapon replay policy має жити в окремих runtime services, а `BattleMapSpawnHandoffPatch.cs` має звузитись до native bridge/suppression shell без власних черг і state machine-ів.
 
 ## 5. Roadmap до clean coop core без TDM
 

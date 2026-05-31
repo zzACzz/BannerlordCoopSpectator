@@ -14,6 +14,7 @@ namespace CoopSpectator.Infrastructure
             Mount = new ExactTransferMountContract();
             PeerBinding = new ExactTransferPeerBindingContract();
             InitialWield = new ExactTransferInitialWieldContract();
+            PreBattleWeaponState = new ExactTransferPreBattleWeaponStateContract();
             Control = new ExactTransferControlContract();
             Cleanup = new ExactTransferCleanupContract();
             SpawnPolicy = new ExactTransferSpawnPolicyContract();
@@ -26,6 +27,7 @@ namespace CoopSpectator.Infrastructure
         public ExactTransferMountContract Mount { get; set; }
         public ExactTransferPeerBindingContract PeerBinding { get; set; }
         public ExactTransferInitialWieldContract InitialWield { get; set; }
+        public ExactTransferPreBattleWeaponStateContract PreBattleWeaponState { get; set; }
         public ExactTransferControlContract Control { get; set; }
         public ExactTransferCleanupContract Cleanup { get; set; }
         public ExactTransferSpawnPolicyContract SpawnPolicy { get; set; }
@@ -119,6 +121,28 @@ namespace CoopSpectator.Infrastructure
         public bool RequireImmediateWieldOnSpawn { get; set; }
         public bool AllowDeferredWieldAfterEquipmentSync { get; set; }
         public bool HasWeapon2Risk { get; set; }
+    }
+
+    public enum ExactTransferPreBattleWeaponStateMode
+    {
+        None = 0,
+        MeleeHold = 1,
+        BowArmed = 2,
+        CrossbowLoaded = 3,
+        ThrownReady = 4,
+        SlingReady = 5,
+        PlayerControlledOverride = 6
+    }
+
+    public sealed class ExactTransferPreBattleWeaponStateContract
+    {
+        public ExactTransferPreBattleWeaponStateMode Mode { get; set; }
+        public int? PreferredMainHandSlotIndex { get; set; }
+        public int? PreferredOffHandSlotIndex { get; set; }
+        public int? ExpectedAmmoSlotIndex { get; set; }
+        public bool ExpectAmmoAttachedToMainHand { get; set; }
+        public Equipment.InitialWeaponEquipPreference InitialWeaponEquipPreference { get; set; }
+        public string DecisionReason { get; set; }
     }
 
     public sealed class ExactTransferControlContract

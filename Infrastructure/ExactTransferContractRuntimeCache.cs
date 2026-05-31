@@ -388,6 +388,13 @@ namespace CoopSpectator.Infrastructure
                     ",IncludeMountVisuals=" + contract.Equipment?.IncludeMountVisualsInPreSpawn +
                     ",MountedWeaponLayoutNormalized=" + contract.Equipment?.MountedWeaponLayoutNormalized +
                     ",MountedWeaponLayout=" + (contract.Equipment?.MountedWeaponLayoutSummary ?? "null") +
+                    ",PreBattleWeaponStateMode=" + contract.PreBattleWeaponState?.Mode +
+                    ",PreBattleMain=" + (contract.PreBattleWeaponState?.PreferredMainHandSlotIndex?.ToString() ?? "null") +
+                    ",PreBattleOff=" + (contract.PreBattleWeaponState?.PreferredOffHandSlotIndex?.ToString() ?? "null") +
+                    ",PreBattleAmmo=" + (contract.PreBattleWeaponState?.ExpectedAmmoSlotIndex?.ToString() ?? "null") +
+                    ",PreBattleAmmoAttached=" + contract.PreBattleWeaponState?.ExpectAmmoAttachedToMainHand +
+                    ",PreBattleInitialPreference=" + contract.PreBattleWeaponState?.InitialWeaponEquipPreference +
+                    ",PreBattleReason=" + (contract.PreBattleWeaponState?.DecisionReason ?? "null") +
                     ",PeerDrivenBody=" + contract.PeerBinding?.AllowPeerDrivenBodyAtCreateAgentTime +
                     ",PeerDrivenBanner=" + contract.PeerBinding?.AllowPeerDrivenBannerAtCreateAgentTime +
                     ",UsePlayerAgentCreateBranch=" + contract.PeerBinding?.UsePlayerAgentCreateBranch + "}";

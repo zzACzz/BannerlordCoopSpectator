@@ -100,6 +100,12 @@ namespace CoopSpectator.Infrastructure
             PopulateMount(contract.Mount, entryState);
             PopulatePeerBinding(contract.PeerBinding, entryState, isPlayerControlledOrigin);
             PopulateInitialWield(contract.InitialWield, entryState, contract.Equipment);
+            PopulatePreBattleWeaponState(
+                contract.PreBattleWeaponState,
+                contract.InitialWield,
+                entryState,
+                contract.Equipment,
+                isPlayerControlledOrigin);
             PopulateControl(contract.Control, entryState, teamIndex, formationIndex);
             PopulateCleanup(contract.Cleanup);
             PopulateSpawnPolicy(contract.SpawnPolicy, isStrictHeroEntry, isRuntimeExactSupported);
@@ -266,6 +272,120 @@ namespace CoopSpectator.Infrastructure
                 initialWield.HasWeapon2Risk =
                     DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment.SpawnEquipment) ||
                     (entryState.IsMounted && !string.IsNullOrWhiteSpace(entryState.CombatItem2Id));
+            }
+        }
+
+        private static void PopulatePreBattleWeaponState(
+            ExactTransferPreBattleWeaponStateContract preBattleWeaponState,
+            ExactTransferInitialWieldContract initialWield,
+            RosterEntryState entryState,
+            ExactTransferEquipmentContract equipment,
+            bool isPlayerControlledOrigin)
+        {
+            if (preBattleWeaponState == null)
+                return;
+
+            preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.None;
+            preBattleWeaponState.PreferredMainHandSlotIndex = null;
+            preBattleWeaponState.PreferredOffHandSlotIndex = null;
+            preBattleWeaponState.ExpectedAmmoSlotIndex = null;
+            preBattleWeaponState.ExpectAmmoAttachedToMainHand = false;
+            preBattleWeaponState.InitialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.Any;
+            preBattleWeaponState.DecisionReason = "prebattle-weapon-state-unresolved";
+
+            if (entryState == null || equipment?.SpawnEquipment == null)
+                return;
+
+            List<MountedWeaponSlotState> slots = ResolveMountedWeaponSlots(equipment.SpawnEquipment);
+            if (slots.Count == 0)
+                return;
+
+            MountedWeaponSlotState firstShield = slots.FirstOrDefault(slot => slot?.Role == MountedWeaponRole.Shield);
+            MountedWeaponSlotState firstPrimaryMelee = slots.FirstOrDefault(IsShieldCompatibleMeleeSlot) ??
+                                                       slots.FirstOrDefault(IsMeleeWeaponSlot);
+            MountedWeaponSlotState firstBow = slots.FirstOrDefault(IsBowWeaponSlot);
+            MountedWeaponSlotState firstCrossbow = slots.FirstOrDefault(IsCrossbowWeaponSlot);
+            MountedWeaponSlotState firstThrown = slots.FirstOrDefault(IsThrownWeaponSlot);
+            MountedWeaponSlotState firstArrowAmmo = slots.FirstOrDefault(IsArrowAmmoSlot);
+            MountedWeaponSlotState firstBoltAmmo = slots.FirstOrDefault(IsBoltAmmoSlot);
+            MountedWeaponSlotState firstSlingAmmo = slots.FirstOrDefault(IsSlingAmmoSlot);
+            bool isMainHeroPlayerEntry =
+                isPlayerControlledOrigin &&
+                string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase);
+
+            if (isMainHeroPlayerEntry)
+            {
+                preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.PlayerControlledOverride;
+                preBattleWeaponState.PreferredMainHandSlotIndex = initialWield?.PreferredMainHandSlotIndex;
+                preBattleWeaponState.PreferredOffHandSlotIndex = initialWield?.PreferredOffHandSlotIndex;
+                preBattleWeaponState.InitialWeaponEquipPreference =
+                    ResolveInitialWeaponEquipPreferenceFromPreferredSlot(
+                        equipment.SpawnEquipment,
+                        initialWield?.PreferredMainHandSlotIndex);
+                preBattleWeaponState.DecisionReason = "player-controlled-main-hero-native-initial-wield-override";
+                return;
+            }
+
+            if (firstCrossbow != null && firstBoltAmmo != null)
+            {
+                preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.CrossbowLoaded;
+                preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstCrossbow.Slot;
+                preBattleWeaponState.ExpectedAmmoSlotIndex = (int)firstBoltAmmo.Slot;
+                preBattleWeaponState.ExpectAmmoAttachedToMainHand = true;
+                preBattleWeaponState.InitialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.RangedForMainHand;
+                preBattleWeaponState.DecisionReason = "ai-crossbow-loaded-prebattle-state";
+                return;
+            }
+
+            if (firstBow != null && firstArrowAmmo != null)
+            {
+                preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.BowArmed;
+                preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstBow.Slot;
+                preBattleWeaponState.ExpectedAmmoSlotIndex = (int)firstArrowAmmo.Slot;
+                preBattleWeaponState.ExpectAmmoAttachedToMainHand = true;
+                preBattleWeaponState.InitialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.RangedForMainHand;
+                preBattleWeaponState.DecisionReason = "ai-bow-armed-prebattle-state";
+                return;
+            }
+
+            if (firstThrown != null && firstSlingAmmo != null)
+            {
+                preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.SlingReady;
+                preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstThrown.Slot;
+                preBattleWeaponState.ExpectedAmmoSlotIndex = (int)firstSlingAmmo.Slot;
+                preBattleWeaponState.ExpectAmmoAttachedToMainHand = false;
+                preBattleWeaponState.InitialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.RangedForMainHand;
+                preBattleWeaponState.DecisionReason = "ai-sling-stone-ready-prebattle-state";
+                return;
+            }
+
+            if (firstThrown != null)
+            {
+                preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.ThrownReady;
+                preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstThrown.Slot;
+                preBattleWeaponState.PreferredOffHandSlotIndex =
+                    CanPairShieldWithWeapon(firstThrown)
+                        ? (int?)firstShield?.Slot
+                        : null;
+                preBattleWeaponState.InitialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.RangedForMainHand;
+                preBattleWeaponState.DecisionReason = firstShield != null
+                    ? "ai-thrown-shield-ready-prebattle-state"
+                    : "ai-thrown-ready-prebattle-state";
+                return;
+            }
+
+            if (firstPrimaryMelee != null)
+            {
+                preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.MeleeHold;
+                preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstPrimaryMelee.Slot;
+                preBattleWeaponState.PreferredOffHandSlotIndex =
+                    CanPairShieldWithWeapon(firstPrimaryMelee)
+                        ? (int?)firstShield?.Slot
+                        : null;
+                preBattleWeaponState.InitialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.MeleeForMainHand;
+                preBattleWeaponState.DecisionReason = firstShield != null
+                    ? "ai-melee-hold-with-shield-prebattle-state"
+                    : "ai-melee-hold-prebattle-state";
             }
         }
 
@@ -1557,6 +1677,11 @@ namespace CoopSpectator.Infrastructure
             return slot?.Item?.ItemType == ItemObject.ItemTypeEnum.Bolts;
         }
 
+        private static bool IsSlingAmmoSlot(MountedWeaponSlotState slot)
+        {
+            return slot?.Item?.ItemType == ItemObject.ItemTypeEnum.SlingStones;
+        }
+
         private static bool IsThrownWeaponSlot(MountedWeaponSlotState slot)
         {
             if (slot?.Item == null)
@@ -1586,8 +1711,57 @@ namespace CoopSpectator.Infrastructure
             if (!IsMeleeWeaponSlot(slot))
                 return false;
 
-            int weaponFlags = ((int?)slot.Item?.PrimaryWeapon?.WeaponFlags) ?? 0;
+            return CanPairShieldWithWeapon(slot);
+        }
+
+        private static bool CanPairShieldWithWeapon(MountedWeaponSlotState slot)
+        {
+            if (slot?.Item?.PrimaryWeapon == null)
+                return false;
+
+            int weaponFlags = (int)slot.Item.PrimaryWeapon.WeaponFlags;
             return (weaponFlags & (int)WeaponFlags.NotUsableWithOneHand) != (int)WeaponFlags.NotUsableWithOneHand;
+        }
+
+        private static Equipment.InitialWeaponEquipPreference ResolveInitialWeaponEquipPreferenceFromPreferredSlot(
+            Equipment equipment,
+            int? preferredMainHandSlotIndex)
+        {
+            EquipmentIndex preferredMainHandIndex = ToWeaponEquipmentIndex(preferredMainHandSlotIndex);
+            if (preferredMainHandIndex == EquipmentIndex.None)
+                return Equipment.InitialWeaponEquipPreference.Any;
+
+            ItemObject preferredItem = equipment?[preferredMainHandIndex].Item;
+            switch (ResolveMountedWeaponRole(preferredItem))
+            {
+                case MountedWeaponRole.Ranged:
+                    return Equipment.InitialWeaponEquipPreference.RangedForMainHand;
+                case MountedWeaponRole.Melee:
+                case MountedWeaponRole.Polearm:
+                    return Equipment.InitialWeaponEquipPreference.MeleeForMainHand;
+                default:
+                    return Equipment.InitialWeaponEquipPreference.Any;
+            }
+        }
+
+        private static EquipmentIndex ToWeaponEquipmentIndex(int? slotIndex)
+        {
+            if (!slotIndex.HasValue)
+                return EquipmentIndex.None;
+
+            switch (slotIndex.Value)
+            {
+                case (int)EquipmentIndex.Weapon0:
+                    return EquipmentIndex.Weapon0;
+                case (int)EquipmentIndex.Weapon1:
+                    return EquipmentIndex.Weapon1;
+                case (int)EquipmentIndex.Weapon2:
+                    return EquipmentIndex.Weapon2;
+                case (int)EquipmentIndex.Weapon3:
+                    return EquipmentIndex.Weapon3;
+                default:
+                    return EquipmentIndex.None;
+            }
         }
 
         private static string GetWeaponSlotLabel(EquipmentIndex slot)

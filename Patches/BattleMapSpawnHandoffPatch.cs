@@ -169,10 +169,6 @@ namespace CoopSpectator.Patches
             new List<DeferredClientStartSwitchingWeaponUsageIndexPayload>();
         private static readonly List<DeferredClientWeaponUsageIndexChangePayload> DeferredClientWeaponUsageIndexChangePayloads =
             new List<DeferredClientWeaponUsageIndexChangePayload>();
-        private static readonly List<DeferredClientCreateMissilePayload> DeferredClientCreateMissilePayloads =
-            new List<DeferredClientCreateMissilePayload>();
-        private static readonly List<DeferredClientHandleMissileCollisionReactionPayload> DeferredClientHandleMissileCollisionReactionPayloads =
-            new List<DeferredClientHandleMissileCollisionReactionPayload>();
         private static readonly List<DeferredClientSetWieldedItemIndexPayload> DeferredClientSetWieldedItemIndexPayloads =
             new List<DeferredClientSetWieldedItemIndexPayload>();
         private static readonly List<DeferredClientSetAgentHealthPayload> DeferredClientSetAgentHealthPayloads =
@@ -197,8 +193,6 @@ namespace CoopSpectator.Patches
         private static long _nextDeferredClientSetWeaponReloadPhaseSequence;
         private static long _nextDeferredClientStartSwitchingWeaponUsageIndexSequence;
         private static long _nextDeferredClientWeaponUsageIndexChangeSequence;
-        private static long _nextDeferredClientCreateMissileSequence;
-        private static long _nextDeferredClientHandleMissileCollisionReactionSequence;
         private static long _nextDeferredClientSetWieldedItemIndexSequence;
         private static long _nextDeferredClientSetAgentHealthSequence;
         private static long _nextDeferredClientMakeAgentDeadSequence;
@@ -413,26 +407,6 @@ namespace CoopSpectator.Patches
             public string DeferralReason;
         }
 
-        private sealed class DeferredClientCreateMissilePayload
-        {
-            public long Sequence;
-            public CreateMissile Message;
-            public DateTime DeferredUtc;
-            public DateTime LastAttemptUtc;
-            public int Attempts;
-            public string DeferralReason;
-        }
-
-        private sealed class DeferredClientHandleMissileCollisionReactionPayload
-        {
-            public long Sequence;
-            public HandleMissileCollisionReaction Message;
-            public DateTime DeferredUtc;
-            public DateTime LastAttemptUtc;
-            public int Attempts;
-            public string DeferralReason;
-        }
-
         private sealed class DeferredClientSetWieldedItemIndexPayload
         {
             public long Sequence;
@@ -620,14 +594,7 @@ namespace CoopSpectator.Patches
             {
                 DeferredClientWeaponUsageIndexChangePayloads.Clear();
             }
-            lock (DeferredClientCreateMissilePayloads)
-            {
-                DeferredClientCreateMissilePayloads.Clear();
-            }
-            lock (DeferredClientHandleMissileCollisionReactionPayloads)
-            {
-                DeferredClientHandleMissileCollisionReactionPayloads.Clear();
-            }
+            BattleMapClientMissileReplayRuntime.Reset();
             lock (DeferredClientSetWieldedItemIndexPayloads)
             {
                 DeferredClientSetWieldedItemIndexPayloads.Clear();
@@ -660,8 +627,6 @@ namespace CoopSpectator.Patches
             _nextDeferredClientSetWeaponReloadPhaseSequence = 0;
             _nextDeferredClientStartSwitchingWeaponUsageIndexSequence = 0;
             _nextDeferredClientWeaponUsageIndexChangeSequence = 0;
-            _nextDeferredClientCreateMissileSequence = 0;
-            _nextDeferredClientHandleMissileCollisionReactionSequence = 0;
             _nextDeferredClientSetWieldedItemIndexSequence = 0;
             _nextDeferredClientSetAgentHealthSequence = 0;
             _nextDeferredClientMakeAgentDeadSequence = 0;
@@ -2486,11 +2451,8 @@ namespace CoopSpectator.Patches
                     return true;
             }
 
-            lock (DeferredClientCreateMissilePayloads)
-            {
-                if (DeferredClientCreateMissilePayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
-                    return true;
-            }
+            if (BattleMapClientMissileReplayRuntime.HasDeferredCreateMissilePayloadForAgent(agentIndex))
+                return true;
 
             lock (DeferredClientSetWieldedItemIndexPayloads)
             {
@@ -2682,8 +2644,8 @@ namespace CoopSpectator.Patches
             int setWeaponReloadPhaseCount = DeferredClientSetWeaponReloadPhasePayloads.Count;
             int startSwitchingWeaponUsageIndexCount = DeferredClientStartSwitchingWeaponUsageIndexPayloads.Count;
             int weaponUsageIndexChangeCount = DeferredClientWeaponUsageIndexChangePayloads.Count;
-            int createMissileCount = DeferredClientCreateMissilePayloads.Count;
-            int handleMissileCollisionReactionCount = DeferredClientHandleMissileCollisionReactionPayloads.Count;
+            int createMissileCount = BattleMapClientMissileReplayRuntime.GetDeferredCreateMissilePayloadCount();
+            int handleMissileCollisionReactionCount = BattleMapClientMissileReplayRuntime.GetDeferredHandleMissileCollisionReactionPayloadCount();
             int setWieldedItemIndexCount = DeferredClientSetWieldedItemIndexPayloads.Count;
             int setAgentHealthCount = DeferredClientSetAgentHealthPayloads.Count;
             int makeAgentDeadCount = DeferredClientMakeAgentDeadPayloads.Count;
@@ -3696,105 +3658,47 @@ namespace CoopSpectator.Patches
             CreateMissile createMissile,
             string deferralReason)
         {
-            if (createMissile == null)
-                return;
-
-            lock (DeferredClientCreateMissilePayloads)
-            {
-                DeferredClientCreateMissilePayload existingPayload = DeferredClientCreateMissilePayloads
-                    .FirstOrDefault(candidate => AreDeferredClientCreateMissileMessagesEquivalent(candidate?.Message, createMissile));
-                if (existingPayload != null)
-                {
-                    existingPayload.Message = createMissile;
-                    existingPayload.DeferralReason = deferralReason;
-                    return;
-                }
-
-                DeferredClientCreateMissilePayloads.Add(
-                    new DeferredClientCreateMissilePayload
-                    {
-                        Sequence = ++_nextDeferredClientCreateMissileSequence,
-                        Message = createMissile,
-                        DeferredUtc = DateTime.UtcNow,
-                        LastAttemptUtc = DateTime.MinValue,
-                        Attempts = 0,
-                        DeferralReason = deferralReason
-                    });
-            }
+            BattleMapClientMissileReplayRuntime.RegisterDeferredCreateMissilePayload(
+                createMissile,
+                deferralReason);
         }
 
         private static void RegisterDeferredClientHandleMissileCollisionReactionPayload(
             HandleMissileCollisionReaction handleMissileCollisionReaction,
             string deferralReason)
         {
-            if (handleMissileCollisionReaction == null)
-                return;
-
-            lock (DeferredClientHandleMissileCollisionReactionPayloads)
-            {
-                DeferredClientHandleMissileCollisionReactionPayload existingPayload =
-                    DeferredClientHandleMissileCollisionReactionPayloads.FirstOrDefault(
-                        candidate => AreDeferredClientHandleMissileCollisionReactionMessagesEquivalent(
-                            candidate?.Message,
-                            handleMissileCollisionReaction));
-                if (existingPayload != null)
-                {
-                    existingPayload.Message = handleMissileCollisionReaction;
-                    existingPayload.DeferralReason = deferralReason;
-                    return;
-                }
-
-                DeferredClientHandleMissileCollisionReactionPayloads.Add(
-                    new DeferredClientHandleMissileCollisionReactionPayload
-                    {
-                        Sequence = ++_nextDeferredClientHandleMissileCollisionReactionSequence,
-                        Message = handleMissileCollisionReaction,
-                        DeferredUtc = DateTime.UtcNow,
-                        LastAttemptUtc = DateTime.MinValue,
-                        Attempts = 0,
-                        DeferralReason = deferralReason
-                    });
-            }
+            BattleMapClientMissileReplayRuntime.RegisterDeferredHandleMissileCollisionReactionPayload(
+                handleMissileCollisionReaction,
+                deferralReason);
         }
 
         private static bool HasDeferredClientCreateMissilePayload(int missileIndex, int shooterAgentIndex = int.MinValue)
         {
-            if (missileIndex < 0)
-                return false;
-
-            lock (DeferredClientCreateMissilePayloads)
-            {
-                return DeferredClientCreateMissilePayloads.Any(candidate =>
-                    candidate?.Message != null &&
-                    candidate.Message.MissileIndex == missileIndex &&
-                    (shooterAgentIndex == int.MinValue || candidate.Message.AgentIndex == shooterAgentIndex));
-            }
+            return BattleMapClientMissileReplayRuntime.HasDeferredCreateMissilePayload(
+                missileIndex,
+                shooterAgentIndex);
         }
 
-        private static bool AreDeferredClientCreateMissileMessagesEquivalent(
-            CreateMissile left,
-            CreateMissile right)
+        private static void RecordObservedClientCreateMissile(CreateMissile createMissile, string source)
         {
-            return left != null &&
-                   right != null &&
-                   left.MissileIndex == right.MissileIndex &&
-                   left.AgentIndex == right.AgentIndex;
+            BattleMapClientMissileReplayRuntime.RecordObservedCreateMissile(createMissile, source);
         }
 
-        private static bool AreDeferredClientHandleMissileCollisionReactionMessagesEquivalent(
-            HandleMissileCollisionReaction left,
-            HandleMissileCollisionReaction right)
+        private static bool TryGetLatestObservedClientCreateMissileState(
+            int missileIndex,
+            out BattleMapClientMissileReplayRuntime.ObservedCreateMissileState observedState)
         {
-            return left != null &&
-                   right != null &&
-                   left.MissileIndex == right.MissileIndex &&
-                   left.AttackerAgentIndex == right.AttackerAgentIndex &&
-                   left.AttachedAgentIndex == right.AttachedAgentIndex &&
-                   left.CollisionReaction == right.CollisionReaction &&
-                   left.AttachedToShield == right.AttachedToShield &&
-                   left.AttachedBoneIndex == right.AttachedBoneIndex &&
-                   GetMissionObjectIdValue(left.AttachedMissionObjectId) == GetMissionObjectIdValue(right.AttachedMissionObjectId) &&
-                   left.ForcedSpawnIndex == right.ForcedSpawnIndex;
+            return BattleMapClientMissileReplayRuntime.TryGetLatestObservedCreateMissileState(
+                missileIndex,
+                out observedState);
+        }
+
+        private static long ResolveDeferredClientHandleMissileCollisionReactionExpectedCreateSequence(
+            HandleMissileCollisionReaction handleMissileCollisionReaction)
+        {
+            return BattleMapClientMissileReplayRuntime
+                .ResolveDeferredHandleMissileCollisionReactionExpectedCreateSequence(
+                    handleMissileCollisionReaction);
         }
 
         private static bool HasDeferredClientSpawnWeaponWithNewEntityPayload(MissionObjectId missionObjectId)
@@ -4439,6 +4343,28 @@ namespace CoopSpectator.Patches
             return true;
         }
 
+        private static bool TryGetPreBattleExactRangedAiHoldStatus(
+            Agent agent,
+            out string exactRangedReason,
+            out CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+            out string readinessStage)
+        {
+            exactRangedReason = null;
+            status = null;
+            readinessStage = string.Empty;
+
+            if (!ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out exactRangedReason))
+                return false;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            Mission mission = agent?.Mission ?? Mission.Current;
+            return TryIsClientPreBattleRangedHoldWindow(
+                myPeer,
+                mission,
+                out status,
+                out readinessStage);
+        }
+
         private static bool ShouldSuppressUnsafeClientWeaponAmountNativeUpdate(
             Agent agent,
             EquipmentIndex slotIndex,
@@ -4448,15 +4374,24 @@ namespace CoopSpectator.Patches
         {
             reason = null;
 
-            if (ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out string exactRangedReason) &&
-                IsClientConsumableAmmoEquipmentSlot(agent, slotIndex))
+            if (IsClientConsumableAmmoEquipmentSlot(agent, slotIndex) &&
+                TryGetPreBattleExactRangedAiHoldStatus(
+                    agent,
+                    out string exactRangedReason,
+                    out CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+                    out string readinessStage))
             {
                 reason =
                     exactRangedReason +
                     "|Mutation=amount" +
                     "|Slot=" + slotIndex +
                     "|Amount=" + amount +
-                    "|EnforcePrimaryItem=" + enforcePrimaryItem;
+                    "|EnforcePrimaryItem=" + enforcePrimaryItem +
+                    "|ReadinessStage=" + readinessStage +
+                    "|BattleDataReady=" + status.BattleDataReady +
+                    "|CanStartBattle=" + status.CanStartBattle +
+                    "|HasAgent=" + status.HasAgent +
+                    "|LifecycleState=" + (status.LifecycleState ?? string.Empty);
                 return true;
             }
 
@@ -4499,14 +4434,23 @@ namespace CoopSpectator.Patches
         {
             reason = null;
 
-            if (ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out string exactRangedReason))
+            if (TryGetPreBattleExactRangedAiHoldStatus(
+                    agent,
+                    out string exactRangedReason,
+                    out CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+                    out string readinessStage))
             {
                 reason =
                     exactRangedReason +
                     "|Mutation=ammo" +
                     "|WeaponSlot=" + weaponSlotIndex +
                     "|AmmoSlot=" + ammoSlotIndex +
-                    "|Ammo=" + ammo;
+                    "|Ammo=" + ammo +
+                    "|ReadinessStage=" + readinessStage +
+                    "|BattleDataReady=" + status.BattleDataReady +
+                    "|CanStartBattle=" + status.CanStartBattle +
+                    "|HasAgent=" + status.HasAgent +
+                    "|LifecycleState=" + (status.LifecycleState ?? string.Empty);
                 return true;
             }
 
@@ -4563,8 +4507,15 @@ namespace CoopSpectator.Patches
         {
             reason = null;
 
-            if (!ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out string exactRangedReason))
+            if (!TryGetPreBattleExactRangedAiHoldStatus(
+                    agent,
+                    out string exactRangedReason,
+                    out CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+                    out string readinessStage))
+            {
+                string dataSemanticFallback = BuildSetWeaponNetworkDataSemanticSummary(agent, slotIndex);
                 return false;
+            }
 
             string dataSemantic = BuildSetWeaponNetworkDataSemanticSummary(agent, slotIndex);
             if (!string.Equals(dataSemantic, "amount", StringComparison.OrdinalIgnoreCase))
@@ -4575,7 +4526,12 @@ namespace CoopSpectator.Patches
                 "|Mutation=network-data-message" +
                 "|Slot=" + slotIndex +
                 "|DataValue=" + dataValue +
-                "|Semantic=" + dataSemantic;
+                "|Semantic=" + dataSemantic +
+                "|ReadinessStage=" + readinessStage +
+                "|BattleDataReady=" + status.BattleDataReady +
+                "|CanStartBattle=" + status.CanStartBattle +
+                "|HasAgent=" + status.HasAgent +
+                "|LifecycleState=" + (status.LifecycleState ?? string.Empty);
             return true;
         }
 
@@ -4599,37 +4555,13 @@ namespace CoopSpectator.Patches
                 return true;
             }
 
-            if (!ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out string exactRangedReason))
+            if (!TryGetPreBattleExactRangedAiHoldStatus(
+                    agent,
+                    out string exactRangedReason,
+                    out CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+                    out string readinessStage))
+            {
                 return false;
-
-            if (!TryValidateClientNativeWeaponSlotRuntime(agent, weaponSlotIndex, requireWeaponEntity: false, out string weaponReason))
-            {
-                reason =
-                    exactRangedReason +
-                    "|Mutation=ammo-message" +
-                    "|WeaponSlot=" + weaponSlotIndex +
-                    "|AmmoSlot=" + ammoSlotIndex +
-                    "|Ammo=" + ammo +
-                    "|WeaponRuntime=" + weaponReason;
-                return true;
-            }
-
-            try
-            {
-                WeaponComponentData currentUsageItem = agent.Equipment[weaponSlotIndex].CurrentUsageItem;
-                if (currentUsageItem == null || !currentUsageItem.IsRangedWeapon)
-                    return false;
-            }
-            catch (Exception ex)
-            {
-                reason =
-                    exactRangedReason +
-                    "|Mutation=ammo-message" +
-                    "|WeaponSlot=" + weaponSlotIndex +
-                    "|AmmoSlot=" + ammoSlotIndex +
-                    "|Ammo=" + ammo +
-                    "|WeaponCheck=" + ex.GetType().Name;
-                return true;
             }
 
             reason =
@@ -4637,7 +4569,12 @@ namespace CoopSpectator.Patches
                 "|Mutation=ammo-message" +
                 "|WeaponSlot=" + weaponSlotIndex +
                 "|AmmoSlot=" + ammoSlotIndex +
-                "|Ammo=" + ammo;
+                "|Ammo=" + ammo +
+                "|ReadinessStage=" + readinessStage +
+                "|BattleDataReady=" + status.BattleDataReady +
+                "|CanStartBattle=" + status.CanStartBattle +
+                "|HasAgent=" + status.HasAgent +
+                "|LifecycleState=" + (status.LifecycleState ?? string.Empty);
             return true;
         }
 
@@ -4715,19 +4652,12 @@ namespace CoopSpectator.Patches
                 return true;
             }
 
-            if (!ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out string exactRangedReason))
-                return false;
-
-            NetworkCommunicator myPeer = GameNetwork.MyPeer;
-            Mission mission = agent?.Mission ?? Mission.Current;
-            if (!TryIsClientPreBattleRangedHoldWindow(
-                    myPeer,
-                    mission,
+            if (!TryGetPreBattleExactRangedAiHoldStatus(
+                    agent,
+                    out string exactRangedReason,
                     out CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
                     out string readinessStage))
-            {
                 return false;
-            }
 
             reason =
                 exactRangedReason +
@@ -8013,30 +7943,25 @@ namespace CoopSpectator.Patches
             if (_missionNetworkComponentHandleServerEventCreateMissileMethod == null)
                 return;
 
-            List<DeferredClientCreateMissilePayload> deferredPayloads;
-            lock (DeferredClientCreateMissilePayloads)
-            {
-                if (DeferredClientCreateMissilePayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientCreateMissilePayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            List<BattleMapClientMissileReplayRuntime.DeferredCreateMissilePayload> deferredPayloads =
+                BattleMapClientMissileReplayRuntime.GetDeferredCreateMissilePayloadSnapshot();
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
                 return;
 
             DateTime nowUtc = DateTime.UtcNow;
-            foreach (DeferredClientCreateMissilePayload deferredPayload in deferredPayloads)
+            foreach (BattleMapClientMissileReplayRuntime.DeferredCreateMissilePayload deferredPayload in deferredPayloads)
             {
                 CreateMissile createMissile = deferredPayload?.Message;
                 if (createMissile == null)
                     continue;
 
-                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
-                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                if (BattleMapClientMissileReplayRuntime.ShouldThrottleDeferredReplayAttempt(
+                        deferredPayload.LastAttemptUtc,
+                        nowUtc))
                 {
                     continue;
                 }
@@ -8045,14 +7970,16 @@ namespace CoopSpectator.Patches
                 if (shooterAgent == null || !shooterAgent.IsActive())
                     continue;
 
-                deferredPayload.LastAttemptUtc = nowUtc;
-                deferredPayload.Attempts++;
+                BattleMapClientMissileReplayRuntime.MarkDeferredCreateMissileReplayAttempt(
+                    deferredPayload,
+                    nowUtc);
                 try
                 {
                     _missionNetworkComponentHandleServerEventCreateMissileMethod.Invoke(
                         missionNetworkComponent,
                         new object[] { createMissile });
-                    RemoveDeferredClientCreateMissilePayload(
+                    RecordObservedClientCreateMissile(createMissile, "deferred-replay");
+                    BattleMapClientMissileReplayRuntime.RemoveDeferredCreateMissilePayload(
                         createMissile.MissileIndex,
                         createMissile.AgentIndex);
                     ModLogger.Info(
@@ -8187,37 +8114,50 @@ namespace CoopSpectator.Patches
             if (_missionNetworkComponentHandleServerEventHandleMissileCollisionReactionMethod == null)
                 return;
 
-            List<DeferredClientHandleMissileCollisionReactionPayload> deferredPayloads;
-            lock (DeferredClientHandleMissileCollisionReactionPayloads)
-            {
-                if (DeferredClientHandleMissileCollisionReactionPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientHandleMissileCollisionReactionPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            List<BattleMapClientMissileReplayRuntime.DeferredHandleMissileCollisionReactionPayload> deferredPayloads =
+                BattleMapClientMissileReplayRuntime.GetDeferredHandleMissileCollisionReactionPayloadSnapshot();
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
                 return;
 
             DateTime nowUtc = DateTime.UtcNow;
-            foreach (DeferredClientHandleMissileCollisionReactionPayload deferredPayload in deferredPayloads)
+            foreach (BattleMapClientMissileReplayRuntime.DeferredHandleMissileCollisionReactionPayload deferredPayload in deferredPayloads)
             {
                 HandleMissileCollisionReaction handleMissileCollisionReaction = deferredPayload?.Message;
                 if (handleMissileCollisionReaction == null)
                     continue;
 
-                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
-                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                if (BattleMapClientMissileReplayRuntime.ShouldThrottleDeferredReplayAttempt(
+                        deferredPayload.LastAttemptUtc,
+                        nowUtc))
                 {
                     continue;
                 }
 
-                if (HasDeferredClientCreateMissilePayload(
-                        handleMissileCollisionReaction.MissileIndex,
-                        handleMissileCollisionReaction.AttackerAgentIndex))
+                BattleMapClientMissileReplayRuntime.DeferredHandleMissileCollisionReplayGate replayGate =
+                    BattleMapClientMissileReplayRuntime.EvaluateDeferredHandleMissileCollisionReactionReplay(
+                        deferredPayload,
+                        out BattleMapClientMissileReplayRuntime.ObservedCreateMissileState latestObservedCreateMissileState);
+                if (replayGate == BattleMapClientMissileReplayRuntime.DeferredHandleMissileCollisionReplayGate.DropBecauseMissileIndexReused)
+                {
+                    BattleMapClientMissileReplayRuntime.RemoveDeferredHandleMissileCollisionReactionPayload(handleMissileCollisionReaction);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: dropped deferred client HandleMissileCollisionReaction because missile index was reused by a newer CreateMissile generation before the expected local missile entity materialized. " +
+                        "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
+                        " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
+                        " ExpectedCreateSequence=" + deferredPayload.ExpectedCreateMissileObservationSequence +
+                        " LatestCreateSequence=" + latestObservedCreateMissileState.Sequence +
+                        " LatestCreateAgentIndex=" + latestObservedCreateMissileState.AgentIndex +
+                        " LatestCreateSource=" + (latestObservedCreateMissileState.Source ?? "unknown") +
+                        " Attempts=" + deferredPayload.Attempts +
+                        " Source=" + (source ?? "unknown"));
+                    continue;
+                }
+
+                if (replayGate != BattleMapClientMissileReplayRuntime.DeferredHandleMissileCollisionReplayGate.Ready)
                     continue;
 
                 if (!MissionHasLocalMissile(handleMissileCollisionReaction.MissileIndex))
@@ -8241,14 +8181,15 @@ namespace CoopSpectator.Patches
                         continue;
                 }
 
-                deferredPayload.LastAttemptUtc = nowUtc;
-                deferredPayload.Attempts++;
+                BattleMapClientMissileReplayRuntime.MarkDeferredHandleMissileCollisionReactionReplayAttempt(
+                    deferredPayload,
+                    nowUtc);
                 try
                 {
                     _missionNetworkComponentHandleServerEventHandleMissileCollisionReactionMethod.Invoke(
                         missionNetworkComponent,
                         new object[] { handleMissileCollisionReaction });
-                    RemoveDeferredClientHandleMissileCollisionReactionPayload(handleMissileCollisionReaction);
+                    BattleMapClientMissileReplayRuntime.RemoveDeferredHandleMissileCollisionReactionPayload(handleMissileCollisionReaction);
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: replayed deferred client HandleMissileCollisionReaction after battle snapshot apply. " +
                         "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
@@ -8892,31 +8833,15 @@ namespace CoopSpectator.Patches
 
         private static void RemoveDeferredClientCreateMissilePayload(int missileIndex, int shooterAgentIndex = int.MinValue)
         {
-            if (missileIndex < 0)
-                return;
-
-            lock (DeferredClientCreateMissilePayloads)
-            {
-                DeferredClientCreateMissilePayloads.RemoveAll(candidate =>
-                    candidate?.Message != null &&
-                    candidate.Message.MissileIndex == missileIndex &&
-                    (shooterAgentIndex == int.MinValue || candidate.Message.AgentIndex == shooterAgentIndex));
-            }
+            BattleMapClientMissileReplayRuntime.RemoveDeferredCreateMissilePayload(
+                missileIndex,
+                shooterAgentIndex);
         }
 
         private static void RemoveDeferredClientHandleMissileCollisionReactionPayload(
             HandleMissileCollisionReaction referenceMessage)
         {
-            if (referenceMessage == null || referenceMessage.MissileIndex < 0)
-                return;
-
-            lock (DeferredClientHandleMissileCollisionReactionPayloads)
-            {
-                DeferredClientHandleMissileCollisionReactionPayloads.RemoveAll(candidate =>
-                    AreDeferredClientHandleMissileCollisionReactionMessagesEquivalent(
-                        candidate?.Message,
-                        referenceMessage));
-            }
+            BattleMapClientMissileReplayRuntime.RemoveDeferredHandleMissileCollisionReactionPayload(referenceMessage);
         }
 
         private static void RemoveDeferredClientStartSwitchingWeaponUsageIndexPayload(
@@ -9515,7 +9440,7 @@ namespace CoopSpectator.Patches
 
             contract = ExactTransferContractBuilder.Build(
                 entryState,
-                isPlayerControlledOrigin: false,
+                isPlayerControlledOrigin: CoopMissionSpawnLogic.IsClientLocalSelectedExactEntry(entryState),
                 teamIndex: createAgent.TeamIndex,
                 formationIndex: createAgent.FormationIndex);
             validation = ExactTransferContractValidator.Validate(contract);
@@ -11067,7 +10992,7 @@ namespace CoopSpectator.Patches
                     {
                         _lastSuppressedClientWeaponNetworkDataMessageKey = logKey;
                         ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: suppressed client SetWeaponNetworkData before native handler because exact ranged AI ammo runtime is unsafe. " +
+                            "BattleMapSpawnHandoffPatch: suppressed client SetWeaponNetworkData before native handler because ranged weapon mutation is paused or unsafe. " +
                             "AgentIndex=" + setWeaponNetworkData.AgentIndex +
                             " WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex +
                             " DataValue=" + setWeaponNetworkData.DataValue +
@@ -11170,7 +11095,7 @@ namespace CoopSpectator.Patches
                     {
                         _lastSuppressedClientWeaponAmmoDataMessageKey = logKey;
                         ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: suppressed client SetWeaponAmmoData before native handler because exact ranged AI ammo runtime is unsafe. " +
+                            "BattleMapSpawnHandoffPatch: suppressed client SetWeaponAmmoData before native handler because ranged weapon mutation is paused or unsafe. " +
                             "AgentIndex=" + setWeaponAmmoData.AgentIndex +
                             " WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
                             " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex +
@@ -11227,7 +11152,7 @@ namespace CoopSpectator.Patches
                 {
                     _lastSuppressedClientWeaponAmountNativeKey = logKey;
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed client native SetWeaponAmountInSlot because local weapon runtime is unsafe. " +
+                        "BattleMapSpawnHandoffPatch: suppressed client native SetWeaponAmountInSlot because ranged weapon mutation is paused or unsafe. " +
                         "AgentIndex=" + (__instance?.Index ?? -1) +
                         " EquipmentSlot=" + equipmentSlot +
                         " Amount=" + amount +
@@ -11280,7 +11205,7 @@ namespace CoopSpectator.Patches
                 {
                     _lastSuppressedClientWeaponAmmoNativeKey = logKey;
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed client native SetWeaponAmmoAsClient because local weapon runtime is unsafe. " +
+                        "BattleMapSpawnHandoffPatch: suppressed client native SetWeaponAmmoAsClient because ranged weapon mutation is paused or unsafe. " +
                         "AgentIndex=" + (__instance?.Index ?? -1) +
                         " WeaponSlot=" + equipmentIndex +
                         " AmmoSlot=" + ammoEquipmentIndex +
@@ -11699,6 +11624,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                RecordObservedClientCreateMissile(createMissile, "prefix-immediate");
                 return true;
             }
             catch (Exception ex)

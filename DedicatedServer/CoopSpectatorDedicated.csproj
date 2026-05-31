@@ -65,6 +65,7 @@
     <Compile Include="..\Network\Messages\CoopBattleSelectionNetworkMessages.cs" Link="Network\Messages\CoopBattleSelectionNetworkMessages.cs" />
     <Compile Include="..\Infrastructure\ModLogger.cs" Link="Infrastructure\ModLogger.cs" />
     <Compile Include="..\Infrastructure\BattleMapContractDiagnostics.cs" Link="Infrastructure\BattleMapContractDiagnostics.cs" />
+    <Compile Include="..\Infrastructure\BattleMapClientMissileReplayRuntime.cs" Link="Infrastructure\BattleMapClientMissileReplayRuntime.cs" />
     <Compile Include="..\Infrastructure\BattleCommanderResolver.cs" Link="Infrastructure\BattleCommanderResolver.cs" />
     <Compile Include="..\Infrastructure\BattleSnapshotBinarySerializer.cs" Link="Infrastructure\BattleSnapshotBinarySerializer.cs" />
     <Compile Include="..\Infrastructure\CampaignMapPatchMissionInit.cs" Link="Infrastructure\CampaignMapPatchMissionInit.cs" />
