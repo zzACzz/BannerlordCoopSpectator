@@ -3156,6 +3156,40 @@ namespace CoopSpectator.MissionBehaviors
             return ShouldPausePendingClientExactVisualOverlaysForSelectionScreen(out reason);
         }
 
+        internal static bool IsLiveBattleRespawnSelectionStatus(
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+            out string reason)
+        {
+            reason = null;
+            if (status == null)
+                return false;
+
+            string readinessStage = status.BattleDataReadinessStage?.Trim() ?? string.Empty;
+            string battlePhase = status.BattlePhase?.Trim() ?? string.Empty;
+            string lifecycle = status.LifecycleState?.Trim() ?? string.Empty;
+            bool respawnSelection =
+                string.Equals(readinessStage, "RespawnSelection", StringComparison.OrdinalIgnoreCase);
+            bool liveBattle =
+                string.Equals(battlePhase, nameof(CoopBattlePhase.BattleActive), StringComparison.OrdinalIgnoreCase);
+            if (!status.BattleDataReady ||
+                status.HasAgent ||
+                !status.CanRespawn ||
+                !respawnSelection ||
+                !liveBattle)
+            {
+                return false;
+            }
+
+            reason =
+                "live-battle-respawn-selection" +
+                "|Phase=" + battlePhase +
+                "|Lifecycle=" + lifecycle +
+                "|BattleDataReady=" + status.BattleDataReady +
+                "|CanRespawn=" + status.CanRespawn +
+                "|HasAgent=" + status.HasAgent;
+            return true;
+        }
+
         private static bool TryQueueClientExactCampaignVisualOverlay(
             Mission mission,
             Agent agent,
@@ -3494,6 +3528,139 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            return true;
+        }
+
+        private static bool DoesCreateAgentPayloadMatchEntryState(
+            CreateAgent createAgent,
+            RosterEntryState entryState,
+            out string mismatchReason)
+        {
+            mismatchReason = null;
+            if (createAgent == null)
+            {
+                mismatchReason = "payload-null";
+                return false;
+            }
+
+            if (entryState == null)
+            {
+                mismatchReason = "entry-state-missing";
+                return false;
+            }
+
+            BattleSideEnum payloadSide = ResolveCreateAgentPayloadBattleSide(createAgent.TeamIndex);
+            if (payloadSide != BattleSideEnum.None &&
+                !DoesClientVisualOverlayEntryMatchAgentSide(entryState, payloadSide))
+            {
+                mismatchReason =
+                    "payload-side-mismatch" +
+                    "|PayloadSide=" + payloadSide +
+                    "|EntrySideId=" + (entryState.SideId ?? "null");
+                return false;
+            }
+
+            string payloadCharacterId = createAgent.Character?.StringId;
+            if (!string.IsNullOrWhiteSpace(payloadCharacterId) &&
+                !DoesClientVisualOverlayEntryMatchAgentTroop(entryState, payloadCharacterId))
+            {
+                mismatchReason =
+                    "payload-character-mismatch" +
+                    "|PayloadCharacterId=" + payloadCharacterId +
+                    "|EntryCharacterId=" + (entryState.CharacterId ?? "null") +
+                    "|EntryOriginalCharacterId=" + (entryState.OriginalCharacterId ?? "null") +
+                    "|EntrySpawnTemplateId=" + (ResolveEntrySpawnTemplateId(entryState) ?? "null");
+                return false;
+            }
+
+            return true;
+        }
+
+        internal static bool DoesClientActiveAgentSatisfyDeferredCreateAgentPayload(
+            Agent agent,
+            CreateAgent createAgent,
+            out string reason)
+        {
+            reason = null;
+            if (agent == null || !agent.IsActive())
+            {
+                reason = "agent-missing-or-inactive";
+                return false;
+            }
+
+            if (createAgent == null)
+            {
+                reason = "payload-null";
+                return false;
+            }
+
+            if (agent.Index != createAgent.AgentIndex)
+            {
+                reason =
+                    "agent-index-mismatch" +
+                    "|AgentIndex=" + agent.Index +
+                    "|PayloadAgentIndex=" + createAgent.AgentIndex;
+                return false;
+            }
+
+            BattleSideEnum payloadSide = ResolveCreateAgentPayloadBattleSide(createAgent.TeamIndex);
+            if (payloadSide != BattleSideEnum.None &&
+                agent.Team?.Side != BattleSideEnum.None &&
+                agent.Team?.Side != payloadSide)
+            {
+                reason =
+                    "runtime-side-mismatch" +
+                    "|AgentSide=" + (agent.Team?.Side.ToString() ?? "null") +
+                    "|PayloadSide=" + payloadSide;
+                return false;
+            }
+
+            if (TryResolveClientAuthoritativeMaterializedEntryId(createAgent.AgentIndex, out string authoritativeEntryId))
+            {
+                RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(authoritativeEntryId);
+                if (entryState == null)
+                {
+                    reason = "authoritative-entry-state-missing|EntryId=" + authoritativeEntryId;
+                    return false;
+                }
+
+                if (!DoesCreateAgentPayloadMatchEntryState(createAgent, entryState, out string payloadMismatchReason))
+                {
+                    reason =
+                        "authoritative-entry-payload-mismatch" +
+                        "|EntryId=" + authoritativeEntryId +
+                        "|" + payloadMismatchReason;
+                    return false;
+                }
+
+                if (!DoesClientVisualOverlayEntryMatchAgentTroop(entryState, agent.Character?.StringId) &&
+                    !ShouldPreserveStrictExactHeroEntryMapping(agent.Index, authoritativeEntryId))
+                {
+                    reason =
+                        "authoritative-entry-agent-troop-mismatch" +
+                        "|EntryId=" + authoritativeEntryId +
+                        "|AgentTroopId=" + (agent.Character?.StringId ?? "null");
+                    return false;
+                }
+
+                reason = "authoritative-entry-match:" + authoritativeEntryId;
+                return true;
+            }
+
+            string payloadCharacterId = createAgent.Character?.StringId;
+            if (!string.IsNullOrWhiteSpace(payloadCharacterId) &&
+                !string.Equals(agent.Character?.StringId, payloadCharacterId, StringComparison.OrdinalIgnoreCase))
+            {
+                reason =
+                    "runtime-character-mismatch" +
+                    "|AgentTroopId=" + (agent.Character?.StringId ?? "null") +
+                    "|PayloadCharacterId=" + payloadCharacterId;
+                return false;
+            }
+
+            reason = !string.IsNullOrWhiteSpace(payloadCharacterId)
+                ? "runtime-payload-character-match:" + payloadCharacterId
+                : "runtime-side-match";
             return true;
         }
 
@@ -4201,6 +4368,12 @@ namespace CoopSpectator.MissionBehaviors
             {
                 readinessSummary = "status-null";
                 return false;
+            }
+
+            if (IsLiveBattleRespawnSelectionStatus(status, out string liveRespawnSelectionReason))
+            {
+                readinessSummary = liveRespawnSelectionReason ?? "live-battle-respawn-selection";
+                return true;
             }
 
             if (status.HasAgent)
@@ -5670,6 +5843,21 @@ namespace CoopSpectator.MissionBehaviors
                     !string.IsNullOrWhiteSpace(pendingState.EntryId)
                         ? BattleSnapshotRuntimeState.GetEntryState(pendingState.EntryId)
                         : null;
+                if (_exactNativeClientVisualOverlayAppliedAgentIndices.Contains(agentIndex) &&
+                    _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.TryGetValue(agentIndex, out bool appliedIncludesWeapons) &&
+                    (!pendingState.IncludeWeaponsForRefresh || appliedIncludesWeapons))
+                {
+                    completedAgentIndices.Add(agentIndex);
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: completed pending client exact visual refresh because overlay was already satisfied. " +
+                        "AgentIndex=" + agent.Index +
+                        " EntryId=" + (pendingState.EntryId ?? "null") +
+                        " IncludeWeapons=" + pendingState.IncludeWeaponsForRefresh +
+                        " Retries=" + pendingState.RetryCount +
+                        " Source=" + (pendingState.Source ?? "unknown"));
+                    continue;
+                }
+
                 if (ShouldAwaitMountedHeroEquipmentSyncBeforeClientExactVisualRefresh(
                         agent,
                         pendingEntryState,
@@ -5760,6 +5948,13 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (IsLiveBattleRespawnSelectionStatus(status, out _))
+            {
+                _pendingClientExactVisualSelectionPauseSticky = false;
+                _lastPendingClientExactVisualPauseReason = null;
+                return false;
+            }
+
             string lifecycle = status.LifecycleState?.Trim() ?? string.Empty;
             string readinessStage = status.BattleDataReadinessStage?.Trim() ?? string.Empty;
             bool reconnectFinalize =
@@ -5818,6 +6013,9 @@ namespace CoopSpectator.MissionBehaviors
 
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
             if (status == null || !status.BattleDataReady || status.HasAgent)
+                return false;
+
+            if (IsLiveBattleRespawnSelectionStatus(status, out _))
                 return false;
 
             string lifecycle = status.LifecycleState?.Trim() ?? string.Empty;
@@ -6514,6 +6712,7 @@ namespace CoopSpectator.MissionBehaviors
                 _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.TryGetValue(agent.Index, out bool appliedIncludesWeapons) &&
                 (!effectiveIncludeWeaponsForClientRefresh || appliedIncludesWeapons == effectiveIncludeWeaponsForClientRefresh))
             {
+                _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agent.Index);
                 return true;
             }
 
@@ -6531,6 +6730,9 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agent.Index);
+            _exactNativeClientVisualOverlayAppliedAgentIndices.Remove(agent.Index);
+            _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.Remove(agent.Index);
             bool applied = TryApplyExactCampaignSnapshotOverlayToNativeAgent(
                 agent,
                 entryId,
@@ -23249,7 +23451,7 @@ namespace CoopSpectator.MissionBehaviors
             initialWeaponEquipPreference = ResolveBootstrapInitialWeaponEquipPreference(entryState, equipment);
             resolved = false;
 
-            if (entryState == null || equipment == null || entryState.IsHero)
+            if (entryState == null || equipment == null)
                 return;
 
             EquipmentIndex firstShield = EquipmentIndex.None;
@@ -23486,6 +23688,19 @@ namespace CoopSpectator.MissionBehaviors
             {
                 appliedEquipment = "runtime-exact-character";
                 equipmentMisses = "post-replace-refresh-skipped";
+                if (forceInitialWieldAfterStrictPreSpawnExactLoadout &&
+                    TryReapplyCanonicalReplaceBotInitialWield(
+                        replacedAgent,
+                        entryState,
+                        "materialized replace-bot runtime-exact-character",
+                        out string canonicalReplaceBotWieldSummary))
+                {
+                    reapplyWield = canonicalReplaceBotWieldSummary;
+                }
+                else if (forceInitialWieldAfterStrictPreSpawnExactLoadout)
+                {
+                    reapplyWield = "canonical-replace-bot-wield-unavailable";
+                }
             }
             else if (preSpawnExactLoadoutInjected)
             {
@@ -23493,18 +23708,17 @@ namespace CoopSpectator.MissionBehaviors
                 equipmentMisses = "replace-bot-visual-refresh-skipped";
                 if (forceInitialWieldAfterStrictPreSpawnExactLoadout)
                 {
-                    try
+                    if (TryReapplyCanonicalReplaceBotInitialWield(
+                            replacedAgent,
+                            entryState,
+                            "materialized replace-bot pre-spawn-exact-loadout",
+                            out string canonicalReplaceBotWieldSummary))
                     {
-                        replacedAgent.WieldInitialWeapons(
-                            Agent.WeaponWieldActionType.Instant,
-                            Equipment.InitialWeaponEquipPreference.Any);
-                        replacedAgent.MountAgent?.UpdateAgentProperties();
-                        reapplyWield = "forced-for-strict-pre-spawn-exact-loadout";
+                        reapplyWield = canonicalReplaceBotWieldSummary;
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        reapplyWield = "failed-for-strict-pre-spawn-exact-loadout";
-                        equipmentMisses += ", initial-wield-failed:" + ex.GetType().Name;
+                        reapplyWield = "canonical-replace-bot-wield-unavailable";
                     }
                 }
                 else
@@ -23543,10 +23757,21 @@ namespace CoopSpectator.MissionBehaviors
                     replacedAgent.UpdateSpawnEquipmentAndRefreshVisuals(spawnEquipment);
                     if (forceInitialWieldAfterReplaceBotRefresh)
                     {
-                        replacedAgent.WieldInitialWeapons(
-                            Agent.WeaponWieldActionType.Instant,
-                            Equipment.InitialWeaponEquipPreference.Any);
-                        reapplyWield = "forced";
+                        if (TryReapplyCanonicalReplaceBotInitialWield(
+                                replacedAgent,
+                                entryState,
+                                "materialized replace-bot visual-refresh",
+                                out string canonicalReplaceBotWieldSummary))
+                        {
+                            reapplyWield = canonicalReplaceBotWieldSummary;
+                        }
+                        else
+                        {
+                            replacedAgent.WieldInitialWeapons(
+                                Agent.WeaponWieldActionType.Instant,
+                                Equipment.InitialWeaponEquipPreference.Any);
+                            reapplyWield = "forced-fallback-initial-weapons";
+                        }
                     }
                     else
                     {
@@ -23570,6 +23795,118 @@ namespace CoopSpectator.MissionBehaviors
                 " ReapplyMisses=" + equipmentMisses +
                 " ReapplyWield=" + reapplyWield +
                 " " + appliedCombatProfile;
+        }
+
+        private static bool TryReapplyCanonicalReplaceBotInitialWield(
+            Agent agent,
+            RosterEntryState entryState,
+            string source,
+            out string wieldSummary)
+        {
+            wieldSummary = "canonical-replace-bot-wield-skipped";
+            if (agent == null ||
+                entryState == null ||
+                agent.IsMount ||
+                agent.SpawnEquipment == null ||
+                !ShouldForceInitialWieldAfterStrictPreSpawnExactLoadout(entryState))
+            {
+                return false;
+            }
+
+            try
+            {
+                ResolveCanonicalBootstrapDesiredWeaponPair(
+                    entryState,
+                    agent.SpawnEquipment,
+                    out EquipmentIndex desiredMainHandIndex,
+                    out EquipmentIndex desiredOffHandIndex,
+                    out Equipment.InitialWeaponEquipPreference initialWeaponEquipPreference,
+                    out string canonicalWieldReason,
+                    out bool canonicalWieldResolved);
+
+                EquipmentIndex preMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+                EquipmentIndex preOffHandIndex = agent.GetOffhandWieldedItemIndex();
+                bool usedExplicitSlot = false;
+                if (canonicalWieldResolved)
+                {
+                    usedExplicitSlot = TryApplyExplicitBootstrapWieldByDesiredPair(
+                        agent,
+                        agent.SpawnEquipment,
+                        desiredMainHandIndex,
+                        desiredOffHandIndex);
+                }
+
+                EquipmentIndex postMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+                EquipmentIndex postOffHandIndex = agent.GetOffhandWieldedItemIndex();
+                if ((!usedExplicitSlot ||
+                     (postMainHandIndex == EquipmentIndex.None && postOffHandIndex == EquipmentIndex.None)))
+                {
+                    agent.WieldInitialWeapons(
+                        Agent.WeaponWieldActionType.Instant,
+                        initialWeaponEquipPreference);
+                    postMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+                    postOffHandIndex = agent.GetOffhandWieldedItemIndex();
+                }
+
+                if (postMainHandIndex == EquipmentIndex.None && postOffHandIndex == EquipmentIndex.None)
+                {
+                    if (TryForceServerBootstrapWeaponWieldFromEquipment(
+                            agent,
+                            agent.SpawnEquipment,
+                            entryState,
+                            out string explicitWieldSummary))
+                    {
+                        wieldSummary =
+                            "canonical-replace-bot-wield{" +
+                            "PreMain=" + FormatAgentWieldedEquipmentIndex(agent, preMainHandIndex) +
+                            ",PreOff=" + FormatAgentWieldedEquipmentIndex(agent, preOffHandIndex) +
+                            ",PostMain=" + FormatAgentWieldedEquipmentIndex(agent, agent.GetPrimaryWieldedItemIndex()) +
+                            ",PostOff=" + FormatAgentWieldedEquipmentIndex(agent, agent.GetOffhandWieldedItemIndex()) +
+                            ",CanonicalResolved=" + canonicalWieldResolved +
+                            ",CanonicalReason=" + (canonicalWieldReason ?? "none") +
+                            ",InitialWeaponEquipPreference=" + initialWeaponEquipPreference +
+                            ",UsedExplicitSlot=" + usedExplicitSlot +
+                            ",Fallback=" + explicitWieldSummary +
+                            ",Source=" + (source ?? "unknown") + "}";
+                        agent.UpdateAgentProperties();
+                        agent.MountAgent?.UpdateAgentProperties();
+                        return true;
+                    }
+
+                    wieldSummary =
+                        "canonical-replace-bot-wield-empty{" +
+                        "PreMain=" + FormatAgentWieldedEquipmentIndex(agent, preMainHandIndex) +
+                        ",PreOff=" + FormatAgentWieldedEquipmentIndex(agent, preOffHandIndex) +
+                        ",CanonicalResolved=" + canonicalWieldResolved +
+                        ",CanonicalReason=" + (canonicalWieldReason ?? "none") +
+                        ",InitialWeaponEquipPreference=" + initialWeaponEquipPreference +
+                        ",UsedExplicitSlot=" + usedExplicitSlot +
+                        ",Source=" + (source ?? "unknown") + "}";
+                    return false;
+                }
+
+                agent.UpdateAgentProperties();
+                agent.MountAgent?.UpdateAgentProperties();
+                wieldSummary =
+                    "canonical-replace-bot-wield{" +
+                    "PreMain=" + FormatAgentWieldedEquipmentIndex(agent, preMainHandIndex) +
+                    ",PreOff=" + FormatAgentWieldedEquipmentIndex(agent, preOffHandIndex) +
+                    ",PostMain=" + FormatAgentWieldedEquipmentIndex(agent, postMainHandIndex) +
+                    ",PostOff=" + FormatAgentWieldedEquipmentIndex(agent, postOffHandIndex) +
+                    ",PostWieldedItem=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
+                    ",PostOffhandItem=" + (agent.WieldedOffhandWeapon.Item?.StringId ?? "none") +
+                    ",CanonicalResolved=" + canonicalWieldResolved +
+                    ",CanonicalReason=" + (canonicalWieldReason ?? "none") +
+                    ",InitialWeaponEquipPreference=" + initialWeaponEquipPreference +
+                    ",UsedExplicitSlot=" + usedExplicitSlot +
+                    ",Source=" + (source ?? "unknown") + "}";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                wieldSummary = "canonical-replace-bot-wield-failed:" + ex.GetType().Name;
+                return false;
+            }
         }
 
         private static Equipment BuildSnapshotEquipmentForReplaceBot(
@@ -28140,7 +28477,70 @@ namespace CoopSpectator.MissionBehaviors
                     " Source=" + (source ?? "unknown"));
             }
 
-            if (TryRefreshClientOverlayLiveWeaponWieldState(
+            ResolveCanonicalBootstrapDesiredWeaponPair(
+                entryState,
+                overlaySpawnEquipment,
+                out EquipmentIndex desiredMainHandIndex,
+                out EquipmentIndex desiredOffHandIndex,
+                out Equipment.InitialWeaponEquipPreference initialWeaponEquipPreference,
+                out string canonicalWieldReason,
+                out bool canonicalWieldResolved);
+            EquipmentIndex desiredAmmoIndex =
+                ResolveDesiredLiveAmmoEquipmentIndex(overlaySpawnEquipment, desiredMainHandIndex);
+            bool localControlledAgent = IsLocalPeerControlledAgent(agent);
+            if (localControlledAgent && canonicalWieldResolved)
+            {
+                EquipmentIndex preMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+                EquipmentIndex preOffHandIndex = agent.GetOffhandWieldedItemIndex();
+                bool usedExplicitSlot = TryApplyExplicitBootstrapWieldByDesiredPair(
+                    agent,
+                    overlaySpawnEquipment,
+                    desiredMainHandIndex,
+                    desiredOffHandIndex);
+                EquipmentIndex postMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+                EquipmentIndex postOffHandIndex = agent.GetOffhandWieldedItemIndex();
+                bool success = HasDesiredLiveWeaponPair(
+                    agent,
+                    overlaySpawnEquipment,
+                    desiredMainHandIndex,
+                    desiredOffHandIndex,
+                    desiredAmmoIndex);
+                appliedWieldRefresh =
+                    "strict-exact-hero-local-controlled-canonical-wield" +
+                    "{AgentIndex=" + agent.Index +
+                    ",EntryId=" + entryId +
+                    ",DesiredMain=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredMainHandIndex) +
+                    ",DesiredOff=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredOffHandIndex) +
+                    ",PreMain=" + FormatAgentWieldedEquipmentIndex(agent, preMainHandIndex) +
+                    ",PreOff=" + FormatAgentWieldedEquipmentIndex(agent, preOffHandIndex) +
+                    ",PostMain=" + FormatAgentWieldedEquipmentIndex(agent, postMainHandIndex) +
+                    ",PostOff=" + FormatAgentWieldedEquipmentIndex(agent, postOffHandIndex) +
+                    ",PostWieldedItem=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
+                    ",PostOffhandItem=" + (agent.WieldedOffhandWeapon.Item?.StringId ?? "none") +
+                    ",CanonicalReason=" + (canonicalWieldReason ?? "none") +
+                    ",InitialWeaponEquipPreference=" + initialWeaponEquipPreference +
+                    ",UsedExplicitSlot=" + usedExplicitSlot +
+                    ",Source=" + (source ?? "unknown") + "}";
+                if (success)
+                {
+                    RecordStrictExactHeroLocalInitialWieldApplied(
+                        agent,
+                        entryId,
+                        source ?? "strict exact hero local controlled canonical wield");
+                    wieldRefreshIssue = "(none)";
+                    return true;
+                }
+
+                wieldRefreshIssue =
+                    "strict-exact-hero-local-controlled-canonical-wield-unresolved" +
+                    "{DesiredMain=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredMainHandIndex) +
+                    ",DesiredOff=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredOffHandIndex) +
+                    ",CanonicalReason=" + (canonicalWieldReason ?? "none") +
+                    ",UsedExplicitSlot=" + usedExplicitSlot + "}";
+            }
+
+            if (!localControlledAgent &&
+                TryRefreshClientOverlayLiveWeaponWieldState(
                     agent,
                     overlaySpawnEquipment,
                     entryId,
@@ -28161,7 +28561,7 @@ namespace CoopSpectator.MissionBehaviors
                 EquipmentIndex preOffHandIndex = agent.GetOffhandWieldedItemIndex();
                 agent.WieldInitialWeapons(
                     Agent.WeaponWieldActionType.Instant,
-                    Equipment.InitialWeaponEquipPreference.Any);
+                    initialWeaponEquipPreference);
                 EquipmentIndex postMainHandIndex = agent.GetPrimaryWieldedItemIndex();
                 EquipmentIndex postOffHandIndex = agent.GetOffhandWieldedItemIndex();
                 bool success = postMainHandIndex != EquipmentIndex.None || postOffHandIndex != EquipmentIndex.None;
@@ -28175,6 +28575,8 @@ namespace CoopSpectator.MissionBehaviors
                     ",PostOff=" + FormatAgentWieldedEquipmentIndex(agent, postOffHandIndex) +
                     ",PostWieldedItem=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
                     ",PostOffhandItem=" + (agent.WieldedOffhandWeapon.Item?.StringId ?? "none") +
+                    ",CanonicalReason=" + (canonicalWieldReason ?? "none") +
+                    ",InitialWeaponEquipPreference=" + initialWeaponEquipPreference +
                     ",Source=" + (source ?? "unknown") + "}";
                 if (!success)
                     wieldRefreshIssue = "strict-exact-hero-local-initial-wield-post-none";

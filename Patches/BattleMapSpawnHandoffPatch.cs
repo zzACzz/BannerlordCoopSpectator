@@ -3053,6 +3053,7 @@ namespace CoopSpectator.Patches
             int selectedCreateAgentCount = selectedDeferredCreateAgentPayloads.Count;
             int selectedActionSetCount = deferredSetAgentActionSetPayloads.Count;
             bool focusAgentWasDeferred = focusCreateAgentPayload != null;
+            DateTime nowUtc = DateTime.UtcNow;
 
             _unsafeImmediateClientAgentBaselineMaterializationDepth++;
             try
@@ -3066,7 +3067,36 @@ namespace CoopSpectator.Patches
                     Agent existingAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(createAgent.AgentIndex, canBeNull: true);
                     if (existingAgent != null && existingAgent.IsActive())
                     {
-                        RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
+                        if (CoopMissionSpawnLogic.DoesClientActiveAgentSatisfyDeferredCreateAgentPayload(
+                                existingAgent,
+                                createAgent,
+                                out string existingAgentMatchReason))
+                        {
+                            RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: completed deferred client CreateAgent because a matching runtime agent already occupied the target index. " +
+                                "AgentIndex=" + createAgent.AgentIndex +
+                                " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                                " Reason=" + (existingAgentMatchReason ?? "unknown") +
+                                " Source=" + (source ?? "unknown"));
+                        }
+                        else
+                        {
+                            deferredPayload.LastAttemptUtc = nowUtc;
+                            deferredPayload.Attempts++;
+                            if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                            {
+                                ModLogger.Info(
+                                    "BattleMapSpawnHandoffPatch: kept deferred client CreateAgent because the active runtime agent at the target index did not match the deferred payload. " +
+                                    "AgentIndex=" + createAgent.AgentIndex +
+                                    " ExistingTroopId=" + (existingAgent.Character?.StringId ?? "null") +
+                                    " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                                    " Attempts=" + deferredPayload.Attempts +
+                                    " Reason=" + (existingAgentMatchReason ?? "unknown") +
+                                    " Source=" + (source ?? "unknown") +
+                                    " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown"));
+                            }
+                        }
                         continue;
                     }
 
@@ -4558,6 +4588,17 @@ namespace CoopSpectator.Patches
         {
             reason = null;
 
+            if (ShouldSuppressLocalControlledPreBattleRangedAmmoDataMessage(
+                    agent,
+                    weaponSlotIndex,
+                    ammoSlotIndex,
+                    ammo,
+                    out string localControlledReason))
+            {
+                reason = localControlledReason;
+                return true;
+            }
+
             if (!ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out string exactRangedReason))
                 return false;
 
@@ -4600,6 +4641,62 @@ namespace CoopSpectator.Patches
             return true;
         }
 
+        private static bool ShouldSuppressLocalControlledPreBattleRangedAmmoDataMessage(
+            Agent agent,
+            EquipmentIndex weaponSlotIndex,
+            EquipmentIndex ammoSlotIndex,
+            short ammo,
+            out string reason)
+        {
+            reason = null;
+
+            if (agent == null ||
+                GameNetwork.IsServer ||
+                !IsLocalPeerControlledBattleAgent(agent))
+            {
+                return false;
+            }
+
+            WeaponComponentData currentUsageItem = null;
+            try
+            {
+                currentUsageItem = agent.Equipment[weaponSlotIndex].CurrentUsageItem;
+            }
+            catch (Exception ex)
+            {
+                reason = "local-controlled-prebattle-ranged-agent|Mutation=ammo-message|WeaponCheck=" + ex.GetType().Name;
+                return true;
+            }
+
+            if (currentUsageItem == null || !currentUsageItem.IsRangedWeapon)
+                return false;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            Mission mission = agent.Mission ?? Mission.Current;
+            if (!TryGetLocalControlledPreBattleRangedHoldStatus(
+                    myPeer,
+                    mission,
+                    out CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+                    out string readinessStage))
+            {
+                return false;
+            }
+
+            reason =
+                "local-controlled-prebattle-ranged-agent" +
+                "|Mutation=ammo-message" +
+                "|WeaponSlot=" + weaponSlotIndex +
+                "|AmmoSlot=" + ammoSlotIndex +
+                "|Ammo=" + ammo +
+                "|ReadinessStage=" + readinessStage +
+                "|BattleDataReady=" + status.BattleDataReady +
+                "|CanStartBattle=" + status.CanStartBattle +
+                "|HasAgent=" + status.HasAgent +
+                "|LifecycleState=" + (status.LifecycleState ?? string.Empty) +
+                "|UsageClass=" + currentUsageItem.WeaponClass;
+            return true;
+        }
+
         private static bool ShouldSuppressPreBattleClientWeaponReloadPhaseMessage(
             Agent agent,
             EquipmentIndex slotIndex,
@@ -4608,20 +4705,148 @@ namespace CoopSpectator.Patches
         {
             reason = null;
 
+            if (ShouldSuppressLocalControlledPreBattleRangedReloadPhaseMessage(
+                    agent,
+                    slotIndex,
+                    reloadPhase,
+                    out string localControlledReason))
+            {
+                reason = localControlledReason;
+                return true;
+            }
+
             if (!ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out string exactRangedReason))
                 return false;
 
-            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
-            if (currentPhase >= CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            Mission mission = agent?.Mission ?? Mission.Current;
+            if (!TryIsClientPreBattleRangedHoldWindow(
+                    myPeer,
+                    mission,
+                    out CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+                    out string readinessStage))
+            {
                 return false;
+            }
 
             reason =
                 exactRangedReason +
                 "|Mutation=reload-phase-message" +
                 "|Slot=" + slotIndex +
                 "|ReloadPhase=" + reloadPhase +
-                "|BattlePhase=" + currentPhase;
+                "|ReadinessStage=" + readinessStage +
+                "|BattleDataReady=" + status.BattleDataReady +
+                "|CanStartBattle=" + status.CanStartBattle +
+                "|HasAgent=" + status.HasAgent +
+                "|LifecycleState=" + (status.LifecycleState ?? string.Empty);
             return true;
+        }
+
+        private static bool ShouldSuppressLocalControlledPreBattleRangedReloadPhaseMessage(
+            Agent agent,
+            EquipmentIndex slotIndex,
+            short reloadPhase,
+            out string reason)
+        {
+            reason = null;
+
+            if (agent == null ||
+                GameNetwork.IsServer ||
+                !IsLocalPeerControlledBattleAgent(agent))
+            {
+                return false;
+            }
+
+            WeaponComponentData currentUsageItem = null;
+            try
+            {
+                currentUsageItem = agent.Equipment[slotIndex].CurrentUsageItem;
+            }
+            catch (Exception ex)
+            {
+                reason = "local-controlled-prebattle-ranged-agent|WeaponCheck=" + ex.GetType().Name;
+                return true;
+            }
+
+            if (currentUsageItem == null || !currentUsageItem.IsRangedWeapon)
+                return false;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            Mission mission = agent.Mission ?? Mission.Current;
+            if (!TryGetLocalControlledPreBattleRangedHoldStatus(
+                    myPeer,
+                    mission,
+                    out CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+                    out string readinessStage))
+            {
+                return false;
+            }
+
+            reason =
+                "local-controlled-prebattle-ranged-agent" +
+                "|Slot=" + slotIndex +
+                "|ReloadPhase=" + reloadPhase +
+                "|ReadinessStage=" + readinessStage +
+                "|BattleDataReady=" + status.BattleDataReady +
+                "|CanStartBattle=" + status.CanStartBattle +
+                "|HasAgent=" + status.HasAgent +
+                "|LifecycleState=" + (status.LifecycleState ?? string.Empty) +
+                "|UsageClass=" + currentUsageItem.WeaponClass;
+            return true;
+        }
+
+        private static bool TryGetLocalControlledPreBattleRangedHoldStatus(
+            NetworkCommunicator networkPeer,
+            Mission mission,
+            out CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+            out string readinessStage)
+        {
+            status = null;
+            readinessStage = string.Empty;
+
+            if (!TryIsClientPreBattleRangedHoldWindow(
+                    networkPeer,
+                    mission,
+                    out status,
+                    out readinessStage))
+            {
+                return false;
+            }
+
+            return
+                !status.BattleDataReady &&
+                status.HasAgent &&
+                status.CanStartBattle &&
+                string.Equals(status.LifecycleState, "Alive", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(readinessStage, "Loading", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool TryIsClientPreBattleRangedHoldWindow(
+            NetworkCommunicator networkPeer,
+            Mission mission,
+            out CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+            out string readinessStage)
+        {
+            status = ReadRelevantBattleMapStatus(networkPeer, mission);
+            readinessStage = status?.BattleDataReadinessStage?.Trim() ?? string.Empty;
+            if (status == null)
+                return false;
+
+            bool sideOrUnitSelectionWindow =
+                status.BattleDataReady &&
+                !status.HasAgent &&
+                (string.Equals(readinessStage, "SideSelection", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(readinessStage, "UnitSelection", StringComparison.OrdinalIgnoreCase));
+            if (sideOrUnitSelectionWindow)
+                return true;
+
+            bool localControlledLoadingWindow =
+                !status.BattleDataReady &&
+                status.HasAgent &&
+                status.CanStartBattle &&
+                string.Equals(status.LifecycleState, "Alive", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(readinessStage, "Loading", StringComparison.OrdinalIgnoreCase);
+            return localControlledLoadingWindow;
         }
 
         private static string BuildSetWeaponNetworkDataSemanticSummary(Agent agent, EquipmentIndex slotIndex)
@@ -6790,7 +7015,36 @@ namespace CoopSpectator.Patches
                 Agent existingAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(createAgent.AgentIndex, canBeNull: true);
                 if (existingAgent != null && existingAgent.IsActive())
                 {
-                    RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
+                    if (CoopMissionSpawnLogic.DoesClientActiveAgentSatisfyDeferredCreateAgentPayload(
+                            existingAgent,
+                            createAgent,
+                            out string existingAgentMatchReason))
+                    {
+                        RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: completed deferred client CreateAgent because a matching runtime agent already occupied the target index. " +
+                            "AgentIndex=" + createAgent.AgentIndex +
+                            " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                            " Reason=" + (existingAgentMatchReason ?? "unknown") +
+                            " Source=" + (source ?? "unknown"));
+                    }
+                    else
+                    {
+                        deferredPayload.LastAttemptUtc = nowUtc;
+                        deferredPayload.Attempts++;
+                        if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                        {
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: kept deferred client CreateAgent because the active runtime agent at the target index did not match the deferred payload. " +
+                                "AgentIndex=" + createAgent.AgentIndex +
+                                " ExistingTroopId=" + (existingAgent.Character?.StringId ?? "null") +
+                                " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                                " Attempts=" + deferredPayload.Attempts +
+                                " Reason=" + (existingAgentMatchReason ?? "unknown") +
+                                " Source=" + (source ?? "unknown") +
+                                " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown"));
+                        }
+                    }
                     continue;
                 }
 
