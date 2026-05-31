@@ -51,6 +51,8 @@ namespace CoopSpectator.Patches
         private static MethodInfo _missionNetworkComponentHandleServerEventSetWieldedItemIndexMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSetAgentHealthMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventMakeAgentDeadMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventSetPeerTeamMethod;
+        private static MethodInfo _missionLobbyComponentHandleServerEventChangeCultureMethod;
 
         private static string _lastSuppressedFollowSwitchKey;
         private static string _lastArmedLocalFollowSuppressionWindowKey;
@@ -122,6 +124,13 @@ namespace CoopSpectator.Patches
         private static string _lastForcedExactCommanderTroopSelectionInputsKey;
         private static string _lastExactCommanderOrderItemExecutionKey;
         private static string _lastSuppressedNativeAgentVisualBootstrapKey;
+        private static string _lastSuppressedLocalPeerTeamCompatibilityKey;
+        private static string _lastSuppressedLocalPeerCultureCompatibilityKey;
+        private static string _lastSuppressedClientWeaponAmountNativeKey;
+        private static string _lastSuppressedClientWeaponAmmoNativeKey;
+        private static string _lastSuppressedClientWeaponNetworkDataMessageKey;
+        private static string _lastSuppressedClientWeaponAmmoDataMessageKey;
+        private static string _lastSuppressedClientWeaponReloadPhaseMessageKey;
         private static string _lastDeferredClientRecoverySelectionGateKey;
         private static bool _suppressExactCommanderOrderHotkeyFallbackUntilRelease;
         private static object _activeExactCommanderMissionOrderVm;
@@ -432,6 +441,7 @@ namespace CoopSpectator.Patches
             public DateTime LastAttemptUtc;
             public int Attempts;
             public string DeferralReason;
+            public bool DeferredOnSpawnObservationReported;
         }
 
         private sealed class DeferredClientSetAgentHealthPayload
@@ -482,6 +492,8 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAttachWeaponToWeaponInAgentEquipmentSlot), () => PatchMissionNetworkComponentAttachWeaponToWeaponInAgentEquipmentSlot(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponNetworkData), () => PatchMissionNetworkComponentSetWeaponNetworkData(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponAmmoData), () => PatchMissionNetworkComponentSetWeaponAmmoData(harmony));
+            TryApplyPatchStep(nameof(PatchAgentSetWeaponAmountInSlot), () => PatchAgentSetWeaponAmountInSlot(harmony));
+            TryApplyPatchStep(nameof(PatchAgentSetWeaponAmmoAsClient), () => PatchAgentSetWeaponAmmoAsClient(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponReloadPhase), () => PatchMissionNetworkComponentSetWeaponReloadPhase(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentStartSwitchingWeaponUsageIndex), () => PatchMissionNetworkComponentStartSwitchingWeaponUsageIndex(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentWeaponUsageIndexChangeMessage), () => PatchMissionNetworkComponentWeaponUsageIndexChangeMessage(harmony));
@@ -492,6 +504,8 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentMakeAgentDead), () => PatchMissionNetworkComponentMakeAgentDead(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWieldedItemIndex), () => PatchMissionNetworkComponentSetWieldedItemIndex(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent), () => PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentHandleServerEventSetPeerTeam), () => PatchMissionNetworkComponentHandleServerEventSetPeerTeam(harmony));
+            TryApplyPatchStep(nameof(PatchMissionLobbyComponentHandleServerEventChangeCulture), () => PatchMissionLobbyComponentHandleServerEventChangeCulture(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentOnPeerSelectedTeam), () => PatchMissionNetworkComponentOnPeerSelectedTeam(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSendAgentsToPeerServer), () => PatchMissionNetworkComponentSendAgentsToPeerServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionOnAgentAddedAsCorpseServer), () => PatchMissionOnAgentAddedAsCorpseServer(harmony));
@@ -724,6 +738,13 @@ namespace CoopSpectator.Patches
             _lastForcedExactCommanderTroopSelectionInputsKey = null;
             _lastExactCommanderOrderItemExecutionKey = null;
             _lastDeferredClientRecoverySelectionGateKey = null;
+            _lastSuppressedLocalPeerTeamCompatibilityKey = null;
+            _lastSuppressedLocalPeerCultureCompatibilityKey = null;
+            _lastSuppressedClientWeaponAmountNativeKey = null;
+            _lastSuppressedClientWeaponAmmoNativeKey = null;
+            _lastSuppressedClientWeaponNetworkDataMessageKey = null;
+            _lastSuppressedClientWeaponAmmoDataMessageKey = null;
+            _lastSuppressedClientWeaponReloadPhaseMessageKey = null;
             if (!preserveCommanderOrderControlState)
             {
                 _suppressExactCommanderOrderHotkeyFallbackUntilRelease = false;
@@ -1041,6 +1062,42 @@ namespace CoopSpectator.Patches
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetWeaponAmmoData.");
         }
 
+        private static void PatchAgentSetWeaponAmountInSlot(Harmony harmony)
+        {
+            MethodInfo target = typeof(Agent).GetMethod(
+                nameof(Agent.SetWeaponAmountInSlot),
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_SetWeaponAmountInSlot_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.SetWeaponAmountInSlot not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.SetWeaponAmountInSlot.");
+        }
+
+        private static void PatchAgentSetWeaponAmmoAsClient(Harmony harmony)
+        {
+            MethodInfo target = typeof(Agent).GetMethod(
+                nameof(Agent.SetWeaponAmmoAsClient),
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_SetWeaponAmmoAsClient_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.SetWeaponAmmoAsClient not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.SetWeaponAmmoAsClient.");
+        }
+
         private static void PatchMissionNetworkComponentSetWeaponReloadPhase(Harmony harmony)
         {
             MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
@@ -1295,6 +1352,48 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.OnPeerSelectedTeam.");
+        }
+
+        private static void PatchMissionNetworkComponentHandleServerEventSetPeerTeam(Harmony harmony)
+        {
+            if (_missionNetworkComponentHandleServerEventSetPeerTeamMethod == null)
+            {
+                _missionNetworkComponentHandleServerEventSetPeerTeamMethod = typeof(MissionNetworkComponent).GetMethod(
+                    "HandleServerEventSetPeerTeam",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetPeerTeam_ClientPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (_missionNetworkComponentHandleServerEventSetPeerTeamMethod == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetPeerTeam not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(_missionNetworkComponentHandleServerEventSetPeerTeamMethod, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetPeerTeam.");
+        }
+
+        private static void PatchMissionLobbyComponentHandleServerEventChangeCulture(Harmony harmony)
+        {
+            if (_missionLobbyComponentHandleServerEventChangeCultureMethod == null)
+            {
+                _missionLobbyComponentHandleServerEventChangeCultureMethod = typeof(MissionLobbyComponent).GetMethod(
+                    "HandleServerEventChangeCulture",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionLobbyComponent_HandleServerEventChangeCulture_ClientPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (_missionLobbyComponentHandleServerEventChangeCultureMethod == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionLobbyComponent.HandleServerEventChangeCulture not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(_missionLobbyComponentHandleServerEventChangeCultureMethod, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionLobbyComponent.HandleServerEventChangeCulture.");
         }
 
         private static void PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer(Harmony harmony)
@@ -2484,6 +2583,68 @@ namespace CoopSpectator.Patches
             return true;
         }
 
+        private static bool ShouldDeferClientSelectionGateWeaponRuntimeReadyMessage(
+            Mission mission,
+            Agent agent,
+            int agentIndex,
+            string messageKind,
+            out string deferralReason)
+        {
+            deferralReason = null;
+            if (agentIndex < 0 ||
+                mission == null ||
+                agent == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                agent.Team == null ||
+                agent.Team.Side == BattleSideEnum.None ||
+                !ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+            {
+                return false;
+            }
+
+            if (!CoopMissionSpawnLogic.ShouldDeferClientExactRuntimeBootstrapForSelectionScreen(
+                    out string selectionGateReason))
+            {
+                return false;
+            }
+
+            if (!CoopMissionSpawnLogic.TryResolveClientAuthoritativeMaterializedEntryId(
+                    agentIndex,
+                    out string authoritativeEntryId) ||
+                string.IsNullOrWhiteSpace(authoritativeEntryId))
+            {
+                return false;
+            }
+
+            string finalizeSource =
+                "battle-map handoff " + (messageKind ?? "weapon corridor") +
+                " selection-gate weapon-ready";
+            bool exactVisualReady =
+                CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
+                    mission,
+                    agent,
+                    authoritativeEntryId,
+                    finalizeSource,
+                    includeWeaponsForClientRefresh: true,
+                    allowImmediateApply: true) ||
+                CoopMissionSpawnLogic.TryFinalizeClientExactCampaignTroopVisualForPeerAgent(
+                    mission,
+                    agent,
+                    finalizeSource,
+                    includeWeaponsForClientRefresh: true,
+                    allowImmediateApply: true);
+            if (exactVisualReady)
+                return false;
+
+            deferralReason =
+                "selection-gate-local-weapon-ready-pending:" +
+                (selectionGateReason ?? "unknown") +
+                "|EntryId=" + authoritativeEntryId +
+                "|Message=" + (messageKind ?? "weapon corridor");
+            return true;
+        }
+
         internal static void ClearDeferredClientMountedHeroCreateAgents(string source)
         {
             int clearedCount;
@@ -3297,12 +3458,12 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void RegisterDeferredClientSetWieldedItemIndexPayload(
+        private static DeferredClientSetWieldedItemIndexPayload RegisterDeferredClientSetWieldedItemIndexPayload(
             SetWieldedItemIndex setWieldedItemIndex,
             string deferralReason)
         {
             if (setWieldedItemIndex == null)
-                return;
+                return null;
 
             lock (DeferredClientSetWieldedItemIndexPayloads)
             {
@@ -3315,10 +3476,10 @@ namespace CoopSpectator.Patches
                 {
                     existingPayload.Message = setWieldedItemIndex;
                     existingPayload.DeferralReason = deferralReason;
-                    return;
+                    return existingPayload;
                 }
 
-                DeferredClientSetWieldedItemIndexPayloads.Add(
+                DeferredClientSetWieldedItemIndexPayload payload =
                     new DeferredClientSetWieldedItemIndexPayload
                     {
                         Sequence = ++_nextDeferredClientSetWieldedItemIndexSequence,
@@ -3326,9 +3487,45 @@ namespace CoopSpectator.Patches
                         DeferredUtc = DateTime.UtcNow,
                         LastAttemptUtc = DateTime.MinValue,
                         Attempts = 0,
-                        DeferralReason = deferralReason
-                    });
+                        DeferralReason = deferralReason,
+                        DeferredOnSpawnObservationReported = false
+                    };
+                DeferredClientSetWieldedItemIndexPayloads.Add(payload);
+                return payload;
             }
+        }
+
+        private static void ReportDeferredClientSetWieldedItemIndexOnSpawnObservation(
+            DeferredClientSetWieldedItemIndexPayload deferredPayload,
+            Agent agent,
+            string source)
+        {
+            if (deferredPayload == null ||
+                deferredPayload.DeferredOnSpawnObservationReported)
+            {
+                return;
+            }
+
+            SetWieldedItemIndex setWieldedItemIndex = deferredPayload.Message;
+            if (setWieldedItemIndex == null ||
+                !setWieldedItemIndex.IsWieldedOnSpawn ||
+                agent == null ||
+                !agent.IsActive())
+            {
+                return;
+            }
+
+            CoopMissionSpawnLogic.ObserveClientSetWieldedItemIndex(
+                setWieldedItemIndex.AgentIndex,
+                isWieldedOnSpawn: true,
+                source ?? "battle-map handoff deferred SetWieldedItemIndex on-spawn observation");
+            deferredPayload.DeferredOnSpawnObservationReported = true;
+
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: recorded deferred client SetWieldedItemIndex on-spawn observation without native execution so local exact init can progress during selection gate. " +
+                "AgentIndex=" + setWieldedItemIndex.AgentIndex +
+                " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                " Source=" + (source ?? "unknown"));
         }
 
         private static void RegisterDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload(
@@ -4046,6 +4243,387 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool TryValidateClientNativeWeaponSlotRuntime(
+            Agent agent,
+            EquipmentIndex slotIndex,
+            bool requireWeaponEntity,
+            out string reason)
+        {
+            reason = null;
+
+            if (agent == null)
+            {
+                reason = "agent-null";
+                return false;
+            }
+
+            if (slotIndex == EquipmentIndex.None)
+            {
+                reason = "slot-none";
+                return false;
+            }
+
+            try
+            {
+                MissionWeapon slotWeapon = agent.Equipment[slotIndex];
+                if (slotWeapon.IsEmpty || slotWeapon.Item == null)
+                {
+                    reason = "slot-empty";
+                    return false;
+                }
+
+                if (slotWeapon.CurrentUsageItem == null)
+                {
+                    reason = "usage-null";
+                    return false;
+                }
+
+                if (requireWeaponEntity)
+                {
+                    WeakGameEntity weaponEntity = agent.GetWeaponEntityFromEquipmentSlot(slotIndex);
+                    if (!weaponEntity.IsValid)
+                    {
+                        reason = "weapon-entity-invalid";
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                reason = "validation-failed:" + ex.GetType().Name;
+                return false;
+            }
+        }
+
+        private static bool IsClientConsumableAmmoEquipmentSlot(
+            Agent agent,
+            EquipmentIndex slotIndex)
+        {
+            if (agent == null || slotIndex < EquipmentIndex.Weapon0 || slotIndex > EquipmentIndex.Weapon3)
+                return false;
+
+            try
+            {
+                MissionWeapon missionWeapon = agent.Equipment[slotIndex];
+                WeaponComponentData currentUsageItem = missionWeapon.CurrentUsageItem;
+                return currentUsageItem != null &&
+                       currentUsageItem.IsConsumable &&
+                       !currentUsageItem.IsRangedWeapon;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsLocalPeerControlledBattleAgent(Agent agent)
+        {
+            if (agent == null || GameNetwork.IsServer)
+                return false;
+
+            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            return localMissionPeer != null &&
+                   (ReferenceEquals(localMissionPeer.ControlledAgent, agent) ||
+                    ReferenceEquals(agent.MissionPeer, localMissionPeer));
+        }
+
+        private static bool ShouldSuppressClientNativeExactNoShieldRangedAiMutation(
+            Agent agent,
+            out string reason)
+        {
+            reason = null;
+
+            if (agent == null ||
+                GameNetwork.IsServer ||
+                agent.IsMount ||
+                agent.Controller == AgentControllerType.Player ||
+                IsLocalPeerControlledBattleAgent(agent))
+            {
+                return false;
+            }
+
+            string entryId = null;
+            string entryResolutionSource = null;
+            if (CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out string authoritativeTrackedEntryId) &&
+                !string.IsNullOrWhiteSpace(authoritativeTrackedEntryId))
+            {
+                entryId = authoritativeTrackedEntryId;
+                entryResolutionSource = "authoritative-tracked";
+            }
+            else if (ExactCampaignArmyBootstrap.TryGetEntryId(agent, out string bootstrapEntryId) &&
+                     !string.IsNullOrWhiteSpace(bootstrapEntryId))
+            {
+                entryId = bootstrapEntryId;
+                entryResolutionSource = "bootstrap";
+            }
+
+            if (string.IsNullOrWhiteSpace(entryId))
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (entryState == null || entryState.IsMounted || entryState.HasShield)
+                return false;
+
+            bool hasRangedWeapon = false;
+            bool hasAmmoSlot = false;
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                try
+                {
+                    MissionWeapon missionWeapon = agent.Equipment[slot];
+                    if (missionWeapon.IsEmpty || missionWeapon.Item == null)
+                        continue;
+
+                    WeaponComponentData currentUsageItem = missionWeapon.CurrentUsageItem;
+                    if (currentUsageItem == null)
+                        continue;
+
+                    if (currentUsageItem.IsRangedWeapon)
+                    {
+                        hasRangedWeapon = true;
+                    }
+                    else if (currentUsageItem.IsConsumable)
+                    {
+                        hasAmmoSlot = true;
+                    }
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+
+            if (!hasRangedWeapon || !hasAmmoSlot)
+                return false;
+
+            reason =
+                "non-local-exact-no-shield-ranged-ai" +
+                "|EntryId=" + entryId +
+                "|EntryResolution=" + (entryResolutionSource ?? "unknown") +
+                "|Hero=" + entryState.IsHero +
+                "|Controller=" + agent.Controller;
+            return true;
+        }
+
+        private static bool ShouldSuppressUnsafeClientWeaponAmountNativeUpdate(
+            Agent agent,
+            EquipmentIndex slotIndex,
+            short amount,
+            bool enforcePrimaryItem,
+            out string reason)
+        {
+            reason = null;
+
+            if (ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out string exactRangedReason) &&
+                IsClientConsumableAmmoEquipmentSlot(agent, slotIndex))
+            {
+                reason =
+                    exactRangedReason +
+                    "|Mutation=amount" +
+                    "|Slot=" + slotIndex +
+                    "|Amount=" + amount +
+                    "|EnforcePrimaryItem=" + enforcePrimaryItem;
+                return true;
+            }
+
+            if (!TryValidateClientNativeWeaponSlotRuntime(agent, slotIndex, requireWeaponEntity: true, out string slotReason))
+            {
+                reason = slotReason;
+                return true;
+            }
+
+            try
+            {
+                WeaponComponentData currentUsageItem = agent.Equipment[slotIndex].CurrentUsageItem;
+                if (currentUsageItem == null || !currentUsageItem.IsConsumable)
+                    return false;
+
+                if (amount <= 0 && agent.Equipment[slotIndex].Amount <= 0)
+                {
+                    reason =
+                        "consumable-already-empty" +
+                        "|Amount=" + amount +
+                        "|EnforcePrimaryItem=" + enforcePrimaryItem;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                reason = "amount-check-failed:" + ex.GetType().Name;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool ShouldSuppressUnsafeClientWeaponAmmoNativeUpdate(
+            Agent agent,
+            EquipmentIndex weaponSlotIndex,
+            EquipmentIndex ammoSlotIndex,
+            short ammo,
+            out string reason)
+        {
+            reason = null;
+
+            if (ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out string exactRangedReason))
+            {
+                reason =
+                    exactRangedReason +
+                    "|Mutation=ammo" +
+                    "|WeaponSlot=" + weaponSlotIndex +
+                    "|AmmoSlot=" + ammoSlotIndex +
+                    "|Ammo=" + ammo;
+                return true;
+            }
+
+            if (!TryValidateClientNativeWeaponSlotRuntime(agent, weaponSlotIndex, requireWeaponEntity: true, out string weaponReason))
+            {
+                reason = "weapon-" + weaponReason;
+                return true;
+            }
+
+            try
+            {
+                MissionWeapon weaponSlot = agent.Equipment[weaponSlotIndex];
+                WeaponComponentData currentUsageItem = weaponSlot.CurrentUsageItem;
+                if (currentUsageItem == null || !currentUsageItem.IsRangedWeapon)
+                {
+                    reason = "weapon-not-ranged";
+                    return true;
+                }
+
+                if (ammoSlotIndex != EquipmentIndex.None)
+                {
+                    if (!TryValidateClientNativeWeaponSlotRuntime(agent, ammoSlotIndex, requireWeaponEntity: false, out string ammoReason))
+                    {
+                        reason = "ammo-" + ammoReason;
+                        return true;
+                    }
+
+                    return false;
+                }
+
+                if (!currentUsageItem.IsConsumable && weaponSlot.AmmoWeapon.IsEmpty)
+                {
+                    reason =
+                        "ammo-backend-empty" +
+                        "|Ammo=" + ammo +
+                        "|UsageClass=" + currentUsageItem.WeaponClass;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                reason = "ammo-check-failed:" + ex.GetType().Name;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool ShouldSuppressUnsafeClientWeaponNetworkDataMessage(
+            Agent agent,
+            EquipmentIndex slotIndex,
+            int dataValue,
+            out string reason)
+        {
+            reason = null;
+
+            if (!ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out string exactRangedReason))
+                return false;
+
+            string dataSemantic = BuildSetWeaponNetworkDataSemanticSummary(agent, slotIndex);
+            if (!string.Equals(dataSemantic, "amount", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            reason =
+                exactRangedReason +
+                "|Mutation=network-data-message" +
+                "|Slot=" + slotIndex +
+                "|DataValue=" + dataValue +
+                "|Semantic=" + dataSemantic;
+            return true;
+        }
+
+        private static bool ShouldSuppressUnsafeClientWeaponAmmoDataMessage(
+            Agent agent,
+            EquipmentIndex weaponSlotIndex,
+            EquipmentIndex ammoSlotIndex,
+            short ammo,
+            out string reason)
+        {
+            reason = null;
+
+            if (!ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out string exactRangedReason))
+                return false;
+
+            if (!TryValidateClientNativeWeaponSlotRuntime(agent, weaponSlotIndex, requireWeaponEntity: false, out string weaponReason))
+            {
+                reason =
+                    exactRangedReason +
+                    "|Mutation=ammo-message" +
+                    "|WeaponSlot=" + weaponSlotIndex +
+                    "|AmmoSlot=" + ammoSlotIndex +
+                    "|Ammo=" + ammo +
+                    "|WeaponRuntime=" + weaponReason;
+                return true;
+            }
+
+            try
+            {
+                WeaponComponentData currentUsageItem = agent.Equipment[weaponSlotIndex].CurrentUsageItem;
+                if (currentUsageItem == null || !currentUsageItem.IsRangedWeapon)
+                    return false;
+            }
+            catch (Exception ex)
+            {
+                reason =
+                    exactRangedReason +
+                    "|Mutation=ammo-message" +
+                    "|WeaponSlot=" + weaponSlotIndex +
+                    "|AmmoSlot=" + ammoSlotIndex +
+                    "|Ammo=" + ammo +
+                    "|WeaponCheck=" + ex.GetType().Name;
+                return true;
+            }
+
+            reason =
+                exactRangedReason +
+                "|Mutation=ammo-message" +
+                "|WeaponSlot=" + weaponSlotIndex +
+                "|AmmoSlot=" + ammoSlotIndex +
+                "|Ammo=" + ammo;
+            return true;
+        }
+
+        private static bool ShouldSuppressPreBattleClientWeaponReloadPhaseMessage(
+            Agent agent,
+            EquipmentIndex slotIndex,
+            short reloadPhase,
+            out string reason)
+        {
+            reason = null;
+
+            if (!ShouldSuppressClientNativeExactNoShieldRangedAiMutation(agent, out string exactRangedReason))
+                return false;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase >= CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
+                return false;
+
+            reason =
+                exactRangedReason +
+                "|Mutation=reload-phase-message" +
+                "|Slot=" + slotIndex +
+                "|ReloadPhase=" + reloadPhase +
+                "|BattlePhase=" + currentPhase;
+            return true;
+        }
+
         private static string BuildSetWeaponNetworkDataSemanticSummary(Agent agent, EquipmentIndex slotIndex)
         {
             try
@@ -4531,6 +5109,70 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool MissionNetworkComponent_HandleServerEventSetPeerTeam_ClientPrefix(
+            MissionNetworkComponent __instance,
+            GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                SetPeerTeam setPeerTeam = baseMessage as SetPeerTeam;
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (setPeerTeam?.Peer == null ||
+                    !ShouldSuppressNativeLocalPeerCompatibilityHandler(mission, setPeerTeam.Peer))
+                {
+                    return true;
+                }
+
+                NetworkCommunicator peer = setPeerTeam.Peer;
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                Team targetTeam = mission != null
+                    ? Mission.MissionNetworkHelper.GetTeamFromTeamIndex(setPeerTeam.TeamIndex)
+                    : null;
+                ApplyClientPeerTeamCompatibilityBridgeWithoutNativeCallbacks(
+                    mission,
+                    missionPeer,
+                    peer,
+                    targetTeam,
+                    "MissionNetworkComponent.HandleServerEventSetPeerTeam");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: local peer SetPeerTeam compatibility bridge failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool MissionLobbyComponent_HandleServerEventChangeCulture_ClientPrefix(
+            MissionLobbyComponent __instance,
+            GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                ChangeCulture changeCulture = baseMessage as ChangeCulture;
+                Mission mission = __instance?.Mission ?? Mission.Current;
+                if (changeCulture?.Peer == null ||
+                    !ShouldSuppressNativeLocalPeerCompatibilityHandler(mission, changeCulture.Peer))
+                {
+                    return true;
+                }
+
+                NetworkCommunicator peer = changeCulture.Peer;
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                ApplyClientPeerCultureCompatibilityBridgeWithoutNativeCallbacks(
+                    missionPeer,
+                    peer,
+                    changeCulture.Culture,
+                    "MissionLobbyComponent.HandleServerEventChangeCulture");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: local peer ChangeCulture compatibility bridge failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static bool ShouldSuppressNativeAgentVisualBootstrap(Mission mission, MissionPeer missionPeer)
         {
             if (!GameNetwork.IsServer || mission == null || missionPeer == null)
@@ -4546,7 +5188,122 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null;
+            return IsClientOrServerCoopBattleMapRuntime(mission);
+        }
+
+        private static bool ShouldSuppressNativeLocalPeerCompatibilityHandler(
+            Mission mission,
+            NetworkCommunicator peer)
+        {
+            if (!GameNetwork.IsClient || GameNetwork.IsServer || mission == null || peer == null)
+                return false;
+
+            string sceneName = mission.SceneName ?? string.Empty;
+            if (!MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(sceneName) ||
+                !SceneRuntimeClassifier.IsCampaignBattleScene(sceneName))
+            {
+                return false;
+            }
+
+            if (!IsLocalMissionPeerCommunicator(peer))
+                return false;
+
+            if (!IsClientOrServerCoopBattleMapRuntime(mission))
+                return false;
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            return status?.HasAgent != true;
+        }
+
+        private static bool IsClientOrServerCoopBattleMapRuntime(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null ||
+                   mission.GetMissionBehavior<MissionMultiplayerCoopBattleClient>() != null ||
+                   mission.GetMissionBehavior<CoopMissionSpawnLogic>() != null;
+        }
+
+        private static bool IsLocalMissionPeerCommunicator(NetworkCommunicator peer)
+        {
+            if (peer == null)
+                return false;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            MissionPeer myMissionPeer = myPeer?.GetComponent<MissionPeer>();
+            MissionPeer payloadMissionPeer = peer.GetComponent<MissionPeer>();
+            return peer.IsMine ||
+                   ReferenceEquals(peer, myPeer) ||
+                   (payloadMissionPeer != null && ReferenceEquals(payloadMissionPeer, myMissionPeer));
+        }
+
+        private static void ApplyClientPeerTeamCompatibilityBridgeWithoutNativeCallbacks(
+            Mission mission,
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            Team targetTeam,
+            string source)
+        {
+            if (missionPeer != null)
+            {
+                TrySetInstanceMemberValue(missionPeer, "_team", targetTeam);
+                TrySetInstanceMemberValue(missionPeer, "_controlledFormation", null);
+                TrySetInstanceMemberValue(missionPeer, "<Team>k__BackingField", targetTeam);
+            }
+
+            if (mission != null && IsLocalMissionPeerCommunicator(peer))
+            {
+                object teams = TryGetInstanceMemberValue(mission, "Teams");
+                if (teams != null)
+                {
+                    TrySetInstanceMemberValue(teams, "_playerTeam", targetTeam);
+                    TryInvokeParameterlessMethod(teams, "AdjustPlayerTeams");
+                }
+            }
+
+            string key =
+                (mission?.SceneName ?? "unknown") + "|" +
+                (peer?.Index.ToString() ?? "null") + "|" +
+                (targetTeam?.TeamIndex.ToString() ?? "null") + "|" +
+                (targetTeam?.Side.ToString() ?? "null");
+            if (!string.Equals(_lastSuppressedLocalPeerTeamCompatibilityKey, key, StringComparison.Ordinal))
+            {
+                _lastSuppressedLocalPeerTeamCompatibilityKey = key;
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: suppressed native local-peer SetPeerTeam handler and bridged team compatibility state without MissionPeer.Team setter side effects. " +
+                    "Scene=" + (mission?.SceneName ?? "unknown") +
+                    " Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "null") +
+                    " TeamIndex=" + (targetTeam?.TeamIndex.ToString() ?? "null") +
+                    " TeamSide=" + (targetTeam?.Side.ToString() ?? "null") +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private static void ApplyClientPeerCultureCompatibilityBridgeWithoutNativeCallbacks(
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            BasicCultureObject culture,
+            string source)
+        {
+            if (missionPeer != null)
+            {
+                TrySetInstanceMemberValue(missionPeer, "_culture", culture);
+                TrySetInstanceMemberValue(missionPeer, "<Culture>k__BackingField", culture);
+            }
+
+            string key =
+                (peer?.Index.ToString() ?? "null") + "|" +
+                (culture?.StringId ?? "null");
+            if (!string.Equals(_lastSuppressedLocalPeerCultureCompatibilityKey, key, StringComparison.Ordinal))
+            {
+                _lastSuppressedLocalPeerCultureCompatibilityKey = key;
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: suppressed native local-peer ChangeCulture handler and bridged culture compatibility state without MissionPeer.Culture setter side effects. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "null") +
+                    " Culture=" + (culture?.StringId ?? "null") +
+                    " Source=" + (source ?? "unknown"));
+            }
         }
 
         private static bool Mission_SpawnAttachedWeaponOnCorpse_ServerPrefix(
@@ -6951,6 +7708,16 @@ namespace CoopSpectator.Patches
                     continue;
                 }
 
+                if (ShouldDeferClientSelectionGateWeaponRuntimeReadyMessage(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.AgentIndex,
+                        "SetWeaponReloadPhase",
+                        out _))
+                {
+                    continue;
+                }
+
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
                 try
@@ -7302,6 +8069,20 @@ namespace CoopSpectator.Patches
                     continue;
                 }
 
+                if (ShouldDeferClientSelectionGateWeaponRuntimeReadyMessage(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.AgentIndex,
+                        "SetWieldedItemIndex",
+                        out _))
+                {
+                    ReportDeferredClientSetWieldedItemIndexOnSpawnObservation(
+                        deferredPayload,
+                        agent,
+                        "battle-map handoff deferred SetWieldedItemIndex replay selection-gate local-weapon-ready");
+                    continue;
+                }
+
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
                 try
@@ -7377,6 +8158,16 @@ namespace CoopSpectator.Patches
                         mission,
                         agent,
                         startSwitchingWeaponUsageIndex.AgentIndex,
+                        out _))
+                {
+                    continue;
+                }
+
+                if (ShouldDeferClientSelectionGateWeaponRuntimeReadyMessage(
+                        mission,
+                        agent,
+                        startSwitchingWeaponUsageIndex.AgentIndex,
+                        "StartSwitchingWeaponUsageIndex",
                         out _))
                 {
                     continue;
@@ -7461,6 +8252,16 @@ namespace CoopSpectator.Patches
                         mission,
                         agent,
                         weaponUsageIndexChangeMessage.AgentIndex,
+                        out _))
+                {
+                    continue;
+                }
+
+                if (ShouldDeferClientSelectionGateWeaponRuntimeReadyMessage(
+                        mission,
+                        agent,
+                        weaponUsageIndexChangeMessage.AgentIndex,
+                        "WeaponUsageIndexChangeMessage",
                         out _))
                 {
                     continue;
@@ -9997,6 +10798,32 @@ namespace CoopSpectator.Patches
                     }
                 }
 
+                if (ShouldSuppressUnsafeClientWeaponNetworkDataMessage(
+                        agent,
+                        setWeaponNetworkData.WeaponEquipmentIndex,
+                        setWeaponNetworkData.DataValue,
+                        out string suppressReason))
+                {
+                    string logKey =
+                        (agent?.Index ?? -1) + "|" +
+                        setWeaponNetworkData.WeaponEquipmentIndex + "|" +
+                        setWeaponNetworkData.DataValue + "|" +
+                        suppressReason;
+                    if (!string.Equals(_lastSuppressedClientWeaponNetworkDataMessageKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedClientWeaponNetworkDataMessageKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed client SetWeaponNetworkData before native handler because exact ranged AI ammo runtime is unsafe. " +
+                            "AgentIndex=" + setWeaponNetworkData.AgentIndex +
+                            " WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex +
+                            " DataValue=" + setWeaponNetworkData.DataValue +
+                            " Reason=" + suppressReason +
+                            " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(agent, setWeaponNetworkData.WeaponEquipmentIndex) + "}");
+                    }
+
+                    return false;
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -10072,11 +10899,148 @@ namespace CoopSpectator.Patches
                     }
                 }
 
+                if (ShouldSuppressUnsafeClientWeaponAmmoDataMessage(
+                        agent,
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        setWeaponAmmoData.AmmoEquipmentIndex,
+                        setWeaponAmmoData.Ammo,
+                        out string suppressReason))
+                {
+                    string logKey =
+                        (agent?.Index ?? -1) + "|" +
+                        setWeaponAmmoData.WeaponEquipmentIndex + "|" +
+                        setWeaponAmmoData.AmmoEquipmentIndex + "|" +
+                        setWeaponAmmoData.Ammo + "|" +
+                        suppressReason;
+                    if (!string.Equals(_lastSuppressedClientWeaponAmmoDataMessageKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedClientWeaponAmmoDataMessageKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed client SetWeaponAmmoData before native handler because exact ranged AI ammo runtime is unsafe. " +
+                            "AgentIndex=" + setWeaponAmmoData.AgentIndex +
+                            " WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
+                            " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex +
+                            " Ammo=" + setWeaponAmmoData.Ammo +
+                            " Reason=" + suppressReason +
+                            " WeaponSlot={" + BuildMountedWeaponSlotObservationSummary(agent, setWeaponAmmoData.WeaponEquipmentIndex) + "} " +
+                            "AmmoSlot={" + BuildMountedWeaponSlotObservationSummary(agent, setWeaponAmmoData.AmmoEquipmentIndex) + "}");
+                    }
+
+                    return false;
+                }
+
                 return true;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: SetWeaponAmmoData prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool Agent_SetWeaponAmountInSlot_Prefix(
+            Agent __instance,
+            EquipmentIndex equipmentSlot,
+            short amount,
+            bool enforcePrimaryItem)
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                    return true;
+
+                if (!ShouldSuppressUnsafeClientWeaponAmountNativeUpdate(
+                        __instance,
+                        equipmentSlot,
+                        amount,
+                        enforcePrimaryItem,
+                        out string suppressReason))
+                {
+                    return true;
+                }
+
+                string logKey =
+                    (__instance?.Index ?? -1) + "|" +
+                    equipmentSlot + "|" +
+                    amount + "|" +
+                    enforcePrimaryItem + "|" +
+                    suppressReason;
+                if (!string.Equals(_lastSuppressedClientWeaponAmountNativeKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedClientWeaponAmountNativeKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed client native SetWeaponAmountInSlot because local weapon runtime is unsafe. " +
+                        "AgentIndex=" + (__instance?.Index ?? -1) +
+                        " EquipmentSlot=" + equipmentSlot +
+                        " Amount=" + amount +
+                        " EnforcePrimaryItem=" + enforcePrimaryItem +
+                        " Reason=" + suppressReason +
+                        " Slot={" + BuildMountedWeaponSlotObservationSummary(__instance, equipmentSlot) + "}");
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.SetWeaponAmountInSlot prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool Agent_SetWeaponAmmoAsClient_Prefix(
+            Agent __instance,
+            EquipmentIndex equipmentIndex,
+            EquipmentIndex ammoEquipmentIndex,
+            short ammo)
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                    return true;
+
+                if (!ShouldSuppressUnsafeClientWeaponAmmoNativeUpdate(
+                        __instance,
+                        equipmentIndex,
+                        ammoEquipmentIndex,
+                        ammo,
+                        out string suppressReason))
+                {
+                    return true;
+                }
+
+                string logKey =
+                    (__instance?.Index ?? -1) + "|" +
+                    equipmentIndex + "|" +
+                    ammoEquipmentIndex + "|" +
+                    ammo + "|" +
+                    suppressReason;
+                if (!string.Equals(_lastSuppressedClientWeaponAmmoNativeKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedClientWeaponAmmoNativeKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed client native SetWeaponAmmoAsClient because local weapon runtime is unsafe. " +
+                        "AgentIndex=" + (__instance?.Index ?? -1) +
+                        " WeaponSlot=" + equipmentIndex +
+                        " AmmoSlot=" + ammoEquipmentIndex +
+                        " Ammo=" + ammo +
+                        " Reason=" + suppressReason +
+                        " WeaponSlot={" + BuildMountedWeaponSlotObservationSummary(__instance, equipmentIndex) + "} " +
+                        "AmmoSlot={" + BuildMountedWeaponSlotObservationSummary(__instance, ammoEquipmentIndex) + "}");
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.SetWeaponAmmoAsClient prefix failed open: " + ex.Message);
                 return true;
             }
         }
@@ -10140,6 +11104,50 @@ namespace CoopSpectator.Patches
                         "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
                         " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
                         " Reason=" + (authoritativeMaterializationReason ?? "unknown"));
+                    return false;
+                }
+
+                if (ShouldDeferClientSelectionGateWeaponRuntimeReadyMessage(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.AgentIndex,
+                        "SetWeaponReloadPhase",
+                        out string localWeaponReadyReason))
+                {
+                    RegisterDeferredClientSetWeaponReloadPhasePayload(
+                        setWeaponReloadPhase,
+                        localWeaponReadyReason ?? "selection-gate-local-weapon-ready-pending");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetWeaponReloadPhase until local weapon-ready exact state is finished during selection gate. " +
+                        "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
+                        " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
+                        " Reason=" + (localWeaponReadyReason ?? "unknown"));
+                    return false;
+                }
+
+                if (ShouldSuppressPreBattleClientWeaponReloadPhaseMessage(
+                        agent,
+                        setWeaponReloadPhase.EquipmentIndex,
+                        setWeaponReloadPhase.ReloadPhase,
+                        out string suppressReason))
+                {
+                    string logKey =
+                        (agent?.Index ?? -1) + "|" +
+                        setWeaponReloadPhase.EquipmentIndex + "|" +
+                        setWeaponReloadPhase.ReloadPhase + "|" +
+                        suppressReason;
+                    if (!string.Equals(_lastSuppressedClientWeaponReloadPhaseMessageKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedClientWeaponReloadPhaseMessageKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed client SetWeaponReloadPhase before native handler during pre-battle exact ranged AI hold. " +
+                            "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
+                            " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
+                            " ReloadPhase=" + setWeaponReloadPhase.ReloadPhase +
+                            " Reason=" + suppressReason +
+                            " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(agent, setWeaponReloadPhase.EquipmentIndex) + "}");
+                    }
+
                     return false;
                 }
 
@@ -10236,6 +11244,25 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (ShouldDeferClientSelectionGateWeaponRuntimeReadyMessage(
+                        mission,
+                        agent,
+                        startSwitchingWeaponUsageIndex.AgentIndex,
+                        "StartSwitchingWeaponUsageIndex",
+                        out string localWeaponReadyReason))
+                {
+                    RegisterDeferredClientStartSwitchingWeaponUsageIndexPayload(
+                        startSwitchingWeaponUsageIndex,
+                        localWeaponReadyReason ?? "selection-gate-local-weapon-ready-pending");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client StartSwitchingWeaponUsageIndex until local weapon-ready exact state is finished during selection gate. " +
+                        "AgentIndex=" + startSwitchingWeaponUsageIndex.AgentIndex +
+                        " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
+                        " UsageIndex=" + startSwitchingWeaponUsageIndex.UsageIndex +
+                        " Reason=" + (localWeaponReadyReason ?? "unknown"));
+                    return false;
+                }
+
                 if (agent != null && IsMountedUsageLifecycleAgent(agent))
                 {
                     string logKey =
@@ -10327,6 +11354,25 @@ namespace CoopSpectator.Patches
                         " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
                         " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex +
                         " Reason=" + (authoritativeMaterializationReason ?? "unknown"));
+                    return false;
+                }
+
+                if (ShouldDeferClientSelectionGateWeaponRuntimeReadyMessage(
+                        mission,
+                        agent,
+                        weaponUsageIndexChangeMessage.AgentIndex,
+                        "WeaponUsageIndexChangeMessage",
+                        out string localWeaponReadyReason))
+                {
+                    RegisterDeferredClientWeaponUsageIndexChangePayload(
+                        weaponUsageIndexChangeMessage,
+                        localWeaponReadyReason ?? "selection-gate-local-weapon-ready-pending");
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client WeaponUsageIndexChangeMessage until local weapon-ready exact state is finished during selection gate. " +
+                        "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
+                        " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
+                        " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex +
+                        " Reason=" + (localWeaponReadyReason ?? "unknown"));
                     return false;
                 }
 
@@ -10898,6 +11944,30 @@ namespace CoopSpectator.Patches
                         "AgentIndex=" + setWieldedItemIndex.AgentIndex +
                         " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
                         " Reason=" + (authoritativeMaterializationReason ?? "unknown"));
+                    return false;
+                }
+
+                if (ShouldDeferClientSelectionGateWeaponRuntimeReadyMessage(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.AgentIndex,
+                        "SetWieldedItemIndex",
+                        out string localWeaponReadyReason))
+                {
+                    DeferredClientSetWieldedItemIndexPayload deferredPayload =
+                        RegisterDeferredClientSetWieldedItemIndexPayload(
+                        setWieldedItemIndex,
+                        localWeaponReadyReason ?? "selection-gate-local-weapon-ready-pending");
+                    ReportDeferredClientSetWieldedItemIndexOnSpawnObservation(
+                        deferredPayload,
+                        agent,
+                        "battle-map handoff deferred SetWieldedItemIndex selection-gate local-weapon-ready");
+                    __state = true;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SetWieldedItemIndex until local weapon-ready exact state is finished during selection gate. " +
+                        "AgentIndex=" + setWieldedItemIndex.AgentIndex +
+                        " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                        " Reason=" + (localWeaponReadyReason ?? "unknown"));
                     return false;
                 }
 

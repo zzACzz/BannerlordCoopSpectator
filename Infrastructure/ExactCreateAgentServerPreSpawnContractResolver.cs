@@ -429,18 +429,26 @@ namespace CoopSpectator.Infrastructure
             bool includeArmorVisuals,
             bool includeMountVisuals)
         {
+            bool useNativeMountLifecycleForMountedHero =
+                CoopMissionSpawnLogic.ShouldUseNativeMountLifecycleForExactEntry(entryState);
             if (entryState == null ||
                 exactTransferContract == null ||
                 exactTransferValidation?.IsValid != true ||
                 !useContractDrivenPreSpawnPath ||
                 !includeWeapons ||
                 !includeArmorVisuals ||
-                !includeMountVisuals ||
                 !entryState.IsMounted ||
-                exactTransferContract.SpawnPolicy?.UseStrictExactHeroPath != true)
+                exactTransferContract.SpawnPolicy?.UseStrictExactHeroPath != true ||
+                exactTransferContract.InitialWield?.HasWeapon2Risk == true)
             {
                 return false;
             }
+
+            // Strict mounted heroes intentionally keep the native mount lifecycle.
+            // That should not suppress create-time exact rider equipment when the
+            // weapon contract is otherwise safe.
+            if (!includeMountVisuals && !useNativeMountLifecycleForMountedHero)
+                return false;
 
             var snapshot = BattleSnapshotRuntimeState.GetCurrent();
             if (snapshot?.CanonicalBattle == null)

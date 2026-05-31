@@ -808,8 +808,10 @@ namespace CoopSpectator.Infrastructure
                 !hasReservePrimaryAmmo &&
                 !hasSecondaryRangedSet)
             {
-                AddStrictHeroThrown(ordered, remaining);
                 AddFirst(ordered, remaining, primaryAmmoPredicate);
+                // Keep the primary ammo immediately after the mounted ranged weapon.
+                // The live weapon/ammo corridor assumes Weapon1 is the ammo slot.
+                AddStrictHeroThrown(ordered, remaining);
                 AddStrictHeroPrimaryMelee(ordered, remaining, preferShieldCompatible: false);
                 AddStrictHeroRemainingMelee(ordered, remaining, preferShieldCompatible: false);
                 return;
@@ -1350,7 +1352,7 @@ namespace CoopSpectator.Infrastructure
                    role == MountedWeaponRole.Other;
         }
 
-        private static bool DoesEquipmentContainUnsafeRangedWeapon2Layout(Equipment equipment)
+        internal static bool DoesEquipmentContainUnsafeRangedWeapon2Layout(Equipment equipment)
         {
             if (equipment == null)
                 return false;
@@ -1411,14 +1413,14 @@ namespace CoopSpectator.Infrastructure
             bool isBowPattern =
                 IsBowWeaponSlot(slot0) &&
                 (
-                    (IsArrowAmmoSlot(slot1) && IsThrownWeaponSlot(slot2)) ||
-                    (IsThrownWeaponSlot(slot1) && IsArrowAmmoSlot(slot2))
+                    IsArrowAmmoSlot(slot1) &&
+                    IsThrownWeaponSlot(slot2)
                 );
             bool isCrossbowPattern =
                 IsCrossbowWeaponSlot(slot0) &&
                 (
-                    (IsBoltAmmoSlot(slot1) && IsThrownWeaponSlot(slot2)) ||
-                    (IsThrownWeaponSlot(slot1) && IsBoltAmmoSlot(slot2))
+                    IsBoltAmmoSlot(slot1) &&
+                    IsThrownWeaponSlot(slot2)
                 );
             if (!isBowPattern && !isCrossbowPattern)
                 return false;

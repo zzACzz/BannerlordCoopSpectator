@@ -128,12 +128,13 @@ namespace CoopSpectator.UI
                 if (currentMission != null &&
                     MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(currentMission.SceneName))
                 {
-                    int pendingRecoveryCount = CoopSpectator.Patches.BattleMapSpawnHandoffPatch.GetDeferredClientRecoveryPendingCount(out _);
-                    if (pendingRecoveryCount > 0)
+                    if (!CoopMissionSpawnLogic.IsClientBattlefieldSelectionMaterializationBarrierClosed(out _))
                     {
                         battleDataReady = false;
-                        localMaterializationBlockReason =
-                            "Waiting for battlefield units to materialize... (" + pendingRecoveryCount + " pending)";
+                        int pendingRecoveryCount = CoopSpectator.Patches.BattleMapSpawnHandoffPatch.GetDeferredClientRecoveryPendingCount(out _);
+                        localMaterializationBlockReason = pendingRecoveryCount > 0
+                            ? "Waiting for battlefield units to materialize... (" + pendingRecoveryCount + " pending)"
+                            : "Waiting for battlefield units to materialize...";
                     }
                 }
             }

@@ -405,6 +405,22 @@ namespace CoopSpectator.UI
 
             bool hasLocalControlledAgent = HasLocalControlledAgent();
             CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
+            int selectableCount = side == BattleSideEnum.Attacker
+                ? snapshot?.AttackerSelectableEntryCount ?? 0
+                : snapshot?.DefenderSelectableEntryCount ?? 0;
+            if (!CoopSelectionUiHelpers.CanSelectSide(snapshot, side, selectableCount))
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: ignored side selection while local battlefield materialization barrier or selection gate is still active. " +
+                    "RequestedSide=" + side +
+                    " SelectableCount=" + selectableCount +
+                    " BattleDataReady=" + (snapshot?.BattleDataReady ?? false) +
+                    " ReadinessStage=" + (snapshot?.BattleDataReadinessStage ?? string.Empty) +
+                    " Lifecycle=" + (snapshot?.Lifecycle ?? string.Empty));
+                RefreshOverlay(force: true, hasLocalControlledAgent);
+                return;
+            }
+
             if (snapshot?.ReconnectSelectionContractActive == true &&
                 snapshot.AuthoritativeAssignedSide != BattleSideEnum.None)
             {
@@ -429,12 +445,32 @@ namespace CoopSpectator.UI
             if (side == BattleSideEnum.None || string.IsNullOrWhiteSpace(entryId))
                 return;
 
+            bool hasLocalControlledAgent = HasLocalControlledAgent();
+            CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
+            string[] selectableEntryIds = side == BattleSideEnum.Attacker
+                ? snapshot?.AttackerSelectableEntryIds ?? Array.Empty<string>()
+                : snapshot?.DefenderSelectableEntryIds ?? Array.Empty<string>();
+            if (snapshot == null ||
+                !snapshot.BattleDataReady ||
+                !selectableEntryIds.Contains(entryId, StringComparer.OrdinalIgnoreCase))
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: ignored unit selection while local battlefield materialization barrier or selection gate is still active. " +
+                    "RequestedSide=" + side +
+                    " EntryId=" + entryId +
+                    " BattleDataReady=" + (snapshot?.BattleDataReady ?? false) +
+                    " ReadinessStage=" + (snapshot?.BattleDataReadinessStage ?? string.Empty) +
+                    " Lifecycle=" + (snapshot?.Lifecycle ?? string.Empty));
+                RefreshOverlay(force: true, hasLocalControlledAgent);
+                return;
+            }
+
             _spectatorOverlayHidden = false;
             _selectedSideOverride = side;
             _selectedEntryIdOverride = entryId;
             _requestedScreen = CoopSelectionScreen.ClassLoadout;
             CoopBattleNetworkRequestTransport.TrySelectEntry(side, entryId, "CoopClassLoadoutUI Entry");
-            RefreshOverlay(force: true, HasLocalControlledAgent());
+            RefreshOverlay(force: true, hasLocalControlledAgent);
         }
 
         private void HandleAutoAssignRequested()

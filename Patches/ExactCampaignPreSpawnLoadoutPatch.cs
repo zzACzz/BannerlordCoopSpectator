@@ -116,6 +116,10 @@ namespace CoopSpectator.Patches
                 !entryState.IsHero &&
                 BattleSnapshotRuntimeState.UsesGeneratedRuntimeBattleTemplateMaterialization(exactOrigin.EntryId);
             bool useNativeMountLifecycle = CoopMissionSpawnLogic.ShouldUseNativeMountLifecycleForExactEntry(entryState);
+            bool preserveNativeMountedHeroBaseline =
+                entryState.IsHero &&
+                entryState.IsMounted &&
+                useNativeMountLifecycle;
             if (forceGeneratedOrdinaryExactPreSpawnInjection)
             {
                 includeWeapons = true;
@@ -150,7 +154,11 @@ namespace CoopSpectator.Patches
                     includeWeapons,
                     includeArmorVisuals,
                     includeCape,
-                    includeMountVisuals)
+                    includeMountVisuals,
+                    preserveNativeMountedHeroBaseline,
+                    preserveNativeMountedHeroBaseline
+                        ? agentBuildData.AgentOverridenSpawnEquipment ?? agentBuildData.AgentCharacter?.Equipment
+                        : null)
                 : null;
             EquipmentInjectedByEntryId[exactOrigin.EntryId] = injectEquipment && exactEquipment != null;
             if (exactEquipment != null)
@@ -554,7 +562,9 @@ namespace CoopSpectator.Patches
             bool includeWeapons,
             bool includeArmorVisuals,
             bool includeCape,
-            bool includeMountVisuals)
+            bool includeMountVisuals,
+            bool preserveNativeMountBaselineWhenExcluded = false,
+            Equipment nativeMountSeedEquipment = null)
         {
             Equipment equipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
                 entryState,
@@ -578,11 +588,34 @@ namespace CoopSpectator.Patches
 
             if (!includeMountVisuals)
             {
-                equipment[EquipmentIndex.Horse] = default(EquipmentElement);
-                equipment[EquipmentIndex.HorseHarness] = default(EquipmentElement);
+                if (preserveNativeMountBaselineWhenExcluded)
+                {
+                    PreserveMountSlotFromSeed(equipment, nativeMountSeedEquipment, EquipmentIndex.Horse);
+                    PreserveMountSlotFromSeed(equipment, nativeMountSeedEquipment, EquipmentIndex.HorseHarness);
+                }
+                else
+                {
+                    equipment[EquipmentIndex.Horse] = default(EquipmentElement);
+                    equipment[EquipmentIndex.HorseHarness] = default(EquipmentElement);
+                }
             }
 
             return equipment;
+        }
+
+        private static void PreserveMountSlotFromSeed(
+            Equipment equipment,
+            Equipment seedEquipment,
+            EquipmentIndex slot)
+        {
+            if (equipment == null || seedEquipment == null || equipment[slot].Item != null)
+                return;
+
+            EquipmentElement seedElement = seedEquipment[slot];
+            if (seedElement.Item == null)
+                return;
+
+            equipment[slot] = seedElement;
         }
 
         private static string SummarizeEquipment(Equipment equipment)

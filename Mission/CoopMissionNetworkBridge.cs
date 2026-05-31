@@ -18,18 +18,41 @@ namespace CoopSpectator.MissionBehaviors
 {
     internal static class CoopBattleNetworkRequestTransport
     {
+        private enum ClientRequestDispatchResult
+        {
+            Sent,
+            Failed,
+            Suppressed
+        }
+
         public static bool TrySelectSide(BattleSideEnum side, string source)
         {
-            if (TrySendClientRequest(CoopBattleSelectionRequestKind.SelectSide, side, string.Empty, source))
+            ClientRequestDispatchResult dispatchResult =
+                TryDispatchClientSelectionOrSpawnRequest(
+                    CoopBattleSelectionRequestKind.SelectSide,
+                    side,
+                    string.Empty,
+                    source);
+            if (dispatchResult == ClientRequestDispatchResult.Sent)
                 return true;
+            if (dispatchResult == ClientRequestDispatchResult.Suppressed)
+                return false;
 
             return CoopBattleSelectionBridgeFile.WriteSelectSideRequest(side.ToString(), source ?? "network-fallback side");
         }
 
         public static bool TrySelectEntry(BattleSideEnum side, string entryId, string source)
         {
-            if (TrySendClientRequest(CoopBattleSelectionRequestKind.SelectEntry, side, entryId, source))
+            ClientRequestDispatchResult dispatchResult =
+                TryDispatchClientSelectionOrSpawnRequest(
+                    CoopBattleSelectionRequestKind.SelectEntry,
+                    side,
+                    entryId,
+                    source);
+            if (dispatchResult == ClientRequestDispatchResult.Sent)
                 return true;
+            if (dispatchResult == ClientRequestDispatchResult.Suppressed)
+                return false;
 
             bool wroteSide = CoopBattleSelectionBridgeFile.WriteSelectSideRequest(side.ToString(), source ?? "network-fallback entry-side");
             bool wroteEntry = CoopBattleSelectionBridgeFile.WriteSelectTroopRequest(entryId, source ?? "network-fallback entry");
@@ -46,8 +69,16 @@ namespace CoopSpectator.MissionBehaviors
 
         public static bool TryRequestSpawn(string source)
         {
-            if (TrySendClientRequest(CoopBattleSelectionRequestKind.SpawnNow, BattleSideEnum.None, string.Empty, source))
+            ClientRequestDispatchResult dispatchResult =
+                TryDispatchClientSelectionOrSpawnRequest(
+                    CoopBattleSelectionRequestKind.SpawnNow,
+                    BattleSideEnum.None,
+                    string.Empty,
+                    source);
+            if (dispatchResult == ClientRequestDispatchResult.Sent)
                 return true;
+            if (dispatchResult == ClientRequestDispatchResult.Suppressed)
+                return false;
 
             return CoopBattleSpawnBridgeFile.WriteSpawnNowRequest(source ?? "network-fallback spawn");
         }
@@ -100,6 +131,17 @@ namespace CoopSpectator.MissionBehaviors
             out string reason)
         {
             reason = null;
+            if (requestKind == CoopBattleSelectionRequestKind.SelectSide ||
+                requestKind == CoopBattleSelectionRequestKind.SelectEntry ||
+                requestKind == CoopBattleSelectionRequestKind.SpawnNow)
+            {
+                if (!CoopMissionSpawnLogic.IsClientBattlefieldSelectionMaterializationBarrierClosed(out string materializationSummary))
+                {
+                    reason = "battlefield-materialization-barrier-open:" + (materializationSummary ?? "unknown");
+                    return true;
+                }
+            }
+
             if (requestKind != CoopBattleSelectionRequestKind.SelectEntry &&
                 requestKind != CoopBattleSelectionRequestKind.SpawnNow)
             {
@@ -131,6 +173,32 @@ namespace CoopSpectator.MissionBehaviors
             return false;
         }
 
+        private static ClientRequestDispatchResult TryDispatchClientSelectionOrSpawnRequest(
+            CoopBattleSelectionRequestKind requestKind,
+            BattleSideEnum requestedSide,
+            string selectionId,
+            string source)
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return ClientRequestDispatchResult.Failed;
+
+            if (ShouldSuppressClientSelectionOrSpawnRequest(requestKind, out string suppressionReason))
+            {
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: suppressed client request while local selection or spawn handoff is still unsafe. " +
+                    "Kind=" + requestKind +
+                    " Side=" + requestedSide +
+                    " SelectionId=" + (selectionId ?? string.Empty) +
+                    " Reason=" + (suppressionReason ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+                return ClientRequestDispatchResult.Suppressed;
+            }
+
+            return TrySendClientRequest(requestKind, requestedSide, selectionId, source)
+                ? ClientRequestDispatchResult.Sent
+                : ClientRequestDispatchResult.Failed;
+        }
+
         private static bool TrySendClientRequest(
             CoopBattleSelectionRequestKind requestKind,
             BattleSideEnum requestedSide,
@@ -139,18 +207,6 @@ namespace CoopSpectator.MissionBehaviors
         {
             if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
                 return false;
-
-            if (ShouldSuppressClientSelectionOrSpawnRequest(requestKind, out string suppressionReason))
-            {
-                ModLogger.Info(
-                    "CoopBattleNetworkRequestTransport: suppressed client request while local spawn handoff is still in flight. " +
-                    "Kind=" + requestKind +
-                    " Side=" + requestedSide +
-                    " SelectionId=" + (selectionId ?? string.Empty) +
-                    " Reason=" + (suppressionReason ?? "unknown") +
-                    " Source=" + (source ?? "unknown"));
-                return false;
-            }
 
             try
             {
