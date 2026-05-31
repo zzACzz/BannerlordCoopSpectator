@@ -100,23 +100,27 @@ C:\dev\projects\BannerlordCoopSpectator3\docs\COOP_RUNTIME_MAP.md
 - main hero exact materialization, safe side selection, mounted possession, weapon switching і battle start уже не є головним proven blocker-ом;
 - proven native crash corridor у `TaleWorlds.Native.dll+0x5e4aa8` зараз containment-иться message-level guard-ами для non-local exact no-shield ranged AI;
 - battle після цього реально доходить до `BattleEnded` без нового dump-а;
-- активний залишковий blocker тепер вужчий: до `BattleActive` main hero, foot archer companion і looters зі sling усе ще можуть візуально заходити в постійний reload loop, хоча після старту бою вони вже воюють нормально.
+- coop-owned death/respawn loop теж уже доведений: `DeadAwaitingRespawn -> RespawnSelection -> SpawnQueued -> Alive` проходить без повторного materialization deadlock-а;
+- активний proven blocker тепер змістився з respawn/materialization у missile lifecycle: клієнт отримує `CreateMissile`, але частина `HandleMissileCollisionReaction` усе ще defer-иться до моменту, коли local missile entity відсутня, через що метальні списи й інші projectile-и можуть візуально не пролітати або replay-итись на пізнішому reused missile index;
+- pre-battle reload loop main hero, foot archer companion і looters зі sling усе ще лишається супутнім незакритим corridor-ом і, ймовірно, частково пов’язаний з тим самим ranged/missile state surface.
 
 Поточна робоча гіпотеза:
 
 1. snapshot/data sync, materialization barrier і selection gate уже не є головною проблемою для останнього підтвердженого crash corridor;
 2. reload loop до старту бою тепер виглядає як окремий pre-battle weapon-state corridor, а не як materialization failure;
-3. для non-local exact no-shield ranged AI клієнт тепер навмисно suppress-ить до native handler-а:
+3. visible thrown-missile failure імовірно сидить ще нижче: у деяких прогонів deferred `HandleMissileCollisionReaction` replay-иться тільки після повторного `CreateMissile` з тим самим `MissileIndex`, але вже від іншого attacker-а; це дає конкретну низькорівневу гіпотезу про reused missile-index corridor, а не про broader spawn/materialization regression;
+4. для non-local exact no-shield ranged AI клієнт тепер навмисно suppress-ить до native handler-а:
    - `SetWeaponReloadPhase` у pre-battle hold
    - `SetWeaponAmmoData`
    - ammo-semantic `SetWeaponNetworkData`
-4. cohort для цього suppress path тепер резолвиться спочатку через authoritative tracked entry mapping, а не тільки через bootstrap id; саме це дозволило latest successful run реально влучити в companion archer, sling looters і crossbow AI;
-5. local hero corridor цим stop-gap-ом навмисно не глушиться, тому pre-battle reload loop main hero лишається окремою незакритою проблемою.
+5. cohort для цього suppress path тепер резолвиться спочатку через authoritative tracked entry mapping, а не тільки через bootstrap id; саме це дозволило latest successful run реально влучити в companion archer, sling looters і crossbow AI;
+6. local hero corridor цим stop-gap-ом навмисно не глушиться, тому pre-battle reload loop main hero лишається окремою незакритою проблемою.
 
 Практичне правило для продовження:
 
 - якщо новий crash знову з’явиться після старту бою, спершу перевіряються suppress-маркери для `SetWeaponReloadPhase` / `SetWeaponAmmoData` / `SetWeaponNetworkData` і окремо local hero path;
-- якщо battle знову доходить до `BattleEnded`, але pre-battle reload loop лишається, далі досліджується саме local pre-battle ranged state corridor, а не broader materialization/join flow;
+- якщо battle знову доходить до `BattleEnded`, але projectile-и лишаються невидимими, наступним low-level входом у дослідження є `CreateMissile -> deferred HandleMissileCollisionReaction -> replay on reused MissileIndex`, а не broader materialization/join flow;
+- якщо battle знову доходить до `BattleEnded`, але pre-battle reload loop лишається, далі окремо досліджується local pre-battle ranged state corridor;
 - high-level rewrite hero materialization або broader cleanup не робити, поки не доведено точний low-level сигнал, який тримає pre-battle reload loop живим.
 
 ## 3. Архітектура
