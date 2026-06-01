@@ -375,10 +375,19 @@ namespace CoopSpectator.Infrastructure
                 Mission currentMission = Mission.Current;
                 ListedShellMissionLobbyClientComponent listedClient = currentMission?.GetMissionBehavior<ListedShellMissionLobbyClientComponent>();
                 listedClient?.SetServerEndingBeforeClientLoaded(message.UnloadingForBattleIndexMismatch);
+                bool preserveReceiveBootstrapOwnership =
+                    currentMission != null &&
+                    SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(currentMission.SceneName ?? string.Empty) &&
+                    ListedShellClientSessionOwnershipState.ShouldOwnReceiveBootstrap();
 
                 await WaitForMissionUnloadAsync();
-                ListedShellClientSessionOwnershipState.Disarm(
-                    "ListedShellNetworkBootstrapRuntime.HandleListedUnloadMissionReceiveAsync");
+                if (!preserveReceiveBootstrapOwnership ||
+                    !ListedShellClientSessionOwnershipState.PreserveReceiveBootstrapAcrossMissionLoop(
+                        "ListedShellNetworkBootstrapRuntime.HandleListedUnloadMissionReceiveAsync"))
+                {
+                    ListedShellClientSessionOwnershipState.Disarm(
+                        "ListedShellNetworkBootstrapRuntime.HandleListedUnloadMissionReceiveAsync");
+                }
                 CoopSessionTransportPrimitives.CompleteClientLobbyMissionUnload();
             }
             catch (Exception ex)

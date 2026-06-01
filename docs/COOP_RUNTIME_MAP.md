@@ -98,31 +98,27 @@ C:\dev\projects\BannerlordCoopSpectator3\docs\COOP_RUNTIME_MAP.md
 
 - loading/selection barrier уже відпрацьовує достатньо стабільно, щоб selection відкривався тільки після `live-prebattle-materialized` state;
 - main hero exact materialization, safe side selection, mounted possession, weapon switching і battle start уже не є головним proven blocker-ом;
+- pre-battle safe hold для ranged/thrown cohort-ів уже доведений у першій battle mission: main hero більше не смикається, лучниця тримає melee safe hold, а після `BattleActive` native runtime сам переводить cohort-и в бойову зброю;
 - proven native crash corridor у `TaleWorlds.Native.dll+0x5e4aa8` зараз containment-иться message-level guard-ами для non-local exact no-shield ranged AI;
 - battle після цього реально доходить до `BattleEnded` без нового dump-а;
 - coop-owned death/respawn loop теж уже доведений: `DeadAwaitingRespawn -> RespawnSelection -> SpawnQueued -> Alive` проходить без повторного materialization deadlock-а;
-- активний proven blocker тепер змістився з respawn/materialization у missile lifecycle: клієнт отримує `CreateMissile`, але частина `HandleMissileCollisionReaction` усе ще defer-иться до моменту, коли local missile entity відсутня, через що метальні списи й інші projectile-и можуть візуально не пролітати або replay-итись на пізнішому reused missile index;
-- pre-battle reload loop main hero, foot archer companion і looters зі sling усе ще лишається супутнім незакритим corridor-ом і, ймовірно, частково пов’язаний з тим самим ranged/missile state surface.
-- структурна переробка вже стартувала саме в цьому підшарі: deferred `CreateMissile` / `HandleMissileCollisionReaction` state, observation generation і reused-index replay policy більше не живуть тільки як сирі локальні колекції всередині `BattleMapSpawnHandoffPatch`, а винесені в окремий runtime `Infrastructure/BattleMapClientMissileReplayRuntime.cs`.
+- активний proven blocker тепер змістився у battle-to-battle listed bootstrap lifecycle: після першого `BattleEnded` dedicated already ініціалізує нову battle snapshot/runtime state, але клієнт міг лишатись на полі бою в spectator-like state, бо друга `LoadMission` приходила вже після того, як listed `receive-bootstrap` ownership було disarm-нуто на `UnloadMission`;
+- перший low-level симптом цього blocker-а: на другій battle mission клієнт отримує `CoopBattleSnapshotManifestMessage` / `CoopBattleSnapshotChunkV2Message`, але ще не має handler-ів і логить `No message handler found ...`, бо coop-owned `LoadMission` intercept і late-attach `CoopMissionNetworkBridge` не спрацьовують;
+- структурна правда тут така: listed client session ownership повинна жити через увесь transport session, а не через один mission lifetime; battle-to-battle `UnloadMission -> LoadMission` loop не повинен її гасити.
 
 Поточна робоча гіпотеза:
 
-1. snapshot/data sync, materialization barrier і selection gate уже не є головною проблемою для останнього підтвердженого crash corridor;
-2. reload loop до старту бою тепер виглядає як окремий pre-battle weapon-state corridor, а не як materialization failure;
-3. visible thrown-missile failure імовірно сидить ще нижче: у деяких прогонів deferred `HandleMissileCollisionReaction` replay-иться тільки після повторного `CreateMissile` з тим самим `MissileIndex`, але вже від іншого attacker-а; це дає конкретну низькорівневу гіпотезу про reused missile-index corridor, а не про broader spawn/materialization regression;
-4. для non-local exact no-shield ranged AI клієнт тепер навмисно suppress-ить до native handler-а:
-   - `SetWeaponReloadPhase` у pre-battle hold
-   - `SetWeaponAmmoData`
-   - ammo-semantic `SetWeaponNetworkData`
-5. cohort для цього suppress path тепер резолвиться спочатку через authoritative tracked entry mapping, а не тільки через bootstrap id; саме це дозволило latest successful run реально влучити в companion archer, sling looters і crossbow AI;
-6. local hero corridor цим stop-gap-ом навмисно не глушиться, тому pre-battle reload loop main hero лишається окремою незакритою проблемою.
+1. snapshot/data sync, materialization barrier, selection gate і pre-battle safe-hold materialization для першої battle mission уже не є головним blocker-ом;
+2. battle-to-battle listed bootstrap зараз ламається не через battle snapshot payload сам по собі, а через ownership/lifecycle mismatch: ми treat-или listed `receive-bootstrap` ownership як mission-local state і disarm-или його на `UnloadMission`, хоча transport session ще живий;
+3. коли ownership гаситься між боями, друга `LoadMission(GameType=Battle)` уже не перехоплюється coop-owned runtime path-ом, missing battle behaviors не late-attach-яться, а `CoopMissionNetworkBridge` не встигає зареєструвати client V2 snapshot handler-и до приходу manifest/chunk traffic;
+4. правильний fix layer тут не weapon/materialization suppress, а session-scoped bootstrap ownership: другий battle bootstrap повинен знову проходити через `ListedShellNetworkBootstrapRuntime.HandleListedLoadMissionReceiveAsync(...)` і `EnsureListedClientBattleRuntimeBehaviorsAsync(...)`;
+5. missile replay debt і historical ranged crash-containment лишаються secondary cleanup surface, але вже не є активним blocker-ом для наступної battle mission.
 
 Практичне правило для продовження:
 
-- якщо новий crash знову з’явиться після старту бою, спершу перевіряються suppress-маркери для `SetWeaponReloadPhase` / `SetWeaponAmmoData` / `SetWeaponNetworkData` і окремо local hero path;
-- якщо battle знову доходить до `BattleEnded`, але projectile-и лишаються невидимими, наступним low-level входом у дослідження є `CreateMissile -> deferred HandleMissileCollisionReaction -> replay on reused MissileIndex`, а не broader materialization/join flow;
-- якщо battle знову доходить до `BattleEnded`, але pre-battle reload loop лишається, далі окремо досліджується local pre-battle ranged state corridor;
-- high-level rewrite hero materialization або broader cleanup не робити, поки не доведено точний low-level сигнал, який тримає pre-battle reload loop живим.
+- якщо друга battle mission знову не стартує, першим ділом перевіряються `ListedShellClientSessionOwnershipState` і `ListedShellNetworkBootstrapRuntime`: чи ownership лишився активним через `UnloadMission`, чи друга `LoadMission` була саме intercept-нута нашим listed bootstrap path-ом;
+- якщо на другій battle mission знову з’являється `No message handler found for CoopBattleSnapshotManifestMessage`, це означає missing coop-owned `LoadMission` intercept або missing late-attach `CoopMissionNetworkBridge`, а не broader snapshot corruption;
+- missile visibility/reused-index replay і решта pre-battle ranged cleanup після цього залишаються окремим debt surface, але не повинні знову підміняти собою battle-to-battle bootstrap blocker.
 
 ## 3. Архітектура
 
@@ -363,14 +359,10 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 
 Поточна pre-battle weapon/runtime логіка поверх цього flow:
 
-- dedicated observer тримає `SideSelection` і `PreBattleHold` з `PauseAITick=True`, але клієнт усе одно може отримувати ranged weapon chatter ще до `BattleActive`:
-  - `CreateMissile`
+- contract-first ranged/thrown safe hold тепер працює так: до `BattleActive` ranged і throwing cohort-и materialize-яться з exact MP-safe loadout, але pre-battle ownership тримає в руках melee safe hold pair; після `BattleActive` runtime більше не робить explicit rewield orchestration, а просто відпускає cohort у native battle flow;
+- у latest validated run це вже зняло pre-battle смикання main hero/companions і дало native weapon switching/стрільбу в першій battle mission без нового crash-а;
+- для non-local exact no-shield ranged AI історичний crash-containment cohort, який визначається authoritative tracked entry mapping-ом з fallback-ом на bootstrap id, усе ще може suppress-ити before-native handlers там, де входження в proven native ammo corridor знову стане unsafe:
   - `SetWeaponReloadPhase`
-  - `SetWeaponAmmoData`
-  - `SetWeaponNetworkData`
-- для non-local exact no-shield ranged AI цей cohort тепер визначається не тільки bootstrap id-ом, а спочатку authoritative tracked entry mapping-ом з fallback-ом на bootstrap id;
-- для цього cohort-а client battle-map handoff suppress-ить before-native handlers:
-  - `SetWeaponReloadPhase` під час pre-battle hold
   - `SetWeaponAmmoData`
   - ammo-semantic `SetWeaponNetworkData`
 - structural rework для battle-map missile corridor уже почалась: `BattleMapSpawnHandoffPatch` тепер не є єдиним власником deferred missile queue/state; `BattleMapClientMissileReplayRuntime` уже тримає:
@@ -379,8 +371,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
   - latest observed `CreateMissile` generation по `MissileIndex`
   - reuse-detection policy для collision replay
 - мета цього шару - не "полагодити reload visuals", а не пустити клієнт назад у proven native ammo mutation corridor, який раніше валив гру в `TaleWorlds.Native.dll+0x5e4aa8`;
-- local peer / currently controlled main hero до цього suppress cohort навмисно не входить;
-- наслідок current-state: до старту бою можливі visible reload loops для main hero і частини ranged exact AI, але після `BattleActive` battle у latest successful run доходить до `BattleEnded` без crash-а.
+- listed client receive-bootstrap ownership більше не можна трактувати як mission-local state: battle-to-battle `UnloadMission -> LoadMission` loop повинен зберігати ownership достатньо довго, щоб друга battle mission знову пройшла через coop-owned `LoadMission` intercept, late-attach battle runtime behaviors і ранню реєстрацію `CoopMissionNetworkBridge` V2 snapshot handler-ів.
 
 Поточні native залежності в цьому flow:
 

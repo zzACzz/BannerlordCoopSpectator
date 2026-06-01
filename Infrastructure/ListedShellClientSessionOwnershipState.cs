@@ -12,7 +12,7 @@ namespace CoopSpectator.Infrastructure
         }
 
         private static readonly object Sync = new object();
-        private static readonly TimeSpan OwnershipLifetime = TimeSpan.FromMinutes(2);
+        private static readonly TimeSpan WrapperStartOwnershipLifetime = TimeSpan.FromMinutes(2);
 
         private static ListedShellClientSessionPhase _phase;
         private static string _gameType = string.Empty;
@@ -101,6 +101,41 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static bool PreserveReceiveBootstrapAcrossMissionLoop(string source)
+        {
+            string gameType;
+            string serverName;
+            string serverAddress;
+            int serverPort;
+            int sessionKey;
+            int peerIndex;
+
+            lock (Sync)
+            {
+                if (!IsPhaseActive_NoLock(ListedShellClientSessionPhase.ReceiveBootstrap))
+                    return false;
+
+                _armedUtc = DateTime.UtcNow;
+                gameType = _gameType;
+                serverName = _serverName;
+                serverAddress = _serverAddress;
+                serverPort = _serverPort;
+                sessionKey = _sessionKey;
+                peerIndex = _peerIndex;
+            }
+
+            ModLogger.Info(
+                "ListedShellClientSessionOwnershipState: preserved listed client receive-bootstrap ownership across mission loop. " +
+                "GameType=" + Normalize(gameType) +
+                " ServerName=" + Normalize(serverName) +
+                " Address=" + Normalize(serverAddress) +
+                " Port=" + serverPort +
+                " SessionKey=" + sessionKey +
+                " PeerIndex=" + peerIndex +
+                " Source=" + Normalize(source) + ".");
+            return true;
+        }
+
         public static bool TryResolveWrapperStartTransportContext(
             out string gameType,
             out string serverAddress,
@@ -184,8 +219,9 @@ namespace CoopSpectator.Infrastructure
             if (_phase != expectedPhase)
                 return false;
 
-            if (_armedUtc == DateTime.MinValue ||
-                DateTime.UtcNow - _armedUtc > OwnershipLifetime)
+            if (_phase == ListedShellClientSessionPhase.WrapperStart &&
+                (_armedUtc == DateTime.MinValue ||
+                 DateTime.UtcNow - _armedUtc > WrapperStartOwnershipLifetime))
             {
                 Clear_NoLock();
                 return false;

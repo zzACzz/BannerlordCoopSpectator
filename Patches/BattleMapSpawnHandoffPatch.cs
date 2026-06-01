@@ -131,6 +131,8 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedClientWeaponNetworkDataMessageKey;
         private static string _lastSuppressedClientWeaponAmmoDataMessageKey;
         private static string _lastSuppressedClientWeaponReloadPhaseMessageKey;
+        private static string _lastSuppressedClientWeaponUsageSwitchMessageKey;
+        private static string _lastSuppressedClientWeaponUsageIndexChangeMessageKey;
         private static string _lastDeferredClientRecoverySelectionGateKey;
         private static bool _suppressExactCommanderOrderHotkeyFallbackUntilRelease;
         private static object _activeExactCommanderMissionOrderVm;
@@ -710,6 +712,8 @@ namespace CoopSpectator.Patches
             _lastSuppressedClientWeaponNetworkDataMessageKey = null;
             _lastSuppressedClientWeaponAmmoDataMessageKey = null;
             _lastSuppressedClientWeaponReloadPhaseMessageKey = null;
+            _lastSuppressedClientWeaponUsageSwitchMessageKey = null;
+            _lastSuppressedClientWeaponUsageIndexChangeMessageKey = null;
             if (!preserveCommanderOrderControlState)
             {
                 _suppressExactCommanderOrderHotkeyFallbackUntilRelease = false;
@@ -4365,6 +4369,46 @@ namespace CoopSpectator.Patches
                 out readinessStage);
         }
 
+        private static bool TryGetContractDrivenDeferredPreBattleActivationStatus(
+            Agent agent,
+            out string reason)
+        {
+            reason = null;
+
+            if (agent == null)
+                return false;
+
+            return CoopMissionSpawnLogic.TryGetDeferredPreBattleActivationContractStatus(
+                agent,
+                out _,
+                out _,
+                out reason);
+        }
+
+        private static bool ShouldSuppressContractDrivenDeferredPreBattleActivationUsageMessage(
+            Agent agent,
+            EquipmentIndex slotIndex,
+            int usageIndex,
+            string mutation,
+            out string reason)
+        {
+            reason = null;
+
+            if (!TryGetContractDrivenDeferredPreBattleActivationStatus(
+                    agent,
+                    out string contractDeferredReason))
+            {
+                return false;
+            }
+
+            reason =
+                contractDeferredReason +
+                "|Mutation=" + (mutation ?? "usage") +
+                "|Slot=" + slotIndex +
+                "|UsageIndex=" + usageIndex;
+            return true;
+        }
+
         private static bool ShouldSuppressUnsafeClientWeaponAmountNativeUpdate(
             Agent agent,
             EquipmentIndex slotIndex,
@@ -4373,6 +4417,20 @@ namespace CoopSpectator.Patches
             out string reason)
         {
             reason = null;
+
+            if (IsClientConsumableAmmoEquipmentSlot(agent, slotIndex) &&
+                TryGetContractDrivenDeferredPreBattleActivationStatus(
+                    agent,
+                    out string contractDeferredReason))
+            {
+                reason =
+                    contractDeferredReason +
+                    "|Mutation=amount" +
+                    "|Slot=" + slotIndex +
+                    "|Amount=" + amount +
+                    "|EnforcePrimaryItem=" + enforcePrimaryItem;
+                return true;
+            }
 
             if (IsClientConsumableAmmoEquipmentSlot(agent, slotIndex) &&
                 TryGetPreBattleExactRangedAiHoldStatus(
@@ -4433,6 +4491,19 @@ namespace CoopSpectator.Patches
             out string reason)
         {
             reason = null;
+
+            if (TryGetContractDrivenDeferredPreBattleActivationStatus(
+                    agent,
+                    out string contractDeferredReason))
+            {
+                reason =
+                    contractDeferredReason +
+                    "|Mutation=ammo" +
+                    "|WeaponSlot=" + weaponSlotIndex +
+                    "|AmmoSlot=" + ammoSlotIndex +
+                    "|Ammo=" + ammo;
+                return true;
+            }
 
             if (TryGetPreBattleExactRangedAiHoldStatus(
                     agent,
@@ -4507,17 +4578,30 @@ namespace CoopSpectator.Patches
         {
             reason = null;
 
+            string dataSemantic = BuildSetWeaponNetworkDataSemanticSummary(agent, slotIndex);
+            if (string.Equals(dataSemantic, "amount", StringComparison.OrdinalIgnoreCase) &&
+                TryGetContractDrivenDeferredPreBattleActivationStatus(
+                    agent,
+                    out string contractDeferredReason))
+            {
+                reason =
+                    contractDeferredReason +
+                    "|Mutation=network-data-message" +
+                    "|Slot=" + slotIndex +
+                    "|DataValue=" + dataValue +
+                    "|Semantic=" + dataSemantic;
+                return true;
+            }
+
             if (!TryGetPreBattleExactRangedAiHoldStatus(
                     agent,
                     out string exactRangedReason,
                     out CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
                     out string readinessStage))
             {
-                string dataSemanticFallback = BuildSetWeaponNetworkDataSemanticSummary(agent, slotIndex);
                 return false;
             }
 
-            string dataSemantic = BuildSetWeaponNetworkDataSemanticSummary(agent, slotIndex);
             if (!string.Equals(dataSemantic, "amount", StringComparison.OrdinalIgnoreCase))
                 return false;
 
@@ -4543,6 +4627,19 @@ namespace CoopSpectator.Patches
             out string reason)
         {
             reason = null;
+
+            if (TryGetContractDrivenDeferredPreBattleActivationStatus(
+                    agent,
+                    out string contractDeferredReason))
+            {
+                reason =
+                    contractDeferredReason +
+                    "|Mutation=ammo-message" +
+                    "|WeaponSlot=" + weaponSlotIndex +
+                    "|AmmoSlot=" + ammoSlotIndex +
+                    "|Ammo=" + ammo;
+                return true;
+            }
 
             if (ShouldSuppressLocalControlledPreBattleRangedAmmoDataMessage(
                     agent,
@@ -4641,6 +4738,18 @@ namespace CoopSpectator.Patches
             out string reason)
         {
             reason = null;
+
+            if (TryGetContractDrivenDeferredPreBattleActivationStatus(
+                    agent,
+                    out string contractDeferredReason))
+            {
+                reason =
+                    contractDeferredReason +
+                    "|Mutation=reload-phase-message" +
+                    "|Slot=" + slotIndex +
+                    "|ReloadPhase=" + reloadPhase;
+                return true;
+            }
 
             if (ShouldSuppressLocalControlledPreBattleRangedReloadPhaseMessage(
                     agent,
@@ -11442,6 +11551,35 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (ShouldSuppressContractDrivenDeferredPreBattleActivationUsageMessage(
+                        agent,
+                        startSwitchingWeaponUsageIndex.EquipmentIndex,
+                        startSwitchingWeaponUsageIndex.UsageIndex,
+                        "usage-switch-message",
+                        out string suppressReason))
+                {
+                    string logKey =
+                        (agent?.Index ?? -1) + "|" +
+                        startSwitchingWeaponUsageIndex.EquipmentIndex + "|" +
+                        startSwitchingWeaponUsageIndex.UsageIndex + "|" +
+                        startSwitchingWeaponUsageIndex.CurrentMovementFlagUsageDirection + "|" +
+                        suppressReason;
+                    if (!string.Equals(_lastSuppressedClientWeaponUsageSwitchMessageKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedClientWeaponUsageSwitchMessageKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed client StartSwitchingWeaponUsageIndex before native handler because contract-driven pre-battle activation is still deferred. " +
+                            "AgentIndex=" + startSwitchingWeaponUsageIndex.AgentIndex +
+                            " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
+                            " UsageIndex=" + startSwitchingWeaponUsageIndex.UsageIndex +
+                            " UsageDirection=" + startSwitchingWeaponUsageIndex.CurrentMovementFlagUsageDirection +
+                            " Reason=" + suppressReason +
+                            " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(agent, startSwitchingWeaponUsageIndex.EquipmentIndex) + "}");
+                    }
+
+                    return false;
+                }
+
                 if (agent != null && IsMountedUsageLifecycleAgent(agent))
                 {
                     string logKey =
@@ -11555,6 +11693,33 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (ShouldSuppressContractDrivenDeferredPreBattleActivationUsageMessage(
+                        agent,
+                        weaponUsageIndexChangeMessage.SlotIndex,
+                        weaponUsageIndexChangeMessage.UsageIndex,
+                        "usage-index-change-message",
+                        out string suppressReason))
+                {
+                    string logKey =
+                        (agent?.Index ?? -1) + "|" +
+                        weaponUsageIndexChangeMessage.SlotIndex + "|" +
+                        weaponUsageIndexChangeMessage.UsageIndex + "|" +
+                        suppressReason;
+                    if (!string.Equals(_lastSuppressedClientWeaponUsageIndexChangeMessageKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedClientWeaponUsageIndexChangeMessageKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed client WeaponUsageIndexChangeMessage before native handler because contract-driven pre-battle activation is still deferred. " +
+                            "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
+                            " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
+                            " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex +
+                            " Reason=" + suppressReason +
+                            " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(agent, weaponUsageIndexChangeMessage.SlotIndex) + "}");
+                    }
+
+                    return false;
+                }
+
                 if (agent != null && IsMountedUsageLifecycleAgent(agent))
                 {
                     string logKey =
@@ -11621,6 +11786,18 @@ namespace CoopSpectator.Patches
                         "BattleMapSpawnHandoffPatch: deferred client CreateMissile because shooter bootstrap is still deferred. " +
                         "MissileIndex=" + createMissile.MissileIndex +
                         " AgentIndex=" + createMissile.AgentIndex);
+                    return false;
+                }
+
+                if (TryGetContractDrivenDeferredPreBattleActivationStatus(
+                        shooterAgent,
+                        out string contractDeferredReason))
+                {
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed client CreateMissile before native handler because contract-driven pre-battle activation is still deferred. " +
+                        "MissileIndex=" + createMissile.MissileIndex +
+                        " AgentIndex=" + createMissile.AgentIndex +
+                        " Reason=" + contractDeferredReason);
                     return false;
                 }
 
@@ -12153,6 +12330,50 @@ namespace CoopSpectator.Patches
 
                 if (agent == null)
                     return true;
+
+                if (CoopMissionSpawnLogic.TryEnforceDeferredPreBattleActivationWield(
+                        agent,
+                        setWieldedItemIndex.WieldedItemIndex,
+                        setWieldedItemIndex.IsLeftHand,
+                        setWieldedItemIndex.IsWieldedOnSpawn,
+                        out string deferredPreBattleEntryId,
+                        out string deferredPreBattleSuppressReason,
+                        out string deferredPreBattleHoldRepairResult,
+                        out string deferredPreBattleHoldRepairIssue))
+                {
+                    __state = true;
+                    string deferredPreBattlePayloadSummary =
+                        "PayloadWieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                        " PayloadIsLeftHand=" + setWieldedItemIndex.IsLeftHand +
+                        " PayloadIsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
+                        " PayloadIsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
+                        " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
+                        " SuppressedReason=" + (deferredPreBattleSuppressReason ?? "deferred-prebattle-onspawn-wield") +
+                        " HoldRepairResult=" + (deferredPreBattleHoldRepairResult ?? "(none)") +
+                        " HoldRepairIssue=" + (deferredPreBattleHoldRepairIssue ?? "(none)");
+
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed contract-driven deferred pre-battle SetWieldedItemIndex because it would violate or redundantly reaffirm safe-hold materialization. " +
+                        "AgentIndex=" + agent.Index +
+                        " EntryId=" + (deferredPreBattleEntryId ?? "null") +
+                        " TeamSide=" + agent.Team?.Side +
+                        " " + deferredPreBattlePayloadSummary);
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientSetWieldedItemIndex(
+                        setWieldedItemIndex,
+                        agent,
+                        suppressed: true,
+                        source: "battle-map handoff SetWieldedItemIndex deferred pre-battle hold guard");
+                    CoopMissionSpawnLogic.ObserveClientSetWieldedItemIndex(
+                        setWieldedItemIndex.AgentIndex,
+                        setWieldedItemIndex.IsWieldedOnSpawn,
+                        "battle-map handoff SetWieldedItemIndex deferred pre-battle hold guard");
+                    CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                        agent,
+                        "client-set-wielded-item-index-suppressed",
+                        "battle-map handoff SetWieldedItemIndex deferred pre-battle hold guard",
+                        deferredPreBattlePayloadSummary);
+                    return false;
+                }
 
                 if (setWieldedItemIndex.IsWieldedOnSpawn &&
                     TrySuppressStrictExactHeroStaleOnSpawnWield(setWieldedItemIndex, agent))

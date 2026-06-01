@@ -362,7 +362,7 @@ namespace CoopSpectator.Infrastructure
                 preBattleWeaponState.ReadinessMode = ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive;
                 preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstBow.Slot;
                 preBattleWeaponState.ExpectedAmmoSlotIndex = (int)firstArrowAmmo.Slot;
-                preBattleWeaponState.ExpectAmmoAttachedToMainHand = true;
+                preBattleWeaponState.ExpectAmmoAttachedToMainHand = false;
                 preBattleWeaponState.InitialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.RangedForMainHand;
                 preBattleWeaponState.DecisionReason = "ai-bow-armed-prebattle-state";
                 return;

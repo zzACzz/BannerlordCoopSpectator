@@ -26,6 +26,7 @@ namespace CoopSpectator.Infrastructure
     public static class CoopBattlePhaseRuntimeState
     {
         private static readonly object Sync = new object();
+        private static readonly TimeSpan ClientBridgePhasePollInterval = TimeSpan.FromMilliseconds(50);
         private static CoopBattlePhaseStateSnapshot _current = new CoopBattlePhaseStateSnapshot
         {
             Phase = CoopBattlePhase.None,
@@ -33,9 +34,12 @@ namespace CoopSpectator.Infrastructure
             MissionName = string.Empty,
             UpdatedUtc = DateTime.MinValue
         };
+        private static DateTime _lastClientBridgePhasePollUtc = DateTime.MinValue;
+        private static string _lastClientBridgePhaseSnapshotKey = string.Empty;
 
         public static CoopBattlePhaseStateSnapshot GetCurrent()
         {
+            TryRefreshClientObservedPhaseFromBridge();
             lock (Sync)
             {
                 return new CoopBattlePhaseStateSnapshot
@@ -50,6 +54,7 @@ namespace CoopSpectator.Infrastructure
 
         public static CoopBattlePhase GetPhase()
         {
+            TryRefreshClientObservedPhaseFromBridge();
             lock (Sync)
             {
                 return _current.Phase;
@@ -84,7 +89,8 @@ namespace CoopSpectator.Infrastructure
                 };
             }
 
-            CoopBattlePhaseBridgeFile.WriteStatus(GetCurrent());
+            if (ShouldWritePhaseBridgeStatus())
+                CoopBattlePhaseBridgeFile.WriteStatus(GetCurrent());
             ModLogger.Info("CoopBattlePhaseRuntimeState: cleared. Source=" + (_current.Source ?? "unknown"));
         }
 
@@ -110,12 +116,89 @@ namespace CoopSpectator.Infrastructure
                 };
             }
 
-            CoopBattlePhaseBridgeFile.WriteStatus(GetCurrent());
+            if (ShouldWritePhaseBridgeStatus())
+                CoopBattlePhaseBridgeFile.WriteStatus(GetCurrent());
             ModLogger.Info(
                 "CoopBattlePhaseRuntimeState: phase updated. " +
                 "Phase=" + phase +
                 " Source=" + (source ?? "unknown") +
                 " Mission=" + (missionName ?? "unknown"));
+        }
+
+        private static bool ShouldWritePhaseBridgeStatus()
+        {
+            return GameNetwork.IsServer || !GameNetwork.IsClientOrReplay;
+        }
+
+        private static void TryRefreshClientObservedPhaseFromBridge()
+        {
+            if (!GameNetwork.IsClientOrReplay || GameNetwork.IsServer)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            lock (Sync)
+            {
+                if (_lastClientBridgePhasePollUtc != DateTime.MinValue &&
+                    (nowUtc - _lastClientBridgePhasePollUtc) < ClientBridgePhasePollInterval)
+                {
+                    return;
+                }
+
+                _lastClientBridgePhasePollUtc = nowUtc;
+            }
+
+            CoopBattlePhaseStateSnapshot bridgeSnapshot = CoopBattlePhaseBridgeFile.ReadStatus();
+            if (bridgeSnapshot == null)
+                return;
+
+            string currentMissionName = ResolveMissionName(Mission.Current);
+            if (!string.IsNullOrWhiteSpace(currentMissionName) &&
+                !string.IsNullOrWhiteSpace(bridgeSnapshot.MissionName) &&
+                !string.Equals(currentMissionName, bridgeSnapshot.MissionName, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            string snapshotKey =
+                bridgeSnapshot.Phase + "|" +
+                (bridgeSnapshot.Source ?? string.Empty) + "|" +
+                (bridgeSnapshot.MissionName ?? string.Empty) + "|" +
+                bridgeSnapshot.UpdatedUtc.ToString("O");
+
+            lock (Sync)
+            {
+                if (string.Equals(_lastClientBridgePhaseSnapshotKey, snapshotKey, StringComparison.Ordinal))
+                    return;
+
+                bool samePhase = _current.Phase == bridgeSnapshot.Phase;
+                bool sameMission = string.Equals(_current.MissionName, bridgeSnapshot.MissionName, StringComparison.Ordinal);
+                bool sameSource = string.Equals(_current.Source, bridgeSnapshot.Source, StringComparison.Ordinal);
+                bool sameTimestamp = _current.UpdatedUtc == bridgeSnapshot.UpdatedUtc;
+                if (samePhase && sameMission && sameSource && sameTimestamp)
+                {
+                    _lastClientBridgePhaseSnapshotKey = snapshotKey;
+                    return;
+                }
+
+                _current = new CoopBattlePhaseStateSnapshot
+                {
+                    Phase = bridgeSnapshot.Phase,
+                    Source = !string.IsNullOrWhiteSpace(bridgeSnapshot.Source)
+                        ? bridgeSnapshot.Source + " client-bridge"
+                        : "client-bridge",
+                    MissionName = bridgeSnapshot.MissionName ?? string.Empty,
+                    UpdatedUtc = bridgeSnapshot.UpdatedUtc == DateTime.MinValue
+                        ? nowUtc
+                        : bridgeSnapshot.UpdatedUtc
+                };
+                _lastClientBridgePhaseSnapshotKey = snapshotKey;
+            }
+
+            ModLogger.Info(
+                "CoopBattlePhaseRuntimeState: client observed authoritative battle phase. " +
+                "Phase=" + bridgeSnapshot.Phase +
+                " Source=" + (bridgeSnapshot.Source ?? "unknown") +
+                " Mission=" + (bridgeSnapshot.MissionName ?? "unknown"));
         }
 
         private static string ResolveMissionName(Mission mission)
