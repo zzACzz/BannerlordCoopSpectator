@@ -133,6 +133,8 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedClientWeaponReloadPhaseMessageKey;
         private static string _lastSuppressedClientWeaponUsageSwitchMessageKey;
         private static string _lastSuppressedClientWeaponUsageIndexChangeMessageKey;
+        private static string _lastSuppressedLocalDeferredPreBattleTryToWieldWeaponInSlotKey;
+        private static string _lastSuppressedLocalDeferredPreBattleWieldNextWeaponKey;
         private static string _lastDeferredClientRecoverySelectionGateKey;
         private static bool _suppressExactCommanderOrderHotkeyFallbackUntilRelease;
         private static object _activeExactCommanderMissionOrderVm;
@@ -470,6 +472,8 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponAmmoData), () => PatchMissionNetworkComponentSetWeaponAmmoData(harmony));
             TryApplyPatchStep(nameof(PatchAgentSetWeaponAmountInSlot), () => PatchAgentSetWeaponAmountInSlot(harmony));
             TryApplyPatchStep(nameof(PatchAgentSetWeaponAmmoAsClient), () => PatchAgentSetWeaponAmmoAsClient(harmony));
+            TryApplyPatchStep(nameof(PatchAgentTryToWieldWeaponInSlot), () => PatchAgentTryToWieldWeaponInSlot(harmony));
+            TryApplyPatchStep(nameof(PatchAgentWieldNextWeapon), () => PatchAgentWieldNextWeapon(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponReloadPhase), () => PatchMissionNetworkComponentSetWeaponReloadPhase(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentStartSwitchingWeaponUsageIndex), () => PatchMissionNetworkComponentStartSwitchingWeaponUsageIndex(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentWeaponUsageIndexChangeMessage), () => PatchMissionNetworkComponentWeaponUsageIndexChangeMessage(harmony));
@@ -1065,6 +1069,44 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.SetWeaponAmmoAsClient.");
+        }
+
+        private static void PatchAgentTryToWieldWeaponInSlot(Harmony harmony)
+        {
+            MethodInfo target = AccessTools.Method(
+                typeof(Agent),
+                nameof(Agent.TryToWieldWeaponInSlot),
+                new[] { typeof(EquipmentIndex), typeof(Agent.WeaponWieldActionType), typeof(bool) });
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_TryToWieldWeaponInSlot_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.TryToWieldWeaponInSlot not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.TryToWieldWeaponInSlot.");
+        }
+
+        private static void PatchAgentWieldNextWeapon(Harmony harmony)
+        {
+            MethodInfo target = AccessTools.Method(
+                typeof(Agent),
+                nameof(Agent.WieldNextWeapon),
+                new[] { typeof(Agent.HandIndex), typeof(Agent.WeaponWieldActionType) });
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_WieldNextWeapon_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.WieldNextWeapon not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.WieldNextWeapon.");
         }
 
         private static void PatchMissionNetworkComponentSetWeaponReloadPhase(Harmony harmony)
@@ -2111,6 +2153,16 @@ namespace CoopSpectator.Patches
                 if (exactVisualApplied && !deferImmediateExactVisualFinalize)
                     agent.MountAgent?.UpdateAgentProperties();
 
+                bool deferredPreBattleSafeHoldApplied =
+                    CoopMissionSpawnLogic.TryMaterializeDeferredPreBattleActivationSafeHoldLocally(
+                        agent,
+                        preferredEntryId,
+                        "battle-map handoff SetAgentPeer local safe-hold materialization",
+                        out string deferredPreBattleSafeHoldEntryId,
+                        out string deferredPreBattleSafeHoldReason,
+                        out string deferredPreBattleSafeHoldResult,
+                        out string deferredPreBattleSafeHoldIssue);
+
                 _lastLocalVisualFinalizeKey = logKey;
                 ModLogger.Info(
                     "BattleMapSpawnHandoffPatch: processed local player agent exact visuals after SetAgentPeer for battle-map handoff. " +
@@ -2122,6 +2174,11 @@ namespace CoopSpectator.Patches
                     " LocalHeroLiveTakeoverSuppressed=" + clientLocalHeroLiveTakeoverSuppressed +
                     " LocalHeroLiveTakeoverReason=" + (clientLocalHeroLiveTakeoverReason ?? "null") +
                     " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
+                    " DeferredPreBattleSafeHoldApplied=" + deferredPreBattleSafeHoldApplied +
+                    " DeferredPreBattleSafeHoldEntryId=" + (deferredPreBattleSafeHoldEntryId ?? "null") +
+                    " DeferredPreBattleSafeHoldReason=" + (deferredPreBattleSafeHoldReason ?? "null") +
+                    " DeferredPreBattleSafeHoldResult=" + (deferredPreBattleSafeHoldResult ?? "(none)") +
+                    " DeferredPreBattleSafeHoldIssue=" + (deferredPreBattleSafeHoldIssue ?? "(none)") +
                     " PreferredEntryId=" + (preferredEntryId ?? "null") +
                     " EntryResolutionSource=" + (entryResolutionSource ?? "null") +
                     " BridgeTroop=" + (entryPolicy.BridgeTroopOrEntryId ?? "null") +
@@ -2130,12 +2187,13 @@ namespace CoopSpectator.Patches
                     agent,
                     "client-set-agent-peer",
                     "battle-map handoff SetAgentPeer",
-                    "PayloadPeerIndex=" + (setAgentPeer.Peer?.Index.ToString() ?? "null") +
-                    " PreferredEntryId=" + (preferredEntryId ?? "null") +
-                    " LocalHeroLiveTakeoverSuppressed=" + clientLocalHeroLiveTakeoverSuppressed +
-                    " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
-                    " ExactVisualApplied=" + exactVisualApplied +
-                    " TroopExactVisualApplied=" + troopExactVisualApplied);
+                        "PayloadPeerIndex=" + (setAgentPeer.Peer?.Index.ToString() ?? "null") +
+                        " PreferredEntryId=" + (preferredEntryId ?? "null") +
+                        " LocalHeroLiveTakeoverSuppressed=" + clientLocalHeroLiveTakeoverSuppressed +
+                        " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
+                        " DeferredPreBattleSafeHoldApplied=" + deferredPreBattleSafeHoldApplied +
+                        " ExactVisualApplied=" + exactVisualApplied +
+                        " TroopExactVisualApplied=" + troopExactVisualApplied);
             }
             catch (Exception ex)
             {
@@ -4672,6 +4730,57 @@ namespace CoopSpectator.Patches
                 "|CanStartBattle=" + status.CanStartBattle +
                 "|HasAgent=" + status.HasAgent +
                 "|LifecycleState=" + (status.LifecycleState ?? string.Empty);
+            return true;
+        }
+
+        private static bool ShouldSuppressDeadClientExactAgentWeaponMutation(
+            Agent agent,
+            EquipmentIndex weaponSlotIndex,
+            EquipmentIndex ammoSlotIndex,
+            string mutation,
+            out string reason)
+        {
+            reason = null;
+            if (agent == null || agent.IsMount || GameNetwork.IsServer)
+                return false;
+
+            if (agent.IsActive() && agent.Health > 0f)
+                return false;
+
+            string entryId = null;
+            if (!CoopMissionSpawnLogic.TryResolveClientAuthoritativeMaterializedEntryId(agent.Index, out entryId) &&
+                !ExactTransferContractRuntimeCache.TryGetEntryIdByRiderAgentIndex(agent.Index, out entryId))
+            {
+                return false;
+            }
+
+            ExactTransferContractRuntimeCache.TryGetContract(entryId, out ExactTransferSpawnContract contract);
+            ExactTransferPreBattleWeaponStateContract preBattleWeaponState = contract?.PreBattleWeaponState;
+
+            string weaponUsage = "unknown";
+            try
+            {
+                if (weaponSlotIndex >= EquipmentIndex.Weapon0 && weaponSlotIndex <= EquipmentIndex.Weapon3)
+                    weaponUsage = agent.Equipment[weaponSlotIndex].CurrentUsageItem?.WeaponClass.ToString() ?? "null";
+            }
+            catch (Exception ex)
+            {
+                weaponUsage = "check-failed:" + ex.GetType().Name;
+            }
+
+            reason =
+                "dead-exact-agent-weapon-mutation" +
+                "|Mutation=" + (mutation ?? "weapon-message") +
+                "|EntryId=" + (entryId ?? "null") +
+                "|AgentActive=" + agent.IsActive() +
+                "|Health=" + agent.Health.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) +
+                "|Phase=" + CoopBattlePhaseRuntimeState.GetPhase() +
+                "|CharacterId=" + (agent.Character?.StringId ?? "null") +
+                "|WeaponSlot=" + weaponSlotIndex +
+                "|AmmoSlot=" + ammoSlotIndex +
+                "|WeaponUsage=" + weaponUsage +
+                "|PreBattleMode=" + (preBattleWeaponState?.Mode.ToString() ?? "null") +
+                "|PreBattleReadiness=" + (preBattleWeaponState?.ReadinessMode.ToString() ?? "null");
             return true;
         }
 
@@ -11217,6 +11326,36 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (ShouldSuppressDeadClientExactAgentWeaponMutation(
+                        agent,
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        setWeaponAmmoData.AmmoEquipmentIndex,
+                        "ammo-message",
+                        out string deadAgentReason))
+                {
+                    string logKey =
+                        (agent?.Index ?? -1) + "|" +
+                        setWeaponAmmoData.WeaponEquipmentIndex + "|" +
+                        setWeaponAmmoData.AmmoEquipmentIndex + "|" +
+                        setWeaponAmmoData.Ammo + "|" +
+                        deadAgentReason;
+                    if (!string.Equals(_lastSuppressedClientWeaponAmmoDataMessageKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedClientWeaponAmmoDataMessageKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed client SetWeaponAmmoData for dead exact agent before native handler because late death-corridor ranged mutation no longer has a safe live weapon target. " +
+                            "AgentIndex=" + setWeaponAmmoData.AgentIndex +
+                            " WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
+                            " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex +
+                            " Ammo=" + setWeaponAmmoData.Ammo +
+                            " Reason=" + deadAgentReason +
+                            " WeaponSlot={" + BuildMountedWeaponSlotObservationSummary(agent, setWeaponAmmoData.WeaponEquipmentIndex) + "} " +
+                            "AmmoSlot={" + BuildMountedWeaponSlotObservationSummary(agent, setWeaponAmmoData.AmmoEquipmentIndex) + "}");
+                    }
+
+                    return false;
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -11333,6 +11472,129 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool Agent_TryToWieldWeaponInSlot_Prefix(
+            Agent __instance,
+            EquipmentIndex equipmentIndex,
+            Agent.WeaponWieldActionType wieldActionType,
+            bool isWieldedOnSpawn)
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (GameNetwork.IsServer ||
+                    !ShouldUseSafeStringIdCreateAgentPathOnClient(mission) ||
+                    CoopMissionSpawnLogic.IsDeferredPreBattleSafeHoldLocalMaterializationInProgress())
+                {
+                    return true;
+                }
+
+                if (!CoopMissionSpawnLogic.TryMaterializeDeferredPreBattleActivationSafeHoldLocally(
+                        __instance,
+                        preferredEntryId: null,
+                        source: "local TryToWieldWeaponInSlot deferred pre-battle guard",
+                        out string entryId,
+                        out string deferStatusReason,
+                        out string holdRepairResult,
+                        out string holdRepairIssue))
+                {
+                    return true;
+                }
+
+                string logKey =
+                    (__instance?.Index ?? -1) + "|" +
+                    equipmentIndex + "|" +
+                    wieldActionType + "|" +
+                    isWieldedOnSpawn + "|" +
+                    (entryId ?? "null") + "|" +
+                    (deferStatusReason ?? "unknown");
+                if (!string.Equals(_lastSuppressedLocalDeferredPreBattleTryToWieldWeaponInSlotKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedLocalDeferredPreBattleTryToWieldWeaponInSlotKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed local TryToWieldWeaponInSlot because contract-driven pre-battle activation is still deferred. " +
+                        "AgentIndex=" + (__instance?.Index ?? -1) +
+                        " EntryId=" + (entryId ?? "null") +
+                        " EquipmentIndex=" + equipmentIndex +
+                        " WieldActionType=" + wieldActionType +
+                        " IsWieldedOnSpawn=" + isWieldedOnSpawn +
+                        " Reason=" + (deferStatusReason ?? "unknown") +
+                        " HoldRepairResult=" + (holdRepairResult ?? "(none)") +
+                        " HoldRepairIssue=" + (holdRepairIssue ?? "(none)") +
+                        " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, equipmentIndex) + "}");
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.TryToWieldWeaponInSlot prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool Agent_WieldNextWeapon_Prefix(
+            Agent __instance,
+            Agent.HandIndex handIndex,
+            Agent.WeaponWieldActionType wieldActionType)
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (GameNetwork.IsServer ||
+                    !ShouldUseSafeStringIdCreateAgentPathOnClient(mission) ||
+                    CoopMissionSpawnLogic.IsDeferredPreBattleSafeHoldLocalMaterializationInProgress())
+                {
+                    return true;
+                }
+
+                if (!CoopMissionSpawnLogic.TryMaterializeDeferredPreBattleActivationSafeHoldLocally(
+                        __instance,
+                        preferredEntryId: null,
+                        source: "local WieldNextWeapon deferred pre-battle guard",
+                        out string entryId,
+                        out string deferStatusReason,
+                        out string holdRepairResult,
+                        out string holdRepairIssue))
+                {
+                    return true;
+                }
+
+                string logKey =
+                    (__instance?.Index ?? -1) + "|" +
+                    handIndex + "|" +
+                    wieldActionType + "|" +
+                    (entryId ?? "null") + "|" +
+                    (deferStatusReason ?? "unknown");
+                if (!string.Equals(_lastSuppressedLocalDeferredPreBattleWieldNextWeaponKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedLocalDeferredPreBattleWieldNextWeaponKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed local WieldNextWeapon because contract-driven pre-battle activation is still deferred. " +
+                        "AgentIndex=" + (__instance?.Index ?? -1) +
+                        " EntryId=" + (entryId ?? "null") +
+                        " HandIndex=" + handIndex +
+                        " WieldActionType=" + wieldActionType +
+                        " Reason=" + (deferStatusReason ?? "unknown") +
+                        " HoldRepairResult=" + (holdRepairResult ?? "(none)") +
+                        " HoldRepairIssue=" + (holdRepairIssue ?? "(none)") +
+                        " MainSlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, __instance?.GetPrimaryWieldedItemIndex() ?? EquipmentIndex.None) + "}");
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.WieldNextWeapon prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static bool MissionNetworkComponent_HandleServerEventSetWeaponReloadPhase_Prefix(GameNetworkMessage baseMessage)
         {
             try
@@ -11433,6 +11695,33 @@ namespace CoopSpectator.Patches
                             " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
                             " ReloadPhase=" + setWeaponReloadPhase.ReloadPhase +
                             " Reason=" + suppressReason +
+                            " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(agent, setWeaponReloadPhase.EquipmentIndex) + "}");
+                    }
+
+                    return false;
+                }
+
+                if (ShouldSuppressDeadClientExactAgentWeaponMutation(
+                        agent,
+                        setWeaponReloadPhase.EquipmentIndex,
+                        EquipmentIndex.None,
+                        "reload-phase-message",
+                        out string deadAgentReason))
+                {
+                    string logKey =
+                        (agent?.Index ?? -1) + "|" +
+                        setWeaponReloadPhase.EquipmentIndex + "|" +
+                        setWeaponReloadPhase.ReloadPhase + "|" +
+                        deadAgentReason;
+                    if (!string.Equals(_lastSuppressedClientWeaponReloadPhaseMessageKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedClientWeaponReloadPhaseMessageKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed client SetWeaponReloadPhase for dead exact agent before native handler because late death-corridor ranged mutation no longer has a safe live weapon target. " +
+                            "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
+                            " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
+                            " ReloadPhase=" + setWeaponReloadPhase.ReloadPhase +
+                            " Reason=" + deadAgentReason +
                             " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(agent, setWeaponReloadPhase.EquipmentIndex) + "}");
                     }
 
@@ -14043,10 +14332,26 @@ namespace CoopSpectator.Patches
             if (!TryResolveCommanderEntryIdForTeam(team, out commanderEntryId) || string.IsNullOrWhiteSpace(candidateEntryId))
                 return false;
 
+            if (string.Equals(commanderEntryId, candidateEntryId, StringComparison.Ordinal))
+                return true;
+
+            bool commanderHasVariant = HasEntryVariantSuffix(commanderEntryId);
+            bool candidateHasVariant = HasEntryVariantSuffix(candidateEntryId);
+            if (commanderHasVariant || candidateHasVariant)
+                return false;
+
             return string.Equals(
                 StripEntryVariantSuffix(commanderEntryId),
                 StripEntryVariantSuffix(candidateEntryId),
                 StringComparison.Ordinal);
+        }
+
+        private static bool HasEntryVariantSuffix(string entryId)
+        {
+            if (string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            return entryId.IndexOf("|variant-", StringComparison.Ordinal) >= 0;
         }
 
         private static string StripEntryVariantSuffix(string entryId)
