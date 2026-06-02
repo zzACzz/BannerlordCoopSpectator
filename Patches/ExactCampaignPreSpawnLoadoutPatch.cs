@@ -74,12 +74,10 @@ namespace CoopSpectator.Patches
                 return;
 
             bool isPlayerControlledOrigin = ((IAgentOriginBase)exactOrigin).IsUnderPlayersCommand;
-            bool contractPlayerControlledOrigin =
-                isPlayerControlledOrigin &&
-                entryState != null &&
-                (entryState.IsHero ||
-                 !string.IsNullOrWhiteSpace(entryState.HeroId) ||
-                 string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
+            // Mission.SpawnAgent still runs before real peer/controller ownership exists.
+            // Keep IsUnderPlayersCommand as diagnostics only; actual player weapon ownership
+            // is upgraded later by the runtime possession / SetAgentPeer path.
+            bool contractPlayerControlledOrigin = false;
             bool useDedicatedSafeStringIdExactEquipmentPath =
                 CoopMissionSpawnLogic.UseDedicatedSafeStringIdExactEquipmentPathOnServer();
             ExactCreateAgentServerPreSpawnContractState resolvedContract =
