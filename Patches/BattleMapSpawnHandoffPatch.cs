@@ -2508,6 +2508,12 @@ namespace CoopSpectator.Patches
             if (GameNetwork.IsServer || mission == null)
                 return false;
 
+            // Host-side SP battle shells may render the campaign battle scene locally before any
+            // actual network client runtime exists. The exact handoff/native weapon guards below
+            // are only safe once the peer is in a real client session.
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return false;
+
             if (CoopMissionSpawnLogic.UseDedicatedSafeStringIdExactEquipmentPathOnClient())
                 return true;
 
