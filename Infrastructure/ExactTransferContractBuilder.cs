@@ -322,25 +322,35 @@ namespace CoopSpectator.Infrastructure
             preBattleWeaponState.SafeHoldMainHandSlotIndex = safeHoldMainHandSlotIndex;
             preBattleWeaponState.SafeHoldOffHandSlotIndex = safeHoldOffHandSlotIndex;
             preBattleWeaponState.SafeHoldInitialWeaponEquipPreference = safeHoldInitialWeaponEquipPreference;
-            bool isMainHeroPlayerEntry =
-                isPlayerControlledOrigin &&
-                string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase);
-
-            if (isMainHeroPlayerEntry)
+            if (isPlayerControlledOrigin)
             {
+                int? playerControlledPreferredMainHandSlotIndex =
+                    IsWeaponSlotIndex(safeHoldMainHandSlotIndex)
+                        ? safeHoldMainHandSlotIndex
+                        : (IsWeaponSlotIndex(initialWield?.PreferredMainHandSlotIndex)
+                            ? initialWield?.PreferredMainHandSlotIndex
+                            : null);
+                int? playerControlledPreferredOffHandSlotIndex =
+                    IsWeaponSlotIndex(safeHoldMainHandSlotIndex)
+                        ? safeHoldOffHandSlotIndex
+                        : (IsWeaponSlotIndex(initialWield?.PreferredOffHandSlotIndex)
+                            ? initialWield?.PreferredOffHandSlotIndex
+                            : null);
+                Equipment.InitialWeaponEquipPreference playerControlledInitialWeaponEquipPreference =
+                    IsWeaponSlotIndex(safeHoldMainHandSlotIndex)
+                        ? safeHoldInitialWeaponEquipPreference
+                        : ResolveInitialWeaponEquipPreferenceFromPreferredSlot(
+                            equipment.SpawnEquipment,
+                            playerControlledPreferredMainHandSlotIndex);
                 preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.PlayerControlledOverride;
-                preBattleWeaponState.ReadinessMode = ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive;
-                preBattleWeaponState.PreferredMainHandSlotIndex = IsWeaponSlotIndex(initialWield?.PreferredMainHandSlotIndex)
-                    ? initialWield?.PreferredMainHandSlotIndex
-                    : null;
-                preBattleWeaponState.PreferredOffHandSlotIndex = IsWeaponSlotIndex(initialWield?.PreferredOffHandSlotIndex)
-                    ? initialWield?.PreferredOffHandSlotIndex
-                    : null;
-                preBattleWeaponState.InitialWeaponEquipPreference =
-                    ResolveInitialWeaponEquipPreferenceFromPreferredSlot(
-                        equipment.SpawnEquipment,
-                        initialWield?.PreferredMainHandSlotIndex);
-                preBattleWeaponState.DecisionReason = "player-controlled-main-hero-native-initial-wield-override";
+                preBattleWeaponState.ReadinessMode = ExactTransferPreBattleWeaponReadinessMode.AllowImmediateNativeActivation;
+                preBattleWeaponState.PreferredMainHandSlotIndex = playerControlledPreferredMainHandSlotIndex;
+                preBattleWeaponState.PreferredOffHandSlotIndex = playerControlledPreferredOffHandSlotIndex;
+                preBattleWeaponState.InitialWeaponEquipPreference = playerControlledInitialWeaponEquipPreference;
+                preBattleWeaponState.DecisionReason =
+                    string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase)
+                        ? "player-controlled-main-hero-immediate-native-weapon-ownership"
+                        : "player-controlled-possessed-entry-immediate-native-weapon-ownership";
                 return;
             }
 

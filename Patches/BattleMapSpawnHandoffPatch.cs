@@ -11717,8 +11717,8 @@ namespace CoopSpectator.Patches
 
         private static bool Agent_TryToWieldWeaponInSlot_Prefix(
             Agent __instance,
-            EquipmentIndex equipmentIndex,
-            Agent.WeaponWieldActionType wieldActionType,
+            EquipmentIndex slotIndex,
+            Agent.WeaponWieldActionType type,
             bool isWieldedOnSpawn)
         {
             try
@@ -11748,8 +11748,8 @@ namespace CoopSpectator.Patches
 
                 string logKey =
                     (__instance?.Index ?? -1) + "|" +
-                    equipmentIndex + "|" +
-                    wieldActionType + "|" +
+                    slotIndex + "|" +
+                    type + "|" +
                     isWieldedOnSpawn + "|" +
                     (entryId ?? "null") + "|" +
                     (deferStatusReason ?? "unknown");
@@ -11760,13 +11760,13 @@ namespace CoopSpectator.Patches
                         "BattleMapSpawnHandoffPatch: suppressed local TryToWieldWeaponInSlot because contract-driven pre-battle activation is still deferred. " +
                         "AgentIndex=" + (__instance?.Index ?? -1) +
                         " EntryId=" + (entryId ?? "null") +
-                        " EquipmentIndex=" + equipmentIndex +
-                        " WieldActionType=" + wieldActionType +
+                        " EquipmentIndex=" + slotIndex +
+                        " WieldActionType=" + type +
                         " IsWieldedOnSpawn=" + isWieldedOnSpawn +
                         " Reason=" + (deferStatusReason ?? "unknown") +
                         " HoldRepairResult=" + (holdRepairResult ?? "(none)") +
                         " HoldRepairIssue=" + (holdRepairIssue ?? "(none)") +
-                        " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, equipmentIndex) + "}");
+                        " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "}");
                 }
 
                 return false;
@@ -11780,7 +11780,7 @@ namespace CoopSpectator.Patches
 
         private static bool Agent_WieldNextWeapon_Prefix(
             Agent __instance,
-            Agent.HandIndex handIndex,
+            Agent.HandIndex weaponIndex,
             Agent.WeaponWieldActionType wieldActionType)
         {
             try
@@ -11810,7 +11810,7 @@ namespace CoopSpectator.Patches
 
                 string logKey =
                     (__instance?.Index ?? -1) + "|" +
-                    handIndex + "|" +
+                    weaponIndex + "|" +
                     wieldActionType + "|" +
                     (entryId ?? "null") + "|" +
                     (deferStatusReason ?? "unknown");
@@ -11821,7 +11821,7 @@ namespace CoopSpectator.Patches
                         "BattleMapSpawnHandoffPatch: suppressed local WieldNextWeapon because contract-driven pre-battle activation is still deferred. " +
                         "AgentIndex=" + (__instance?.Index ?? -1) +
                         " EntryId=" + (entryId ?? "null") +
-                        " HandIndex=" + handIndex +
+                        " HandIndex=" + weaponIndex +
                         " WieldActionType=" + wieldActionType +
                         " Reason=" + (deferStatusReason ?? "unknown") +
                         " HoldRepairResult=" + (holdRepairResult ?? "(none)") +

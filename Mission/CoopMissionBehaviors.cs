@@ -28102,6 +28102,37 @@ namespace CoopSpectator.MissionBehaviors
                    string.Equals(entryState.EntryId, selectedEntryId, StringComparison.Ordinal);
         }
 
+        private static bool ShouldUseImmediatePlayerControlledWeaponOwnership(
+            Agent agent,
+            RosterEntryState entryState)
+        {
+            if (entryState == null || string.IsNullOrWhiteSpace(entryState.EntryId))
+                return false;
+
+            if (IsClientLocalSelectedExactEntry(entryState))
+                return true;
+
+            if (agent == null || agent.IsMount)
+                return false;
+
+            if (IsLocalPeerControlledAgent(agent))
+                return true;
+
+            if (agent.MissionPeer != null)
+                return true;
+
+            return agent.Controller == AgentControllerType.Player;
+        }
+
+        private static bool IsPlayerControlledWeaponOwnershipContract(ExactTransferSpawnContract contract)
+        {
+            ExactTransferPreBattleWeaponStateContract preBattleWeaponState = contract?.PreBattleWeaponState;
+            return contract?.Identity?.IsPlayerControlledEntry == true &&
+                   preBattleWeaponState != null &&
+                   preBattleWeaponState.Mode == ExactTransferPreBattleWeaponStateMode.PlayerControlledOverride &&
+                   preBattleWeaponState.ReadinessMode == ExactTransferPreBattleWeaponReadinessMode.AllowImmediateNativeActivation;
+        }
+
         internal static bool TryResolveLocalSelectedEntryIdForBattleMapCommander(out string entryId)
         {
             return TryResolveLocalSelectedEntryIdForBattleMapCommander(out entryId, out _);
@@ -29134,11 +29165,19 @@ namespace CoopSpectator.MissionBehaviors
                     return false;
             }
 
-            if (!ExactTransferContractRuntimeCache.TryGetContract(entryId, out contract) || contract == null)
+            bool hasCachedContract =
+                ExactTransferContractRuntimeCache.TryGetContract(entryId, out contract) &&
+                contract != null;
+            bool shouldUsePlayerControlledWeaponOwnership =
+                ShouldUseImmediatePlayerControlledWeaponOwnership(agent, entryState);
+            bool shouldUpgradeCachedContractToPlayerControlled =
+                shouldUsePlayerControlledWeaponOwnership &&
+                !IsPlayerControlledWeaponOwnershipContract(contract);
+            if (!hasCachedContract || shouldUpgradeCachedContractToPlayerControlled)
             {
                 contract = ExactTransferContractBuilder.Build(
                     entryState,
-                    isPlayerControlledOrigin: IsClientLocalSelectedExactEntry(entryState),
+                    isPlayerControlledOrigin: shouldUsePlayerControlledWeaponOwnership,
                     teamIndex: agent.Team?.TeamIndex ?? -1,
                     formationIndex: -1);
                 ExactTransferValidationResult validation = ExactTransferContractValidator.Validate(contract);
