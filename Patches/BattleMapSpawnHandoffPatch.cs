@@ -133,6 +133,9 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedClientWeaponReloadPhaseMessageKey;
         private static string _lastSuppressedClientWeaponUsageSwitchMessageKey;
         private static string _lastSuppressedClientWeaponUsageIndexChangeMessageKey;
+        private static string _lastSuppressedLocalDeferredPreBattleSetWieldedItemIndexAsClientKey;
+        private static string _lastSuppressedLocalDeferredPreBattleStartSwitchingWeaponUsageIndexAsClientKey;
+        private static string _lastSuppressedLocalDeferredPreBattleSetUsageIndexOfWeaponInSlotAsClientKey;
         private static string _lastSuppressedLocalDeferredPreBattleTryToWieldWeaponInSlotKey;
         private static string _lastSuppressedLocalDeferredPreBattleWieldNextWeaponKey;
         private static string _lastDeferredClientRecoverySelectionGateKey;
@@ -472,6 +475,9 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponAmmoData), () => PatchMissionNetworkComponentSetWeaponAmmoData(harmony));
             TryApplyPatchStep(nameof(PatchAgentSetWeaponAmountInSlot), () => PatchAgentSetWeaponAmountInSlot(harmony));
             TryApplyPatchStep(nameof(PatchAgentSetWeaponAmmoAsClient), () => PatchAgentSetWeaponAmmoAsClient(harmony));
+            TryApplyPatchStep(nameof(PatchAgentSetWieldedItemIndexAsClient), () => PatchAgentSetWieldedItemIndexAsClient(harmony));
+            TryApplyPatchStep(nameof(PatchAgentStartSwitchingWeaponUsageIndexAsClient), () => PatchAgentStartSwitchingWeaponUsageIndexAsClient(harmony));
+            TryApplyPatchStep(nameof(PatchAgentSetUsageIndexOfWeaponInSlotAsClient), () => PatchAgentSetUsageIndexOfWeaponInSlotAsClient(harmony));
             TryApplyPatchStep(nameof(PatchAgentTryToWieldWeaponInSlot), () => PatchAgentTryToWieldWeaponInSlot(harmony));
             TryApplyPatchStep(nameof(PatchAgentWieldNextWeapon), () => PatchAgentWieldNextWeapon(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponReloadPhase), () => PatchMissionNetworkComponentSetWeaponReloadPhase(harmony));
@@ -1088,6 +1094,63 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.TryToWieldWeaponInSlot.");
+        }
+
+        private static void PatchAgentSetWieldedItemIndexAsClient(Harmony harmony)
+        {
+            MethodInfo target = AccessTools.Method(
+                typeof(Agent),
+                nameof(Agent.SetWieldedItemIndexAsClient),
+                new[] { typeof(Agent.HandIndex), typeof(EquipmentIndex), typeof(bool), typeof(bool), typeof(int) });
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_SetWieldedItemIndexAsClient_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.SetWieldedItemIndexAsClient not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.SetWieldedItemIndexAsClient.");
+        }
+
+        private static void PatchAgentStartSwitchingWeaponUsageIndexAsClient(Harmony harmony)
+        {
+            MethodInfo target = AccessTools.Method(
+                typeof(Agent),
+                nameof(Agent.StartSwitchingWeaponUsageIndexAsClient),
+                new[] { typeof(EquipmentIndex), typeof(int), typeof(Agent.UsageDirection) });
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_StartSwitchingWeaponUsageIndexAsClient_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.StartSwitchingWeaponUsageIndexAsClient not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.StartSwitchingWeaponUsageIndexAsClient.");
+        }
+
+        private static void PatchAgentSetUsageIndexOfWeaponInSlotAsClient(Harmony harmony)
+        {
+            MethodInfo target = AccessTools.Method(
+                typeof(Agent),
+                nameof(Agent.SetUsageIndexOfWeaponInSlotAsClient),
+                new[] { typeof(EquipmentIndex), typeof(int) });
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_SetUsageIndexOfWeaponInSlotAsClient_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.SetUsageIndexOfWeaponInSlotAsClient not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.SetUsageIndexOfWeaponInSlotAsClient.");
         }
 
         private static void PatchAgentWieldNextWeapon(Harmony harmony)
@@ -11468,6 +11531,186 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.SetWeaponAmmoAsClient prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool Agent_SetWieldedItemIndexAsClient_Prefix(
+            Agent __instance,
+            Agent.HandIndex handIndex,
+            EquipmentIndex equipmentIndex,
+            bool isWieldedInstantly,
+            bool isWieldedOnSpawn,
+            int mainHandCurrentUsageIndex)
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (GameNetwork.IsServer ||
+                    !ShouldUseSafeStringIdCreateAgentPathOnClient(mission) ||
+                    CoopMissionSpawnLogic.IsDeferredPreBattleSafeHoldLocalMaterializationInProgress())
+                {
+                    return true;
+                }
+
+                if (!CoopMissionSpawnLogic.TryMaterializeDeferredPreBattleActivationSafeHoldLocally(
+                        __instance,
+                        preferredEntryId: null,
+                        source: "local SetWieldedItemIndexAsClient deferred pre-battle guard",
+                        out string entryId,
+                        out string deferStatusReason,
+                        out string holdRepairResult,
+                        out string holdRepairIssue))
+                {
+                    return true;
+                }
+
+                string logKey =
+                    (__instance?.Index ?? -1) + "|" +
+                    handIndex + "|" +
+                    equipmentIndex + "|" +
+                    isWieldedInstantly + "|" +
+                    isWieldedOnSpawn + "|" +
+                    mainHandCurrentUsageIndex + "|" +
+                    (entryId ?? "null") + "|" +
+                    (deferStatusReason ?? "unknown");
+                if (!string.Equals(_lastSuppressedLocalDeferredPreBattleSetWieldedItemIndexAsClientKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedLocalDeferredPreBattleSetWieldedItemIndexAsClientKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed local SetWieldedItemIndexAsClient because contract-driven pre-battle activation is still deferred. " +
+                        "AgentIndex=" + (__instance?.Index ?? -1) +
+                        " EntryId=" + (entryId ?? "null") +
+                        " HandIndex=" + handIndex +
+                        " EquipmentIndex=" + equipmentIndex +
+                        " IsWieldedInstantly=" + isWieldedInstantly +
+                        " IsWieldedOnSpawn=" + isWieldedOnSpawn +
+                        " MainHandCurrentUsageIndex=" + mainHandCurrentUsageIndex +
+                        " Reason=" + (deferStatusReason ?? "unknown") +
+                        " HoldRepairResult=" + (holdRepairResult ?? "(none)") +
+                        " HoldRepairIssue=" + (holdRepairIssue ?? "(none)") +
+                        " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, equipmentIndex) + "}");
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.SetWieldedItemIndexAsClient prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool Agent_StartSwitchingWeaponUsageIndexAsClient_Prefix(
+            Agent __instance,
+            EquipmentIndex equipmentIndex,
+            int usageIndex,
+            Agent.UsageDirection currentMovementFlagUsageDirection)
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (GameNetwork.IsServer ||
+                    !ShouldUseSafeStringIdCreateAgentPathOnClient(mission) ||
+                    CoopMissionSpawnLogic.IsDeferredPreBattleSafeHoldLocalMaterializationInProgress())
+                {
+                    return true;
+                }
+
+                if (!ShouldSuppressContractDrivenDeferredPreBattleActivationUsageMessage(
+                        __instance,
+                        equipmentIndex,
+                        usageIndex,
+                        "local-start-switching-usage-as-client",
+                        out string suppressReason))
+                {
+                    return true;
+                }
+
+                string logKey =
+                    (__instance?.Index ?? -1) + "|" +
+                    equipmentIndex + "|" +
+                    usageIndex + "|" +
+                    currentMovementFlagUsageDirection + "|" +
+                    suppressReason;
+                if (!string.Equals(_lastSuppressedLocalDeferredPreBattleStartSwitchingWeaponUsageIndexAsClientKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedLocalDeferredPreBattleStartSwitchingWeaponUsageIndexAsClientKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed local StartSwitchingWeaponUsageIndexAsClient because contract-driven pre-battle activation is still deferred. " +
+                        "AgentIndex=" + (__instance?.Index ?? -1) +
+                        " EquipmentIndex=" + equipmentIndex +
+                        " UsageIndex=" + usageIndex +
+                        " UsageDirection=" + currentMovementFlagUsageDirection +
+                        " Reason=" + suppressReason +
+                        " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, equipmentIndex) + "}");
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.StartSwitchingWeaponUsageIndexAsClient prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool Agent_SetUsageIndexOfWeaponInSlotAsClient_Prefix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            int usageIndex)
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return true;
+
+                if (GameNetwork.IsServer ||
+                    !ShouldUseSafeStringIdCreateAgentPathOnClient(mission) ||
+                    CoopMissionSpawnLogic.IsDeferredPreBattleSafeHoldLocalMaterializationInProgress())
+                {
+                    return true;
+                }
+
+                if (!ShouldSuppressContractDrivenDeferredPreBattleActivationUsageMessage(
+                        __instance,
+                        slotIndex,
+                        usageIndex,
+                        "local-set-usage-index-of-weapon-in-slot-as-client",
+                        out string suppressReason))
+                {
+                    return true;
+                }
+
+                string logKey =
+                    (__instance?.Index ?? -1) + "|" +
+                    slotIndex + "|" +
+                    usageIndex + "|" +
+                    suppressReason;
+                if (!string.Equals(_lastSuppressedLocalDeferredPreBattleSetUsageIndexOfWeaponInSlotAsClientKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedLocalDeferredPreBattleSetUsageIndexOfWeaponInSlotAsClientKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed local SetUsageIndexOfWeaponInSlotAsClient because contract-driven pre-battle activation is still deferred. " +
+                        "AgentIndex=" + (__instance?.Index ?? -1) +
+                        " SlotIndex=" + slotIndex +
+                        " UsageIndex=" + usageIndex +
+                        " Reason=" + suppressReason +
+                        " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "}");
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.SetUsageIndexOfWeaponInSlotAsClient prefix failed open: " + ex.Message);
                 return true;
             }
         }
