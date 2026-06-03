@@ -310,6 +310,7 @@ namespace CoopSpectator.Infrastructure
             MountedWeaponSlotState firstBow = slots.FirstOrDefault(IsBowWeaponSlot);
             MountedWeaponSlotState firstCrossbow = slots.FirstOrDefault(IsCrossbowWeaponSlot);
             MountedWeaponSlotState firstThrown = slots.FirstOrDefault(IsThrownWeaponSlot);
+            MountedWeaponSlotState firstSlingWeapon = slots.FirstOrDefault(IsSlingWeaponSlot);
             MountedWeaponSlotState firstArrowAmmo = slots.FirstOrDefault(IsArrowAmmoSlot);
             MountedWeaponSlotState firstBoltAmmo = slots.FirstOrDefault(IsBoltAmmoSlot);
             MountedWeaponSlotState firstSlingAmmo = slots.FirstOrDefault(IsSlingAmmoSlot);
@@ -378,11 +379,11 @@ namespace CoopSpectator.Infrastructure
                 return;
             }
 
-            if (firstThrown != null && firstSlingAmmo != null)
+            if (firstSlingWeapon != null && firstSlingAmmo != null)
             {
                 preBattleWeaponState.Mode = ExactTransferPreBattleWeaponStateMode.SlingReady;
                 preBattleWeaponState.ReadinessMode = ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive;
-                preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstThrown.Slot;
+                preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstSlingWeapon.Slot;
                 preBattleWeaponState.ExpectedAmmoSlotIndex = (int)firstSlingAmmo.Slot;
                 preBattleWeaponState.ExpectAmmoAttachedToMainHand = false;
                 preBattleWeaponState.InitialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.RangedForMainHand;
@@ -1740,6 +1741,11 @@ namespace CoopSpectator.Infrastructure
         private static bool IsSlingAmmoSlot(MountedWeaponSlotState slot)
         {
             return slot?.Item?.ItemType == ItemObject.ItemTypeEnum.SlingStones;
+        }
+
+        private static bool IsSlingWeaponSlot(MountedWeaponSlotState slot)
+        {
+            return slot?.Item?.ItemType == ItemObject.ItemTypeEnum.Sling;
         }
 
         private static bool IsThrownWeaponSlot(MountedWeaponSlotState slot)

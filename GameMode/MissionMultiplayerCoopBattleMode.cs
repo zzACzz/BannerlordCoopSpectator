@@ -35,18 +35,10 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             string missionShell = battleMapRuntime ? BattleMissionShell : TeamDeathmatchMissionShell;
             if (battleMapRuntime && GameNetwork.IsServer)
             {
-                if (ShouldOwnBattleStartupThroughListedIngress(scene))
-                {
-                    PendingBattleMissionStartupState.Clear(
-                        "MissionMultiplayerCoopBattleMode.StartMultiplayerGame listed-ingress battle startup precedence");
-                    ModLogger.Info(
-                        "MissionMultiplayerCoopBattleMode: skipped pending battle startup arm for listed-ingress battle runtime. " +
-                        "Scene=" + (scene ?? string.Empty) + ".");
-                }
-                else
-                {
-                    PendingBattleMissionStartupState.Arm(scene, "MissionMultiplayerCoopBattleMode.StartMultiplayerGame");
-                }
+                ListedShellMissionSessionState.ReleaseSceneBoundActiveTokenForFreshBattleStartup(
+                    scene,
+                    "MissionMultiplayerCoopBattleMode.StartMultiplayerGame");
+                PendingBattleMissionStartupState.Arm(scene, "MissionMultiplayerCoopBattleMode.StartMultiplayerGame");
 
                 TryApplyBattleMapTimerOptionOverrides();
             }
@@ -63,25 +55,6 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             TryApplyCampaignMapPatchContext(ref record, scene);
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, "CoopBattle mission init pre-open");
             MissionState.OpenNew(missionShell, record, CreateBehaviorsForMission);
-        }
-
-        private static bool ShouldOwnBattleStartupThroughListedIngress(string scene)
-        {
-            if (!GameNetwork.IsServer)
-                return false;
-
-            Mission currentMission = Mission.Current;
-            if (currentMission == null)
-                return false;
-
-            if (!ListedShellMissionSessionState.TryResolveTransportToken(currentMission, out int listedToken) || listedToken <= 0)
-                return false;
-
-            string currentScene = currentMission.SceneName ?? string.Empty;
-            return string.Equals(
-                currentScene.Trim(),
-                (scene ?? string.Empty).Trim(),
-                StringComparison.Ordinal);
         }
 
         private static void TryApplyBattleMapTimerOptionOverrides()

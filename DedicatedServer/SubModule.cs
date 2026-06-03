@@ -88,6 +88,12 @@ namespace CoopSpectator
                 _pendingDedicatedObserverFirstSeenUtc = DateTime.UtcNow;
                 _pendingDedicatedObserverStableReadyTickCount = 0;
                 _lastDedicatedObserverActivationWaitDiagnosticKey = string.Empty;
+                if (SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName))
+                {
+                    PendingBattleMissionStartupState.Arm(
+                        mission.SceneName,
+                        "CoopSpectatorDedicated.ShouldDelayDedicatedMissionObserverActivation first-seen");
+                }
                 CoopMissionSpawnLogic.TryEnsureDedicatedObserverNetworkBridge(
                     mission,
                     isNewMission: true,

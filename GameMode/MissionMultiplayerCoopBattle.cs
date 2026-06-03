@@ -29,21 +29,26 @@ namespace CoopSpectator.GameMode
             _hasLoggedFirstServerTick = false;
             if (GameNetwork.IsServer)
             {
-                ListedShellMissionSessionState.InitializeMission(
+                ListedShellMissionSessionState.ReleaseActiveMissionBinding(
                     Mission,
-                    "CoopBattle.OnBehaviorInitialize");
-                if (ListedShellMissionSessionState.TryResolveTransportToken(Mission, out int listedToken) && listedToken > 0)
-                {
-                    PendingBattleMissionStartupState.Clear(
-                        "CoopBattle.OnBehaviorInitialize listed mission-session token precedence");
-                    ModLogger.Info(
-                        "CoopBattle server: activated listed mission-session token on battle runtime initialization. " +
-                        "Scene=" + (Mission?.SceneName ?? "null") +
-                        " Token=" + listedToken + ".");
-                }
+                    "CoopBattle.OnBehaviorInitialize detach-listed-session");
+                ModLogger.Info(
+                    "CoopBattle server: detached listed mission-session ownership from disposable battle runtime. " +
+                    "Scene=" + (Mission?.SceneName ?? "null") + ".");
             }
 
             CoopBattlePhaseRuntimeState.StartMission(Mission, "CoopBattle.OnBehaviorInitialize");
+        }
+
+        protected override void OnEndMission()
+        {
+            ListedShellMissionSessionState.ReleaseActiveMissionBinding(
+                Mission,
+                "CoopBattle.OnEndMission");
+            PendingBattleMissionStartupState.ReleaseActiveMissionBinding(
+                Mission,
+                "CoopBattle.OnEndMission");
+            base.OnEndMission();
         }
 
         public override void AfterStart()

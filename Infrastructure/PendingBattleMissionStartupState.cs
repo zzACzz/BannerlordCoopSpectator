@@ -12,9 +12,11 @@ namespace CoopSpectator.Infrastructure
         private static string _pendingSceneName = string.Empty;
         private static DateTime _pendingSinceUtc = DateTime.MinValue;
         private static int _pendingTransportToken;
+        private static bool _pendingAcceptCompatibilityZeroFinishedLoadingBattleIndex;
         private static Mission _activeMission;
         private static int _activeTransportToken;
         private static string _activeSceneName = string.Empty;
+        private static bool _activeAcceptCompatibilityZeroFinishedLoadingBattleIndex;
 
         public static void Arm(string sceneName, string source)
         {
@@ -28,9 +30,11 @@ namespace CoopSpectator.Infrastructure
                 _pendingSceneName = normalizedSceneName;
                 _pendingSinceUtc = DateTime.UtcNow;
                 _pendingTransportToken = 0;
+                _pendingAcceptCompatibilityZeroFinishedLoadingBattleIndex = true;
                 _activeMission = null;
                 _activeTransportToken = 0;
                 _activeSceneName = string.Empty;
+                _activeAcceptCompatibilityZeroFinishedLoadingBattleIndex = false;
             }
 
             ModLogger.Info(
@@ -48,7 +52,8 @@ namespace CoopSpectator.Infrastructure
                 if (_pending)
                     return true;
 
-                if (_activeTransportToken <= 0)
+                if (_activeTransportToken <= 0 &&
+                    !_activeAcceptCompatibilityZeroFinishedLoadingBattleIndex)
                     return false;
 
                 if (ReferenceEquals(_activeMission, mission))
@@ -99,7 +104,8 @@ namespace CoopSpectator.Infrastructure
                 if (SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(missionSceneName) &&
                     missionState == Mission.State.Continuing)
                 {
-                    if (_pendingTransportToken <= 0)
+                    if (_pendingTransportToken <= 0 &&
+                        !_pendingAcceptCompatibilityZeroFinishedLoadingBattleIndex)
                     {
                         details =
                             "PendingMissionReadyAwaitingTransportToken=true PendingScene=" + _pendingSceneName +
@@ -112,16 +118,20 @@ namespace CoopSpectator.Infrastructure
                     _activeMission = mission;
                     _activeTransportToken = _pendingTransportToken;
                     _activeSceneName = _pendingSceneName;
+                    _activeAcceptCompatibilityZeroFinishedLoadingBattleIndex =
+                        _pendingAcceptCompatibilityZeroFinishedLoadingBattleIndex;
                     _pending = false;
                     _pendingSceneName = string.Empty;
                     _pendingSinceUtc = DateTime.MinValue;
                     _pendingTransportToken = 0;
+                    _pendingAcceptCompatibilityZeroFinishedLoadingBattleIndex = false;
 
                     details =
                         "PendingResolved=true PendingScene=" + pendingSceneName +
                         " MissionScene=" + missionSceneName +
                         " MissionState=" + missionState +
-                        " Token=" + _activeTransportToken;
+                        " Token=" + _activeTransportToken +
+                        " CompatibilityZeroAccepted=" + _activeAcceptCompatibilityZeroFinishedLoadingBattleIndex;
                     return false;
                 }
 
@@ -142,6 +152,42 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static void ReleaseActiveMissionBinding(Mission mission, string source)
+        {
+            string missionSceneName = Normalize(mission?.SceneName);
+            int releasedToken = 0;
+            string releasedScene = string.Empty;
+            bool released = false;
+
+            lock (Sync)
+            {
+                if ((_activeTransportToken > 0 ||
+                     _activeAcceptCompatibilityZeroFinishedLoadingBattleIndex) &&
+                    (ReferenceEquals(_activeMission, mission) ||
+                     (!string.IsNullOrEmpty(missionSceneName) &&
+                      string.Equals(_activeSceneName, missionSceneName, StringComparison.Ordinal))))
+                {
+                    releasedToken = _activeTransportToken;
+                    releasedScene = _activeSceneName;
+                    _activeMission = null;
+                    _activeTransportToken = 0;
+                    _activeSceneName = string.Empty;
+                    _activeAcceptCompatibilityZeroFinishedLoadingBattleIndex = false;
+                    released = true;
+                }
+            }
+
+            if (!released)
+                return;
+
+            ModLogger.Info(
+                "PendingBattleMissionStartupState: released active pending battle mission binding. " +
+                "MissionScene=" + missionSceneName +
+                " ReleasedScene=" + releasedScene +
+                " ReleasedToken=" + releasedToken +
+                " Source=" + Normalize(source) + ".");
+        }
+
         public static bool TryResolveAuthoritativeTransportToken(Mission mission, out int token)
         {
             string missionSceneName = Normalize(mission?.SceneName);
@@ -158,6 +204,33 @@ namespace CoopSpectator.Infrastructure
                 }
 
                 token = 0;
+                return false;
+            }
+        }
+
+        public static bool TryResolveAuthoritativeValidationState(
+            Mission mission,
+            out int token,
+            out bool acceptCompatibilityZeroFinishedLoadingBattleIndex)
+        {
+            string missionSceneName = Normalize(mission?.SceneName);
+
+            lock (Sync)
+            {
+                if ((_activeTransportToken > 0 ||
+                     _activeAcceptCompatibilityZeroFinishedLoadingBattleIndex) &&
+                    (ReferenceEquals(_activeMission, mission) ||
+                     (!string.IsNullOrEmpty(missionSceneName) &&
+                      string.Equals(_activeSceneName, missionSceneName, StringComparison.Ordinal))))
+                {
+                    token = _activeTransportToken;
+                    acceptCompatibilityZeroFinishedLoadingBattleIndex =
+                        _activeAcceptCompatibilityZeroFinishedLoadingBattleIndex;
+                    return true;
+                }
+
+                token = 0;
+                acceptCompatibilityZeroFinishedLoadingBattleIndex = false;
                 return false;
             }
         }
@@ -199,9 +272,11 @@ namespace CoopSpectator.Infrastructure
                 string.IsNullOrEmpty(_pendingSceneName) &&
                 _pendingSinceUtc == DateTime.MinValue &&
                 _pendingTransportToken == 0 &&
+                !_pendingAcceptCompatibilityZeroFinishedLoadingBattleIndex &&
                 _activeMission == null &&
                 _activeTransportToken == 0 &&
-                string.IsNullOrEmpty(_activeSceneName))
+                string.IsNullOrEmpty(_activeSceneName) &&
+                !_activeAcceptCompatibilityZeroFinishedLoadingBattleIndex)
             {
                 return;
             }
@@ -210,17 +285,21 @@ namespace CoopSpectator.Infrastructure
                 "PendingBattleMissionStartupState: cleared pending battle mission startup. " +
                 "PendingScene=" + _pendingSceneName +
                 " PendingToken=" + _pendingTransportToken +
+                " PendingCompatibilityZeroAccepted=" + _pendingAcceptCompatibilityZeroFinishedLoadingBattleIndex +
                 " ActiveScene=" + _activeSceneName +
                 " ActiveToken=" + _activeTransportToken +
+                " ActiveCompatibilityZeroAccepted=" + _activeAcceptCompatibilityZeroFinishedLoadingBattleIndex +
                 " Source=" + Normalize(source) + ".");
 
             _pending = false;
             _pendingSceneName = string.Empty;
             _pendingSinceUtc = DateTime.MinValue;
             _pendingTransportToken = 0;
+            _pendingAcceptCompatibilityZeroFinishedLoadingBattleIndex = false;
             _activeMission = null;
             _activeTransportToken = 0;
             _activeSceneName = string.Empty;
+            _activeAcceptCompatibilityZeroFinishedLoadingBattleIndex = false;
         }
 
         private static string Normalize(string value)

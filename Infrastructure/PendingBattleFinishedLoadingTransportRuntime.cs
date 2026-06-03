@@ -20,15 +20,19 @@ namespace CoopSpectator.Infrastructure
             if (PendingBattleMissionStartupState.ShouldDelayServerFinishedLoadingValidation(mission, out details))
                 return true;
 
-            if (PendingBattleMissionStartupState.TryResolveAuthoritativeTransportToken(mission, out int token))
+            if (PendingBattleMissionStartupState.TryResolveAuthoritativeValidationState(
+                    mission,
+                    out int token,
+                    out bool acceptCompatibilityZeroFinishedLoadingBattleIndex))
             {
                 details =
-                    "PendingBattleTokenReady=true" +
-                    " MissionSessionToken=" + token;
+                    "PendingBattleValidationReady=true" +
+                    " MissionSessionToken=" + token +
+                    " CompatibilityZeroAccepted=" + acceptCompatibilityZeroFinishedLoadingBattleIndex;
                 return true;
             }
 
-            details = "PendingBattleTokenCaptureRequired=true";
+            details = "PendingBattleValidationStateUnavailable=true";
             return true;
         }
 
@@ -66,8 +70,24 @@ namespace CoopSpectator.Infrastructure
                     return;
 
                 Mission currentMission = Mission.Current;
-                int missionSessionToken = ResolvePendingBattleMissionSessionToken(currentMission);
-                bool shouldUnload = currentMission == null || missionSessionToken != message.BattleIndex;
+                ResolvePendingBattleMissionValidationState(
+                    currentMission,
+                    out int missionSessionToken,
+                    out bool acceptCompatibilityZeroFinishedLoadingBattleIndex);
+                bool compatibilityZeroAccepted =
+                    acceptCompatibilityZeroFinishedLoadingBattleIndex &&
+                    message.BattleIndex <= 0;
+                bool shouldUnload =
+                    currentMission == null ||
+                    (!compatibilityZeroAccepted && missionSessionToken != message.BattleIndex);
+                string validationMode =
+                    currentMission == null
+                        ? "MissionNull"
+                        : compatibilityZeroAccepted
+                            ? "CompatibilityZeroBattleIndexAccepted"
+                            : missionSessionToken > 0
+                                ? "AuthoritativePendingMissionSessionTokenMatchedOrMismatched"
+                                : "AuthoritativePendingMissionSessionTokenUnavailable";
 
                 Debug.Print("Server: " + networkPeer.UserName + " has finished loading. From now on, I will include him in the broadcasted messages");
 
@@ -85,7 +105,9 @@ namespace CoopSpectator.Infrastructure
                     " MissionScene=" + (currentMission?.SceneName ?? "null") +
                     " MissionState=" + (currentMission?.CurrentState.ToString() ?? "null") +
                     " MissionSessionToken=" + missionSessionToken +
+                    " CompatibilityZeroAccepted=" + compatibilityZeroAccepted +
                     " FinishedLoadingBattleIndex=" + message.BattleIndex +
+                    " ValidationMode=" + validationMode +
                     " Action=" + action +
                     " Source=" + Normalize(source) + ".");
             }
@@ -101,15 +123,24 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        private static int ResolvePendingBattleMissionSessionToken(Mission mission)
+        private static void ResolvePendingBattleMissionValidationState(
+            Mission mission,
+            out int missionSessionToken,
+            out bool acceptCompatibilityZeroFinishedLoadingBattleIndex)
         {
-            if (PendingBattleMissionStartupState.TryResolveAuthoritativeTransportToken(mission, out int token))
-                return token;
+            if (PendingBattleMissionStartupState.TryResolveAuthoritativeValidationState(
+                    mission,
+                    out missionSessionToken,
+                    out acceptCompatibilityZeroFinishedLoadingBattleIndex))
+            {
+                return;
+            }
 
             ModLogger.Info(
-                "PendingBattleFinishedLoadingTransportRuntime: authoritative pending battle mission-session token was unavailable after startup delay resolved. " +
+                "PendingBattleFinishedLoadingTransportRuntime: authoritative pending battle finished-loading validation state was unavailable after startup delay resolved. " +
                 "MissionScene=" + (mission?.SceneName ?? "null") + ".");
-            return 0;
+            missionSessionToken = 0;
+            acceptCompatibilityZeroFinishedLoadingBattleIndex = false;
         }
 
         private static string Normalize(string value)

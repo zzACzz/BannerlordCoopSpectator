@@ -6393,6 +6393,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool isHero = TryGetBoolProperty(characterObject, "IsHero");
             if (isHero)
             {
+                string variantAwareHeroId = TryResolveVariantAwareHeroMissionSafeCharacterId(
+                    characterObject as TaleWorlds.CampaignSystem.CharacterObject,
+                    equipmentVariant);
+                if (!string.IsNullOrWhiteSpace(variantAwareHeroId) && !string.Equals(variantAwareHeroId, originalId, StringComparison.Ordinal))
+                {
+                    ModLogger.Info(
+                        "BattleDetector: mapped hero troop id '" + originalId + "' to variant-aware hero template '" +
+                        variantAwareHeroId +
+                        "'." +
+                        (equipmentVariant != null
+                            ? " VariantSignature='" + (equipmentVariant.Signature ?? string.Empty) + "'."
+                            : string.Empty));
+                    return variantAwareHeroId;
+                }
+
                 string multiplayerSafeHeroId = TryResolveMultiplayerSafeHeroCharacterId(characterObject as TaleWorlds.CampaignSystem.CharacterObject);
                 if (!string.IsNullOrWhiteSpace(multiplayerSafeHeroId) && !string.Equals(multiplayerSafeHeroId, originalId, StringComparison.Ordinal))
                 {
@@ -6495,6 +6510,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             const string guaranteedVanillaFallbackId = "imperial_infantryman";
             ModLogger.Info("BattleDetector: no mission-safe fallback found for hero troop id '" + originalId + "'. Using guaranteed vanilla fallback '" + guaranteedVanillaFallbackId + "'.");
             return guaranteedVanillaFallbackId;
+        }
+
+        private static string TryResolveVariantAwareHeroMissionSafeCharacterId(
+            TaleWorlds.CampaignSystem.CharacterObject heroCharacter,
+            CombatEquipmentVariantSnapshot equipmentVariant)
+        {
+            if (heroCharacter == null || !heroCharacter.IsHero || equipmentVariant == null)
+                return null;
+
+            CompatibilityShellTemplateResolver.ShellProfile compatibilityShellProfile =
+                ResolveCompatibilityShellProfile(heroCharacter, equipmentVariant);
+            if (string.IsNullOrWhiteSpace(compatibilityShellProfile?.TroopTemplateId))
+                return null;
+
+            return TryConvertTroopTemplateToHeroTemplate(compatibilityShellProfile.TroopTemplateId);
         }
 
         private static string TryResolveMultiplayerSafeHeroCharacterId(TaleWorlds.CampaignSystem.CharacterObject heroCharacter)

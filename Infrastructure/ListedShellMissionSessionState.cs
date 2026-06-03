@@ -134,6 +134,72 @@ namespace CoopSpectator.Infrastructure
                 " Source=" + Normalize(source) + ".");
         }
 
+        public static void ReleaseActiveMissionBinding(Mission mission, string source)
+        {
+            string missionScene = Normalize(mission?.SceneName);
+            int releasedToken = 0;
+            string releasedScene = string.Empty;
+            bool released = false;
+
+            lock (Sync)
+            {
+                if (_activeToken > 0 &&
+                    (ReferenceEquals(_activeMission, mission) ||
+                     (!string.IsNullOrEmpty(missionScene) &&
+                      string.Equals(_activeScene, missionScene, StringComparison.Ordinal))))
+                {
+                    releasedToken = _activeToken;
+                    releasedScene = _activeScene;
+                    _activeMission = null;
+                    _activeToken = 0;
+                    _activeScene = string.Empty;
+                    released = true;
+                }
+            }
+
+            if (!released)
+                return;
+
+            ModLogger.Info(
+                "ListedShellMissionSessionState: released active mission-session token binding. " +
+                "MissionScene=" + missionScene +
+                " ReleasedScene=" + releasedScene +
+                " ReleasedToken=" + releasedToken +
+                " Source=" + Normalize(source) + ".");
+        }
+
+        public static void ReleaseSceneBoundActiveTokenForFreshBattleStartup(string sceneName, string source)
+        {
+            string normalizedScene = Normalize(sceneName);
+            int releasedToken = 0;
+            bool released = false;
+
+            if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(normalizedScene))
+                return;
+
+            lock (Sync)
+            {
+                if (_activeToken > 0 &&
+                    string.Equals(_activeScene, normalizedScene, StringComparison.Ordinal))
+                {
+                    releasedToken = _activeToken;
+                    _activeMission = null;
+                    _activeToken = 0;
+                    _activeScene = string.Empty;
+                    released = true;
+                }
+            }
+
+            if (!released)
+                return;
+
+            ModLogger.Info(
+                "ListedShellMissionSessionState: released scene-bound listed mission-session token for fresh battle startup. " +
+                "Scene=" + normalizedScene +
+                " ReleasedToken=" + releasedToken +
+                " Source=" + Normalize(source) + ".");
+        }
+
         public static bool ShouldDelayServerFinishedLoadingValidation(Mission mission, out string details)
         {
             lock (Sync)

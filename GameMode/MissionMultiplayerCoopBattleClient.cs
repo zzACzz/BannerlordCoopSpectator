@@ -58,5 +58,16 @@ namespace CoopSpectator.GameMode
         public override void OnGoldAmountChangedForRepresentative(MissionRepresentativeBase representative, int newAmount)
         {
         }
+
+        protected override void OnEndMission()
+        {
+            ListedShellMissionSessionState.ReleaseActiveMissionBinding(
+                Mission,
+                "MissionMultiplayerCoopBattleClient.OnEndMission");
+            PendingBattleMissionStartupState.ReleaseActiveMissionBinding(
+                Mission,
+                "MissionMultiplayerCoopBattleClient.OnEndMission");
+            base.OnEndMission();
+        }
     }
 }

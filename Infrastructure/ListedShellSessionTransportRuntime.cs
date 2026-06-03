@@ -144,7 +144,7 @@ namespace CoopSpectator.Infrastructure
 
         public static bool TryPromotePendingBattleTransportTokenToListedSession(Mission mission, string source)
         {
-            if (!HasListedBattleRuntimeOwnershipShape(mission))
+            if (!IsListedLobbyShellMission(mission))
                 return false;
 
             if (ListedShellMissionSessionState.TryResolveTransportToken(mission, out int listedToken) && listedToken > 0)
@@ -350,6 +350,21 @@ namespace CoopSpectator.Infrastructure
 
             return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null ||
                 mission.GetMissionBehavior<CoopMissionSpawnLogic>() != null;
+        }
+
+        private static bool IsListedLobbyShellMission(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            if (mission.GetMissionBehavior<ListedShellCompatibilityMode>() == null &&
+                mission.GetMissionBehavior<ListedShellCompatibilityModeClient>() == null)
+            {
+                return false;
+            }
+
+            return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() == null &&
+                mission.GetMissionBehavior<MissionMultiplayerCoopBattleClient>() == null;
         }
     }
 }

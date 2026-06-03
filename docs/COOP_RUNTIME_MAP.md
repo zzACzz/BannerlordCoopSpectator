@@ -1,6 +1,6 @@
 # Карта Coop Runtime
 
-Оновлено: `2026-05-31`
+Оновлено: `2026-06-03`
 
 Це єдина актуальна архітектурна карта моду. Історичні аудити, handoff-и, dated-плани та проміжні звіти прибрані з active documentation surface і не повинні використовуватись як поточне джерело правди.
 
@@ -92,33 +92,36 @@ C:\dev\projects\BannerlordCoopSpectator3\docs\COOP_RUNTIME_MAP.md
 
 ### 2.1 Активний runtime blocker
 
-Поточний active blocker уже не сидить у materialization barrier або side-selection unlock. Останній вдалий прогін показав, що listed join, authoritative materialization, side selection, unit preview, mounted possession main hero, старт бою і завершення бою можуть пройти без client crash-у.
+Поточний active blocker знову сидить у client materialization recovery, а не в battle-to-battle loop. Останні зміни вже довели, що:
+
+- listed join, authoritative snapshot/data sync, side selection, unit preview і перша battle mission можуть пройти без client crash-у;
+- pre-battle safe hold для ranged/thrown cohort-ів працює як архітектурний шар і не є поточним blocker-ом сам по собі;
+- battle-to-battle listed bootstrap lifecycle уже не є першим proven blocker-ом: друга battle mission може стартувати, а проблема зберігається вже раніше, на materialization/selection gate.
 
 Стан на зараз:
 
-- loading/selection barrier уже відпрацьовує достатньо стабільно, щоб selection відкривався тільки після `live-prebattle-materialized` state;
-- main hero exact materialization, safe side selection, mounted possession, weapon switching і battle start уже не є головним proven blocker-ом;
-- pre-battle safe hold для ranged/thrown cohort-ів уже доведений у першій battle mission: main hero більше не смикається, лучниця тримає melee safe hold, а після `BattleActive` native runtime сам переводить cohort-и в бойову зброю;
-- proven native crash corridor у `TaleWorlds.Native.dll+0x5e4aa8` зараз containment-иться message-level guard-ами для non-local exact no-shield ranged AI;
-- battle після цього реально доходить до `BattleEnded` без нового dump-а;
-- coop-owned death/respawn loop теж уже доведений: `DeadAwaitingRespawn -> RespawnSelection -> SpawnQueued -> Alive` проходить без повторного materialization deadlock-а;
-- активний proven blocker тепер змістився у battle-to-battle listed bootstrap lifecycle: після першого `BattleEnded` dedicated already ініціалізує нову battle snapshot/runtime state, але клієнт міг лишатись на полі бою в spectator-like state, бо друга `LoadMission` приходила вже після того, як listed `receive-bootstrap` ownership було disarm-нуто на `UnloadMission`;
-- перший low-level симптом цього blocker-а: на другій battle mission клієнт отримує `CoopBattleSnapshotManifestMessage` / `CoopBattleSnapshotChunkV2Message`, але ще не має handler-ів і логить `No message handler found ...`, бо coop-owned `LoadMission` intercept і late-attach `CoopMissionNetworkBridge` не спрацьовують;
-- структурна правда тут така: listed client session ownership повинна жити через увесь transport session, а не через один mission lifetime; battle-to-battle `UnloadMission -> LoadMission` loop не повинен її гасити.
+- loading/selection barrier уже доводить клієнта до `BattleDataReady=True`, але в проблемному прогоні зависає на `Waiting for battlefield units to materialize... (11 pending)`;
+- у цьому стані peer ще не вибрав сторону і не контролює агента: `Lifecycle=NoSide`, `HasAgent=False`, `ReadinessStage=SideSelection`;
+- pending breakdown у client replay queue вже не містить `CreateAgent`; він звужується до `SetWeaponReloadPhase=3`, `WeaponUsageIndexChange=2`, `SetWieldedItemIndex=6`;
+- stuck cohort — defender slinger entry-і на `AgentIndex=3`, `4`, `12`;
+- на сервері для цього cohort-а snapshot і exact contract уже правильні: `PreBattleWeaponStateMode=SlingReady` + `PreBattleReadinessMode=DeferActivationUntilBattleActive`;
+- на клієнті їхні `CreateAgent` payload-и спочатку йдуть у deferred explicit-token path, але після authoritative materialized snapshot replay для attacker cohort-ів видно, а для defender slinger `3/4/12` відповідного replay не видно;
+- після цього weapon follow-up messages для `3/4/12` продовжують вважати, що `agent bootstrap is still deferred`, і selection gate ніколи не закривається.
 
 Поточна робоча гіпотеза:
 
-1. snapshot/data sync, materialization barrier, selection gate і pre-battle safe-hold materialization для першої battle mission уже не є головним blocker-ом;
-2. battle-to-battle listed bootstrap зараз ламається не через battle snapshot payload сам по собі, а через ownership/lifecycle mismatch: ми treat-или listed `receive-bootstrap` ownership як mission-local state і disarm-или його на `UnloadMission`, хоча transport session ще живий;
-3. коли ownership гаситься між боями, друга `LoadMission(GameType=Battle)` уже не перехоплюється coop-owned runtime path-ом, missing battle behaviors не late-attach-яться, а `CoopMissionNetworkBridge` не встигає зареєструвати client V2 snapshot handler-и до приходу manifest/chunk traffic;
-4. правильний fix layer тут не weapon/materialization suppress, а session-scoped bootstrap ownership: другий battle bootstrap повинен знову проходити через `ListedShellNetworkBootstrapRuntime.HandleListedLoadMissionReceiveAsync(...)` і `EnsureListedClientBattleRuntimeBehaviorsAsync(...)`;
-5. missile replay debt і historical ranged crash-containment лишаються secondary cleanup surface, але вже не є активним blocker-ом для наступної battle mission.
+1. safe hold і pre-battle defer-activation тут не є коренем проблеми; deadlock стається ще до side selection і до будь-якого possession;
+2. проблема сидить у client recovery між deferred `CreateAgent` і deferred weapon follow-up messages для defender slinger cohort;
+3. або replay `CreateAgent` для `3/4/12` взагалі не доходить до materialized runtime state після authoritative snapshot apply;
+4. або `CreateAgent` логічно вважається вже вирішеним/заміненим, але stale `reload / usage / wield` payload-и не очищаються і вічно блокують unlock;
+5. правильний fix layer тут не “знімати safe hold з player-controlled unit”, а лагодити саме deferred `CreateAgent` replay / stale follow-up cleanup для defender slinger cohort.
 
 Практичне правило для продовження:
 
-- якщо друга battle mission знову не стартує, першим ділом перевіряються `ListedShellClientSessionOwnershipState` і `ListedShellNetworkBootstrapRuntime`: чи ownership лишився активним через `UnloadMission`, чи друга `LoadMission` була саме intercept-нута нашим listed bootstrap path-ом;
-- якщо на другій battle mission знову з’являється `No message handler found for CoopBattleSnapshotManifestMessage`, це означає missing coop-owned `LoadMission` intercept або missing late-attach `CoopMissionNetworkBridge`, а не broader snapshot corruption;
-- missile visibility/reused-index replay і решта pre-battle ranged cleanup після цього залишаються окремим debt surface, але не повинні знову підміняти собою battle-to-battle bootstrap blocker.
+- якщо selection gate знову висить із `CreateAgent=0`, першим ділом перевіряються defender indexes `3/4/12`: чи replay-нувся для них deferred `CreateAgent` після authoritative snapshot apply;
+- якщо replay не видно, треба дослідити `BattleMapSpawnHandoffPatch` deferred `CreateAgent` recovery path, а не possession чи local safe-hold policy;
+- якщо `CreateAgent` уже логічно не потрібен, треба гарантувати cleanup stale deferred `SetWeaponReloadPhase`, `WeaponUsageIndexChangeMessage` і `SetWieldedItemIndex`, щоб вони не лишались вічним blocker-ом для selection unlock;
+- safe hold для player-controlled unit не прибирати тільки через сам факт possession: він досі потрібен до `BattleActive`, доки не доведено безпечний native pre-battle ranged runtime.
 
 ## 3. Архітектура
 
@@ -361,6 +364,7 @@ Dedicated startup починається в `DedicatedServer/SubModule.cs` і `D
 
 - contract-first ranged/thrown safe hold тепер працює так: до `BattleActive` ranged і throwing cohort-и materialize-яться з exact MP-safe loadout, але pre-battle ownership тримає в руках melee safe hold pair; після `BattleActive` runtime більше не робить explicit rewield orchestration, а просто відпускає cohort у native battle flow;
 - у latest validated run це вже зняло pre-battle смикання main hero/companions і дало native weapon switching/стрільбу в першій battle mission без нового crash-а;
+- current proven debt surface у цьому ж шарі — defender slinger client recovery: для `AgentIndex=3/4/12` deferred `CreateAgent` після authoritative snapshot apply ще може не доходити до replay/materialized runtime, тоді як їхні deferred `reload / usage / wield` follow-up messages лишаються в selection gate queue;
 - для non-local exact no-shield ranged AI історичний crash-containment cohort, який визначається authoritative tracked entry mapping-ом з fallback-ом на bootstrap id, усе ще може suppress-ити before-native handlers там, де входження в proven native ammo corridor знову стане unsafe:
   - `SetWeaponReloadPhase`
   - `SetWeaponAmmoData`
