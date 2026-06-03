@@ -1023,6 +1023,8 @@ namespace CoopSpectator.MissionBehaviors
         private static DateTime _clientPostPossessionMountedTroopWeaponRefreshResumeUtc;
         private static int _clientPostPossessionMountedTroopWeaponRefreshControlledAgentIndex = -1;
         private static int _lastObservedClientControlledAgentIndexForExactVisualPause = int.MinValue;
+        [ThreadStatic]
+        private static int _deferredPreBattleSafeHoldLocalMaterializationDepth;
         private static bool _pendingClientExactVisualSelectionPauseSticky;
         private static bool? _lastAppliedBattlePhaseAiHold;
         private static string _lastLoggedBattlePhaseAiHoldDriftKey = string.Empty;
@@ -1187,13 +1189,16 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly HashSet<int> _pendingServerBootstrapDelayedLiveWieldAgentIndices = new HashSet<int>();
         private static readonly HashSet<int> _serverPreBattleSafeHoldMaterializedAgentIndices = new HashSet<int>();
         private static readonly Dictionary<int, string> _battleActiveDeferredWeaponActivationVersionByAgentIndex = new Dictionary<int, string>();
-        private static readonly Dictionary<int, DateTime> _battleActiveDeferredWeaponActivationLastAttemptUtcByAgentIndex = new Dictionary<int, DateTime>();
         private static readonly Dictionary<int, MaterializedBattleResultLastHitDebugState> _materializedBattleResultLastHitDebugByVictimAgentIndex = new Dictionary<int, MaterializedBattleResultLastHitDebugState>();
         private static readonly List<CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot> _materializedBattleResultCombatEvents = new List<CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot>();
         private static readonly Dictionary<int, string> _materializedCanonicalInstanceIdByAgentIndex = new Dictionary<int, string>();
         private static Mission _lastMaterializedCombatProfileMission;
         private static Mission _lastMaterializedBattleResultMission;
         private static Mission _lastCombatProfileDrivenRefreshMission;
+        private static Mission _lastBattleActiveDeferredWeaponActivationServerMission;
+        private static Mission _lastBattleActiveDeferredWeaponActivationClientMission;
+        private static CoopBattlePhase? _lastBattleActiveDeferredWeaponActivationServerPhase;
+        private static CoopBattlePhase? _lastBattleActiveDeferredWeaponActivationClientPhase;
         private static float _lastCombatProfileDrivenRefreshMissionTime = -1f;
         private static bool _hasLoggedManualCombatProfileRefreshForMission;
         private static bool _hasWrittenBattleResultSnapshotForMission;
@@ -1487,7 +1492,6 @@ namespace CoopSpectator.MissionBehaviors
             _pendingServerBootstrapDelayedLiveWieldAgentIndices.Clear();
             _serverPreBattleSafeHoldMaterializedAgentIndices.Clear();
             _battleActiveDeferredWeaponActivationVersionByAgentIndex.Clear();
-            _battleActiveDeferredWeaponActivationLastAttemptUtcByAgentIndex.Clear();
             _clientAuthoritativeMaterializedEntryIdByAgentIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
             _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
@@ -1502,6 +1506,10 @@ namespace CoopSpectator.MissionBehaviors
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
+            _lastBattleActiveDeferredWeaponActivationServerMission = null;
+            _lastBattleActiveDeferredWeaponActivationClientMission = null;
+            _lastBattleActiveDeferredWeaponActivationServerPhase = null;
+            _lastBattleActiveDeferredWeaponActivationClientPhase = null;
             _lastLoggedDedicatedObserverStaticFallbackMission = null;
             _lastMaterializedArmyMission = null;
             _lastClientBattleSnapshotRefreshMission = null;
@@ -2297,7 +2305,6 @@ namespace CoopSpectator.MissionBehaviors
             _pendingServerBootstrapDelayedLiveWieldAgentIndices.Clear();
             _serverPreBattleSafeHoldMaterializedAgentIndices.Clear();
             _battleActiveDeferredWeaponActivationVersionByAgentIndex.Clear();
-            _battleActiveDeferredWeaponActivationLastAttemptUtcByAgentIndex.Clear();
             _clientAuthoritativeMaterializedEntryIdByAgentIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
             _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.MinValue;
@@ -2337,6 +2344,10 @@ namespace CoopSpectator.MissionBehaviors
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
+            _lastBattleActiveDeferredWeaponActivationServerMission = null;
+            _lastBattleActiveDeferredWeaponActivationClientMission = null;
+            _lastBattleActiveDeferredWeaponActivationServerPhase = null;
+            _lastBattleActiveDeferredWeaponActivationClientPhase = null;
             _lastLoggedDedicatedObserverStaticFallbackMission = null;
             _lastAppliedBattlePhaseAiHold = null;
             _lastLoggedBattlePhaseAiHoldDriftKey = string.Empty;
@@ -3092,7 +3103,7 @@ namespace CoopSpectator.MissionBehaviors
             TryApplyNativeBattleMapWarmupFallback(mission, phaseSource);
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "phase-tick", "warmup-fallback-after", phaseSource);
             TryApplyBattlePhaseAiHold(mission, phaseSource);
-            TryApplyBattleActiveDeferredWeaponActivations(mission, phaseSource + " server-phase-owner");
+            TryApplyBattleActiveDeferredWeaponActivationTransitionSweep(mission, phaseSource + " server-phase-owner", clientRuntime: false);
             TryApplyBattlePhaseFormationHold(mission, phaseSource);
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "phase-tick", "native-reinforcement-sync-before", phaseSource);
             TrySyncExactCampaignNativeArmyBootstrapReinforcements(mission, phaseSource);
@@ -3163,75 +3174,116 @@ namespace CoopSpectator.MissionBehaviors
             TryProcessPendingClientExactCampaignVisualOverlays(mission);
             TryMaintainClientPeerHeroExactVisualOverlays(mission);
             TryMaintainClientBattlefieldTroopExactVisualOverlays(mission);
-            TryApplyBattleActiveDeferredWeaponActivations(mission, "client-exact-visual-observer");
+            TryApplyBattleActiveDeferredWeaponActivationTransitionSweep(mission, "client-exact-visual-observer", clientRuntime: true);
         }
 
-        private static void TryApplyBattleActiveDeferredWeaponActivations(Mission mission, string source)
+        private static void TryApplyBattleActiveDeferredWeaponActivationTransitionSweep(
+            Mission mission,
+            string source,
+            bool clientRuntime)
         {
             if (mission?.AllAgents == null)
                 return;
 
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
-            if (currentPhase < CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
+            if (currentPhase >= CoopBattlePhase.BattleEnded)
                 return;
+
+            Mission lastMission = clientRuntime
+                ? _lastBattleActiveDeferredWeaponActivationClientMission
+                : _lastBattleActiveDeferredWeaponActivationServerMission;
+            CoopBattlePhase? lastPhase = clientRuntime
+                ? _lastBattleActiveDeferredWeaponActivationClientPhase
+                : _lastBattleActiveDeferredWeaponActivationServerPhase;
+            if (!ReferenceEquals(lastMission, mission))
+            {
+                lastPhase = null;
+                if (clientRuntime)
+                    _lastBattleActiveDeferredWeaponActivationClientMission = mission;
+                else
+                    _lastBattleActiveDeferredWeaponActivationServerMission = mission;
+            }
+
+            if (clientRuntime)
+                _lastBattleActiveDeferredWeaponActivationClientPhase = currentPhase;
+            else
+                _lastBattleActiveDeferredWeaponActivationServerPhase = currentPhase;
+
+            if (currentPhase < CoopBattlePhase.BattleActive ||
+                lastPhase.HasValue && lastPhase.Value >= CoopBattlePhase.BattleActive)
+            {
+                return;
+            }
 
             for (int i = 0; i < mission.AllAgents.Count; i++)
             {
-                Agent agent = mission.AllAgents[i];
-                if (agent == null ||
-                    !agent.IsActive() ||
-                    agent.IsMount ||
-                    agent.Team == null ||
-                    agent.Team.Side == BattleSideEnum.None)
-                {
-                    continue;
-                }
-
-                if (!TryResolveDeferredPreBattleActivationContractForAgent(
-                        agent,
-                        out RosterEntryState entryState,
-                        out string entryId,
-                        out ExactTransferSpawnContract contract) ||
-                    contract?.PreBattleWeaponState == null)
-                {
-                    continue;
-                }
-
-                ExactTransferPreBattleWeaponStateContract preBattleWeaponState = contract.PreBattleWeaponState;
-                if (preBattleWeaponState.ReadinessMode != ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive)
-                    continue;
-
-                bool localControlled = !GameNetwork.IsServer && IsLocalPeerControlledAgent(agent);
-                string activationVersionKey = BuildBattleActiveDeferredWeaponActivationVersionKey(
-                    entryId,
-                    contract.Equipment?.SpawnEquipment,
-                    EquipmentIndex.None,
-                    EquipmentIndex.None,
-                    EquipmentIndex.None,
-                    localControlled);
-
-                if (_battleActiveDeferredWeaponActivationVersionByAgentIndex.TryGetValue(agent.Index, out string appliedVersionKey) &&
-                    string.Equals(appliedVersionKey, activationVersionKey, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                _battleActiveDeferredWeaponActivationVersionByAgentIndex[agent.Index] = activationVersionKey;
-                _battleActiveDeferredWeaponActivationLastAttemptUtcByAgentIndex.Remove(agent.Index);
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: released deferred pre-battle weapon ownership to native battle runtime. " +
-                    "AgentIndex=" + agent.Index +
-                    " EntryId=" + (entryId ?? "null") +
-                    " LocalControlled=" + localControlled +
-                    " Mode=" + preBattleWeaponState.Mode +
-                    " Readiness=" + preBattleWeaponState.ReadinessMode +
-                    " SafeHoldMain=" + preBattleWeaponState.SafeHoldMainHandSlotIndex +
-                    " SafeHoldOff=" + preBattleWeaponState.SafeHoldOffHandSlotIndex +
-                    " PreferredMain=" + preBattleWeaponState.PreferredMainHandSlotIndex +
-                    " PreferredOff=" + preBattleWeaponState.PreferredOffHandSlotIndex +
-                    " Reason=" + (preBattleWeaponState.DecisionReason ?? "none") +
-                    " Source=" + (source ?? "unknown"));
+                TryApplyBattleActiveDeferredWeaponActivationForAgent(
+                    mission.AllAgents[i],
+                    source);
             }
+        }
+
+        private static bool TryApplyBattleActiveDeferredWeaponActivationForAgent(
+            Agent agent,
+            string source)
+        {
+            if (agent == null ||
+                !agent.IsActive() ||
+                agent.IsMount ||
+                agent.Team == null ||
+                agent.Team.Side == BattleSideEnum.None)
+            {
+                return false;
+            }
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase < CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
+                return false;
+
+            if (!TryResolveDeferredPreBattleActivationContractForAgent(
+                    agent,
+                    out _,
+                    out string entryId,
+                    out ExactTransferSpawnContract contract) ||
+                contract?.PreBattleWeaponState == null)
+            {
+                return false;
+            }
+
+            ExactTransferPreBattleWeaponStateContract preBattleWeaponState = contract.PreBattleWeaponState;
+            if (preBattleWeaponState.ReadinessMode != ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive)
+                return false;
+
+            bool localControlled = !GameNetwork.IsServer && IsLocalPeerControlledAgent(agent);
+            string activationVersionKey = BuildBattleActiveDeferredWeaponActivationVersionKey(
+                entryId,
+                contract.Equipment?.SpawnEquipment,
+                EquipmentIndex.None,
+                EquipmentIndex.None,
+                EquipmentIndex.None,
+                localControlled);
+
+            if (_battleActiveDeferredWeaponActivationVersionByAgentIndex.TryGetValue(agent.Index, out string appliedVersionKey) &&
+                string.Equals(appliedVersionKey, activationVersionKey, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            _battleActiveDeferredWeaponActivationVersionByAgentIndex[agent.Index] = activationVersionKey;
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: released deferred pre-battle weapon ownership to native battle runtime. " +
+                "AgentIndex=" + agent.Index +
+                " EntryId=" + (entryId ?? "null") +
+                " LocalControlled=" + localControlled +
+                " Mode=" + preBattleWeaponState.Mode +
+                " Readiness=" + preBattleWeaponState.ReadinessMode +
+                " SafeHoldMain=" + preBattleWeaponState.SafeHoldMainHandSlotIndex +
+                " SafeHoldOff=" + preBattleWeaponState.SafeHoldOffHandSlotIndex +
+                " PreferredMain=" + preBattleWeaponState.PreferredMainHandSlotIndex +
+                " PreferredOff=" + preBattleWeaponState.PreferredOffHandSlotIndex +
+                " Reason=" + (preBattleWeaponState.DecisionReason ?? "none") +
+                " Source=" + (source ?? "unknown"));
+            return true;
         }
 
         private static string BuildBattleActiveDeferredWeaponActivationVersionKey(
@@ -3913,6 +3965,10 @@ namespace CoopSpectator.MissionBehaviors
             {
                 state.EntryId = overlayEntryId;
             }
+
+            TryApplyBattleActiveDeferredWeaponActivationForAgent(
+                agent,
+                source ?? "client create-agent postfix");
         }
 
         internal static void ObserveClientSynchronizeAgentEquipment(int agentIndex, string source)
@@ -12963,6 +13019,9 @@ namespace CoopSpectator.MissionBehaviors
                 _materializedArmyEntryIdByAgentIndex[agent.Index] = entryId ?? string.Empty;
                 _materializedArmySideByAgentIndex[agent.Index] = side;
                 RegisterMaterializedBattleResultEntry(agent, entryState, side);
+                TryApplyBattleActiveDeferredWeaponActivationForAgent(
+                    agent,
+                    source + " materialized-spawn");
                 combatProfileDiagnostics = appliedCombatProfile;
                 identityDiagnostics = appliedIdentity;
                 spawnedCount++;
@@ -14458,7 +14517,6 @@ namespace CoopSpectator.MissionBehaviors
             _materializedCombatProfilesByAgentIndex.Remove(agentIndex);
             _materializedBattleResultLastHitDebugByVictimAgentIndex.Remove(agentIndex);
             _battleActiveDeferredWeaponActivationVersionByAgentIndex.Remove(agentIndex);
-            _battleActiveDeferredWeaponActivationLastAttemptUtcByAgentIndex.Remove(agentIndex);
             _pendingServerBootstrapDelayedLiveWieldAgentIndices.Remove(agentIndex);
             _serverPreBattleSafeHoldMaterializedAgentIndices.Remove(agentIndex);
             if (clearRemovedGuard)
@@ -29317,6 +29375,159 @@ namespace CoopSpectator.MissionBehaviors
                 ",PayloadIsLeftHand=" + isLeftHand +
                 ",PayloadIsWieldedOnSpawn=" + isWieldedOnSpawn +
                 ",Reason=" + (preBattleWeaponState.DecisionReason ?? "none") + "}";
+            return true;
+        }
+
+        internal static bool IsDeferredPreBattleSafeHoldLocalMaterializationInProgress()
+        {
+            return _deferredPreBattleSafeHoldLocalMaterializationDepth > 0;
+        }
+
+        internal static bool TryMaterializeDeferredPreBattleActivationSafeHoldLocally(
+            Agent agent,
+            string preferredEntryId,
+            string source,
+            out string entryId,
+            out string deferStatusReason,
+            out string appliedWieldRefresh,
+            out string wieldRefreshIssue)
+        {
+            entryId = null;
+            deferStatusReason = "deferred-prebattle-local-safe-hold-not-applicable";
+            appliedWieldRefresh = "(none)";
+            wieldRefreshIssue = "(none)";
+
+            if (GameNetwork.IsServer ||
+                agent == null ||
+                agent.IsMount ||
+                CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive)
+            {
+                wieldRefreshIssue = "deferred-prebattle-local-safe-hold-not-applicable";
+                return false;
+            }
+
+            ExactTransferPreBattleWeaponStateContract preBattleWeaponState = null;
+            ExactTransferSpawnContract contract = null;
+            RosterEntryState entryState = null;
+
+            if (TryGetDeferredPreBattleActivationContractStatus(
+                    agent,
+                    out string resolvedEntryId,
+                    out ExactTransferPreBattleWeaponStateContract resolvedPreBattleWeaponState,
+                    out string resolvedStatusReason))
+            {
+                entryId = resolvedEntryId;
+                preBattleWeaponState = resolvedPreBattleWeaponState;
+                deferStatusReason = resolvedStatusReason ?? deferStatusReason;
+                entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+                ExactTransferContractRuntimeCache.TryGetContract(entryId, out contract);
+            }
+            else if (!string.IsNullOrWhiteSpace(preferredEntryId))
+            {
+                entryState = BattleSnapshotRuntimeState.GetEntryState(preferredEntryId);
+                if (entryState != null &&
+                    ExactTransferContractRuntimeCache.TryGetContract(preferredEntryId, out contract) &&
+                    contract?.PreBattleWeaponState?.ReadinessMode == ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive)
+                {
+                    entryId = preferredEntryId;
+                    preBattleWeaponState = contract.PreBattleWeaponState;
+                    deferStatusReason =
+                        "deferred-prebattle-activation" +
+                        "{EntryId=" + preferredEntryId +
+                        ",Mode=" + preBattleWeaponState.Mode +
+                        ",Readiness=" + preBattleWeaponState.ReadinessMode +
+                        ",Reason=" + (preBattleWeaponState.DecisionReason ?? "none") +
+                        ",Phase=" + CoopBattlePhaseRuntimeState.GetPhase() +
+                        ",Source=preferred-entry-fallback}";
+                }
+            }
+
+            if (preBattleWeaponState == null || string.IsNullOrWhiteSpace(entryId))
+            {
+                wieldRefreshIssue = "deferred-prebattle-local-safe-hold-contract-unresolved";
+                return false;
+            }
+
+            Equipment overlaySpawnEquipment = contract?.Equipment?.SpawnEquipment?.Clone(false) ??
+                                              BuildSnapshotEquipmentForExactRuntime(
+                                                  entryState,
+                                                  includeWeapons: true,
+                                                  honorExactVisualContracts: false,
+                                                  includeArmorVisuals: false,
+                                                  includeMountVisuals: false);
+            if (overlaySpawnEquipment == null)
+            {
+                wieldRefreshIssue = "deferred-prebattle-local-safe-hold-equipment-unresolved";
+                return false;
+            }
+
+            if (!TryResolveDesiredWeaponPairFromPreBattleStateContract(
+                    preBattleWeaponState,
+                    overlaySpawnEquipment,
+                    out EquipmentIndex desiredMainHandIndex,
+                    out EquipmentIndex desiredOffHandIndex,
+                    out Equipment.InitialWeaponEquipPreference initialWeaponEquipPreference,
+                    out string canonicalWieldReason))
+            {
+                wieldRefreshIssue = "deferred-prebattle-local-safe-hold-unresolved";
+                return false;
+            }
+
+            EquipmentIndex desiredAmmoIndex =
+                ResolveDesiredLiveAmmoEquipmentIndex(overlaySpawnEquipment, desiredMainHandIndex);
+            if (HasDesiredLiveWeaponPair(
+                    agent,
+                    overlaySpawnEquipment,
+                    desiredMainHandIndex,
+                    desiredOffHandIndex,
+                    desiredAmmoIndex))
+            {
+                appliedWieldRefresh = "contract-prebattle-safe-hold-already-applied";
+                wieldRefreshIssue = "none";
+                return true;
+            }
+
+            _deferredPreBattleSafeHoldLocalMaterializationDepth++;
+            try
+            {
+                if (!TryRefreshClientDesiredLiveWeaponPair(
+                        agent,
+                        overlaySpawnEquipment,
+                        desiredMainHandIndex,
+                        desiredOffHandIndex,
+                        false,
+                        initialWeaponEquipPreference,
+                        canonicalWieldReason,
+                        entryId,
+                        source ?? "deferred pre-battle local safe hold materialization",
+                        out appliedWieldRefresh,
+                        out wieldRefreshIssue))
+                {
+                    return false;
+                }
+            }
+            finally
+            {
+                _deferredPreBattleSafeHoldLocalMaterializationDepth =
+                    Math.Max(0, _deferredPreBattleSafeHoldLocalMaterializationDepth - 1);
+            }
+
+            if (!HasDesiredLiveWeaponPair(
+                    agent,
+                    overlaySpawnEquipment,
+                    desiredMainHandIndex,
+                    desiredOffHandIndex,
+                    desiredAmmoIndex))
+            {
+                wieldRefreshIssue =
+                    "deferred-prebattle-local-safe-hold-not-materialized" +
+                    "{DesiredMain=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredMainHandIndex) +
+                    ",DesiredOff=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredOffHandIndex) +
+                    ",RefreshResult=" + (appliedWieldRefresh ?? "(none)") +
+                    ",RefreshIssue=" + (wieldRefreshIssue ?? "(none)") + "}";
+                return false;
+            }
+
             return true;
         }
 
