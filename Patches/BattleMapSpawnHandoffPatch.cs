@@ -54,8 +54,7 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedFollowSwitchKey;
         private static string _lastArmedLocalFollowSuppressionWindowKey;
         private static string _lastSuppressedWeaponDropKey;
-        private static string _lastSuppressedServerMountedMissileStickKey;
-        private static string _lastSuppressedServerMountedMissileAttachVisualKey;
+        private static string _lastSuppressedServerBoltStickKey;
         private static string _lastLocalVisualFinalizeKey;
         private static string _lastSuppressedAssignFormationKey;
         private static string _lastSuppressedLocalSelectAllFormationsKey;
@@ -393,8 +392,6 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateMissile), () => PatchMissionNetworkComponentCreateMissile(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentHandleMissileCollisionReaction), () => PatchMissionNetworkComponentHandleMissileCollisionReaction(harmony));
             TryApplyPatchStep(nameof(PatchMissionHandleMissileCollisionReactionServer), () => PatchMissionHandleMissileCollisionReactionServer(harmony));
-            TryApplyPatchStep(nameof(PatchAgentAttachWeaponToWeaponServer), () => PatchAgentAttachWeaponToWeaponServer(harmony));
-            TryApplyPatchStep(nameof(PatchAgentAttachWeaponToBoneServer), () => PatchAgentAttachWeaponToBoneServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentPeer), () => PatchMissionNetworkComponentSetAgentPeer(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentHealth), () => PatchMissionNetworkComponentSetAgentHealth(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentMakeAgentDead), () => PatchMissionNetworkComponentMakeAgentDead(harmony));
@@ -538,8 +535,7 @@ namespace CoopSpectator.Patches
             _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
             _localFollowEchoSuppressionAgentIndex = -1;
             _lastSuppressedWeaponDropKey = null;
-            _lastSuppressedServerMountedMissileStickKey = null;
-            _lastSuppressedServerMountedMissileAttachVisualKey = null;
+            _lastSuppressedServerBoltStickKey = null;
             _lastLocalVisualFinalizeKey = null;
             _lastSuppressedAssignFormationKey = null;
             _lastSuppressedLocalSelectAllFormationsKey = null;
@@ -993,60 +989,6 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Mission.HandleMissileCollisionReaction.");
-        }
-
-        private static void PatchAgentAttachWeaponToWeaponServer(Harmony harmony)
-        {
-            MethodInfo target = typeof(Agent).GetMethod(
-                nameof(Agent.AttachWeaponToWeapon),
-                BindingFlags.Instance | BindingFlags.Public,
-                binder: null,
-                types: new[]
-                {
-                    typeof(EquipmentIndex),
-                    typeof(MissionWeapon),
-                    typeof(GameEntity),
-                    typeof(MatrixFrame).MakeByRefType()
-                },
-                modifiers: null);
-            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
-                nameof(Agent_AttachWeaponToWeapon_ServerPrefix),
-                BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || prefix == null)
-            {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.AttachWeaponToWeapon not found. Skip.");
-                return;
-            }
-
-            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.AttachWeaponToWeapon.");
-        }
-
-        private static void PatchAgentAttachWeaponToBoneServer(Harmony harmony)
-        {
-            MethodInfo target = typeof(Agent).GetMethod(
-                nameof(Agent.AttachWeaponToBone),
-                BindingFlags.Instance | BindingFlags.Public,
-                binder: null,
-                types: new[]
-                {
-                    typeof(MissionWeapon),
-                    typeof(GameEntity),
-                    typeof(sbyte),
-                    typeof(MatrixFrame).MakeByRefType()
-                },
-                modifiers: null);
-            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
-                nameof(Agent_AttachWeaponToBone_ServerPrefix),
-                BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || prefix == null)
-            {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.AttachWeaponToBone not found. Skip.");
-                return;
-            }
-
-            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.AttachWeaponToBone.");
         }
 
         private static void PatchMissionNetworkComponentSetAgentHealth(Harmony harmony)
@@ -2875,7 +2817,7 @@ namespace CoopSpectator.Patches
             return false;
         }
 
-        private static bool ShouldUseServerExactBattleMountedMissileSuppression(Mission mission)
+        private static bool ShouldUseServerExactBattleBoltStickSuppression(Mission mission)
         {
             if (!GameNetwork.IsServer || mission == null)
                 return false;
@@ -2886,7 +2828,7 @@ namespace CoopSpectator.Patches
             return BattleSnapshotRuntimeState.GetState() != null;
         }
 
-        private static bool IsSuppressibleMountedMissileItem(ItemObject item)
+        private static bool IsSuppressibleServerBoltStickItem(ItemObject item)
         {
             if (item == null)
                 return false;
@@ -2895,9 +2837,7 @@ namespace CoopSpectator.Patches
             {
                 switch (item.ItemType)
                 {
-                    case ItemObject.ItemTypeEnum.Arrows:
                     case ItemObject.ItemTypeEnum.Bolts:
-                    case ItemObject.ItemTypeEnum.Thrown:
                         return true;
                 }
             }
@@ -2951,16 +2891,14 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!ShouldUseServerExactBattleMountedMissileSuppression(__instance) ||
-                    collisionReaction != Mission.MissileCollisionReaction.Stick ||
-                    attachedAgent == null ||
-                    !attachedAgent.IsMount)
+                if (!ShouldUseServerExactBattleBoltStickSuppression(__instance) ||
+                    collisionReaction != Mission.MissileCollisionReaction.Stick)
                 {
                     return true;
                 }
 
                 if (!TryResolveMissionMissileItem(__instance, missileIndex, out ItemObject missileItem) ||
-                    !IsSuppressibleMountedMissileItem(missileItem))
+                    !IsSuppressibleServerBoltStickItem(missileItem))
                 {
                     return true;
                 }
@@ -2970,21 +2908,23 @@ namespace CoopSpectator.Patches
                 string logKey =
                     missileIndex + "|" +
                     (missileItem?.StringId ?? "null") + "|" +
-                    attachedAgent.Index + "|" +
-                    (attachedAgent.RiderAgent?.Index ?? -1) + "|" +
+                    (attachedAgent?.Index ?? -1) + "|" +
+                    (attachedAgent?.RiderAgent?.Index ?? -1) + "|" +
                     attachedToShield + "|" +
                     attachedBoneIndex + "|" +
                     GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid);
-                if (!string.Equals(_lastSuppressedServerMountedMissileStickKey, logKey, StringComparison.Ordinal))
+                if (!string.Equals(_lastSuppressedServerBoltStickKey, logKey, StringComparison.Ordinal))
                 {
-                    _lastSuppressedServerMountedMissileStickKey = logKey;
+                    _lastSuppressedServerBoltStickKey = logKey;
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed server missile stick reaction on mount and downgraded to BecomeInvisible. " +
+                        "BattleMapSpawnHandoffPatch: suppressed server bolt stick reaction and downgraded to BecomeInvisible. " +
                         "MissileIndex=" + missileIndex +
                         " MissileItem=" + (missileItem?.StringId ?? "null") +
                         " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
-                        " AttachedMountAgent=" + attachedAgent.Index +
-                        " RiderAgent=" + (attachedAgent.RiderAgent?.Index ?? -1) +
+                        " AttachedAgent=" + (attachedAgent?.Index ?? -1) +
+                        " AttachedAgentIsMount=" + (attachedAgent?.IsMount ?? false) +
+                        " RiderAgent=" + (attachedAgent?.RiderAgent?.Index ?? -1) +
+                        " AttachedToShield=" + attachedToShield +
                         " AttachedBoneIndex=" + attachedBoneIndex +
                         " ForcedSpawnIndex=" + forcedSpawnIndex);
                 }
@@ -2993,101 +2933,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: server HandleMissileCollisionReaction mount prefix failed open: " + ex.Message);
-                return true;
-            }
-        }
-
-        private static bool Agent_AttachWeaponToWeapon_ServerPrefix(
-            Agent __instance,
-            EquipmentIndex slotIndex,
-            MissionWeapon weapon,
-            GameEntity weaponEntity,
-            ref MatrixFrame attachLocalFrame)
-        {
-            try
-            {
-                if (!ShouldUseServerExactBattleMountedMissileSuppression(Mission.Current) ||
-                    __instance == null ||
-                    !__instance.IsMount ||
-                    weapon.IsEmpty)
-                {
-                    return true;
-                }
-
-                ItemObject missileItem = weapon.Item;
-                if (!IsSuppressibleMountedMissileItem(missileItem))
-                    return true;
-
-                string logKey =
-                    "slot|" +
-                    __instance.Index + "|" +
-                    (missileItem?.StringId ?? "null") + "|" +
-                    slotIndex;
-                if (!string.Equals(_lastSuppressedServerMountedMissileAttachVisualKey, logKey, StringComparison.Ordinal))
-                {
-                    _lastSuppressedServerMountedMissileAttachVisualKey = logKey;
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed server Agent.AttachWeaponToWeapon on mount for missile visual. " +
-                        "MountAgent=" + __instance.Index +
-                        " RiderAgent=" + (__instance.RiderAgent?.Index ?? -1) +
-                        " SlotIndex=" + slotIndex +
-                        " MissileItem=" + (missileItem?.StringId ?? "null") +
-                        " WeaponEntityPresent=" + (weaponEntity != null));
-                }
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.AttachWeaponToWeapon mount prefix failed open: " + ex.Message);
-                return true;
-            }
-        }
-
-        private static bool Agent_AttachWeaponToBone_ServerPrefix(
-            Agent __instance,
-            MissionWeapon weapon,
-            GameEntity weaponEntity,
-            sbyte boneIndex,
-            ref MatrixFrame attachLocalFrame)
-        {
-            try
-            {
-                if (!ShouldUseServerExactBattleMountedMissileSuppression(Mission.Current) ||
-                    __instance == null ||
-                    !__instance.IsMount ||
-                    weapon.IsEmpty)
-                {
-                    return true;
-                }
-
-                ItemObject missileItem = weapon.Item;
-                if (!IsSuppressibleMountedMissileItem(missileItem))
-                    return true;
-
-                string logKey =
-                    "bone|" +
-                    __instance.Index + "|" +
-                    (missileItem?.StringId ?? "null") + "|" +
-                    boneIndex;
-                if (!string.Equals(_lastSuppressedServerMountedMissileAttachVisualKey, logKey, StringComparison.Ordinal))
-                {
-                    _lastSuppressedServerMountedMissileAttachVisualKey = logKey;
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed server Agent.AttachWeaponToBone on mount for missile visual. " +
-                        "MountAgent=" + __instance.Index +
-                        " RiderAgent=" + (__instance.RiderAgent?.Index ?? -1) +
-                        " BoneIndex=" + boneIndex +
-                        " MissileItem=" + (missileItem?.StringId ?? "null") +
-                        " WeaponEntityPresent=" + (weaponEntity != null));
-                }
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.AttachWeaponToBone mount prefix failed open: " + ex.Message);
+                ModLogger.Info("BattleMapSpawnHandoffPatch: server HandleMissileCollisionReaction bolt prefix failed open: " + ex.Message);
                 return true;
             }
         }
