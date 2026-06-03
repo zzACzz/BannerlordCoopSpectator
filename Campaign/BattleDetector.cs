@@ -1756,20 +1756,24 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         battleRewardModel.CalculateRenownGain(
                             mainPartyState.PartyBase,
                             projection.WinnerRenownValue,
-                            projection.ContributionShare).ResultNumber * victoryFactor);
+                            projection.ContributionShare,
+                            victoryFactor,
+                            includeDescriptions: false).ResultNumber);
 
                     projection.ProjectedInfluence = Math.Max(
                         0f,
                         battleRewardModel.CalculateInfluenceGain(
                             mainPartyState.PartyBase,
                             projection.WinnerInfluenceValue,
-                            projection.ContributionShare).ResultNumber * victoryFactor);
+                            projection.ContributionShare,
+                            victoryFactor,
+                            includeDescriptions: false).ResultNumber);
 
                     projection.ProjectedMoraleChange = battleRewardModel.CalculateMoraleGainVictory(
                         mainPartyState.PartyBase,
                         projection.WinnerRenownValue,
                         projection.ContributionShare,
-                        battle).ResultNumber;
+                        includeDescriptions: false).ResultNumber;
 
                     float goldShare = 0f;
                     foreach (KeyValuePair<MapEventParty, float> chance in battleRewardModel.GetLootGoldChances(winnerMapSide.Parties))
@@ -2623,15 +2627,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (mainPartyMapEventParty == null || projection == null)
                 return false;
 
+            float committedMoraleChange = TryGetFloatProperty(mainPartyMapEventParty, "GainedMorale", "MoraleChange");
+
             bool hasCommittedWinnerRewards =
                 mainPartyMapEventParty.GainedRenown > 0.001f ||
                 mainPartyMapEventParty.GainedInfluence > 0.001f ||
                 mainPartyMapEventParty.PlunderedGold > 0 ||
-                Math.Abs(mainPartyMapEventParty.MoraleChange) > 0.001f;
+                Math.Abs(committedMoraleChange) > 0.001f;
 
             bool hasCommittedLoserRewards =
                 mainPartyMapEventParty.GoldLost > 0 ||
-                Math.Abs(mainPartyMapEventParty.MoraleChange) > 0.001f;
+                Math.Abs(committedMoraleChange) > 0.001f;
 
             bool hasCommittedAftermath = projection.MainPartyOnWinnerSide
                 ? hasCommittedWinnerRewards
@@ -2643,7 +2649,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             projection.Source = "committed-map-event-party";
             projection.ProjectedRenown = Math.Max(0f, mainPartyMapEventParty.GainedRenown);
             projection.ProjectedInfluence = Math.Max(0f, mainPartyMapEventParty.GainedInfluence);
-            projection.ProjectedMoraleChange = mainPartyMapEventParty.MoraleChange;
+            projection.ProjectedMoraleChange = committedMoraleChange;
             projection.ProjectedGoldGain = Math.Max(0, mainPartyMapEventParty.PlunderedGold);
             projection.ProjectedGoldLoss = Math.Max(0, mainPartyMapEventParty.GoldLost);
             return true;
@@ -4852,7 +4858,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 SurgeonHeroId = TryGetHeroId(surgeonHeroObject),
                 Morale = TryGetFloatProperty(mobileParty, "Morale"),
                 RecentEventsMorale = TryGetFloatProperty(mobileParty, "RecentEventsMorale"),
-                MoraleChange = TryGetFloatProperty(partyObject, "MoraleChange"),
+                MoraleChange = TryGetFloatProperty(partyObject, "GainedMorale", "MoraleChange"),
                 ContributionToBattle = TryGetIntProperty(partyObject, "ContributionToBattle"),
                 LeaderLeadershipSkill = TryGetCharacterSkillValue(leaderHero, "Leadership"),
                 LeaderTacticsSkill = TryGetCharacterSkillValue(leaderHero, "Tactics"),
@@ -7785,7 +7791,26 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
         private static float TryGetFloatProperty(object instance, string propertyName)
         {
-            object value = TryGetPropertyValue(instance, propertyName);
+            return TryGetFloatProperty(instance, new[] { propertyName });
+        }
+
+        private static float TryGetFloatProperty(object instance, params string[] propertyNames)
+        {
+            if (propertyNames == null || propertyNames.Length == 0)
+                return 0f;
+
+            foreach (string propertyName in propertyNames)
+            {
+                object value = TryGetPropertyValue(instance, propertyName);
+                if (value != null)
+                    return TryConvertToSingle(value);
+            }
+
+            return 0f;
+        }
+
+        private static float TryConvertToSingle(object value)
+        {
             if (value is float f)
                 return f;
             if (value is double d)

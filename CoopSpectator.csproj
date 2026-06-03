@@ -31,6 +31,8 @@
     <UseGameDlls Condition="Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.dll')">true</UseGameDlls>
     <!-- Якщо маркер не знайдено, використовуємо локальні DLL з репозиторію -->
     <UseGameDlls Condition="'$(UseGameDlls)'==''">false</UseGameDlls>
+    <!-- Якщо збираємося по DLL гри, не даємо локальним TaleWorlds*.dll з кореня репо випереджати HintPath через CandidateAssemblyFiles. -->
+    <AssemblySearchPaths Condition="'$(UseGameDlls)'=='true'">{HintPathFromItem};{TargetFrameworkDirectory};{RawFileName};{CandidateAssemblyFiles}</AssemblySearchPaths>
 
     <!-- Шлях до клієнтської Multiplayer DLL: спочатку root bin, інакше модуль Multiplayer (Steam-інсталяція має DLL у Modules\Multiplayer\bin\Win64_Shipping_Client). -->
     <BannerlordMultiplayerModuleBinDir>$(BannerlordRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Client</BannerlordMultiplayerModuleBinDir>
