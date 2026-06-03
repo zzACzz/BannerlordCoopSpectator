@@ -121,6 +121,11 @@ namespace CoopSpectator.Infrastructure
             public string ItemId { get; set; }
         }
 
+        private static bool ShouldCaptureVerboseObservation()
+        {
+            return ModLogger.IsRuntimeDiagnosticEnabled(ModLogger.RuntimeDiagnosticLevel.Verbose);
+        }
+
         internal static void ResetRuntimeState(string source)
         {
             lock (Sync)
@@ -506,7 +511,7 @@ namespace CoopSpectator.Infrastructure
             string snapshotReadinessSummary,
             string source)
         {
-            if (GameNetwork.IsServer || createAgent == null)
+            if (GameNetwork.IsServer || createAgent == null || !ShouldCaptureVerboseObservation())
                 return;
 
             ClientCreateAgentCorridorState state = GetOrCreateState(createAgent.AgentIndex);
@@ -545,7 +550,7 @@ namespace CoopSpectator.Infrastructure
             bool mountedHeroPayloadCandidate,
             string source)
         {
-            if (GameNetwork.IsServer || createAgent == null)
+            if (GameNetwork.IsServer || createAgent == null || !ShouldCaptureVerboseObservation())
                 return;
 
             string payloadSummary = BuildCreateAgentPayloadSummary(createAgent);
@@ -584,7 +589,7 @@ namespace CoopSpectator.Infrastructure
             string reason,
             string source)
         {
-            if (GameNetwork.IsServer || createAgent == null)
+            if (GameNetwork.IsServer || createAgent == null || !ShouldCaptureVerboseObservation())
                 return;
 
             ClientCreateAgentCorridorState state = GetOrCreateState(createAgent.AgentIndex);
@@ -618,7 +623,7 @@ namespace CoopSpectator.Infrastructure
             string mutationSummary,
             string source)
         {
-            if (GameNetwork.IsServer || createAgent == null)
+            if (GameNetwork.IsServer || createAgent == null || !ShouldCaptureVerboseObservation())
                 return;
 
             ClientCreateAgentCorridorState state = GetOrCreateState(createAgent.AgentIndex);
@@ -655,7 +660,7 @@ namespace CoopSpectator.Infrastructure
             bool exactVisualApplied,
             string source)
         {
-            if (GameNetwork.IsServer || createAgent == null)
+            if (GameNetwork.IsServer || createAgent == null || !ShouldCaptureVerboseObservation())
                 return;
 
             ClientCreateAgentCorridorState state = GetOrCreateState(createAgent.AgentIndex);
@@ -734,7 +739,7 @@ namespace CoopSpectator.Infrastructure
             Agent agent,
             string source)
         {
-            if (GameNetwork.IsServer || message == null)
+            if (GameNetwork.IsServer || message == null || !ShouldCaptureVerboseObservation())
                 return;
 
             ClientCreateAgentCorridorState state = GetOrCreateState(message.AgentIndex);
@@ -765,7 +770,7 @@ namespace CoopSpectator.Infrastructure
             bool suppressed,
             string source)
         {
-            if (GameNetwork.IsServer || message == null)
+            if (GameNetwork.IsServer || message == null || !ShouldCaptureVerboseObservation())
                 return;
 
             ClientCreateAgentCorridorState state = GetOrCreateState(message.AgentIndex);
@@ -1958,11 +1963,24 @@ namespace CoopSpectator.Infrastructure
 
         private static void Log(string eventName, string details, bool persistToRuntimeBundle)
         {
-            ModLogger.Info(
-                "ExactCreateAgentCorridorDiagnostics: " +
-                (eventName ?? "unknown") +
-                ". " +
-                (details ?? string.Empty));
+            if (persistToRuntimeBundle)
+            {
+                ModLogger.Info(
+                    "ExactCreateAgentCorridorDiagnostics: " +
+                    (eventName ?? "unknown") +
+                    ". " +
+                    (details ?? string.Empty));
+            }
+            else
+            {
+                ModLogger.RuntimeDiagnostic(
+                    ModLogger.RuntimeDiagnosticLevel.Verbose,
+                    () =>
+                        "ExactCreateAgentCorridorDiagnostics: " +
+                        (eventName ?? "unknown") +
+                        ". " +
+                        (details ?? string.Empty));
+            }
 
             if (!persistToRuntimeBundle)
                 return;

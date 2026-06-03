@@ -2332,12 +2332,14 @@ namespace CoopSpectator.Patches
                         out string explicitIdentityReason))
                 {
                     RegisterDeferredClientCreateAgentPayload(createAgent, explicitIdentityReason);
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: deferred client CreateAgent until authoritative materialization token arrives. " +
-                        "AgentIndex=" + createAgent.AgentIndex +
-                        " MountAgentIndex=" + createAgent.MountAgentIndex +
-                        " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
-                        " Reason=" + (explicitIdentityReason ?? "unknown"));
+                    ModLogger.RuntimeDiagnostic(
+                        ModLogger.RuntimeDiagnosticLevel.Verbose,
+                        () =>
+                            "BattleMapSpawnHandoffPatch: deferred client CreateAgent until authoritative materialization token arrives. " +
+                            "AgentIndex=" + createAgent.AgentIndex +
+                            " MountAgentIndex=" + createAgent.MountAgentIndex +
+                            " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                            " Reason=" + (explicitIdentityReason ?? "unknown"));
                     ExactCreateAgentCorridorDiagnostics.ObserveClientCreateAgentBypass(
                         createAgent,
                         "deferred-create-agent-explicit-token-pending:" + (explicitIdentityReason ?? "unknown"),
@@ -3027,12 +3029,14 @@ namespace CoopSpectator.Patches
                 if (!string.Equals(_lastDeferredClientRecoverySelectionGateKey, allowKey, StringComparison.Ordinal))
                 {
                     _lastDeferredClientRecoverySelectionGateKey = allowKey;
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: continued deferred client bootstrap replay while local peer remains in selection gate so battlefield materialization can finish before unlock. " +
-                        "Mission=" + (mission.SceneName ?? "null") +
-                        " Reason=" + (selectionGateReason ?? "unknown") +
-                        " " + pendingSummary +
-                        " Source=" + (source ?? "unknown"));
+                    ModLogger.RuntimeDiagnostic(
+                        ModLogger.RuntimeDiagnosticLevel.Verbose,
+                        () =>
+                            "BattleMapSpawnHandoffPatch: continued deferred client bootstrap replay while local peer remains in selection gate so battlefield materialization can finish before unlock. " +
+                            "Mission=" + (mission.SceneName ?? "null") +
+                            " Reason=" + (selectionGateReason ?? "unknown") +
+                            " " + pendingSummary +
+                            " Source=" + (source ?? "unknown"));
                 }
 
                 return false;
@@ -3046,13 +3050,15 @@ namespace CoopSpectator.Patches
             if (!string.Equals(_lastDeferredClientRecoverySelectionGateKey, logKey, StringComparison.Ordinal))
             {
                 _lastDeferredClientRecoverySelectionGateKey = logKey;
-                ModLogger.Info(
-                    "BattleMapSpawnHandoffPatch: paused deferred client bootstrap replay while local peer remains in selection gate. " +
-                    "Mission=" + (mission.SceneName ?? "null") +
-                    " Reason=" + (selectionGateReason ?? "unknown") +
-                    " MountedHeroCreateAgentPending=" + mountedHeroPendingCount +
-                    " " + pendingSummary +
-                    " Source=" + (source ?? "unknown"));
+                ModLogger.RuntimeDiagnostic(
+                    ModLogger.RuntimeDiagnosticLevel.Verbose,
+                    () =>
+                        "BattleMapSpawnHandoffPatch: paused deferred client bootstrap replay while local peer remains in selection gate. " +
+                        "Mission=" + (mission.SceneName ?? "null") +
+                        " Reason=" + (selectionGateReason ?? "unknown") +
+                        " MountedHeroCreateAgentPending=" + mountedHeroPendingCount +
+                        " " + pendingSummary +
+                        " Source=" + (source ?? "unknown"));
             }
 
             return true;
@@ -8612,12 +8618,14 @@ namespace CoopSpectator.Patches
                         missionNetworkComponent,
                         new object[] { setWieldedItemIndex });
                     RemoveDeferredClientSetWieldedItemIndexPayload(setWieldedItemIndex.AgentIndex, setWieldedItemIndex);
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: replayed deferred client SetWieldedItemIndex after battle snapshot apply. " +
-                        "AgentIndex=" + setWieldedItemIndex.AgentIndex +
-                        " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
-                        " Attempts=" + deferredPayload.Attempts +
-                        " Source=" + (source ?? "unknown"));
+                    ModLogger.RuntimeDiagnostic(
+                        ModLogger.RuntimeDiagnosticLevel.Verbose,
+                        () =>
+                            "BattleMapSpawnHandoffPatch: replayed deferred client SetWieldedItemIndex after battle snapshot apply. " +
+                            "AgentIndex=" + setWieldedItemIndex.AgentIndex +
+                            " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " Source=" + (source ?? "unknown"));
                 }
                 catch (Exception ex)
                 {
@@ -12855,11 +12863,13 @@ namespace CoopSpectator.Patches
                         setWieldedItemIndex,
                         missingAgentBootstrapReason ?? "agent-bootstrap-deferred");
                     __state = true;
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: deferred client SetWieldedItemIndex because agent bootstrap is still deferred. " +
-                        "AgentIndex=" + setWieldedItemIndex.AgentIndex +
-                        " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
-                        " Reason=" + (missingAgentBootstrapReason ?? "unknown"));
+                    ModLogger.RuntimeDiagnostic(
+                        ModLogger.RuntimeDiagnosticLevel.Verbose,
+                        () =>
+                            "BattleMapSpawnHandoffPatch: deferred client SetWieldedItemIndex because agent bootstrap is still deferred. " +
+                            "AgentIndex=" + setWieldedItemIndex.AgentIndex +
+                            " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                            " Reason=" + (missingAgentBootstrapReason ?? "unknown"));
                     return false;
                 }
 

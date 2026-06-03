@@ -1006,6 +1006,7 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly HashSet<string> _loggedAutomatedMaterializedEntrySkipIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> _loggedSuppressedMaterializedEquipmentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static Mission _lastBattlePhaseAiHoldMission;
+        private static Mission _lastLoggedDedicatedObserverStaticFallbackMission;
         private static Mission _lastMaterializedArmyMission;
         private static Mission _lastClientBattleSnapshotRefreshMission;
         private static string _lastClientMountedHeroRuntimeBundleMissionKey = string.Empty;
@@ -1024,6 +1025,7 @@ namespace CoopSpectator.MissionBehaviors
         private static int _lastObservedClientControlledAgentIndexForExactVisualPause = int.MinValue;
         private static bool _pendingClientExactVisualSelectionPauseSticky;
         private static bool? _lastAppliedBattlePhaseAiHold;
+        private static string _lastLoggedBattlePhaseAiHoldDriftKey = string.Empty;
         private static CoopBattlePhase? _lastAppliedFormationHoldPhase;
         private static bool _hasMaterializedBattlefieldArmies;
         private static bool _hasLoggedImportedEquipmentAvailabilityDiagnostics;
@@ -1500,6 +1502,7 @@ namespace CoopSpectator.MissionBehaviors
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
+            _lastLoggedDedicatedObserverStaticFallbackMission = null;
             _lastMaterializedArmyMission = null;
             _lastClientBattleSnapshotRefreshMission = null;
             _battleLifecycleStartupTraceKeys.Clear();
@@ -1508,6 +1511,7 @@ namespace CoopSpectator.MissionBehaviors
             _lastSkippedClientBattleSnapshotRefreshKey = string.Empty;
             _nextSkippedClientBattleSnapshotRefreshLogUtc = DateTime.MinValue;
             _lastAppliedBattlePhaseAiHold = null;
+            _lastLoggedBattlePhaseAiHoldDriftKey = string.Empty;
             _lastAppliedFormationHoldPhase = null;
             _hasMaterializedBattlefieldArmies = false;
             ModLogger.Info(
@@ -2333,7 +2337,9 @@ namespace CoopSpectator.MissionBehaviors
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
+            _lastLoggedDedicatedObserverStaticFallbackMission = null;
             _lastAppliedBattlePhaseAiHold = null;
+            _lastLoggedBattlePhaseAiHoldDriftKey = string.Empty;
             _lastAppliedFormationHoldPhase = null;
             _battleLifecycleStartupTraceKeys.Clear();
             _lastMaterializedArmyMission = null;
@@ -2721,11 +2727,17 @@ namespace CoopSpectator.MissionBehaviors
             {
                 if (mission.GetMissionBehavior<CoopMissionSpawnLogic>() == null)
                 {
-                    ModLogger.Info(
-                        "CoopMissionSpawnLogic: dedicated observer skipped attaching CoopMissionSpawnLogic mission behavior on active battle-map mission. " +
-                        "Mission=" + (mission.SceneName ?? "null") +
-                        " IsNewMission=" + isNewMission +
-                        " UsingStaticFallbackTick=True.");
+                    if (!ReferenceEquals(_lastLoggedDedicatedObserverStaticFallbackMission, mission))
+                    {
+                        _lastLoggedDedicatedObserverStaticFallbackMission = mission;
+                        ModLogger.RuntimeDiagnostic(
+                            ModLogger.RuntimeDiagnosticLevel.Minimal,
+                            () =>
+                                "CoopMissionSpawnLogic: dedicated observer skipped attaching CoopMissionSpawnLogic mission behavior on active battle-map mission. " +
+                                "Mission=" + (mission.SceneName ?? "null") +
+                                " IsNewMission=" + isNewMission +
+                                " UsingStaticFallbackTick=True.");
+                    }
                 }
 
                 // Keep dedicated battle-map observer on the static fallback pipeline.
@@ -2806,7 +2818,9 @@ namespace CoopSpectator.MissionBehaviors
             _battlePhaseHeldFormationKeys.Clear();
             _battlePhaseHeldFormationUnitCounts.Clear();
             _lastBattlePhaseAiHoldMission = null;
+            _lastLoggedDedicatedObserverStaticFallbackMission = null;
             _lastAppliedBattlePhaseAiHold = null;
+            _lastLoggedBattlePhaseAiHoldDriftKey = string.Empty;
             _lastAppliedFormationHoldPhase = null;
             _battleLifecycleStartupTraceKeys.Clear();
             _lastMaterializedArmyMission = null;
@@ -10928,10 +10942,14 @@ namespace CoopSpectator.MissionBehaviors
             if (!ReferenceEquals(_lastBattlePhaseAiHoldMission, mission))
             {
                 _lastBattlePhaseAiHoldMission = mission;
+                _lastLoggedBattlePhaseAiHoldDriftKey = string.Empty;
                 _lastAppliedBattlePhaseAiHold = null;
             }
 
             bool currentPauseAi = mission.PauseAITick;
+            bool desiredStateChanged = !_lastAppliedBattlePhaseAiHold.HasValue ||
+                                       _lastAppliedBattlePhaseAiHold.Value != shouldPauseAi;
+            bool missionPauseStateDrifted = currentPauseAi != shouldPauseAi;
             if (_lastAppliedBattlePhaseAiHold.HasValue &&
                 _lastAppliedBattlePhaseAiHold.Value == shouldPauseAi &&
                 currentPauseAi == shouldPauseAi)
@@ -10942,11 +10960,39 @@ namespace CoopSpectator.MissionBehaviors
             mission.PauseAITick = shouldPauseAi;
             _lastAppliedBattlePhaseAiHold = shouldPauseAi;
 
-            ModLogger.Info(
-                "CoopMissionSpawnLogic: battle phase AI hold state applied. " +
-                "Phase=" + currentPhase +
-                " PauseAITick=" + shouldPauseAi +
-                " Source=" + (source ?? "unknown"));
+            if (desiredStateChanged)
+            {
+                _lastLoggedBattlePhaseAiHoldDriftKey = string.Empty;
+                ModLogger.RuntimeDiagnostic(
+                    ModLogger.RuntimeDiagnosticLevel.Minimal,
+                    () =>
+                        "CoopMissionSpawnLogic: battle phase AI hold state applied. " +
+                        "Phase=" + currentPhase +
+                        " PauseAITick=" + shouldPauseAi +
+                        " Source=" + (source ?? "unknown"));
+                return;
+            }
+
+            if (missionPauseStateDrifted)
+            {
+                string driftKey =
+                    (mission.SceneName ?? "null") + "|" +
+                    currentPhase + "|" +
+                    shouldPauseAi + "|" +
+                    (source ?? "unknown");
+                if (!string.Equals(_lastLoggedBattlePhaseAiHoldDriftKey, driftKey, StringComparison.Ordinal))
+                {
+                    _lastLoggedBattlePhaseAiHoldDriftKey = driftKey;
+                    ModLogger.RuntimeDiagnostic(
+                        ModLogger.RuntimeDiagnosticLevel.Minimal,
+                        () =>
+                            "CoopMissionSpawnLogic: battle phase AI hold state reapplied after mission pause state drift. " +
+                            "Phase=" + currentPhase +
+                            " DesiredPauseAITick=" + shouldPauseAi +
+                            " ObservedPauseAITick=" + currentPauseAi +
+                            " Source=" + (source ?? "unknown"));
+                }
+            }
         }
 
         private static void TryApplyNativeBattleMapWarmupFallback(Mission mission, string source)
