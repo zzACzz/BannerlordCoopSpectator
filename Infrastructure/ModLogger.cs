@@ -1,46 +1,97 @@
-using System; // Підключаємо базові типи .NET (Exception)
-using System.Diagnostics; // Підключаємо System.Diagnostics як fallback логування (на випадок якщо API гри недоступне)
-using TWDebug = TaleWorlds.Library.Debug; // Створюємо alias щоб явно викликати Debug.Print з TaleWorlds, а не з System.Diagnostics
+using System;
+using System.Diagnostics;
+using TWDebug = TaleWorlds.Library.Debug;
 
-namespace CoopSpectator.Infrastructure // Оголошуємо простір імен для інфраструктурних утиліт
-{ // Починаємо блок простору імен
-    /// <summary> // Документуємо клас
-    /// Простий логер для моду з префіксом, щоб легше фільтрувати повідомлення у логах гри. // Пояснюємо навіщо існує
-    /// </summary> // Завершуємо XML-коментар
-    public static class ModLogger // Оголошуємо статичний клас, бо логер не потребує стану екземпляра
-    { // Починаємо блок класу
-        private const string Prefix = "[CoopSpectator]"; // Визначаємо префікс, який буде доданий до кожного повідомлення
+namespace CoopSpectator.Infrastructure
+{
+    /// <summary>
+    /// Central logger wrapper for the mod.
+    /// Runtime diagnostics default to the minimal tier so hot-path tracing stays off in large battles.
+    /// Use the COOPSPECTATOR_RUNTIME_DIAGNOSTICS environment variable with values off|minimal|verbose
+    /// to change the active runtime diagnostic tier without editing code.
+    /// </summary>
+    public static class ModLogger
+    {
+        public enum RuntimeDiagnosticLevel
+        {
+            Off = 0,
+            Minimal = 1,
+            Verbose = 2
+        }
 
-        public static void Info(string message) // Оголошуємо метод для інформаційних повідомлень
-        { // Починаємо блок методу
-            Print("INFO", message, null); // Друкуємо повідомлення з рівнем INFO
-        } // Завершуємо блок методу
+        private const string Prefix = "[CoopSpectator]";
+        private static readonly RuntimeDiagnosticLevel ActiveRuntimeDiagnosticsLevel = ResolveRuntimeDiagnosticLevel();
 
-        public static void Warn(string message) // Оголошуємо метод для попереджень
-        { // Починаємо блок методу
-            Print("WARN", message, null); // Друкуємо повідомлення з рівнем WARN
-        } // Завершуємо блок методу
+        public static void Info(string message)
+        {
+            Print("INFO", message, null);
+        }
 
-        public static void Error(string message, Exception exception) // Оголошуємо метод для помилок з винятком
-        { // Починаємо блок методу
-            Print("ERROR", message, exception); // Друкуємо повідомлення з рівнем ERROR і деталями винятку
-        } // Завершуємо блок методу
+        public static void Warn(string message)
+        {
+            Print("WARN", message, null);
+        }
 
-        private static void Print(string level, string message, Exception exception) // Оголошуємо спільний метод друку, щоб не дублювати форматування
-        { // Починаємо блок методу
-            string safeMessage = message ?? string.Empty; // Гарантуємо що message не null, щоб не отримати NullReferenceException при конкатенації
-            string exceptionText = exception != null ? (" | " + exception) : string.Empty; // Додаємо текст винятку тільки якщо він є
-            string line = $"{Prefix} {level}: {safeMessage}{exceptionText}"; // Формуємо фінальний рядок для логу
+        public static void Error(string message, Exception exception)
+        {
+            Print("ERROR", message, exception);
+        }
 
-            try // Пробуємо використати логер гри, бо це зручніше для Bannerlord
-            { // Починаємо блок try
-                TWDebug.Print(line); // Друкуємо у лог гри через TaleWorlds.Library.Debug.Print (найбільш сумісний overload)
-            } // Завершуємо блок try
-            catch (Exception) // Якщо API гри недоступне (наприклад, під час тестів поза грою), падаємо назад на System.Diagnostics
-            { // Починаємо блок catch
-                Debug.WriteLine(line); // Пишемо у стандартний debug output, щоб не втратити інформацію
-            } // Завершуємо блок catch
-        } // Завершуємо блок методу
-    } // Завершуємо блок класу
-} // Завершуємо блок простору імен
+        public static bool IsRuntimeDiagnosticEnabled(RuntimeDiagnosticLevel level)
+        {
+            return ActiveRuntimeDiagnosticsLevel >= level;
+        }
 
+        public static void RuntimeDiagnostic(RuntimeDiagnosticLevel level, Func<string> messageFactory)
+        {
+            if (!IsRuntimeDiagnosticEnabled(level) || messageFactory == null)
+                return;
+
+            Info(messageFactory());
+        }
+
+        private static void Print(string level, string message, Exception exception)
+        {
+            string safeMessage = message ?? string.Empty;
+            string exceptionText = exception != null ? (" | " + exception) : string.Empty;
+            string line = $"{Prefix} {level}: {safeMessage}{exceptionText}";
+
+            try
+            {
+                TWDebug.Print(line);
+            }
+            catch (Exception)
+            {
+                Debug.WriteLine(line);
+            }
+        }
+
+        private static RuntimeDiagnosticLevel ResolveRuntimeDiagnosticLevel()
+        {
+            try
+            {
+                string rawLevel = Environment.GetEnvironmentVariable("COOPSPECTATOR_RUNTIME_DIAGNOSTICS");
+                switch ((rawLevel ?? string.Empty).Trim().ToLowerInvariant())
+                {
+                    case "0":
+                    case "off":
+                    case "none":
+                        return RuntimeDiagnosticLevel.Off;
+                    case "2":
+                    case "verbose":
+                    case "trace":
+                        return RuntimeDiagnosticLevel.Verbose;
+                    case "":
+                    case "1":
+                    case "minimal":
+                    default:
+                        return RuntimeDiagnosticLevel.Minimal;
+                }
+            }
+            catch (Exception)
+            {
+                return RuntimeDiagnosticLevel.Minimal;
+            }
+        }
+    }
+}

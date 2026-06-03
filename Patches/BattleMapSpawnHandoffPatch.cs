@@ -4271,6 +4271,13 @@ namespace CoopSpectator.Patches
                 "|Rider=" + SafeGetAgentIndex(riderAgent);
         }
 
+        private static bool ShouldLogVerboseMountedUsageObservation(Agent agent)
+        {
+            return agent != null &&
+                   IsMountedUsageLifecycleAgent(agent) &&
+                   ModLogger.IsRuntimeDiagnosticEnabled(ModLogger.RuntimeDiagnosticLevel.Verbose);
+        }
+
         private static string BuildMountedUsageObservationSummary(Agent agent)
         {
             if (agent == null)
@@ -6553,7 +6560,7 @@ namespace CoopSpectator.Patches
                 if (!GameNetwork.IsServer ||
                     mission == null ||
                     !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                    !IsMountedUsageLifecycleAgent(__instance))
+                    !ShouldLogVerboseMountedUsageObservation(__instance))
                 {
                     return;
                 }
@@ -6592,7 +6599,7 @@ namespace CoopSpectator.Patches
                 if (!GameNetwork.IsServer ||
                     mission == null ||
                     !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                    !IsMountedUsageLifecycleAgent(__instance))
+                    !ShouldLogVerboseMountedUsageObservation(__instance))
                 {
                     return;
                 }
@@ -6629,7 +6636,7 @@ namespace CoopSpectator.Patches
                 if (!GameNetwork.IsServer ||
                     mission == null ||
                     !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                    !IsMountedUsageLifecycleAgent(__instance))
+                    !ShouldLogVerboseMountedUsageObservation(__instance))
                 {
                     return;
                 }
@@ -6665,7 +6672,7 @@ namespace CoopSpectator.Patches
                 if (!GameNetwork.IsServer ||
                     mission == null ||
                     !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                    !IsMountedUsageLifecycleAgent(__instance))
+                    !ShouldLogVerboseMountedUsageObservation(__instance))
                 {
                     return;
                 }
@@ -6703,7 +6710,7 @@ namespace CoopSpectator.Patches
                 if (!GameNetwork.IsServer ||
                     mission == null ||
                     !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                    !IsMountedUsageLifecycleAgent(__instance))
+                    !ShouldLogVerboseMountedUsageObservation(__instance))
                 {
                     return;
                 }
@@ -6743,7 +6750,7 @@ namespace CoopSpectator.Patches
                 if (!GameNetwork.IsServer ||
                     mission == null ||
                     !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                    !IsMountedUsageLifecycleAgent(__instance))
+                    !ShouldLogVerboseMountedUsageObservation(__instance))
                 {
                     return;
                 }
@@ -6780,7 +6787,7 @@ namespace CoopSpectator.Patches
                 if (!GameNetwork.IsServer ||
                     mission == null ||
                     !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                    !IsMountedUsageLifecycleAgent(__instance))
+                    !ShouldLogVerboseMountedUsageObservation(__instance))
                 {
                     return;
                 }
@@ -6816,7 +6823,7 @@ namespace CoopSpectator.Patches
                 if (!GameNetwork.IsServer ||
                     mission == null ||
                     !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                    !IsMountedUsageLifecycleAgent(__instance))
+                    !ShouldLogVerboseMountedUsageObservation(__instance))
                 {
                     return;
                 }
@@ -11275,7 +11282,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (agent != null && IsMountedUsageLifecycleAgent(agent))
+                if (ShouldLogVerboseMountedUsageObservation(agent))
                 {
                     string logKey =
                         BuildMountedUsagePairKey(agent) + "|" +
@@ -11375,7 +11382,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (agent != null && IsMountedUsageLifecycleAgent(agent))
+                if (ShouldLogVerboseMountedUsageObservation(agent))
                 {
                     string logKey =
                         BuildMountedUsagePairKey(agent) + "|" +
@@ -12009,7 +12016,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (agent != null && IsMountedUsageLifecycleAgent(agent))
+                if (ShouldLogVerboseMountedUsageObservation(agent))
                 {
                     string logKey =
                         BuildMountedUsagePairKey(agent) + "|" +
@@ -12150,7 +12157,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (agent != null && IsMountedUsageLifecycleAgent(agent))
+                if (ShouldLogVerboseMountedUsageObservation(agent))
                 {
                     string logKey =
                         BuildMountedUsagePairKey(agent) + "|" +
@@ -12290,7 +12297,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (agent != null && IsMountedUsageLifecycleAgent(agent))
+                if (ShouldLogVerboseMountedUsageObservation(agent))
                 {
                     string logKey =
                         BuildMountedUsagePairKey(agent) + "|" +
@@ -13381,7 +13388,7 @@ namespace CoopSpectator.Patches
                     return;
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWieldedItemIndex.AgentIndex, canBeNull: true);
-                if (agent != null && IsMountedUsageLifecycleAgent(agent))
+                if (ShouldLogVerboseMountedUsageObservation(agent))
                 {
                     string logKey =
                         BuildMountedUsagePairKey(agent) + "|" +

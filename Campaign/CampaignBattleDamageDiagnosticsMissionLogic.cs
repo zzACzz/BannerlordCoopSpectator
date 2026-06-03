@@ -30,12 +30,14 @@ namespace CoopSpectator.Campaign
             try
             {
                 Mission mission = Mission;
-                ModLogger.Info(
-                    "CampaignBattleDamageDiagnosticsMissionLogic: attached. " +
-                    "Scene=" + (mission?.SceneName ?? "null") +
-                    " Mode=" + (mission?.Mode.ToString() ?? "null") +
-                    " MainHero=" + (Hero.MainHero?.StringId ?? "null") +
-                    " TrackedHeroes=" + BuildTrackedHeroSummary() + ".");
+                ModLogger.RuntimeDiagnostic(
+                    ModLogger.RuntimeDiagnosticLevel.Minimal,
+                    () =>
+                        "CampaignBattleDamageDiagnosticsMissionLogic: attached. " +
+                        "Scene=" + (mission?.SceneName ?? "null") +
+                        " Mode=" + (mission?.Mode.ToString() ?? "null") +
+                        " MainHero=" + (Hero.MainHero?.StringId ?? "null") +
+                        " TrackedHeroes=" + BuildTrackedHeroSummary() + ".");
             }
             catch (Exception ex)
             {
@@ -46,6 +48,9 @@ namespace CoopSpectator.Campaign
         public override void OnMissionTick(float dt)
         {
             base.OnMissionTick(dt);
+
+            if (!ModLogger.IsRuntimeDiagnosticEnabled(ModLogger.RuntimeDiagnosticLevel.Verbose))
+                return;
 
             try
             {
@@ -71,6 +76,9 @@ namespace CoopSpectator.Campaign
         {
             try
             {
+                if (!ModLogger.IsRuntimeDiagnosticEnabled(ModLogger.RuntimeDiagnosticLevel.Verbose))
+                    return;
+
                 if (!TryResolveTrackedPlayerPartyHeroAttack(affectorAgent, attackerWeapon, out Hero trackedHero, out CharacterObject trackedCharacter, out string heroRole))
                     return;
 
@@ -133,6 +141,9 @@ namespace CoopSpectator.Campaign
         {
             try
             {
+                if (!ModLogger.IsRuntimeDiagnosticEnabled(ModLogger.RuntimeDiagnosticLevel.Verbose))
+                    return;
+
                 if (!killingBlow.IsValid || affectorAgent == null)
                     return;
 
@@ -182,15 +193,17 @@ namespace CoopSpectator.Campaign
             if (!_loggedActivationKeys.Add(scene + "|" + heroKey))
                 return;
 
-            ModLogger.Info(
-                "CampaignBattleDamageDiagnosticsMissionLogic: activated for campaign battle. " +
-                "Scene=" + scene +
-                " HeroId=" + heroKey +
-                " HeroName=" + (trackedHero?.Name?.ToString() ?? trackedCharacter?.Name?.ToString() ?? "null") +
-                " HeroRole=" + heroRole +
-                " PlayerControlled=" + (agent?.IsMainAgent ?? false) +
-                " Mounted=" + (agent?.HasMount ?? false) +
-                " Skills=" + BuildTrackedHeroSkillSummary(trackedCharacter) + ".");
+            ModLogger.RuntimeDiagnostic(
+                ModLogger.RuntimeDiagnosticLevel.Minimal,
+                () =>
+                    "CampaignBattleDamageDiagnosticsMissionLogic: activated for campaign battle. " +
+                    "Scene=" + scene +
+                    " HeroId=" + heroKey +
+                    " HeroName=" + (trackedHero?.Name?.ToString() ?? trackedCharacter?.Name?.ToString() ?? "null") +
+                    " HeroRole=" + heroRole +
+                    " PlayerControlled=" + (agent?.IsMainAgent ?? false) +
+                    " Mounted=" + (agent?.HasMount ?? false) +
+                    " Skills=" + BuildTrackedHeroSkillSummary(trackedCharacter) + ".");
         }
 
         private void ObserveTrackedRangedStateProofSamples()
@@ -318,9 +331,11 @@ namespace CoopSpectator.Campaign
             }
 
             _lastLoggedRangedStateByTrackKey[trackKey] = stateSnapshot;
-            ModLogger.Info(
-                "CampaignBattleDamageDiagnosticsMissionLogic: ranged state proof sample. " +
-                stateSnapshot);
+            ModLogger.RuntimeDiagnostic(
+                ModLogger.RuntimeDiagnosticLevel.Verbose,
+                () =>
+                    "CampaignBattleDamageDiagnosticsMissionLogic: ranged state proof sample. " +
+                    stateSnapshot);
         }
 
         private static string BuildAgentRangedStateSnapshot(
