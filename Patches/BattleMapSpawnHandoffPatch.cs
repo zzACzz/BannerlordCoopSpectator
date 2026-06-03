@@ -55,6 +55,8 @@ namespace CoopSpectator.Patches
         private static string _lastArmedLocalFollowSuppressionWindowKey;
         private static string _lastSuppressedWeaponDropKey;
         private static string _lastSuppressedServerProjectileStickKey;
+        private static string _lastSuppressedServerCorpseAttachedWeaponKey;
+        private static string _lastSuppressedServerSpawnedWeaponAttachmentKey;
         private static string _lastLocalVisualFinalizeKey;
         private static string _lastSuppressedAssignFormationKey;
         private static string _lastSuppressedLocalSelectAllFormationsKey;
@@ -391,6 +393,8 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentWeaponUsageIndexChangeMessage), () => PatchMissionNetworkComponentWeaponUsageIndexChangeMessage(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateMissile), () => PatchMissionNetworkComponentCreateMissile(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentHandleMissileCollisionReaction), () => PatchMissionNetworkComponentHandleMissileCollisionReaction(harmony));
+            TryApplyPatchStep(nameof(PatchMissionSpawnAttachedWeaponOnCorpseServer), () => PatchMissionSpawnAttachedWeaponOnCorpseServer(harmony));
+            TryApplyPatchStep(nameof(PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer), () => PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionHandleMissileCollisionReactionServer), () => PatchMissionHandleMissileCollisionReactionServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentPeer), () => PatchMissionNetworkComponentSetAgentPeer(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentHealth), () => PatchMissionNetworkComponentSetAgentHealth(harmony));
@@ -536,6 +540,8 @@ namespace CoopSpectator.Patches
             _localFollowEchoSuppressionAgentIndex = -1;
             _lastSuppressedWeaponDropKey = null;
             _lastSuppressedServerProjectileStickKey = null;
+            _lastSuppressedServerCorpseAttachedWeaponKey = null;
+            _lastSuppressedServerSpawnedWeaponAttachmentKey = null;
             _lastLocalVisualFinalizeKey = null;
             _lastSuppressedAssignFormationKey = null;
             _lastSuppressedLocalSelectAllFormationsKey = null;
@@ -989,6 +995,42 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Mission.HandleMissileCollisionReaction.");
+        }
+
+        private static void PatchMissionSpawnAttachedWeaponOnCorpseServer(Harmony harmony)
+        {
+            MethodInfo target = typeof(Mission).GetMethod(
+                nameof(Mission.SpawnAttachedWeaponOnCorpse),
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_SpawnAttachedWeaponOnCorpse_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Mission.SpawnAttachedWeaponOnCorpse not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Mission.SpawnAttachedWeaponOnCorpse.");
+        }
+
+        private static void PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer(Harmony harmony)
+        {
+            MethodInfo target = typeof(Mission).GetMethod(
+                nameof(Mission.SpawnAttachedWeaponOnSpawnedWeapon),
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_SpawnAttachedWeaponOnSpawnedWeapon_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Mission.SpawnAttachedWeaponOnSpawnedWeapon not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Mission.SpawnAttachedWeaponOnSpawnedWeapon.");
         }
 
         private static void PatchMissionNetworkComponentSetAgentHealth(Harmony harmony)
@@ -2850,6 +2892,21 @@ namespace CoopSpectator.Patches
             return false;
         }
 
+        private static bool IsShieldItem(ItemObject item)
+        {
+            if (item == null)
+                return false;
+
+            try
+            {
+                return item.PrimaryWeapon?.IsShield == true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static bool TryResolveMissionMissileItem(Mission mission, int missileIndex, out ItemObject item)
         {
             item = null;
@@ -2877,6 +2934,125 @@ namespace CoopSpectator.Patches
             catch
             {
                 return false;
+            }
+        }
+
+        private static bool Mission_SpawnAttachedWeaponOnCorpse_ServerPrefix(
+            Mission __instance,
+            Agent agent,
+            int attachedWeaponIndex,
+            int forcedSpawnIndex,
+            ref SpawnedItemEntity __result)
+        {
+            try
+            {
+                if (!ShouldUseServerExactBattleProjectileStickSuppression(__instance) ||
+                    agent == null ||
+                    attachedWeaponIndex < 0)
+                {
+                    return true;
+                }
+
+                if (agent.IsActive() && agent.Health > 0f)
+                    return true;
+
+                if (!ExactCampaignArmyBootstrap.TryGetEntryId(agent, out string entryId) ||
+                    string.IsNullOrWhiteSpace(entryId))
+                {
+                    return true;
+                }
+
+                MissionWeapon attachedWeapon = agent.GetAttachedWeapon(attachedWeaponIndex);
+                if (attachedWeapon.IsEmpty)
+                    return true;
+
+                ItemObject attachedItem = attachedWeapon.Item;
+                if (!IsSuppressibleServerProjectileStickItem(attachedItem))
+                    return true;
+
+                __result = null;
+
+                string logKey =
+                    "corpse|" +
+                    agent.Index + "|" +
+                    entryId + "|" +
+                    attachedWeaponIndex + "|" +
+                    (attachedItem?.StringId ?? "null") + "|" +
+                    forcedSpawnIndex;
+                if (!string.Equals(_lastSuppressedServerCorpseAttachedWeaponKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedServerCorpseAttachedWeaponKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed server SpawnAttachedWeaponOnCorpse for exact battle corpse attachment. " +
+                        "AgentIndex=" + agent.Index +
+                        " EntryId=" + entryId +
+                        " CharacterId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                        " AttachedWeaponIndex=" + attachedWeaponIndex +
+                        " AttachedItem=" + (attachedItem?.StringId ?? "null") +
+                        " ForcedSpawnIndex=" + forcedSpawnIndex);
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: server SpawnAttachedWeaponOnCorpse prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool Mission_SpawnAttachedWeaponOnSpawnedWeapon_ServerPrefix(
+            Mission __instance,
+            SpawnedItemEntity spawnedWeapon,
+            int attachmentIndex,
+            int forcedSpawnIndex)
+        {
+            try
+            {
+                if (!ShouldUseServerExactBattleProjectileStickSuppression(__instance) ||
+                    spawnedWeapon == null ||
+                    attachmentIndex < 0)
+                {
+                    return true;
+                }
+
+                ItemObject parentItem = spawnedWeapon.WeaponCopy.Item;
+                if (!IsShieldItem(parentItem))
+                    return true;
+
+                MissionWeapon attachedWeapon = spawnedWeapon.WeaponCopy.GetAttachedWeapon(attachmentIndex);
+                if (attachedWeapon.IsEmpty)
+                    return true;
+
+                ItemObject attachedItem = attachedWeapon.Item;
+                if (!IsSuppressibleServerProjectileStickItem(attachedItem))
+                    return true;
+
+                string logKey =
+                    "spawned-weapon|" +
+                    GetMissionObjectIdValue(spawnedWeapon.Id) + "|" +
+                    (parentItem?.StringId ?? "null") + "|" +
+                    attachmentIndex + "|" +
+                    (attachedItem?.StringId ?? "null") + "|" +
+                    forcedSpawnIndex;
+                if (!string.Equals(_lastSuppressedServerSpawnedWeaponAttachmentKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastSuppressedServerSpawnedWeaponAttachmentKey = logKey;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed server SpawnAttachedWeaponOnSpawnedWeapon for dropped shield in exact battle. " +
+                        "SpawnedWeaponId=" + GetMissionObjectIdValue(spawnedWeapon.Id) +
+                        " ParentItem=" + (parentItem?.StringId ?? "null") +
+                        " AttachmentIndex=" + attachmentIndex +
+                        " AttachedItem=" + (attachedItem?.StringId ?? "null") +
+                        " ForcedSpawnIndex=" + forcedSpawnIndex);
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: server SpawnAttachedWeaponOnSpawnedWeapon prefix failed open: " + ex.Message);
+                return true;
             }
         }
 
