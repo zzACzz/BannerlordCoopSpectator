@@ -28705,6 +28705,71 @@ namespace CoopSpectator.MissionBehaviors
             return Math.Max(0, GetMaterializedArmyAgentsPerSideCap(side, requestedEntryCount));
         }
 
+        private static IReadOnlyList<string> ResolvePrebattleRequiredEntryIdsForReadiness(
+            BattleSideEnum side,
+            MissionPeer missionPeer,
+            string fallbackFilterSource)
+        {
+            if (side == BattleSideEnum.None)
+                return Array.Empty<string>();
+
+            IReadOnlyList<RosterEntryState> materializableEntryStates = GetAutomatedMaterializableEntryStatesSnapshot(side);
+            if (materializableEntryStates != null && materializableEntryStates.Count > 0)
+            {
+                IReadOnlyList<string> allowedEntryIds = GetAllowedSelectableEntryIdsForSide(side);
+                var requiredEntryIds = new List<string>(materializableEntryStates.Count);
+                var seenEntryIds = new HashSet<string>(StringComparer.Ordinal);
+                foreach (RosterEntryState entryState in materializableEntryStates)
+                {
+                    if (entryState == null ||
+                        string.IsNullOrWhiteSpace(entryState.EntryId) ||
+                        string.IsNullOrWhiteSpace(ResolveEntrySpawnTemplateId(entryState)))
+                    {
+                        continue;
+                    }
+
+                    int availableCount = Math.Max(0, entryState.Count - entryState.WoundedCount);
+                    if (availableCount <= 0 || !seenEntryIds.Add(entryState.EntryId))
+                        continue;
+
+                    requiredEntryIds.Add(entryState.EntryId);
+                }
+
+                if (requiredEntryIds.Count > 0)
+                {
+                    if (allowedEntryIds.Count > requiredEntryIds.Count)
+                    {
+                        string logKey =
+                            "required-universe|" +
+                            side + "|" +
+                            allowedEntryIds.Count + "|" +
+                            requiredEntryIds.Count;
+                        if (_loggedPrebattleReadinessBarrierBypassKeys.Add(logKey))
+                        {
+                            ModLogger.Info(
+                                "CoopMissionSpawnLogic: using pre-battle materializable entry universe for readiness instead of full allowed roster. " +
+                                "Side=" + side +
+                                " AllowedEntries=" + allowedEntryIds.Count +
+                                " MaterializableEntries=" + requiredEntryIds.Count +
+                                " Peer=" + (missionPeer?.GetNetworkPeer()?.UserName ?? missionPeer?.Name?.ToString() ?? "none"));
+                        }
+                    }
+
+                    return FilterClaimedSelectableEntryIdsForPeer(
+                        requiredEntryIds,
+                        missionPeer,
+                        (fallbackFilterSource ?? "prebattle-readiness") + "-materializable",
+                        out _);
+                }
+            }
+
+            return FilterClaimedSelectableEntryIdsForPeer(
+                GetAllowedSelectableEntryIdsForSide(side),
+                missionPeer,
+                fallbackFilterSource ?? "prebattle-readiness",
+                out _);
+        }
+
         private static void TryLogPrebattleReadinessBarrierBypass(
             MissionPeer missionPeer,
             BattleSideEnum side,
@@ -28748,11 +28813,10 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || missionPeer == null || side == BattleSideEnum.None)
                 return false;
 
-            IReadOnlyList<string> requiredEntryIds = FilterClaimedSelectableEntryIdsForPeer(
-                GetAllowedSelectableEntryIdsForSide(side),
+            IReadOnlyList<string> requiredEntryIds = ResolvePrebattleRequiredEntryIdsForReadiness(
+                side,
                 missionPeer,
-                "allowed-prebattle-readiness",
-                out _);
+                "allowed-prebattle-readiness");
             if (requiredEntryIds == null || requiredEntryIds.Count <= 0)
             {
                 reason = "allowed-entries-empty";
@@ -28814,11 +28878,10 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || missionPeer == null || side == BattleSideEnum.None)
                 return false;
 
-            IReadOnlyList<string> requiredEntryIds = FilterClaimedSelectableEntryIdsForPeer(
-                GetAllowedSelectableEntryIdsForSide(side),
+            IReadOnlyList<string> requiredEntryIds = ResolvePrebattleRequiredEntryIdsForReadiness(
+                side,
                 missionPeer,
-                "allowed-prebattle-authoritative-readiness",
-                out _);
+                "allowed-prebattle-authoritative-readiness");
             if (requiredEntryIds == null || requiredEntryIds.Count <= 0)
             {
                 reason = "allowed-entries-empty";
