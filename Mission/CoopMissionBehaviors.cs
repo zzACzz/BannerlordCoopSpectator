@@ -4525,9 +4525,9 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            int deferredRecoveryPendingCount =
-                BattleMapSpawnHandoffPatch.GetDeferredClientRecoveryPendingCount(out string deferredRecoverySummary);
-            if (deferredRecoveryPendingCount > 0)
+            int materializationPendingCount =
+                BattleMapSpawnHandoffPatch.GetDeferredClientSelectionMaterializationPendingCount(out string deferredRecoverySummary);
+            if (materializationPendingCount > 0)
             {
                 readinessSummary =
                     "deferred-client-recovery-pending " +
@@ -4540,7 +4540,7 @@ namespace CoopSpectator.MissionBehaviors
                 " ObservedAgentCount=" + _clientAuthoritativeMaterializedEntryObservedAgentIndices.Count +
                 " SnapshotEntryCount=" + _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount +
                 " PendingExactVisualOverlays=" + _pendingExactNativeClientVisualOverlaysByAgentIndex.Count +
-                " DeferredClientRecoveryPending=" + deferredRecoveryPendingCount;
+                " SelectionMaterializationPending=" + materializationPendingCount;
             return true;
         }
 

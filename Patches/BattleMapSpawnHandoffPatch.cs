@@ -2832,6 +2832,38 @@ namespace CoopSpectator.Patches
             return totalPending;
         }
 
+        internal static int GetDeferredClientSelectionMaterializationPendingCount(out string summary)
+        {
+            int mountedHeroCreateAgentCount = DeferredMountedHeroCreateAgentPayloads.Count;
+            int createAgentCount = DeferredClientCreateAgentPayloads.Count;
+            int setAgentActionSetCount = DeferredClientSetAgentActionSetPayloads.Count;
+            int agentSetFormationCount = DeferredClientAgentSetFormationPayloads.Count;
+            int synchronizeAgentEquipmentCount = DeferredClientSynchronizeAgentEquipmentPayloads.Count;
+            int synchronizeMissionObjectCount = DeferredClientSynchronizeMissionObjectPayloads.Count;
+
+            int materializationPending =
+                mountedHeroCreateAgentCount +
+                createAgentCount +
+                setAgentActionSetCount +
+                agentSetFormationCount +
+                synchronizeAgentEquipmentCount +
+                synchronizeMissionObjectCount;
+            int totalPending = GetDeferredClientRecoveryPendingCount(out _);
+            int excludedPending = Math.Max(0, totalPending - materializationPending);
+
+            summary =
+                "MaterializationPending=" + materializationPending +
+                " MountedHeroCreateAgent=" + mountedHeroCreateAgentCount +
+                " CreateAgent=" + createAgentCount +
+                " SetAgentActionSet=" + setAgentActionSetCount +
+                " AgentSetFormation=" + agentSetFormationCount +
+                " SynchronizeAgentEquipment=" + synchronizeAgentEquipmentCount +
+                " SynchronizeMissionObject=" + synchronizeMissionObjectCount +
+                " ExcludedDeferredRuntimePending=" + excludedPending +
+                " TotalDeferredPending=" + totalPending;
+            return materializationPending;
+        }
+
         internal static void TryProcessDeferredClientCreateAgentMessages(Mission mission, string source)
         {
             if (!GameNetwork.IsClient ||

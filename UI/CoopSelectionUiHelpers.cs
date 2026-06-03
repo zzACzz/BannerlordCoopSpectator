@@ -131,7 +131,7 @@ namespace CoopSpectator.UI
                     if (!CoopMissionSpawnLogic.IsClientBattlefieldSelectionMaterializationBarrierClosed(out _))
                     {
                         battleDataReady = false;
-                        int pendingRecoveryCount = CoopSpectator.Patches.BattleMapSpawnHandoffPatch.GetDeferredClientRecoveryPendingCount(out _);
+                        int pendingRecoveryCount = CoopSpectator.Patches.BattleMapSpawnHandoffPatch.GetDeferredClientSelectionMaterializationPendingCount(out _);
                         localMaterializationBlockReason = pendingRecoveryCount > 0
                             ? "Waiting for battlefield units to materialize... (" + pendingRecoveryCount + " pending)"
                             : "Waiting for battlefield units to materialize...";
