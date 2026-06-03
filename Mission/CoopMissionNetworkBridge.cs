@@ -293,6 +293,7 @@ namespace CoopSpectator.MissionBehaviors
         private readonly Dictionary<string, PayloadAssemblyState> _clientPayloadAssemblies = new Dictionary<string, PayloadAssemblyState>(StringComparer.Ordinal);
         private readonly Dictionary<int, BattleSnapshotTransportState> _battleSnapshotTransportStatesByPeer = new Dictionary<int, BattleSnapshotTransportState>();
         private readonly Dictionary<int, BattleSnapshotClientAssemblyState> _clientBattleSnapshotAssembliesByTransmission = new Dictionary<int, BattleSnapshotClientAssemblyState>();
+        private readonly HashSet<int> _pendingForcedStatusRefreshPeerIndices = new HashSet<int>();
         private static readonly Dictionary<int, int> _expectedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _acknowledgedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private static int _clientObservedBattleSnapshotTransmissionId;
@@ -382,6 +383,7 @@ namespace CoopSpectator.MissionBehaviors
 
             TrySyncBattleSnapshotPayloads();
             TrySyncMaterializedAgentEntryPayloads();
+            TryFlushForcedEntryStatusRefreshes();
             TrySyncEntryStatusPayloads();
         }
 
@@ -594,6 +596,7 @@ namespace CoopSpectator.MissionBehaviors
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.EntryStatusSnapshot));
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.BattleSnapshot));
             _battleSnapshotTransportStatesByPeer.Remove(networkPeer.Index);
+            _pendingForcedStatusRefreshPeerIndices.Remove(networkPeer.Index);
             ClearPeerBattleSnapshotSyncState(networkPeer.Index);
             CoopBattlePeerReconnectState.ObserveDisconnect(
                 networkPeer,
@@ -617,6 +620,7 @@ namespace CoopSpectator.MissionBehaviors
             _clientPayloadAssemblies.Clear();
             _battleSnapshotTransportStatesByPeer.Clear();
             _clientBattleSnapshotAssembliesByTransmission.Clear();
+            _pendingForcedStatusRefreshPeerIndices.Clear();
             _expectedBattleSnapshotTransmissionIdByPeer.Clear();
             _acknowledgedBattleSnapshotTransmissionIdByPeer.Clear();
             CoopBattlePeerReconnectState.Reset("CoopMissionNetworkBridge.OnRemoveBehavior");
@@ -1135,6 +1139,10 @@ namespace CoopSpectator.MissionBehaviors
             if (string.IsNullOrWhiteSpace(comparisonJson))
                 return;
 
+            bool payloadChangedRelativeToLastSent =
+                !_lastSentMaterializedAgentEntryPayloadByPeer.TryGetValue(peer.Index, out string previousMaterializedPayload) ||
+                !string.Equals(previousMaterializedPayload, comparisonJson, StringComparison.Ordinal);
+
             string transmissionKey = BuildPendingTransmissionKey(peer.Index, CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot);
             bool hasPending = _pendingPayloadsByKey.TryGetValue(transmissionKey, out PendingPayloadTransmission pendingTransmission) &&
                 pendingTransmission != null;
@@ -1200,6 +1208,45 @@ namespace CoopSpectator.MissionBehaviors
                     : string.Empty) +
                 " Chunks=" + pendingTransmission.ChunkCount +
                 " EntryCount=" + snapshot.EntryCount);
+            if (payloadChangedRelativeToLastSent && snapshot.EntryCount > 0)
+                QueueForcedEntryStatusRefresh(peer, "authoritative-materialized-snapshot-updated");
+        }
+
+        private void QueueForcedEntryStatusRefresh(NetworkCommunicator peer, string source)
+        {
+            if (peer == null || peer.IsServerPeer)
+                return;
+
+            if (!_pendingForcedStatusRefreshPeerIndices.Add(peer.Index))
+                return;
+
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: queued forced entry status refresh after authoritative materialized snapshot update. " +
+                "Peer=" + (peer.UserName ?? "null") +
+                " Source=" + (source ?? string.Empty));
+        }
+
+        private void TryFlushForcedEntryStatusRefreshes()
+        {
+            if (_pendingForcedStatusRefreshPeerIndices.Count <= 0 || GameNetwork.NetworkPeers == null)
+                return;
+
+            int[] peerIndices = _pendingForcedStatusRefreshPeerIndices.ToArray();
+            foreach (int peerIndex in peerIndices)
+            {
+                NetworkCommunicator peer = GameNetwork.NetworkPeers.FirstOrDefault(candidate => candidate != null && candidate.Index == peerIndex);
+                if (peer == null)
+                {
+                    _pendingForcedStatusRefreshPeerIndices.Remove(peerIndex);
+                    continue;
+                }
+
+                if (!IsEligibleRemotePeer(peer) || !IsPeerCurrentBattleSnapshotBootstrapReady(peer, out _))
+                    continue;
+
+                TrySendEntryStatusToPeer(peer, force: true);
+                _pendingForcedStatusRefreshPeerIndices.Remove(peerIndex);
+            }
         }
 
         private void TrySendEntryStatusToPeer(NetworkCommunicator peer, bool force)
