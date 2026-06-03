@@ -54,7 +54,7 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedFollowSwitchKey;
         private static string _lastArmedLocalFollowSuppressionWindowKey;
         private static string _lastSuppressedWeaponDropKey;
-        private static string _lastSuppressedServerBoltStickKey;
+        private static string _lastSuppressedServerProjectileStickKey;
         private static string _lastLocalVisualFinalizeKey;
         private static string _lastSuppressedAssignFormationKey;
         private static string _lastSuppressedLocalSelectAllFormationsKey;
@@ -535,7 +535,7 @@ namespace CoopSpectator.Patches
             _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
             _localFollowEchoSuppressionAgentIndex = -1;
             _lastSuppressedWeaponDropKey = null;
-            _lastSuppressedServerBoltStickKey = null;
+            _lastSuppressedServerProjectileStickKey = null;
             _lastLocalVisualFinalizeKey = null;
             _lastSuppressedAssignFormationKey = null;
             _lastSuppressedLocalSelectAllFormationsKey = null;
@@ -2817,7 +2817,7 @@ namespace CoopSpectator.Patches
             return false;
         }
 
-        private static bool ShouldUseServerExactBattleBoltStickSuppression(Mission mission)
+        private static bool ShouldUseServerExactBattleProjectileStickSuppression(Mission mission)
         {
             if (!GameNetwork.IsServer || mission == null)
                 return false;
@@ -2828,7 +2828,7 @@ namespace CoopSpectator.Patches
             return BattleSnapshotRuntimeState.GetState() != null;
         }
 
-        private static bool IsSuppressibleServerBoltStickItem(ItemObject item)
+        private static bool IsSuppressibleServerProjectileStickItem(ItemObject item)
         {
             if (item == null)
                 return false;
@@ -2837,7 +2837,9 @@ namespace CoopSpectator.Patches
             {
                 switch (item.ItemType)
                 {
+                    case ItemObject.ItemTypeEnum.Arrows:
                     case ItemObject.ItemTypeEnum.Bolts:
+                    case ItemObject.ItemTypeEnum.Thrown:
                         return true;
                 }
             }
@@ -2891,14 +2893,14 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!ShouldUseServerExactBattleBoltStickSuppression(__instance) ||
+                if (!ShouldUseServerExactBattleProjectileStickSuppression(__instance) ||
                     collisionReaction != Mission.MissileCollisionReaction.Stick)
                 {
                     return true;
                 }
 
                 if (!TryResolveMissionMissileItem(__instance, missileIndex, out ItemObject missileItem) ||
-                    !IsSuppressibleServerBoltStickItem(missileItem))
+                    !IsSuppressibleServerProjectileStickItem(missileItem))
                 {
                     return true;
                 }
@@ -2913,11 +2915,11 @@ namespace CoopSpectator.Patches
                     attachedToShield + "|" +
                     attachedBoneIndex + "|" +
                     GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid);
-                if (!string.Equals(_lastSuppressedServerBoltStickKey, logKey, StringComparison.Ordinal))
+                if (!string.Equals(_lastSuppressedServerProjectileStickKey, logKey, StringComparison.Ordinal))
                 {
-                    _lastSuppressedServerBoltStickKey = logKey;
+                    _lastSuppressedServerProjectileStickKey = logKey;
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed server bolt stick reaction and downgraded to BecomeInvisible. " +
+                        "BattleMapSpawnHandoffPatch: suppressed server projectile stick reaction and downgraded to BecomeInvisible. " +
                         "MissileIndex=" + missileIndex +
                         " MissileItem=" + (missileItem?.StringId ?? "null") +
                         " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
@@ -2933,7 +2935,7 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: server HandleMissileCollisionReaction bolt prefix failed open: " + ex.Message);
+                ModLogger.Info("BattleMapSpawnHandoffPatch: server HandleMissileCollisionReaction projectile prefix failed open: " + ex.Message);
                 return true;
             }
         }
