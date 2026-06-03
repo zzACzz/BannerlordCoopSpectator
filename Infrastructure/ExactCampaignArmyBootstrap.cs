@@ -8,12 +8,18 @@ using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Source.Missions;
 using TaleWorlds.ObjectSystem;
 
+#if COOPSPECTATOR_DEDICATED
+using NativeMissionAgentSpawnLogic = TaleWorlds.MountAndBlade.DefaultBattleMissionAgentSpawnLogic;
+#else
+using NativeMissionAgentSpawnLogic = TaleWorlds.MountAndBlade.MissionAgentSpawnLogic;
+#endif
+
 namespace CoopSpectator.Infrastructure
 {
     public static class ExactCampaignArmyBootstrap
     {
         private static Mission _activeMission;
-        private static MissionAgentSpawnLogic _activeSpawnLogic;
+        private static NativeMissionAgentSpawnLogic _activeSpawnLogic;
         private static BattleSideEnum _activePlayerSide = BattleSideEnum.None;
         private static Team _activePlayerTeam;
         private static Team _activePlayerEnemyTeam;
@@ -31,23 +37,35 @@ namespace CoopSpectator.Infrastructure
         private static readonly PropertyInfo MissionInitializerRecordProperty =
             typeof(Mission).GetProperty("InitializerRecord", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionAgentSpawnLogicMissionSidesField =
-            typeof(MissionAgentSpawnLogic).GetField("_missionSides", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(NativeMissionAgentSpawnLogic).GetField(
+#if COOPSPECTATOR_DEDICATED
+                "_battleSideSpawnContexts",
+#else
+                "_missionSides",
+#endif
+                BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionAgentSpawnLogicPhasesField =
-            typeof(MissionAgentSpawnLogic).GetField("_phases", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(NativeMissionAgentSpawnLogic).GetField("_phases", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionAgentSpawnLogicNumberOfTroopsInTotalField =
-            typeof(MissionAgentSpawnLogic).GetField("_numberOfTroopsInTotal", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(NativeMissionAgentSpawnLogic).GetField("_numberOfTroopsInTotal", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionAgentSpawnLogicBattleSizeField =
-            typeof(MissionAgentSpawnLogic).GetField("_battleSize", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(NativeMissionAgentSpawnLogic).GetField("_battleSize", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionAgentSpawnLogicDeploymentPlanField =
-            typeof(MissionAgentSpawnLogic).GetField("_deploymentPlan", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(NativeMissionAgentSpawnLogic).GetField("_deploymentPlan", BindingFlags.Instance | BindingFlags.NonPublic);
+#if !COOPSPECTATOR_DEDICATED
         private static readonly FieldInfo MissionAgentSpawnLogicPlayerSideField =
-            typeof(MissionAgentSpawnLogic).GetField("_playerSide", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(NativeMissionAgentSpawnLogic).GetField("_playerSide", BindingFlags.Instance | BindingFlags.NonPublic);
+#endif
         private static readonly FieldInfo DefaultMissionDeploymentPlanFormationSceneSpawnEntriesField =
             typeof(DefaultMissionDeploymentPlan).GetField("_formationSceneSpawnEntries", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionSideTroopSupplierField =
-            typeof(MissionAgentSpawnLogic)
+#if COOPSPECTATOR_DEDICATED
+            typeof(MissionBattleSideSpawnContext).GetField("_troopSupplier", BindingFlags.Instance | BindingFlags.NonPublic);
+#else
+            typeof(NativeMissionAgentSpawnLogic)
                 .GetNestedType("MissionSide", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
                 ?.GetField("_troopSupplier", BindingFlags.Instance | BindingFlags.NonPublic);
+#endif
 
         private readonly struct TeamSideOverrideState
         {
@@ -207,11 +225,11 @@ namespace CoopSpectator.Infrastructure
                 }
 
                 initializationStep = "resolve-agent-spawn-logic";
-                MissionAgentSpawnLogic spawnLogic = mission.GetMissionBehavior<MissionAgentSpawnLogic>();
+                NativeMissionAgentSpawnLogic spawnLogic = mission.GetMissionBehavior<NativeMissionAgentSpawnLogic>();
                 if (spawnLogic == null)
                 {
                     initializationStep = "create-agent-spawn-logic";
-                    spawnLogic = new MissionAgentSpawnLogic(suppliers, playerSide, Mission.BattleSizeType.Battle);
+                    spawnLogic = new NativeMissionAgentSpawnLogic(suppliers, playerSide, Mission.BattleSizeType.Battle);
                     initializationStep = "add-agent-spawn-logic";
                     mission.AddMissionBehavior(spawnLogic);
                     initializationStep = "agent-spawn-logic-onbehaviorinitialize";
@@ -360,7 +378,7 @@ namespace CoopSpectator.Infrastructure
                 reason = "exception@" + initializationStep + ":" + ex.GetType().Name + ":" + ex.Message;
                 LogBootstrapContractSnapshot(
                     mission,
-                    mission?.GetMissionBehavior<MissionAgentSpawnLogic>(),
+                    mission?.GetMissionBehavior<NativeMissionAgentSpawnLogic>(),
                     playerSide,
                     reason,
                     "exception-" + initializationStep,
@@ -379,7 +397,7 @@ namespace CoopSpectator.Infrastructure
 
         private static void LogBootstrapContractSnapshot(
             Mission mission,
-            MissionAgentSpawnLogic spawnLogic,
+            NativeMissionAgentSpawnLogic spawnLogic,
             BattleSideEnum playerSide,
             string details,
             string stage,
@@ -409,7 +427,7 @@ namespace CoopSpectator.Infrastructure
                 " ReflectedInitializerRecord={" + BuildReflectedInitializerRecordSummary(mission) + "}" +
                 " PlayerTeam=" + playerTeamText +
                 " PlayerEnemyTeam=" + playerEnemyTeamText +
-                " BattleSize=" + MissionAgentSpawnLogic.MaxNumberOfAgentsForMission +
+                " BattleSize=" + NativeMissionAgentSpawnLogic.MaxNumberOfAgentsForMission +
                 " Source=" + (source ?? "unknown") +
                 " Details=" + (details ?? string.Empty));
 
@@ -673,7 +691,7 @@ namespace CoopSpectator.Infrastructure
             return true;
         }
 
-        private static string BuildSpawnLogicSummary(MissionAgentSpawnLogic spawnLogic)
+        private static string BuildSpawnLogicSummary(NativeMissionAgentSpawnLogic spawnLogic)
         {
             if (spawnLogic == null)
                 return "SpawnLogic=null";
@@ -682,9 +700,13 @@ namespace CoopSpectator.Infrastructure
             builder.Append("SpawnLogicType=");
             builder.Append(spawnLogic.GetType().Name);
 
-            object playerSide = MissionAgentSpawnLogicPlayerSideField?.GetValue(spawnLogic);
             builder.Append(" NativePlayerSide=");
+#if COOPSPECTATOR_DEDICATED
+            builder.Append(spawnLogic.PlayerSide);
+#else
+            object playerSide = MissionAgentSpawnLogicPlayerSideField?.GetValue(spawnLogic);
             builder.Append(playerSide == null ? "null" : playerSide.GetType().GetField("_side", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(playerSide)?.ToString() ?? playerSide.ToString());
+#endif
 
             object deploymentPlan = MissionAgentSpawnLogicDeploymentPlanField?.GetValue(spawnLogic);
             builder.Append(" NativeDeploymentPlan=");
@@ -735,7 +757,7 @@ namespace CoopSpectator.Infrastructure
             return builder.ToString();
         }
 
-        private static string BuildDetailedRuntimeSummary(MissionAgentSpawnLogic spawnLogic)
+        private static string BuildDetailedRuntimeSummary(NativeMissionAgentSpawnLogic spawnLogic)
         {
             if (spawnLogic == null)
                 return "SpawnLogic=null";
@@ -767,7 +789,7 @@ namespace CoopSpectator.Infrastructure
             return builder.ToString();
         }
 
-        private static string BuildPhaseRuntimeSummary(MissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
+        private static string BuildPhaseRuntimeSummary(NativeMissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
         {
             object phase = GetActivePhaseObject(spawnLogic, side);
             if (phase == null)
@@ -782,7 +804,7 @@ namespace CoopSpectator.Infrastructure
                    "}";
         }
 
-        private static string BuildMissionSideRuntimeSummary(MissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
+        private static string BuildMissionSideRuntimeSummary(NativeMissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
         {
             object missionSide = GetMissionSideObject(spawnLogic, side);
             if (missionSide == null)
@@ -802,7 +824,7 @@ namespace CoopSpectator.Infrastructure
                    "}";
         }
 
-        private static object GetActivePhaseObject(MissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
+        private static object GetActivePhaseObject(NativeMissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
         {
             if (spawnLogic == null || MissionAgentSpawnLogicPhasesField == null)
                 return null;
@@ -821,7 +843,7 @@ namespace CoopSpectator.Infrastructure
             return indexer?.Invoke(phaseList, new object[] { 0 });
         }
 
-        private static object GetMissionSideObject(MissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
+        private static object GetMissionSideObject(NativeMissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
         {
             if (spawnLogic == null || MissionAgentSpawnLogicMissionSidesField == null)
                 return null;
@@ -835,7 +857,7 @@ namespace CoopSpectator.Infrastructure
         }
 
         private static T GetMissionSideSupplierPropertyValue<T>(
-            MissionAgentSpawnLogic spawnLogic,
+            NativeMissionAgentSpawnLogic spawnLogic,
             BattleSideEnum side,
             string propertyName)
         {
@@ -870,7 +892,7 @@ namespace CoopSpectator.Infrastructure
             return default;
         }
 
-        private static bool SafeIsSideDepleted(MissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
+        private static bool SafeIsSideDepleted(NativeMissionAgentSpawnLogic spawnLogic, BattleSideEnum side)
         {
             try
             {
@@ -1209,7 +1231,7 @@ namespace CoopSpectator.Infrastructure
         }
 
         private static bool TryOverrideNativeBattleSize(
-            MissionAgentSpawnLogic spawnLogic,
+            NativeMissionAgentSpawnLogic spawnLogic,
             int battleSizeBudget,
             out string diagnostics)
         {
@@ -1244,7 +1266,7 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        private static int GetNativeBattleSize(MissionAgentSpawnLogic spawnLogic)
+        private static int GetNativeBattleSize(NativeMissionAgentSpawnLogic spawnLogic)
         {
             if (spawnLogic == null || MissionAgentSpawnLogicBattleSizeField == null)
                 return -1;
@@ -2074,6 +2096,10 @@ namespace CoopSpectator.Infrastructure
         public BasicCharacterObject Troop => _troop;
 
         bool IAgentOriginBase.IsUnderPlayersCommand => _isUnderPlayersCommand;
+
+#if COOPSPECTATOR_DEDICATED
+        bool IAgentOriginBase.IsInSameArmyAsPlayer => _isUnderPlayersCommand;
+#endif
 
         uint IAgentOriginBase.FactionColor => 0u;
 

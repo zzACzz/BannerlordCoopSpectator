@@ -307,7 +307,12 @@ namespace CoopSpectator.Infrastructure
 
                 return
                     "Valid=True" +
+#if COOPSPECTATOR_DEDICATED
+                    " PivotOffset=" + spawnPathData.PivotOffset.ToString("0.###", CultureInfo.InvariantCulture) +
+                    " PathLength=" + spawnPathData.PathLength.ToString("0.###", CultureInfo.InvariantCulture) +
+#else
                     " PivotRatio=" + spawnPathData.PivotRatio.ToString("0.###", CultureInfo.InvariantCulture) +
+#endif
                     " IsInverted=" + spawnPathData.IsInverted +
                     " SnapType=" + spawnPathData.SnapType +
                     " PathPoints=" + (spawnPathData.Path?.NumberOfPoints ?? 0);
