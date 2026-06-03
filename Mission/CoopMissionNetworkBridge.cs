@@ -1175,6 +1175,14 @@ namespace CoopSpectator.MissionBehaviors
                 if (pendingTransmission == null)
                     return;
 
+                pendingTransmission.MaterializedAgentEntryCount = snapshot.EntryCount;
+                pendingTransmission.QueueForcedEntryStatusRefreshOnCompletion =
+                    payloadChangedRelativeToLastSent &&
+                    snapshot.EntryCount > 0;
+                pendingTransmission.ForcedEntryStatusRefreshSource =
+                    pendingTransmission.QueueForcedEntryStatusRefreshOnCompletion
+                        ? "authoritative-materialized-snapshot-updated"
+                        : string.Empty;
                 _pendingPayloadsByKey[transmissionKey] = pendingTransmission;
                 ModLogger.Info(
                     "CoopMissionNetworkBridge: queued payload transmission. " +
@@ -1207,9 +1215,8 @@ namespace CoopSpectator.MissionBehaviors
                     ? " LogicalBytes=" + pendingTransmission.LogicalBytes
                     : string.Empty) +
                 " Chunks=" + pendingTransmission.ChunkCount +
-                " EntryCount=" + snapshot.EntryCount);
-            if (payloadChangedRelativeToLastSent && snapshot.EntryCount > 0)
-                QueueForcedEntryStatusRefresh(peer, "authoritative-materialized-snapshot-updated");
+                " EntryCount=" + pendingTransmission.MaterializedAgentEntryCount);
+            TryHandleCompletedPendingPayloadTransmission(peer, pendingTransmission);
         }
 
         private void QueueForcedEntryStatusRefresh(NetworkCommunicator peer, string source)
@@ -2123,9 +2130,33 @@ namespace CoopSpectator.MissionBehaviors
                 (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
                     ? " LogicalBytes=" + pendingTransmission.LogicalBytes
                     : string.Empty) +
-                " Chunks=" + pendingTransmission.ChunkCount);
+                " Chunks=" + pendingTransmission.ChunkCount +
+                (pendingTransmission.PayloadKind == CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot
+                    ? " EntryCount=" + pendingTransmission.MaterializedAgentEntryCount
+                    : string.Empty));
+            TryHandleCompletedPendingPayloadTransmission(peer, pendingTransmission);
             pendingTransmission = null;
             return true;
+        }
+
+        private void TryHandleCompletedPendingPayloadTransmission(
+            NetworkCommunicator peer,
+            PendingPayloadTransmission pendingTransmission)
+        {
+            if (peer == null || pendingTransmission == null)
+                return;
+
+            if (pendingTransmission.PayloadKind != CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot)
+                return;
+
+            if (!pendingTransmission.QueueForcedEntryStatusRefreshOnCompletion)
+                return;
+
+            QueueForcedEntryStatusRefresh(
+                peer,
+                string.IsNullOrWhiteSpace(pendingTransmission.ForcedEntryStatusRefreshSource)
+                    ? "authoritative-materialized-snapshot-updated"
+                    : pendingTransmission.ForcedEntryStatusRefreshSource);
         }
 
         private bool TryRetryUnacknowledgedBattleSnapshot(NetworkCommunicator peer)
@@ -3448,6 +3479,7 @@ namespace CoopSpectator.MissionBehaviors
                 Chunks = chunks ?? Array.Empty<byte[]>();
                 TotalBytes = Math.Max(0, totalBytes);
                 NextChunkIndex = 0;
+                ForcedEntryStatusRefreshSource = string.Empty;
             }
 
             public CoopBattlePayloadKind PayloadKind { get; }
@@ -3457,6 +3489,9 @@ namespace CoopSpectator.MissionBehaviors
             public byte[][] Chunks { get; }
             public int TotalBytes { get; }
             public int NextChunkIndex { get; set; }
+            public int MaterializedAgentEntryCount { get; set; }
+            public bool QueueForcedEntryStatusRefreshOnCompletion { get; set; }
+            public string ForcedEntryStatusRefreshSource { get; set; }
             public int ChunkCount => Chunks.Length;
             public bool IsCompleted => NextChunkIndex >= ChunkCount;
 
