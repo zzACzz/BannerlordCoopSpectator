@@ -1005,6 +1005,7 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<int, int> _battlePhaseHeldFormationUnitCounts = new Dictionary<int, int>();
         private static readonly HashSet<string> _loggedAutomatedMaterializedEntrySkipIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> _loggedSuppressedMaterializedEquipmentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> _loggedPrebattleReadinessBarrierBypassKeys = new HashSet<string>(StringComparer.Ordinal);
         private static Mission _lastBattlePhaseAiHoldMission;
         private static Mission _lastMaterializedArmyMission;
         private static Mission _lastClientBattleSnapshotRefreshMission;
@@ -1499,6 +1500,7 @@ namespace CoopSpectator.MissionBehaviors
             _battlePhaseHeldFormationUnitCounts.Clear();
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
+            _loggedPrebattleReadinessBarrierBypassKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
             _lastMaterializedArmyMission = null;
             _lastClientBattleSnapshotRefreshMission = null;
@@ -2332,6 +2334,7 @@ namespace CoopSpectator.MissionBehaviors
             _battlePhaseHeldFormationUnitCounts.Clear();
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
+            _loggedPrebattleReadinessBarrierBypassKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
             _lastAppliedBattlePhaseAiHold = null;
             _lastAppliedFormationHoldPhase = null;
@@ -2803,6 +2806,7 @@ namespace CoopSpectator.MissionBehaviors
             _exactNativeClientVisualOverlayQueueSnapshotKey = string.Empty;
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
+            _loggedPrebattleReadinessBarrierBypassKeys.Clear();
             _battlePhaseHeldFormationKeys.Clear();
             _battlePhaseHeldFormationUnitCounts.Clear();
             _lastBattlePhaseAiHoldMission = null;
@@ -28688,6 +28692,51 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private static int GetPrebattleMaterializedSideCap(BattleSideEnum side)
+        {
+            if (side == BattleSideEnum.None)
+                return 0;
+
+            IReadOnlyList<RosterEntryState> automatedEntryStates = GetAutomatedMaterializableEntryStatesSnapshot(side);
+            int requestedEntryCount = automatedEntryStates?.Count ?? 0;
+            if (requestedEntryCount <= 0)
+                requestedEntryCount = GetAllowedSelectableEntryIdsForSide(side).Count;
+
+            return Math.Max(0, GetMaterializedArmyAgentsPerSideCap(side, requestedEntryCount));
+        }
+
+        private static void TryLogPrebattleReadinessBarrierBypass(
+            MissionPeer missionPeer,
+            BattleSideEnum side,
+            string barrierKind,
+            int requestedCoverageCount,
+            int sideCap)
+        {
+            if (side == BattleSideEnum.None ||
+                string.IsNullOrWhiteSpace(barrierKind) ||
+                requestedCoverageCount <= 0 ||
+                sideCap <= 0)
+            {
+                return;
+            }
+
+            string logKey =
+                barrierKind + "|" +
+                side + "|" +
+                requestedCoverageCount + "|" +
+                sideCap;
+            if (!_loggedPrebattleReadinessBarrierBypassKeys.Add(logKey))
+                return;
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: bypassing full pre-battle readiness coverage barrier because battle-size-limited materialization cannot satisfy it before BattleActive. " +
+                "Barrier=" + barrierKind +
+                " Side=" + side +
+                " RequestedCoverage=" + requestedCoverageCount +
+                " SideCap=" + sideCap +
+                " Peer=" + (missionPeer?.GetNetworkPeer()?.UserName ?? missionPeer?.Name?.ToString() ?? "none"));
+        }
+
         private static bool ArePrebattleSelectableRepresentativesReadyForPeer(
             Mission mission,
             MissionPeer missionPeer,
@@ -28708,6 +28757,18 @@ namespace CoopSpectator.MissionBehaviors
             {
                 reason = "allowed-entries-empty";
                 return false;
+            }
+
+            int sideCap = GetPrebattleMaterializedSideCap(side);
+            if (sideCap > 0 && requiredEntryIds.Count > sideCap)
+            {
+                TryLogPrebattleReadinessBarrierBypass(
+                    missionPeer,
+                    side,
+                    "selectable-representatives",
+                    requiredEntryIds.Count,
+                    sideCap);
+                return true;
             }
 
             IReadOnlyList<string> liveMaterializedEntryIds = FilterClaimedSelectableEntryIdsForPeer(
@@ -28765,6 +28826,18 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             int expectedActiveCount = Math.Max(0, GetBattleSideAvailableCount(side));
+            int sideCap = GetPrebattleMaterializedSideCap(side);
+            if (sideCap > 0 && expectedActiveCount > sideCap)
+            {
+                TryLogPrebattleReadinessBarrierBypass(
+                    missionPeer,
+                    side,
+                    "authoritative-battlefield-agents",
+                    expectedActiveCount,
+                    sideCap);
+                return true;
+            }
+
             int trackedActiveCount = 0;
             var trackedEntryIds = new HashSet<string>(StringComparer.Ordinal);
             if (mission.AllAgents != null)
