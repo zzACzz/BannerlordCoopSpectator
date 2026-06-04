@@ -48,6 +48,9 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
         private const bool EnableManualPatchMissionFlowBattleRuntimeCameraPreview = true;
         private const bool EnableManualPatchExactCampaignRuntime = true;
         private const bool EnableManualPatchPreviewDiagnostics = false;
+        // Coarse mannequin isolation switch: disables the whole client-side campaign/preview
+        // patch cluster without touching dedicated/server battle runtime fixes.
+        private const bool EnableManualPatchMannequinSensitiveClientPreviewCluster = false;
         private const bool EnableClientGameModeRegistration = true;
         private const bool EnableCampaignBehaviors = true;
         private const bool EnableNonCampaignModelRegistration = true;
@@ -127,6 +130,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                 $"FinishedLoadingGate={EnableManualPatchMissionFlowBattleRuntimeFinishedLoadingGate}, " +
                 $"CameraPreview={EnableManualPatchMissionFlowBattleRuntimeCameraPreview}, " +
                 $"ExactCampaignRuntime={EnableManualPatchExactCampaignRuntime}, " +
+                $"MannequinSensitiveClientPreviewCluster={EnableManualPatchMannequinSensitiveClientPreviewCluster}, " +
                 $"ClientGameModes={EnableClientGameModeRegistration}, " +
                 $"NonCampaignModels={EnableNonCampaignModelRegistration}.");
         }
@@ -244,7 +248,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                                 ModLogger.Info("Startup isolation: skipped mission-flow battle-runtime bootstrap-gates Apply(...) patch subgroup.");
                             }
 
-                            if (EnableManualPatchMissionFlowBattleRuntimeCameraPreview)
+                            if (EnableManualPatchMannequinSensitiveClientPreviewCluster &&
+                                EnableManualPatchMissionFlowBattleRuntimeCameraPreview)
                             {
                                 MissionScreenCameraPreviewPatch.Apply(harmony);
                             }
@@ -272,7 +277,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         ModLogger.Info("Startup isolation: skipped manual mission-flow/ui Apply(...) patch group.");
                     }
 
-                    if (EnableManualPatchExactCampaignRuntime)
+                    if (EnableManualPatchMannequinSensitiveClientPreviewCluster &&
+                        EnableManualPatchExactCampaignRuntime)
                     {
                         ExactCampaignArmyBootstrapPatch.Apply(harmony);
                         ExactCampaignPreSpawnLoadoutPatch.Apply(harmony);
@@ -286,7 +292,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         ModLogger.Info("Startup isolation: skipped manual exact/runtime Apply(...) patch group.");
                     }
 
-                    if (EnableManualPatchPreviewDiagnostics)
+                    if (EnableManualPatchMannequinSensitiveClientPreviewCluster &&
+                        EnableManualPatchPreviewDiagnostics)
                     {
                         CharacterTableauChainDiagnosticsPatch.Apply(harmony);
                         CampaignVisualResetPatch.Apply(harmony);
