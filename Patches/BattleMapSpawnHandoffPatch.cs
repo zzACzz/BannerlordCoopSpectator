@@ -61,6 +61,7 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedServerMissileStickKey;
         private static string _lastSuppressedServerBoltWorldHitBypassKey;
         private static string _lastSuppressedServerBoltWorldHitMissileHitBypassKey;
+        private static string _lastSuppressedServerBoltWorldHitQuarantineKey;
         private static string _lastSuppressedServerMissileAttachVisualKey;
         private static string _lastSuppressedClientCreateMissileInvalidShooterKey;
         private static string _lastObservedServerBoltMissileHitKey;
@@ -187,6 +188,8 @@ namespace CoopSpectator.Patches
             new List<DeferredClientMakeAgentDeadPayload>();
         private static readonly Dictionary<int, ClientDroppedWeaponOriginState> ClientDroppedWeaponOriginsByMissionObjectId =
             new Dictionary<int, ClientDroppedWeaponOriginState>();
+        private static readonly Dictionary<int, SuppressedServerBoltWorldHitMissileState> SuppressedServerBoltWorldHitMissilesByIndex =
+            new Dictionary<int, SuppressedServerBoltWorldHitMissileState>();
         private static long _nextDeferredClientCreateAgentSequence;
         private static long _nextDeferredClientSetAgentActionSetSequence;
         private static long _nextDeferredClientAgentSetFormationSequence;
@@ -208,6 +211,7 @@ namespace CoopSpectator.Patches
         private static long _nextDeferredClientMakeAgentDeadSequence;
         private static int _unsafeImmediateClientAgentBaselineMaterializationDepth;
         private static readonly TimeSpan LocalFollowEchoSuppressionWindow = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan SuppressedServerBoltWorldHitMissileQuarantineWindow = TimeSpan.FromSeconds(3);
         private static DateTime _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
         private static int _localFollowEchoSuppressionAgentIndex = -1;
 
@@ -460,6 +464,15 @@ namespace CoopSpectator.Patches
             public DateTime ObservedUtc;
         }
 
+        private sealed class SuppressedServerBoltWorldHitMissileState
+        {
+            public int MissileIndex;
+            public string MissileItemId;
+            public int AttackerAgentIndex;
+            public DateTime ObservedUtc;
+            public string Source;
+        }
+
         public static void Apply(Harmony harmony)
         {
             TryApplyPatchStep(nameof(PatchMissionPeerFollowedAgent), () => PatchMissionPeerFollowedAgent(harmony));
@@ -623,6 +636,10 @@ namespace CoopSpectator.Patches
             {
                 ClientDroppedWeaponOriginsByMissionObjectId.Clear();
             }
+            lock (SuppressedServerBoltWorldHitMissilesByIndex)
+            {
+                SuppressedServerBoltWorldHitMissilesByIndex.Clear();
+            }
             _nextDeferredClientCreateAgentSequence = 0;
             _nextDeferredClientSetAgentActionSetSequence = 0;
             _nextDeferredClientAgentSetFormationSequence = 0;
@@ -651,6 +668,8 @@ namespace CoopSpectator.Patches
             _lastSuppressedDroppedShieldAttachmentKey = null;
             _lastSuppressedServerMissileStickKey = null;
             _lastSuppressedServerBoltWorldHitBypassKey = null;
+            _lastSuppressedServerBoltWorldHitMissileHitBypassKey = null;
+            _lastSuppressedServerBoltWorldHitQuarantineKey = null;
             _lastSuppressedServerMissileAttachVisualKey = null;
             _lastObservedServerBoltMissileHitKey = null;
             _lastObservedServerBoltCollisionKey = null;
@@ -4108,6 +4127,87 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void RegisterSuppressedServerBoltWorldHitMissile(
+            int missileIndex,
+            ItemObject missileItem,
+            Agent attacker,
+            string source)
+        {
+            if (missileIndex < 0)
+                return;
+
+            lock (SuppressedServerBoltWorldHitMissilesByIndex)
+            {
+                CleanupExpiredSuppressedServerBoltWorldHitMissiles_NoLock(DateTime.UtcNow);
+                SuppressedServerBoltWorldHitMissilesByIndex[missileIndex] = new SuppressedServerBoltWorldHitMissileState
+                {
+                    MissileIndex = missileIndex,
+                    MissileItemId = missileItem?.StringId,
+                    AttackerAgentIndex = attacker?.Index ?? -1,
+                    ObservedUtc = DateTime.UtcNow,
+                    Source = source
+                };
+            }
+        }
+
+        private static bool TryGetSuppressedServerBoltWorldHitMissile(
+            int missileIndex,
+            ItemObject missileItem,
+            out SuppressedServerBoltWorldHitMissileState state)
+        {
+            state = null;
+            if (missileIndex < 0)
+                return false;
+
+            lock (SuppressedServerBoltWorldHitMissilesByIndex)
+            {
+                CleanupExpiredSuppressedServerBoltWorldHitMissiles_NoLock(DateTime.UtcNow);
+                if (!SuppressedServerBoltWorldHitMissilesByIndex.TryGetValue(missileIndex, out state) ||
+                    state == null)
+                {
+                    return false;
+                }
+
+                string missileItemId = missileItem?.StringId;
+                if (!string.IsNullOrWhiteSpace(missileItemId) &&
+                    !string.IsNullOrWhiteSpace(state.MissileItemId) &&
+                    !string.Equals(state.MissileItemId, missileItemId, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+        }
+
+        private static void CleanupExpiredSuppressedServerBoltWorldHitMissiles_NoLock(DateTime utcNow)
+        {
+            if (SuppressedServerBoltWorldHitMissilesByIndex.Count == 0)
+                return;
+
+            List<int> expiredMissileIndices = null;
+            foreach (KeyValuePair<int, SuppressedServerBoltWorldHitMissileState> pair in SuppressedServerBoltWorldHitMissilesByIndex)
+            {
+                SuppressedServerBoltWorldHitMissileState state = pair.Value;
+                if (state == null ||
+                    utcNow - state.ObservedUtc > SuppressedServerBoltWorldHitMissileQuarantineWindow)
+                {
+                    if (expiredMissileIndices == null)
+                        expiredMissileIndices = new List<int>();
+
+                    expiredMissileIndices.Add(pair.Key);
+                }
+            }
+
+            if (expiredMissileIndices == null)
+                return;
+
+            foreach (int expiredMissileIndex in expiredMissileIndices)
+            {
+                SuppressedServerBoltWorldHitMissilesByIndex.Remove(expiredMissileIndex);
+            }
+        }
+
         private static bool TryBuildBoltAfterhitAgentSummary(Agent agent, out string summary, out string failureType)
         {
             if (agent == null)
@@ -6003,6 +6103,34 @@ namespace CoopSpectator.Patches
 
             try
             {
+                if (TryGetSuppressedServerBoltWorldHitMissile(missileIndex, null, out SuppressedServerBoltWorldHitMissileState quarantinedMissile))
+                {
+                    collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
+
+                    string quarantineLogKey =
+                        "HandleMissileCollisionReaction|" +
+                        missileIndex + "|" +
+                        (quarantinedMissile?.MissileItemId ?? "null") + "|" +
+                        (quarantinedMissile?.AttackerAgentIndex ?? -1);
+                    if (!string.Equals(_lastSuppressedServerBoltWorldHitQuarantineKey, quarantineLogKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedServerBoltWorldHitQuarantineKey = quarantineLogKey;
+                        double quarantineAgeMs = quarantinedMissile == null
+                            ? -1d
+                            : (DateTime.UtcNow - quarantinedMissile.ObservedUtc).TotalMilliseconds;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: bypassed dedicated Mission.HandleMissileCollisionReaction original because missile index is quarantined from a prior exact battle bolt world-hit. " +
+                            "MissileIndex=" + missileIndex +
+                            " MissileItem=" + (quarantinedMissile?.MissileItemId ?? "null") +
+                            " AttackerAgentIndex=" + (quarantinedMissile?.AttackerAgentIndex ?? -1) +
+                            " QuarantineSource=" + (quarantinedMissile?.Source ?? "unknown") +
+                            " QuarantineAgeMs=" + quarantineAgeMs.ToString("F1") +
+                            " CollisionReaction=BecomeInvisible");
+                    }
+
+                    return false;
+                }
+
                 ItemObject observedMissileItem = null;
                 WeaponFlags observedWeaponFlags = 0;
                 WeaponClass observedWeaponClass = WeaponClass.Undefined;
@@ -6162,6 +6290,12 @@ namespace CoopSpectator.Patches
 
                 if (isBoltWorldHitWithoutAttachTarget)
                 {
+                    RegisterSuppressedServerBoltWorldHitMissile(
+                        missileIndex,
+                        missileItem,
+                        attackerAgent,
+                        "Mission.HandleMissileCollisionReaction:exact-battle-bolt-world-hit");
+
                     collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
 
                     string bypassLogKey =
@@ -6312,7 +6446,7 @@ namespace CoopSpectator.Patches
             return __exception;
         }
 
-        private static void Mission_SpawnWeaponAsDropFromMissile_ServerPrefix(
+        private static bool Mission_SpawnWeaponAsDropFromMissile_ServerPrefix(
             Mission __instance,
             int missileIndex,
             MissionObject attachedMissionObject,
@@ -6324,13 +6458,42 @@ namespace CoopSpectator.Patches
 
             try
             {
+                if (TryGetSuppressedServerBoltWorldHitMissile(missileIndex, null, out SuppressedServerBoltWorldHitMissileState quarantinedMissile))
+                {
+                    string quarantineLogKey =
+                        "SpawnWeaponAsDropFromMissile|" +
+                        missileIndex + "|" +
+                        (quarantinedMissile?.MissileItemId ?? "null") + "|" +
+                        (quarantinedMissile?.AttackerAgentIndex ?? -1) + "|" +
+                        spawnFlags + "|" +
+                        forcedSpawnIndex;
+                    if (!string.Equals(_lastSuppressedServerBoltWorldHitQuarantineKey, quarantineLogKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedServerBoltWorldHitQuarantineKey = quarantineLogKey;
+                        double quarantineAgeMs = quarantinedMissile == null
+                            ? -1d
+                            : (DateTime.UtcNow - quarantinedMissile.ObservedUtc).TotalMilliseconds;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: bypassed dedicated Mission.SpawnWeaponAsDropFromMissile original because missile index is quarantined from a prior exact battle bolt world-hit. " +
+                            "MissileIndex=" + missileIndex +
+                            " MissileItem=" + (quarantinedMissile?.MissileItemId ?? "null") +
+                            " AttackerAgentIndex=" + (quarantinedMissile?.AttackerAgentIndex ?? -1) +
+                            " QuarantineSource=" + (quarantinedMissile?.Source ?? "unknown") +
+                            " QuarantineAgeMs=" + quarantineAgeMs.ToString("F1") +
+                            " SpawnFlags=" + spawnFlags +
+                            " ForcedSpawnIndex=" + forcedSpawnIndex);
+                    }
+
+                    return false;
+                }
+
                 if (!ShouldObserveServerExactBattleBoltAfterhitDiagnostics(__instance))
-                    return;
+                    return true;
 
                 if (!TryResolveMissionMissileData(__instance, missileIndex, out ItemObject missileItem, out WeaponFlags weaponFlags, out WeaponClass weaponClass) ||
                     !IsBoltAttachedMissileItem(missileItem, weaponFlags, weaponClass))
                 {
-                    return;
+                    return true;
                 }
 
                 string observationKey =
@@ -6360,10 +6523,13 @@ namespace CoopSpectator.Patches
                         "BattleMapSpawnHandoffPatch: observed server bolt world-drop enter corridor. " +
                         observationDetails);
                 }
+
+                return true;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: server SpawnWeaponAsDropFromMissile prefix failed open: " + ex.Message);
+                return true;
             }
         }
 
@@ -6438,6 +6604,31 @@ namespace CoopSpectator.Patches
                     !IsBoltAttachedMissileItem(missileItem, weaponFlags, weaponClass))
                 {
                     return true;
+                }
+
+                if (TryGetSuppressedServerBoltWorldHitMissile(missileIndex, missileItem, out SuppressedServerBoltWorldHitMissileState quarantinedMissile))
+                {
+                    string quarantineLogKey =
+                        "MissileHitCallback|" +
+                        missileIndex + "|" +
+                        (quarantinedMissile?.MissileItemId ?? "null") + "|" +
+                        (quarantinedMissile?.AttackerAgentIndex ?? -1);
+                    if (!string.Equals(_lastSuppressedServerBoltWorldHitQuarantineKey, quarantineLogKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedServerBoltWorldHitQuarantineKey = quarantineLogKey;
+                        double quarantineAgeMs = quarantinedMissile == null
+                            ? -1d
+                            : (DateTime.UtcNow - quarantinedMissile.ObservedUtc).TotalMilliseconds;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: bypassed dedicated Mission.MissileHitCallback original because missile index is quarantined from a prior exact battle bolt world-hit. " +
+                            "MissileIndex=" + missileIndex +
+                            " MissileItem=" + (quarantinedMissile?.MissileItemId ?? "null") +
+                            " AttackerAgentIndex=" + (quarantinedMissile?.AttackerAgentIndex ?? -1) +
+                            " QuarantineSource=" + (quarantinedMissile?.Source ?? "unknown") +
+                            " QuarantineAgeMs=" + quarantineAgeMs.ToString("F1"));
+                    }
+
+                    return false;
                 }
 
                 MissionObject hitMissionObject = null;
@@ -6557,6 +6748,12 @@ namespace CoopSpectator.Patches
                     !collisionData.IsColliderAgent &&
                     hitMissionObject == null)
                 {
+                    RegisterSuppressedServerBoltWorldHitMissile(
+                        missileIndex,
+                        missileItem,
+                        attacker,
+                        "Mission.MissileHitCallback:exact-battle-bolt-world-hit");
+
                     string bypassLogKey =
                         missileIndex + "|" +
                         (missileItem?.StringId ?? "null") + "|" +
