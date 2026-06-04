@@ -49,10 +49,10 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
         private const bool EnableManualPatchExactCampaignRuntime = true;
         private const bool EnableManualPatchPreviewDiagnostics = false;
         // Mannequin stabilization switches after bisect.
-        // Preview patch is safe to keep; AgentDisplayNamePatch is disabled because it regresses mannequins.
+        // Preview patch is safe to keep; AgentDisplayNamePatch is re-enabled only after narrowing it to coop battle-map runtime.
         // The remaining class/stats and exact bootstrap/runtime clusters stay disabled until re-validated separately.
         private const bool EnableManualPatchMannequinPreview = true;
-        private const bool EnableManualPatchMannequinDisplayNames = false;
+        private const bool EnableManualPatchMannequinDisplayNames = true;
         private const bool EnableManualPatchMannequinClassAndStats = false;
         private const bool EnableManualPatchMannequinExactBootstrap = false;
         private const bool EnableClientGameModeRegistration = true;

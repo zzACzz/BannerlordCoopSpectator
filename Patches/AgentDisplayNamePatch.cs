@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using HarmonyLib;
@@ -31,12 +32,6 @@ namespace CoopSpectator.Patches
                 typeof(Agent).GetProperty(nameof(Agent.NameTextObject), BindingFlags.Instance | BindingFlags.Public)?.GetGetMethod(),
                 nameof(Agent_NameTextObject_Postfix),
                 "Agent.NameTextObject");
-
-            TryPatchGetter(
-                harmony,
-                ResolveTrackableGetNameMethod(),
-                nameof(Agent_ITrackableBase_GetName_Postfix),
-                "Agent.ITrackableBase.GetName");
         }
 
         private static void TryPatchGetter(Harmony harmony, MethodInfo target, string postfixMethodName, string targetLabel)
@@ -61,48 +56,11 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static MethodInfo ResolveTrackableGetNameMethod()
-        {
-            try
-            {
-                MethodInfo[] methods = typeof(Agent).GetMethods(
-                    BindingFlags.Instance |
-                    BindingFlags.Public |
-                    BindingFlags.NonPublic);
-
-                for (int i = 0; i < methods.Length; i++)
-                {
-                    MethodInfo method = methods[i];
-                    if (method == null ||
-                        method.ReturnType != typeof(TextObject) ||
-                        method.GetParameters().Length != 0)
-                    {
-                        continue;
-                    }
-
-                    if (string.Equals(method.Name, "GetName", StringComparison.Ordinal) ||
-                        method.Name.EndsWith(".GetName", StringComparison.Ordinal))
-                    {
-                        ModLogger.Info("AgentDisplayNamePatch: resolved trackable/display name target. Method=" + method.Name + ".");
-                        return method;
-                    }
-                }
-
-                ModLogger.Info("AgentDisplayNamePatch: no trackable/display name method matched on Agent.");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("AgentDisplayNamePatch: failed to resolve trackable/display name target: " + ex.Message);
-            }
-
-            return null;
-        }
-
         private static void Agent_Name_Postfix(Agent __instance, ref string __result)
         {
             try
             {
-                if (!CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(__instance, out string entryId, out TextObject exactName))
+                if (!TryResolveBattleOnlyExactDisplayNameForAgent(__instance, out string entryId, out TextObject exactName))
                     return;
 
                 __result = exactName.ToString();
@@ -118,7 +76,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(__instance, out string entryId, out TextObject exactName))
+                if (!TryResolveBattleOnlyExactDisplayNameForAgent(__instance, out string entryId, out TextObject exactName))
                     return;
 
                 __result = exactName;
@@ -130,20 +88,60 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void Agent_ITrackableBase_GetName_Postfix(Agent __instance, ref TextObject __result)
+        private static bool TryResolveBattleOnlyExactDisplayNameForAgent(Agent agent, out string entryId, out TextObject exactName)
         {
-            try
-            {
-                if (!CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(__instance, out string entryId, out TextObject exactName))
-                    return;
+            entryId = null;
+            exactName = null;
+            if (agent == null)
+                return false;
 
-                __result = exactName;
-                LogExactNameOverride(__instance, entryId, exactName.ToString(), "ITrackableBase.GetName");
-            }
-            catch (Exception ex)
+            Mission mission = Mission.Current;
+            if (!ShouldRunForCurrentMission(mission))
+                return false;
+
+            if (!TryResolveBattleOnlyEntryId(agent, out entryId) ||
+                string.IsNullOrWhiteSpace(entryId))
             {
-                ModLogger.Info("AgentDisplayNamePatch: Agent.ITrackableBase.GetName postfix failed: " + ex.Message);
+                return false;
             }
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (entryState == null)
+                return false;
+
+            string resolvedDisplayName = BattleSnapshotRuntimeState.ResolveEntryDisplayName(entryState, entryId);
+            if (string.IsNullOrWhiteSpace(resolvedDisplayName) ||
+                string.Equals(resolvedDisplayName, "Unknown Unit", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            exactName = new TextObject(resolvedDisplayName);
+            return true;
+        }
+
+        private static bool ShouldRunForCurrentMission(Mission mission)
+        {
+            if (mission == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                return false;
+            }
+
+            return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null ||
+                   mission.GetMissionBehavior<MissionMultiplayerCoopBattleClient>() != null;
+        }
+
+        private static bool TryResolveBattleOnlyEntryId(Agent agent, out string entryId)
+        {
+            if (CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                !string.IsNullOrWhiteSpace(entryId))
+            {
+                return true;
+            }
+
+            return ExactCampaignArmyBootstrap.TryGetEntryId(agent, out entryId) &&
+                   !string.IsNullOrWhiteSpace(entryId);
         }
 
         private static void LogExactNameOverride(Agent agent, string entryId, string exactName, string source)
