@@ -59,6 +59,7 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedWeaponDropKey;
         private static string _lastSuppressedDroppedShieldAttachmentKey;
         private static string _lastSuppressedServerMissileStickKey;
+        private static string _lastSuppressedServerBoltWorldHitBypassKey;
         private static string _lastSuppressedServerMissileAttachVisualKey;
         private static string _lastObservedServerBoltMissileHitKey;
         private static string _lastObservedServerBoltCollisionKey;
@@ -473,13 +474,8 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAttachWeaponToWeaponInAgentEquipmentSlot), () => PatchMissionNetworkComponentAttachWeaponToWeaponInAgentEquipmentSlot(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponNetworkData), () => PatchMissionNetworkComponentSetWeaponNetworkData(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponAmmoData), () => PatchMissionNetworkComponentSetWeaponAmmoData(harmony));
-            TryApplyPatchStep(nameof(PatchAgentSetWeaponAmountInSlot), () => PatchAgentSetWeaponAmountInSlot(harmony));
-            TryApplyPatchStep(nameof(PatchAgentSetWeaponAmmoAsClient), () => PatchAgentSetWeaponAmmoAsClient(harmony));
-            TryApplyPatchStep(nameof(PatchAgentSetWieldedItemIndexAsClient), () => PatchAgentSetWieldedItemIndexAsClient(harmony));
-            TryApplyPatchStep(nameof(PatchAgentStartSwitchingWeaponUsageIndexAsClient), () => PatchAgentStartSwitchingWeaponUsageIndexAsClient(harmony));
-            TryApplyPatchStep(nameof(PatchAgentSetUsageIndexOfWeaponInSlotAsClient), () => PatchAgentSetUsageIndexOfWeaponInSlotAsClient(harmony));
-            TryApplyPatchStep(nameof(PatchAgentTryToWieldWeaponInSlot), () => PatchAgentTryToWieldWeaponInSlot(harmony));
-            TryApplyPatchStep(nameof(PatchAgentWieldNextWeapon), () => PatchAgentWieldNextWeapon(harmony));
+            // Keep local client weapon mutation hooks out of the global runtime in this branch.
+            // They do not exist in the release baseline and they regress mannequin / preview scenes.
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponReloadPhase), () => PatchMissionNetworkComponentSetWeaponReloadPhase(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentStartSwitchingWeaponUsageIndex), () => PatchMissionNetworkComponentStartSwitchingWeaponUsageIndex(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentWeaponUsageIndexChangeMessage), () => PatchMissionNetworkComponentWeaponUsageIndexChangeMessage(harmony));
@@ -652,6 +648,7 @@ namespace CoopSpectator.Patches
             _lastSuppressedWeaponDropKey = null;
             _lastSuppressedDroppedShieldAttachmentKey = null;
             _lastSuppressedServerMissileStickKey = null;
+            _lastSuppressedServerBoltWorldHitBypassKey = null;
             _lastSuppressedServerMissileAttachVisualKey = null;
             _lastObservedServerBoltMissileHitKey = null;
             _lastObservedServerBoltCollisionKey = null;
@@ -6152,6 +6149,39 @@ namespace CoopSpectator.Patches
                     !IsSuppressibleAttachedMissileItem(missileItem))
                 {
                     return true;
+                }
+
+                bool isBoltWorldHitWithoutAttachTarget =
+                    IsBoltAttachedMissileItem(missileItem, weaponFlags, weaponClass) &&
+                    attachedAgent == null &&
+                    !attachedToShield &&
+                    attachedMissionObject == null &&
+                    attachedBoneIndex < 0;
+
+                if (isBoltWorldHitWithoutAttachTarget)
+                {
+                    collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
+
+                    string bypassLogKey =
+                        missileIndex + "|" +
+                        (missileItem?.StringId ?? "null") + "|" +
+                        (attackerAgent?.Index ?? -1) + "|" +
+                        forcedSpawnIndex;
+                    if (!string.Equals(_lastSuppressedServerBoltWorldHitBypassKey, bypassLogKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedServerBoltWorldHitBypassKey = bypassLogKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: bypassed dedicated Mission.HandleMissileCollisionReaction original for exact battle bolt world-hit. " +
+                            "MissileIndex=" + missileIndex +
+                            " MissileItem=" + (missileItem?.StringId ?? "null") +
+                            " WeaponClass=" + weaponClass +
+                            " WeaponFlags=" + weaponFlags +
+                            " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
+                            " ForcedSpawnIndex=" + forcedSpawnIndex +
+                            " CollisionReaction=BecomeInvisible");
+                    }
+
+                    return false;
                 }
 
                 collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
