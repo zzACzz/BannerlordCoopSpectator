@@ -656,7 +656,7 @@ namespace CoopSpectator.Infrastructure
 
             foreach (string candidateId in BuildDisplayNameCandidateIds(entryState, fallbackId))
             {
-                resolvedName = PrettifyIdentifierToken(candidateId);
+                resolvedName = NormalizeDisplayNameCandidate(PrettifyIdentifierToken(candidateId));
                 if (!string.IsNullOrWhiteSpace(resolvedName))
                     return resolvedName;
             }
@@ -866,7 +866,58 @@ namespace CoopSpectator.Infrastructure
             if (trimmed.IndexOf('|') >= 0)
                 return null;
 
+            if (LooksLikeGeneratedShellDisplayName(trimmed))
+                return null;
+
             return LooksLikeOpaqueIdentifier(trimmed) ? null : trimmed;
+        }
+
+        private static bool LooksLikeGeneratedShellDisplayName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            string trimmed = value.Trim();
+            if (!trimmed.EndsWith("Shell", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (trimmed.StartsWith("{=!}", StringComparison.Ordinal))
+                return true;
+
+            if (trimmed.StartsWith("Foot ", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("Mounted ", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            string[] tokens = trimmed.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            bool hasLoadoutRoleToken = false;
+            bool hasHexVariantToken = false;
+
+            foreach (string token in tokens)
+            {
+                if (string.IsNullOrWhiteSpace(token))
+                    continue;
+
+                if (token.Equals("Melee", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("Bow", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("Crossbow", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("Thrown", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("Polearm", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("Unarmed", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("Shield", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("No", StringComparison.OrdinalIgnoreCase) ||
+                    token.IndexOf("1H", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    token.IndexOf("2H", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    hasLoadoutRoleToken = true;
+                }
+
+                if (token.Length >= 8 && token.All(Uri.IsHexDigit))
+                    hasHexVariantToken = true;
+            }
+
+            return hasLoadoutRoleToken || hasHexVariantToken;
         }
 
         private static bool LooksLikeOpaqueIdentifier(string value)

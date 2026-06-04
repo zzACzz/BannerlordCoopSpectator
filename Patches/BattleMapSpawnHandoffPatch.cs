@@ -60,7 +60,9 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedDroppedShieldAttachmentKey;
         private static string _lastSuppressedServerMissileStickKey;
         private static string _lastSuppressedServerBoltWorldHitBypassKey;
+        private static string _lastSuppressedServerBoltWorldHitMissileHitBypassKey;
         private static string _lastSuppressedServerMissileAttachVisualKey;
+        private static string _lastSuppressedClientCreateMissileInvalidShooterKey;
         private static string _lastObservedServerBoltMissileHitKey;
         private static string _lastObservedServerBoltCollisionKey;
         private static string _lastObservedServerBoltAttachKey;
@@ -6544,8 +6546,36 @@ namespace CoopSpectator.Patches
                             " CollisionResult=" + collisionData.CollisionResult +
                             " Victim={" + BuildMountedUsageObservationSummary(victim) + "} " +
                             "Attacker={" + BuildMountedUsageObservationSummary(attacker) + "} " +
-                            "HitEntityPresent=" + (hitEntity != null)
+                        "HitEntityPresent=" + (hitEntity != null)
                     };
+                }
+
+                if (ShouldUseServerExactBattleAttachedMissileSuppression(__instance) &&
+                    collisionData.CollisionResult == CombatCollisionResult.HitWorld &&
+                    numDamagedAgents <= 0 &&
+                    victim == null &&
+                    !collisionData.IsColliderAgent &&
+                    hitMissionObject == null)
+                {
+                    string bypassLogKey =
+                        missileIndex + "|" +
+                        (missileItem?.StringId ?? "null") + "|" +
+                        (attacker?.Index ?? -1) + "|" +
+                        collisionData.PhysicsMaterialIndex;
+                    if (!string.Equals(_lastSuppressedServerBoltWorldHitMissileHitBypassKey, bypassLogKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedServerBoltWorldHitMissileHitBypassKey = bypassLogKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: bypassed dedicated Mission.MissileHitCallback original for exact battle bolt world-hit. " +
+                            "MissileIndex=" + missileIndex +
+                            " MissileItem=" + (missileItem?.StringId ?? "null") +
+                            " Attacker={" + BuildBoltAfterhitAgentSummary(attacker) + "} " +
+                            "CollisionResult=" + collisionData.CollisionResult +
+                            " PhysicsMaterialIndex=" + collisionData.PhysicsMaterialIndex +
+                            " NumDamagedAgents=" + numDamagedAgents);
+                    }
+
+                    return false;
                 }
 
                 return true;
@@ -12403,6 +12433,27 @@ namespace CoopSpectator.Patches
                         "BattleMapSpawnHandoffPatch: deferred client CreateMissile because shooter bootstrap is still deferred. " +
                         "MissileIndex=" + createMissile.MissileIndex +
                         " AgentIndex=" + createMissile.AgentIndex);
+                    return false;
+                }
+
+                if (shooterAgent == null || !shooterAgent.IsActive())
+                {
+                    string invalidShooterKey =
+                        createMissile.MissileIndex + "|" +
+                        createMissile.AgentIndex + "|" +
+                        (shooterAgent != null) + "|" +
+                        (shooterAgent?.IsActive() ?? false);
+                    if (!string.Equals(_lastSuppressedClientCreateMissileInvalidShooterKey, invalidShooterKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedClientCreateMissileInvalidShooterKey = invalidShooterKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: dropped client CreateMissile before native handler because shooter agent is missing or inactive. " +
+                            "MissileIndex=" + createMissile.MissileIndex +
+                            " AgentIndex=" + createMissile.AgentIndex +
+                            " ShooterPresent=" + (shooterAgent != null) +
+                            " ShooterActive=" + (shooterAgent?.IsActive() ?? false));
+                    }
+
                     return false;
                 }
 
