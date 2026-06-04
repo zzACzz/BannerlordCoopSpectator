@@ -489,6 +489,7 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentHandleServerEventSetPeerTeam), () => PatchMissionNetworkComponentHandleServerEventSetPeerTeam(harmony));
             TryApplyPatchStep(nameof(PatchMissionLobbyComponentHandleServerEventChangeCulture), () => PatchMissionLobbyComponentHandleServerEventChangeCulture(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentOnPeerSelectedTeam), () => PatchMissionNetworkComponentOnPeerSelectedTeam(harmony));
+#if COOPSPECTATOR_DEDICATED
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSendAgentsToPeerServer), () => PatchMissionNetworkComponentSendAgentsToPeerServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionOnAgentAddedAsCorpseServer), () => PatchMissionOnAgentAddedAsCorpseServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionSpawnAttachedWeaponOnCorpseServer), () => PatchMissionSpawnAttachedWeaponOnCorpseServer(harmony));
@@ -504,7 +505,6 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchAgentOnWeaponUsageIndexChangeServer), () => PatchAgentOnWeaponUsageIndexChangeServer(harmony));
             TryApplyPatchStep(nameof(PatchAgentOnWeaponAmountChangeServer), () => PatchAgentOnWeaponAmountChangeServer(harmony));
             TryApplyPatchStep(nameof(PatchAgentOnRemoveWeaponServer), () => PatchAgentOnRemoveWeaponServer(harmony));
-#if COOPSPECTATOR_DEDICATED
             TryApplyPatchStep(nameof(PatchAgentAttachWeaponToWeaponServer), () => PatchAgentAttachWeaponToWeaponServer(harmony));
             TryApplyPatchStep(nameof(PatchAgentAttachWeaponToBoneServer), () => PatchAgentAttachWeaponToBoneServer(harmony));
 #endif
