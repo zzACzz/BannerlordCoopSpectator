@@ -56,6 +56,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
         private const bool EnableManualPatchMannequinDisplayNames = false;
         private const bool EnableManualPatchMannequinClassAndStats = false;
         private const bool EnableManualPatchMannequinExactBootstrap = false;
+        private const bool EnableManualPatchBattleDisplayNameConsumers = true;
         private const bool EnableClientGameModeRegistration = true;
         private const bool EnableCampaignBehaviors = true;
         private const bool EnableNonCampaignModelRegistration = true;
@@ -139,6 +140,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                 $"MannequinDisplayNames={EnableManualPatchMannequinDisplayNames}, " +
                 $"MannequinClassAndStats={EnableManualPatchMannequinClassAndStats}, " +
                 $"MannequinExactBootstrap={EnableManualPatchMannequinExactBootstrap}, " +
+                $"BattleDisplayNameConsumers={EnableManualPatchBattleDisplayNameConsumers}, " +
                 $"ClientGameModes={EnableClientGameModeRegistration}, " +
                 $"NonCampaignModels={EnableNonCampaignModelRegistration}.");
         }
@@ -305,6 +307,15 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         else
                         {
                             ModLogger.Info("Startup isolation: skipped mannequin display-name Apply(...) patch subgroup.");
+                        }
+
+                        if (EnableManualPatchBattleDisplayNameConsumers)
+                        {
+                            CoopBattleDisplayNameConsumerPatch.Apply(harmony);
+                        }
+                        else
+                        {
+                            ModLogger.Info("Startup isolation: skipped battle display-name consumer Apply(...) patch subgroup.");
                         }
 
                         if (EnableManualPatchMannequinClassAndStats)
