@@ -48,9 +48,10 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
         private const bool EnableManualPatchMissionFlowBattleRuntimeCameraPreview = true;
         private const bool EnableManualPatchExactCampaignRuntime = true;
         private const bool EnableManualPatchPreviewDiagnostics = false;
-        // Coarse mannequin isolation switch: disables the whole client-side campaign/preview
-        // patch cluster without touching dedicated/server battle runtime fixes.
-        private const bool EnableManualPatchMannequinSensitiveClientPreviewCluster = false;
+        // Mannequin bisect switches for the client-side campaign/preview cluster.
+        // Half A = preview/display/class/stats. Half B = exact bootstrap/spawn/network.
+        private const bool EnableManualPatchMannequinClusterHalfA = true;
+        private const bool EnableManualPatchMannequinClusterHalfB = false;
         private const bool EnableClientGameModeRegistration = true;
         private const bool EnableCampaignBehaviors = true;
         private const bool EnableNonCampaignModelRegistration = true;
@@ -130,7 +131,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                 $"FinishedLoadingGate={EnableManualPatchMissionFlowBattleRuntimeFinishedLoadingGate}, " +
                 $"CameraPreview={EnableManualPatchMissionFlowBattleRuntimeCameraPreview}, " +
                 $"ExactCampaignRuntime={EnableManualPatchExactCampaignRuntime}, " +
-                $"MannequinSensitiveClientPreviewCluster={EnableManualPatchMannequinSensitiveClientPreviewCluster}, " +
+                $"MannequinClusterHalfA={EnableManualPatchMannequinClusterHalfA}, " +
+                $"MannequinClusterHalfB={EnableManualPatchMannequinClusterHalfB}, " +
                 $"ClientGameModes={EnableClientGameModeRegistration}, " +
                 $"NonCampaignModels={EnableNonCampaignModelRegistration}.");
         }
@@ -248,7 +250,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                                 ModLogger.Info("Startup isolation: skipped mission-flow battle-runtime bootstrap-gates Apply(...) patch subgroup.");
                             }
 
-                            if (EnableManualPatchMannequinSensitiveClientPreviewCluster &&
+                            if (EnableManualPatchMannequinClusterHalfA &&
                                 EnableManualPatchMissionFlowBattleRuntimeCameraPreview)
                             {
                                 MissionScreenCameraPreviewPatch.Apply(harmony);
@@ -277,22 +279,36 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         ModLogger.Info("Startup isolation: skipped manual mission-flow/ui Apply(...) patch group.");
                     }
 
-                    if (EnableManualPatchMannequinSensitiveClientPreviewCluster &&
-                        EnableManualPatchExactCampaignRuntime)
+                    if (EnableManualPatchExactCampaignRuntime)
                     {
-                        ExactCampaignArmyBootstrapPatch.Apply(harmony);
-                        ExactCampaignPreSpawnLoadoutPatch.Apply(harmony);
-                        ExactCampaignNetworkObjectBootstrapPatch.Apply(harmony);
-                        AgentDisplayNamePatch.Apply(harmony);
-                        MultiplayerCharacterClassFallbackPatch.Apply(harmony);
-                        CampaignCombatProfileAgentStatsPatch.Apply(harmony);
+                        if (EnableManualPatchMannequinClusterHalfB)
+                        {
+                            ExactCampaignArmyBootstrapPatch.Apply(harmony);
+                            ExactCampaignPreSpawnLoadoutPatch.Apply(harmony);
+                            ExactCampaignNetworkObjectBootstrapPatch.Apply(harmony);
+                        }
+                        else
+                        {
+                            ModLogger.Info("Startup isolation: skipped mannequin cluster half B (exact bootstrap/spawn/network) Apply(...) patch subgroup.");
+                        }
+
+                        if (EnableManualPatchMannequinClusterHalfA)
+                        {
+                            AgentDisplayNamePatch.Apply(harmony);
+                            MultiplayerCharacterClassFallbackPatch.Apply(harmony);
+                            CampaignCombatProfileAgentStatsPatch.Apply(harmony);
+                        }
+                        else
+                        {
+                            ModLogger.Info("Startup isolation: skipped mannequin cluster half A (preview/display/class/stats) Apply(...) patch subgroup.");
+                        }
                     }
                     else
                     {
                         ModLogger.Info("Startup isolation: skipped manual exact/runtime Apply(...) patch group.");
                     }
 
-                    if (EnableManualPatchMannequinSensitiveClientPreviewCluster &&
+                    if ((EnableManualPatchMannequinClusterHalfA || EnableManualPatchMannequinClusterHalfB) &&
                         EnableManualPatchPreviewDiagnostics)
                     {
                         CharacterTableauChainDiagnosticsPatch.Apply(harmony);
