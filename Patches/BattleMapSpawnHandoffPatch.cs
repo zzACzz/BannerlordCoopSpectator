@@ -508,8 +508,10 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchAgentOnWeaponUsageIndexChangeServer), () => PatchAgentOnWeaponUsageIndexChangeServer(harmony));
             TryApplyPatchStep(nameof(PatchAgentOnWeaponAmountChangeServer), () => PatchAgentOnWeaponAmountChangeServer(harmony));
             TryApplyPatchStep(nameof(PatchAgentOnRemoveWeaponServer), () => PatchAgentOnRemoveWeaponServer(harmony));
+#if COOPSPECTATOR_DEDICATED
             TryApplyPatchStep(nameof(PatchAgentAttachWeaponToWeaponServer), () => PatchAgentAttachWeaponToWeaponServer(harmony));
             TryApplyPatchStep(nameof(PatchAgentAttachWeaponToBoneServer), () => PatchAgentAttachWeaponToBoneServer(harmony));
+#endif
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAssignFormationToPlayer), () => PatchMissionNetworkComponentAssignFormationToPlayer(harmony));
             TryApplyPatchStep(nameof(PatchOrderControllerSelectAllFormations), () => PatchOrderControllerSelectAllFormations(harmony));
             TryApplyPatchStep(nameof(PatchOrderTroopPlacerMissionScreenTick), () => PatchOrderTroopPlacerMissionScreenTick(harmony));
@@ -4031,11 +4033,13 @@ namespace CoopSpectator.Patches
 
         private static bool ShouldUseServerExactBattleAttachedMissileSuppression(Mission mission)
         {
-            // Exact battle missile-attachment suppression previously cut the native
-            // "stick -> attach -> replicate" corridor in the middle. For the current
-            // investigation we restore the full native dedicated-server path and keep
-            // the Harmony hooks fail-open by disabling the runtime gate here.
-            return false;
+            if (!GameNetwork.IsServer || mission == null)
+                return false;
+
+            if (!MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                return false;
+
+            return BattleSnapshotRuntimeState.GetState() != null;
         }
 
         private static bool ShouldObserveServerExactBattleBoltAfterhitDiagnostics(Mission mission)
@@ -6150,36 +6154,31 @@ namespace CoopSpectator.Patches
                     return true;
                 }
 
-                string attachedEntryId = null;
-                bool attachedExactAgent =
-                    attachedAgent != null &&
-                    ExactCampaignArmyBootstrap.TryGetEntryId(attachedAgent, out attachedEntryId);
-                ItemObject attachedMissionObjectItem = (attachedMissionObject as SpawnedItemEntity)?.WeaponCopy.Item;
-                bool attachedShieldMissionObject = IsShieldItem(attachedMissionObjectItem);
-                if (!attachedExactAgent && !attachedShieldMissionObject)
-                    return true;
-
                 collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
 
+                ExactCampaignArmyBootstrap.TryGetEntryId(attachedAgent, out string attachedEntryId);
+                ItemObject attachedMissionObjectItem = (attachedMissionObject as SpawnedItemEntity)?.WeaponCopy.Item;
                 string logKey =
                     missileIndex + "|" +
                     (missileItem?.StringId ?? "null") + "|" +
                     (attachedAgent?.Index ?? -1) + "|" +
-                    (attachedEntryId ?? "null") + "|" +
+                    (attachedAgent?.RiderAgent?.Index ?? -1) + "|" +
                     attachedToShield + "|" +
+                    attachedBoneIndex + "|" +
                     GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid);
                 if (!string.Equals(_lastSuppressedServerMissileStickKey, logKey, StringComparison.Ordinal))
                 {
                     _lastSuppressedServerMissileStickKey = logKey;
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed server missile stick reaction for exact battle and downgraded to BecomeInvisible. " +
+                        "BattleMapSpawnHandoffPatch: suppressed server projectile stick reaction and downgraded to BecomeInvisible. " +
                         "MissileIndex=" + missileIndex +
                         " MissileItem=" + (missileItem?.StringId ?? "null") +
                         " WeaponClass=" + weaponClass +
                         " WeaponFlags=" + weaponFlags +
                         " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
                         " AttachedAgent=" + (attachedAgent?.Index ?? -1) +
-                        " AttachedEntryId=" + (attachedEntryId ?? "null") +
+                        " AttachedAgentIsMount=" + (attachedAgent?.IsMount ?? false) +
+                        " RiderAgent=" + (attachedAgent?.RiderAgent?.Index ?? -1) +
                         " AttachedToShield=" + attachedToShield +
                         " AttachedBoneIndex=" + attachedBoneIndex +
                         " AttachedMissionObjectId=" + GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid) +
@@ -6901,9 +6900,10 @@ namespace CoopSpectator.Patches
                 {
                     _lastSuppressedServerMissileAttachVisualKey = logKey;
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed server Agent.AttachWeaponToWeapon for exact battle attached missile visual. " +
+                        "BattleMapSpawnHandoffPatch: suppressed dedicated Agent.AttachWeaponToWeapon for exact battle projectile visual. " +
                         "AgentIndex=" + __instance.Index +
-                        " EntryId=" + (entryId ?? "null") +
+                        " EntryId=" + (entryId ?? "no-entry") +
+                        " IsMount=" + __instance.IsMount +
                         " SlotIndex=" + slotIndex +
                         " MissileItem=" + (missileItem?.StringId ?? "null") +
                         " WeaponEntityPresent=" + (weaponEntity != null));
@@ -7010,9 +7010,10 @@ namespace CoopSpectator.Patches
                 {
                     _lastSuppressedServerMissileAttachVisualKey = logKey;
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed server Agent.AttachWeaponToBone for exact battle attached missile visual. " +
+                        "BattleMapSpawnHandoffPatch: suppressed dedicated Agent.AttachWeaponToBone for exact battle projectile visual. " +
                         "AgentIndex=" + __instance.Index +
-                        " EntryId=" + (entryId ?? "null") +
+                        " EntryId=" + (entryId ?? "no-entry") +
+                        " IsMount=" + __instance.IsMount +
                         " BoneIndex=" + boneIndex +
                         " MissileItem=" + (missileItem?.StringId ?? "null") +
                         " WeaponEntityPresent=" + (weaponEntity != null));
@@ -8349,20 +8350,21 @@ namespace CoopSpectator.Patches
             missileItem = weapon.Item;
             logKeyBase = null;
 
-            Mission mission = Mission.Current;
+            Mission mission = agent?.Mission ?? Mission.Current;
             if (!ShouldUseServerExactBattleAttachedMissileSuppression(mission) ||
                 agent == null ||
                 weapon.IsEmpty ||
-                !ExactCampaignArmyBootstrap.TryGetEntryId(agent, out entryId) ||
                 !IsSuppressibleAttachedMissileItem(missileItem))
             {
                 return false;
             }
 
+            ExactCampaignArmyBootstrap.TryGetEntryId(agent, out entryId);
             logKeyBase =
                 attachmentKind + "|" +
                 agent.Index + "|" +
-                (entryId ?? "null") + "|" +
+                (entryId ?? "no-entry") + "|" +
+                (agent.IsMount ? "mount" : "agent") + "|" +
                 (missileItem?.StringId ?? "null");
             return true;
         }
