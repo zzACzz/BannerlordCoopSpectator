@@ -49,8 +49,9 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
         private const bool EnableManualPatchExactCampaignRuntime = true;
         private const bool EnableManualPatchPreviewDiagnostics = false;
         // Mannequin bisect switches for the client-side campaign/preview cluster.
-        // Half A = preview/display/class/stats. Half B = exact bootstrap/spawn/network.
-        private const bool EnableManualPatchMannequinClusterHalfA = true;
+        // Half A1 = preview/display. Half A2 = class/stats. Half B = exact bootstrap/spawn/network.
+        private const bool EnableManualPatchMannequinClusterHalfA1 = true;
+        private const bool EnableManualPatchMannequinClusterHalfA2 = false;
         private const bool EnableManualPatchMannequinClusterHalfB = false;
         private const bool EnableClientGameModeRegistration = true;
         private const bool EnableCampaignBehaviors = true;
@@ -131,7 +132,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                 $"FinishedLoadingGate={EnableManualPatchMissionFlowBattleRuntimeFinishedLoadingGate}, " +
                 $"CameraPreview={EnableManualPatchMissionFlowBattleRuntimeCameraPreview}, " +
                 $"ExactCampaignRuntime={EnableManualPatchExactCampaignRuntime}, " +
-                $"MannequinClusterHalfA={EnableManualPatchMannequinClusterHalfA}, " +
+                $"MannequinClusterHalfA1={EnableManualPatchMannequinClusterHalfA1}, " +
+                $"MannequinClusterHalfA2={EnableManualPatchMannequinClusterHalfA2}, " +
                 $"MannequinClusterHalfB={EnableManualPatchMannequinClusterHalfB}, " +
                 $"ClientGameModes={EnableClientGameModeRegistration}, " +
                 $"NonCampaignModels={EnableNonCampaignModelRegistration}.");
@@ -250,7 +252,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                                 ModLogger.Info("Startup isolation: skipped mission-flow battle-runtime bootstrap-gates Apply(...) patch subgroup.");
                             }
 
-                            if (EnableManualPatchMannequinClusterHalfA &&
+                            if (EnableManualPatchMannequinClusterHalfA1 &&
                                 EnableManualPatchMissionFlowBattleRuntimeCameraPreview)
                             {
                                 MissionScreenCameraPreviewPatch.Apply(harmony);
@@ -292,15 +294,23 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                             ModLogger.Info("Startup isolation: skipped mannequin cluster half B (exact bootstrap/spawn/network) Apply(...) patch subgroup.");
                         }
 
-                        if (EnableManualPatchMannequinClusterHalfA)
+                        if (EnableManualPatchMannequinClusterHalfA1)
                         {
                             AgentDisplayNamePatch.Apply(harmony);
+                        }
+                        else
+                        {
+                            ModLogger.Info("Startup isolation: skipped mannequin cluster half A1 (preview/display) Apply(...) patch subgroup.");
+                        }
+
+                        if (EnableManualPatchMannequinClusterHalfA2)
+                        {
                             MultiplayerCharacterClassFallbackPatch.Apply(harmony);
                             CampaignCombatProfileAgentStatsPatch.Apply(harmony);
                         }
                         else
                         {
-                            ModLogger.Info("Startup isolation: skipped mannequin cluster half A (preview/display/class/stats) Apply(...) patch subgroup.");
+                            ModLogger.Info("Startup isolation: skipped mannequin cluster half A2 (class/stats) Apply(...) patch subgroup.");
                         }
                     }
                     else
@@ -308,7 +318,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         ModLogger.Info("Startup isolation: skipped manual exact/runtime Apply(...) patch group.");
                     }
 
-                    if ((EnableManualPatchMannequinClusterHalfA || EnableManualPatchMannequinClusterHalfB) &&
+                    if ((EnableManualPatchMannequinClusterHalfA1 || EnableManualPatchMannequinClusterHalfA2 || EnableManualPatchMannequinClusterHalfB) &&
                         EnableManualPatchPreviewDiagnostics)
                     {
                         CharacterTableauChainDiagnosticsPatch.Apply(harmony);
