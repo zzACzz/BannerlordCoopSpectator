@@ -361,9 +361,11 @@ namespace CoopSpectator.Infrastructure
                 preBattleWeaponState.ReadinessMode = ExactTransferPreBattleWeaponReadinessMode.DeferActivationUntilBattleActive;
                 preBattleWeaponState.PreferredMainHandSlotIndex = (int)firstCrossbow.Slot;
                 preBattleWeaponState.ExpectedAmmoSlotIndex = (int)firstBoltAmmo.Slot;
-                preBattleWeaponState.ExpectAmmoAttachedToMainHand = true;
+                // Diagnostic narrowing: keep native crossbow activation, but do not
+                // force a pre-loaded attached-ammo runtime state at battle start.
+                preBattleWeaponState.ExpectAmmoAttachedToMainHand = false;
                 preBattleWeaponState.InitialWeaponEquipPreference = Equipment.InitialWeaponEquipPreference.RangedForMainHand;
-                preBattleWeaponState.DecisionReason = "ai-crossbow-loaded-prebattle-state";
+                preBattleWeaponState.DecisionReason = "ai-crossbow-ranged-prebattle-state-no-attached-ammo";
                 return;
             }
 

@@ -16,6 +16,9 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const int DefaultPort = 7210; // Офіційний UDP-порт дедик-сервера за замовчуванням
         private const string DedicatedServerFolderName = "Mount & Blade II Dedicated Server";
         private const string ExplicitGameRootEnvVar = "BANNERLORD_GAME_ROOT";
+        private const string RuntimeDiagnosticsEnvVar = "COOPSPECTATOR_RUNTIME_DIAGNOSTICS";
+        private const bool ForceVerboseRuntimeDiagnosticsForCampaignDedicatedLaunch = true;
+        private const string ForcedRuntimeDiagnosticsLevel = "verbose";
         private const string ServerBinRelativePath = @"bin\Win64_Shipping_Server";
         /// <summary>Єдиний exe для custom dedicated server у стандартній інсталі: DedicatedCustomServer.Starter.exe (core exe в цій папці немає).</summary>
         private static readonly string[] ExeCandidates = new[] { "DedicatedCustomServer.Starter.exe" };
@@ -968,13 +971,26 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             try
             {
                 string gameRoot = TryGetGameRootFromProcess();
-                if (string.IsNullOrWhiteSpace(gameRoot))
-                    return;
+                bool appliedAnyVariable = false;
+                if (!string.IsNullOrWhiteSpace(gameRoot))
+                {
+                    startInfo.EnvironmentVariables[ExplicitGameRootEnvVar] = gameRoot;
+                    appliedAnyVariable = true;
+                }
 
-                startInfo.EnvironmentVariables[ExplicitGameRootEnvVar] = gameRoot;
-                ModLogger.Info(
-                    "DedicatedHelper [before Start] applied shared launch environment. " +
-                    ExplicitGameRootEnvVar + "=" + gameRoot + ".");
+                if (ForceVerboseRuntimeDiagnosticsForCampaignDedicatedLaunch)
+                {
+                    startInfo.EnvironmentVariables[RuntimeDiagnosticsEnvVar] = ForcedRuntimeDiagnosticsLevel;
+                    appliedAnyVariable = true;
+                }
+
+                if (appliedAnyVariable)
+                {
+                    ModLogger.Info(
+                        "DedicatedHelper [before Start] applied shared launch environment. " +
+                        ExplicitGameRootEnvVar + "=" + (gameRoot ?? string.Empty) + " " +
+                        RuntimeDiagnosticsEnvVar + "=" + (ForceVerboseRuntimeDiagnosticsForCampaignDedicatedLaunch ? ForcedRuntimeDiagnosticsLevel : string.Empty) + ".");
+                }
             }
             catch (Exception ex)
             {

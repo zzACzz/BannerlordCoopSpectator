@@ -61,6 +61,11 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedServerMissileStickKey;
         private static string _lastSuppressedServerBoltWorldHitBypassKey;
         private static string _lastSuppressedServerBoltWorldHitMissileHitBypassKey;
+        private static string _lastSuppressedServerBoltMountStrikeMissileHitBypassKey;
+        private static string _lastSuppressedServerMountedLifecycleStickBypassKey;
+        private static string _lastObservedServerMountedUsageLifecycleQuarantineArmKey;
+        private static string _lastObservedServerMountedUsageLifecycleAllowKey;
+        private static string _lastSuppressedServerMountedUsageLifecycleGuardKey;
         private static string _lastSuppressedServerBoltWorldHitQuarantineKey;
         private static string _lastSuppressedServerMissileAttachVisualKey;
         private static string _lastSuppressedClientCreateMissileInvalidShooterKey;
@@ -190,6 +195,8 @@ namespace CoopSpectator.Patches
             new Dictionary<int, ClientDroppedWeaponOriginState>();
         private static readonly Dictionary<int, SuppressedServerBoltWorldHitMissileState> SuppressedServerBoltWorldHitMissilesByIndex =
             new Dictionary<int, SuppressedServerBoltWorldHitMissileState>();
+        private static readonly Dictionary<string, SuppressedMountedUsageLifecyclePairState> SuppressedMountedUsageLifecyclePairsByKey =
+            new Dictionary<string, SuppressedMountedUsageLifecyclePairState>();
         private static long _nextDeferredClientCreateAgentSequence;
         private static long _nextDeferredClientSetAgentActionSetSequence;
         private static long _nextDeferredClientAgentSetFormationSequence;
@@ -212,6 +219,7 @@ namespace CoopSpectator.Patches
         private static int _unsafeImmediateClientAgentBaselineMaterializationDepth;
         private static readonly TimeSpan LocalFollowEchoSuppressionWindow = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan SuppressedServerBoltWorldHitMissileQuarantineWindow = TimeSpan.FromSeconds(3);
+        private static readonly TimeSpan SuppressedMountedUsageLifecyclePairQuarantineWindow = TimeSpan.FromSeconds(5);
         private static DateTime _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
         private static int _localFollowEchoSuppressionAgentIndex = -1;
 
@@ -259,6 +267,19 @@ namespace CoopSpectator.Patches
         {
             public string Key;
             public string Details;
+        }
+
+        private sealed class SuppressedMountedUsageLifecyclePairState
+        {
+            public string PairKey;
+            public string Source;
+            public DateTime ObservedUtc;
+            public int MissileIndex;
+            public string MissileItemId;
+            public int AttackerAgentIndex;
+            public int AgentIndex;
+            public int MountAgentIndex;
+            public int RiderAgentIndex;
         }
 
         private sealed class DeferredClientCreateAgentPayload
@@ -640,6 +661,10 @@ namespace CoopSpectator.Patches
             {
                 SuppressedServerBoltWorldHitMissilesByIndex.Clear();
             }
+            lock (SuppressedMountedUsageLifecyclePairsByKey)
+            {
+                SuppressedMountedUsageLifecyclePairsByKey.Clear();
+            }
             _nextDeferredClientCreateAgentSequence = 0;
             _nextDeferredClientSetAgentActionSetSequence = 0;
             _nextDeferredClientAgentSetFormationSequence = 0;
@@ -669,6 +694,11 @@ namespace CoopSpectator.Patches
             _lastSuppressedServerMissileStickKey = null;
             _lastSuppressedServerBoltWorldHitBypassKey = null;
             _lastSuppressedServerBoltWorldHitMissileHitBypassKey = null;
+            _lastSuppressedServerBoltMountStrikeMissileHitBypassKey = null;
+            _lastSuppressedServerMountedLifecycleStickBypassKey = null;
+            _lastObservedServerMountedUsageLifecycleQuarantineArmKey = null;
+            _lastObservedServerMountedUsageLifecycleAllowKey = null;
+            _lastSuppressedServerMountedUsageLifecycleGuardKey = null;
             _lastSuppressedServerBoltWorldHitQuarantineKey = null;
             _lastSuppressedServerMissileAttachVisualKey = null;
             _lastObservedServerBoltMissileHitKey = null;
@@ -1606,17 +1636,20 @@ namespace CoopSpectator.Patches
             MethodInfo target = typeof(Agent).GetMethod(
                 "OnWieldedItemIndexChange",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWieldedItemIndexChange_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
             MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(Agent_OnWieldedItemIndexChange_ServerPostfix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || postfix == null)
+            if (target == null || prefix == null || postfix == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWieldedItemIndexChange not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWieldedItemIndexChange.");
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to Agent.OnWieldedItemIndexChange.");
         }
 
         private static void PatchAgentOnWeaponSwitchingToAlternativeStartServer(Harmony harmony)
@@ -1627,17 +1660,20 @@ namespace CoopSpectator.Patches
                 typeof(int)
             };
             MethodInfo target = AccessTools.Method(typeof(Agent), "OnWeaponSwitchingToAlternativeStart", parameterTypes);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWeaponSwitchingToAlternativeStart_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
             MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(Agent_OnWeaponSwitchingToAlternativeStart_ServerPostfix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || postfix == null)
+            if (target == null || prefix == null || postfix == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponSwitchingToAlternativeStart not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWeaponSwitchingToAlternativeStart.");
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to Agent.OnWeaponSwitchingToAlternativeStart.");
         }
 
         private static void PatchAgentOnWeaponReloadPhaseChangeServer(Harmony harmony)
@@ -1648,17 +1684,20 @@ namespace CoopSpectator.Patches
                 typeof(short)
             };
             MethodInfo target = AccessTools.Method(typeof(Agent), "OnWeaponReloadPhaseChange", parameterTypes);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWeaponReloadPhaseChange_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
             MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(Agent_OnWeaponReloadPhaseChange_ServerPostfix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || postfix == null)
+            if (target == null || prefix == null || postfix == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponReloadPhaseChange not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWeaponReloadPhaseChange.");
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to Agent.OnWeaponReloadPhaseChange.");
         }
 
         private static void PatchAgentOnWeaponAmmoReloadServer(Harmony harmony)
@@ -1670,17 +1709,20 @@ namespace CoopSpectator.Patches
                 typeof(short)
             };
             MethodInfo target = AccessTools.Method(typeof(Agent), "OnWeaponAmmoReload", parameterTypes);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWeaponAmmoReload_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
             MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(Agent_OnWeaponAmmoReload_ServerPostfix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || postfix == null)
+            if (target == null || prefix == null || postfix == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponAmmoReload not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWeaponAmmoReload.");
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to Agent.OnWeaponAmmoReload.");
         }
 
         private static void PatchAgentOnWeaponAmmoConsumeServer(Harmony harmony)
@@ -1691,17 +1733,20 @@ namespace CoopSpectator.Patches
                 typeof(short)
             };
             MethodInfo target = AccessTools.Method(typeof(Agent), "OnWeaponAmmoConsume", parameterTypes);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWeaponAmmoConsume_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
             MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(Agent_OnWeaponAmmoConsume_ServerPostfix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || postfix == null)
+            if (target == null || prefix == null || postfix == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponAmmoConsume not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWeaponAmmoConsume.");
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to Agent.OnWeaponAmmoConsume.");
         }
 
         private static void PatchAgentOnWeaponUsageIndexChangeServer(Harmony harmony)
@@ -1712,17 +1757,20 @@ namespace CoopSpectator.Patches
                 typeof(int)
             };
             MethodInfo target = AccessTools.Method(typeof(Agent), "OnWeaponUsageIndexChange", parameterTypes);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWeaponUsageIndexChange_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
             MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(Agent_OnWeaponUsageIndexChange_ServerPostfix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || postfix == null)
+            if (target == null || prefix == null || postfix == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponUsageIndexChange not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWeaponUsageIndexChange.");
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to Agent.OnWeaponUsageIndexChange.");
         }
 
         private static void PatchAgentOnWeaponAmountChangeServer(Harmony harmony)
@@ -1733,17 +1781,20 @@ namespace CoopSpectator.Patches
                 typeof(short)
             };
             MethodInfo target = AccessTools.Method(typeof(Agent), "OnWeaponAmountChange", parameterTypes);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_OnWeaponAmountChange_ServerPrefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
             MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(Agent_OnWeaponAmountChange_ServerPostfix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || postfix == null)
+            if (target == null || prefix == null || postfix == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponAmountChange not found. Skip.");
                 return;
             }
 
-            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to Agent.OnWeaponAmountChange.");
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix applied to Agent.OnWeaponAmountChange.");
         }
 
         private static void PatchAgentOnRemoveWeaponServer(Harmony harmony)
@@ -4074,21 +4125,9 @@ namespace CoopSpectator.Patches
 
             try
             {
-                switch (item.ItemType)
-                {
-                    case ItemObject.ItemTypeEnum.Arrows:
-                    case ItemObject.ItemTypeEnum.Bolts:
-                    case ItemObject.ItemTypeEnum.Thrown:
-                        return true;
-                }
-
-                WeaponComponentData primaryWeapon = item.PrimaryWeapon;
-                if (primaryWeapon == null)
-                    return false;
-
-                WeaponFlags flags = primaryWeapon.WeaponFlags;
-                return (flags & WeaponFlags.AttachAmmoToVisual) != 0 ||
-                       (flags & WeaponFlags.AmmoSticksWhenShot) != 0;
+                // Guardrail narrowing: mutating exact-battle suppression must stay
+                // bolt-only until the mounted riding/item-usage corridor is stable.
+                return IsBoltAttachedMissileItem(item);
             }
             catch
             {
@@ -4120,6 +4159,57 @@ namespace CoopSpectator.Patches
                        (((effectiveWeaponFlags & WeaponFlags.AttachAmmoToVisual) != 0 ||
                          (effectiveWeaponFlags & WeaponFlags.AmmoSticksWhenShot) != 0) &&
                         item.ItemType == ItemObject.ItemTypeEnum.Bolts);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool ShouldSuppressMountedExactBattleBoltStick(
+            Mission mission,
+            Agent attachedAgent,
+            Mission.MissileCollisionReaction collisionReaction,
+            ItemObject missileItem)
+        {
+            return mission != null &&
+                   collisionReaction == Mission.MissileCollisionReaction.Stick &&
+                   attachedAgent != null &&
+                   ShouldUseServerExactBattleAttachedMissileSuppression(mission) &&
+                   IsSuppressibleAttachedMissileItem(missileItem) &&
+                   IsMountedUsageLifecycleAgent(attachedAgent);
+        }
+
+        private static bool IsMountedThrownConsumableLifecycleRider(Agent agent)
+        {
+            if (agent == null ||
+                SafeIsMountAgent(agent) ||
+                !IsMountedUsageLifecycleAgent(agent))
+            {
+                return false;
+            }
+
+            try
+            {
+                for (EquipmentIndex slotIndex = EquipmentIndex.Weapon0; slotIndex <= EquipmentIndex.Weapon3; slotIndex++)
+                {
+                    MissionWeapon slotWeapon = agent.Equipment[slotIndex];
+                    WeaponComponentData currentUsageItem = slotWeapon.CurrentUsageItem;
+                    if (currentUsageItem == null)
+                        continue;
+
+                    switch (currentUsageItem.WeaponClass)
+                    {
+                        case WeaponClass.Javelin:
+                        case WeaponClass.ThrowingAxe:
+                        case WeaponClass.ThrowingKnife:
+                        case WeaponClass.Stone:
+                        case WeaponClass.SlingStone:
+                            return true;
+                    }
+                }
+
+                return false;
             }
             catch
             {
@@ -4421,6 +4511,490 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static string BuildMountedWeaponInventoryObservationSummary(Agent agent)
+        {
+            if (agent == null)
+                return "AgentInventory=null";
+
+            try
+            {
+                Agent mountAgent;
+                Agent riderAgent;
+                if (SafeIsMountAgent(agent))
+                {
+                    mountAgent = agent;
+                    riderAgent = agent.RiderAgent;
+                }
+                else
+                {
+                    mountAgent = agent.MountAgent;
+                    riderAgent = agent;
+                }
+
+                StringBuilder builder = new StringBuilder();
+                builder.Append("AgentSlots={").Append(BuildAgentWeaponInventoryObservationSummary(agent)).Append("}");
+                if (mountAgent != null && !ReferenceEquals(mountAgent, agent))
+                    builder.Append(" MountSlots={").Append(BuildAgentWeaponInventoryObservationSummary(mountAgent)).Append("}");
+                if (riderAgent != null && !ReferenceEquals(riderAgent, agent))
+                    builder.Append(" RiderSlots={").Append(BuildAgentWeaponInventoryObservationSummary(riderAgent)).Append("}");
+                return builder.ToString();
+            }
+            catch (Exception ex)
+            {
+                return "AgentIndex=" + SafeGetAgentIndex(agent) + ",MountedWeaponInventoryFailed=" + ex.GetType().Name;
+            }
+        }
+
+        private static string BuildAgentWeaponInventoryObservationSummary(Agent agent)
+        {
+            if (agent == null)
+                return "agent-null";
+
+            if (SafeIsMountAgent(agent))
+                return BuildMountWeaponInventoryObservationSummary(agent);
+
+            try
+            {
+                List<string> parts = new List<string>();
+                EquipmentIndex primaryWieldedItemIndex = agent.GetPrimaryWieldedItemIndex();
+                for (EquipmentIndex slotIndex = EquipmentIndex.Weapon0; slotIndex <= EquipmentIndex.Weapon3; slotIndex++)
+                {
+                    MissionWeapon slotWeapon = agent.Equipment[slotIndex];
+                    if (slotWeapon.IsEmpty && slotWeapon.Item == null)
+                        continue;
+
+                    string slotPrefix = slotIndex == primaryWieldedItemIndex
+                        ? "Primary:"
+                        : string.Empty;
+                    parts.Add(slotPrefix + BuildMountedWeaponSlotObservationSummary(agent, slotIndex));
+                }
+
+                return parts.Count > 0 ? string.Join("; ", parts) : "empty";
+            }
+            catch (Exception ex)
+            {
+                return "inventory-summary-failed:" + ex.GetType().Name;
+            }
+        }
+
+        private static string BuildMountWeaponInventoryObservationSummary(Agent mountAgent)
+        {
+            if (mountAgent == null)
+                return "mount-null";
+
+            try
+            {
+                List<string> parts = new List<string>
+                {
+                    "Attached={" + BuildMountAttachedWeaponsObservationSummary(mountAgent) + "}",
+                    "MountSpawn={" + BuildMountSpawnEquipmentObservationSummary(mountAgent) + "}"
+                };
+
+                Agent riderAgent = null;
+                try
+                {
+                    riderAgent = mountAgent.RiderAgent;
+                }
+                catch
+                {
+                }
+
+                if (riderAgent != null)
+                    parts.Add("RiderSpawnMount={" + BuildMountSpawnEquipmentObservationSummary(riderAgent) + "}");
+
+                return string.Join("; ", parts);
+            }
+            catch (Exception ex)
+            {
+                return "mount-inventory-summary-failed:" + ex.GetType().Name;
+            }
+        }
+
+        private static string BuildMountSpawnEquipmentObservationSummary(Agent agent)
+        {
+            if (agent == null)
+                return "agent-null";
+
+            try
+            {
+                Equipment spawnEquipment = agent.SpawnEquipment;
+                return BuildEquipmentSummary(spawnEquipment, EquipmentIndex.Horse, EquipmentIndex.HorseHarness);
+            }
+            catch (Exception ex)
+            {
+                return "mount-spawn-summary-failed:" + ex.GetType().Name;
+            }
+        }
+
+        private static string BuildMountAttachedWeaponsObservationSummary(Agent mountAgent)
+        {
+            if (mountAgent == null)
+                return "mount-null";
+
+            int attachedWeaponsCount;
+            try
+            {
+                attachedWeaponsCount = mountAgent.GetAttachedWeaponsCount();
+            }
+            catch (Exception ex)
+            {
+                return "count-failed:" + ex.GetType().Name;
+            }
+
+            if (attachedWeaponsCount <= 0)
+                return "none";
+
+            int boltAttachedWeaponsCount = 0;
+            List<string> parts = new List<string>();
+            for (int i = 0; i < attachedWeaponsCount; i++)
+            {
+                try
+                {
+                    MissionWeapon attachedWeapon = mountAgent.GetAttachedWeapon(i);
+                    ItemObject attachedItem = attachedWeapon.Item;
+                    WeaponComponentData primaryUsageItem = attachedItem?.PrimaryWeapon;
+                    WeaponComponentData currentUsageItem = null;
+                    string currentUsageId = null;
+                    string usageState;
+                    try
+                    {
+                        currentUsageItem = attachedWeapon.CurrentUsageItem;
+                        currentUsageId = currentUsageItem?.ItemUsage;
+                        usageState =
+                            currentUsageItem == null
+                                ? "usage-null"
+                                : string.IsNullOrWhiteSpace(currentUsageId)
+                                    ? "usage-id-empty"
+                                    : "ok";
+                    }
+                    catch (Exception usageEx)
+                    {
+                        usageState = "usage-read-failed:" + usageEx.GetType().Name;
+                    }
+
+                    bool isBolt = IsBoltAttachedMissileItem(attachedItem);
+                    if (isBolt)
+                        boltAttachedWeaponsCount++;
+
+                    sbyte attachedBoneIndex = mountAgent.GetAttachedWeaponBoneIndex(i);
+                    parts.Add(
+                        i +
+                        ":" + (attachedItem?.StringId ?? "null") +
+                        "@" + attachedBoneIndex +
+                        ",CurrentUsageIndex=" + attachedWeapon.CurrentUsageIndex +
+                        ",PrimaryUsageId=" + (primaryUsageItem?.ItemUsage ?? "null") +
+                        ",CurrentUsageId=" + (currentUsageId ?? "null") +
+                        ",UsageState=" + usageState +
+                        ",WeaponClass=" + (currentUsageItem?.WeaponClass.ToString() ?? "null") +
+                        ",WeaponFlags=" + (currentUsageItem?.WeaponFlags.ToString() ?? "0") +
+                        ",Bolt=" + isBolt);
+                }
+                catch (Exception ex)
+                {
+                    parts.Add(i + ":fault:" + ex.GetType().Name);
+                }
+            }
+
+            return
+                "Count=" + attachedWeaponsCount +
+                ",BoltCount=" + boltAttachedWeaponsCount +
+                ",Items=[" + string.Join("; ", parts) + "]";
+        }
+
+        private static void PruneExpiredSuppressedMountedUsageLifecyclePairsLocked(DateTime utcNow)
+        {
+            if (SuppressedMountedUsageLifecyclePairsByKey.Count <= 0)
+                return;
+
+            List<string> expiredKeys = null;
+            foreach (KeyValuePair<string, SuppressedMountedUsageLifecyclePairState> entry in SuppressedMountedUsageLifecyclePairsByKey)
+            {
+                if (entry.Value == null ||
+                    utcNow - entry.Value.ObservedUtc > SuppressedMountedUsageLifecyclePairQuarantineWindow)
+                {
+                    if (expiredKeys == null)
+                        expiredKeys = new List<string>();
+
+                    expiredKeys.Add(entry.Key);
+                }
+            }
+
+            if (expiredKeys == null)
+                return;
+
+            foreach (string expiredKey in expiredKeys)
+                SuppressedMountedUsageLifecyclePairsByKey.Remove(expiredKey);
+        }
+
+        private static void RegisterSuppressedMountedUsageLifecyclePair(
+            Agent agent,
+            int missileIndex,
+            ItemObject missileItem,
+            Agent attacker,
+            string source)
+        {
+            if (!IsMountedUsageLifecycleAgent(agent))
+                return;
+
+            string pairKey = BuildMountedUsagePairKey(agent);
+            if (string.IsNullOrWhiteSpace(pairKey))
+                return;
+
+            Agent mountAgent = SafeIsMountAgent(agent) ? agent : agent?.MountAgent;
+            Agent riderAgent = SafeIsMountAgent(agent) ? agent?.RiderAgent : agent;
+            DateTime observedUtc = DateTime.UtcNow;
+            SuppressedMountedUsageLifecyclePairState state = new SuppressedMountedUsageLifecyclePairState
+            {
+                PairKey = pairKey,
+                Source = source,
+                ObservedUtc = observedUtc,
+                MissileIndex = missileIndex,
+                MissileItemId = missileItem?.StringId,
+                AttackerAgentIndex = SafeGetAgentIndex(attacker),
+                AgentIndex = SafeGetAgentIndex(agent),
+                MountAgentIndex = SafeGetAgentIndex(mountAgent),
+                RiderAgentIndex = SafeGetAgentIndex(riderAgent)
+            };
+
+            lock (SuppressedMountedUsageLifecyclePairsByKey)
+            {
+                PruneExpiredSuppressedMountedUsageLifecyclePairsLocked(observedUtc);
+                SuppressedMountedUsageLifecyclePairsByKey[pairKey] = state;
+            }
+
+            if (!ShouldLogVerboseMountedUsageObservation(agent))
+                return;
+
+            string logKey =
+                pairKey + "|" +
+                (source ?? "unknown") + "|" +
+                missileIndex + "|" +
+                state.MountAgentIndex + "|" +
+                state.RiderAgentIndex;
+            if (!string.Equals(_lastObservedServerMountedUsageLifecycleQuarantineArmKey, logKey, StringComparison.Ordinal))
+            {
+                _lastObservedServerMountedUsageLifecycleQuarantineArmKey = logKey;
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: tracked dedicated mounted usage lifecycle observation window after exact battle bolt event. " +
+                    "PairKey=" + pairKey +
+                    " Source=" + (source ?? "unknown") +
+                    " MissileIndex=" + missileIndex +
+                    " MissileItem=" + (missileItem?.StringId ?? "null") +
+                    " AttackerAgentIndex=" + SafeGetAgentIndex(attacker) +
+                    " QuarantineWindowMs=" + SuppressedMountedUsageLifecyclePairQuarantineWindow.TotalMilliseconds.ToString("F0") +
+                    " " + BuildMountedUsageObservationSummary(agent) +
+                    " WeaponInventory={" + BuildMountedWeaponInventoryObservationSummary(agent) + "}");
+            }
+        }
+
+        private static bool TryGetSuppressedMountedUsageLifecyclePair(
+            Agent agent,
+            out SuppressedMountedUsageLifecyclePairState state)
+        {
+            state = null;
+            if (!IsMountedUsageLifecycleAgent(agent))
+                return false;
+
+            string pairKey = BuildMountedUsagePairKey(agent);
+            if (string.IsNullOrWhiteSpace(pairKey))
+                return false;
+
+            lock (SuppressedMountedUsageLifecyclePairsByKey)
+            {
+                DateTime utcNow = DateTime.UtcNow;
+                PruneExpiredSuppressedMountedUsageLifecyclePairsLocked(utcNow);
+                if (!SuppressedMountedUsageLifecyclePairsByKey.TryGetValue(pairKey, out state) || state == null)
+                    return false;
+
+                if (utcNow - state.ObservedUtc > SuppressedMountedUsageLifecyclePairQuarantineWindow)
+                {
+                    SuppressedMountedUsageLifecyclePairsByKey.Remove(pairKey);
+                    state = null;
+                    return false;
+                }
+
+                return true;
+            }
+        }
+
+        private static bool TryGetActiveServerMountedUsageLifecycleQuarantine(
+            Agent agent,
+            out SuppressedMountedUsageLifecyclePairState quarantineState)
+        {
+            quarantineState = null;
+
+            Mission mission = agent?.Mission ?? Mission.Current;
+            if (!GameNetwork.IsServer ||
+                mission == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                return false;
+            }
+
+            return TryGetSuppressedMountedUsageLifecyclePair(agent, out quarantineState);
+        }
+
+        private static bool ShouldSuppressServerMountedUsageLifecycleQuarantineOperation(
+            Agent agent,
+            SuppressedMountedUsageLifecyclePairState quarantineState,
+            string operationName,
+            out string reason)
+        {
+            reason = null;
+            if (agent == null ||
+                quarantineState == null ||
+                !IsMountedUsageLifecycleAgent(agent))
+            {
+                return false;
+            }
+
+            Agent mountAgent = null;
+            Agent riderAgent = null;
+            try
+            {
+                if (SafeIsMountAgent(agent))
+                {
+                    mountAgent = agent;
+                    riderAgent = agent.RiderAgent;
+                }
+                else
+                {
+                    mountAgent = agent.MountAgent;
+                    riderAgent = agent;
+                }
+            }
+            catch
+            {
+            }
+
+            bool agentIsInactive = false;
+            bool mountIsInactive = false;
+            bool riderIsInactive = false;
+
+            string agentStatus = BuildMountedUsageLifecyclePairMemberStatus(agent, out agentIsInactive);
+            string mountStatus = BuildMountedUsageLifecyclePairMemberStatus(mountAgent, out mountIsInactive);
+            string riderStatus = BuildMountedUsageLifecyclePairMemberStatus(riderAgent, out riderIsInactive);
+
+            if (!agentIsInactive &&
+                !mountIsInactive &&
+                !riderIsInactive)
+            {
+                return false;
+            }
+
+            reason =
+                "dead-or-inactive-mounted-pair" +
+                "|Operation=" + (operationName ?? "unknown") +
+                "|PairKey=" + (quarantineState.PairKey ?? "null") +
+                "|QuarantineSource=" + (quarantineState.Source ?? "unknown") +
+                "|AgentStatus=" + agentStatus +
+                "|MountStatus=" + mountStatus +
+                "|RiderStatus=" + riderStatus;
+            return true;
+        }
+
+        private static string BuildMountedUsageLifecyclePairMemberStatus(Agent agent, out bool isInactive)
+        {
+            isInactive = false;
+            if (agent == null)
+                return "null";
+
+            try
+            {
+                bool isActive = agent.IsActive();
+                float health = agent.Health;
+                isInactive = !isActive || health <= 0f;
+
+                return
+                    "Index=" + SafeGetAgentIndex(agent) +
+                    ",Active=" + isActive +
+                    ",Health=" + health.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) +
+                    ",Character=" + (agent.Character?.StringId ?? "null");
+            }
+            catch (Exception ex)
+            {
+                isInactive = false;
+                return "Index=" + SafeGetAgentIndex(agent) + ",StatusCheckFailed=" + ex.GetType().Name;
+            }
+        }
+
+        private static void LogSuppressedServerMountedUsageLifecycleOperation(
+            Agent agent,
+            SuppressedMountedUsageLifecyclePairState quarantineState,
+            string operationName,
+            string operationKeySuffix,
+            string operationDetails)
+        {
+            if (agent == null ||
+                quarantineState == null ||
+                !ShouldLogVerboseMountedUsageObservation(agent))
+            {
+                return;
+            }
+
+            string logKey =
+                (quarantineState.PairKey ?? "null") + "|" +
+                (operationName ?? "unknown") + "|" +
+                (operationKeySuffix ?? "none") + "|" +
+                quarantineState.MissileIndex;
+            if (string.Equals(_lastObservedServerMountedUsageLifecycleAllowKey, logKey, StringComparison.Ordinal))
+                return;
+
+            _lastObservedServerMountedUsageLifecycleAllowKey = logKey;
+            double quarantineAgeMs = (DateTime.UtcNow - quarantineState.ObservedUtc).TotalMilliseconds;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: observed dedicated mounted usage lifecycle operation inside tracked exact battle bolt window and allowed native original. " +
+                "Operation=" + (operationName ?? "unknown") +
+                " PairKey=" + (quarantineState.PairKey ?? "null") +
+                " QuarantineSource=" + (quarantineState.Source ?? "unknown") +
+                " QuarantineAgeMs=" + quarantineAgeMs.ToString("F1") +
+                " MissileIndex=" + quarantineState.MissileIndex +
+                " MissileItem=" + (quarantineState.MissileItemId ?? "null") +
+                " AttackerAgentIndex=" + quarantineState.AttackerAgentIndex +
+                " Details=" + (operationDetails ?? "none") +
+                " " + BuildMountedUsageObservationSummary(agent) +
+                " WeaponInventory={" + BuildMountedWeaponInventoryObservationSummary(agent) + "}");
+        }
+
+        private static void LogSuppressedServerMountedUsageLifecycleGuard(
+            Agent agent,
+            SuppressedMountedUsageLifecyclePairState quarantineState,
+            string operationName,
+            string operationKeySuffix,
+            string reason)
+        {
+            if (agent == null ||
+                quarantineState == null ||
+                !ShouldLogVerboseMountedUsageObservation(agent))
+            {
+                return;
+            }
+
+            string logKey =
+                (quarantineState.PairKey ?? "null") + "|" +
+                (operationName ?? "unknown") + "|" +
+                (operationKeySuffix ?? "none") + "|" +
+                quarantineState.MissileIndex + "|" +
+                (reason ?? "none");
+            if (string.Equals(_lastSuppressedServerMountedUsageLifecycleGuardKey, logKey, StringComparison.Ordinal))
+                return;
+
+            _lastSuppressedServerMountedUsageLifecycleGuardKey = logKey;
+            double quarantineAgeMs = (DateTime.UtcNow - quarantineState.ObservedUtc).TotalMilliseconds;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: suppressed dedicated mounted usage lifecycle operation inside tracked exact battle bolt window. " +
+                "Operation=" + (operationName ?? "unknown") +
+                " PairKey=" + (quarantineState.PairKey ?? "null") +
+                " QuarantineSource=" + (quarantineState.Source ?? "unknown") +
+                " QuarantineAgeMs=" + quarantineAgeMs.ToString("F1") +
+                " MissileIndex=" + quarantineState.MissileIndex +
+                " MissileItem=" + (quarantineState.MissileItemId ?? "null") +
+                " AttackerAgentIndex=" + quarantineState.AttackerAgentIndex +
+                " Reason=" + (reason ?? "none") +
+                " " + BuildMountedUsageObservationSummary(agent) +
+                " WeaponInventory={" + BuildMountedWeaponInventoryObservationSummary(agent) + "}");
+        }
+
         private static string BuildMountedWeaponSlotObservationSummary(Agent agent, EquipmentIndex slotIndex)
         {
             if (agent == null)
@@ -4429,10 +5003,14 @@ namespace CoopSpectator.Patches
             if (slotIndex == EquipmentIndex.None)
                 return "Slot=None";
 
+            if (SafeIsMountAgent(agent))
+                return "Slot=" + slotIndex + ",MountAgent=no-weapon-slots";
+
             try
             {
                 MissionWeapon slotWeapon = agent.Equipment[slotIndex];
                 WeaponComponentData currentUsageItem = slotWeapon.CurrentUsageItem;
+                WeaponComponentData primaryUsageItem = slotWeapon.Item?.PrimaryWeapon;
                 if (slotWeapon.IsEmpty || slotWeapon.Item == null)
                 {
                     return
@@ -4440,11 +5018,23 @@ namespace CoopSpectator.Patches
                         ",Item=none";
                 }
 
+                string currentUsageId = currentUsageItem?.ItemUsage;
+                string usageState =
+                    currentUsageItem == null
+                        ? "usage-null"
+                        : string.IsNullOrWhiteSpace(currentUsageId)
+                            ? "usage-id-empty"
+                            : "ok";
                 return
                     "Slot=" + slotIndex +
                     ",Item=" + (slotWeapon.Item?.StringId ?? "none") +
                     ",Amount=" + slotWeapon.Amount +
                     ",ModifiedMax=" + slotWeapon.ModifiedMaxAmount +
+                    ",CurrentUsageIndex=" + slotWeapon.CurrentUsageIndex +
+                    ",PrimaryUsageId=" + (primaryUsageItem?.ItemUsage ?? "null") +
+                    ",CurrentUsageId=" + (currentUsageId ?? "null") +
+                    ",UsageState=" + usageState +
+                    ",RelevantSkill=" + (currentUsageItem?.RelevantSkill?.StringId ?? "null") +
                     ",CurrentUsageClass=" + (currentUsageItem?.WeaponClass.ToString() ?? "null") +
                     ",CurrentUsageFlags=" + (currentUsageItem?.WeaponFlags.ToString() ?? "0") +
                     ",IsConsumable=" + (currentUsageItem?.IsConsumable ?? false) +
@@ -6105,8 +6695,6 @@ namespace CoopSpectator.Patches
             {
                 if (TryGetSuppressedServerBoltWorldHitMissile(missileIndex, null, out SuppressedServerBoltWorldHitMissileState quarantinedMissile))
                 {
-                    collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
-
                     string quarantineLogKey =
                         "HandleMissileCollisionReaction|" +
                         missileIndex + "|" +
@@ -6119,16 +6707,14 @@ namespace CoopSpectator.Patches
                             ? -1d
                             : (DateTime.UtcNow - quarantinedMissile.ObservedUtc).TotalMilliseconds;
                         ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: bypassed dedicated Mission.HandleMissileCollisionReaction original because missile index is quarantined from a prior exact battle bolt world-hit. " +
+                            "BattleMapSpawnHandoffPatch: allowed native Mission.HandleMissileCollisionReaction original while missile index is still inside the tracked exact battle bolt observation window. " +
                             "MissileIndex=" + missileIndex +
                             " MissileItem=" + (quarantinedMissile?.MissileItemId ?? "null") +
                             " AttackerAgentIndex=" + (quarantinedMissile?.AttackerAgentIndex ?? -1) +
                             " QuarantineSource=" + (quarantinedMissile?.Source ?? "unknown") +
                             " QuarantineAgeMs=" + quarantineAgeMs.ToString("F1") +
-                            " CollisionReaction=BecomeInvisible");
+                            " CollisionReaction=" + collisionReaction);
                     }
-
-                    return false;
                 }
 
                 ItemObject observedMissileItem = null;
@@ -6138,6 +6724,12 @@ namespace CoopSpectator.Patches
                     ShouldObserveServerExactBattleBoltAfterhitDiagnostics(__instance) &&
                     IsBoltAttachedMissileItem(observedMissileItem, observedWeaponFlags, observedWeaponClass))
                 {
+                    bool shouldSuppressMountedStickObservation =
+                        ShouldSuppressMountedExactBattleBoltStick(
+                            __instance,
+                            attachedAgent,
+                            collisionReaction,
+                            observedMissileItem);
                     ExactCampaignArmyBootstrap.TryGetEntryId(attachedAgent, out string observedEntryId);
                     ItemObject observedMissionObjectItem = (attachedMissionObject as SpawnedItemEntity)?.WeaponCopy.Item;
                     string observedKey =
@@ -6174,7 +6766,8 @@ namespace CoopSpectator.Patches
                     if ((collisionReaction == Mission.MissileCollisionReaction.Stick ||
                          collisionReaction == Mission.MissileCollisionReaction.BecomeInvisible) &&
                         attachedAgent != null &&
-                        SafeIsMountAgent(attachedAgent))
+                        SafeIsMountAgent(attachedAgent) &&
+                        !shouldSuppressMountedStickObservation)
                     {
                         string mountObservationKey =
                             missileIndex + "|" +
@@ -6269,11 +6862,8 @@ namespace CoopSpectator.Patches
                 }
                 }
 
-                if (!ShouldUseServerExactBattleAttachedMissileSuppression(__instance) ||
-                    collisionReaction != Mission.MissileCollisionReaction.Stick)
-                {
+                if (!ShouldUseServerExactBattleAttachedMissileSuppression(__instance))
                     return true;
-                }
 
                 if (!TryResolveMissionMissileData(__instance, missileIndex, out ItemObject missileItem, out WeaponFlags weaponFlags, out WeaponClass weaponClass) ||
                     !IsSuppressibleAttachedMissileItem(missileItem))
@@ -6288,13 +6878,19 @@ namespace CoopSpectator.Patches
                     attachedMissionObject == null &&
                     attachedBoneIndex < 0;
 
-                if (isBoltWorldHitWithoutAttachTarget)
+                if (isBoltWorldHitWithoutAttachTarget &&
+                    (collisionReaction == Mission.MissileCollisionReaction.Stick ||
+                     collisionReaction == Mission.MissileCollisionReaction.BecomeInvisible))
                 {
+                    string quarantineSource =
+                        collisionReaction == Mission.MissileCollisionReaction.Stick
+                            ? "Mission.HandleMissileCollisionReaction:exact-battle-bolt-world-hit"
+                            : "Mission.HandleMissileCollisionReaction:exact-battle-bolt-world-hit-become-invisible";
                     RegisterSuppressedServerBoltWorldHitMissile(
                         missileIndex,
                         missileItem,
                         attackerAgent,
-                        "Mission.HandleMissileCollisionReaction:exact-battle-bolt-world-hit");
+                        quarantineSource);
 
                     collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
 
@@ -6302,23 +6898,193 @@ namespace CoopSpectator.Patches
                         missileIndex + "|" +
                         (missileItem?.StringId ?? "null") + "|" +
                         (attackerAgent?.Index ?? -1) + "|" +
-                        forcedSpawnIndex;
+                        forcedSpawnIndex + "|" +
+                        quarantineSource;
                     if (!string.Equals(_lastSuppressedServerBoltWorldHitBypassKey, bypassLogKey, StringComparison.Ordinal))
                     {
                         _lastSuppressedServerBoltWorldHitBypassKey = bypassLogKey;
                         ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: bypassed dedicated Mission.HandleMissileCollisionReaction original for exact battle bolt world-hit. " +
+                            "BattleMapSpawnHandoffPatch: tracked exact battle bolt world-hit and allowed native Mission.HandleMissileCollisionReaction original. " +
                             "MissileIndex=" + missileIndex +
                             " MissileItem=" + (missileItem?.StringId ?? "null") +
                             " WeaponClass=" + weaponClass +
                             " WeaponFlags=" + weaponFlags +
                             " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
+                            " QuarantineSource=" + quarantineSource +
                             " ForcedSpawnIndex=" + forcedSpawnIndex +
-                            " CollisionReaction=BecomeInvisible");
+                            " CollisionReaction=" + collisionReaction);
                     }
 
-                    return false;
+                    return true;
                 }
+
+                if (collisionReaction == Mission.MissileCollisionReaction.Stick &&
+                    attachedAgent != null &&
+                    ShouldSuppressMountedExactBattleBoltStick(__instance, attachedAgent, collisionReaction, missileItem))
+                {
+                    const string quarantineSource =
+                        "Mission.HandleMissileCollisionReaction:exact-battle-mounted-lifecycle-stick-suppressed";
+                    RegisterSuppressedMountedUsageLifecyclePair(
+                        attachedAgent,
+                        missileIndex,
+                        missileItem,
+                        attackerAgent,
+                        quarantineSource);
+                    RegisterSuppressedServerBoltWorldHitMissile(
+                        missileIndex,
+                        missileItem,
+                        attackerAgent,
+                        quarantineSource);
+                    collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
+
+                    string bypassLogKey =
+                        missileIndex + "|" +
+                        (missileItem?.StringId ?? "null") + "|" +
+                        SafeGetAgentIndex(attachedAgent) + "|" +
+                        SafeGetAgentIndex(attachedAgent?.MountAgent) + "|" +
+                        SafeGetAgentIndex(attachedAgent?.RiderAgent) + "|" +
+                        attachedToShield + "|" +
+                        attachedBoneIndex + "|" +
+                        forcedSpawnIndex;
+                    if (!string.Equals(_lastSuppressedServerMountedLifecycleStickBypassKey, bypassLogKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedServerMountedLifecycleStickBypassKey = bypassLogKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed server mounted-lifecycle bolt stick reaction and downgraded to BecomeInvisible. " +
+                            "MissileIndex=" + missileIndex +
+                            " MissileItem=" + (missileItem?.StringId ?? "null") +
+                            " WeaponClass=" + weaponClass +
+                            " WeaponFlags=" + weaponFlags +
+                            " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
+                            " AttachedAgent=" + SafeGetAgentIndex(attachedAgent) +
+                            " AttachedAgentIsMount=" + (attachedAgent?.IsMount ?? false) +
+                            " MountAgent=" + SafeGetAgentIndex(attachedAgent?.MountAgent) +
+                            " RiderAgent=" + SafeGetAgentIndex(attachedAgent?.RiderAgent) +
+                            " AttachedToShield=" + attachedToShield +
+                            " AttachedBoneIndex=" + attachedBoneIndex +
+                            " ForcedSpawnIndex=" + forcedSpawnIndex +
+                            " QuarantineSource=" + quarantineSource +
+                            " CollisionReaction=" + collisionReaction +
+                            " " + BuildMountedUsageObservationSummary(attachedAgent) +
+                            " WeaponInventory={" + BuildMountedWeaponInventoryObservationSummary(attachedAgent) + "}");
+                    }
+
+                    if (attachedToShield)
+                    {
+                        string hardStopLogKey =
+                            missileIndex + "|" +
+                            (missileItem?.StringId ?? "null") + "|" +
+                            SafeGetAgentIndex(attachedAgent) + "|" +
+                            SafeGetAgentIndex(attachedAgent?.MountAgent) + "|" +
+                            SafeGetAgentIndex(attachedAgent?.RiderAgent) + "|" +
+                            attachedToShield + "|" +
+                            attachedBoneIndex + "|" +
+                            forcedSpawnIndex + "|skip-native-mounted-shield-block";
+                        if (!string.Equals(_lastSuppressedServerMountedLifecycleStickBypassKey, hardStopLogKey, StringComparison.Ordinal))
+                        {
+                            _lastSuppressedServerMountedLifecycleStickBypassKey = hardStopLogKey;
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: suppressed server mounted-lifecycle bolt stick reaction and skipped native Mission.HandleMissileCollisionReaction original for mounted shield-block quarantine. " +
+                                "MissileIndex=" + missileIndex +
+                                " MissileItem=" + (missileItem?.StringId ?? "null") +
+                                " WeaponClass=" + weaponClass +
+                                " WeaponFlags=" + weaponFlags +
+                                " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
+                                " AttachedAgent=" + SafeGetAgentIndex(attachedAgent) +
+                                " AttachedAgentIsMount=" + (attachedAgent?.IsMount ?? false) +
+                                " MountAgent=" + SafeGetAgentIndex(attachedAgent?.MountAgent) +
+                                " RiderAgent=" + SafeGetAgentIndex(attachedAgent?.RiderAgent) +
+                                " AttachedToShield=" + attachedToShield +
+                                " AttachedBoneIndex=" + attachedBoneIndex +
+                                " ForcedSpawnIndex=" + forcedSpawnIndex +
+                                " QuarantineSource=" + quarantineSource +
+                                " CollisionReaction=" + collisionReaction +
+                                " " + BuildMountedUsageObservationSummary(attachedAgent) +
+                                " WeaponInventory={" + BuildMountedWeaponInventoryObservationSummary(attachedAgent) + "}");
+                        }
+
+                        return false;
+                    }
+
+                    if (SafeIsMountAgent(attachedAgent))
+                    {
+                        string hardStopLogKey =
+                            missileIndex + "|" +
+                            (missileItem?.StringId ?? "null") + "|" +
+                            SafeGetAgentIndex(attachedAgent) + "|" +
+                            SafeGetAgentIndex(attachedAgent?.MountAgent) + "|" +
+                            SafeGetAgentIndex(attachedAgent?.RiderAgent) + "|" +
+                            attachedToShield + "|" +
+                            attachedBoneIndex + "|" +
+                            forcedSpawnIndex + "|skip-native-mounted-mount-body";
+                        if (!string.Equals(_lastSuppressedServerMountedLifecycleStickBypassKey, hardStopLogKey, StringComparison.Ordinal))
+                        {
+                            _lastSuppressedServerMountedLifecycleStickBypassKey = hardStopLogKey;
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: suppressed server mounted-lifecycle bolt stick reaction and skipped native Mission.HandleMissileCollisionReaction original for mounted mount-body quarantine. " +
+                                "MissileIndex=" + missileIndex +
+                                " MissileItem=" + (missileItem?.StringId ?? "null") +
+                                " WeaponClass=" + weaponClass +
+                                " WeaponFlags=" + weaponFlags +
+                                " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
+                                " AttachedAgent=" + SafeGetAgentIndex(attachedAgent) +
+                                " AttachedAgentIsMount=" + (attachedAgent?.IsMount ?? false) +
+                                " MountAgent=" + SafeGetAgentIndex(attachedAgent?.MountAgent) +
+                                " RiderAgent=" + SafeGetAgentIndex(attachedAgent?.RiderAgent) +
+                                " AttachedToShield=" + attachedToShield +
+                                " AttachedBoneIndex=" + attachedBoneIndex +
+                                " ForcedSpawnIndex=" + forcedSpawnIndex +
+                                " QuarantineSource=" + quarantineSource +
+                                " CollisionReaction=" + collisionReaction +
+                                " " + BuildMountedUsageObservationSummary(attachedAgent) +
+                                " WeaponInventory={" + BuildMountedWeaponInventoryObservationSummary(attachedAgent) + "}");
+                        }
+
+                        return false;
+                    }
+
+                    if (IsMountedThrownConsumableLifecycleRider(attachedAgent))
+                    {
+                        string hardStopLogKey =
+                            missileIndex + "|" +
+                            (missileItem?.StringId ?? "null") + "|" +
+                            SafeGetAgentIndex(attachedAgent) + "|" +
+                            SafeGetAgentIndex(attachedAgent?.MountAgent) + "|" +
+                            SafeGetAgentIndex(attachedAgent?.RiderAgent) + "|" +
+                            attachedToShield + "|" +
+                            attachedBoneIndex + "|" +
+                            forcedSpawnIndex + "|skip-native-mounted-thrown";
+                        if (!string.Equals(_lastSuppressedServerMountedLifecycleStickBypassKey, hardStopLogKey, StringComparison.Ordinal))
+                        {
+                            _lastSuppressedServerMountedLifecycleStickBypassKey = hardStopLogKey;
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: suppressed server mounted-lifecycle bolt stick reaction and skipped native Mission.HandleMissileCollisionReaction original for mounted thrown rider quarantine. " +
+                                "MissileIndex=" + missileIndex +
+                                " MissileItem=" + (missileItem?.StringId ?? "null") +
+                                " WeaponClass=" + weaponClass +
+                                " WeaponFlags=" + weaponFlags +
+                                " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
+                                " AttachedAgent=" + SafeGetAgentIndex(attachedAgent) +
+                                " AttachedAgentIsMount=" + (attachedAgent?.IsMount ?? false) +
+                                " MountAgent=" + SafeGetAgentIndex(attachedAgent?.MountAgent) +
+                                " RiderAgent=" + SafeGetAgentIndex(attachedAgent?.RiderAgent) +
+                                " AttachedToShield=" + attachedToShield +
+                                " AttachedBoneIndex=" + attachedBoneIndex +
+                                " ForcedSpawnIndex=" + forcedSpawnIndex +
+                                " QuarantineSource=" + quarantineSource +
+                                " CollisionReaction=" + collisionReaction +
+                                " " + BuildMountedUsageObservationSummary(attachedAgent) +
+                                " WeaponInventory={" + BuildMountedWeaponInventoryObservationSummary(attachedAgent) + "}");
+                        }
+
+                        return false;
+                    }
+
+                    return true;
+                }
+
+                if (collisionReaction != Mission.MissileCollisionReaction.Stick)
+                    return true;
 
                 collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
 
@@ -6474,7 +7240,7 @@ namespace CoopSpectator.Patches
                             ? -1d
                             : (DateTime.UtcNow - quarantinedMissile.ObservedUtc).TotalMilliseconds;
                         ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: bypassed dedicated Mission.SpawnWeaponAsDropFromMissile original because missile index is quarantined from a prior exact battle bolt world-hit. " +
+                            "BattleMapSpawnHandoffPatch: allowed native Mission.SpawnWeaponAsDropFromMissile original while missile index is still inside the tracked exact battle bolt observation window. " +
                             "MissileIndex=" + missileIndex +
                             " MissileItem=" + (quarantinedMissile?.MissileItemId ?? "null") +
                             " AttackerAgentIndex=" + (quarantinedMissile?.AttackerAgentIndex ?? -1) +
@@ -6483,8 +7249,6 @@ namespace CoopSpectator.Patches
                             " SpawnFlags=" + spawnFlags +
                             " ForcedSpawnIndex=" + forcedSpawnIndex);
                     }
-
-                    return false;
                 }
 
                 if (!ShouldObserveServerExactBattleBoltAfterhitDiagnostics(__instance))
@@ -6620,15 +7384,13 @@ namespace CoopSpectator.Patches
                             ? -1d
                             : (DateTime.UtcNow - quarantinedMissile.ObservedUtc).TotalMilliseconds;
                         ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: bypassed dedicated Mission.MissileHitCallback original because missile index is quarantined from a prior exact battle bolt world-hit. " +
+                            "BattleMapSpawnHandoffPatch: allowed native Mission.MissileHitCallback original while missile index is still inside the tracked exact battle bolt observation window. " +
                             "MissileIndex=" + missileIndex +
                             " MissileItem=" + (quarantinedMissile?.MissileItemId ?? "null") +
                             " AttackerAgentIndex=" + (quarantinedMissile?.AttackerAgentIndex ?? -1) +
                             " QuarantineSource=" + (quarantinedMissile?.Source ?? "unknown") +
                             " QuarantineAgeMs=" + quarantineAgeMs.ToString("F1"));
                     }
-
-                    return false;
                 }
 
                 MissionObject hitMissionObject = null;
@@ -6742,6 +7504,46 @@ namespace CoopSpectator.Patches
                 }
 
                 if (ShouldUseServerExactBattleAttachedMissileSuppression(__instance) &&
+                    collisionData.CollisionResult == CombatCollisionResult.StrikeAgent &&
+                    IsMountedUsageLifecycleAgent(victim))
+                {
+                    RegisterSuppressedMountedUsageLifecyclePair(
+                        victim,
+                        missileIndex,
+                        missileItem,
+                        attacker,
+                        "Mission.MissileHitCallback:exact-battle-mounted-lifecycle-strike");
+                    // Reuse the same short-lived quarantine store because mounted rider/mount strike-agents
+                    // fall into the same native post-hit lifecycle as the already-suppressed world-hit path.
+                    RegisterSuppressedServerBoltWorldHitMissile(
+                        missileIndex,
+                        missileItem,
+                        attacker,
+                        "Mission.MissileHitCallback:exact-battle-mounted-lifecycle-strike");
+
+                    string bypassLogKey =
+                        missileIndex + "|" +
+                        (missileItem?.StringId ?? "null") + "|" +
+                        (attacker?.Index ?? -1) + "|" +
+                        (victim?.Index ?? -1) + "|" +
+                        SafeGetAgentIndex(victim?.MountAgent) + "|" +
+                        SafeGetAgentIndex(victim?.RiderAgent) + "|" +
+                        collisionData.CollisionBoneIndex;
+                    if (!string.Equals(_lastSuppressedServerBoltMountStrikeMissileHitBypassKey, bypassLogKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedServerBoltMountStrikeMissileHitBypassKey = bypassLogKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: tracked exact battle mounted-lifecycle strike-agent hit and allowed native Mission.MissileHitCallback original. " +
+                            "MissileIndex=" + missileIndex +
+                            " MissileItem=" + (missileItem?.StringId ?? "null") +
+                            " CollisionBoneIndex=" + collisionData.CollisionBoneIndex +
+                            " Victim={" + BuildMountedUsageObservationSummary(victim) + "} " +
+                            "Attacker={" + BuildBoltAfterhitAgentSummary(attacker) + "} " +
+                            "WeaponInventory={" + BuildMountedWeaponInventoryObservationSummary(victim) + "}");
+                    }
+                }
+
+                if (ShouldUseServerExactBattleAttachedMissileSuppression(__instance) &&
                     collisionData.CollisionResult == CombatCollisionResult.HitWorld &&
                     numDamagedAgents <= 0 &&
                     victim == null &&
@@ -6763,7 +7565,7 @@ namespace CoopSpectator.Patches
                     {
                         _lastSuppressedServerBoltWorldHitMissileHitBypassKey = bypassLogKey;
                         ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: bypassed dedicated Mission.MissileHitCallback original for exact battle bolt world-hit. " +
+                            "BattleMapSpawnHandoffPatch: tracked exact battle bolt world-hit and allowed native Mission.MissileHitCallback original. " +
                             "MissileIndex=" + missileIndex +
                             " MissileItem=" + (missileItem?.StringId ?? "null") +
                             " Attacker={" + BuildBoltAfterhitAgentSummary(attacker) + "} " +
@@ -6771,8 +7573,6 @@ namespace CoopSpectator.Patches
                             " PhysicsMaterialIndex=" + collisionData.PhysicsMaterialIndex +
                             " NumDamagedAgents=" + numDamagedAgents);
                     }
-
-                    return false;
                 }
 
                 return true;
@@ -6810,12 +7610,69 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool Agent_OnWieldedItemIndexChange_ServerPrefix(
+            Agent __instance,
+            bool isOffHand,
+            bool isWieldedInstantly,
+            bool isWieldedOnSpawn,
+            ref bool __state)
+        {
+            __state = false;
+
+            try
+            {
+                string operationKeySuffix = isOffHand + "|" + isWieldedInstantly + "|" + isWieldedOnSpawn;
+                string operationDetails =
+                    "IsOffHand=" + isOffHand +
+                    " IsWieldedInstantly=" + isWieldedInstantly +
+                    " IsWieldedOnSpawn=" + isWieldedOnSpawn;
+
+                if (TryGetActiveServerMountedUsageLifecycleQuarantine(__instance, out SuppressedMountedUsageLifecyclePairState quarantineState))
+                {
+                    if (ShouldSuppressServerMountedUsageLifecycleQuarantineOperation(
+                        __instance,
+                        quarantineState,
+                        "Agent.OnWieldedItemIndexChange",
+                        out string suppressReason))
+                    {
+                        LogSuppressedServerMountedUsageLifecycleGuard(
+                            __instance,
+                            quarantineState,
+                            "Agent.OnWieldedItemIndexChange",
+                            operationKeySuffix,
+                            suppressReason);
+                        return false;
+                    }
+
+                    LogSuppressedServerMountedUsageLifecycleOperation(
+                        __instance,
+                        quarantineState,
+                        "Agent.OnWieldedItemIndexChange",
+                        operationKeySuffix,
+                        operationDetails);
+                }
+
+                __state = true;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                __state = true;
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWieldedItemIndexChange prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static void Agent_OnWieldedItemIndexChange_ServerPostfix(
             Agent __instance,
             bool isOffHand,
             bool isWieldedInstantly,
-            bool isWieldedOnSpawn)
+            bool isWieldedOnSpawn,
+            bool __state)
         {
+            if (!__state)
+                return;
+
             try
             {
                 Mission mission = __instance?.Mission ?? Mission.Current;
@@ -6850,11 +7707,48 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool Agent_OnWeaponSwitchingToAlternativeStart_ServerPrefix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            int usageIndex,
+            ref bool __state)
+        {
+            __state = false;
+
+            try
+            {
+                if (TryGetActiveServerMountedUsageLifecycleQuarantine(__instance, out SuppressedMountedUsageLifecyclePairState quarantineState))
+                {
+                    LogSuppressedServerMountedUsageLifecycleOperation(
+                        __instance,
+                        quarantineState,
+                        "Agent.OnWeaponSwitchingToAlternativeStart",
+                        slotIndex + "|" + usageIndex,
+                        "SlotIndex=" + slotIndex +
+                        " UsageIndex=" + usageIndex +
+                        " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "}");
+                }
+
+                __state = true;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                __state = true;
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponSwitchingToAlternativeStart prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static void Agent_OnWeaponSwitchingToAlternativeStart_ServerPostfix(
             Agent __instance,
             EquipmentIndex slotIndex,
-            int usageIndex)
+            int usageIndex,
+            bool __state)
         {
+            if (!__state)
+                return;
+
             try
             {
                 Mission mission = __instance?.Mission ?? Mission.Current;
@@ -6887,11 +7781,67 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool Agent_OnWeaponUsageIndexChange_ServerPrefix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            int usageIndex,
+            ref bool __state)
+        {
+            __state = false;
+
+            try
+            {
+                string operationKeySuffix = slotIndex + "|" + usageIndex;
+                string operationDetails =
+                    "SlotIndex=" + slotIndex +
+                    " UsageIndex=" + usageIndex +
+                    " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "}";
+
+                if (TryGetActiveServerMountedUsageLifecycleQuarantine(__instance, out SuppressedMountedUsageLifecyclePairState quarantineState))
+                {
+                    if (ShouldSuppressServerMountedUsageLifecycleQuarantineOperation(
+                        __instance,
+                        quarantineState,
+                        "Agent.OnWeaponUsageIndexChange",
+                        out string suppressReason))
+                    {
+                        LogSuppressedServerMountedUsageLifecycleGuard(
+                            __instance,
+                            quarantineState,
+                            "Agent.OnWeaponUsageIndexChange",
+                            operationKeySuffix,
+                            suppressReason);
+                        return false;
+                    }
+
+                    LogSuppressedServerMountedUsageLifecycleOperation(
+                        __instance,
+                        quarantineState,
+                        "Agent.OnWeaponUsageIndexChange",
+                        operationKeySuffix,
+                        operationDetails);
+                }
+
+                __state = true;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                __state = true;
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponUsageIndexChange prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static void Agent_OnWeaponUsageIndexChange_ServerPostfix(
             Agent __instance,
             EquipmentIndex slotIndex,
-            int usageIndex)
+            int usageIndex,
+            bool __state)
         {
+            if (!__state)
+                return;
+
             try
             {
                 Mission mission = __instance?.Mission ?? Mission.Current;
@@ -6923,11 +7873,67 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool Agent_OnWeaponReloadPhaseChange_ServerPrefix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            short reloadPhase,
+            ref bool __state)
+        {
+            __state = false;
+
+            try
+            {
+                string operationKeySuffix = slotIndex + "|" + reloadPhase;
+                string operationDetails =
+                    "SlotIndex=" + slotIndex +
+                    " ReloadPhase=" + reloadPhase +
+                    " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "}";
+
+                if (TryGetActiveServerMountedUsageLifecycleQuarantine(__instance, out SuppressedMountedUsageLifecyclePairState quarantineState))
+                {
+                    if (ShouldSuppressServerMountedUsageLifecycleQuarantineOperation(
+                        __instance,
+                        quarantineState,
+                        "Agent.OnWeaponReloadPhaseChange",
+                        out string suppressReason))
+                    {
+                        LogSuppressedServerMountedUsageLifecycleGuard(
+                            __instance,
+                            quarantineState,
+                            "Agent.OnWeaponReloadPhaseChange",
+                            operationKeySuffix,
+                            suppressReason);
+                        return false;
+                    }
+
+                    LogSuppressedServerMountedUsageLifecycleOperation(
+                        __instance,
+                        quarantineState,
+                        "Agent.OnWeaponReloadPhaseChange",
+                        operationKeySuffix,
+                        operationDetails);
+                }
+
+                __state = true;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                __state = true;
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponReloadPhaseChange prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static void Agent_OnWeaponReloadPhaseChange_ServerPostfix(
             Agent __instance,
             EquipmentIndex slotIndex,
-            short reloadPhase)
+            short reloadPhase,
+            bool __state)
         {
+            if (!__state)
+                return;
+
             try
             {
                 Mission mission = __instance?.Mission ?? Mission.Current;
@@ -6960,12 +7966,52 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool Agent_OnWeaponAmmoReload_ServerPrefix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            EquipmentIndex ammoSlotIndex,
+            short totalAmmo,
+            ref bool __state)
+        {
+            __state = false;
+
+            try
+            {
+                if (TryGetActiveServerMountedUsageLifecycleQuarantine(__instance, out SuppressedMountedUsageLifecyclePairState quarantineState))
+                {
+                    LogSuppressedServerMountedUsageLifecycleOperation(
+                        __instance,
+                        quarantineState,
+                        "Agent.OnWeaponAmmoReload",
+                        slotIndex + "|" + ammoSlotIndex + "|" + totalAmmo,
+                        "WeaponSlotIndex=" + slotIndex +
+                        " AmmoSlotIndex=" + ammoSlotIndex +
+                        " TotalAmmo=" + totalAmmo +
+                        " WeaponSlot={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "} " +
+                        "AmmoSlot={" + BuildMountedWeaponSlotObservationSummary(__instance, ammoSlotIndex) + "}");
+                }
+
+                __state = true;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                __state = true;
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponAmmoReload prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static void Agent_OnWeaponAmmoReload_ServerPostfix(
             Agent __instance,
             EquipmentIndex slotIndex,
             EquipmentIndex ammoSlotIndex,
-            short totalAmmo)
+            short totalAmmo,
+            bool __state)
         {
+            if (!__state)
+                return;
+
             try
             {
                 Mission mission = __instance?.Mission ?? Mission.Current;
@@ -7001,11 +8047,67 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool Agent_OnWeaponAmmoConsume_ServerPrefix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            short totalAmmo,
+            ref bool __state)
+        {
+            __state = false;
+
+            try
+            {
+                string operationKeySuffix = slotIndex + "|" + totalAmmo;
+                string operationDetails =
+                    "WeaponSlotIndex=" + slotIndex +
+                    " TotalAmmo=" + totalAmmo +
+                    " WeaponSlot={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "}";
+
+                if (TryGetActiveServerMountedUsageLifecycleQuarantine(__instance, out SuppressedMountedUsageLifecyclePairState quarantineState))
+                {
+                    if (ShouldSuppressServerMountedUsageLifecycleQuarantineOperation(
+                        __instance,
+                        quarantineState,
+                        "Agent.OnWeaponAmmoConsume",
+                        out string suppressReason))
+                    {
+                        LogSuppressedServerMountedUsageLifecycleGuard(
+                            __instance,
+                            quarantineState,
+                            "Agent.OnWeaponAmmoConsume",
+                            operationKeySuffix,
+                            suppressReason);
+                        return false;
+                    }
+
+                    LogSuppressedServerMountedUsageLifecycleOperation(
+                        __instance,
+                        quarantineState,
+                        "Agent.OnWeaponAmmoConsume",
+                        operationKeySuffix,
+                        operationDetails);
+                }
+
+                __state = true;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                __state = true;
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponAmmoConsume prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static void Agent_OnWeaponAmmoConsume_ServerPostfix(
             Agent __instance,
             EquipmentIndex slotIndex,
-            short totalAmmo)
+            short totalAmmo,
+            bool __state)
         {
+            if (!__state)
+                return;
+
             try
             {
                 Mission mission = __instance?.Mission ?? Mission.Current;
@@ -7038,11 +8140,67 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool Agent_OnWeaponAmountChange_ServerPrefix(
+            Agent __instance,
+            EquipmentIndex slotIndex,
+            short amount,
+            ref bool __state)
+        {
+            __state = false;
+
+            try
+            {
+                string operationKeySuffix = slotIndex + "|" + amount;
+                string operationDetails =
+                    "SlotIndex=" + slotIndex +
+                    " Amount=" + amount +
+                    " SlotSummary={" + BuildMountedWeaponSlotObservationSummary(__instance, slotIndex) + "}";
+
+                if (TryGetActiveServerMountedUsageLifecycleQuarantine(__instance, out SuppressedMountedUsageLifecyclePairState quarantineState))
+                {
+                    if (ShouldSuppressServerMountedUsageLifecycleQuarantineOperation(
+                        __instance,
+                        quarantineState,
+                        "Agent.OnWeaponAmountChange",
+                        out string suppressReason))
+                    {
+                        LogSuppressedServerMountedUsageLifecycleGuard(
+                            __instance,
+                            quarantineState,
+                            "Agent.OnWeaponAmountChange",
+                            operationKeySuffix,
+                            suppressReason);
+                        return false;
+                    }
+
+                    LogSuppressedServerMountedUsageLifecycleOperation(
+                        __instance,
+                        quarantineState,
+                        "Agent.OnWeaponAmountChange",
+                        operationKeySuffix,
+                        operationDetails);
+                }
+
+                __state = true;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                __state = true;
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnWeaponAmountChange prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static void Agent_OnWeaponAmountChange_ServerPostfix(
             Agent __instance,
             EquipmentIndex slotIndex,
-            short amount)
+            short amount,
+            bool __state)
         {
+            if (!__state)
+                return;
+
             try
             {
                 Mission mission = __instance?.Mission ?? Mission.Current;

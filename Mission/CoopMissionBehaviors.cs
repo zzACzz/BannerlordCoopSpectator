@@ -14611,7 +14611,44 @@ namespace CoopSpectator.MissionBehaviors
                     " Source=" + (source ?? "unknown"));
             }
 
+            if (GameNetwork.IsClient &&
+                agent != null &&
+                !agent.IsMount &&
+                agent.IsHuman &&
+                (shouldResetIndexState || clearedRemovedGuard || agentIndexRebound))
+            {
+                TryRefreshClientSpectatorHudExactDisplayName(
+                    agent,
+                    source ?? "unknown");
+            }
+
             return true;
+        }
+
+        private static void TryRefreshClientSpectatorHudExactDisplayName(Agent agent, string source)
+        {
+            if (!GameNetwork.IsClient || agent == null)
+                return;
+
+            try
+            {
+                Type consumerPatchType =
+                    typeof(CoopMissionSpawnLogic).Assembly.GetType(
+                        "CoopSpectator.Patches.CoopBattleDisplayNameConsumerPatch",
+                        throwOnError: false);
+                MethodInfo refreshMethod = consumerPatchType?.GetMethod(
+                    "TryRefreshSpectatorHudExactDisplayNameForAgent",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                refreshMethod?.Invoke(null, new object[] { agent, source ?? "unknown" });
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: spectator HUD exact-name refresh bridge failed. " +
+                    "AgentIndex=" + agent.Index +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+            }
         }
 
         private static MaterializedBattleResultEntryRuntimeState TryGetMaterializedBattleResultEntryByAgent(Agent agent, out string entryId)

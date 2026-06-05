@@ -31,6 +31,8 @@ namespace CoopSpectator.Patches
 
         private static readonly HashSet<string> LoggedOverrideKeys =
             new HashSet<string>(StringComparer.Ordinal);
+        private static WeakReference<object> _lastSpectatorHudVm =
+            new WeakReference<object>(null);
 
         public static void Apply(Harmony harmony)
         {
@@ -137,6 +139,8 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                _lastSpectatorHudVm.SetTarget(__instance);
+
                 if (!TryResolveBattleOnlyExactDisplayNameForAgent(followedAgent, out string entryId, out string exactName))
                     return;
 
@@ -146,6 +150,38 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info("CoopBattleDisplayNameConsumerPatch: spectator HUD postfix failed: " + ex.Message);
+            }
+        }
+
+        internal static void TryRefreshSpectatorHudExactDisplayNameForAgent(Agent agent, string source)
+        {
+            try
+            {
+                if (agent == null || !ShouldRunForCurrentMission(Mission.Current))
+                    return;
+
+                MissionPeer localMissionPeer = GameNetwork.MyPeer == null
+                    ? null
+                    : PeerExtensions.GetComponent<MissionPeer>(GameNetwork.MyPeer);
+                Agent followedAgent = localMissionPeer?.FollowedAgent;
+                if (followedAgent == null || followedAgent.Index != agent.Index)
+                    return;
+
+                if (!_lastSpectatorHudVm.TryGetTarget(out object spectatorHudVm) || spectatorHudVm == null)
+                    return;
+
+                if (!TryResolveBattleOnlyExactDisplayNameForAgent(agent, out string entryId, out string exactName))
+                    return;
+
+                AccessTools.Property(spectatorHudVm.GetType(), "SpectatedPlayerName")?.SetValue(spectatorHudVm, exactName);
+                LogOverride("spectator-hud-refresh", agent, entryId, exactName);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopBattleDisplayNameConsumerPatch: spectator HUD refresh failed. " +
+                    "Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
             }
         }
 
