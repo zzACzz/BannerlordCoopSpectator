@@ -25,24 +25,44 @@ namespace CoopSpectator.GameMode
 
         public override void AfterStart()
         {
-            ModLogger.Info("MissionBehaviorDiagnostic AfterStart ENTER");
             base.AfterStart();
             Mission mission = Mission;
-            if (mission == null) return;
+            if (mission == null)
+                return;
+
+            if (!ModLogger.IsRuntimeDiagnosticEnabled(ModLogger.RuntimeDiagnosticLevel.Verbose))
+                return;
+
             try
             {
+                ModLogger.RuntimeDiagnostic(
+                    ModLogger.RuntimeDiagnosticLevel.Verbose,
+                    () => "MissionBehaviorDiagnostic AfterStart ENTER");
                 List<MissionBehavior> behaviors = mission.MissionBehaviors;
-                if (behaviors == null) { ModLogger.Info("MissionBehaviorDiagnostic: MissionBehaviors is null."); return; }
+                if (behaviors == null)
+                {
+                    ModLogger.RuntimeDiagnostic(
+                        ModLogger.RuntimeDiagnosticLevel.Verbose,
+                        () => "MissionBehaviorDiagnostic: MissionBehaviors is null.");
+                    return;
+                }
+
                 foreach (string name in CriticalTypeNames)
                 {
                     bool found = ContainsBehavior(behaviors, name);
-                    ModLogger.Info("MissionBehaviorDiagnostic: GetMissionBehavior<" + name + "> = " + (found ? "OK" : "NULL"));
+                    string capturedName = name;
+                    ModLogger.RuntimeDiagnostic(
+                        ModLogger.RuntimeDiagnosticLevel.Verbose,
+                        () => "MissionBehaviorDiagnostic: GetMissionBehavior<" + capturedName + "> = " + (found ? "OK" : "NULL"));
                 }
 
                 foreach (string name in BattleMapUiParityTypeNames)
                 {
                     bool found = ContainsBehavior(behaviors, name);
-                    ModLogger.Info("MissionBehaviorDiagnostic: UIParity<" + name + "> = " + (found ? "OK" : "NULL"));
+                    string capturedName = name;
+                    ModLogger.RuntimeDiagnostic(
+                        ModLogger.RuntimeDiagnosticLevel.Verbose,
+                        () => "MissionBehaviorDiagnostic: UIParity<" + capturedName + "> = " + (found ? "OK" : "NULL"));
                 }
 
                 List<string> relevantBehaviorTypes = new List<string>();
@@ -60,15 +80,21 @@ namespace CoopSpectator.GameMode
                     }
                 }
 
-                ModLogger.Info(
-                    "MissionBehaviorDiagnostic: relevant UI behavior types = " +
-                    (relevantBehaviorTypes.Count > 0 ? string.Join(", ", relevantBehaviorTypes) : "(none)"));
+                ModLogger.RuntimeDiagnostic(
+                    ModLogger.RuntimeDiagnosticLevel.Verbose,
+                    () =>
+                        "MissionBehaviorDiagnostic: relevant UI behavior types = " +
+                        (relevantBehaviorTypes.Count > 0 ? string.Join(", ", relevantBehaviorTypes) : "(none)"));
             }
             catch (Exception ex)
             {
-                ModLogger.Info("MissionBehaviorDiagnostic: " + ex.Message);
+                ModLogger.RuntimeDiagnostic(
+                    ModLogger.RuntimeDiagnosticLevel.Verbose,
+                    () => "MissionBehaviorDiagnostic: " + ex.Message);
             }
-            ModLogger.Info("MissionBehaviorDiagnostic AfterStart EXIT");
+            ModLogger.RuntimeDiagnostic(
+                ModLogger.RuntimeDiagnosticLevel.Verbose,
+                () => "MissionBehaviorDiagnostic AfterStart EXIT");
         }
 
         public override void OnMissionTick(float dt)
@@ -86,8 +112,9 @@ namespace CoopSpectator.GameMode
             if (!_loggedBattleMapClientObserverFallback)
             {
                 _loggedBattleMapClientObserverFallback = true;
-                ModLogger.Info(
-                    "MissionBehaviorDiagnostic: running battle-map client exact visual observer fallback.");
+                ModLogger.RuntimeDiagnostic(
+                    ModLogger.RuntimeDiagnosticLevel.Verbose,
+                    () => "MissionBehaviorDiagnostic: running battle-map client exact visual observer fallback.");
             }
 
             CoopMissionSpawnLogic.TryRunClientExactCampaignVisualObserver(mission);

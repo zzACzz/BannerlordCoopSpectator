@@ -1,258 +1,148 @@
-# Підсумок розслідування get_item_usage_get_index_with_id
+# Підсумок розслідування `get_item_usage_get_index_with_id`
 
 ## Статус
 
-Коренева причина все ще **не доведена**.
-
-Зараз доведено більш вузьке:
-
-- довгий пошук навколо suppression для mounted bolt-stick **не** прибрав server assert
-- останні докази вказують вище, ніж рівень missile attach visuals
-- зараз найсильніші підозри такі:
-  - стан exact snapshot / create-agent handoff
-  - повторне використання stale server spawn state
-  - mismatch item identity / materialization
-  - можливий mismatch runtime/build між клієнтом і dedicated server
-
-## Основний симптом
-
-Повторювана серверна помилка така:
+Для конкретного зависання сервера, яке супроводжувалось warning-ом:
 
 - `get_item_usage_get_index_with_id failed`
 
-Свіжі докази з dedicated crash:
+зараз найкращий підтверджений висновок такий:
 
-- `C:\ProgramData\Mount and Blade II Bannerlord\logs\watchdog_log_101592.txt`
-  - crash tag: `-td95064--get_item_usage_get_index_with_id failed .`
-  - шлях до dump: `C:\ProgramData\Mount and Blade II Bannerlord\crashes\2026-06-05_05.08.07\dump.dmp`
-- `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_101592.txt:800916`
-  - `WARNING: get_item_usage_get_index_with_id failed .`
-- `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_101592.txt:800956`
-  - `rgl_post_warning_line: RGL WARNING - get_item_usage_get_index_with_id failed .`
+- проблема не була в "неправильному болті" як окремому `item id`;
+- проблема виникала на native lookup шляху, коли рушій доходив до порожнього `ItemUsage`;
+- production-fix, який реально прибрав warning/hang corridor, це guard у `MissionWeapon.HasAnyUsageWithItemUsageSetFlags`.
 
-Старіший аналіз dump з:
+Поточний fix:
 
-- `C:\dev\projects\BannerlordCoopSpectator3\tmp_cdb_105568.txt`
+- [Patches/MissionItemUsageSetFlagsGuardPatch.cs](C:/dev/projects/BannerlordCoopSpectator3/Patches/MissionItemUsageSetFlagsGuardPatch.cs)
 
-показав, що warning / hang шлях проходить через:
+Його суть проста:
 
-- `msvcp140!_Cnd_wait`
-- `Rgl!rglAnim_subnode_human_riding_set::~rglAnim_subnode_human_riding_set`
-- `Rgl!rglLibrary_interface::warning+0x394`
-- `Game!Animation_clip_item`
+- якщо в `MissionWeapon` чергова usage-entries має порожній `ItemUsage`, ми не віддаємо її в native `MBItem.GetItemUsageSetFlags("")`;
+- така entry просто пропускається;
+- решта usage-entries перевіряються штатно.
 
-Це означає, що помилка не є просто нешкідливим текстовим warning. Вона доходить до native riding / animation / item-usage state.
+## Що саме тепер доведено
 
-## Що вже пробували
+### 1. Warning був реальним native trigger, а не "нешкідливим логом"
 
-Раніше вже були досліджені такі напрямки:
+Старі crash/log дані показували такий шлях:
 
-1. Відкат на чистішу release-базу і rebuild під новий патч.
-2. Широкі експерименти з suppression для bolt-stick на:
-   - `Mission.HandleMissileCollisionReaction`
-   - `Agent.AttachWeaponToBone`
-   - `Agent.AttachWeaponToWeapon`
-3. Вужчі guard-и для mounted bolt-hit:
-   - mounted mount-body quarantine
-   - mounted shield-block quarantine
-   - dead/inactive mounted pair guard
-   - вузькі guard-и для `OnWieldedItemIndexChange` / `OnWeaponUsageIndexChange`
-4. Широкий mounted ranged lifecycle quarantine навколо:
-   - `OnWeaponReloadPhaseChange`
-   - `OnWeaponAmmoConsume`
-   - `OnWeaponAmountChange`
-5. Експерименти з native ammo / exact ammo для арбалетних bolt.
-6. Експерименти навколо одразу заряджених арбалетів.
-7. Verbose runtime diagnostics і аналіз watchdog dump.
-8. Низькорівневий аналіз через WinDbg / cdb.
-9. Пошук причини поломки манекенів через binary-search вимкнення частин моду.
-10. Вужчі експерименти навколо battle-only відображення імен.
+- `WARNING: get_item_usage_get_index_with_id failed .`
+- далі native stack заходив у riding / animation wait corridor;
+- через це сервер доходив до watchdog hang / crash state.
 
-## Що вже доведено як не-коренева причина
+Тобто проблема не була просто текстовим warning-ом у логах. Вона реально ламала native runtime path.
 
-### 1. Поломки манекенів були реальні, але окремі
+### 2. `bolt_e -> bolt_e@17` не доводить підміну на інший предмет
 
-Було доведено і задокументовано дві окремі регресії:
+Раніше один з головних підозрюваних був такий:
 
-- `docs/BOLT_MANNEQUIN_ATTACH_GUARDRAIL_2026-06-04.md`
-- `docs/AGENT_DISPLAY_NAME_MANNEQUIN_GUARDRAIL_2026-06-04.md`
+- у наших diagnostics видно `bolt_e -> bolt_e@17`;
+- з цього робився висновок, що ми десь підміняємо один предмет на інший.
 
-Ці висновки важливі, але вони **не** пояснюють сам server assert.
+Тепер це треба вважати застарілою інтерпретацією.
 
-### 2. Остання теорія про mounted ranged ammo-lifecycle була спростована
+У нашій діагностиці суфікс виду `@17` означає не новий `StringId`, а:
 
-Ми прибрали selective suppression шлях, який блокував reload/ammo callback-и для live mounted ranged unit.
+- той самий базовий item id;
+- плюс runtime `data value`.
 
-Результат:
-
-- assert все одно стався
-- `rgl_log_101592.txt` все одно містить `get_item_usage_get_index_with_id failed`
-
-Висновок:
-
-- попередня теорія "ми ламаємо native state, бо suppress-имо лише половину mounted ranged ammo lifecycle" **не** була кореневою причиною
-
-Цей експеримент все одно був корисним, бо прибрав одну велику хибну гіпотезу.
-
-### 3. Баг не обмежується одним сценарієм з mounted bow rider
-
-У попередніх прогонах здавалося, що проблема дуже тісно прив'язана до mounted bow rider і його коня.
-
-Останній серверний лог `rgl_log_101592.txt` показує tracked bolt-hit windows навколо:
-
-- mounted melee pair `Agent=132 / Mount=133`
-- mounted thrown pair `Agent=182 / Mount=183`
-- mounted thrown pair `Agent=156 / Mount=157`
-
-Отже, поточні докази кажуть так:
-
-- mounted bolt events все ще є важливим trigger corridor
-- але збій **не** виглядає як вузький сценарій "тільки mounted bow rider з horse-attached arrow"
-
-## Найсильніші поточні докази
-
-### A. Повторюваний create-agent / exact snapshot mismatch навколо crossbow troop
-
-`C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_94752.txt` багаторазово показує:
-
-- `MissionDiff ... Changed=[Weapon1:bolt_e->bolt_e@17]`
-
-Приклади:
-
-- `rgl_log_94752.txt:792637`
-- `rgl_log_94752.txt:792728`
-- `rgl_log_94752.txt:792829`
-- `rgl_log_94752.txt:801880`
-
-Важливий нюанс:
-
-- `bolt_e@17` у наших логах не є окремим `StringId`
-- у поточній діагностиці суфікс `@17` формується як `itemId + runtime data value`
-- для `MissionWeapon` це поле є `_dataValue`: для болтів воно означає кількість, для щитів може означати durability / hit points
-- тому `bolt_e -> bolt_e@17` у `MissionDiff` не доводить перехід на інший предмет; це може бути той самий `bolt_e`, але вже в live mission state з іншим runtime-станом
-- наша exact snapshot / handoff діагностика зараз трактує таку зміну як mismatch, хоча `LayoutIdentityMatch=True` уже одночасно показує, що базовий `itemId` збігається
-- отже тут підтверджена проблема не в "іншому bolt id", а в тому, що наш diff змішує item identity і runtime state в одному порівнянні
-
-### B. Stale server spawn state / character mismatch з'являється прямо перед warning
-
-З `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_101592.txt`:
-
-- `800904`
-  - `server-create-agent-onwrite-sanitize-skipped`
-  - `Reason=stale-server-spawn-state:character-mismatch`
-  - `AgentIndex=18`
-- `800907`
-  - spawn result для crossbow troop
-  - у spawn weapons є `Weapon1=bolt_e`
-  - у mission weapons вже `Weapon1=bolt_e@17`
-- `800916`
-  - `WARNING: get_item_usage_get_index_with_id failed .`
-
-Важливе уточнення:
-
-- сам перехід `spawn weapons: bolt_e` -> `mission weapons: bolt_e@17` не виглядає аномалією сам по собі
-- ordinary AI corridor у нас навмисно розводить `EntryWeapons`, `PreSpawnWeapons` і live `MissionWeapons` по різних етапах
-- тому ці три представлення не повинні бути буквально однаковими на кожному кроці
-
-Зараз це найсильніша причина змістити розслідування від bolt-visual suppression у бік:
-
-- повторного використання stale create-agent payload
-- неправильного expected/actual troop identity mapping
-- mismatch під час exact snapshot materialization
-
-### C. Може існувати mismatch між dedicated/client sub-build
-
-Останні логи показують:
-
-- dedicated server runtime у `watchdog_log_101592.txt`
-  - `Build Version#TW#v1.4.5.114659`
-- client runtime у `watchdog_log_94752.txt`
-  - `Build Version#TW#v1.4.5.115026`
-- client runtime у `watchdog_log_90848.txt`
-  - `Build Version#TW#v1.4.5.115026`
-
-Саме по собі це **ще не доводить** несумісність.
-
-Але це достатньо підозріло, щоб у наступному раунді окремо перевірити:
-
-1. чи dedicated server install справді має бути на `114659`
-2. чи комбінація client `115026` + dedicated `114659` є підтримуваною
-3. чи ця різниця версій може впливати на item usage / weapon materialization / agent creation
-
-## Найкраща поточна інтерпретація
-
-Найімовірніша модель зараз така:
-
-1. якийсь agent / item state вже стає неконсистентним під час exact snapshot handoff або create-agent materialization
-2. bolt-hit і mounted combat activity пізніше лише активують цей уже зіпсований state
-3. native code потім намагається отримати item-usage index зі state, який більше не відповідає очікуваному identity chain
-4. RGL викидає `get_item_usage_get_index_with_id failed`
-5. сервер зрештою доходить до native warning / riding / animation wait path, який ми бачили в dump
+Для болтів це зазвичай означає кількість, для інших слотів це може означати інший runtime-state на кшталт durability / hit points.
 
 Отже:
 
-- bolt-hit може бути **тригером**
-- але create-agent / materialization / identity mismatch може бути **справжнім попереднім джерелом проблеми**
+- `bolt_e -> bolt_e@17` саме по собі не є доказом неправильного item identity transition;
+- це радше зміна runtime-стану того ж предмета.
 
-## Чому попередній пошук, імовірно, був зміщений
+### 3. Багато наших попередніх bolt/mount suppression-експериментів не були кореневим фіксом
 
-Ми витратили багато часу навколо:
+Ми перепробували:
 
-- bolt sticking
-- horse body hit reactions
-- reload/ammo callback suppression
-- mounted combat lifecycle guards
+- широкі suppression для bolt sticking;
+- quarantine для mounted pair;
+- guard-и навколо reload/ammo/wield callbacks;
+- варіанти з native ammo / exact ammo;
+- експерименти навколо вже заряджених арбалетів;
+- діагностичні обмеження по dead/inactive mounted pair.
 
-Такий пошук був логічним, бо видимий crash часто з'являвся після серії bolt-hit по mounted unit.
+Ці експерименти були корисні для звуження, але вони не закрили проблему як production-fix.
 
-Але останні логи тепер натякають, що це, ймовірно, був downstream noise навколо глибшої проблеми:
+Підсумок тут такий:
 
-- stale spawn state
-- troop identity mismatch
-- exact snapshot / mission weapon identity mismatch
+- болти і влучання по mounted unit були trigger corridor;
+- але корисний production-fix виявився не у missile attach / bolt visual layer;
+- корисний fix виявився у захисті native item-usage lookup від порожнього `ItemUsage`.
 
-Іншими словами:
+### 4. Поломки манекенів були окремою регресією
 
-- ми могли дебажити момент, коли зіпсований state стає видимим
-- а не той ранній момент, коли цей state створюється
+Поломка манекенів реально існувала, але вона не була коренем цього server hang.
 
-## Кращий напрямок для наступного пошуку
+Окремі guardrail-звіти:
 
-Не треба починати наступний раунд з нових bolt-visual suppression експериментів.
+- [docs/BOLT_MANNEQUIN_ATTACH_GUARDRAIL_2026-06-04.md](C:/dev/projects/BannerlordCoopSpectator3/docs/BOLT_MANNEQUIN_ATTACH_GUARDRAIL_2026-06-04.md)
+- [docs/AGENT_DISPLAY_NAME_MANNEQUIN_GUARDRAIL_2026-06-04.md](C:/dev/projects/BannerlordCoopSpectator3/docs/AGENT_DISPLAY_NAME_MANNEQUIN_GUARDRAIL_2026-06-04.md)
 
-Починати краще з create-agent / exact handoff corridor:
+Важливо не змішувати ці дві лінії:
 
-- `ExactCreateAgentCorridorDiagnostics`
-- `CoopMissionSpawnLogic`
-- `ExactCampaignPreSpawnLoadoutPatch`
-- генерація exact snapshot для ordinary troop
-- повторне використання stale server spawn state / expected entry resolution
-- логіка heuristic fallback candidate
-- правила порівняння mission weapon identity
+- mannequin regressions;
+- `get_item_usage_get_index_with_id` hang corridor.
 
-Питання, на які варто відповісти далі:
+## Що саме виправило проблему
 
-1. Чому `server-create-agent-onwrite-sanitize-skipped` виникає так близько до warning?
-2. Чи не перевикористовуються expected troop identity після recycle agent slot?
-3. Чи не стоїть dedicated server install на неправильному sub-build відносно клієнта?
-4. У якій саме точці `create-agent / exact handoff corridor` item identity ще коректний, а live runtime state вже стає небезпечним для `ItemUsage`
+Поточний робочий guard:
 
-## Guardrails для майбутніх спроб
+- перехоплює `MissionWeapon.HasAnyUsageWithItemUsageSetFlags`;
+- вручну проходить по `WeaponsCount`;
+- пропускає usage-записи, де `weapon?.ItemUsage` порожній;
+- викликає `MBItem.GetItemUsageSetFlags(itemUsage)` тільки для непорожніх значень.
 
-Поки create-agent / materialization corridor не досліджений:
+Практичний сенс:
 
-- не витрачати ще один цикл на broad mounted ranged ammo suppression
-- не повертати глобальні hook-и на `Agent.AttachWeaponToBone/Weapon`
-- не повертати глобальні hook-и на `Agent.Name` / `Agent.NameTextObject`
-- не припускати, що "ще більше bolt quarantine" автоматично наближає до кореня
+- ми не даємо рушію намагатися резолвити порожній usage id;
+- саме цей lookup і був найкраще підтвердженим місцем падіння warning/hang corridor.
 
-## Короткий підсумок
+## Які докази це підтримують
+
+Після впровадження `MissionItemUsageSetFlagsGuardPatch`:
+
+- у свіжих успішних прогонах більше не з'являвся `get_item_usage_get_index_with_id failed`;
+- watchdog більше не показував той самий crash/hang pattern;
+- бій переживав підкріплення і доходив до завершення без старого зависання.
+
+Це не просто нова гіпотеза, а найсильніший на зараз підтверджений практикою висновок.
+
+## Що лишається невирішеним, але вже не є головним lead для цього бага
+
+Нижче речі, які можуть ще вимагати cleanup або окремого розбору, але вже не є найкращим поясненням саме цього warning/hang:
+
+- exact create-agent / handoff diagnostics шум;
+- старі corridor comparison rules, які змішували item identity і runtime state;
+- battle-only name/display oddities;
+- окремі regressions навколо mannequin pipeline;
+- будь-який шум від старої diagnostics surface.
+
+Тобто далі правильніше думати так:
+
+- цей конкретний hang path ми закрили guard-ом на empty `ItemUsage`;
+- не треба знову повертатись у широкі bolt-suppression експерименти без нових фактів;
+- якщо warning повернеться, першим ділом треба перевіряти, чи guard реально завантажився і чи не з'явився новий шлях до порожнього `ItemUsage`.
+
+## Рекомендації на майбутнє
+
+1. Тримати `MissionItemUsageSetFlagsGuardPatch` увімкненим як production-fix.
+2. Не трактувати `item -> item@N` у diagnostics як автоматичну підміну предмета.
+3. Нову hot-path diagnostics тримати вимкненою за замовчуванням або за explicit verbose gate.
+4. Якщо ця помилка колись повернеться, починати не з bolt visuals, а з перевірки:
+   - чи є порожній `ItemUsage`;
+   - чи guard застосувався на клієнті й dedicated server;
+   - чи не з'явився новий native шлях, який обходить цей guard.
+
+## Короткий висновок
 
 Найкращий поточний підсумок такий:
 
-- assert реальний і native
-- регресії з манекенами були окремими побічними проблемами, а не коренем
-- mounted bolt-hit все ще лишається trigger corridor, але вже не виглядає найглибшою причиною
-- `bolt_e@17` у наших логах означає не "інший bolt id", а `bolt_e` плюс runtime data value
-- нові логи значно сильніше вказують не на прямий bolt-id mismatch, а на проблему в create-agent / exact snapshot corridor або у подальшому live runtime state
-- dedicated server vs client sub-build mismatch виглядає підозріло і його треба окремо перевірити перед новими інвазивними змінами
+- корінь конкретного server hang був не у "неправильному bolt id", а у пустому `ItemUsage`, який доходив до native lookup;
+- `MissionItemUsageSetFlagsGuardPatch` закрив саме цей шлях;
+- старі `bolt_e@17` спостереження були корисними для діагностики, але не довели item identity corruption;
+- діагностичний шум навколо battle/create-agent corridor треба тримати вимкненим за замовчуванням, щоб не навантажувати бій.

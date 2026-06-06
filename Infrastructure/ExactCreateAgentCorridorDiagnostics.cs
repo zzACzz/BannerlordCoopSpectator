@@ -136,9 +136,11 @@ namespace CoopSpectator.Infrastructure
                 ExpectedEntryPayloadWeaponsByEntryId.Clear();
             }
 
-            ModLogger.Info(
-                "ExactCreateAgentCorridorDiagnostics: reset runtime state. " +
-                "Source=" + (source ?? "unknown"));
+            ModLogger.RuntimeDiagnostic(
+                ModLogger.RuntimeDiagnosticLevel.Verbose,
+                () =>
+                    "ExactCreateAgentCorridorDiagnostics: reset runtime state. " +
+                    "Source=" + (source ?? "unknown"));
         }
 
         internal static void ClearServerAgentIndexState(int agentIndex, string source)
@@ -174,23 +176,49 @@ namespace CoopSpectator.Infrastructure
             if (!GameNetwork.IsServer || exactOrigin == null || entryState == null)
                 return;
 
+            bool captureVerbose = ShouldCaptureVerboseObservation();
+            string payloadDiagnosticSummary = captureVerbose
+                ? (payloadDiagnostic?.ToSummary() ?? "ExactCreateAgentPayloadDiagnostic={State=absent}")
+                : null;
+            string payloadWeaponLayoutSummary = captureVerbose
+                ? (payloadDiagnostic?.ToWeaponLayoutSummary() ?? "ExactCreateAgentWeaponLayout={State=absent}")
+                : null;
+            string entryWeaponSlotVector = captureVerbose
+                ? BuildEntryWeaponSlotVector(entryState)
+                : null;
+            string preSpawnWeaponSlotVector = captureVerbose
+                ? BuildEquipmentWeaponSlotVector(exactEquipment)
+                : null;
+            string preSpawnMountSummary = captureVerbose
+                ? ExactCreateAgentPayloadDiagnostics.BuildEquipmentMountLayoutSummary(exactEquipment)
+                : null;
+            string preSpawnNonWeaponSlotVector = captureVerbose
+                ? BuildEquipmentNonWeaponSlotVector(exactEquipment)
+                : null;
+            Dictionary<string, string> expectedItemOriginById = captureVerbose
+                ? BuildExpectedItemOriginById(exactEquipment)
+                : null;
+
             lock (Sync)
             {
                 PendingServerStatesByEntryId[entryState.EntryId ?? string.Empty] = new ServerCreateAgentPendingState
                 {
                     EntryId = entryState.EntryId,
                     TroopId = exactOrigin.TroopId,
-                    PayloadDiagnosticSummary = payloadDiagnostic?.ToSummary() ?? "ExactCreateAgentPayloadDiagnostic={State=absent}",
-                    PayloadWeaponLayoutSummary = payloadDiagnostic?.ToWeaponLayoutSummary() ?? "ExactCreateAgentWeaponLayout={State=absent}",
-                    EntryWeaponSlotVector = BuildEntryWeaponSlotVector(entryState),
-                    PreSpawnWeaponSlotVector = BuildEquipmentWeaponSlotVector(exactEquipment),
-                    PreSpawnMountSummary = ExactCreateAgentPayloadDiagnostics.BuildEquipmentMountLayoutSummary(exactEquipment),
-                    PreSpawnNonWeaponSlotVector = BuildEquipmentNonWeaponSlotVector(exactEquipment),
+                    PayloadDiagnosticSummary = payloadDiagnosticSummary,
+                    PayloadWeaponLayoutSummary = payloadWeaponLayoutSummary,
+                    EntryWeaponSlotVector = entryWeaponSlotVector,
+                    PreSpawnWeaponSlotVector = preSpawnWeaponSlotVector,
+                    PreSpawnMountSummary = preSpawnMountSummary,
+                    PreSpawnNonWeaponSlotVector = preSpawnNonWeaponSlotVector,
                     EntryWeaponSlots = BuildEntryWeaponSlots(entryState),
                     PreSpawnWeaponSlots = BuildEquipmentWeaponSlots(exactEquipment),
-                    ExpectedItemOriginById = BuildExpectedItemOriginById(exactEquipment)
+                    ExpectedItemOriginById = expectedItemOriginById
                 };
             }
+
+            if (!captureVerbose)
+                return;
 
             string details =
                 "EntryId=" + (entryState.EntryId ?? "null") +
@@ -206,13 +234,13 @@ namespace CoopSpectator.Infrastructure
                                            entryState.OriginalCharacterId ??
                                            "null") +
                 " EntryWeapons={" + ExactCreateAgentPayloadDiagnostics.BuildEntryWeaponLayoutSummary(entryState) + "}" +
-                " EntryWeaponSlots={" + BuildEntryWeaponSlotVector(entryState) + "}" +
+                " EntryWeaponSlots={" + (entryWeaponSlotVector ?? "unknown") + "}" +
                 " EntryMount={" + ExactCreateAgentPayloadDiagnostics.BuildEntryMountLayoutSummary(entryState) + "}" +
                 " PreSpawnWeapons={" + ExactCreateAgentPayloadDiagnostics.BuildEquipmentWeaponLayoutSummary(exactEquipment) + "}" +
-                " PreSpawnWeaponSlots={" + BuildEquipmentWeaponSlotVector(exactEquipment) + "}" +
-                " PreSpawnMount={" + ExactCreateAgentPayloadDiagnostics.BuildEquipmentMountLayoutSummary(exactEquipment) + "}" +
-                " " + (payloadDiagnostic?.ToSummary() ?? "ExactCreateAgentPayloadDiagnostic={State=absent}") +
-                " " + (payloadDiagnostic?.ToWeaponLayoutSummary() ?? "ExactCreateAgentWeaponLayout={State=absent}");
+                " PreSpawnWeaponSlots={" + (preSpawnWeaponSlotVector ?? "unknown") + "}" +
+                " PreSpawnMount={" + (preSpawnMountSummary ?? "unknown") + "}" +
+                " " + (payloadDiagnosticSummary ?? "ExactCreateAgentPayloadDiagnostic={State=absent}") +
+                " " + (payloadWeaponLayoutSummary ?? "ExactCreateAgentWeaponLayout={State=absent}");
             Log("server-pre-spawn-payload", details, persistToRuntimeBundle: false);
         }
 
@@ -228,6 +256,13 @@ namespace CoopSpectator.Infrastructure
 
             try
             {
+                bool captureVerbose = ShouldCaptureVerboseObservation();
+                string serverSpawnMissionWeaponSlotVector = captureVerbose
+                    ? BuildMissionEquipmentWeaponSlotVector(result?.Equipment)
+                    : null;
+                string serverSpawnSpawnWeaponSlotVector = captureVerbose
+                    ? BuildEquipmentWeaponSlotVector(result?.SpawnEquipment)
+                    : null;
                 ServerCreateAgentPendingState pendingState = null;
                 lock (Sync)
                 {
@@ -244,16 +279,16 @@ namespace CoopSpectator.Infrastructure
                             ServerSpawnMounted = result?.MountAgent != null ||
                                                 result?.SpawnEquipment?[EquipmentIndex.Horse].Item != null ||
                                                 result?.SpawnEquipment?[EquipmentIndex.HorseHarness].Item != null,
-                            PayloadDiagnosticSummary = pendingState.PayloadDiagnosticSummary ?? (payloadDiagnostic?.ToSummary() ?? "ExactCreateAgentPayloadDiagnostic={State=absent}"),
-                            PayloadWeaponLayoutSummary = pendingState.PayloadWeaponLayoutSummary ?? (payloadDiagnostic?.ToWeaponLayoutSummary() ?? "ExactCreateAgentWeaponLayout={State=absent}"),
+                            PayloadDiagnosticSummary = pendingState.PayloadDiagnosticSummary,
+                            PayloadWeaponLayoutSummary = pendingState.PayloadWeaponLayoutSummary,
                             ExpectedEntryWeaponSlotVector = pendingState.EntryWeaponSlotVector,
                             ExpectedPreSpawnWeaponSlotVector = pendingState.PreSpawnWeaponSlotVector,
                             ExpectedPreSpawnNonWeaponSlotVector = pendingState.PreSpawnNonWeaponSlotVector,
                             ExpectedPreSpawnMountSummary = pendingState.PreSpawnMountSummary,
                             ExpectedEntryWeaponSlots = pendingState.EntryWeaponSlots,
                             ExpectedPreSpawnWeaponSlots = pendingState.PreSpawnWeaponSlots,
-                            ServerSpawnMissionWeaponSlotVector = BuildMissionEquipmentWeaponSlotVector(result?.Equipment),
-                            ServerSpawnSpawnWeaponSlotVector = BuildEquipmentWeaponSlotVector(result?.SpawnEquipment),
+                            ServerSpawnMissionWeaponSlotVector = serverSpawnMissionWeaponSlotVector,
+                            ServerSpawnSpawnWeaponSlotVector = serverSpawnSpawnWeaponSlotVector,
                             ServerSpawnMissionWeaponSlots = BuildMissionEquipmentWeaponSlots(result?.Equipment),
                             ServerSpawnSpawnWeaponSlots = BuildEquipmentWeaponSlots(result?.SpawnEquipment),
                             ExpectedItemOriginById = pendingState.ExpectedItemOriginById,
@@ -263,6 +298,9 @@ namespace CoopSpectator.Infrastructure
                     }
                 }
 
+                if (!captureVerbose)
+                    return;
+
                 string details =
                     "EntryId=" + (exactOrigin.EntryId ?? "null") +
                     " TroopId=" + (exactOrigin.TroopId ?? "null") +
@@ -270,10 +308,10 @@ namespace CoopSpectator.Infrastructure
                     " SpawnFromAgentVisuals=" + spawnFromAgentVisuals +
                     " EquipmentInjected=" + equipmentInjected +
                     " SpawnedAgent={" + BuildAgentSummary(result) + "}" +
-                    " SpawnedAgentSpawnWeaponSlots={" + BuildEquipmentWeaponSlotVector(result?.SpawnEquipment) + "}" +
-                    " SpawnedAgentMissionWeaponSlots={" + BuildMissionEquipmentWeaponSlotVector(result?.Equipment) + "}" +
-                    " " + (payloadDiagnostic?.ToSummary() ?? "ExactCreateAgentPayloadDiagnostic={State=absent}") +
-                    " " + (payloadDiagnostic?.ToWeaponLayoutSummary() ?? "ExactCreateAgentWeaponLayout={State=absent}");
+                    " SpawnedAgentSpawnWeaponSlots={" + (serverSpawnSpawnWeaponSlotVector ?? "unknown") + "}" +
+                    " SpawnedAgentMissionWeaponSlots={" + (serverSpawnMissionWeaponSlotVector ?? "unknown") + "}" +
+                    " " + (pendingState?.PayloadDiagnosticSummary ?? "ExactCreateAgentPayloadDiagnostic={State=absent}") +
+                    " " + (pendingState?.PayloadWeaponLayoutSummary ?? "ExactCreateAgentWeaponLayout={State=absent}");
                 Log("server-spawn-result", details, persistToRuntimeBundle: false);
             }
             catch (Exception ex)
@@ -296,6 +334,8 @@ namespace CoopSpectator.Infrastructure
             reason = "server-create-agent-state-unavailable";
             if (!GameNetwork.IsServer || createAgent == null)
                 return false;
+
+            bool captureVerbose = ShouldCaptureVerboseObservation();
 
             ServerCreateAgentExpectedState state = null;
             lock (Sync)
@@ -326,14 +366,17 @@ namespace CoopSpectator.Infrastructure
                 }
 
                 reason = stateMismatchReason ?? "stale-server-spawn-state";
-                Log(
-                    "server-create-agent-onwrite-sanitize-skipped",
-                    "AgentIndex=" + createAgent.AgentIndex +
-                    " Reason=" + reason +
-                    " ExpectedEntryId=" + (state.EntryId ?? "unknown") +
-                    " ExpectedTroopId=" + (state.TroopId ?? "unknown") +
-                    " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null"),
-                    persistToRuntimeBundle: false);
+                if (captureVerbose)
+                {
+                    Log(
+                        "server-create-agent-onwrite-sanitize-skipped",
+                        "AgentIndex=" + createAgent.AgentIndex +
+                        " Reason=" + reason +
+                        " ExpectedEntryId=" + (state.EntryId ?? "unknown") +
+                        " ExpectedTroopId=" + (state.TroopId ?? "unknown") +
+                        " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null"),
+                        persistToRuntimeBundle: false);
+                }
                 return false;
             }
 
@@ -345,7 +388,9 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
-            string beforePayloadSummary = BuildCreateAgentPayloadSummary(createAgent);
+            string beforePayloadSummary = captureVerbose
+                ? BuildCreateAgentPayloadSummary(createAgent)
+                : null;
             Equipment sanitizedSpawnEquipment = CloneEquipment(state.ServerSpawnSpawnEquipmentClone);
             MissionEquipment sanitizedMissionEquipment = BuildMissionEquipmentFromEquipmentClone(state.ServerSpawnMissionEquipmentClone);
             if (sanitizedSpawnEquipment == null || sanitizedMissionEquipment == null)
@@ -359,22 +404,27 @@ namespace CoopSpectator.Infrastructure
             TrySetInstanceMemberValue(createAgent, "MissionEquipment", sanitizedMissionEquipment);
             TrySetInstanceMemberValue(createAgent, "<MissionEquipment>k__BackingField", sanitizedMissionEquipment);
 
-            string afterPayloadSummary = BuildCreateAgentPayloadSummary(createAgent);
             reason =
                 "sanitized-to-server-spawn-baseline:" +
                 (missionMismatch ? "mission-weapons-mismatch" : "mission-weapons-match") +
                 "," +
                 (spawnMismatch ? "spawn-weapons-mismatch" : "spawn-weapons-match");
-            string details =
-                "AgentIndex=" + createAgent.AgentIndex +
-                " Reason=" + reason +
-                " ExpectedEntryId=" + (state.EntryId ?? "unknown") +
-                " ExpectedTroopId=" + (state.TroopId ?? "unknown") +
-                " BeforePayload={" + beforePayloadSummary + "}" +
-                " AfterPayload={" + afterPayloadSummary + "}" +
-                " ServerSpawnMissionWeaponSlots={" + (state.ServerSpawnMissionWeaponSlotVector ?? "unknown") + "}" +
-                " ServerSpawnSpawnWeaponSlots={" + (state.ServerSpawnSpawnWeaponSlotVector ?? "unknown") + "}";
-            Log("server-create-agent-onwrite-sanitized", details, persistToRuntimeBundle: false);
+
+            if (captureVerbose)
+            {
+                string afterPayloadSummary = BuildCreateAgentPayloadSummary(createAgent);
+                string details =
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " Reason=" + reason +
+                    " ExpectedEntryId=" + (state.EntryId ?? "unknown") +
+                    " ExpectedTroopId=" + (state.TroopId ?? "unknown") +
+                    " BeforePayload={" + beforePayloadSummary + "}" +
+                    " AfterPayload={" + afterPayloadSummary + "}" +
+                    " ServerSpawnMissionWeaponSlots={" + (state.ServerSpawnMissionWeaponSlotVector ?? "unknown") + "}" +
+                    " ServerSpawnSpawnWeaponSlots={" + (state.ServerSpawnSpawnWeaponSlotVector ?? "unknown") + "}";
+                Log("server-create-agent-onwrite-sanitized", details, persistToRuntimeBundle: false);
+            }
+
             return true;
         }
 
@@ -383,6 +433,9 @@ namespace CoopSpectator.Infrastructure
             string source)
         {
             if (!GameNetwork.IsServer || createAgent == null)
+                return;
+
+            if (!ShouldCaptureVerboseObservation())
                 return;
 
             ServerCreateAgentExpectedState state = null;

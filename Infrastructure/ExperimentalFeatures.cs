@@ -53,7 +53,7 @@ namespace CoopSpectator.Infrastructure
         /// deployment-plan / formation-plan / scene-spawn-entry summaries.
         /// This is intentionally log-heavy and meant for diagnosis, not steady-state play.
         /// </summary>
-        public const bool EnableBattleMapFullContractDiagnostics = true;
+        public const bool EnableBattleMapFullContractDiagnostics = false;
 
         /// <summary>
         /// Exact campaign scene bootstrap path: replace the hybrid delayed
