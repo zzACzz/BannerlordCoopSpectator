@@ -139,6 +139,7 @@
     <Compile Include="..\Patches\ExactCampaignPreSpawnLoadoutPatch.cs" Link="Patches\ExactCampaignPreSpawnLoadoutPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" Link="Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" />
     <Compile Include="..\Patches\BattleMapSpawnHandoffPatch.cs" Link="Patches\BattleMapSpawnHandoffPatch.cs" />
+    <Compile Include="..\Patches\MissionItemUsageSetFlagsGuardPatch.cs" Link="Patches\MissionItemUsageSetFlagsGuardPatch.cs" />
     <Compile Include="..\Patches\LateJoinPeerBootstrapGatePatch.cs" Link="Patches\LateJoinPeerBootstrapGatePatch.cs" />
     <Compile Include="..\Patches\LateJoinPeerStateReplayOwnershipPatch.cs" Link="Patches\LateJoinPeerStateReplayOwnershipPatch.cs" />
     <Compile Include="..\Patches\PendingBattleLoadMissionTransportTokenPatch.cs" Link="Patches\PendingBattleLoadMissionTransportTokenPatch.cs" />

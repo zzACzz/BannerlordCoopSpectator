@@ -220,6 +220,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                             if (EnableManualPatchMissionFlowBattleRuntimeSpawnHandoff)
                             {
                                 BattleMapSpawnHandoffPatch.Apply(harmony);
+                                MissionItemUsageSetFlagsGuardPatch.Apply(harmony);
                             }
                             else
                             {
