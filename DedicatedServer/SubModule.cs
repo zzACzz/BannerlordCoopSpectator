@@ -314,6 +314,7 @@ namespace CoopSpectator
                     TryApplyExactCampaignPreSpawnLoadoutPatch();
                     TryApplyExactCampaignNetworkObjectBootstrapPatch();
                     TryApplyBattleMapSpawnHandoffPatch();
+                    TryApplyMissionItemUsageSetFlagsGuardPatch();
                     TryApplyLateJoinPeerBootstrapGatePatch();
                     TryApplyFinishedLoadingMissionReadyGatePatch();
                     if (EnableBattleShellSuppressionPatch)
@@ -511,6 +512,20 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: BattleMapSpawnHandoff patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyMissionItemUsageSetFlagsGuardPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                MissionItemUsageSetFlagsGuardPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: MissionItemUsageSetFlagsGuard patch apply failed: " + ex.Message);
             }
         }
 

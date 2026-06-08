@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using HarmonyLib;
@@ -50,9 +51,18 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool ShouldRunOnCurrentMission()
+        {
+            Mission mission = Mission.Current;
+            return mission != null &&
+                   MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName);
+        }
+
         private static void Mission_SpawnAgent_Prefix(AgentBuildData agentBuildData, bool spawnFromAgentVisuals)
         {
-            if (!ExperimentalFeatures.EnableExactCampaignPreSpawnLoadoutInjection || !GameNetwork.IsServer)
+            if (!ExperimentalFeatures.EnableExactCampaignPreSpawnLoadoutInjection ||
+                !GameNetwork.IsServer ||
+                !ShouldRunOnCurrentMission())
                 return;
 
             if (!(agentBuildData?.AgentOrigin is ExactCampaignSnapshotAgentOrigin exactOrigin))
@@ -192,7 +202,9 @@ namespace CoopSpectator.Patches
 
         private static void Mission_SpawnAgent_Postfix(AgentBuildData agentBuildData, bool spawnFromAgentVisuals, Agent __result)
         {
-            if (!ExperimentalFeatures.EnableExactCampaignPreSpawnLoadoutInjection || !GameNetwork.IsServer)
+            if (!ExperimentalFeatures.EnableExactCampaignPreSpawnLoadoutInjection ||
+                !GameNetwork.IsServer ||
+                !ShouldRunOnCurrentMission())
                 return;
 
             if (!(agentBuildData?.AgentOrigin is ExactCampaignSnapshotAgentOrigin exactOrigin))

@@ -396,10 +396,10 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentWeaponUsageIndexChangeMessage), () => PatchMissionNetworkComponentWeaponUsageIndexChangeMessage(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateMissile), () => PatchMissionNetworkComponentCreateMissile(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentHandleMissileCollisionReaction), () => PatchMissionNetworkComponentHandleMissileCollisionReaction(harmony));
+#if COOPSPECTATOR_DEDICATED
             TryApplyPatchStep(nameof(PatchMissionSpawnAttachedWeaponOnCorpseServer), () => PatchMissionSpawnAttachedWeaponOnCorpseServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer), () => PatchMissionSpawnAttachedWeaponOnSpawnedWeaponServer(harmony));
             TryApplyPatchStep(nameof(PatchMissionHandleMissileCollisionReactionServer), () => PatchMissionHandleMissileCollisionReactionServer(harmony));
-#if COOPSPECTATOR_DEDICATED
             TryApplyPatchStep(nameof(PatchAgentAttachWeaponToWeaponServer), () => PatchAgentAttachWeaponToWeaponServer(harmony));
             TryApplyPatchStep(nameof(PatchAgentAttachWeaponToBoneServer), () => PatchAgentAttachWeaponToBoneServer(harmony));
 #endif

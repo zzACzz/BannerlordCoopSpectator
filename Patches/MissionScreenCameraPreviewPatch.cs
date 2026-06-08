@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.UI;
 using HarmonyLib;
@@ -89,10 +90,13 @@ namespace CoopSpectator.Patches
                 if (__instance?.Mission == null ||
                     !GameNetwork.IsClient ||
                     !GameNetwork.IsSessionActive ||
-                    !CoopMissionSelectionView.TryGetActiveCameraPreviewAgent(out Agent previewAgent))
+                    !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(__instance.Mission.SceneName))
                 {
                     return;
                 }
+
+                if (!CoopMissionSelectionView.TryGetActiveCameraPreviewAgent(out Agent previewAgent))
+                    return;
 
                 MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
                 if (localMissionPeer == null ||
