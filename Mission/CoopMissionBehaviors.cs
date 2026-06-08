@@ -3758,8 +3758,8 @@ namespace CoopSpectator.MissionBehaviors
         private const int InitialMaterializedArmySpawnPulseBudgetPerSide = 1;
         private const double InitialMaterializedArmyPulseIntervalSeconds = 0.35d;
         private const double MaterializedArmyReinforcementPulseIntervalSeconds = 0.75d;
-        private const string FixedMissionAttackerCultureId = "empire";
-        private const string FixedMissionDefenderCultureId = "vlandia";
+        private const string FallbackMissionAttackerCultureId = "empire";
+        private const string FallbackMissionDefenderCultureId = "vlandia";
         private static readonly string[] ImportedEquipmentProbeIds =
         {
             "aserai_chain_plate_armor_d",
@@ -5460,6 +5460,15 @@ namespace CoopSpectator.MissionBehaviors
             ExactTransferContractRuntimeCache.Reset((_lastServerRuntimeInitializationSource ?? source ?? "unknown") + " server-runtime-init");
 
             RefreshAllowedTroopsFromRoster(source);
+            BattleRuntimeState initializedRuntimeState = BattleSnapshotRuntimeState.GetState();
+            if (MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) &&
+                initializedRuntimeState?.Sides != null &&
+                initializedRuntimeState.Sides.Count > 0)
+            {
+                string teamInitSource = (_lastServerRuntimeInitializationSource ?? source ?? "unknown") + " runtime-init";
+                MissionMultiplayerCoopBattle.TryApplyAuthoritativeBattleCultureOptionsFromRuntimeState(teamInitSource);
+                MissionMultiplayerCoopBattle.EnsureOpposingTeamsReadyForMission(mission, teamInitSource);
+            }
             CampaignMapPatchMissionInit.TryRepairLiveMissionContract(
                 mission,
                 (_lastServerRuntimeInitializationSource ?? source ?? "unknown") + " live-contract-repair");
@@ -21781,20 +21790,17 @@ namespace CoopSpectator.MissionBehaviors
                 return null;
 
             if (side == BattleSideEnum.Attacker)
-                return FixedMissionAttackerCultureId;
+                return BattleSnapshotRuntimeState.ResolveSideCultureId(BattleSideEnum.Attacker, FallbackMissionAttackerCultureId);
 
             if (side == BattleSideEnum.Defender)
-                return FixedMissionDefenderCultureId;
+                return BattleSnapshotRuntimeState.ResolveSideCultureId(BattleSideEnum.Defender, FallbackMissionDefenderCultureId);
 
             return null;
         }
 
         private static string ResolveRuntimeMissionCultureIdForPeer(MissionPeer missionPeer, BattleSideEnum authoritativeSide)
         {
-            string heroCultureId = TryResolveHeroRuntimeCultureIdForPeer(missionPeer);
-            return !string.IsNullOrWhiteSpace(heroCultureId)
-                ? heroCultureId
-                : ResolveFixedMissionCultureIdForSide(authoritativeSide);
+            return ResolveFixedMissionCultureIdForSide(authoritativeSide);
         }
 
         private static string TryResolveHeroRuntimeCultureIdForPeer(MissionPeer missionPeer)
