@@ -3371,9 +3371,11 @@ namespace CoopSpectator.MissionBehaviors
                 return null;
 
             string weight = GetTroopWeightForClientPicker(normalizedTargetTroopId);
-            string prefix = string.IsNullOrWhiteSpace(weight)
-                ? "mp_coop_" + role + "_"
-                : "mp_coop_" + weight + "_" + role + "_";
+            string prefix = string.Equals(role, "horse_archer", StringComparison.Ordinal)
+                ? "mp_coop_light_horse_archer_"
+                : string.IsNullOrWhiteSpace(weight)
+                    ? "mp_coop_" + role + "_"
+                    : "mp_coop_" + weight + "_" + role + "_";
 
             return prefix + cultureToken + "_troop";
         }
@@ -3396,6 +3398,8 @@ namespace CoopSpectator.MissionBehaviors
             if (string.IsNullOrWhiteSpace(troopId))
                 return string.Empty;
 
+            if (troopId.Contains("_horse_archer_"))
+                return "horse_archer";
             if (troopId.Contains("_cavalry_"))
                 return "cavalry";
             if (troopId.Contains("_ranged_") || troopId.Contains("_archer_"))
@@ -5088,6 +5092,8 @@ namespace CoopSpectator.MissionBehaviors
                 return "mp_light_cavalry_aserai_troop";
             if (string.Equals(normalized, "mp_coop_light_cavalry_khuzait_troop", StringComparison.Ordinal))
                 return "mp_light_cavalry_khuzait_troop";
+            if (normalized.StartsWith("mp_coop_light_horse_archer_", StringComparison.Ordinal))
+                return "mp_horse_archer_khuzait_troop";
             if (string.Equals(normalized, "mp_light_infantry_empire_troop", StringComparison.Ordinal))
                 return "mp_coop_light_infantry_empire_troop";
             if (string.Equals(normalized, "mp_light_infantry_empire_hero", StringComparison.Ordinal))
@@ -8853,7 +8859,9 @@ namespace CoopSpectator.MissionBehaviors
                    sidesSignature;
         }
 
-        private static bool HasExactCampaignPreSpawnLoadoutInjected(Agent agent)
+        private static bool HasExactCampaignPreSpawnExactWeaponLoadoutInjected(
+            Agent agent,
+            RosterEntryState entryState = null)
         {
             if (!ExperimentalFeatures.EnableExactCampaignPreSpawnLoadoutInjection ||
                 !GameNetwork.IsServer ||
@@ -8875,7 +8883,12 @@ namespace CoopSpectator.MissionBehaviors
             if (string.IsNullOrWhiteSpace(entryId))
                 _materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out entryId);
 
-            return CoopSpectator.Patches.ExactCampaignPreSpawnLoadoutPatch.WasEquipmentInjectedForEntry(entryId);
+            if (!CoopSpectator.Patches.ExactCampaignPreSpawnLoadoutPatch.WasEquipmentInjectedForEntry(entryId))
+                return false;
+
+            if (entryState == null)
+                entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            return entryState?.ServerCreatePreSpawnIncludesWeapons == true;
         }
 
         private static bool TryApplyExactCampaignSnapshotOverlayToNativeAgent(
@@ -8909,7 +8922,8 @@ namespace CoopSpectator.MissionBehaviors
             string clientLiveWeaponPreservationSummary = null;
             bool clientOverlayLiveWeaponsClearedByRefresh = false;
             bool runtimeExactCharacter = ExactCampaignRuntimeObjectRegistry.IsRuntimeCharacter(agent.Character as BasicCharacterObject);
-            bool preSpawnExactLoadoutInjected = HasExactCampaignPreSpawnLoadoutInjected(agent);
+            bool preSpawnExactLoadoutInjected =
+                HasExactCampaignPreSpawnExactWeaponLoadoutInjected(agent, entryState);
             bool enforceServerAuthoritativeOverlayContract =
                 GameNetwork.IsServer &&
                 overlayMode == ExactCampaignSnapshotOverlayMode.ServerAuthoritative;
@@ -19552,7 +19566,7 @@ namespace CoopSpectator.MissionBehaviors
                 " MountAgentIndex=" + (affectedAgent.MountAgent?.Index.ToString() ?? "null") +
                 " AffectorAgentIndex=" + (affectorAgent?.Index.ToString() ?? "null") +
                 " WieldedItem=" + (affectedAgent.WieldedWeapon.Item?.StringId ?? "none") +
-                " PreSpawnExactLoadoutInjected=" + HasExactCampaignPreSpawnLoadoutInjected(affectedAgent) +
+                " PreSpawnExactWeaponLoadoutInjected=" + HasExactCampaignPreSpawnExactWeaponLoadoutInjected(affectedAgent) +
                 " " + BuildExactBattleAgentSpawnTraceEquipmentSummary(ResolveAgentTraceEquipmentSnapshot(affectedAgent)) +
                 " " + BuildExactBattleAgentSpawnTraceContractSummary(diagnostic) +
                 " Source=" + (source ?? "unknown");
@@ -21362,7 +21376,8 @@ namespace CoopSpectator.MissionBehaviors
             string equipmentMisses = "(none)";
             string reapplyWield = "skipped";
             bool runtimeExactCharacter = ExactCampaignRuntimeObjectRegistry.IsRuntimeCharacter(replacedAgent.Character as BasicCharacterObject);
-            bool preSpawnExactLoadoutInjected = HasExactCampaignPreSpawnLoadoutInjected(replacedAgent);
+            bool preSpawnExactLoadoutInjected =
+                HasExactCampaignPreSpawnExactWeaponLoadoutInjected(replacedAgent, entryState);
             bool includeVisualsForReplaceBotRefresh = false;
             bool includeMountVisualsForReplaceBotRefresh = false;
             bool allowExactCapeVisual = EvaluateExactRuntimeCapeVisualContract(entryState, out _, out _);
@@ -28202,9 +28217,11 @@ namespace CoopSpectator.MissionBehaviors
                 return null;
 
             string weight = GetTroopWeight(normalizedTarget);
-            string prefix = string.IsNullOrWhiteSpace(weight)
-                ? "mp_coop_" + role + "_"
-                : "mp_coop_" + weight + "_" + role + "_";
+            string prefix = string.Equals(role, "horse_archer", StringComparison.Ordinal)
+                ? "mp_coop_light_horse_archer_"
+                : string.IsNullOrWhiteSpace(weight)
+                    ? "mp_coop_" + role + "_"
+                    : "mp_coop_" + weight + "_" + role + "_";
 
             return prefix + cultureToken + "_troop";
         }
@@ -28246,7 +28263,7 @@ namespace CoopSpectator.MissionBehaviors
             string normalizedTarget = targetTroopId.Trim().ToLowerInvariant();
             string targetRole = GetTroopRole(normalizedTarget);
             string targetWeight = GetTroopWeight(normalizedTarget);
-            bool targetMounted = normalizedTarget.Contains("_cavalry_");
+            bool targetMounted = normalizedTarget.Contains("_cavalry_") || normalizedTarget.Contains("_horse_archer_");
             bool targetRanged = normalizedTarget.Contains("_ranged_") || normalizedTarget.Contains("_archer_");
 
             int bestIndex = -1;
@@ -28272,7 +28289,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (!string.IsNullOrEmpty(targetWeight) && string.Equals(candidateWeight, targetWeight, StringComparison.Ordinal))
                     score += 50;
 
-                bool candidateMounted = normalizedCandidate.Contains("_cavalry_");
+                bool candidateMounted = normalizedCandidate.Contains("_cavalry_") || normalizedCandidate.Contains("_horse_archer_");
                 if (candidateMounted == targetMounted)
                     score += 25;
 
@@ -28362,6 +28379,8 @@ namespace CoopSpectator.MissionBehaviors
             if (string.IsNullOrWhiteSpace(troopId))
                 return string.Empty;
 
+            if (troopId.Contains("_horse_archer_"))
+                return "horse_archer";
             if (troopId.Contains("_cavalry_"))
                 return "cavalry";
             if (troopId.Contains("_ranged_") || troopId.Contains("_archer_"))

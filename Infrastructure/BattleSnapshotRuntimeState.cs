@@ -1109,6 +1109,9 @@ namespace CoopSpectator.Infrastructure
             bool isRanged = entry?.IsRanged ?? false;
             bool hasShield = entry?.HasShield ?? false;
             bool hasThrown = entry?.HasThrown ?? false;
+            bool wantsHorseArcherFallback =
+                !string.IsNullOrWhiteSpace(spawnTemplateId) &&
+                spawnTemplateId.IndexOf("_horse_archer_", StringComparison.OrdinalIgnoreCase) >= 0;
             bool wantsSkirmisherFallback =
                 !string.IsNullOrWhiteSpace(spawnTemplateId) &&
                 spawnTemplateId.IndexOf("_skirmisher_", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -1138,8 +1141,17 @@ namespace CoopSpectator.Infrastructure
                 }
             }
 
+            if (!string.IsNullOrWhiteSpace(spawnTemplateId) &&
+                spawnTemplateId.Trim().StartsWith("mp_", StringComparison.OrdinalIgnoreCase))
+            {
+                AddCandidate(spawnTemplateId.Trim());
+            }
+
             if (!string.IsNullOrWhiteSpace(cultureToken))
             {
+                if (wantsHorseArcherFallback || (isMounted && isRanged))
+                    AddRolePair("mp_coop_light_horse_archer_" + cultureToken);
+
                 if (wantsSkirmisherFallback || (hasThrown && !isMounted && !isRanged))
                 {
                     AddRolePair("mp_light_infantry_" + cultureToken);
@@ -1175,6 +1187,9 @@ namespace CoopSpectator.Infrastructure
             {
                 if (string.Equals(fallbackCultureToken, cultureToken, StringComparison.OrdinalIgnoreCase))
                     continue;
+
+                if (wantsHorseArcherFallback || (isMounted && isRanged))
+                    AddRolePair("mp_coop_light_horse_archer_" + fallbackCultureToken);
 
                 if (wantsSkirmisherFallback || (hasThrown && !isMounted && !isRanged))
                 {

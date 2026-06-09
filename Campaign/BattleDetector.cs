@@ -6527,9 +6527,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             string cultureToken = TryMapCultureToMultiplayerToken(TryGetCultureId(characterObject));
 
             if (isMounted)
-                return !string.IsNullOrWhiteSpace(cultureToken)
-                    ? "mp_light_cavalry_" + cultureToken + "_troop"
-                    : "mp_coop_light_cavalry_sturgia_troop";
+                return BuildCoopMountedTemplateId(cultureToken, isRanged);
 
             if (isRanged)
             {
@@ -6704,10 +6702,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool isLord = string.Equals(heroRole, "lord", StringComparison.OrdinalIgnoreCase);
 
             if (isMounted)
-            {
-                string cavalryTemplateId = (isLord ? "mp_heavy_cavalry_" : "mp_light_cavalry_") + cultureToken + "_troop";
-                return NormalizeKnownMissionSafeTemplateId(cavalryTemplateId);
-            }
+                return BuildCoopMountedTemplateId(cultureToken, isRanged);
 
             if (isRanged)
             {
@@ -6853,13 +6848,27 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
+        private static string BuildCoopMountedTemplateId(string cultureToken, bool isRanged)
+        {
+            if (string.IsNullOrWhiteSpace(cultureToken))
+            {
+                return isRanged
+                    ? "mp_coop_light_horse_archer_khuzait_troop"
+                    : "mp_coop_light_cavalry_sturgia_troop";
+            }
+
+            return isRanged
+                ? "mp_coop_light_horse_archer_" + cultureToken + "_troop"
+                : "mp_coop_light_cavalry_" + cultureToken + "_troop";
+        }
+
         private static string TryResolveCoopControlTroopId(string cultureToken, bool isMounted, bool isRanged, int tier)
         {
             if (string.IsNullOrWhiteSpace(cultureToken))
                 return null;
 
             if (isMounted)
-                return "mp_coop_light_cavalry_" + cultureToken + "_troop";
+                return BuildCoopMountedTemplateId(cultureToken, isRanged);
 
             if (string.Equals(cultureToken, "empire", StringComparison.Ordinal) && !isMounted && !isRanged && tier >= 4)
                 return "mp_coop_heavy_infantry_empire_troop";

@@ -335,7 +335,7 @@ namespace CoopSpectator.Infrastructure
                 return "mp_horse_archer_khuzait_troop";
 
             if (isMounted)
-                return NormalizeKnownTemplateId("mp_coop_light_cavalry_" + cultureToken + "_troop");
+                return NormalizeKnownTemplateId(BuildCoopMountedTemplateId(cultureToken, isRanged));
 
             if (isRanged)
             {
@@ -367,6 +367,16 @@ namespace CoopSpectator.Infrastructure
                 default:
                     return candidate;
             }
+        }
+
+        private static string BuildCoopMountedTemplateId(string cultureToken, bool isRanged)
+        {
+            if (string.IsNullOrWhiteSpace(cultureToken))
+                cultureToken = isRanged ? "khuzait" : "sturgia";
+
+            return isRanged
+                ? "mp_coop_light_horse_archer_" + cultureToken + "_troop"
+                : "mp_coop_light_cavalry_" + cultureToken + "_troop";
         }
 
         private static string TryConvertTroopTemplateToHeroTemplateId(string troopTemplateId)
