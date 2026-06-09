@@ -8,7 +8,7 @@
             <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="StdAssets\Popup\canvas_gradient" IsEnabled="false" />
             <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="frame_9" ExtendLeft="18" ExtendTop="18" ExtendRight="18" ExtendBottom="18" IsEnabled="false" />
 
-            <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="40" MarginRight="40" MarginTop="28" MarginBottom="28" StackLayout.LayoutMethod="VerticalBottomToTop">
+            <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="40" MarginRight="40" MarginTop="28" MarginBottom="28" StackLayout.LayoutMethod="VerticalTopToBottom">
               <Children>
                 <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" Brush="Popup.Title.Text" Text="@TitleText" />
                 <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginTop="10" MarginBottom="14" Brush="Popup.Description.Text" Text="@DescriptionText" />
@@ -19,7 +19,7 @@
                       <Children>
                         <Widget Id="ContentClipRect" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" ClipContents="true">
                           <Children>
-                            <ListPanel Id="ContentPanel" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="8" MarginRight="8" MarginTop="6" MarginBottom="6" StackLayout.LayoutMethod="VerticalBottomToTop">
+                            <ListPanel Id="ContentPanel" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="8" MarginRight="8" MarginTop="6" MarginBottom="6" StackLayout.LayoutMethod="VerticalTopToBottom">
                               <Children>
                                 <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="16" Brush="Popup.Description.Text" Text="@LaunchNotesText" />
                                 <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="6" Brush="Popup.Description.Text" Text="@TokenStatusText" />
@@ -43,7 +43,7 @@
                                   </Children>
                                 </ListPanel>
 
-                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="12" StackLayout.LayoutMethod="VerticalBottomToTop">
+                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="12" StackLayout.LayoutMethod="VerticalTopToBottom">
                                   <Children>
                                     <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="8" Brush="Popup.Description.Text" Text="@HostingModeDescriptionText" />
                                     <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="Fixed" SuggestedHeight="64" HorizontalAlignment="Center" MarginBottom="6" StackLayout.LayoutMethod="HorizontalLeftToRight">
@@ -69,7 +69,7 @@
 
                                 <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="12" IsVisible="@ShowAdvertisedHostAddress">
                                   <Children>
-                                    <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" StackLayout.LayoutMethod="VerticalBottomToTop">
+                                    <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" StackLayout.LayoutMethod="VerticalTopToBottom">
                                       <Children>
                                         <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="6" Brush="Popup.Description.Text" Text="@AdvertisedHostAddressHelpText" />
                                         <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="620" SuggestedHeight="70" HorizontalAlignment="Center" MarginTop="6" Sprite="General\CharacterCreation\name_input_area">
@@ -83,7 +83,7 @@
                                   </Children>
                                 </Widget>
 
-                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="12" StackLayout.LayoutMethod="VerticalBottomToTop">
+                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="12" StackLayout.LayoutMethod="VerticalTopToBottom">
                                   <Children>
                                     <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" Brush="Popup.Description.Text" Text="Server Name" />
                                     <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="620" SuggestedHeight="70" HorizontalAlignment="Center" MarginTop="6" Sprite="General\CharacterCreation\name_input_area">
@@ -94,7 +94,7 @@
                                   </Children>
                                 </ListPanel>
 
-                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="12" StackLayout.LayoutMethod="VerticalBottomToTop">
+                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="12" StackLayout.LayoutMethod="VerticalTopToBottom">
                                   <Children>
                                     <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" Brush="Popup.Description.Text" Text="Server Password (optional)" />
                                     <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="Fixed" SuggestedHeight="70" HorizontalAlignment="Center" MarginTop="6" StackLayout.LayoutMethod="HorizontalLeftToRight">
@@ -115,7 +115,7 @@
                                   </Children>
                                 </ListPanel>
 
-                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="12" StackLayout.LayoutMethod="VerticalBottomToTop">
+                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="12" StackLayout.LayoutMethod="VerticalTopToBottom">
                                   <Children>
                                     <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" Brush="Popup.Description.Text" Text="Admin Password" />
                                     <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="Fixed" SuggestedHeight="70" HorizontalAlignment="Center" MarginTop="6" StackLayout.LayoutMethod="HorizontalLeftToRight">
@@ -136,7 +136,7 @@
                                   </Children>
                                 </ListPanel>
 
-                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="6" StackLayout.LayoutMethod="VerticalBottomToTop">
+                                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginBottom="6" StackLayout.LayoutMethod="VerticalTopToBottom">
                                   <Children>
                                     <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="6" Brush="Popup.Description.Text" Text="@PlayerCountHintText" />
                                     <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" Brush="Popup.Description.Text" Text="Max Player Count" />
@@ -164,7 +164,7 @@
 
                 <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="12" Brush="Popup.Description.Text" Text="@StatusText" />
 
-                <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" MarginBottom="18" StackLayout.LayoutMethod="VerticalBottomToTop">
+                <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" MarginBottom="18" StackLayout.LayoutMethod="VerticalTopToBottom">
                   <Children>
                     <ButtonWidget DoNotPassEventsToChildren="true" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="250" SuggestedHeight="64" Brush="Popup.Done.Button" Command.Click="ExecuteOpenSupportPage">
                       <Children>

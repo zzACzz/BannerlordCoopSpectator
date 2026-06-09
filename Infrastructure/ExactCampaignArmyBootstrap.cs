@@ -1397,6 +1397,20 @@ namespace CoopSpectator.Infrastructure
             if (team == null)
                 return null;
 
+            string runtimeSideBannerCode = BattleSnapshotRuntimeState.ResolveSideBannerCode(side, null);
+            if (!string.IsNullOrWhiteSpace(runtimeSideBannerCode))
+            {
+                source = "battle-snapshot-side";
+                return runtimeSideBannerCode;
+            }
+
+            string teamBannerCode = team.Banner?.BannerCode;
+            if (!string.IsNullOrWhiteSpace(teamBannerCode))
+            {
+                source = "team-banner";
+                return teamBannerCode;
+            }
+
             string assignedPeerBannerCode = TryResolveAssignedMissionPeerBannerCode(team);
             if (!string.IsNullOrWhiteSpace(assignedPeerBannerCode))
             {
@@ -1412,13 +1426,6 @@ namespace CoopSpectator.Infrastructure
                     source = "single-active-peer";
                     return singleActivePeerBannerCode;
                 }
-            }
-
-            string teamBannerCode = team.Banner?.BannerCode;
-            if (!string.IsNullOrWhiteSpace(teamBannerCode))
-            {
-                source = "team-banner";
-                return teamBannerCode;
             }
 
             return null;
@@ -1727,6 +1734,7 @@ namespace CoopSpectator.Infrastructure
             int missionReadyExhaustedEntries = 0;
             int missionReadyUnresolvedEntries = 0;
             int seed = 1;
+            ResolveOriginAppearance(sideState, side, out uint factionColor, out uint factionColor2, out Banner banner);
             var remainingHealthyByEntryId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
             foreach (RosterEntryState entryState in sideState.Entries)
@@ -1779,7 +1787,7 @@ namespace CoopSpectator.Infrastructure
                         continue;
                     }
 
-                    AppendOriginForEntry(origins, supplier, entryState, troop, side, playerSide, ref seed);
+                    AppendOriginForEntry(origins, supplier, entryState, troop, side, playerSide, factionColor, factionColor2, banner, ref seed);
                     remainingHealthyByEntryId[entryId] = remainingHealthyCount - 1;
                     totalHealthyCount++;
                     missionReadyMatched++;
@@ -1826,7 +1834,7 @@ namespace CoopSpectator.Infrastructure
 
                 for (int i = 0; i < availableCount; i++)
                 {
-                    AppendOriginForEntry(origins, supplier, entryState, troop, side, playerSide, ref seed);
+                    AppendOriginForEntry(origins, supplier, entryState, troop, side, playerSide, factionColor, factionColor2, banner, ref seed);
                     totalHealthyCount++;
                 }
 
@@ -1855,6 +1863,68 @@ namespace CoopSpectator.Infrastructure
             return supplier;
         }
 
+        private static void ResolveOriginAppearance(
+            BattleSideState sideState,
+            BattleSideEnum side,
+            out uint factionColor,
+            out uint factionColor2,
+            out Banner banner)
+        {
+            const uint fallbackAttackerColor = 0xFFCC2222u;
+            const uint fallbackAttackerColor2 = 0xFF661111u;
+            const uint fallbackDefenderColor = 0xFF2222CCu;
+            const uint fallbackDefenderColor2 = 0xFF111166u;
+            const string fallbackAttackerCultureId = "empire";
+            const string fallbackDefenderCultureId = "vlandia";
+
+            uint fallbackColor = side == BattleSideEnum.Attacker ? fallbackAttackerColor : fallbackDefenderColor;
+            uint fallbackColor2 = side == BattleSideEnum.Attacker ? fallbackAttackerColor2 : fallbackDefenderColor2;
+            string fallbackCultureId = side == BattleSideEnum.Attacker ? fallbackAttackerCultureId : fallbackDefenderCultureId;
+
+            string cultureId = !string.IsNullOrWhiteSpace(sideState?.CultureId)
+                ? sideState.CultureId
+                : fallbackCultureId;
+            factionColor = sideState?.Color ?? 0u;
+            factionColor2 = sideState?.Color2 ?? 0u;
+            string bannerCode = sideState?.BannerCode;
+
+            BasicCultureObject culture = !string.IsNullOrWhiteSpace(cultureId)
+                ? MBObjectManager.Instance?.GetObject<BasicCultureObject>(cultureId)
+                : null;
+            if (culture != null)
+            {
+                if (factionColor == 0u)
+                    factionColor = culture.Color;
+                if (factionColor2 == 0u)
+                    factionColor2 = culture.Color2;
+                if (string.IsNullOrWhiteSpace(bannerCode))
+                    bannerCode = culture.Banner?.BannerCode;
+            }
+
+            if (factionColor == 0u)
+                factionColor = fallbackColor;
+            if (factionColor2 == 0u)
+                factionColor2 = fallbackColor2;
+
+            banner = null;
+            if (string.IsNullOrWhiteSpace(bannerCode))
+                return;
+
+            try
+            {
+                banner = new Banner(bannerCode, factionColor, factionColor2);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "ExactCampaignArmyBootstrap: failed to resolve exact origin banner for side. " +
+                    "Side=" + side +
+                    " Culture=" + (cultureId ?? "null") +
+                    " BannerCodeLength=" + bannerCode.Length +
+                    " Error=" + ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
         private static void AppendOriginForEntry(
             List<ExactCampaignSnapshotAgentOrigin> origins,
             ExactCampaignSnapshotTroopSupplier supplier,
@@ -1862,6 +1932,9 @@ namespace CoopSpectator.Infrastructure
             BasicCharacterObject troop,
             BattleSideEnum side,
             BattleSideEnum playerSide,
+            uint factionColor,
+            uint factionColor2,
+            Banner banner,
             ref int seed)
         {
             if (origins == null || supplier == null || entryState == null || troop == null)
@@ -1874,6 +1947,9 @@ namespace CoopSpectator.Infrastructure
                 troop.StringId,
                 side,
                 side == playerSide,
+                factionColor,
+                factionColor2,
+                banner,
                 seed++));
         }
 
@@ -2051,6 +2127,9 @@ namespace CoopSpectator.Infrastructure
         private readonly bool _hasHeavyArmor;
         private readonly bool _hasShield;
         private readonly bool _hasSpear;
+        private readonly uint _factionColor;
+        private readonly uint _factionColor2;
+        private Banner _banner;
         private OriginRemovalState _removalState;
 
         private enum OriginRemovalState
@@ -2073,9 +2152,9 @@ namespace CoopSpectator.Infrastructure
 
         bool IAgentOriginBase.IsInSameArmyAsPlayer => _isUnderPlayersCommand;
 
-        uint IAgentOriginBase.FactionColor => 0u;
+        uint IAgentOriginBase.FactionColor => _factionColor;
 
-        uint IAgentOriginBase.FactionColor2 => 0u;
+        uint IAgentOriginBase.FactionColor2 => _factionColor2;
 
         IBattleCombatant IAgentOriginBase.BattleCombatant => null;
 
@@ -2083,7 +2162,7 @@ namespace CoopSpectator.Infrastructure
 
         int IAgentOriginBase.Seed => _seed;
 
-        Banner IAgentOriginBase.Banner => null;
+        Banner IAgentOriginBase.Banner => _banner;
 
         BasicCharacterObject IAgentOriginBase.Troop => _troop;
 
@@ -2102,6 +2181,9 @@ namespace CoopSpectator.Infrastructure
             string troopId,
             BattleSideEnum side,
             bool isUnderPlayersCommand,
+            uint factionColor,
+            uint factionColor2,
+            Banner banner,
             int seed)
         {
             _supplier = supplier;
@@ -2110,6 +2192,9 @@ namespace CoopSpectator.Infrastructure
             TroopId = troopId ?? troop?.StringId ?? string.Empty;
             Side = side;
             _isUnderPlayersCommand = isUnderPlayersCommand;
+            _factionColor = factionColor;
+            _factionColor2 = factionColor2;
+            _banner = banner;
             _seed = seed;
             AgentOriginUtilities.GetDefaultTroopTraits(_troop, out _hasThrownWeapon, out _hasSpear, out _hasShield, out _hasHeavyArmor);
         }
@@ -2148,6 +2233,8 @@ namespace CoopSpectator.Infrastructure
 
         void IAgentOriginBase.SetBanner(Banner banner)
         {
+            if (banner != null)
+                _banner = banner;
         }
 
         TroopTraitsMask IAgentOriginBase.GetTraitsMask()

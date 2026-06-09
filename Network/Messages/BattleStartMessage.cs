@@ -56,6 +56,11 @@ namespace CoopSpectator.Network.Messages
         public string SideId { get; set; }
         public string SideText { get; set; }
         public string LeaderPartyId { get; set; }
+        public string CultureId { get; set; }
+        public uint Color { get; set; }
+        public uint Color2 { get; set; }
+        public string BannerCode { get; set; }
+        public string AppearanceSource { get; set; }
         public float SideMorale { get; set; }
         public bool IsPlayerSide { get; set; }
         public int TotalManCount { get; set; }

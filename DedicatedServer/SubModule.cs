@@ -20,7 +20,7 @@ namespace CoopSpectator
     {
         /// <summary>ТЗ A: true = тільки proof-of-load, без Harmony і без реєстрації game mode. false = реєструємо TdmClone + Harmony (для Етапу 3.3 — тест з нашими mission behaviors і логуванням; UseTdmCloneForListedTest у Launcher має бути true).</summary>
         private const bool CleanModuleLoadOnly = false;
-        private const bool EnableFixedTestCultures = true;
+        private const bool EnableFixedTestCultures = false;
         // Disabled after 2026-05-15 reconnect/load-crash triage:
         // BattleShellSuppressionPatch manually bypasses native dedicated mission loading and
         // correlates with access-violation crashes during battle scene startup.

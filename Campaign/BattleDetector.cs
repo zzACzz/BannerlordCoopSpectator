@@ -84,6 +84,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public string Source { get; set; }
         }
 
+        private sealed class BattleSideAppearanceSnapshot
+        {
+            public string CultureId { get; set; }
+            public uint Color { get; set; }
+            public uint Color2 { get; set; }
+            public string BannerCode { get; set; }
+            public string Source { get; set; }
+
+            public bool HasAnyData =>
+                !string.IsNullOrWhiteSpace(CultureId) ||
+                Color != 0u ||
+                Color2 != 0u ||
+                !string.IsNullOrWhiteSpace(BannerCode);
+        }
+
         private sealed class EncounterPartyWritebackState
         {
             public string PartyId { get; set; }
@@ -3974,6 +3989,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             attackerSide.TotalManCount = attackerSide.Troops.Count;
             defenderSide.TotalManCount = defenderSide.Troops.Count;
+            ApplyResolvedSideAppearance(attackerSide, null, "synthetic-all-campaign-troops");
+            ApplyResolvedSideAppearance(defenderSide, null, "synthetic-all-campaign-troops");
 
             if (attackerSide.Parties.Count > 0)
                 snapshot.Sides.Add(attackerSide);
@@ -4030,6 +4047,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             attackerSide.TotalManCount = attackerSide.Troops.Count;
             defenderSide.TotalManCount = defenderSide.Troops.Count;
+            ApplyResolvedSideAppearance(attackerSide, null, "synthetic-live-heroes");
+            ApplyResolvedSideAppearance(defenderSide, null, "synthetic-live-heroes");
 
             if (attackerSide.Parties.Count > 0)
                 snapshot.Sides.Add(attackerSide);
@@ -4452,6 +4471,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             mainPartySide.Parties.Add(mainParty);
             mainPartySide.Troops.AddRange(mainParty.Troops ?? new List<TroopStackInfo>());
             mainPartySide.TotalManCount = mainParty.TotalManCount;
+            ApplyResolvedSideAppearance(mainPartySide, MobileParty.MainParty, "fallback-main-party");
             snapshot.Sides.Add(mainPartySide);
 
             LogSnapshotMappings("fallback", snapshot);
@@ -4501,6 +4521,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     sideSnapshot.Troops.AddRange(partySnapshot.Troops);
             }
 
+            ApplyResolvedSideAppearance(sideSnapshot, sideObject, "live-side");
             sideSnapshot.TotalManCount = sideSnapshot.Parties.Sum(p => p?.TotalManCount ?? 0);
             sideSnapshot.MissionReadyEntryOrder = BuildMissionReadyEntryOrder(sideObject, sideSnapshot, sideId);
             ModLogger.Info(
@@ -4509,8 +4530,250 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " EnumeratedPartyObjects=" + enumeratedPartyCount +
                 " SnapshotParties=" + sideSnapshot.Parties.Count +
                 " TotalTroopStacks=" + sideSnapshot.Troops.Count +
+                " CultureId=" + (sideSnapshot.CultureId ?? "null") +
+                " BannerCodeLength=" + (sideSnapshot.BannerCode?.Length ?? 0) +
+                " AppearanceSource=" + (sideSnapshot.AppearanceSource ?? "unknown") +
                 " MissionReadyOrder=" + (sideSnapshot.MissionReadyEntryOrder?.Count ?? 0) + ".");
             return sideSnapshot.Parties.Count > 0 ? sideSnapshot : null;
+        }
+
+        private static void ApplyResolvedSideAppearance(BattleSideSnapshotMessage sideSnapshot, object sideCarrier, string source)
+        {
+            if (sideSnapshot == null)
+                return;
+
+            BattleSideAppearanceSnapshot appearance = ResolveSideAppearanceSnapshot(sideCarrier, sideSnapshot, source);
+            if (appearance == null || !appearance.HasAnyData)
+                return;
+
+            sideSnapshot.CultureId = appearance.CultureId ?? sideSnapshot.CultureId;
+            sideSnapshot.Color = appearance.Color;
+            sideSnapshot.Color2 = appearance.Color2;
+            sideSnapshot.BannerCode = appearance.BannerCode ?? sideSnapshot.BannerCode;
+            sideSnapshot.AppearanceSource = appearance.Source ?? sideSnapshot.AppearanceSource;
+        }
+
+        private static BattleSideAppearanceSnapshot ResolveSideAppearanceSnapshot(
+            object sideCarrier,
+            BattleSideSnapshotMessage sideSnapshot,
+            string source)
+        {
+            BattleSideAppearanceSnapshot appearance = TryResolveSideAppearanceFromCarrier(
+                TryGetPropertyValue(sideCarrier, "LeaderParty"),
+                source + ":leader-party");
+            if (appearance?.HasAnyData == true)
+                return ApplyCultureAppearanceFallback(appearance);
+
+            appearance = TryResolveSideAppearanceFromCarrier(sideCarrier, source + ":side-carrier");
+            if (appearance?.HasAnyData == true)
+                return ApplyCultureAppearanceFallback(appearance);
+
+            foreach (object partyObject in EnumerateBattleParties(sideCarrier))
+            {
+                appearance = TryResolveSideAppearanceFromCarrier(partyObject, source + ":party");
+                if (appearance?.HasAnyData == true)
+                    return ApplyCultureAppearanceFallback(appearance);
+            }
+
+            string dominantCultureId = ResolveDominantSideCultureId(sideSnapshot);
+            if (string.IsNullOrWhiteSpace(dominantCultureId))
+                return null;
+
+            return ApplyCultureAppearanceFallback(
+                new BattleSideAppearanceSnapshot
+                {
+                    CultureId = dominantCultureId,
+                    Source = source + ":dominant-troop-culture"
+                });
+        }
+
+        private static BattleSideAppearanceSnapshot TryResolveSideAppearanceFromCarrier(object carrier, string source)
+        {
+            if (carrier == null)
+                return null;
+
+            object partyBase = UnwrapPartyBase(carrier);
+            object mobileParty = TryResolveMobileParty(carrier, partyBase);
+            object leaderHero = TryGetPropertyValue(mobileParty, "LeaderHero");
+
+            foreach (object candidate in new[]
+            {
+                TryGetPropertyValue(carrier, "MapFaction"),
+                TryGetPropertyValue(partyBase, "MapFaction"),
+                TryGetPropertyValue(mobileParty, "MapFaction"),
+                TryGetPropertyValue(carrier, "Faction"),
+                TryGetPropertyValue(mobileParty, "ActualClan"),
+                TryGetPropertyValue(mobileParty, "Clan"),
+                TryGetPropertyValue(leaderHero, "MapFaction"),
+                TryGetPropertyValue(leaderHero, "Clan"),
+                leaderHero,
+                TryGetPropertyValue(carrier, "Culture"),
+                TryGetPropertyValue(partyBase, "Culture"),
+                TryGetPropertyValue(mobileParty, "Culture")
+            })
+            {
+                BattleSideAppearanceSnapshot appearance = TryResolveSideAppearanceFromObject(candidate, source);
+                if (appearance?.HasAnyData == true)
+                    return ApplyCultureAppearanceFallback(appearance);
+            }
+
+            return ApplyCultureAppearanceFallback(TryResolveSideAppearanceFromObject(carrier, source));
+        }
+
+        private static BattleSideAppearanceSnapshot TryResolveSideAppearanceFromObject(object candidate, string source)
+        {
+            if (candidate == null)
+                return null;
+
+            var appearance = new BattleSideAppearanceSnapshot
+            {
+                CultureId = TryResolveAppearanceCultureId(candidate),
+                Color = TryResolveUInt32Member(candidate, "Color"),
+                Color2 = TryResolveUInt32Member(candidate, "Color2"),
+                BannerCode = TryResolveBannerCode(candidate),
+                Source = source
+            };
+
+            return appearance.HasAnyData ? appearance : null;
+        }
+
+        private static BattleSideAppearanceSnapshot ApplyCultureAppearanceFallback(BattleSideAppearanceSnapshot appearance)
+        {
+            if (appearance == null || string.IsNullOrWhiteSpace(appearance.CultureId))
+                return appearance;
+
+            BasicCultureObject culture = MBObjectManager.Instance?.GetObject<BasicCultureObject>(appearance.CultureId);
+            if (culture == null)
+                return appearance;
+
+            if (appearance.Color == 0u)
+                appearance.Color = TryResolveUInt32Member(culture, "Color");
+            if (appearance.Color2 == 0u)
+                appearance.Color2 = TryResolveUInt32Member(culture, "Color2");
+            if (string.IsNullOrWhiteSpace(appearance.BannerCode))
+                appearance.BannerCode = TryResolveBannerCode(culture);
+
+            return appearance;
+        }
+
+        private static string ResolveDominantSideCultureId(BattleSideSnapshotMessage sideSnapshot)
+        {
+            if (sideSnapshot?.Troops == null || sideSnapshot.Troops.Count == 0)
+                return null;
+
+            return sideSnapshot.Troops
+                .Where(troop => troop != null && !string.IsNullOrWhiteSpace(troop.CultureId))
+                .GroupBy(troop => troop.CultureId, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(group => group.Sum(troop => Math.Max(1, troop.Count - troop.WoundedCount)))
+                .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.Key)
+                .FirstOrDefault();
+        }
+
+        private static string TryResolveAppearanceCultureId(object candidate)
+        {
+            if (candidate == null)
+                return null;
+
+            string directCultureId = TryGetCultureId(candidate);
+            if (!string.IsNullOrWhiteSpace(directCultureId))
+                return directCultureId;
+
+            object culture = TryGetPropertyValue(candidate, "Culture");
+            directCultureId = TryGetStringId(culture);
+            if (!string.IsNullOrWhiteSpace(directCultureId))
+                return directCultureId;
+
+            object mapFaction = TryGetPropertyValue(candidate, "MapFaction");
+            culture = TryGetPropertyValue(mapFaction, "Culture");
+            directCultureId = TryGetStringId(culture);
+            if (!string.IsNullOrWhiteSpace(directCultureId))
+                return directCultureId;
+
+            object clan = TryGetPropertyValue(candidate, "Clan");
+            culture = TryGetPropertyValue(clan, "Culture");
+            directCultureId = TryGetStringId(culture);
+            if (!string.IsNullOrWhiteSpace(directCultureId))
+                return directCultureId;
+
+            object leaderHero = TryGetPropertyValue(candidate, "LeaderHero");
+            return TryGetCultureId(leaderHero);
+        }
+
+        private static string TryResolveBannerCode(object candidate)
+        {
+            if (candidate == null)
+                return null;
+
+            string directBannerCode = TryResolveBannerCodeValue(TryGetPropertyValue(candidate, "BannerCode"));
+            if (!string.IsNullOrWhiteSpace(directBannerCode))
+                return directBannerCode;
+
+            directBannerCode = TryResolveBannerCodeValue(TryGetPropertyValue(candidate, "Banner"));
+            if (!string.IsNullOrWhiteSpace(directBannerCode))
+                return directBannerCode;
+
+            object clan = TryGetPropertyValue(candidate, "Clan");
+            directBannerCode = TryResolveBannerCodeValue(TryGetPropertyValue(clan, "Banner"));
+            if (!string.IsNullOrWhiteSpace(directBannerCode))
+                return directBannerCode;
+
+            object mapFaction = TryGetPropertyValue(candidate, "MapFaction");
+            return TryResolveBannerCodeValue(TryGetPropertyValue(mapFaction, "Banner"));
+        }
+
+        private static string TryResolveBannerCodeValue(object value)
+        {
+            if (value == null)
+                return null;
+
+            if (value is Banner banner)
+                return banner.BannerCode;
+
+            if (value is string bannerCodeString)
+                return string.IsNullOrWhiteSpace(bannerCodeString)
+                    ? null
+                    : bannerCodeString;
+
+            return TryGetPropertyValue(value, "BannerCode") as string;
+        }
+
+        private static uint TryResolveUInt32Member(object instance, string memberName)
+        {
+            object value = TryGetPropertyValue(instance, memberName);
+            if (value == null)
+                return 0u;
+
+            switch (value)
+            {
+                case uint uintValue:
+                    return uintValue;
+                case int intValue:
+                    return intValue > 0 ? (uint)intValue : 0u;
+                case long longValue:
+                    return longValue > 0 ? (uint)longValue : 0u;
+                case ulong ulongValue:
+                    return ulongValue > 0UL ? (uint)ulongValue : 0u;
+                case short shortValue:
+                    return shortValue > 0 ? (uint)shortValue : 0u;
+                case ushort ushortValue:
+                    return ushortValue;
+                case byte byteValue:
+                    return byteValue;
+                case sbyte sbyteValue:
+                    return sbyteValue > 0 ? (uint)sbyteValue : 0u;
+                case string stringValue:
+                    return uint.TryParse(stringValue, out uint parsedValue) ? parsedValue : 0u;
+                default:
+                    try
+                    {
+                        return Convert.ToUInt32(value, CultureInfo.InvariantCulture);
+                    }
+                    catch
+                    {
+                        return 0u;
+                    }
+            }
         }
 
         private sealed class MissionReadyEntryBucket

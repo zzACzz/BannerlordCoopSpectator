@@ -24,6 +24,7 @@ namespace CoopSpectator.MissionModels
         private readonly HashSet<string> _loggedExactMaxHealthKeys = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> _loggedExactDefenseDrivenKeys = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> _loggedExactMeleeDrivenKeys = new HashSet<string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, float> _exactDefenseDrivenPropertyBaselines = new Dictionary<string, float>(StringComparer.Ordinal);
         private bool _hasLoggedBattleActivation;
 
         public CoopCampaignDerivedAgentStatCalculateModel(AgentStatCalculateModel baseModel)
@@ -442,11 +443,13 @@ namespace CoopSpectator.MissionModels
 
             if (CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(agent, "AthleticsFormFittingArmor", out string formFittingEntryId))
             {
-                float baseArmorEncumbrance = agentDrivenProperties.ArmorEncumbrance;
+                float baseArmorEncumbrance = GetExactDefenseDrivenPropertyBaseline(
+                    agent,
+                    agentDrivenProperties,
+                    DrivenProperty.ArmorEncumbrance);
                 float exactArmorEncumbrance = baseArmorEncumbrance * 0.85f;
-                if (Math.Abs(exactArmorEncumbrance - baseArmorEncumbrance) >= 0.0001f)
+                if (TrySetDrivenProperty(agentDrivenProperties, DrivenProperty.ArmorEncumbrance, exactArmorEncumbrance))
                 {
-                    agentDrivenProperties.ArmorEncumbrance = exactArmorEncumbrance;
                     entryId = formFittingEntryId;
                     summary = AppendAppliedPerkSummary(
                         summary,
@@ -462,10 +465,10 @@ namespace CoopSpectator.MissionModels
                 CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(agent, "AthleticsIgnorePain", out string ignorePainEntryId))
             {
                 bool armorScaled = false;
-                armorScaled |= TryScaleArmorDrivenProperty(agentDrivenProperties, DrivenProperty.ArmorHead, 1.1f);
-                armorScaled |= TryScaleArmorDrivenProperty(agentDrivenProperties, DrivenProperty.ArmorTorso, 1.1f);
-                armorScaled |= TryScaleArmorDrivenProperty(agentDrivenProperties, DrivenProperty.ArmorArms, 1.1f);
-                armorScaled |= TryScaleArmorDrivenProperty(agentDrivenProperties, DrivenProperty.ArmorLegs, 1.1f);
+                armorScaled |= TryApplyExactDefenseDrivenPropertyScale(agent, agentDrivenProperties, DrivenProperty.ArmorHead, 1.1f);
+                armorScaled |= TryApplyExactDefenseDrivenPropertyScale(agent, agentDrivenProperties, DrivenProperty.ArmorTorso, 1.1f);
+                armorScaled |= TryApplyExactDefenseDrivenPropertyScale(agent, agentDrivenProperties, DrivenProperty.ArmorArms, 1.1f);
+                armorScaled |= TryApplyExactDefenseDrivenPropertyScale(agent, agentDrivenProperties, DrivenProperty.ArmorLegs, 1.1f);
                 if (armorScaled)
                 {
                     if (string.IsNullOrWhiteSpace(entryId))
@@ -481,6 +484,88 @@ namespace CoopSpectator.MissionModels
 
             TryLogBattleActivation(agent);
             TryLogDefenseDrivenOverride(agent, entryId, summary);
+        }
+
+        private bool TryApplyExactDefenseDrivenPropertyScale(
+            Agent agent,
+            AgentDrivenProperties agentDrivenProperties,
+            DrivenProperty property,
+            float scaleFactor)
+        {
+            if (agentDrivenProperties == null || scaleFactor <= 0f)
+                return false;
+
+            float baselineValue = GetExactDefenseDrivenPropertyBaseline(agent, agentDrivenProperties, property);
+            if (baselineValue <= 0f)
+                return false;
+
+            float desiredValue = Math.Max(0f, baselineValue * scaleFactor);
+            return TrySetDrivenProperty(agentDrivenProperties, property, desiredValue);
+        }
+
+        private float GetExactDefenseDrivenPropertyBaseline(
+            Agent agent,
+            AgentDrivenProperties agentDrivenProperties,
+            DrivenProperty property)
+        {
+            string key = BuildExactDefenseDrivenPropertyBaselineKey(agent, property);
+            if (!string.IsNullOrWhiteSpace(key) &&
+                _exactDefenseDrivenPropertyBaselines.TryGetValue(key, out float cachedBaseline) &&
+                cachedBaseline > 0f)
+            {
+                return cachedBaseline;
+            }
+
+            float resolvedBaseline = ResolveExactDefenseDrivenPropertyBaseline(agent, agentDrivenProperties, property);
+            if (!string.IsNullOrWhiteSpace(key) && resolvedBaseline > 0f)
+                _exactDefenseDrivenPropertyBaselines[key] = resolvedBaseline;
+
+            return resolvedBaseline;
+        }
+
+        private static float ResolveExactDefenseDrivenPropertyBaseline(
+            Agent agent,
+            AgentDrivenProperties agentDrivenProperties,
+            DrivenProperty property)
+        {
+            if (agentDrivenProperties == null)
+                return 0f;
+
+            float currentValue = agentDrivenProperties.GetStat(property);
+            if (currentValue > 0.0001f)
+                return currentValue;
+
+            Equipment spawnEquipment = agent?.SpawnEquipment;
+            if (spawnEquipment == null)
+                return Math.Max(0f, currentValue);
+
+            switch (property)
+            {
+                case DrivenProperty.ArmorEncumbrance:
+                    return Math.Max(0f, spawnEquipment.GetTotalWeightOfArmor(agent.IsHuman));
+                case DrivenProperty.ArmorHead:
+                    return Math.Max(0f, spawnEquipment.GetHeadArmorSum());
+                case DrivenProperty.ArmorTorso:
+                    return Math.Max(0f, spawnEquipment.GetHumanBodyArmorSum());
+                case DrivenProperty.ArmorArms:
+                    return Math.Max(0f, spawnEquipment.GetArmArmorSum());
+                case DrivenProperty.ArmorLegs:
+                    return Math.Max(0f, spawnEquipment.GetLegArmorSum());
+                default:
+                    return Math.Max(0f, currentValue);
+            }
+        }
+
+        private static string BuildExactDefenseDrivenPropertyBaselineKey(Agent agent, DrivenProperty property)
+        {
+            if (agent == null)
+                return string.Empty;
+
+            int missionHash = agent.Mission?.GetHashCode() ?? 0;
+            return missionHash.ToString() + "|" +
+                agent.Index.ToString() + "|" +
+                (agent.Character?.StringId ?? "null") + "|" +
+                ((int)property).ToString();
         }
 
         private void TryLogDefenseDrivenOverride(Agent agent, string entryId, string summary)
@@ -655,6 +740,23 @@ namespace CoopSpectator.MissionModels
                 return false;
 
             agentDrivenProperties.SetStat(property, updatedValue);
+            return true;
+        }
+
+        private static bool TrySetDrivenProperty(
+            AgentDrivenProperties agentDrivenProperties,
+            DrivenProperty property,
+            float desiredValue,
+            float epsilon = 0.001f)
+        {
+            if (agentDrivenProperties == null)
+                return false;
+
+            float currentValue = agentDrivenProperties.GetStat(property);
+            if (Math.Abs(currentValue - desiredValue) <= epsilon)
+                return false;
+
+            agentDrivenProperties.SetStat(property, desiredValue);
             return true;
         }
 

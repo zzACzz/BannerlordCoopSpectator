@@ -15,8 +15,8 @@ namespace CoopSpectator.Patches
     /// </summary>
     public static class ServerChangeCultureCanonicalizationPatch
     {
-        private const string FixedAttackerCultureId = "empire";
-        private const string FixedDefenderCultureId = "vlandia";
+        private const string FallbackAttackerCultureId = "empire";
+        private const string FallbackDefenderCultureId = "vlandia";
 
         public static void Apply(Harmony harmony)
         {
@@ -66,7 +66,7 @@ namespace CoopSpectator.Patches
                 if (missionPeer?.Team == null || Mission.Current == null || ReferenceEquals(missionPeer.Team, Mission.Current.SpectatorTeam))
                     return;
 
-                string targetCultureId = ResolveFixedCultureIdForTeam(missionPeer.Team);
+                string targetCultureId = ResolveRuntimeCultureIdForTeam(missionPeer.Team);
                 if (string.IsNullOrWhiteSpace(targetCultureId))
                     return;
 
@@ -127,16 +127,16 @@ namespace CoopSpectator.Patches
             return FindFirstCompatibleMemberValue(instance, typeof(BasicCultureObject)) as BasicCultureObject;
         }
 
-        private static string ResolveFixedCultureIdForTeam(Team team)
+        private static string ResolveRuntimeCultureIdForTeam(Team team)
         {
             if (team == null)
                 return null;
 
             if (team.Side == BattleSideEnum.Attacker)
-                return FixedAttackerCultureId;
+                return BattleSnapshotRuntimeState.ResolveSideCultureId(BattleSideEnum.Attacker, FallbackAttackerCultureId);
 
             if (team.Side == BattleSideEnum.Defender)
-                return FixedDefenderCultureId;
+                return BattleSnapshotRuntimeState.ResolveSideCultureId(BattleSideEnum.Defender, FallbackDefenderCultureId);
 
             return null;
         }

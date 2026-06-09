@@ -84,6 +84,8 @@ namespace CoopSpectator.UI
     {
         private static readonly ConcurrentDictionary<string, byte> SelectionVisualDiagnosticKeys =
             new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        private static readonly ConcurrentDictionary<string, byte> SelectionDisplayNameDiagnosticKeys =
+            new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
 
         private const string LoadingBattleDataText = "Loading battle data...";
         private const string NeutralPlayerBannerCode = "11.163.166.1528.1528.764.764.1.0.0.133.171.171.483.483.764.764.0.0.0";
@@ -957,7 +959,53 @@ namespace CoopSpectator.UI
                 }));
             }
 
+            if (ExperimentalFeatures.EnableBattleSelectionDisplayNameDiagnostics)
+                TryLogClassRefreshDiagnostic(snapshot);
+
             return string.Join("\n", parts);
+        }
+
+        private static void TryLogClassRefreshDiagnostic(CoopSelectionUiSnapshot snapshot)
+        {
+            try
+            {
+                string[] sampleEntryIds = (snapshot?.EffectiveSelectableEntryIds ?? Array.Empty<string>())
+                    .Take(6)
+                    .ToArray();
+                string key =
+                    (snapshot?.BattleDataReady.ToString() ?? bool.FalseString) + "|" +
+                    (snapshot?.EffectiveSide.ToString() ?? BattleSideEnum.None.ToString()) + "|" +
+                    (snapshot?.SelectedEntryId ?? string.Empty) + "|" +
+                    string.Join(",", sampleEntryIds);
+
+                if (!SelectionDisplayNameDiagnosticKeys.TryAdd(key, 0))
+                    return;
+
+                RosterEntryState selectedEntryState = ResolveEntryState(
+                    snapshot?.EffectiveSide ?? BattleSideEnum.None,
+                    snapshot?.SelectedEntryId);
+                List<string> entryFacts = new List<string>();
+                foreach (string entryId in sampleEntryIds)
+                {
+                    RosterEntryState entryState = ResolveEntryState(snapshot?.EffectiveSide ?? BattleSideEnum.None, entryId);
+                    entryFacts.Add((entryId ?? string.Empty) + ":" + (entryState != null ? "resolved" : "null"));
+                }
+
+                ModLogger.Info(
+                    "CoopSelectionUiHelpers: class refresh diagnostic. " +
+                    "BattleDataReady=" + (snapshot?.BattleDataReady ?? false) +
+                    " BattlePhase=" + (snapshot?.BattlePhase ?? string.Empty) +
+                    " Side=" + (snapshot?.EffectiveSide.ToString() ?? BattleSideEnum.None.ToString()) +
+                    " SelectedEntryId=" + ShortenForDiagnostic(snapshot?.SelectedEntryId, 96) +
+                    " SelectedEntryResolved=" + (selectedEntryState != null) +
+                    " EffectiveSelectableCount=" + (snapshot?.EffectiveSelectableEntryIds?.Length ?? 0) +
+                    " BattleStateEntries=" + (snapshot?.BattleState?.EntriesById?.Count ?? 0) +
+                    " EntrySamples=" + string.Join(",", entryFacts));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSelectionUiHelpers: class refresh diagnostic failed open: " + ex.Message);
+            }
         }
 
         private static string BuildSideRefreshDescriptor(CoopSidePresentation presentation, int selectableEntryCount)

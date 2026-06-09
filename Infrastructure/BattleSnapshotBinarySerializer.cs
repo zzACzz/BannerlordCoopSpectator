@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 2;
+        private const int SchemaVersion = 3;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -59,7 +59,7 @@ namespace CoopSpectator.Infrastructure
                     }
 
                     int schemaVersion = reader.ReadInt32();
-                    if (schemaVersion != 1 && schemaVersion != SchemaVersion)
+                    if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
                             "BattleSnapshotBinarySerializer: unsupported schema version. " +
@@ -127,7 +127,7 @@ namespace CoopSpectator.Infrastructure
                 BattleSizeBudgetSource = ReadString(reader),
                 PlayerSide = ReadString(reader),
                 PlayerTroopsReceivedDamageMultiplier = schemaVersion >= 2 ? reader.ReadSingle() : 1f,
-                Sides = ReadList(reader, ReadBattleSide) ?? new List<BattleSideSnapshotMessage>()
+                Sides = ReadList(reader, itemReader => ReadBattleSide(itemReader, schemaVersion)) ?? new List<BattleSideSnapshotMessage>()
             };
         }
 
@@ -136,6 +136,11 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, side?.SideId);
             WriteString(writer, side?.SideText);
             WriteString(writer, side?.LeaderPartyId);
+            WriteString(writer, side?.CultureId);
+            writer.Write(side?.Color ?? 0u);
+            writer.Write(side?.Color2 ?? 0u);
+            WriteString(writer, side?.BannerCode);
+            WriteString(writer, side?.AppearanceSource);
             writer.Write(side?.SideMorale ?? 0f);
             writer.Write(side?.IsPlayerSide ?? false);
             writer.Write(side?.TotalManCount ?? 0);
@@ -144,13 +149,18 @@ namespace CoopSpectator.Infrastructure
             WriteList(writer, side?.Troops, WriteTroopStack);
         }
 
-        private static BattleSideSnapshotMessage ReadBattleSide(BinaryReader reader)
+        private static BattleSideSnapshotMessage ReadBattleSide(BinaryReader reader, int schemaVersion)
         {
             return new BattleSideSnapshotMessage
             {
                 SideId = ReadString(reader),
                 SideText = ReadString(reader),
                 LeaderPartyId = ReadString(reader),
+                CultureId = schemaVersion >= 3 ? ReadString(reader) : null,
+                Color = schemaVersion >= 3 ? reader.ReadUInt32() : 0u,
+                Color2 = schemaVersion >= 3 ? reader.ReadUInt32() : 0u,
+                BannerCode = schemaVersion >= 3 ? ReadString(reader) : null,
+                AppearanceSource = schemaVersion >= 3 ? ReadString(reader) : null,
                 SideMorale = reader.ReadSingle(),
                 IsPlayerSide = reader.ReadBoolean(),
                 TotalManCount = reader.ReadInt32(),

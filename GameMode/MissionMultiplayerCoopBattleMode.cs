@@ -34,7 +34,10 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             bool battleMapRuntime = IsBattleMapSceneName(scene);
             string missionShell = battleMapRuntime ? BattleMissionShell : TeamDeathmatchMissionShell;
             if (battleMapRuntime && GameNetwork.IsServer)
+            {
                 TryApplyBattleMapTimerOptionOverrides();
+                TryPrimeBattleMapAppearanceOptions();
+            }
             ModLogger.Info("StartMultiplayerGame CoopBattle called, scene=" + (scene ?? ""));
             if (GameNetwork.IsServer)
                 ModLogger.Info("[CoopSpectator] Server starting mission, GameType=" + GameModeId + " (must match client GetMultiplayerGameMode and multiplayer_strings).");
@@ -85,6 +88,34 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             MultiplayerOptions.OptionType.RoundTimeLimit.SetValue(
                 MultiplayerOptions.OptionType.RoundTimeLimit.GetMaximumValue(),
                 mode);
+        }
+
+        private static void TryPrimeBattleMapAppearanceOptions()
+        {
+            try
+            {
+                BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+                if ((snapshot?.Sides?.Count ?? 0) <= 0)
+                    snapshot = BattleRosterFileHelper.ReadSnapshot();
+
+                if ((snapshot?.Sides?.Count ?? 0) <= 0)
+                {
+                    ModLogger.Info("MissionMultiplayerCoopBattleMode: skipped battle-map appearance prime before mission open because no snapshot sides are available yet.");
+                    return;
+                }
+
+                MissionMultiplayerCoopBattle.TryApplyAuthoritativeBattleCultureOptionsFromRuntimeState(
+                    "CoopBattle.StartMultiplayerGame pre-open");
+
+                ModLogger.Info(
+                    "MissionMultiplayerCoopBattleMode: primed battle-map appearance options before mission open. " +
+                    "SnapshotSides=" + (snapshot?.Sides?.Count ?? 0) +
+                    " SnapshotSource=" + (BattleSnapshotRuntimeState.GetSource() ?? "unknown") + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionMultiplayerCoopBattleMode: failed to prime battle-map appearance options: " + ex.Message);
+            }
         }
 
         private static IEnumerable<MissionBehavior> CreateBehaviorsForMission(Mission mission)

@@ -1626,6 +1626,25 @@ namespace CoopSpectator.MissionBehaviors
             if (message == null || message.TransmissionId <= 0)
                 return;
 
+            string normalizedPayloadHash = message.PayloadHash ?? string.Empty;
+            bool alreadyAppliedCurrentSnapshot =
+                _clientAppliedBattleSnapshotTransmissionId == message.TransmissionId &&
+                string.Equals(
+                    _clientAppliedBattleSnapshotPayloadHash ?? string.Empty,
+                    normalizedPayloadHash,
+                    StringComparison.Ordinal);
+            if (alreadyAppliedCurrentSnapshot)
+            {
+                _clientObservedBattleSnapshotTransmissionId = message.TransmissionId;
+                _clientObservedBattleSnapshotPayloadHash = normalizedPayloadHash;
+                _clientBattleSnapshotAssembliesByTransmission.Remove(message.TransmissionId);
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: ignored duplicate V2 battle snapshot manifest because the current snapshot is already applied. " +
+                    "TransmissionId=" + message.TransmissionId +
+                    " ChunkCount=" + message.ChunkCount);
+                return;
+            }
+
             ObserveClientBattleSnapshotManifest(message.TransmissionId, message.PayloadHash);
 
             foreach (int staleTransmissionId in _clientBattleSnapshotAssembliesByTransmission.Keys

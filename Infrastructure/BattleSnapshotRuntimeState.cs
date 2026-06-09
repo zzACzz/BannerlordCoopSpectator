@@ -38,6 +38,11 @@ namespace CoopSpectator.Infrastructure
         public string SideText { get; set; }
         public string CanonicalSideKey { get; set; }
         public string LeaderPartyId { get; set; }
+        public string CultureId { get; set; }
+        public uint Color { get; set; }
+        public uint Color2 { get; set; }
+        public string BannerCode { get; set; }
+        public string AppearanceSource { get; set; }
         public float SideMorale { get; set; }
         public bool IsPlayerSide { get; set; }
         public int TotalManCount { get; set; }
@@ -159,6 +164,11 @@ namespace CoopSpectator.Infrastructure
         public string SideText { get; set; }
         public string CanonicalSideKey { get; set; }
         public string LeaderPartyId { get; set; }
+        public string CultureId { get; set; }
+        public uint Color { get; set; }
+        public uint Color2 { get; set; }
+        public string BannerCode { get; set; }
+        public string AppearanceSource { get; set; }
         public float SideMorale { get; set; }
         public bool IsPlayerSide { get; set; }
         public int TotalManCount { get; set; }
@@ -278,6 +288,7 @@ namespace CoopSpectator.Infrastructure
     {
         private static readonly object Sync = new object();
         private static readonly HashSet<string> LoggedMissionSafeFallbackEntryIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> LoggedSelectionDisplayNameResolutionKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static BattleSnapshotMessage _current;
         private static BattleSnapshotProjectionState _projection;
         private static BattleRuntimeState _state;
@@ -296,6 +307,7 @@ namespace CoopSpectator.Infrastructure
                 _projection = BuildProjection(snapshot);
                 _state = BuildState(_projection);
                 LoggedMissionSafeFallbackEntryIds.Clear();
+                LoggedSelectionDisplayNameResolutionKeys.Clear();
                 runtimeState = _state;
                 _source = source ?? "unknown";
                 _updatedUtc = DateTime.UtcNow;
@@ -334,6 +346,9 @@ namespace CoopSpectator.Infrastructure
                 " ProjectionServerCreateResolved=" + projectionServerCreateResolvedEntries +
                 " RuntimeServerCreateResolved=" + runtimeServerCreateResolvedEntries +
                 " BattleId=" + (snapshot.BattleId ?? "null"));
+
+            if (ExperimentalFeatures.EnableBattleSelectionDisplayNameDiagnostics)
+                LogSelectionDisplayNameSnapshot(runtimeState, _source);
         }
 
         public static BattleSnapshotMessage GetCurrent()
@@ -389,6 +404,48 @@ namespace CoopSpectator.Infrastructure
                 _state.SidesByKey.TryGetValue(canonicalSideKey, out BattleSideState sideState);
                 return sideState;
             }
+        }
+
+        public static BattleSideState GetSideState(BattleSideEnum side)
+        {
+            if (side == BattleSideEnum.Attacker)
+                return GetSideState("attacker");
+            if (side == BattleSideEnum.Defender)
+                return GetSideState("defender");
+
+            return null;
+        }
+
+        public static string ResolveSideCultureId(BattleSideEnum side, string fallback = null)
+        {
+            BattleSideState sideState = GetSideState(side);
+            return !string.IsNullOrWhiteSpace(sideState?.CultureId)
+                ? sideState.CultureId
+                : fallback;
+        }
+
+        public static string ResolveSideBannerCode(BattleSideEnum side, string fallback = null)
+        {
+            BattleSideState sideState = GetSideState(side);
+            return !string.IsNullOrWhiteSpace(sideState?.BannerCode)
+                ? sideState.BannerCode
+                : fallback;
+        }
+
+        public static uint ResolveSideColor(BattleSideEnum side, uint fallback = 0u)
+        {
+            BattleSideState sideState = GetSideState(side);
+            return sideState != null && sideState.Color != 0u
+                ? sideState.Color
+                : fallback;
+        }
+
+        public static uint ResolveSideColor2(BattleSideEnum side, uint fallback = 0u)
+        {
+            BattleSideState sideState = GetSideState(side);
+            return sideState != null && sideState.Color2 != 0u
+                ? sideState.Color2
+                : fallback;
         }
 
         public static void Clear(string reason)
@@ -498,28 +555,146 @@ namespace CoopSpectator.Infrastructure
             return troops?.Count(troop => troop?.ServerCreateContractResolved == true) ?? 0;
         }
 
+        private static void LogSelectionDisplayNameSnapshot(BattleRuntimeState runtimeState, string source)
+        {
+            try
+            {
+                if (runtimeState?.EntriesById == null)
+                    return;
+
+                List<RosterEntryState> entries = runtimeState.EntriesById.Values
+                    .Where(entry => entry != null)
+                    .ToList();
+                List<RosterEntryState> nonHeroEntries = entries
+                    .Where(entry => !entry.IsHero)
+                    .ToList();
+                List<RosterEntryState> missingTroopNameEntries = nonHeroEntries
+                    .Where(entry => string.IsNullOrWhiteSpace(entry.TroopName))
+                    .Take(6)
+                    .ToList();
+                List<RosterEntryState> unusableTroopNameEntries = nonHeroEntries
+                    .Where(entry =>
+                        !string.IsNullOrWhiteSpace(entry.TroopName) &&
+                        string.IsNullOrWhiteSpace(NormalizeDisplayNameCandidate(entry.TroopName)))
+                    .Take(6)
+                    .ToList();
+
+                int missingTroopNameCount = nonHeroEntries.Count(entry => string.IsNullOrWhiteSpace(entry.TroopName));
+                int unusableTroopNameCount = nonHeroEntries.Count(entry =>
+                    !string.IsNullOrWhiteSpace(entry.TroopName) &&
+                    string.IsNullOrWhiteSpace(NormalizeDisplayNameCandidate(entry.TroopName)));
+
+                ModLogger.Info(
+                    "BattleSnapshotRuntimeState: selection display-name snapshot. " +
+                    "Source=" + (source ?? "unknown") +
+                    " Role=" + (GameNetwork.IsServer ? "Server" : "Client") +
+                    " TotalEntries=" + entries.Count +
+                    " NonHeroEntries=" + nonHeroEntries.Count +
+                    " MissingTroopName=" + missingTroopNameCount +
+                    " UnusableTroopName=" + unusableTroopNameCount);
+
+                string sampleKind = missingTroopNameEntries.Count > 0
+                    ? "MissingTroopName"
+                    : "UnusableTroopName";
+                IEnumerable<RosterEntryState> sampleEntries = missingTroopNameEntries.Count > 0
+                    ? missingTroopNameEntries
+                    : unusableTroopNameEntries;
+
+                foreach (RosterEntryState sampleEntry in sampleEntries)
+                {
+                    ModLogger.Info(
+                        "BattleSnapshotRuntimeState: selection display-name sample. " +
+                        "Kind=" + sampleKind +
+                        " EntryId=" + ShortenDiagnosticValue(sampleEntry?.EntryId, 96) +
+                        " TroopName=" + ShortenDiagnosticValue(sampleEntry?.TroopName, 96) +
+                        " OriginalCharacterId=" + ShortenDiagnosticValue(sampleEntry?.OriginalCharacterId, 64) +
+                        " SpawnTemplateId=" + ShortenDiagnosticValue(sampleEntry?.SpawnTemplateId, 64) +
+                        " CharacterId=" + ShortenDiagnosticValue(sampleEntry?.CharacterId, 64));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleSnapshotRuntimeState: selection display-name snapshot diagnostics failed open: " + ex.Message);
+            }
+        }
+
         public static string ResolveEntryDisplayName(RosterEntryState entryState, string fallbackId)
         {
             string resolvedName = NormalizeDisplayNameCandidate(entryState?.TroopName);
             if (!string.IsNullOrWhiteSpace(resolvedName))
+            {
+                TryLogSelectionDisplayNameResolution(entryState, fallbackId, resolvedName, "TroopName", entryState?.TroopName);
                 return resolvedName;
+            }
 
             foreach (string candidateId in BuildDisplayNameCandidateIds(entryState, fallbackId))
             {
                 BasicCharacterObject character = TryResolveBasicCharacterObject(candidateId);
                 resolvedName = NormalizeDisplayNameCandidate(character?.Name?.ToString());
                 if (!string.IsNullOrWhiteSpace(resolvedName))
+                {
+                    TryLogSelectionDisplayNameResolution(entryState, fallbackId, resolvedName, "CharacterObject", candidateId);
                     return resolvedName;
+                }
             }
 
             foreach (string candidateId in BuildDisplayNameCandidateIds(entryState, fallbackId))
             {
-                resolvedName = PrettifyIdentifierToken(candidateId);
+                resolvedName = NormalizeDisplayNameCandidate(PrettifyIdentifierToken(candidateId));
                 if (!string.IsNullOrWhiteSpace(resolvedName))
+                {
+                    TryLogSelectionDisplayNameResolution(entryState, fallbackId, resolvedName, "PrettifiedFallback", candidateId);
                     return resolvedName;
+                }
             }
 
+            TryLogSelectionDisplayNameResolution(entryState, fallbackId, "Unknown Unit", "UnknownUnit", fallbackId);
             return "Unknown Unit";
+        }
+
+        private static void TryLogSelectionDisplayNameResolution(
+            RosterEntryState entryState,
+            string fallbackId,
+            string resolvedName,
+            string branch,
+            string candidateId)
+        {
+            if (!ExperimentalFeatures.EnableBattleSelectionDisplayNameDiagnostics)
+                return;
+
+            try
+            {
+                string key =
+                    (entryState?.EntryId ?? "null") + "|" +
+                    (fallbackId ?? string.Empty) + "|" +
+                    (branch ?? string.Empty) + "|" +
+                    (candidateId ?? string.Empty) + "|" +
+                    (resolvedName ?? string.Empty);
+
+                bool shouldLog;
+                lock (Sync)
+                    shouldLog = LoggedSelectionDisplayNameResolutionKeys.Add(key);
+
+                if (!shouldLog)
+                    return;
+
+                ModLogger.Info(
+                    "BattleSnapshotRuntimeState: resolved entry display name. " +
+                    "EntryId=" + ShortenDiagnosticValue(entryState?.EntryId, 96) +
+                    " HasEntryState=" + (entryState != null) +
+                    " SideId=" + (entryState?.SideId ?? "null") +
+                    " IsHero=" + (entryState?.IsHero ?? false) +
+                    " TroopName=" + ShortenDiagnosticValue(entryState?.TroopName, 96) +
+                    " Branch=" + (branch ?? "null") +
+                    " CandidateSource=" + ResolveDisplayNameCandidateDebugSource(entryState, fallbackId, candidateId) +
+                    " CandidateId=" + ShortenDiagnosticValue(candidateId, 96) +
+                    " ResolvedName=" + ShortenDiagnosticValue(resolvedName, 96) +
+                    " FallbackId=" + ShortenDiagnosticValue(fallbackId, 96));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleSnapshotRuntimeState: entry display-name resolution diagnostics failed open: " + ex.Message);
+            }
         }
 
         public static string TryResolveEntryId(string canonicalSideKey, string troopId)
@@ -676,6 +851,41 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        private static string ResolveDisplayNameCandidateDebugSource(
+            RosterEntryState entryState,
+            string fallbackId,
+            string candidateId)
+        {
+            if (string.IsNullOrWhiteSpace(candidateId))
+                return "None";
+
+            if (string.Equals(candidateId, entryState?.OriginalCharacterId, StringComparison.OrdinalIgnoreCase))
+                return "OriginalCharacterId";
+
+            if (string.Equals(candidateId, entryState?.HeroTemplateId, StringComparison.OrdinalIgnoreCase))
+                return "HeroTemplateId";
+
+            if (string.Equals(candidateId, entryState?.SpawnTemplateId, StringComparison.OrdinalIgnoreCase))
+                return "SpawnTemplateId";
+
+            if (string.Equals(candidateId, entryState?.CharacterId, StringComparison.OrdinalIgnoreCase))
+                return "CharacterId";
+
+            if (ExtractDisplayNameFallbackTokens(entryState?.EntryId)
+                .Any(token => string.Equals(token, candidateId, StringComparison.OrdinalIgnoreCase)))
+            {
+                return "EntryIdToken";
+            }
+
+            if (ExtractDisplayNameFallbackTokens(fallbackId)
+                .Any(token => string.Equals(token, candidateId, StringComparison.OrdinalIgnoreCase)))
+            {
+                return "FallbackIdToken";
+            }
+
+            return "UnknownCandidate";
+        }
+
         private static IEnumerable<string> ExtractDisplayNameFallbackTokens(string value)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -711,7 +921,58 @@ namespace CoopSpectator.Infrastructure
             if (trimmed.IndexOf('|') >= 0)
                 return null;
 
+            if (LooksLikeGeneratedShellDisplayName(trimmed))
+                return null;
+
             return LooksLikeOpaqueIdentifier(trimmed) ? null : trimmed;
+        }
+
+        private static bool LooksLikeGeneratedShellDisplayName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            string trimmed = value.Trim();
+            if (!trimmed.EndsWith("Shell", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (trimmed.StartsWith("{=!}", StringComparison.Ordinal))
+                return true;
+
+            if (trimmed.StartsWith("Foot ", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("Mounted ", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            string[] tokens = trimmed.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            bool hasLoadoutRoleToken = false;
+            bool hasHexVariantToken = false;
+
+            foreach (string token in tokens)
+            {
+                if (string.IsNullOrWhiteSpace(token))
+                    continue;
+
+                if (token.Equals("Melee", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("Bow", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("Crossbow", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("Thrown", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("Polearm", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("Unarmed", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("Shield", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("No", StringComparison.OrdinalIgnoreCase) ||
+                    token.IndexOf("1H", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    token.IndexOf("2H", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    hasLoadoutRoleToken = true;
+                }
+
+                if (token.Length >= 8 && token.All(Uri.IsHexDigit))
+                    hasHexVariantToken = true;
+            }
+
+            return hasLoadoutRoleToken || hasHexVariantToken;
         }
 
         private static bool LooksLikeOpaqueIdentifier(string value)
@@ -768,6 +1029,14 @@ namespace CoopSpectator.Infrastructure
 
                     return char.ToUpperInvariant(word[0]) + word.Substring(1);
                 }));
+        }
+
+        private static string ShortenDiagnosticValue(string value, int maxChars)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxChars)
+                return value ?? "null";
+
+            return value.Substring(0, maxChars) + "...";
         }
 
         public static string TryResolveMissionSafeFallbackCharacterId(RosterEntryState entryState, string spawnTemplateId = null)
@@ -1159,6 +1428,11 @@ namespace CoopSpectator.Infrastructure
                     SideText = sideSnapshot.SideText,
                     CanonicalSideKey = NormalizeSideKey(sideSnapshot.SideText ?? sideSnapshot.SideId),
                     LeaderPartyId = sideSnapshot.LeaderPartyId,
+                    CultureId = sideSnapshot.CultureId,
+                    Color = sideSnapshot.Color,
+                    Color2 = sideSnapshot.Color2,
+                    BannerCode = sideSnapshot.BannerCode,
+                    AppearanceSource = sideSnapshot.AppearanceSource,
                     SideMorale = sideSnapshot.SideMorale,
                     IsPlayerSide = sideSnapshot.IsPlayerSide,
                     TotalManCount = sideSnapshot.TotalManCount,
@@ -1292,6 +1566,11 @@ namespace CoopSpectator.Infrastructure
                     SideText = sideProjection.SideText,
                     CanonicalSideKey = sideProjection.CanonicalSideKey,
                     LeaderPartyId = sideProjection.LeaderPartyId,
+                    CultureId = sideProjection.CultureId,
+                    Color = sideProjection.Color,
+                    Color2 = sideProjection.Color2,
+                    BannerCode = sideProjection.BannerCode,
+                    AppearanceSource = sideProjection.AppearanceSource,
                     SideMorale = sideProjection.SideMorale,
                     IsPlayerSide = sideProjection.IsPlayerSide,
                     TotalManCount = sideProjection.TotalManCount,

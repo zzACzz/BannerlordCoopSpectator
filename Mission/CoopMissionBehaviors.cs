@@ -933,6 +933,13 @@ namespace CoopSpectator.MissionBehaviors
             RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(selectionId);
             if (entryState != null)
             {
+                string resolvedDisplayName = BattleSnapshotRuntimeState.ResolveEntryDisplayName(entryState, selectionId);
+                if (!string.IsNullOrWhiteSpace(resolvedDisplayName) &&
+                    !string.Equals(resolvedDisplayName, "Unknown Unit", StringComparison.Ordinal))
+                {
+                    return resolvedDisplayName;
+                }
+
                 if (!string.IsNullOrWhiteSpace(entryState.TroopName))
                     return entryState.TroopName;
                 if (!string.IsNullOrWhiteSpace(entryState.OriginalCharacterId))
@@ -3991,10 +3998,13 @@ namespace CoopSpectator.MissionBehaviors
             public bool CountedPartyEngineerAdjustment;
             public bool CountedPartySurgeonAdjustment;
             public string HumanDrivenPropertyBaselineSignature { get; set; }
+            public string HumanPersistentDrivenPropertyBaselineSignature { get; set; }
             public string MountDrivenPropertyBaselineSignature { get; set; }
             public Dictionary<DrivenProperty, float> HumanDrivenPropertyBaselines { get; } = new Dictionary<DrivenProperty, float>();
+            public Dictionary<DrivenProperty, float> HumanPersistentDrivenPropertyBaselines { get; } = new Dictionary<DrivenProperty, float>();
             public Dictionary<DrivenProperty, float> MountDrivenPropertyBaselines { get; } = new Dictionary<DrivenProperty, float>();
             public Dictionary<DrivenProperty, float> HumanDrivenPropertyAccumulatedScales { get; } = new Dictionary<DrivenProperty, float>();
+            public Dictionary<DrivenProperty, float> HumanPersistentDrivenPropertyAccumulatedScales { get; } = new Dictionary<DrivenProperty, float>();
             public Dictionary<DrivenProperty, float> MountDrivenPropertyAccumulatedScales { get; } = new Dictionary<DrivenProperty, float>();
         }
 
@@ -16159,10 +16169,14 @@ namespace CoopSpectator.MissionBehaviors
             if (profile == null)
                 return;
 
-            Dictionary<DrivenProperty, float> accumulatedScales = isMountContext
-                ? profile.MountDrivenPropertyAccumulatedScales
-                : profile.HumanDrivenPropertyAccumulatedScales;
-            accumulatedScales.Clear();
+            if (isMountContext)
+            {
+                profile.MountDrivenPropertyAccumulatedScales.Clear();
+                return;
+            }
+
+            profile.HumanDrivenPropertyAccumulatedScales.Clear();
+            profile.HumanPersistentDrivenPropertyAccumulatedScales.Clear();
         }
 
         private static void ClearDrivenPropertyBaselineContext()
@@ -16191,6 +16205,30 @@ namespace CoopSpectator.MissionBehaviors
             return "human|" + primaryItemId + "|mounted=" + isMounted;
         }
 
+        private static string GetHumanPersistentDrivenPropertyBaselineSignature(Agent agent)
+        {
+            if (agent == null)
+                return "human-persistent|null";
+
+            return "human-persistent|agent=" +
+                agent.Index.ToString() +
+                "|character=" +
+                (agent.Character?.StringId ?? "null");
+        }
+
+        private static bool IsHumanPersistentDrivenProperty(DrivenProperty drivenProperty)
+        {
+            switch (drivenProperty)
+            {
+                case DrivenProperty.ArmorEncumbrance:
+                case DrivenProperty.CombatMaxSpeedMultiplier:
+                case DrivenProperty.TopSpeedReachDuration:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         private static bool TryScaleDrivenPropertyFromBaselineContext(
             AgentDrivenProperties agentDrivenProperties,
             DrivenProperty drivenProperty,
@@ -16207,16 +16245,16 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             bool isMountContext = _drivenPropertyBaselineMountContext;
-            Dictionary<DrivenProperty, float> baselines = isMountContext
-                ? profile.MountDrivenPropertyBaselines
-                : profile.HumanDrivenPropertyBaselines;
-            Dictionary<DrivenProperty, float> accumulatedScales = isMountContext
-                ? profile.MountDrivenPropertyAccumulatedScales
-                : profile.HumanDrivenPropertyAccumulatedScales;
-            string signature = GetDrivenPropertyBaselineSignature(agent, isMountContext);
+            bool useHumanPersistentBaseline = !isMountContext && IsHumanPersistentDrivenProperty(drivenProperty);
+            Dictionary<DrivenProperty, float> baselines;
+            Dictionary<DrivenProperty, float> accumulatedScales;
+            string signature;
 
             if (isMountContext)
             {
+                baselines = profile.MountDrivenPropertyBaselines;
+                accumulatedScales = profile.MountDrivenPropertyAccumulatedScales;
+                signature = GetDrivenPropertyBaselineSignature(agent, isMountContext);
                 if (!string.Equals(profile.MountDrivenPropertyBaselineSignature, signature, StringComparison.Ordinal))
                 {
                     profile.MountDrivenPropertyBaselineSignature = signature;
@@ -16224,8 +16262,23 @@ namespace CoopSpectator.MissionBehaviors
                     accumulatedScales.Clear();
                 }
             }
+            else if (useHumanPersistentBaseline)
+            {
+                baselines = profile.HumanPersistentDrivenPropertyBaselines;
+                accumulatedScales = profile.HumanPersistentDrivenPropertyAccumulatedScales;
+                signature = GetHumanPersistentDrivenPropertyBaselineSignature(agent);
+                if (!string.Equals(profile.HumanPersistentDrivenPropertyBaselineSignature, signature, StringComparison.Ordinal))
+                {
+                    profile.HumanPersistentDrivenPropertyBaselineSignature = signature;
+                    baselines.Clear();
+                    accumulatedScales.Clear();
+                }
+            }
             else
             {
+                baselines = profile.HumanDrivenPropertyBaselines;
+                accumulatedScales = profile.HumanDrivenPropertyAccumulatedScales;
+                signature = GetDrivenPropertyBaselineSignature(agent, isMountContext);
                 if (!string.Equals(profile.HumanDrivenPropertyBaselineSignature, signature, StringComparison.Ordinal))
                 {
                     profile.HumanDrivenPropertyBaselineSignature = signature;

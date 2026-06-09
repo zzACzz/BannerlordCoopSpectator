@@ -61,6 +61,14 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableDedicatedExactCampaignSceneBootstrapProbe = true;
 
         /// <summary>
+        /// Explicit investigation switch for surrogate troop names inside the
+        /// custom coop selection overlay. Keep this limited to targeted manual
+        /// reruns because it emits extra logs from snapshot and class-list refresh
+        /// paths.
+        /// </summary>
+        public static readonly bool EnableBattleSelectionDisplayNameDiagnostics = true;
+
+        /// <summary>
         /// Full contract diagnostics for battle-map runtime: MissionState.OpenNew overloads,
         /// mission initializer patch state, live mission map-patch/spawn-path facts, and
         /// deployment-plan / formation-plan / scene-spawn-entry summaries.
