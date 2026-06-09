@@ -118,6 +118,7 @@ namespace CoopSpectator.Patches
             bool injectEquipment = resolvedContract?.InjectEquipment == true;
             Equipment exactEquipment = injectEquipment
                 ? BuildPreSpawnEquipment(
+                    agentBuildData,
                     entryState,
                     includeWeapons,
                     includeArmorVisuals,
@@ -356,12 +357,21 @@ namespace CoopSpectator.Patches
         }
 
         private static Equipment BuildPreSpawnEquipment(
+            AgentBuildData agentBuildData,
             RosterEntryState entryState,
             bool includeWeapons,
             bool includeArmorVisuals,
             bool includeCape,
             bool includeMountVisuals)
         {
+            bool mountOnlyHybrid =
+                !includeWeapons &&
+                !includeArmorVisuals &&
+                !includeCape &&
+                includeMountVisuals;
+            if (mountOnlyHybrid)
+                return BuildMountOnlyHybridPreSpawnEquipment(agentBuildData, entryState);
+
             Equipment equipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
                 entryState,
                 includeWeapons: includeWeapons,
@@ -389,6 +399,56 @@ namespace CoopSpectator.Patches
             }
 
             return equipment;
+        }
+
+        private static Equipment BuildMountOnlyHybridPreSpawnEquipment(
+            AgentBuildData agentBuildData,
+            RosterEntryState entryState)
+        {
+            Equipment baseEquipment = CloneNativePreSpawnEquipment(agentBuildData);
+            if (baseEquipment == null)
+                return null;
+
+            Equipment exactMountEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
+                entryState,
+                includeWeapons: false,
+                honorExactVisualContracts: false,
+                includeArmorVisuals: false,
+                includeMountVisuals: true);
+            if (exactMountEquipment == null)
+                return null;
+
+            CopyEquipmentSlot(baseEquipment, exactMountEquipment, EquipmentIndex.Horse);
+            CopyEquipmentSlot(baseEquipment, exactMountEquipment, EquipmentIndex.HorseHarness);
+            return baseEquipment;
+        }
+
+        private static Equipment CloneNativePreSpawnEquipment(AgentBuildData agentBuildData)
+        {
+            try
+            {
+                if (agentBuildData?.AgentOverridenSpawnEquipment != null)
+                    return agentBuildData.AgentOverridenSpawnEquipment.Clone(false);
+
+                BasicCharacterObject character = agentBuildData?.AgentCharacter;
+                return character?.FirstBattleEquipment?.Clone(false) ??
+                       character?.Equipment?.Clone(false);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void CopyEquipmentSlot(
+            Equipment targetEquipment,
+            Equipment sourceEquipment,
+            EquipmentIndex slot)
+        {
+            if (targetEquipment == null || sourceEquipment == null)
+                return;
+
+            targetEquipment[slot] = sourceEquipment[slot];
         }
 
         private static string SummarizeEquipment(Equipment equipment)

@@ -50,6 +50,7 @@ namespace CoopSpectator.Infrastructure
             ExactTransferValidationResult exactTransferValidation =
                 ExactTransferContractValidator.Validate(exactTransferContract);
 
+            bool strictHeroPath = exactTransferContract?.SpawnPolicy?.UseStrictExactHeroPath == true;
             string exactEntryCompatibilitySummary;
             string weaponDecisionReason;
             bool includeWeapons = exactTransferContract?.Equipment?.IncludeWeaponsInPreSpawn ?? false;
@@ -61,7 +62,6 @@ namespace CoopSpectator.Infrastructure
                 exactTransferValidation?.IsValid == true;
             if (useContractDrivenPreSpawnPath)
             {
-                bool strictHeroPath = exactTransferContract?.SpawnPolicy?.UseStrictExactHeroPath == true;
                 exactEntryCompatibilitySummary = strictHeroPath
                     ? "ExactEntryContract=contract-driven-strict-hero"
                     : "ExactEntryContract=contract-driven-full-army";
@@ -84,7 +84,6 @@ namespace CoopSpectator.Infrastructure
             string capeDecisionReason;
             if (useContractDrivenPreSpawnPath)
             {
-                bool strictHeroPath = exactTransferContract?.SpawnPolicy?.UseStrictExactHeroPath == true;
                 capeDecisionReason = includeCape
                     ? (strictHeroPath
                         ? "contract-driven strict exact hero cape policy"
@@ -147,7 +146,24 @@ namespace CoopSpectator.Infrastructure
                   (includeWeapons || includeCape || includeArmorVisuals || includeMountVisuals)
                 : includeWeapons || includeCape;
             if (useDedicatedSafeStringIdExactEquipmentPath)
-                injectEquipment = false;
+            {
+                bool allowMountOnlyInjection = useContractDrivenPreSpawnPath &&
+                                               !strictHeroPath &&
+                                               includeMountVisuals;
+                if (allowMountOnlyInjection)
+                {
+                    // Dedicated create-agent remains too fragile for full exact gear,
+                    // but native mount visuals must exist at spawn time for cavalry.
+                    includeWeapons = false;
+                    includeArmorVisuals = false;
+                    includeCape = false;
+                    injectEquipment = true;
+                }
+                else
+                {
+                    injectEquipment = false;
+                }
+            }
 
             return new ExactCreateAgentServerPreSpawnContractState
             {
