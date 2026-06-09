@@ -314,6 +314,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         ClientChangeCultureCanonicalizationPatch.Apply(harmony);
                         MultiplayerCharacterClassFallbackPatch.Apply(harmony);
                         CampaignCombatProfileAgentStatsPatch.Apply(harmony);
+                        CoopBattleDisplayNameConsumerPatch.Apply(harmony);
                     }
                     else
                     {
@@ -355,6 +356,12 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         if (loadedAssemblyName == "TaleWorlds.MountAndBlade.Multiplayer.ViewModelCollection")
                         {
                             IntermissionVmCrashGuardPatch.Apply(harmony);
+                            CoopBattleDisplayNameConsumerPatch.Apply(harmony);
+                        }
+
+                        if (loadedAssemblyName == "TaleWorlds.MountAndBlade.Multiplayer.View")
+                        {
+                            CoopBattleDisplayNameConsumerPatch.Apply(harmony);
                         }
                     };
                 }

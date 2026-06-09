@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using HarmonyLib;
@@ -102,7 +103,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(__instance, out string entryId, out TextObject exactName))
+                if (!TryResolveBattleOnlyExactDisplayNameForAgent(__instance, out string entryId, out TextObject exactName))
                     return;
 
                 __result = exactName.ToString();
@@ -118,7 +119,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(__instance, out string entryId, out TextObject exactName))
+                if (!TryResolveBattleOnlyExactDisplayNameForAgent(__instance, out string entryId, out TextObject exactName))
                     return;
 
                 __result = exactName;
@@ -134,7 +135,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(__instance, out string entryId, out TextObject exactName))
+                if (!TryResolveBattleOnlyExactDisplayNameForAgent(__instance, out string entryId, out TextObject exactName))
                     return;
 
                 __result = exactName;
@@ -144,6 +145,46 @@ namespace CoopSpectator.Patches
             {
                 ModLogger.Info("AgentDisplayNamePatch: Agent.ITrackableBase.GetName postfix failed: " + ex.Message);
             }
+        }
+
+        private static bool TryResolveBattleOnlyExactDisplayNameForAgent(Agent agent, out string entryId, out TextObject exactName)
+        {
+            entryId = null;
+            exactName = null;
+
+            if (agent == null)
+                return false;
+
+            Mission mission = agent.Mission;
+            if (!ShouldRunForAgentMission(mission))
+                return false;
+
+            return CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(agent, out entryId, out exactName);
+        }
+
+        private static bool ShouldRunForAgentMission(Mission mission)
+        {
+            if (mission == null ||
+                !GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                return false;
+            }
+
+            return HasCoopBattleRuntimeMarker(mission);
+        }
+
+        private static bool HasCoopBattleRuntimeMarker(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null ||
+                   mission.GetMissionBehavior<MissionMultiplayerCoopBattleClient>() != null ||
+                   mission.GetMissionBehavior<CoopMissionClientLogic>() != null ||
+                   mission.GetMissionBehavior<CoopMissionSpawnLogic>() != null ||
+                   mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null;
         }
 
         private static void LogExactNameOverride(Agent agent, string entryId, string exactName, string source)

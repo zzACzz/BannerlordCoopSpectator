@@ -1651,6 +1651,79 @@ Applied change:
 
 ## 23. Dedicated crash on clean host machine during first mission-open observer tick (2026-04-24)
 
+## 24. Остаточне закриття surrogate in-world names без поломки манекенів (2026-06-09)
+
+Проблема, яка залишалась після стабілізації `spectator HUD` і `kill feed`, була не в загальному exact roster state (точному стані ростеру), а в окремому local interaction HUD path (локальному шляху HUD взаємодії після вселення в бійця).
+
+### Підтверджений симптом
+
+- у `spectator HUD` і `kill feed` уже показувались правильні кампанійські імена;
+- але коли гравець був вселений у бійця і дивився на іншого агента, у центрі екрана все ще з’являвся сурогат на кшталт `Coop Jawwal`.
+
+### Негативний результат, який тепер вважається остаточно доведеним
+
+Спроба лікувати цей текст через global `Agent.Name` / `Agent.NameTextObject` / `ITrackableBase.GetName` patch (глобальний патч getter-ів імені агента) є архітектурно небезпечною.
+
+Що підтверджено ручними прогонами:
+
+- після активації `AgentDisplayNamePatch` центр-екранні імена могли ставати правильними;
+- але campaign / preview mannequin pipeline (конвеєр кампанійних / прев’ю-манекенів) ламався;
+- після відключення реєстрації `AgentDisplayNamePatch` манекени знову стабілізувались.
+
+Практичний висновок:
+
+- для цієї проблеми більше не можна повертатися до global display-name override (глобальної підміни імені агента);
+- навіть жорсткі battle-only gate (обмежувачі лише на бойову місію) не роблять цей path безпечним для манекенів.
+
+### Точний native/runtime corridor для проблемного тексту
+
+Низькорівневе decompile-дослідження (дослідження через декомпіляцію) показало, що проблемний центр-екранний текст іде не через `MissionAgentLabelView`, а через interaction HUD path:
+
+1. `MissionMainAgentInteractionComponent.FocusTick()` знаходить фокусований `Agent`.
+2. `SetCurrentFocusedObject(...)` фіксує цей `focusable`-об’єкт.
+3. `MissionAgentStatusVM` передає подію в `AgentInteractionInterfaceVM.OnFocusGained(...)`.
+4. `AgentInteractionInterfaceVM` викликає `Mission.FocusableObjectInformationProvider.GetInteractionTexts(...)`.
+5. `MissionFocusableObjectInformationProvider` у гілках:
+   - `GetHumanAgentTexts(...)`
+   - `GetMountTexts(...)`
+   - `GetGenericAgentTexts(...)`
+   напряму ставить:
+   - `focusableObjectInformation.PrimaryInteractionText = agent.NameTextObject`
+
+Тобто `Coop Jawwal` у центрі екрана був не окремим banner/label mesh issue (проблемою банерного/лейблового меша), а прямим наслідком того, що interaction HUD consumer (споживач interaction HUD) читав сурогатний `agent.NameTextObject`.
+
+### Фінальний робочий fix
+
+Замість глобального патчу getter-ів застосовано вузький consumer patch (патч конкретного споживача тексту):
+
+- `Patches/CoopBattleDisplayNameConsumerPatch.cs`
+- postfix на `MissionFocusableObjectInformationProvider.GetInteractionTexts(...)`
+
+Логіка фіксу:
+
+- працює лише в `coop battle runtime` (нашому бойовому runtime);
+- працює лише коли `focusable` є `Agent`;
+- не чіпає `SecondaryInteractionText`;
+- не чіпає usable objects / machines / інші не-agent cases (випадки не-агентів);
+- якщо `CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(...)` знаходить exact campaign name (точне кампанійське ім’я), postfix підміняє тільки `PrimaryInteractionText`.
+
+### Результат перевірки
+
+Після цього фіксу ручний прогін підтвердив:
+
+- у центрі екрана при погляді на бійців тепер показуються правильні кампанійські імена;
+- манекени залишились стабільними;
+- глобальний `AgentDisplayNamePatch` для цієї задачі більше не потрібен як active runtime path (активний шлях виконання в runtime).
+
+### Захищений архітектурний висновок
+
+Для display-name problems (проблем відображення імен) у coop battle треба відрізняти:
+
+- global identity path (глобальний шлях ідентичності агента), який дуже ризиковий для preview/mannequin систем;
+- local UI consumer path (локальний шлях конкретного UI-споживача), який можна патчити безпечніше.
+
+Для center interaction HUD name (імені в центрі HUD взаємодії) захищеним рішенням тепер вважається тільки вузький patch на `MissionFocusableObjectInformationProvider.GetInteractionTexts(...)`.
+
 ### 23a. Fresh finding from dedicated dump + host-only logs
 
 The crash was not a lobby/join disconnect. It was a real dedicated native crash on a clean host machine.
