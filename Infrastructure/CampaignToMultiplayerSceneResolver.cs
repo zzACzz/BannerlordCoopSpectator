@@ -51,6 +51,18 @@ namespace CoopSpectator.Infrastructure
             if (string.IsNullOrWhiteSpace(campaignBattleScene))
                 return resolution;
 
+            if (SceneRuntimeClassifier.IsVillageBattleScene(campaignBattleScene))
+            {
+                resolution.RuntimeScene = campaignBattleScene;
+                resolution.Source = ExperimentalFeatures.EnableDirectCampaignBattleSceneRuntime
+                    ? "direct-campaign-village-scene"
+                    : "direct-campaign-village-scene-forced";
+                resolution.Terrain = "Village";
+                resolution.ForestDensity = "Unknown";
+                resolution.IsNaval = false;
+                return resolution;
+            }
+
             if (ExperimentalFeatures.EnableDirectCampaignBattleSceneRuntime &&
                 IsCampaignBattleScene(campaignBattleScene))
             {

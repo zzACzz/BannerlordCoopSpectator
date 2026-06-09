@@ -5597,7 +5597,7 @@ namespace CoopSpectator.MissionBehaviors
 
             try { missionMode = mission.Mode.ToString(); } catch { }
             try { missionTime = mission.CurrentTime; } catch { }
-            try { isExactCampaignBattleScene = SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty); } catch { }
+            try { isExactCampaignBattleScene = SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty); } catch { }
 
             if (GameNetwork.NetworkPeers != null)
             {
@@ -8228,7 +8228,7 @@ namespace CoopSpectator.MissionBehaviors
             ExactCampaignArmyBootstrap.ResetForMission(mission);
             if (!ExperimentalFeatures.EnableExactCampaignNativeArmyBootstrap ||
                 !IsSceneAwareBattleMapRuntime(mission) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
             {
                 return;
             }
@@ -10772,7 +10772,7 @@ namespace CoopSpectator.MissionBehaviors
             int defenderCurrentCount = GetCurrentMaterializedSpawnCountForSide(BattleSideEnum.Defender);
 
             bool exactCampaignSceneHasControlledPeer = false;
-            if (SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty) &&
+            if (SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) &&
                 GameNetwork.NetworkPeers != null)
             {
                 foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
@@ -11106,8 +11106,18 @@ namespace CoopSpectator.MissionBehaviors
             if (entryStates != null && entryStates.Count > 0)
             {
                 int sideCap = GetMaterializedArmyAgentsPerSideCap(side, entryStates.Count);
-                int totalAvailable = entryStates.Sum(entryState => Math.Max(0, (entryState?.Count ?? 0) - (entryState?.WoundedCount ?? 0)));
-                return Math.Max(0, Math.Min(sideCap, totalAvailable));
+                int perEntryCap = GetMaterializedAgentsPerEntryCap(side, entryStates.Count);
+                int totalSpawnableUnderEntryCaps = 0;
+                foreach (RosterEntryState entryState in entryStates)
+                {
+                    int availableCount = Math.Max(0, (entryState?.Count ?? 0) - (entryState?.WoundedCount ?? 0));
+                    if (availableCount <= 0)
+                        continue;
+
+                    totalSpawnableUnderEntryCaps += Math.Min(availableCount, perEntryCap);
+                }
+
+                return Math.Max(0, Math.Min(sideCap, totalSpawnableUnderEntryCaps));
             }
 
             IReadOnlyList<string> troopIds = GetGenericMaterializedTroopFallbackIds(side);
@@ -11383,7 +11393,7 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
-            if (!SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName))
+            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName))
                 return false;
 
             if (IsBattleSnapshotReadyForMaterialization(mission, out _))
@@ -11459,7 +11469,7 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
-            if (!SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
                 return false;
 
             DateTime nowUtc = DateTime.UtcNow;
@@ -20811,7 +20821,7 @@ namespace CoopSpectator.MissionBehaviors
             if (IsUsingNativeExactCampaignArmyBootstrap(mission))
                 return false;
 
-            if (!SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
                 return false;
 
             return GetCurrentMaterializedSpawnCountForSide(side) <= 0;
@@ -21070,7 +21080,7 @@ namespace CoopSpectator.MissionBehaviors
                 bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
                 ExpireMissionPeerVanillaSpawnVisuals(missionPeer);
                 if (IsSceneAwareBattleMapRuntime(mission) &&
-                    SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+                    SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
                 {
                     _exactScenePostPossessionMaterializationResumeUtc =
                         DateTime.UtcNow.AddSeconds(ExactScenePostPossessionMaterializationDelaySeconds);
@@ -21142,7 +21152,7 @@ namespace CoopSpectator.MissionBehaviors
                 controlledAgent == null ||
                 !controlledAgent.IsActive() ||
                 !IsSceneAwareBattleMapRuntime(mission) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
             {
                 return "CommanderControl=(captain)";
             }

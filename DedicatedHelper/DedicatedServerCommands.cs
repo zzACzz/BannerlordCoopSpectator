@@ -175,7 +175,7 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
 
                 string requestedScene = snapshot.MultiplayerScene;
                 string requestedGameType = snapshot.MultiplayerGameType;
-                bool exactCampaignScene = CampaignToMultiplayerSceneResolver.IsCampaignBattleScene(requestedScene);
+                bool requiresSceneRegistration = SceneRuntimeClassifier.RequiresDedicatedSceneRegistration(requestedScene);
                 string appliedGameType = string.Equals(requestedGameType, CoopGameModeIds.OfficialBattle, StringComparison.Ordinal)
                     ? CoopGameModeIds.OfficialBattle
                     : CoopGameModeIds.CoopBattle;
@@ -196,11 +196,11 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                     return;
                 }
 
-                if (exactCampaignScene)
+                if (requiresSceneRegistration)
                 {
                     bool preRegisteredExactScene = DedicatedHelperLauncher.TrySendConsoleLine("add_map_to_usable_maps " + requestedScene + " " + appliedGameType);
                     ModLogger.Info(
-                        "DedicatedServerCommands: pre-registered exact campaign runtime scene before start_mission. " +
+                        "DedicatedServerCommands: pre-registered scene-aware runtime scene before start_mission. " +
                         "RequestedScene=" + requestedScene +
                         " AppliedGameType=" + appliedGameType +
                         " AddMapSent=" + preRegisteredExactScene + ".");

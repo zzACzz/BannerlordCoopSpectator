@@ -148,7 +148,7 @@ namespace CoopSpectator.Infrastructure
 
                 initializationStep = "validate-scene";
                 string sceneName = mission.SceneName ?? string.Empty;
-                if (!SceneRuntimeClassifier.IsCampaignBattleScene(sceneName))
+                if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(sceneName))
                 {
                     reason = "scene-not-exact-campaign";
                     return false;

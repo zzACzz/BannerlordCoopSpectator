@@ -9562,7 +9562,7 @@ namespace CoopSpectator.Patches
             if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return false;
 
-            if (!SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
                 return false;
 
             MissionPeer missionPeer = networkPeer.GetComponent<MissionPeer>();
@@ -9669,7 +9669,7 @@ namespace CoopSpectator.Patches
             if (myMissionPeer == null || mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return false;
 
-            if (!SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
                 return false;
 
             Agent controlledAgent = myMissionPeer.ControlledAgent;
@@ -9825,7 +9825,7 @@ namespace CoopSpectator.Patches
                 mission == null ||
                 team == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
             {
                 return false;
             }
@@ -10018,7 +10018,7 @@ namespace CoopSpectator.Patches
                 mission == null ||
                 team == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
             {
                 return false;
             }
@@ -10168,7 +10168,7 @@ namespace CoopSpectator.Patches
                 mission == null ||
                 team == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
             {
                 return;
             }
@@ -10361,7 +10361,7 @@ namespace CoopSpectator.Patches
                 mission == null ||
                 team == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty) ||
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
                 !team.IsPlayerGeneral ||
                 !ReferenceEquals(team.GeneralAgent, controlledAgent))
             {
@@ -10925,7 +10925,7 @@ namespace CoopSpectator.Patches
                 mission == null ||
                 team == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty) ||
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
                 !team.IsPlayerGeneral ||
                 !ReferenceEquals(team.GeneralAgent, controlledAgent))
             {
@@ -11228,7 +11228,7 @@ namespace CoopSpectator.Patches
                 mainAgent == null ||
                 !mainAgent.IsActive() ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty) ||
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
                 !playerTeam.IsPlayerGeneral)
             {
                 return;
@@ -11275,7 +11275,7 @@ namespace CoopSpectator.Patches
                 mainAgent == null ||
                 !mainAgent.IsActive() ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty) ||
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
                 !playerTeam.IsPlayerGeneral)
             {
                 return;
@@ -11325,7 +11325,7 @@ namespace CoopSpectator.Patches
                 !GameNetwork.IsSessionActive ||
                 myPeer.IsServerPeer ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty) ||
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
                 !team.IsPlayerGeneral)
             {
                 return;
@@ -11391,7 +11391,7 @@ namespace CoopSpectator.Patches
                 mainAgent == null ||
                 !mainAgent.IsActive() ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty) ||
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
                 !playerTeam.IsPlayerGeneral)
             {
                 return;
@@ -11434,7 +11434,7 @@ namespace CoopSpectator.Patches
                 mainAgent == null ||
                 !mainAgent.IsActive() ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty) ||
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
                 !playerTeam.IsPlayerGeneral ||
                 !TryGetInstanceBool(missionOrderVm, "IsToggleOrderShown"))
             {

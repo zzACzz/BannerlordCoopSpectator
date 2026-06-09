@@ -3651,13 +3651,23 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             message.MapPatchSceneIndex = sceneContext?.MapPatchSceneIndex ?? -1;
             message.MapPatchNormalizedX = sceneContext?.MapPatchNormalizedX ?? 0f;
             message.MapPatchNormalizedY = sceneContext?.MapPatchNormalizedY ?? 0f;
-            message.HasPatchEncounterDirection = TryResolveCampaignPatchEncounterDirectionSafe(
-                out float patchEncounterDirX,
-                out float patchEncounterDirY,
-                out string patchEncounterDirectionSource);
-            message.PatchEncounterDirX = patchEncounterDirX;
-            message.PatchEncounterDirY = patchEncounterDirY;
-            message.PatchEncounterDirectionSource = patchEncounterDirectionSource ?? string.Empty;
+            if (SceneRuntimeClassifier.IsVillageBattleScene(message.MapScene))
+            {
+                message.HasPatchEncounterDirection = false;
+                message.PatchEncounterDirX = 0f;
+                message.PatchEncounterDirY = 0f;
+                message.PatchEncounterDirectionSource = "village-battle-no-map-patch";
+            }
+            else
+            {
+                message.HasPatchEncounterDirection = TryResolveCampaignPatchEncounterDirectionSafe(
+                    out float patchEncounterDirX,
+                    out float patchEncounterDirY,
+                    out string patchEncounterDirectionSource);
+                message.PatchEncounterDirX = patchEncounterDirX;
+                message.PatchEncounterDirY = patchEncounterDirY;
+                message.PatchEncounterDirectionSource = patchEncounterDirectionSource ?? string.Empty;
+            }
             MultiplayerSceneResolution multiplayerSceneResolution = CampaignToMultiplayerSceneResolver.Resolve(message.MapScene);
             message.MultiplayerScene = multiplayerSceneResolution?.RuntimeScene ?? string.Empty;
             message.MultiplayerGameType = multiplayerSceneResolution?.RuntimeGameType ?? string.Empty;
@@ -6079,6 +6089,19 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             try
             {
+                Mission mission = Mission.Current;
+                string missionSceneName = mission?.SceneName ?? string.Empty;
+                MapEvent battle = PlayerEncounter.Battle ?? PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty?.MapEvent;
+                Settlement encounterSettlement = PlayerEncounter.EncounterSettlement ?? battle?.MapEventSettlement ?? MobileParty.MainParty?.CurrentSettlement;
+                if (battle != null &&
+                    encounterSettlement?.IsVillage == true &&
+                    SceneRuntimeClassifier.IsVillageBattleScene(missionSceneName))
+                {
+                    context.BattleSceneName = missionSceneName;
+                    context.Source = "mission-scene-village";
+                    return context;
+                }
+
                 TaleWorlds.CampaignSystem.Campaign campaign = TaleWorlds.CampaignSystem.Campaign.Current;
                 MobileParty mainParty = MobileParty.MainParty;
                 object mapSceneWrapper = campaign?.MapSceneWrapper;

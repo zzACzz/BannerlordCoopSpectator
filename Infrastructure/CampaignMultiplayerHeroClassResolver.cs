@@ -207,7 +207,7 @@ namespace CoopSpectator.Infrastructure
 
             string sceneName = mission.SceneName ?? string.Empty;
             return SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(sceneName) &&
-                   SceneRuntimeClassifier.IsCampaignBattleScene(sceneName);
+                   SceneRuntimeClassifier.IsExactCampaignBattleScene(sceneName);
         }
 
         public static bool MatchesTroopClass(

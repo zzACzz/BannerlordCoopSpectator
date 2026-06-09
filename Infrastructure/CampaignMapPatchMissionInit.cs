@@ -31,6 +31,7 @@ namespace CoopSpectator.Infrastructure
 
             string source = string.IsNullOrWhiteSpace(logSource) ? "CampaignMapPatchMissionInit" : logSource;
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " pre-apply");
+            ApplyVillageBattleSceneContext(ref record, runtimeScene, source);
             BattleSnapshotMessage snapshot = TryResolveSnapshot(source);
             if (snapshot == null)
             {
@@ -40,6 +41,16 @@ namespace CoopSpectator.Infrastructure
             }
 
             ApplyCampaignDifficultyContext(ref record, snapshot, runtimeScene, source);
+
+            if (SceneRuntimeClassifier.IsVillageBattleScene(runtimeScene))
+            {
+                ModLogger.Info(
+                    source + ": skipped campaign map patch context for village battle runtime. " +
+                    "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                    " SceneLevels=" + (record.SceneLevels ?? "null") + ".");
+                BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " skipped-village-map-patch");
+                return;
+            }
 
             if (snapshot.MapPatchSceneIndex < 0)
             {
@@ -111,6 +122,24 @@ namespace CoopSpectator.Infrastructure
                 source + ": applied campaign player-troops damage multiplier. " +
                 "RuntimeScene=" + (runtimeScene ?? "unknown") +
                 " Multiplier=" + playerTroopsReceivedDamageMultiplier.ToString("0.###") + ".");
+        }
+
+        private static void ApplyVillageBattleSceneContext(
+            ref MissionInitializerRecord record,
+            string runtimeScene,
+            string source)
+        {
+            if (!SceneRuntimeClassifier.RequiresLandRaidSceneLevel(runtimeScene))
+                return;
+
+            if (string.Equals(record.SceneLevels, "land_raid", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            record.SceneLevels = "land_raid";
+            ModLogger.Info(
+                source + ": applied village battle scene-level context. " +
+                "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                " SceneLevels=" + (record.SceneLevels ?? "null") + ".");
         }
 
         public static bool TryRepairLiveMissionContract(Mission mission, string logSource)
