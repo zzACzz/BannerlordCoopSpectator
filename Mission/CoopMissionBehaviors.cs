@@ -9644,14 +9644,16 @@ namespace CoopSpectator.MissionBehaviors
             string entryId,
             string source,
             out string appliedWieldRefresh,
-            out string wieldRefreshIssue)
+            out string wieldRefreshIssue,
+            bool allowLocalPeerControlledAgent = false)
         {
             appliedWieldRefresh = "(none)";
             wieldRefreshIssue = "(none)";
             if (agent == null || overlaySpawnEquipment == null || agent.IsMount)
                 return false;
 
-            if (IsLocalPeerControlledAgent(agent))
+            if (!allowLocalPeerControlledAgent &&
+                IsLocalPeerControlledAgent(agent))
             {
                 wieldRefreshIssue = "client-live-wield-refresh-skipped:local-controlled-agent";
                 return false;
@@ -25744,7 +25746,8 @@ namespace CoopSpectator.MissionBehaviors
                     entryId,
                     source,
                     out appliedWieldRefresh,
-                    out wieldRefreshIssue))
+                    out wieldRefreshIssue,
+                    allowLocalPeerControlledAgent: true))
             {
                 RecordStrictExactHeroLocalInitialWieldApplied(
                     agent,
