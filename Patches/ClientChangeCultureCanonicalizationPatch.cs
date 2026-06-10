@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.MissionBehaviors;
 using HarmonyLib;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -66,7 +67,11 @@ namespace CoopSpectator.Patches
                 if (missionPeer == null || missionPeer.Team == null || Mission.Current == null || ReferenceEquals(missionPeer.Team, Mission.Current.SpectatorTeam))
                     return;
 
-                string targetCultureId = ResolveRuntimeCultureIdForTeam(missionPeer.Team);
+                string targetCultureId = CoopMissionSpawnLogic.ResolveCanonicalRuntimeCultureIdForPeerPublic(
+                    missionPeer,
+                    missionPeer.Team.Side);
+                if (string.IsNullOrWhiteSpace(targetCultureId))
+                    targetCultureId = ResolveRuntimeCultureIdForTeam(missionPeer.Team);
                 if (string.IsNullOrWhiteSpace(targetCultureId))
                     return;
 

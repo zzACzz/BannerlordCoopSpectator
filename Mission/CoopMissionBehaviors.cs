@@ -21876,6 +21876,11 @@ namespace CoopSpectator.MissionBehaviors
             return null;
         }
 
+        public static string ResolveCanonicalRuntimeCultureIdForPeerPublic(MissionPeer missionPeer, BattleSideEnum authoritativeSide)
+        {
+            return ResolveRuntimeMissionCultureIdForPeer(missionPeer, authoritativeSide);
+        }
+
         private static string ResolveRuntimeMissionCultureIdForPeer(MissionPeer missionPeer, BattleSideEnum authoritativeSide)
         {
             return ResolveFixedMissionCultureIdForSide(authoritativeSide);

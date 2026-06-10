@@ -8,7 +8,7 @@ namespace CoopSpectator.Campaign
 {
     public sealed class CoopDedicatedServerSettingsVM : ViewModel
     {
-        private const string SupportUrl = "https://ko-fi.com/zaczua";
+        private const string SupportUrl = "https://www.patreon.com/cw/BannerlordCoopCampaign";
         private readonly Action _onClose;
         private string _serverName;
         private string _serverPassword;

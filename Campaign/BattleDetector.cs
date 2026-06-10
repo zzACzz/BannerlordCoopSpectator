@@ -3970,7 +3970,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         OriginalCharacterId = originalCharacterId,
                         SpawnTemplateId = spawnTemplateId,
                         TroopName = character.Name?.ToString() ?? originalCharacterId,
-                        CultureId = TryGetCultureId(character),
+                        CultureId = CanonicalizeSnapshotCultureId(TryGetCultureId(character)),
                         Tier = TryGetIntProperty(character, "Tier"),
                         IsMounted = TryGetBoolProperty(character, "IsMounted"),
                         IsRanged = TryGetCharacterIsRanged(character),
@@ -4001,6 +4001,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             defenderSide.TotalManCount = defenderSide.Troops.Count;
             ApplyResolvedSideAppearance(attackerSide, null, "synthetic-all-campaign-troops");
             ApplyResolvedSideAppearance(defenderSide, null, "synthetic-all-campaign-troops");
+            CanonicalizeSnapshotSideCulture(attackerSide);
+            CanonicalizeSnapshotSideCulture(defenderSide);
 
             if (attackerSide.Parties.Count > 0)
                 snapshot.Sides.Add(attackerSide);
@@ -4059,6 +4061,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             defenderSide.TotalManCount = defenderSide.Troops.Count;
             ApplyResolvedSideAppearance(attackerSide, null, "synthetic-live-heroes");
             ApplyResolvedSideAppearance(defenderSide, null, "synthetic-live-heroes");
+            CanonicalizeSnapshotSideCulture(attackerSide);
+            CanonicalizeSnapshotSideCulture(defenderSide);
 
             if (attackerSide.Parties.Count > 0)
                 snapshot.Sides.Add(attackerSide);
@@ -4107,7 +4111,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     OriginalCharacterId = originalCharacterId,
                     SpawnTemplateId = spawnTemplateId,
                     TroopName = character.Name?.ToString() ?? originalCharacterId,
-                    CultureId = TryGetCultureId(character),
+                    CultureId = CanonicalizeSnapshotCultureId(TryGetCultureId(character)),
                     Tier = TryGetIntProperty(character, "Tier"),
                     IsMounted = TryGetBoolProperty(character, "IsMounted"),
                     IsRanged = TryGetCharacterIsRanged(character),
@@ -4482,6 +4486,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             mainPartySide.Troops.AddRange(mainParty.Troops ?? new List<TroopStackInfo>());
             mainPartySide.TotalManCount = mainParty.TotalManCount;
             ApplyResolvedSideAppearance(mainPartySide, MobileParty.MainParty, "fallback-main-party");
+            CanonicalizeSnapshotSideCulture(mainPartySide);
             snapshot.Sides.Add(mainPartySide);
 
             LogSnapshotMappings("fallback", snapshot);
@@ -4532,6 +4537,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             ApplyResolvedSideAppearance(sideSnapshot, sideObject, "live-side");
+            CanonicalizeSnapshotSideCulture(sideSnapshot);
             sideSnapshot.TotalManCount = sideSnapshot.Parties.Sum(p => p?.TotalManCount ?? 0);
             sideSnapshot.MissionReadyEntryOrder = BuildMissionReadyEntryOrder(sideObject, sideSnapshot, sideId);
             ModLogger.Info(
@@ -5369,7 +5375,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     CharacterId = spawnTemplateId,
                     OriginalCharacterId = originalCharacterId,
                     SpawnTemplateId = spawnTemplateId,
-                    CultureId = TryGetCultureId(characterObject),
+                    CultureId = CanonicalizeSnapshotCultureId(TryGetCultureId(characterObject)),
                     HasShield = TryGetCharacterHasShield(characterObject),
                     HasThrown = TryGetCharacterHasThrown(characterObject),
                     IsRanged = TryGetCharacterIsRanged(characterObject),
@@ -7137,6 +7143,60 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             troop.HeroLevel = TryGetHeroLevel(characterObject);
             troop.HeroAge = TryGetHeroAge(characterObject);
             troop.HeroIsFemale = TryGetHeroIsFemale(characterObject);
+        }
+
+        private static void CanonicalizeSnapshotSideCulture(BattleSideSnapshotMessage sideSnapshot)
+        {
+            if (sideSnapshot == null)
+                return;
+
+            string resolvedCultureId = IsSupportedSnapshotCultureId(sideSnapshot.CultureId)
+                ? sideSnapshot.CultureId
+                : ResolveDominantSideCultureId(sideSnapshot);
+            sideSnapshot.CultureId = CanonicalizeSnapshotCultureId(resolvedCultureId);
+        }
+
+        private static string CanonicalizeSnapshotCultureId(string cultureId)
+        {
+            if (string.IsNullOrWhiteSpace(cultureId))
+                return "empire";
+
+            switch (cultureId.Trim().ToLowerInvariant())
+            {
+                case "empire":
+                    return "empire";
+                case "aserai":
+                    return "aserai";
+                case "battania":
+                    return "battania";
+                case "khuzait":
+                    return "khuzait";
+                case "sturgia":
+                    return "sturgia";
+                case "vlandia":
+                    return "vlandia";
+                default:
+                    return "empire";
+            }
+        }
+
+        private static bool IsSupportedSnapshotCultureId(string cultureId)
+        {
+            if (string.IsNullOrWhiteSpace(cultureId))
+                return false;
+
+            switch (cultureId.Trim().ToLowerInvariant())
+            {
+                case "empire":
+                case "aserai":
+                case "battania":
+                case "khuzait":
+                case "sturgia":
+                case "vlandia":
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static int TryGetCharacterAttributeValue(object instance, string attributeName)
