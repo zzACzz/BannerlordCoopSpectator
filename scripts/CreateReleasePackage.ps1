@@ -21,6 +21,7 @@ $lightReleaseReadmeUaTemplate = Join-Path $distRoot "README_LIGHT_RELEASE_UA.md"
 [xml]$moduleXml = Get-Content (Join-Path $clientModuleSource "SubModule.xml")
 $moduleVersion = $moduleXml.Module.Version.value
 $releaseTag = "BannerlordCoopCampaign_{0}" -f $moduleVersion.Trim()
+$releaseChangelogTemplate = Join-Path $distRoot ("CHANGELOG_{0}.md" -f $moduleVersion.Trim())
 
 $legacyClientDir = Join-Path $distRoot "CoopSpectator_ClientPackage"
 $legacyClientZip = Join-Path $distRoot "CoopSpectator_ClientPackage.zip"
@@ -258,6 +259,9 @@ Copy-DirectoryContent $clientModuleSource (Join-Path $lightReleaseDir "CoopSpect
 Copy-HostPayload $lightReleaseDir $false
 Remove-DebugSymbols $lightReleaseDir
 Validate-LightReleasePayload $lightReleaseDir
+Copy-Item -LiteralPath $lightReleaseReadmeEnTemplate -Destination (Join-Path $lightReleaseDir "README_EN.md") -Force
+Copy-Item -LiteralPath $lightReleaseReadmeUaTemplate -Destination (Join-Path $lightReleaseDir "README_UA.md") -Force
+Copy-Item -LiteralPath $releaseChangelogTemplate -Destination (Join-Path $lightReleaseDir (Split-Path $releaseChangelogTemplate -Leaf)) -Force
 
 Compress-Archive -Path (Join-Path $lightReleaseDir "*") -DestinationPath $lightReleaseZip -CompressionLevel Optimal
 
