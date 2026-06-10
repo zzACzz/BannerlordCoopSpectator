@@ -49,6 +49,7 @@ namespace CoopSpectator.Infrastructure
         public bool ClientCreateAgentSafe { get; set; }
         public string ClientCreateAgentSafeReason { get; set; }
         public bool RequiresCreateTimeWeapons { get; set; }
+        public bool RequiresServerSpawnBaselineOnClientCreateAgent { get; set; }
         public bool WeaponLayoutMatchesNativeTemplate { get; set; }
         public string ExactWeaponLayoutSummary { get; set; }
         public string NativeTemplateWeaponLayoutSummary { get; set; }
@@ -72,6 +73,7 @@ namespace CoopSpectator.Infrastructure
                 ",ClientCreateAgentSafe=" + ClientCreateAgentSafe +
                 ",ClientCreateAgentSafeReason=" + (ClientCreateAgentSafeReason ?? "unknown") +
                 ",RequiresCreateTimeWeapons=" + RequiresCreateTimeWeapons +
+                ",RequiresServerSpawnBaselineOnClientCreateAgent=" + RequiresServerSpawnBaselineOnClientCreateAgent +
                 ",WeaponLayoutMatchesNativeTemplate=" + WeaponLayoutMatchesNativeTemplate +
                 ",Weapons=" + IncludeWeapons +
                 ",Armor=" + IncludeArmorVisuals +
@@ -156,6 +158,10 @@ namespace CoopSpectator.Infrastructure
                 exactEquipment != null &&
                 nativeTemplateEquipment != null &&
                 DoWeaponLayoutsMatch(exactEquipment, nativeTemplateEquipment);
+            bool requiresServerSpawnBaselineOnClientCreateAgent =
+                archetype == ExactCreateAgentPayloadArchetype.MountedRanged &&
+                requiresCreateTimeWeapons &&
+                !weaponLayoutMatchesNativeTemplate;
             bool requiresCreateTimeMount = RequiresCreateTimeMount(entryState, contract);
             bool requestedProfileIncludesMount = ProfileIncludesMount(requestedProfile);
             ExactCreateAgentPayloadDiagnosticProfile effectiveProfile = requestedProfile;
@@ -169,7 +175,8 @@ namespace CoopSpectator.Infrastructure
 
             bool requestedProfileClientSafe =
                 (requestedProfileIncludesWeapons || !requiresCreateTimeWeapons) &&
-                (requestedProfileIncludesMount || !requiresCreateTimeMount);
+                (requestedProfileIncludesMount || !requiresCreateTimeMount) &&
+                !requiresServerSpawnBaselineOnClientCreateAgent;
             if (requiresCreateTimeWeapons && !ProfileIncludesWeapons(effectiveProfile))
             {
                 effectiveProfile = PromoteProfileForWeaponSafety(effectiveProfile);
@@ -177,7 +184,11 @@ namespace CoopSpectator.Infrastructure
             }
 
             string clientCreateAgentSafeReason;
-            if (promotionReasons.Count > 0)
+            if (requiresServerSpawnBaselineOnClientCreateAgent)
+            {
+                clientCreateAgentSafeReason = "mounted-ranged-server-spawn-baseline-required";
+            }
+            else if (promotionReasons.Count > 0)
             {
                 clientCreateAgentSafeReason =
                     "promoted-to-" +
@@ -206,9 +217,11 @@ namespace CoopSpectator.Infrastructure
                 RequestedProfileClientSafe = requestedProfileClientSafe,
                 ClientCreateAgentSafe =
                     (ProfileIncludesWeapons(effectiveProfile) || !requiresCreateTimeWeapons) &&
-                    (ProfileIncludesMount(effectiveProfile) || !requiresCreateTimeMount),
+                    (ProfileIncludesMount(effectiveProfile) || !requiresCreateTimeMount) &&
+                    !requiresServerSpawnBaselineOnClientCreateAgent,
                 ClientCreateAgentSafeReason = clientCreateAgentSafeReason,
                 RequiresCreateTimeWeapons = requiresCreateTimeWeapons,
+                RequiresServerSpawnBaselineOnClientCreateAgent = requiresServerSpawnBaselineOnClientCreateAgent,
                 WeaponLayoutMatchesNativeTemplate = weaponLayoutMatchesNativeTemplate,
                 ExactWeaponLayoutSummary = BuildEquipmentWeaponLayoutSummary(exactEquipment),
                 NativeTemplateWeaponLayoutSummary = BuildEquipmentWeaponLayoutSummary(nativeTemplateEquipment),

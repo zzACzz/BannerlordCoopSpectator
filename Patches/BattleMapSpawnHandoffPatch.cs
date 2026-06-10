@@ -132,6 +132,16 @@ namespace CoopSpectator.Patches
             new List<DeferredClientSetAgentHealthPayload>();
         private static readonly List<DeferredClientMakeAgentDeadPayload> DeferredClientMakeAgentDeadPayloads =
             new List<DeferredClientMakeAgentDeadPayload>();
+
+        private enum SynchronizeMountedWeaponRole
+        {
+            Other = 0,
+            Melee = 1,
+            Polearm = 2,
+            Shield = 3,
+            Ranged = 4,
+            Ammo = 5
+        }
         private static long _nextDeferredClientCreateAgentSequence;
         private static long _nextDeferredClientSetAgentActionSetSequence;
         private static long _nextDeferredClientSynchronizeAgentEquipmentSequence;
@@ -5932,6 +5942,281 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void TryCanonicalizeMountedRangedSynchronizeAgentEquipmentPayload(
+            SynchronizeAgentSpawnEquipment synchronizeAgentSpawnEquipment,
+            Agent agent)
+        {
+            try
+            {
+                Equipment spawnEquipment = synchronizeAgentSpawnEquipment?.SpawnEquipment;
+                if (spawnEquipment == null || agent == null || agent.IsMount)
+                    return;
+
+                if (agent.Character?.IsHero == true || agent.MissionPeer != null)
+                    return;
+
+                if (!IsMountedSynchronizeAgentEquipmentCandidate(agent, spawnEquipment))
+                    return;
+
+                EquipmentElement slot0 = spawnEquipment.GetEquipmentFromSlot(EquipmentIndex.Weapon0);
+                EquipmentElement slot1 = spawnEquipment.GetEquipmentFromSlot(EquipmentIndex.Weapon1);
+                EquipmentElement slot2 = spawnEquipment.GetEquipmentFromSlot(EquipmentIndex.Weapon2);
+                EquipmentElement slot3 = spawnEquipment.GetEquipmentFromSlot(EquipmentIndex.Weapon3);
+
+                if (!TryBuildCanonicalMountedRangedSynchronizeWeaponOrder(
+                        slot0,
+                        slot1,
+                        slot2,
+                        slot3,
+                        out EquipmentElement canonicalWeapon0,
+                        out EquipmentElement canonicalWeapon1,
+                        out EquipmentElement canonicalWeapon2,
+                        out EquipmentElement canonicalWeapon3))
+                {
+                    return;
+                }
+
+                spawnEquipment[EquipmentIndex.Weapon0] = canonicalWeapon0;
+                spawnEquipment[EquipmentIndex.Weapon1] = canonicalWeapon1;
+                spawnEquipment[EquipmentIndex.Weapon2] = canonicalWeapon2;
+                spawnEquipment[EquipmentIndex.Weapon3] = canonicalWeapon3;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: mounted ranged SynchronizeAgentSpawnEquipment payload canonicalization failed open: " +
+                    ex.Message);
+            }
+        }
+
+        private static bool IsMountedSynchronizeAgentEquipmentCandidate(Agent agent, Equipment spawnEquipment)
+        {
+            if (agent?.MountAgent != null)
+                return true;
+
+            if (HasEquipmentItemInSlot(spawnEquipment, EquipmentIndex.Horse) ||
+                HasEquipmentItemInSlot(spawnEquipment, EquipmentIndex.HorseHarness))
+            {
+                return true;
+            }
+
+            string entryId = null;
+            if (!CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                !CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId) &&
+                !ExactTransferContractRuntimeCache.TryGetEntryIdByRiderAgentIndex(agent.Index, out entryId))
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            return entryState?.IsMounted == true;
+        }
+
+        private static bool HasEquipmentItemInSlot(Equipment equipment, EquipmentIndex slot)
+        {
+            if (equipment == null)
+                return false;
+
+            EquipmentElement element = equipment.GetEquipmentFromSlot(slot);
+            return !element.IsEmpty && element.Item != null;
+        }
+
+        private static bool TryBuildCanonicalMountedRangedSynchronizeWeaponOrder(
+            EquipmentElement slot0,
+            EquipmentElement slot1,
+            EquipmentElement slot2,
+            EquipmentElement slot3,
+            out EquipmentElement canonicalWeapon0,
+            out EquipmentElement canonicalWeapon1,
+            out EquipmentElement canonicalWeapon2,
+            out EquipmentElement canonicalWeapon3)
+        {
+            canonicalWeapon0 = default;
+            canonicalWeapon1 = default;
+            canonicalWeapon2 = default;
+            canonicalWeapon3 = default;
+
+            EquipmentElement[] sourceSlots =
+            {
+                slot0,
+                slot1,
+                slot2,
+                slot3
+            };
+            SynchronizeMountedWeaponRole[] sourceRoles =
+            {
+                ResolveSynchronizeMountedWeaponRole(slot0.Item),
+                ResolveSynchronizeMountedWeaponRole(slot1.Item),
+                ResolveSynchronizeMountedWeaponRole(slot2.Item),
+                ResolveSynchronizeMountedWeaponRole(slot3.Item)
+            };
+
+            bool hasRanged = sourceRoles.Any(role => role == SynchronizeMountedWeaponRole.Ranged);
+            bool hasAmmo = sourceRoles.Any(role => role == SynchronizeMountedWeaponRole.Ammo);
+            if (!hasRanged || !hasAmmo)
+                return false;
+
+            var usedIndices = new HashSet<int>();
+            if (!TryTakeSynchronizeWeaponSlotByRole(
+                    sourceSlots,
+                    sourceRoles,
+                    usedIndices,
+                    SynchronizeMountedWeaponRole.Ranged,
+                    out canonicalWeapon0))
+            {
+                return false;
+            }
+
+            if (!TryTakeSynchronizeWeaponSlotByRole(
+                    sourceSlots,
+                    sourceRoles,
+                    usedIndices,
+                    SynchronizeMountedWeaponRole.Ammo,
+                    out canonicalWeapon1))
+            {
+                return false;
+            }
+
+            if (!TryTakeSynchronizeWeaponSlotByRole(
+                    sourceSlots,
+                    sourceRoles,
+                    usedIndices,
+                    SynchronizeMountedWeaponRole.Polearm,
+                    out canonicalWeapon2) &&
+                !TryTakeSynchronizeWeaponSlotByRole(
+                    sourceSlots,
+                    sourceRoles,
+                    usedIndices,
+                    SynchronizeMountedWeaponRole.Melee,
+                    out canonicalWeapon2))
+            {
+                if (!TryTakeSynchronizeWeaponSlotByRole(
+                        sourceSlots,
+                        sourceRoles,
+                        usedIndices,
+                        SynchronizeMountedWeaponRole.Shield,
+                        out canonicalWeapon2))
+                {
+                    TryTakeNextUnusedSynchronizeWeaponSlot(
+                        sourceSlots,
+                        usedIndices,
+                        out canonicalWeapon2);
+                }
+            }
+
+            if (!TryTakeSynchronizeWeaponSlotByRole(
+                    sourceSlots,
+                    sourceRoles,
+                    usedIndices,
+                    SynchronizeMountedWeaponRole.Shield,
+                    out canonicalWeapon3))
+            {
+                TryTakeNextUnusedSynchronizeWeaponSlot(
+                    sourceSlots,
+                    usedIndices,
+                    out canonicalWeapon3);
+            }
+
+            return true;
+        }
+
+        private static bool TryTakeSynchronizeWeaponSlotByRole(
+            EquipmentElement[] sourceSlots,
+            SynchronizeMountedWeaponRole[] sourceRoles,
+            HashSet<int> usedIndices,
+            SynchronizeMountedWeaponRole role,
+            out EquipmentElement element)
+        {
+            element = default;
+            if (sourceSlots == null || sourceRoles == null || usedIndices == null)
+                return false;
+
+            for (int i = 0; i < sourceSlots.Length && i < sourceRoles.Length; i++)
+            {
+                if (usedIndices.Contains(i) || sourceRoles[i] != role)
+                    continue;
+
+                usedIndices.Add(i);
+                element = sourceSlots[i];
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryTakeNextUnusedSynchronizeWeaponSlot(
+            EquipmentElement[] sourceSlots,
+            HashSet<int> usedIndices,
+            out EquipmentElement element)
+        {
+            element = default;
+            if (sourceSlots == null || usedIndices == null)
+                return false;
+
+            for (int i = 0; i < sourceSlots.Length; i++)
+            {
+                if (usedIndices.Contains(i))
+                    continue;
+
+                usedIndices.Add(i);
+                element = sourceSlots[i];
+                return true;
+            }
+
+            return false;
+        }
+
+        private static SynchronizeMountedWeaponRole ResolveSynchronizeMountedWeaponRole(ItemObject item)
+        {
+            if (item == null)
+                return SynchronizeMountedWeaponRole.Other;
+
+            WeaponComponentData primaryWeapon = item.PrimaryWeapon;
+            if (primaryWeapon != null)
+            {
+                if (primaryWeapon.IsShield)
+                    return SynchronizeMountedWeaponRole.Shield;
+                if (primaryWeapon.IsPolearm)
+                    return SynchronizeMountedWeaponRole.Polearm;
+                if (primaryWeapon.IsAmmo)
+                    return SynchronizeMountedWeaponRole.Ammo;
+                if (primaryWeapon.IsRangedWeapon ||
+                    primaryWeapon.WeaponClass == WeaponClass.Javelin ||
+                    primaryWeapon.WeaponClass == WeaponClass.ThrowingAxe ||
+                    primaryWeapon.WeaponClass == WeaponClass.ThrowingKnife ||
+                    primaryWeapon.WeaponClass == WeaponClass.Stone ||
+                    primaryWeapon.WeaponClass == WeaponClass.SlingStone)
+                {
+                    return SynchronizeMountedWeaponRole.Ranged;
+                }
+
+                if (primaryWeapon.IsOneHanded || primaryWeapon.IsTwoHanded || primaryWeapon.IsMeleeWeapon)
+                    return SynchronizeMountedWeaponRole.Melee;
+            }
+
+            switch (item.ItemType)
+            {
+                case ItemObject.ItemTypeEnum.Shield:
+                    return SynchronizeMountedWeaponRole.Shield;
+                case ItemObject.ItemTypeEnum.Polearm:
+                    return SynchronizeMountedWeaponRole.Polearm;
+                case ItemObject.ItemTypeEnum.Bow:
+                case ItemObject.ItemTypeEnum.Crossbow:
+                case ItemObject.ItemTypeEnum.Sling:
+                case ItemObject.ItemTypeEnum.Thrown:
+                    return SynchronizeMountedWeaponRole.Ranged;
+                case ItemObject.ItemTypeEnum.Arrows:
+                case ItemObject.ItemTypeEnum.Bolts:
+                case ItemObject.ItemTypeEnum.SlingStones:
+                    return SynchronizeMountedWeaponRole.Ammo;
+                case ItemObject.ItemTypeEnum.OneHandedWeapon:
+                case ItemObject.ItemTypeEnum.TwoHandedWeapon:
+                    return SynchronizeMountedWeaponRole.Melee;
+                default:
+                    return SynchronizeMountedWeaponRole.Other;
+            }
+        }
+
         private static void CanonicalizeSynchronizeAgentEquipmentSlot(
             Equipment targetEquipment,
             Equipment sourceEquipment,
@@ -6338,6 +6623,9 @@ namespace CoopSpectator.Patches
                 }
 
                 TryCanonicalizeStrictMountedHeroSynchronizeAgentEquipmentPayload(
+                    synchronizeAgentSpawnEquipment,
+                    agent);
+                TryCanonicalizeMountedRangedSynchronizeAgentEquipmentPayload(
                     synchronizeAgentSpawnEquipment,
                     agent);
 

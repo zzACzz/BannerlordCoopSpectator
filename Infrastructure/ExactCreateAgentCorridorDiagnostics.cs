@@ -48,6 +48,7 @@ namespace CoopSpectator.Infrastructure
             public string TroopId { get; set; }
             public string PayloadDiagnosticSummary { get; set; }
             public string PayloadWeaponLayoutSummary { get; set; }
+            public bool RequiresServerSpawnBaselineOnClientCreateAgent { get; set; }
             public string EntryWeaponSlotVector { get; set; }
             public string PreSpawnWeaponSlotVector { get; set; }
             public string PreSpawnMountSummary { get; set; }
@@ -66,6 +67,7 @@ namespace CoopSpectator.Infrastructure
             public bool ServerSpawnMounted { get; set; }
             public string PayloadDiagnosticSummary { get; set; }
             public string PayloadWeaponLayoutSummary { get; set; }
+            public bool RequiresServerSpawnBaselineOnClientCreateAgent { get; set; }
             public string ExpectedEntryWeaponSlotVector { get; set; }
             public string ExpectedPreSpawnWeaponSlotVector { get; set; }
             public string ExpectedPreSpawnNonWeaponSlotVector { get; set; }
@@ -167,6 +169,7 @@ namespace CoopSpectator.Infrastructure
                     TroopId = exactOrigin.TroopId,
                     PayloadDiagnosticSummary = payloadDiagnostic?.ToSummary() ?? "ExactCreateAgentPayloadDiagnostic={State=absent}",
                     PayloadWeaponLayoutSummary = payloadDiagnostic?.ToWeaponLayoutSummary() ?? "ExactCreateAgentWeaponLayout={State=absent}",
+                    RequiresServerSpawnBaselineOnClientCreateAgent = payloadDiagnostic?.RequiresServerSpawnBaselineOnClientCreateAgent == true,
                     EntryWeaponSlotVector = BuildEntryWeaponSlotVector(entryState),
                     PreSpawnWeaponSlotVector = BuildEquipmentWeaponSlotVector(exactEquipment),
                     PreSpawnMountSummary = ExactCreateAgentPayloadDiagnostics.BuildEquipmentMountLayoutSummary(exactEquipment),
@@ -231,6 +234,7 @@ namespace CoopSpectator.Infrastructure
                                                 result?.SpawnEquipment?[EquipmentIndex.HorseHarness].Item != null,
                             PayloadDiagnosticSummary = pendingState.PayloadDiagnosticSummary ?? (payloadDiagnostic?.ToSummary() ?? "ExactCreateAgentPayloadDiagnostic={State=absent}"),
                             PayloadWeaponLayoutSummary = pendingState.PayloadWeaponLayoutSummary ?? (payloadDiagnostic?.ToWeaponLayoutSummary() ?? "ExactCreateAgentWeaponLayout={State=absent}"),
+                            RequiresServerSpawnBaselineOnClientCreateAgent = pendingState.RequiresServerSpawnBaselineOnClientCreateAgent,
                             ExpectedEntryWeaponSlotVector = pendingState.EntryWeaponSlotVector,
                             ExpectedPreSpawnWeaponSlotVector = pendingState.PreSpawnWeaponSlotVector,
                             ExpectedPreSpawnNonWeaponSlotVector = pendingState.PreSpawnNonWeaponSlotVector,
@@ -299,27 +303,35 @@ namespace CoopSpectator.Infrastructure
 
             WeaponSlotSnapshot[] actualMissionSlots = BuildMissionEquipmentWeaponSlots(createAgent.MissionEquipment);
             WeaponSlotSnapshot[] actualSpawnSlots = BuildEquipmentWeaponSlots(createAgent.SpawnEquipment);
+            bool forcedBaselineRepair = false;
             if (!DoesServerSpawnStateMatchOutgoingCreateAgent(state, createAgent, actualMissionSlots, out string stateMismatchReason))
             {
-                lock (Sync)
+                if (ShouldForceServerSpawnBaselineRepair(state, stateMismatchReason))
                 {
-                    if (ServerStatesByAgentIndex.TryGetValue(createAgent.AgentIndex, out ServerCreateAgentExpectedState currentState) &&
-                        ReferenceEquals(currentState, state))
-                    {
-                        ServerStatesByAgentIndex.Remove(createAgent.AgentIndex);
-                    }
+                    forcedBaselineRepair = true;
                 }
+                else
+                {
+                    lock (Sync)
+                    {
+                        if (ServerStatesByAgentIndex.TryGetValue(createAgent.AgentIndex, out ServerCreateAgentExpectedState currentState) &&
+                            ReferenceEquals(currentState, state))
+                        {
+                            ServerStatesByAgentIndex.Remove(createAgent.AgentIndex);
+                        }
+                    }
 
-                reason = stateMismatchReason ?? "stale-server-spawn-state";
-                Log(
-                    "server-create-agent-onwrite-sanitize-skipped",
-                    "AgentIndex=" + createAgent.AgentIndex +
-                    " Reason=" + reason +
-                    " ExpectedEntryId=" + (state.EntryId ?? "unknown") +
-                    " ExpectedTroopId=" + (state.TroopId ?? "unknown") +
-                    " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null"),
-                    persistToRuntimeBundle: false);
-                return false;
+                    reason = stateMismatchReason ?? "stale-server-spawn-state";
+                    Log(
+                        "server-create-agent-onwrite-sanitize-skipped",
+                        "AgentIndex=" + createAgent.AgentIndex +
+                        " Reason=" + reason +
+                        " ExpectedEntryId=" + (state.EntryId ?? "unknown") +
+                        " ExpectedTroopId=" + (state.TroopId ?? "unknown") +
+                        " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null"),
+                        persistToRuntimeBundle: false);
+                    return false;
+                }
             }
 
             bool missionMismatch = HasWeaponSlotMismatch(state.ServerSpawnMissionWeaponSlots, actualMissionSlots);
@@ -346,7 +358,10 @@ namespace CoopSpectator.Infrastructure
 
             string afterPayloadSummary = BuildCreateAgentPayloadSummary(createAgent);
             reason =
-                "sanitized-to-server-spawn-baseline:" +
+                (forcedBaselineRepair
+                    ? "forced-server-spawn-baseline-reset:"
+                    : "sanitized-to-server-spawn-baseline:") +
+                (forcedBaselineRepair ? "stale-weapon-overlap-missing," : string.Empty) +
                 (missionMismatch ? "mission-weapons-mismatch" : "mission-weapons-match") +
                 "," +
                 (spawnMismatch ? "spawn-weapons-mismatch" : "spawn-weapons-match");
@@ -361,6 +376,21 @@ namespace CoopSpectator.Infrastructure
                 " ServerSpawnSpawnWeaponSlots={" + (state.ServerSpawnSpawnWeaponSlotVector ?? "unknown") + "}";
             Log("server-create-agent-onwrite-sanitized", details, persistToRuntimeBundle: false);
             return true;
+        }
+
+        private static bool ShouldForceServerSpawnBaselineRepair(
+            ServerCreateAgentExpectedState state,
+            string mismatchReason)
+        {
+            if (state == null ||
+                !state.RequiresServerSpawnBaselineOnClientCreateAgent ||
+                state.CreateAgentOnWriteEventCount > 0)
+            {
+                return false;
+            }
+
+            return !string.IsNullOrWhiteSpace(mismatchReason) &&
+                   mismatchReason.StartsWith("stale-server-spawn-state:weapon-overlap-missing", StringComparison.Ordinal);
         }
 
         internal static void ObserveServerCreateAgentOnWrite(
