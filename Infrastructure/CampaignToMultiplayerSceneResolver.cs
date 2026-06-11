@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using CoopSpectator.Network.Messages;
 using TaleWorlds.CampaignSystem;
 
 namespace CoopSpectator.Infrastructure
@@ -35,7 +36,9 @@ namespace CoopSpectator.Infrastructure
             return SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(sceneName);
         }
 
-        public static MultiplayerSceneResolution Resolve(string campaignBattleScene)
+        public static MultiplayerSceneResolution Resolve(
+            string campaignBattleScene,
+            BattleScenarioContextMessage scenarioContext = null)
         {
             var resolution = new MultiplayerSceneResolution
             {
@@ -50,6 +53,20 @@ namespace CoopSpectator.Infrastructure
 
             if (string.IsNullOrWhiteSpace(campaignBattleScene))
                 return resolution;
+
+            if (scenarioContext?.IsSiegeBattle == true)
+            {
+                resolution.RuntimeScene = campaignBattleScene;
+                resolution.Source = ExperimentalFeatures.EnableDirectCampaignBattleSceneRuntime
+                    ? "direct-campaign-siege-scene"
+                    : "direct-campaign-siege-scene-forced";
+                resolution.Terrain = !string.IsNullOrWhiteSpace(scenarioContext.SiegeContext?.SiegeSubtype)
+                    ? scenarioContext.SiegeContext.SiegeSubtype
+                    : "Siege";
+                resolution.ForestDensity = "Unknown";
+                resolution.IsNaval = false;
+                return resolution;
+            }
 
             if (SceneRuntimeClassifier.IsVillageBattleScene(campaignBattleScene))
             {

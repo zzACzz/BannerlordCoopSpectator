@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Source.Missions;
@@ -177,6 +178,18 @@ namespace CoopSpectator.Infrastructure
                     return false;
                 }
 
+                initializationStep = "resolve-scenario-contract";
+                BattleScenarioContextMessage scenarioContext = ResolveScenarioContextForMission(mission);
+                if (!TryResolveBootstrapScenarioContract(
+                        scenarioContext,
+                        out string battleSpawnTag,
+                        out Mission.BattleSizeType battleSizeType,
+                        out string scenarioContractReason))
+                {
+                    reason = scenarioContractReason ?? "scenario-contract-rejected";
+                    return false;
+                }
+
                 initializationStep = "ensure-campaign-object-catalogs";
                 ExactCampaignObjectCatalogBootstrap.EnsureLoaded("exact-native-bootstrap:" + (source ?? "unknown"));
 
@@ -190,12 +203,32 @@ namespace CoopSpectator.Infrastructure
                     return false;
                 }
 
+                initializationStep = "resolve-siege-scene-preparation";
+                if (scenarioContext?.IsSiegeBattle == true)
+                {
+                    MissionBehavior existingSiegePreparationHandler = mission.GetMissionBehavior<SiegeMissionPreparationHandler>();
+                    if (existingSiegePreparationHandler == null)
+                    {
+                        initializationStep = "create-siege-scene-preparation";
+                        var siegePreparationHandler = new SiegeMissionPreparationHandler(
+                            isSallyOut: false,
+                            isReliefForceAttack: false,
+                            (scenarioContext.SiegeContext?.WallHitPointRatios ?? new List<float>()).ToArray(),
+                            scenarioContext.SiegeContext?.HasAnySiegeTower == true);
+                        mission.AddMissionBehavior(siegePreparationHandler);
+                        initializationStep = "siege-scene-preparation-onbehaviorinitialize";
+                        siegePreparationHandler.OnBehaviorInitialize();
+                        initializationStep = "siege-scene-preparation-afterstart";
+                        siegePreparationHandler.AfterStart();
+                    }
+                }
+
                 initializationStep = "resolve-battle-spawn-logic";
                 MissionBehavior existingBattleSpawnLogic = mission.GetMissionBehavior<BattleSpawnLogic>();
                 if (existingBattleSpawnLogic == null)
                 {
                     initializationStep = "create-battle-spawn-logic";
-                    var battleSpawnLogic = new BattleSpawnLogic(BattleSpawnLogic.BattleTag);
+                    var battleSpawnLogic = new BattleSpawnLogic(battleSpawnTag);
                     mission.AddMissionBehavior(battleSpawnLogic);
                     initializationStep = "battle-spawn-logic-onbehaviorinitialize";
                     battleSpawnLogic.OnBehaviorInitialize();
@@ -208,7 +241,7 @@ namespace CoopSpectator.Infrastructure
                 if (spawnLogic == null)
                 {
                     initializationStep = "create-agent-spawn-logic";
-                    spawnLogic = new NativeMissionAgentSpawnLogic(suppliers, playerSide, Mission.BattleSizeType.Battle);
+                    spawnLogic = new NativeMissionAgentSpawnLogic(suppliers, playerSide, battleSizeType);
                     initializationStep = "add-agent-spawn-logic";
                     mission.AddMissionBehavior(spawnLogic);
                     initializationStep = "agent-spawn-logic-onbehaviorinitialize";
@@ -327,6 +360,10 @@ namespace CoopSpectator.Infrastructure
                     "ExactCampaignArmyBootstrap: initialized native-like army bootstrap on exact campaign scene. " +
                     "Scene=" + sceneName +
                     " PlayerSide=" + playerSide +
+                    " ScenarioKind=" + (scenarioContext?.ScenarioKind ?? "Unknown") +
+                    " SiegeSubtype=" + (scenarioContext?.SiegeContext?.SiegeSubtype ?? "None") +
+                    " BattleSpawnTag=" + battleSpawnTag +
+                    " BattleSizeType=" + battleSizeType +
                     " DefenderTotal=" + defenderTotal +
                     " AttackerTotal=" + attackerTotal +
                     " DefenderInitialInput=" + defenderInitial +
@@ -372,6 +409,87 @@ namespace CoopSpectator.Infrastructure
                     " Error=" + ex);
                 return false;
             }
+        }
+
+        private static BattleScenarioContextMessage ResolveScenarioContextForMission(Mission mission)
+        {
+            if (mission == null)
+                return null;
+
+            try
+            {
+                BattleScenarioContextMessage scenarioContext = BattleSnapshotRuntimeState.GetScenarioContext();
+                if (scenarioContext != null)
+                    return scenarioContext;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                return BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool TryResolveBootstrapScenarioContract(
+            BattleScenarioContextMessage scenarioContext,
+            out string battleSpawnTag,
+            out Mission.BattleSizeType battleSizeType,
+            out string reason)
+        {
+            battleSpawnTag = BattleSpawnLogic.BattleTag;
+            battleSizeType = Mission.BattleSizeType.Battle;
+            reason = string.Empty;
+
+            if (scenarioContext?.IsSiegeBattle != true)
+                return true;
+
+            string siegeSubtype = scenarioContext.SiegeContext?.SiegeSubtype ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(siegeSubtype))
+            {
+                reason = "siege-scenario-missing-subtype";
+                return false;
+            }
+
+            if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
+            {
+                battleSpawnTag = BattleSpawnLogic.BattleTag;
+                battleSizeType = Mission.BattleSizeType.Siege;
+                return true;
+            }
+
+            if (string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase))
+            {
+                reason = "siege-subtype-guarded:" + siegeSubtype + ":requires-sally-out-controller";
+                return false;
+            }
+
+            if (string.Equals(siegeSubtype, "Relief", StringComparison.OrdinalIgnoreCase))
+            {
+                reason = "siege-subtype-guarded:Relief:requires-relief-force-controller";
+                return false;
+            }
+
+            if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase))
+            {
+                reason = "siege-subtype-guarded:LordsHall:indoor-scene-contract-pending";
+                return false;
+            }
+
+            if (string.Equals(siegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
+            {
+                reason = "siege-subtype-guarded:Blockade:no-mission-runtime-contract";
+                return false;
+            }
+
+            reason = "siege-subtype-guarded:" + siegeSubtype;
+            return false;
         }
 
         private static void LogBootstrapContractSnapshot(

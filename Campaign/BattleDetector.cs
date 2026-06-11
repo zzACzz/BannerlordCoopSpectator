@@ -18,6 +18,7 @@ using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.Map;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Roster;
+using TaleWorlds.CampaignSystem.Siege;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using Helpers;
@@ -3668,7 +3669,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 message.PatchEncounterDirY = patchEncounterDirY;
                 message.PatchEncounterDirectionSource = patchEncounterDirectionSource ?? string.Empty;
             }
-            MultiplayerSceneResolution multiplayerSceneResolution = CampaignToMultiplayerSceneResolver.Resolve(message.MapScene);
+            BattleScenarioContextMessage scenarioContext = TryBuildBattleScenarioContextSafe(message.MapScene);
+            MultiplayerSceneResolution multiplayerSceneResolution = CampaignToMultiplayerSceneResolver.Resolve(
+                message.MapScene,
+                scenarioContext);
             message.MultiplayerScene = multiplayerSceneResolution?.RuntimeScene ?? string.Empty;
             message.MultiplayerGameType = multiplayerSceneResolution?.RuntimeGameType ?? string.Empty;
             message.MultiplayerSceneResolverSource = multiplayerSceneResolution?.Source ?? string.Empty;
@@ -3693,6 +3697,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             // 3) Player side (best-effort) // Пояснюємо блок
             message.PlayerSide = TryGetPlayerSideTextSafe(); // Пишемо "Attacker/Defender/Unknown" як текст
             float playerTroopsReceivedDamageMultiplier = TryResolvePlayerTroopsReceivedDamageMultiplierSafe();
+            message.ScenarioContext = scenarioContext?.Clone();
 
             // 4) Extended battle snapshot (best-effort) // Пояснюємо блок
             message.Snapshot =
@@ -3715,6 +3720,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 message.Snapshot.MultiplayerGameType = message.MultiplayerGameType;
                 message.Snapshot.MultiplayerSceneResolverSource = message.MultiplayerSceneResolverSource;
                 message.Snapshot.PlayerTroopsReceivedDamageMultiplier = playerTroopsReceivedDamageMultiplier;
+                message.Snapshot.ScenarioContext = scenarioContext?.Clone();
             }
 
             // 5) Legacy fields for transitional clients/runtime // Пояснюємо блок
@@ -3792,6 +3798,195 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
+        private static BattleScenarioContextMessage TryBuildBattleScenarioContextSafe(string missionScene)
+        {
+            try
+            {
+                MapEvent battle = TryGetCurrentMapEventSafe();
+                Settlement encounterSettlement = PlayerEncounter.EncounterSettlement ?? battle?.MapEventSettlement ?? MobileParty.MainParty?.CurrentSettlement;
+                string siegeSubtype = ResolveSiegeSubtype(battle, encounterSettlement, missionScene);
+                bool isSiegeBattle = !string.IsNullOrWhiteSpace(siegeSubtype);
+
+                return new BattleScenarioContextMessage
+                {
+                    CampaignBattleType = battle?.EventType.ToString() ?? string.Empty,
+                    ScenarioKind = ResolveScenarioKind(battle, encounterSettlement, missionScene, isSiegeBattle),
+                    IsSiegeBattle = isSiegeBattle,
+                    Source = battle != null ? "map-event+settlement" : "scene/settlement-fallback",
+                    SiegeContext = isSiegeBattle
+                        ? BuildSiegeContextSafe(encounterSettlement, siegeSubtype)
+                        : null
+                };
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleDetector: failed to build battle scenario context. " +
+                    "MissionScene=" + (missionScene ?? "null") +
+                    " Error=" + ex.Message);
+                return new BattleScenarioContextMessage
+                {
+                    ScenarioKind = "Unknown",
+                    IsSiegeBattle = false,
+                    Source = "scenario-context-exception"
+                };
+            }
+        }
+
+        private static MapEvent TryGetCurrentMapEventSafe()
+        {
+            return PlayerEncounter.Battle ?? PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty?.MapEvent;
+        }
+
+        private static string ResolveScenarioKind(
+            MapEvent battle,
+            Settlement encounterSettlement,
+            string missionScene,
+            bool isSiegeBattle)
+        {
+            if (isSiegeBattle)
+                return "Siege";
+
+            if (battle?.IsHideoutBattle == true || encounterSettlement?.IsHideout == true || LooksLikeUnsupportedHideoutScene(missionScene))
+                return "Hideout";
+
+            if (encounterSettlement?.IsVillage == true || SceneRuntimeClassifier.IsVillageBattleScene(missionScene))
+                return "VillageBattle";
+
+            if (battle != null)
+                return "FieldBattle";
+
+            return "Unknown";
+        }
+
+        private static string ResolveSiegeSubtype(
+            MapEvent battle,
+            Settlement encounterSettlement,
+            string missionScene)
+        {
+            bool isLordsHallSiegeState = encounterSettlement?.CurrentSiegeState == Settlement.SiegeState.InTheLordsHall;
+            bool looksLikeKeepScene = LooksLikeUnsupportedKeepScene(missionScene);
+
+            if (battle?.IsBlockade == true)
+                return "Blockade";
+
+            if (battle?.IsBlockadeSallyOut == true)
+                return "BlockadeSallyOut";
+
+            if ((battle?.IsSiegeAssault == true && isLordsHallSiegeState) ||
+                (looksLikeKeepScene && encounterSettlement?.IsFortification == true))
+            {
+                return "LordsHall";
+            }
+
+            if (battle?.IsSiegeOutside == true)
+                return "Relief";
+
+            if (battle?.IsSallyOut == true)
+                return "SallyOut";
+
+            if (battle?.IsSiegeAssault == true)
+                return "SiegeAssault";
+
+            return null;
+        }
+
+        private static BattleSiegeContextMessage BuildSiegeContextSafe(Settlement encounterSettlement, string siegeSubtype)
+        {
+            var siegeContext = new BattleSiegeContextMessage
+            {
+                SiegeSubtype = siegeSubtype ?? string.Empty,
+                SettlementId = encounterSettlement?.StringId ?? string.Empty,
+                SettlementKind = ResolveSettlementKind(encounterSettlement),
+                SettlementCultureId = encounterSettlement?.Culture?.StringId ?? string.Empty,
+                SceneLocationId = ResolveSiegeSceneLocationId(siegeSubtype),
+                CurrentSiegeState = encounterSettlement?.CurrentSiegeState.ToString() ?? string.Empty,
+                WallLevel = encounterSettlement?.Town != null ? encounterSettlement.Town.GetWallLevel() : 0,
+                WallHitPointRatios = encounterSettlement?.SettlementWallSectionHitPointsRatioList != null
+                    ? encounterSettlement.SettlementWallSectionHitPointsRatioList.ToList()
+                    : new List<float>()
+            };
+
+            PopulateSiegeEngineContext(encounterSettlement?.SiegeEvent, siegeContext);
+            return siegeContext;
+        }
+
+        private static string ResolveSettlementKind(Settlement settlement)
+        {
+            if (settlement == null)
+                return string.Empty;
+
+            if (settlement.IsTown)
+                return "Town";
+
+            if (settlement.IsCastle)
+                return "Castle";
+
+            if (settlement.IsFortification)
+                return "Fortification";
+
+            if (settlement.IsVillage)
+                return "Village";
+
+            if (settlement.IsHideout)
+                return "Hideout";
+
+            return string.Empty;
+        }
+
+        private static string ResolveSiegeSceneLocationId(string siegeSubtype)
+        {
+            if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase))
+                return "lordshall";
+
+            if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase))
+            {
+                return "center";
+            }
+
+            return string.Empty;
+        }
+
+        private static void PopulateSiegeEngineContext(SiegeEvent siegeEvent, BattleSiegeContextMessage siegeContext)
+        {
+            if (siegeEvent == null || siegeContext == null)
+                return;
+
+            try
+            {
+                var attackerSide = siegeEvent.GetSiegeEventSide(BattleSideEnum.Attacker);
+                var defenderSide = siegeEvent.GetSiegeEventSide(BattleSideEnum.Defender);
+                siegeContext.AttackerSiegeEngineTypeIds = BuildSiegeEngineTypeIdList(
+                    attackerSide != null ? siegeEvent.GetPreparedAndActiveSiegeEngines(attackerSide) : null);
+                siegeContext.DefenderSiegeEngineTypeIds = BuildSiegeEngineTypeIdList(
+                    defenderSide != null ? siegeEvent.GetPreparedAndActiveSiegeEngines(defenderSide) : null);
+
+                string siegeTowerId = DefaultSiegeEngineTypes.SiegeTower?.StringId ?? string.Empty;
+                siegeContext.HasAnySiegeTower = siegeContext.AttackerSiegeEngineTypeIds.Any(
+                    typeId => !string.IsNullOrWhiteSpace(typeId) &&
+                              (string.Equals(typeId, siegeTowerId, StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(typeId, DefaultSiegeEngineTypes.SiegeTower?.ToString(), StringComparison.OrdinalIgnoreCase)));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to populate siege engine context. " + ex.Message);
+            }
+        }
+
+        private static List<string> BuildSiegeEngineTypeIdList(IEnumerable<MissionSiegeWeapon> siegeWeapons)
+        {
+            if (siegeWeapons == null)
+                return new List<string>();
+
+            return siegeWeapons
+                .Where(weapon => weapon != null)
+                .Select(weapon => !string.IsNullOrWhiteSpace(weapon.Type?.StringId) ? weapon.Type.StringId : weapon.Type?.ToString())
+                .Where(typeId => !string.IsNullOrWhiteSpace(typeId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
         private static CampaignBattleSpawnBudgetContext TryBuildCampaignBattleSpawnBudgetContextSafe(
             string battleScene,
             MultiplayerSceneResolution multiplayerSceneResolution,
@@ -3812,7 +4007,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     battleSizeBudget = BannerlordConfig.GetRealBattleSizeForNaval();
                     battleSizeSource = "bannerlord-config-naval";
                 }
-                else if (IsLikelySiegeBattleScene(battleScene))
+                else if (snapshot?.ScenarioContext?.IsSiegeBattle == true || IsLikelySiegeBattleScene(battleScene))
                 {
                     battleSizeBudget = BannerlordConfig.GetRealBattleSizeForSiege();
                     battleSizeSource = "bannerlord-config-siege";

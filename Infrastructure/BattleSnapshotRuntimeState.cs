@@ -25,6 +25,7 @@ namespace CoopSpectator.Infrastructure
         public int ReinforcementWaveCount { get; set; }
         public string BattleSizeBudgetSource { get; set; }
         public float PlayerTroopsReceivedDamageMultiplier { get; set; } = 1f;
+        public BattleScenarioContextMessage ScenarioContext { get; set; }
         public List<BattleSideState> Sides { get; set; } = new List<BattleSideState>();
         public Dictionary<string, BattleSideState> SidesByKey { get; set; } = new Dictionary<string, BattleSideState>(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, BattlePartyState> PartiesById { get; set; } = new Dictionary<string, BattlePartyState>(StringComparer.OrdinalIgnoreCase);
@@ -388,6 +389,14 @@ namespace CoopSpectator.Infrastructure
             lock (Sync)
             {
                 return _state;
+            }
+        }
+
+        public static BattleScenarioContextMessage GetScenarioContext()
+        {
+            lock (Sync)
+            {
+                return _state?.ScenarioContext ?? _current?.ScenarioContext;
             }
         }
 
@@ -1567,7 +1576,8 @@ namespace CoopSpectator.Infrastructure
                 BattleSizeBudget = projection?.Snapshot?.BattleSizeBudget ?? 0,
                 ReinforcementWaveCount = projection?.Snapshot?.ReinforcementWaveCount ?? 0,
                 BattleSizeBudgetSource = projection?.Snapshot?.BattleSizeBudgetSource,
-                PlayerTroopsReceivedDamageMultiplier = projection?.Snapshot?.PlayerTroopsReceivedDamageMultiplier ?? 1f
+                PlayerTroopsReceivedDamageMultiplier = projection?.Snapshot?.PlayerTroopsReceivedDamageMultiplier ?? 1f,
+                ScenarioContext = projection?.Snapshot?.ScenarioContext?.Clone()
             };
 
             if (projection == null)

@@ -42,6 +42,16 @@ namespace CoopSpectator.Infrastructure
 
             ApplyCampaignDifficultyContext(ref record, snapshot, runtimeScene, source);
 
+            if (IsSiegeScenario(snapshot))
+            {
+                ModLogger.Info(
+                    source + ": skipped campaign map patch context for siege runtime. " +
+                    "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                    " SiegeSubtype=" + (snapshot?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? "unknown") + ".");
+                BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " skipped-siege-map-patch");
+                return;
+            }
+
             if (SceneRuntimeClassifier.IsVillageBattleScene(runtimeScene))
             {
                 ModLogger.Info(
@@ -181,22 +191,25 @@ namespace CoopSpectator.Infrastructure
 
             try
             {
-                if (mission.MissionTeamAIType != Mission.MissionTeamAITypeEnum.FieldBattle)
+                BattleSnapshotMessage snapshot = TryResolveSnapshot(source + " team-ai");
+                Mission.MissionTeamAITypeEnum targetType = ResolveMissionTeamAiType(snapshot?.ScenarioContext);
+                if (mission.MissionTeamAIType != targetType)
                 {
                     Mission.MissionTeamAITypeEnum previousType = mission.MissionTeamAIType;
-                    mission.MissionTeamAIType = Mission.MissionTeamAITypeEnum.FieldBattle;
+                    mission.MissionTeamAIType = targetType;
                     changed = true;
                     ModLogger.Info(
-                        source + ": forced live mission team AI type to FieldBattle. " +
+                        source + ": repaired live mission team AI type. " +
                         "Scene=" + (mission.SceneName ?? "null") +
                         " PreviousType=" + previousType +
-                        " NewType=" + mission.MissionTeamAIType + ".");
+                        " NewType=" + mission.MissionTeamAIType +
+                        " SiegeSubtype=" + (snapshot?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? "none") + ".");
                 }
             }
             catch (Exception ex)
             {
                 ModLogger.Info(
-                    source + ": failed to force live mission team AI type. " +
+                    source + ": failed to repair live mission team AI type. " +
                     "Scene=" + (mission.SceneName ?? "null") +
                     " Message=" + ex.Message);
             }
@@ -261,6 +274,29 @@ namespace CoopSpectator.Infrastructure
             {
                 return null;
             }
+        }
+
+        private static bool IsSiegeScenario(BattleSnapshotMessage snapshot)
+        {
+            return snapshot?.ScenarioContext?.IsSiegeBattle == true;
+        }
+
+        private static Mission.MissionTeamAITypeEnum ResolveMissionTeamAiType(BattleScenarioContextMessage scenarioContext)
+        {
+            if (scenarioContext?.IsSiegeBattle != true)
+                return Mission.MissionTeamAITypeEnum.FieldBattle;
+
+            string siegeSubtype = scenarioContext.SiegeContext?.SiegeSubtype ?? string.Empty;
+            if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase))
+                return Mission.MissionTeamAITypeEnum.NoTeamAI;
+
+            if (string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase))
+            {
+                return Mission.MissionTeamAITypeEnum.SallyOut;
+            }
+
+            return Mission.MissionTeamAITypeEnum.Siege;
         }
 
         private static float Clamp01(float value)

@@ -1,4 +1,5 @@
 using System;
+using CoopSpectator.Network.Messages;
 
 namespace CoopSpectator.Infrastructure
 {
@@ -37,7 +38,14 @@ namespace CoopSpectator.Infrastructure
         public static bool IsExactCampaignBattleScene(string sceneName)
         {
             return IsCampaignBattleScene(sceneName)
-                || IsVillageBattleScene(sceneName);
+                || IsVillageBattleScene(sceneName)
+                || IsCurrentSiegeScenarioScene(sceneName);
+        }
+
+        public static bool IsCampaignOrCurrentSiegeScene(string sceneName)
+        {
+            return IsCampaignBattleScene(sceneName)
+                || IsCurrentSiegeScenarioScene(sceneName);
         }
 
         public static bool RequiresLandRaidSceneLevel(string sceneName)
@@ -55,6 +63,34 @@ namespace CoopSpectator.Infrastructure
         {
             return IsOfficialMultiplayerBattleScene(sceneName)
                 || IsExactCampaignBattleScene(sceneName);
+        }
+
+        private static bool IsCurrentSiegeScenarioScene(string sceneName)
+        {
+            if (string.IsNullOrWhiteSpace(sceneName))
+                return false;
+
+            try
+            {
+                BattleScenarioContextMessage scenarioContext = BattleSnapshotRuntimeState.GetScenarioContext();
+                if (scenarioContext?.IsSiegeBattle != true)
+                    return false;
+
+                BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+                return SceneNamesMatch(sceneName, snapshot?.MapScene) ||
+                       SceneNamesMatch(sceneName, snapshot?.MultiplayerScene);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool SceneNamesMatch(string sceneName, string candidate)
+        {
+            return !string.IsNullOrWhiteSpace(sceneName) &&
+                   !string.IsNullOrWhiteSpace(candidate) &&
+                   string.Equals(sceneName, candidate, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

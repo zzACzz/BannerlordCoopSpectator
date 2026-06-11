@@ -135,7 +135,7 @@ namespace CoopSpectator.Patches
                     return;
 
                 if (!MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(sceneName) ||
-                    !SceneRuntimeClassifier.IsCampaignBattleScene(sceneName))
+                    !SceneRuntimeClassifier.IsCampaignOrCurrentSiegeScene(sceneName))
                 {
                     return;
                 }

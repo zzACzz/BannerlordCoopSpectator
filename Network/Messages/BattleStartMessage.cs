@@ -22,6 +22,7 @@ namespace CoopSpectator.Network.Messages
         public float MapX { get; set; }
         public float MapY { get; set; }
         public string PlayerSide { get; set; }
+        public BattleScenarioContextMessage ScenarioContext { get; set; }
         public int ArmySize { get; set; }
         public List<TroopStackInfo> Troops { get; set; }
         public BattleSnapshotMessage Snapshot { get; set; }
@@ -48,7 +49,62 @@ namespace CoopSpectator.Network.Messages
         public string BattleSizeBudgetSource { get; set; }
         public string PlayerSide { get; set; }
         public float PlayerTroopsReceivedDamageMultiplier { get; set; } = 1f;
+        public BattleScenarioContextMessage ScenarioContext { get; set; }
         public List<BattleSideSnapshotMessage> Sides { get; set; } = new List<BattleSideSnapshotMessage>();
+    }
+
+    public sealed class BattleScenarioContextMessage
+    {
+        public string CampaignBattleType { get; set; }
+        public string ScenarioKind { get; set; }
+        public bool IsSiegeBattle { get; set; }
+        public string Source { get; set; }
+        public BattleSiegeContextMessage SiegeContext { get; set; }
+
+        public BattleScenarioContextMessage Clone()
+        {
+            return new BattleScenarioContextMessage
+            {
+                CampaignBattleType = CampaignBattleType,
+                ScenarioKind = ScenarioKind,
+                IsSiegeBattle = IsSiegeBattle,
+                Source = Source,
+                SiegeContext = SiegeContext?.Clone()
+            };
+        }
+    }
+
+    public sealed class BattleSiegeContextMessage
+    {
+        public string SiegeSubtype { get; set; }
+        public string SettlementId { get; set; }
+        public string SettlementKind { get; set; }
+        public string SettlementCultureId { get; set; }
+        public string SceneLocationId { get; set; }
+        public string CurrentSiegeState { get; set; }
+        public int WallLevel { get; set; }
+        public bool HasAnySiegeTower { get; set; }
+        public List<float> WallHitPointRatios { get; set; } = new List<float>();
+        public List<string> AttackerSiegeEngineTypeIds { get; set; } = new List<string>();
+        public List<string> DefenderSiegeEngineTypeIds { get; set; } = new List<string>();
+
+        public BattleSiegeContextMessage Clone()
+        {
+            return new BattleSiegeContextMessage
+            {
+                SiegeSubtype = SiegeSubtype,
+                SettlementId = SettlementId,
+                SettlementKind = SettlementKind,
+                SettlementCultureId = SettlementCultureId,
+                SceneLocationId = SceneLocationId,
+                CurrentSiegeState = CurrentSiegeState,
+                WallLevel = WallLevel,
+                HasAnySiegeTower = HasAnySiegeTower,
+                WallHitPointRatios = WallHitPointRatios != null ? new List<float>(WallHitPointRatios) : new List<float>(),
+                AttackerSiegeEngineTypeIds = AttackerSiegeEngineTypeIds != null ? new List<string>(AttackerSiegeEngineTypeIds) : new List<string>(),
+                DefenderSiegeEngineTypeIds = DefenderSiegeEngineTypeIds != null ? new List<string>(DefenderSiegeEngineTypeIds) : new List<string>()
+            };
+        }
     }
 
     public sealed class BattleSideSnapshotMessage

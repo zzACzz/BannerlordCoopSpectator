@@ -1796,7 +1796,7 @@ namespace CoopSpectator.Patches
             string sceneName = mission.SceneName ?? string.Empty;
             return
                 MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(sceneName) &&
-                SceneRuntimeClassifier.IsCampaignBattleScene(sceneName);
+                SceneRuntimeClassifier.IsCampaignOrCurrentSiegeScene(sceneName);
         }
 
         private static bool HasAnyDeferredClientAgentBootstrapPayload(int agentIndex)
@@ -8809,7 +8809,7 @@ namespace CoopSpectator.Patches
                 mission == null ||
                 team == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+                !SceneRuntimeClassifier.IsCampaignOrCurrentSiegeScene(mission.SceneName ?? string.Empty))
             {
                 return false;
             }
@@ -9609,7 +9609,7 @@ namespace CoopSpectator.Patches
             if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return false;
 
-            if (!SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsCampaignOrCurrentSiegeScene(mission.SceneName ?? string.Empty))
                 return false;
 
             Agent controlledAgent = myMissionPeer.ControlledAgent;
@@ -9710,7 +9710,7 @@ namespace CoopSpectator.Patches
                 if (myMissionPeer == null || mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                     return;
 
-                if (!SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+                if (!SceneRuntimeClassifier.IsCampaignOrCurrentSiegeScene(mission.SceneName ?? string.Empty))
                     return;
 
                 CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot selectionBridge =
@@ -9783,7 +9783,7 @@ namespace CoopSpectator.Patches
             if (myMissionPeer == null || mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return false;
 
-            if (!SceneRuntimeClassifier.IsCampaignBattleScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsCampaignOrCurrentSiegeScene(mission.SceneName ?? string.Empty))
                 return false;
 
             int botsUnderControlTotal = myMissionPeer.BotsUnderControlTotal;

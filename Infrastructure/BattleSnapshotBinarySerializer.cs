@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 3;
+        private const int SchemaVersion = 4;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -59,7 +59,10 @@ namespace CoopSpectator.Infrastructure
                     }
 
                     int schemaVersion = reader.ReadInt32();
-                    if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != SchemaVersion)
+                    if (schemaVersion != 1 &&
+                        schemaVersion != 2 &&
+                        schemaVersion != 3 &&
+                        schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
                             "BattleSnapshotBinarySerializer: unsupported schema version. " +
@@ -101,6 +104,7 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, snapshot.BattleSizeBudgetSource);
             WriteString(writer, snapshot.PlayerSide);
             writer.Write(snapshot.PlayerTroopsReceivedDamageMultiplier);
+            WriteBattleScenarioContext(writer, snapshot.ScenarioContext);
             WriteList(writer, snapshot.Sides, WriteBattleSide);
         }
 
@@ -127,7 +131,76 @@ namespace CoopSpectator.Infrastructure
                 BattleSizeBudgetSource = ReadString(reader),
                 PlayerSide = ReadString(reader),
                 PlayerTroopsReceivedDamageMultiplier = schemaVersion >= 2 ? reader.ReadSingle() : 1f,
+                ScenarioContext = schemaVersion >= 4 ? ReadBattleScenarioContext(reader) : null,
                 Sides = ReadList(reader, itemReader => ReadBattleSide(itemReader, schemaVersion)) ?? new List<BattleSideSnapshotMessage>()
+            };
+        }
+
+        private static void WriteBattleScenarioContext(BinaryWriter writer, BattleScenarioContextMessage context)
+        {
+            writer.Write(context != null);
+            if (context == null)
+                return;
+
+            WriteString(writer, context.CampaignBattleType);
+            WriteString(writer, context.ScenarioKind);
+            writer.Write(context.IsSiegeBattle);
+            WriteString(writer, context.Source);
+            WriteBattleSiegeContext(writer, context.SiegeContext);
+        }
+
+        private static BattleScenarioContextMessage ReadBattleScenarioContext(BinaryReader reader)
+        {
+            if (!reader.ReadBoolean())
+                return null;
+
+            return new BattleScenarioContextMessage
+            {
+                CampaignBattleType = ReadString(reader),
+                ScenarioKind = ReadString(reader),
+                IsSiegeBattle = reader.ReadBoolean(),
+                Source = ReadString(reader),
+                SiegeContext = ReadBattleSiegeContext(reader)
+            };
+        }
+
+        private static void WriteBattleSiegeContext(BinaryWriter writer, BattleSiegeContextMessage siegeContext)
+        {
+            writer.Write(siegeContext != null);
+            if (siegeContext == null)
+                return;
+
+            WriteString(writer, siegeContext.SiegeSubtype);
+            WriteString(writer, siegeContext.SettlementId);
+            WriteString(writer, siegeContext.SettlementKind);
+            WriteString(writer, siegeContext.SettlementCultureId);
+            WriteString(writer, siegeContext.SceneLocationId);
+            WriteString(writer, siegeContext.CurrentSiegeState);
+            writer.Write(siegeContext.WallLevel);
+            writer.Write(siegeContext.HasAnySiegeTower);
+            WriteList(writer, siegeContext.WallHitPointRatios, (listWriter, value) => listWriter.Write(value));
+            WriteList(writer, siegeContext.AttackerSiegeEngineTypeIds, WriteString);
+            WriteList(writer, siegeContext.DefenderSiegeEngineTypeIds, WriteString);
+        }
+
+        private static BattleSiegeContextMessage ReadBattleSiegeContext(BinaryReader reader)
+        {
+            if (!reader.ReadBoolean())
+                return null;
+
+            return new BattleSiegeContextMessage
+            {
+                SiegeSubtype = ReadString(reader),
+                SettlementId = ReadString(reader),
+                SettlementKind = ReadString(reader),
+                SettlementCultureId = ReadString(reader),
+                SceneLocationId = ReadString(reader),
+                CurrentSiegeState = ReadString(reader),
+                WallLevel = reader.ReadInt32(),
+                HasAnySiegeTower = reader.ReadBoolean(),
+                WallHitPointRatios = ReadList(reader, listReader => listReader.ReadSingle()) ?? new List<float>(),
+                AttackerSiegeEngineTypeIds = ReadList(reader, ReadString) ?? new List<string>(),
+                DefenderSiegeEngineTypeIds = ReadList(reader, ReadString) ?? new List<string>()
             };
         }
 
