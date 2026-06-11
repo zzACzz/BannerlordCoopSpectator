@@ -41,6 +41,7 @@ namespace CoopSpectator.Infrastructure
             }
 
             ApplyCampaignDifficultyContext(ref record, snapshot, runtimeScene, source);
+            ApplySiegeSceneLevelContext(ref record, snapshot, runtimeScene, source);
 
             if (IsSiegeScenario(snapshot))
             {
@@ -152,6 +153,41 @@ namespace CoopSpectator.Infrastructure
                 " SceneLevels=" + (record.SceneLevels ?? "null") + ".");
         }
 
+        private static void ApplySiegeSceneLevelContext(
+            ref MissionInitializerRecord record,
+            BattleSnapshotMessage snapshot,
+            string runtimeScene,
+            string source)
+        {
+            if (snapshot?.ScenarioContext?.IsSiegeBattle != true)
+                return;
+
+            string siegeSubtype = snapshot.ScenarioContext.SiegeContext?.SiegeSubtype ?? string.Empty;
+            if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(siegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            int wallLevel = snapshot.ScenarioContext.SiegeContext?.WallLevel ?? 0;
+            if (wallLevel < 1)
+                wallLevel = 1;
+            if (wallLevel > 3)
+                wallLevel = 3;
+
+            string desiredSceneLevels = "level_" + wallLevel + " siege";
+            if (string.Equals(record.SceneLevels, desiredSceneLevels, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            record.SceneLevels = desiredSceneLevels;
+            ModLogger.Info(
+                source + ": applied siege scene-level context. " +
+                "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                " SiegeSubtype=" + (string.IsNullOrWhiteSpace(siegeSubtype) ? "unknown" : siegeSubtype) +
+                " WallLevel=" + wallLevel +
+                " SceneLevels=" + (record.SceneLevels ?? "null") + ".");
+        }
+
         public static bool TryRepairLiveMissionContract(Mission mission, string logSource)
         {
             if (mission == null)
@@ -169,12 +205,14 @@ namespace CoopSpectator.Infrastructure
             {
                 if (TryGetMissionInitializerRecord(mission, out MissionInitializerRecord record))
                 {
+                    string previousSceneLevels = record.SceneLevels;
                     bool hadPatchBefore = record.SceneHasMapPatch;
                     TryApply(ref record, runtimeScene, source + " initializer");
                     bool writeBackSucceeded = TrySetMissionInitializerRecord(mission, record);
 
                     initializerPatched = writeBackSucceeded && record.SceneHasMapPatch;
                     changed |= (!hadPatchBefore && record.SceneHasMapPatch);
+                    changed |= !string.Equals(previousSceneLevels, record.SceneLevels, StringComparison.Ordinal);
                     if (TryGetMissionInitializerRecord(mission, out MissionInitializerRecord storedRecord))
                         BattleMapContractDiagnostics.LogMissionInitializerRecordState(storedRecord, source + " live-mission-record");
                     else

@@ -205,7 +205,9 @@ namespace CoopSpectator.Infrastructure
                 bool useLordsHallController = IsLordsHallSiegeSubtype(scenarioContext);
                 bool isSallyOutSubtype = IsSallyOutSiegeSubtype(scenarioContext);
                 bool isReliefForceAttack = IsReliefSiegeSubtype(scenarioContext);
+                bool isSiegeAssaultSubtype = IsSiegeAssaultSubtype(scenarioContext);
                 Mission.MissionTeamAITypeEnum missionTeamAiType = ResolveMissionTeamAiType(scenarioContext);
+                string teamAiDiagnostics = "team-ai-not-applied";
 
                 initializationStep = "ensure-campaign-object-catalogs";
                 ExactCampaignObjectCatalogBootstrap.EnsureLoaded("exact-native-bootstrap:" + (source ?? "unknown"));
@@ -239,6 +241,20 @@ namespace CoopSpectator.Infrastructure
                         reason = siegePreparationDiagnostics ?? "siege-scene-preparation-failed";
                         return false;
                     }
+                }
+
+                initializationStep = "apply-mission-team-ai-type";
+                mission.MissionTeamAIType = missionTeamAiType;
+
+                initializationStep = "ensure-mission-team-ai-contract";
+                if (!TryEnsureMissionTeamAiContract(
+                        mission,
+                        missionTeamAiType,
+                        source,
+                        out teamAiDiagnostics))
+                {
+                    reason = teamAiDiagnostics ?? "mission-team-ai-contract-failed";
+                    return false;
                 }
 
                 if (useLordsHallController)
@@ -379,17 +395,6 @@ namespace CoopSpectator.Infrastructure
 
                 if (useSiegeAmbushController)
                 {
-                    initializationStep = "ensure-siege-team-ai-contract";
-                    if (!TryEnsureMissionTeamAiContract(
-                            mission,
-                            missionTeamAiType,
-                            source,
-                            out string teamAiDiagnostics))
-                    {
-                        reason = teamAiDiagnostics ?? "mission-team-ai-contract-failed";
-                        return false;
-                    }
-
                     initializationStep = "init-siege-ambush-controller";
                     PushSpawnLogicInitTeamSideOverride(mission, playerSide);
                     List<TeamSideOverrideState> temporaryTeamSideOverrides =
@@ -442,8 +447,10 @@ namespace CoopSpectator.Infrastructure
                 else
                 {
                     initializationStep = "configure-spawn-horses";
-                    spawnLogic.SetSpawnHorses(BattleSideEnum.Defender, SideHasMountedTroops(suppliers, BattleSideEnum.Defender));
-                    spawnLogic.SetSpawnHorses(BattleSideEnum.Attacker, SideHasMountedTroops(suppliers, BattleSideEnum.Attacker));
+                    bool spawnDefenderHorses = !isSiegeAssaultSubtype && SideHasMountedTroops(suppliers, BattleSideEnum.Defender);
+                    bool spawnAttackerHorses = !isSiegeAssaultSubtype && SideHasMountedTroops(suppliers, BattleSideEnum.Attacker);
+                    spawnLogic.SetSpawnHorses(BattleSideEnum.Defender, spawnDefenderHorses);
+                    spawnLogic.SetSpawnHorses(BattleSideEnum.Attacker, spawnAttackerHorses);
 
                     initializationStep = "init-with-single-phase";
                     PushSpawnLogicInitTeamSideOverride(mission, playerSide);
@@ -472,7 +479,9 @@ namespace CoopSpectator.Infrastructure
                             playerSide,
                             supplierDiagnostics +
                             " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
-                            " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}",
+                            " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}" +
+                            " MissionTeamAI={" + teamAiDiagnostics + "}" +
+                            " SpawnHorses={Defender=" + spawnDefenderHorses + " Attacker=" + spawnAttackerHorses + "}",
                             "pre-init-with-single-phase",
                             source);
                         initializationStep = "init-with-single-phase";
@@ -675,6 +684,12 @@ namespace CoopSpectator.Infrastructure
         {
             string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
             return string.Equals(siegeSubtype, "Relief", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSiegeAssaultSubtype(BattleScenarioContextMessage scenarioContext)
+        {
+            string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
+            return string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase);
         }
 
         private static Mission.MissionTeamAITypeEnum ResolveMissionTeamAiType(BattleScenarioContextMessage scenarioContext)
