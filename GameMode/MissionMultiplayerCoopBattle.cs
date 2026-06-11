@@ -17,6 +17,9 @@ namespace CoopSpectator.GameMode
         private const uint DefaultDefenderColor2 = 0xFF111166u;
         private const string DefaultAttackerCultureId = "empire";
         private const string DefaultDefenderCultureId = "vlandia";
+        private static readonly MethodInfo MissionTeamCollectionSetPlayerTeamAuxMethod =
+            typeof(Mission).GetNestedType("TeamCollection", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                ?.GetMethod("SetPlayerTeamAux", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private bool _hasInitialized;
         private bool _hasLoggedFirstServerTick;
@@ -162,14 +165,16 @@ namespace CoopSpectator.GameMode
             TryApplyAuthoritativeCultureOptions(attackerAppearance, defenderAppearance, source);
 
             if (mission.Teams.Attacker == null)
-                mission.Teams.Add(BattleSideEnum.Attacker, attackerAppearance.Color, attackerAppearance.Color2, attackerAppearance.Banner, false, false, false);
+                mission.Teams.Add(BattleSideEnum.Attacker, attackerAppearance.Color, attackerAppearance.Color2, attackerAppearance.Banner, false, false, true);
             else
                 TryRepairExistingTeamAppearance(mission.Teams.Attacker, attackerAppearance, source);
 
             if (mission.Teams.Defender == null)
-                mission.Teams.Add(BattleSideEnum.Defender, defenderAppearance.Color, defenderAppearance.Color2, defenderAppearance.Banner, false, false, false);
+                mission.Teams.Add(BattleSideEnum.Defender, defenderAppearance.Color, defenderAppearance.Color2, defenderAppearance.Banner, false, false, true);
             else
                 TryRepairExistingTeamAppearance(mission.Teams.Defender, defenderAppearance, source);
+
+            EnsureOpposingTeamRelations(mission);
 
             CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, source ?? "CoopBattle.EnsureOpposingTeamsReady", mission);
             ModLogger.Info(
@@ -181,6 +186,95 @@ namespace CoopSpectator.GameMode
                 " DefenderCulture=" + (defenderAppearance.CultureId ?? "null") +
                 " AttackerBannerCodeLength=" + (attackerAppearance.BannerCode?.Length ?? 0) +
                 " DefenderBannerCodeLength=" + (defenderAppearance.BannerCode?.Length ?? 0));
+        }
+
+        internal static bool TryRefreshMissionPlayerTeamRelationView(
+            Mission mission,
+            Team playerTeam,
+            string source,
+            out string diagnostics)
+        {
+            diagnostics = "mission-or-player-team-null";
+            if (mission == null || playerTeam == null)
+                return false;
+
+            EnsureOpposingTeamRelations(mission);
+
+            string refreshMode = "set-player-team";
+            if (!ReferenceEquals(mission.PlayerTeam, playerTeam))
+            {
+                mission.PlayerTeam = playerTeam;
+            }
+            else
+            {
+                refreshMode = "set-player-team-aux";
+                if (!TryInvokeMissionPlayerTeamAux(mission, playerTeam, out string refreshDiagnostics))
+                {
+                    diagnostics = refreshDiagnostics;
+                    return false;
+                }
+            }
+
+            diagnostics =
+                "RefreshMode=" + refreshMode +
+                " PlayerTeam=" + (mission.PlayerTeam == null ? "null" : mission.PlayerTeam.Side + "#" + mission.PlayerTeam.TeamIndex) +
+                " PlayerEnemyTeam=" + (mission.PlayerEnemyTeam == null ? "null" : mission.PlayerEnemyTeam.Side + "#" + mission.PlayerEnemyTeam.TeamIndex) +
+                " Source=" + (source ?? "unknown");
+            return ReferenceEquals(mission.PlayerTeam, playerTeam) && mission.PlayerEnemyTeam != null;
+        }
+
+        private static void EnsureOpposingTeamRelations(Mission mission)
+        {
+            Team attacker = mission?.AttackerTeam ?? mission?.Teams?.Attacker;
+            Team defender = mission?.DefenderTeam ?? mission?.Teams?.Defender;
+            if (attacker == null || defender == null || ReferenceEquals(attacker, defender))
+                return;
+
+            if (!attacker.IsEnemyOf(defender))
+                attacker.SetIsEnemyOf(defender, true);
+
+            if (!defender.IsEnemyOf(attacker))
+                defender.SetIsEnemyOf(attacker, true);
+        }
+
+        private static bool TryInvokeMissionPlayerTeamAux(Mission mission, Team playerTeam, out string diagnostics)
+        {
+            diagnostics = "mission-team-aux-unavailable";
+            if (mission?.Teams == null || playerTeam == null)
+                return false;
+
+            MethodInfo setPlayerTeamAux = MissionTeamCollectionSetPlayerTeamAuxMethod ??
+                mission.Teams.GetType().GetMethod("SetPlayerTeamAux", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (setPlayerTeamAux == null)
+            {
+                diagnostics = "set-player-team-aux-missing";
+                return false;
+            }
+
+            int playerTeamIndex = IndexOfMissionTeam(mission, playerTeam);
+            if (playerTeamIndex < 0)
+            {
+                diagnostics = "player-team-index-missing";
+                return false;
+            }
+
+            setPlayerTeamAux.Invoke(mission.Teams, new object[] { playerTeamIndex });
+            diagnostics = "set-player-team-aux-invoked Index=" + playerTeamIndex;
+            return true;
+        }
+
+        private static int IndexOfMissionTeam(Mission mission, Team team)
+        {
+            if (mission?.Teams == null || team == null)
+                return -1;
+
+            for (int i = 0; i < mission.Teams.Count; i++)
+            {
+                if (ReferenceEquals(mission.Teams[i], team))
+                    return i;
+            }
+
+            return -1;
         }
 
         private static TeamAppearanceContract ResolveTeamAppearance(BattleSideEnum side)

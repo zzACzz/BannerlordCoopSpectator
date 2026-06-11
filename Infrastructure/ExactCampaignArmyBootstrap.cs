@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using CoopSpectator.GameMode;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
@@ -1567,7 +1568,11 @@ namespace CoopSpectator.Infrastructure
 
             Team previousPlayerTeam = mission.PlayerTeam;
             Team previousPlayerEnemyTeam = mission.PlayerEnemyTeam;
-            mission.PlayerTeam = _activePlayerTeam;
+            MissionMultiplayerCoopBattle.TryRefreshMissionPlayerTeamRelationView(
+                mission,
+                _activePlayerTeam,
+                source + " restore",
+                out _);
 
             string previousPlayerTeamText =
                 previousPlayerTeam == null

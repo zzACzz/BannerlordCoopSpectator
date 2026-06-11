@@ -10011,14 +10011,21 @@ namespace CoopSpectator.MissionBehaviors
 
             Team previousPlayerTeam = mission.PlayerTeam;
             Team previousPlayerEnemyTeam = mission.PlayerEnemyTeam;
+            Team authoritativeEnemyTeam = ResolveOpposingMissionTeamForPlayerSide(mission, authoritativeSide);
             bool needsBridge =
                 previousPlayerTeam == null ||
                 previousPlayerTeam.Side != authoritativeSide ||
-                !ReferenceEquals(previousPlayerTeam, authoritativeTeam);
+                !ReferenceEquals(previousPlayerTeam, authoritativeTeam) ||
+                previousPlayerEnemyTeam == null ||
+                (authoritativeEnemyTeam != null && !ReferenceEquals(previousPlayerEnemyTeam, authoritativeEnemyTeam));
             if (!needsBridge)
                 return;
 
-            mission.PlayerTeam = authoritativeTeam;
+            MissionMultiplayerCoopBattle.TryRefreshMissionPlayerTeamRelationView(
+                mission,
+                authoritativeTeam,
+                source + " bridge",
+                out _);
 
             string previousPlayerTeamText =
                 previousPlayerTeam == null
@@ -10046,6 +10053,20 @@ namespace CoopSpectator.MissionBehaviors
                 " AppliedPlayerTeam=" + appliedPlayerTeamText +
                 " AppliedPlayerEnemyTeam=" + appliedPlayerEnemyTeamText +
                 " Source=" + (source ?? "unknown"));
+        }
+
+        private static Team ResolveOpposingMissionTeamForPlayerSide(Mission mission, BattleSideEnum playerSide)
+        {
+            if (mission == null || playerSide == BattleSideEnum.None)
+                return null;
+
+            if (playerSide == BattleSideEnum.Attacker)
+                return mission.DefenderTeam ?? mission.Teams?.Defender;
+
+            if (playerSide == BattleSideEnum.Defender)
+                return mission.AttackerTeam ?? mission.Teams?.Attacker;
+
+            return null;
         }
 
         // This bridge keeps the stable vanilla MP preview/spawn lifecycle while CoopBattle owns
