@@ -6327,6 +6327,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 string missionSceneName = mission?.SceneName ?? string.Empty;
                 MapEvent battle = PlayerEncounter.Battle ?? PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty?.MapEvent;
                 Settlement encounterSettlement = PlayerEncounter.EncounterSettlement ?? battle?.MapEventSettlement ?? MobileParty.MainParty?.CurrentSettlement;
+                if (ShouldUseMissionSceneForSiegeAssault(battle, encounterSettlement, missionSceneName))
+                {
+                    context.BattleSceneName = missionSceneName;
+                    context.Source = "mission-scene-siege-assault";
+                    return context;
+                }
+
                 if (battle != null &&
                     encounterSettlement?.IsVillage == true &&
                     SceneRuntimeClassifier.IsVillageBattleScene(missionSceneName))
@@ -6421,6 +6428,39 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 ModLogger.Info("BattleDetector: failed to resolve campaign battle scene via map patch, falling back. " + ex.Message);
                 return context;
             }
+        }
+
+        private static bool ShouldUseMissionSceneForSiegeAssault(
+            MapEvent battle,
+            Settlement encounterSettlement,
+            string missionSceneName)
+        {
+            if (battle?.IsSiegeAssault != true)
+                return false;
+
+            if (encounterSettlement?.IsFortification != true)
+                return false;
+
+            if (encounterSettlement.CurrentSiegeState == Settlement.SiegeState.InTheLordsHall)
+                return false;
+
+            if (string.IsNullOrWhiteSpace(missionSceneName))
+                return false;
+
+            if (SceneRuntimeClassifier.IsOfficialMultiplayerBattleScene(missionSceneName) ||
+                SceneRuntimeClassifier.IsCampaignBattleScene(missionSceneName) ||
+                SceneRuntimeClassifier.IsVillageBattleScene(missionSceneName))
+            {
+                return false;
+            }
+
+            if (LooksLikeUnsupportedKeepScene(missionSceneName) ||
+                LooksLikeUnsupportedHideoutScene(missionSceneName))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private static bool TryReadVec2Components(object vec2Like, out float x, out float y)

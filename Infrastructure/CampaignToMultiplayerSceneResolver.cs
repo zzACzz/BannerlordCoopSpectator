@@ -56,12 +56,19 @@ namespace CoopSpectator.Infrastructure
 
             if (scenarioContext?.IsSiegeBattle == true)
             {
+                string siegeSubtype = scenarioContext.SiegeContext?.SiegeSubtype ?? string.Empty;
                 resolution.RuntimeScene = campaignBattleScene;
                 resolution.Source = ExperimentalFeatures.EnableDirectCampaignBattleSceneRuntime
                     ? "direct-campaign-siege-scene"
                     : "direct-campaign-siege-scene-forced";
-                resolution.Terrain = !string.IsNullOrWhiteSpace(scenarioContext.SiegeContext?.SiegeSubtype)
-                    ? scenarioContext.SiegeContext.SiegeSubtype
+                if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase) &&
+                    IsCampaignBattleScene(campaignBattleScene))
+                {
+                    resolution.Source += "-fallback-field-terrain";
+                }
+
+                resolution.Terrain = !string.IsNullOrWhiteSpace(siegeSubtype)
+                    ? siegeSubtype
                     : "Siege";
                 resolution.ForestDensity = "Unknown";
                 resolution.IsNaval = false;
