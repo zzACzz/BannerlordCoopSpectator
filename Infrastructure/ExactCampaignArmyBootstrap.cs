@@ -756,22 +756,59 @@ namespace CoopSpectator.Infrastructure
                 return true;
             }
 
-            bool attackerReady = TryEnsureMissionTeamAiForTeam(
+            Team firstTeam;
+            Team secondTeam;
+            string firstLabel;
+            string secondLabel;
+            ResolveMissionTeamAiInitializationOrder(
                 mission,
-                mission.AttackerTeam,
                 missionTeamAiType,
-                out string attackerDiagnostics);
-            bool defenderReady = TryEnsureMissionTeamAiForTeam(
+                out firstTeam,
+                out secondTeam,
+                out firstLabel,
+                out secondLabel);
+
+            bool firstReady = TryEnsureMissionTeamAiForTeam(
                 mission,
-                mission.DefenderTeam,
+                firstTeam,
                 missionTeamAiType,
-                out string defenderDiagnostics);
+                out string firstDiagnostics);
+            bool secondReady = TryEnsureMissionTeamAiForTeam(
+                mission,
+                secondTeam,
+                missionTeamAiType,
+                out string secondDiagnostics);
             diagnostics =
                 "TeamAIType=" + missionTeamAiType +
-                " Attacker={" + attackerDiagnostics + "}" +
-                " Defender={" + defenderDiagnostics + "}" +
+                " " + firstLabel + "={" + firstDiagnostics + "}" +
+                " " + secondLabel + "={" + secondDiagnostics + "}" +
                 " Source=" + (source ?? "unknown");
-            return attackerReady && defenderReady;
+            return firstReady && secondReady;
+        }
+
+        private static void ResolveMissionTeamAiInitializationOrder(
+            Mission mission,
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            out Team firstTeam,
+            out Team secondTeam,
+            out string firstLabel,
+            out string secondLabel)
+        {
+            // Mirror the native creation order because siege AI constructors depend on
+            // QuerySystem being initialized by the complementary side first.
+            if (missionTeamAiType == Mission.MissionTeamAITypeEnum.SallyOut)
+            {
+                firstTeam = mission?.AttackerTeam;
+                secondTeam = mission?.DefenderTeam;
+                firstLabel = "First";
+                secondLabel = "Second";
+                return;
+            }
+
+            firstTeam = mission?.DefenderTeam;
+            secondTeam = mission?.AttackerTeam;
+            firstLabel = "First";
+            secondLabel = "Second";
         }
 
         private static bool TryEnsureMissionTeamAiForTeam(
