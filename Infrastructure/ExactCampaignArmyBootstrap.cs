@@ -15,8 +15,17 @@ namespace CoopSpectator.Infrastructure
 {
     public static class ExactCampaignArmyBootstrap
     {
+        private enum ActiveBootstrapMode
+        {
+            None = 0,
+            NativeSpawnLogic = 1,
+            LordsHallController = 2
+        }
+
         private static Mission _activeMission;
         private static NativeMissionAgentSpawnLogic _activeSpawnLogic;
+        private static IMissionTroopSupplier[] _activeSuppliers;
+        private static ActiveBootstrapMode _activeMode;
         private static BattleSideEnum _activePlayerSide = BattleSideEnum.None;
         private static Team _activePlayerTeam;
         private static Team _activePlayerEnemyTeam;
@@ -75,7 +84,7 @@ namespace CoopSpectator.Infrastructure
         {
             return mission != null &&
                    ReferenceEquals(_activeMission, mission) &&
-                   _activeSpawnLogic != null;
+                   _activeMode != ActiveBootstrapMode.None;
         }
 
         public static bool TryGetSpawnLogicInitTeamSideOverride(
@@ -110,6 +119,8 @@ namespace CoopSpectator.Infrastructure
 
             _activeMission = mission;
             _activeSpawnLogic = null;
+            _activeSuppliers = null;
+            _activeMode = ActiveBootstrapMode.None;
             _activePlayerSide = BattleSideEnum.None;
             _activePlayerTeam = null;
             _activePlayerEnemyTeam = null;
@@ -138,7 +149,7 @@ namespace CoopSpectator.Infrastructure
 
                 initializationStep = "reset-runtime";
                 ResetForMission(mission);
-                if (_activeSpawnLogic != null)
+                if (IsActive(mission))
                     return true;
 
                 initializationStep = "validate-feature";
@@ -191,6 +202,7 @@ namespace CoopSpectator.Infrastructure
                     return false;
                 }
                 bool useSiegeAmbushController = RequiresSiegeAmbushController(scenarioContext);
+                bool useLordsHallController = IsLordsHallSiegeSubtype(scenarioContext);
                 bool isSallyOutSubtype = IsSallyOutSiegeSubtype(scenarioContext);
                 bool isReliefForceAttack = IsReliefSiegeSubtype(scenarioContext);
                 Mission.MissionTeamAITypeEnum missionTeamAiType = ResolveMissionTeamAiType(scenarioContext);
@@ -202,14 +214,20 @@ namespace CoopSpectator.Infrastructure
                 TrySeedFormationBannerCodes(mission, playerSide, source, out string formationBannerDiagnostics);
 
                 initializationStep = "build-suppliers";
-                if (!TryBuildSuppliers(playerSide, out IMissionTroopSupplier[] suppliers, out int defenderTotal, out int attackerTotal, out string supplierDiagnostics))
+                if (!TryBuildSuppliers(
+                        playerSide,
+                        scenarioContext,
+                        out IMissionTroopSupplier[] suppliers,
+                        out int defenderTotal,
+                        out int attackerTotal,
+                        out string supplierDiagnostics))
                 {
                     reason = supplierDiagnostics ?? "supplier-build-failed";
                     return false;
                 }
 
                 initializationStep = "resolve-siege-scene-preparation";
-                if (scenarioContext?.IsSiegeBattle == true)
+                if (scenarioContext?.IsSiegeBattle == true && !useLordsHallController)
                 {
                     if (!TryEnsureSiegeScenePreparationBehavior(
                             mission,
@@ -221,6 +239,76 @@ namespace CoopSpectator.Infrastructure
                         reason = siegePreparationDiagnostics ?? "siege-scene-preparation-failed";
                         return false;
                     }
+                }
+
+                if (useLordsHallController)
+                {
+                    initializationStep = "validate-lords-hall-contract";
+                    if (mission.GetMissionBehavior<BattleSpawnLogic>() != null)
+                    {
+                        reason = "lords-hall-unexpected-battle-spawn-logic";
+                        return false;
+                    }
+
+                    if (mission.GetMissionBehavior<NativeMissionAgentSpawnLogic>() != null)
+                    {
+                        reason = "lords-hall-unexpected-native-spawn-logic";
+                        return false;
+                    }
+
+                    initializationStep = "log-bootstrap-contract";
+                    LogBootstrapContractSnapshot(
+                        mission,
+                        null,
+                        playerSide,
+                        supplierDiagnostics +
+                        " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                        " RuntimeContract={LordsHall MissionReadyOnly=true}",
+                        "pre-init-lords-hall-controller",
+                        source);
+
+                    initializationStep = "init-lords-hall-controller";
+                    if (!TryEnsureLordsHallControllerInitialized(
+                            mission,
+                            suppliers,
+                            playerSide,
+                            defenderTotal,
+                            attackerTotal,
+                            out string lordsHallDiagnostics))
+                    {
+                        reason = lordsHallDiagnostics ?? "lords-hall-controller-failed";
+                        return false;
+                    }
+
+                    initializationStep = "subscribe-agent-removal-events";
+                    mission.OnBeforeAgentRemoved -= OnMissionBeforeAgentRemoved;
+                    mission.OnBeforeAgentRemoved += OnMissionBeforeAgentRemoved;
+
+                    initializationStep = "activate-runtime";
+                    _activeMission = mission;
+                    _activeSpawnLogic = null;
+                    _activeSuppliers = suppliers;
+                    _activeMode = ActiveBootstrapMode.LordsHallController;
+                    _activePlayerSide = playerSide;
+                    _activePlayerTeam = mission.PlayerTeam;
+                    _activePlayerEnemyTeam = mission.PlayerEnemyTeam;
+                    _reinforcementsEnabled = false;
+                    reason = "initialized";
+
+                    ModLogger.Info(
+                        "ExactCampaignArmyBootstrap: initialized lords-hall army bootstrap on exact campaign scene. " +
+                        "Scene=" + sceneName +
+                        " PlayerSide=" + playerSide +
+                        " ScenarioKind=" + (scenarioContext?.ScenarioKind ?? "Unknown") +
+                        " SiegeSubtype=" + (scenarioContext?.SiegeContext?.SiegeSubtype ?? "None") +
+                        " DefenderTotal=" + defenderTotal +
+                        " AttackerTotal=" + attackerTotal +
+                        " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                        " ObjectCatalog={" + ExactCampaignObjectCatalogBootstrap.LastSummary + "}" +
+                        " SupplierDiagnostics=" + supplierDiagnostics +
+                        " ControllerDiagnostics=" + lordsHallDiagnostics +
+                        " Source=" + (source ?? "unknown"));
+                    return true;
                 }
 
                 initializationStep = "resolve-battle-spawn-logic";
@@ -415,6 +503,8 @@ namespace CoopSpectator.Infrastructure
                 initializationStep = "activate-runtime";
                 _activeMission = mission;
                 _activeSpawnLogic = spawnLogic;
+                _activeSuppliers = suppliers;
+                _activeMode = ActiveBootstrapMode.NativeSpawnLogic;
                 _activePlayerSide = playerSide;
                 _activePlayerTeam = mission.PlayerTeam;
                 _activePlayerEnemyTeam = mission.PlayerEnemyTeam;
@@ -545,8 +635,9 @@ namespace CoopSpectator.Infrastructure
 
             if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase))
             {
-                reason = "siege-subtype-guarded:LordsHall:indoor-scene-contract-pending";
-                return false;
+                battleSpawnTag = BattleSpawnLogic.BattleTag;
+                battleSizeType = Mission.BattleSizeType.Siege;
+                return true;
             }
 
             if (string.Equals(siegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
@@ -565,6 +656,12 @@ namespace CoopSpectator.Infrastructure
             return string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(siegeSubtype, "Relief", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsLordsHallSiegeSubtype(BattleScenarioContextMessage scenarioContext)
+        {
+            string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
+            return string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsSallyOutSiegeSubtype(BattleScenarioContextMessage scenarioContext)
@@ -588,7 +685,8 @@ namespace CoopSpectator.Infrastructure
             if (IsSallyOutSiegeSubtype(scenarioContext))
                 return Mission.MissionTeamAITypeEnum.SallyOut;
 
-            if (string.Equals(scenarioContext.SiegeContext?.SiegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(scenarioContext.SiegeContext?.SiegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(scenarioContext.SiegeContext?.SiegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
                 return Mission.MissionTeamAITypeEnum.NoTeamAI;
 
             return Mission.MissionTeamAITypeEnum.Siege;
@@ -777,6 +875,45 @@ namespace CoopSpectator.Infrastructure
             diagnostics =
                 "Created=" + created +
                 " Started=" + controller.HasStarted +
+                " DefenderTotal=" + defenderTotal +
+                " AttackerTotal=" + attackerTotal;
+            return controller.HasStarted;
+        }
+
+        private static bool TryEnsureLordsHallControllerInitialized(
+            Mission mission,
+            IMissionTroopSupplier[] suppliers,
+            BattleSideEnum playerSide,
+            int defenderTotal,
+            int attackerTotal,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            CoopExactCampaignLordsHallMissionController controller =
+                mission.GetMissionBehavior<CoopExactCampaignLordsHallMissionController>();
+            bool created = false;
+            if (controller == null)
+            {
+                controller = new CoopExactCampaignLordsHallMissionController(
+                    suppliers,
+                    3f,
+                    0.7f,
+                    Math.Min(19, Math.Max(0, attackerTotal)),
+                    Math.Min(27, Math.Max(0, defenderTotal)),
+                    playerSide);
+                mission.AddMissionBehavior(controller);
+                created = true;
+            }
+
+            controller.SetReinforcementsEnabled(false);
+            controller.EnsureInitializedAndStarted();
+            diagnostics =
+                "Created=" + created +
+                " Started=" + controller.HasStarted +
+                " PlayerSide=" + playerSide +
                 " DefenderTotal=" + defenderTotal +
                 " AttackerTotal=" + attackerTotal;
             return controller.HasStarted;
@@ -1289,7 +1426,7 @@ namespace CoopSpectator.Infrastructure
         private static void OnNativeReinforcementsSpawned(BattleSideEnum side, int spawnedCount)
         {
             Mission mission = _activeMission;
-            if (_activeSpawnLogic == null || mission == null)
+            if (_activeMode != ActiveBootstrapMode.NativeSpawnLogic || _activeSpawnLogic == null || mission == null)
                 return;
 
             ModLogger.Info(
@@ -1326,20 +1463,13 @@ namespace CoopSpectator.Infrastructure
             if (!IsActive(mission) ||
                 affectedAgent == null ||
                 affectedAgent.IsMount ||
-                !(affectedAgent.Origin is ExactCampaignSnapshotAgentOrigin exactOrigin) ||
-                _activeSpawnLogic == null)
+                !(affectedAgent.Origin is ExactCampaignSnapshotAgentOrigin exactOrigin))
             {
                 return;
             }
 
-            int defenderRemovedBefore = GetMissionSideSupplierPropertyValue<int>(
-                _activeSpawnLogic,
-                BattleSideEnum.Defender,
-                "NumRemovedTroops");
-            int attackerRemovedBefore = GetMissionSideSupplierPropertyValue<int>(
-                _activeSpawnLogic,
-                BattleSideEnum.Attacker,
-                "NumRemovedTroops");
+            int defenderRemovedBefore = GetActiveRemovedTroopCount(BattleSideEnum.Defender);
+            int attackerRemovedBefore = GetActiveRemovedTroopCount(BattleSideEnum.Attacker);
 
             switch (agentState)
             {
@@ -1354,14 +1484,8 @@ namespace CoopSpectator.Infrastructure
                     break;
             }
 
-            int defenderRemovedAfter = GetMissionSideSupplierPropertyValue<int>(
-                _activeSpawnLogic,
-                BattleSideEnum.Defender,
-                "NumRemovedTroops");
-            int attackerRemovedAfter = GetMissionSideSupplierPropertyValue<int>(
-                _activeSpawnLogic,
-                BattleSideEnum.Attacker,
-                "NumRemovedTroops");
+            int defenderRemovedAfter = GetActiveRemovedTroopCount(BattleSideEnum.Defender);
+            int attackerRemovedAfter = GetActiveRemovedTroopCount(BattleSideEnum.Attacker);
             if (defenderRemovedBefore == defenderRemovedAfter &&
                 attackerRemovedBefore == attackerRemovedAfter)
             {
@@ -1381,8 +1505,8 @@ namespace CoopSpectator.Infrastructure
                 ",Attacker=" + attackerRemovedBefore + "]" +
                 " RemovedBySideAfter=[Defender=" + defenderRemovedAfter +
                 ",Attacker=" + attackerRemovedAfter + "]" +
-                " ActiveTroopsAfter=[Defender=" + _activeSpawnLogic.NumberOfActiveDefenderTroops +
-                ",Attacker=" + _activeSpawnLogic.NumberOfActiveAttackerTroops + "]" +
+                " ActiveTroopsAfter=[Defender=" + CountActiveMissionSideAgents(mission, BattleSideEnum.Defender) +
+                ",Attacker=" + CountActiveMissionSideAgents(mission, BattleSideEnum.Attacker) + "]" +
                 " PlayerSide=" + _activePlayerSide);
             TryLogRuntimeDiagnostics(
                 mission,
@@ -1395,12 +1519,21 @@ namespace CoopSpectator.Infrastructure
             if (!IsActive(mission) || _reinforcementsEnabled == enabled)
                 return;
 
-            _activeSpawnLogic.SetReinforcementsSpawnEnabled(enabled);
+            if (_activeMode == ActiveBootstrapMode.NativeSpawnLogic)
+            {
+                _activeSpawnLogic?.SetReinforcementsSpawnEnabled(enabled);
+            }
+            else if (_activeMode == ActiveBootstrapMode.LordsHallController)
+            {
+                mission?.GetMissionBehavior<CoopExactCampaignLordsHallMissionController>()?.SetReinforcementsEnabled(enabled);
+            }
+
             _reinforcementsEnabled = enabled;
             ModLogger.Info(
                 "ExactCampaignArmyBootstrap: reinforcement gate updated. " +
                 "Scene=" + (mission?.SceneName ?? "null") +
                 " Enabled=" + enabled +
+                " Mode=" + _activeMode +
                 " PlayerSide=" + _activePlayerSide +
                 " Source=" + (source ?? "unknown"));
             TryLogRuntimeDiagnostics(mission, source + " gate-change", force: true);
@@ -1456,24 +1589,55 @@ namespace CoopSpectator.Infrastructure
         {
             attackerRemaining = 0;
             defenderRemaining = 0;
-            if (!IsActive(mission) || _activeSpawnLogic == null)
+            if (!IsActive(mission))
                 return false;
 
-            attackerRemaining = Math.Max(0, _activeSpawnLogic.NumberOfRemainingAttackerTroops);
-            defenderRemaining = Math.Max(0, _activeSpawnLogic.NumberOfRemainingDefenderTroops);
-            return true;
+            if (_activeMode == ActiveBootstrapMode.NativeSpawnLogic && _activeSpawnLogic != null)
+            {
+                attackerRemaining = Math.Max(0, _activeSpawnLogic.NumberOfRemainingAttackerTroops);
+                defenderRemaining = Math.Max(0, _activeSpawnLogic.NumberOfRemainingDefenderTroops);
+                return true;
+            }
+
+            if (_activeMode == ActiveBootstrapMode.LordsHallController)
+            {
+                attackerRemaining = GetActiveRemainingTroopCount(BattleSideEnum.Attacker);
+                defenderRemaining = GetActiveRemainingTroopCount(BattleSideEnum.Defender);
+                return true;
+            }
+
+            return false;
         }
 
         public static void TryLogRuntimeDiagnostics(Mission mission, string source, bool force = false)
         {
-            if (!IsActive(mission) || _activeSpawnLogic == null)
+            if (!IsActive(mission))
                 return;
 
             DateTime nowUtc = DateTime.UtcNow;
             if (!force && nowUtc < _nextRuntimeDiagnosticsLogUtc)
                 return;
 
-            string summary = BuildDetailedRuntimeSummary(_activeSpawnLogic);
+            string summary;
+            if (_activeMode == ActiveBootstrapMode.NativeSpawnLogic)
+            {
+                if (_activeSpawnLogic == null)
+                    return;
+
+                summary = BuildDetailedRuntimeSummary(_activeSpawnLogic);
+            }
+            else if (_activeMode == ActiveBootstrapMode.LordsHallController)
+            {
+                CoopExactCampaignLordsHallMissionController controller =
+                    mission.GetMissionBehavior<CoopExactCampaignLordsHallMissionController>();
+                summary = controller?.BuildRuntimeSummary() ??
+                          "Mode=LordsHall Started=false Controller=missing";
+            }
+            else
+            {
+                return;
+            }
+
             if (!force && string.Equals(summary, _lastRuntimeDiagnosticsSummary, StringComparison.Ordinal))
             {
                 _nextRuntimeDiagnosticsLogUtc = nowUtc.AddSeconds(2);
@@ -1483,8 +1647,9 @@ namespace CoopSpectator.Infrastructure
             _lastRuntimeDiagnosticsSummary = summary;
             _nextRuntimeDiagnosticsLogUtc = nowUtc.AddSeconds(force ? 1 : 2);
             ModLogger.Info(
-                "ExactCampaignArmyBootstrap: native reinforcement runtime state. " +
+                "ExactCampaignArmyBootstrap: runtime state. " +
                 "Scene=" + (mission?.SceneName ?? "null") +
+                " Mode=" + _activeMode +
                 " ReinforcementsEnabled=" + _reinforcementsEnabled +
                 " PlayerSide=" + _activePlayerSide +
                 " Source=" + (source ?? "unknown") +
@@ -1685,6 +1850,7 @@ namespace CoopSpectator.Infrastructure
 
         private static bool TryBuildSuppliers(
             BattleSideEnum playerSide,
+            BattleScenarioContextMessage scenarioContext,
             out IMissionTroopSupplier[] suppliers,
             out int defenderTotal,
             out int attackerTotal,
@@ -1702,8 +1868,27 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
-            ExactCampaignSnapshotTroopSupplier defenderSupplier = BuildSupplier(runtimeState, BattleSideEnum.Defender, playerSide, out defenderTotal, out string defenderDiagnostics);
-            ExactCampaignSnapshotTroopSupplier attackerSupplier = BuildSupplier(runtimeState, BattleSideEnum.Attacker, playerSide, out attackerTotal, out string attackerDiagnostics);
+            bool useMissionReadyOnly = IsLordsHallSiegeSubtype(scenarioContext);
+            string defenderDiagnostics;
+            string attackerDiagnostics;
+            ExactCampaignSnapshotTroopSupplier defenderSupplier = useMissionReadyOnly
+                ? BuildMissionReadyOnlySupplier(
+                    runtimeState,
+                    BattleSideEnum.Defender,
+                    playerSide,
+                    maxEntries: 27,
+                    out defenderTotal,
+                    out defenderDiagnostics)
+                : BuildSupplier(runtimeState, BattleSideEnum.Defender, playerSide, out defenderTotal, out defenderDiagnostics);
+            ExactCampaignSnapshotTroopSupplier attackerSupplier = useMissionReadyOnly
+                ? BuildMissionReadyOnlySupplier(
+                    runtimeState,
+                    BattleSideEnum.Attacker,
+                    playerSide,
+                    maxEntries: 19,
+                    out attackerTotal,
+                    out attackerDiagnostics)
+                : BuildSupplier(runtimeState, BattleSideEnum.Attacker, playerSide, out attackerTotal, out attackerDiagnostics);
             suppliers = new IMissionTroopSupplier[2]
             {
                 defenderSupplier,
@@ -1711,9 +1896,110 @@ namespace CoopSpectator.Infrastructure
             };
 
             diagnostics =
+                "Mode=" + (useMissionReadyOnly ? "MissionReadyOnly" : "FullBattleRoster") + " " +
                 "Defender=" + defenderTotal + "(" + defenderDiagnostics + ")" +
                 " Attacker=" + attackerTotal + "(" + attackerDiagnostics + ")";
             return defenderTotal > 0 || attackerTotal > 0;
+        }
+
+        private static ExactCampaignSnapshotTroopSupplier BuildMissionReadyOnlySupplier(
+            BattleRuntimeState runtimeState,
+            BattleSideEnum side,
+            BattleSideEnum playerSide,
+            int maxEntries,
+            out int totalHealthyCount,
+            out string diagnostics)
+        {
+            totalHealthyCount = 0;
+            diagnostics = "side-state-missing";
+
+            BattleSideState sideState = runtimeState?.Sides?.FirstOrDefault(candidate => ResolveBattleSide(candidate) == side);
+            if (sideState?.Entries == null || sideState.Entries.Count <= 0)
+                return new ExactCampaignSnapshotTroopSupplier(side, side == playerSide);
+
+            List<string> missionReadyEntryOrder = sideState.MissionReadyEntryOrder?
+                .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
+                .ToList();
+            if (missionReadyEntryOrder == null || missionReadyEntryOrder.Count <= 0)
+            {
+                diagnostics = "mission-ready-order-missing";
+                return new ExactCampaignSnapshotTroopSupplier(side, side == playerSide);
+            }
+
+            var supplier = new ExactCampaignSnapshotTroopSupplier(side, side == playerSide);
+            var origins = new List<ExactCampaignSnapshotAgentOrigin>();
+            ResolveOriginAppearance(sideState, side, out uint factionColor, out uint factionColor2, out Banner banner);
+            Dictionary<string, RosterEntryState> entriesById = sideState.Entries
+                .Where(entry => entry != null && !string.IsNullOrWhiteSpace(entry.EntryId))
+                .GroupBy(entry => entry.EntryId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+            var remainingHealthyByEntryId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            int seed = 1;
+            int missingEntries = 0;
+            int exhaustedEntries = 0;
+            int unresolvedEntries = 0;
+
+            foreach (RosterEntryState entryState in sideState.Entries)
+            {
+                if (entryState == null || string.IsNullOrWhiteSpace(entryState.EntryId))
+                    continue;
+
+                int availableCount = Math.Max(0, entryState.Count - entryState.WoundedCount);
+                if (availableCount > 0)
+                    remainingHealthyByEntryId[entryState.EntryId] = availableCount;
+            }
+
+            RosterEntryState commanderEntryState = BattleCommanderResolver.ResolveCommanderEntry(runtimeState, side, sideState.Entries);
+            BasicCharacterObject generalCharacter = TryResolveEntryCharacter(commanderEntryState);
+
+            foreach (string entryId in missionReadyEntryOrder)
+            {
+                if (totalHealthyCount >= maxEntries)
+                    break;
+
+                if (!entriesById.TryGetValue(entryId, out RosterEntryState entryState) || entryState == null)
+                {
+                    missingEntries++;
+                    continue;
+                }
+
+                if (!remainingHealthyByEntryId.TryGetValue(entryId, out int remainingHealthyCount) || remainingHealthyCount <= 0)
+                {
+                    exhaustedEntries++;
+                    continue;
+                }
+
+                BasicCharacterObject troop = TryResolveEntryCharacter(entryState);
+                if (troop == null)
+                {
+                    unresolvedEntries++;
+                    continue;
+                }
+
+                if (generalCharacter == null &&
+                    (entryState.IsHero || !string.IsNullOrWhiteSpace(entryState.HeroRole)))
+                {
+                    generalCharacter = troop;
+                }
+
+                AppendOriginForEntry(origins, supplier, entryState, troop, side, playerSide, factionColor, factionColor2, banner, ref seed);
+                remainingHealthyByEntryId[entryId] = remainingHealthyCount - 1;
+                totalHealthyCount++;
+            }
+
+            if (generalCharacter == null)
+                generalCharacter = origins.FirstOrDefault()?.Troop;
+
+            supplier.Initialize(origins, generalCharacter);
+            diagnostics =
+                "MissionReadyOrder=" + missionReadyEntryOrder.Count +
+                " Selected=" + totalHealthyCount +
+                " MaxEntries=" + maxEntries +
+                " MissingEntries=" + missingEntries +
+                " ExhaustedEntries=" + exhaustedEntries +
+                " UnresolvedEntries=" + unresolvedEntries +
+                " GeneralCharacter=" + (generalCharacter?.StringId ?? "null");
+            return supplier;
         }
 
         private static bool TrySeedFormationBannerCodes(
@@ -2269,6 +2555,43 @@ namespace CoopSpectator.Infrastructure
                 " MissionReadyUnresolved=" + missionReadyUnresolvedEntries +
                 " GeneralCharacter=" + (generalCharacter?.StringId ?? "null");
             return supplier;
+        }
+
+        private static int GetActiveRemovedTroopCount(BattleSideEnum side)
+        {
+            IMissionTroopSupplier supplier = GetActiveSupplier(side);
+            return supplier?.NumRemovedTroops ?? 0;
+        }
+
+        private static int GetActiveRemainingTroopCount(BattleSideEnum side)
+        {
+            IMissionTroopSupplier supplier = GetActiveSupplier(side);
+            return Math.Max(0, supplier?.NumTroopsNotSupplied ?? 0);
+        }
+
+        private static IMissionTroopSupplier GetActiveSupplier(BattleSideEnum side)
+        {
+            if (_activeSuppliers == null)
+                return null;
+
+            int sideIndex = (int)side;
+            return sideIndex >= 0 && sideIndex < _activeSuppliers.Length
+                ? _activeSuppliers[sideIndex]
+                : null;
+        }
+
+        private static int CountActiveMissionSideAgents(Mission mission, BattleSideEnum side)
+        {
+            if (mission == null)
+                return 0;
+
+            Team team =
+                side == BattleSideEnum.Attacker
+                    ? mission.AttackerTeam
+                    : side == BattleSideEnum.Defender
+                        ? mission.DefenderTeam
+                        : null;
+            return team?.ActiveAgents?.Count ?? 0;
         }
 
         private static void ResolveOriginAppearance(

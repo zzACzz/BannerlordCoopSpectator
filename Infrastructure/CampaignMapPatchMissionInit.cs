@@ -287,7 +287,8 @@ namespace CoopSpectator.Infrastructure
                 return Mission.MissionTeamAITypeEnum.FieldBattle;
 
             string siegeSubtype = scenarioContext.SiegeContext?.SiegeSubtype ?? string.Empty;
-            if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(siegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
                 return Mission.MissionTeamAITypeEnum.NoTeamAI;
 
             if (string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase) ||
