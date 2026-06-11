@@ -1229,9 +1229,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             var participants = new List<FallbackCombatXpParticipant>();
             int totalWeight = 0;
+            bool requireParticipationSignal = HasBattleResultParticipationSignals(result, partyId);
             foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry in result.Entries.Where(item =>
                          item != null &&
                          string.Equals(item.PartyId, partyId, StringComparison.OrdinalIgnoreCase) &&
+                         (!requireParticipationSignal || DidBattleResultEntryParticipate(item)) &&
                          Math.Max(0, item.SnapshotCount) > 0))
             {
                 if (!TryResolvePartyRosterCharacter(
@@ -1359,6 +1361,37 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             if (anyApplied)
                 AddWritebackSample(summary.AdjustedSamples, "FallbackCombatXp:" + partyId + "/casualty-pool");
+        }
+
+        private static bool HasBattleResultParticipationSignals(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            string partyId)
+        {
+            if (result?.Entries == null || string.IsNullOrWhiteSpace(partyId))
+                return false;
+
+            return result.Entries.Any(entry =>
+                entry != null &&
+                string.Equals(entry.PartyId, partyId, StringComparison.OrdinalIgnoreCase) &&
+                DidBattleResultEntryParticipate(entry));
+        }
+
+        private static bool DidBattleResultEntryParticipate(CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry)
+        {
+            if (entry == null)
+                return false;
+
+            return Math.Max(0, entry.MaterializedSpawnCount) > 0 ||
+                   Math.Max(0, entry.ActiveCount) > 0 ||
+                   Math.Max(0, entry.RemovedCount) > 0 ||
+                   Math.Max(0, entry.ScoreHitCount) > 0 ||
+                   Math.Max(0, entry.HitsTakenCount) > 0 ||
+                   Math.Max(0, entry.FatalHitCount) > 0 ||
+                   Math.Max(0, entry.KillsInflictedCount) > 0 ||
+                   Math.Max(0, entry.UnconsciousInflictedCount) > 0 ||
+                   Math.Max(0, entry.RoutedInflictedCount) > 0 ||
+                   entry.DamageDealt > 0.01f ||
+                   entry.DamageTaken > 0.01f;
         }
 
         private static void TryReplayCombatEventHeroXp(

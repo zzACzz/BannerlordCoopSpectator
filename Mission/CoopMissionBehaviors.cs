@@ -22036,12 +22036,14 @@ namespace CoopSpectator.MissionBehaviors
                 List<string> attackerRoster = new List<string>();
                 List<string> defenderRoster = new List<string>();
                 List<RosterEntryState> playerSideEntries = new List<RosterEntryState>();
+                List<RosterEntryState> allAllowedEntries = new List<RosterEntryState>();
 
                 foreach (BattleSideState sideState in rosterState.Sides)
                 {
                     BattleSideEnum side = ResolveBattleSideFromState(sideState);
                     List<string> sideTroopIds = NormalizeRosterTroopIds(sideState.TroopIds);
-                    if (sideState?.Entries == null || sideState.Entries.Count == 0)
+                    List<RosterEntryState> allowedSideEntries = ResolveAllowedControlEntryStatesForSide(rosterState, sideState);
+                    if (allowedSideEntries.Count == 0)
                         continue;
 
                     if (side == BattleSideEnum.Attacker)
@@ -22050,15 +22052,22 @@ namespace CoopSpectator.MissionBehaviors
                         defenderRoster = sideTroopIds;
 
                     if (sideState.IsPlayerSide && playerSideEntries.Count == 0)
-                        playerSideEntries = sideState.Entries.Where(entry => entry != null).ToList();
+                        playerSideEntries = new List<RosterEntryState>(allowedSideEntries);
 
-                    foreach (RosterEntryState entryState in sideState.Entries.Where(entry => entry != null))
+                    foreach (RosterEntryState entryState in allowedSideEntries)
+                    {
+                        if (!allAllowedEntries.Any(entry => string.Equals(entry?.EntryId, entryState?.EntryId, StringComparison.Ordinal)))
+                            allAllowedEntries.Add(entryState);
+
                         TryAddAllowedControlEntryState(side, entryState, rosterProjection, preferAsSelected: SelectedAllowedCharacter == null && sideState.IsPlayerSide);
+                    }
                 }
 
                 List<RosterEntryState> preferredEntries = playerSideEntries.Count > 0
                     ? playerSideEntries
-                    : rosterState.EntriesById.Values.Where(entry => entry != null).ToList();
+                    : (allAllowedEntries.Count > 0
+                        ? allAllowedEntries
+                        : rosterState.EntriesById.Values.Where(entry => entry != null).ToList());
                 if (SelectedAllowedCharacter == null && preferredEntries.Count > 0)
                 {
                     SelectedAllowedEntryId = preferredEntries[0].EntryId;
@@ -22125,6 +22134,50 @@ namespace CoopSpectator.MissionBehaviors
 
             RefreshAuthorityStateFromAllowedTroops(source, "campaign-roster");
             LogAllowedControlTroops(source, "campaign-roster", ControlTroopIds, Array.Empty<string>());
+        }
+
+        private static List<RosterEntryState> ResolveAllowedControlEntryStatesForSide(
+            BattleRuntimeState rosterState,
+            BattleSideState sideState)
+        {
+            List<RosterEntryState> fallbackEntries = sideState?.Entries?
+                .Where(entry => entry != null)
+                .ToList() ?? new List<RosterEntryState>();
+            if (!ShouldRestrictAllowedControlEntriesToMissionReadyRoster(rosterState))
+                return fallbackEntries;
+
+            List<string> missionReadyEntryOrder = sideState.MissionReadyEntryOrder?
+                .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
+                .ToList();
+            if (missionReadyEntryOrder == null || missionReadyEntryOrder.Count <= 0)
+                return fallbackEntries;
+
+            Dictionary<string, RosterEntryState> entriesById = fallbackEntries
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.EntryId))
+                .GroupBy(entry => entry.EntryId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+            var missionReadyEntries = new List<RosterEntryState>(entriesById.Count);
+            var addedEntryIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (string entryId in missionReadyEntryOrder)
+            {
+                if (!addedEntryIds.Add(entryId))
+                    continue;
+
+                if (entriesById.TryGetValue(entryId, out RosterEntryState entryState) && entryState != null)
+                    missionReadyEntries.Add(entryState);
+            }
+
+            return missionReadyEntries.Count > 0
+                ? missionReadyEntries
+                : fallbackEntries;
+        }
+
+        private static bool ShouldRestrictAllowedControlEntriesToMissionReadyRoster(BattleRuntimeState rosterState)
+        {
+            string siegeSubtype = rosterState?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
+            return rosterState?.ScenarioContext?.IsSiegeBattle == true &&
+                   string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void RefreshAuthorityStateFromAllowedTroops(string source, string mode)
