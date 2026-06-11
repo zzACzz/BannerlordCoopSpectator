@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -189,6 +190,10 @@ namespace CoopSpectator.Infrastructure
                     reason = scenarioContractReason ?? "scenario-contract-rejected";
                     return false;
                 }
+                bool useSiegeAmbushController = RequiresSiegeAmbushController(scenarioContext);
+                bool isSallyOutSubtype = IsSallyOutSiegeSubtype(scenarioContext);
+                bool isReliefForceAttack = IsReliefSiegeSubtype(scenarioContext);
+                Mission.MissionTeamAITypeEnum missionTeamAiType = ResolveMissionTeamAiType(scenarioContext);
 
                 initializationStep = "ensure-campaign-object-catalogs";
                 ExactCampaignObjectCatalogBootstrap.EnsureLoaded("exact-native-bootstrap:" + (source ?? "unknown"));
@@ -206,20 +211,15 @@ namespace CoopSpectator.Infrastructure
                 initializationStep = "resolve-siege-scene-preparation";
                 if (scenarioContext?.IsSiegeBattle == true)
                 {
-                    MissionBehavior existingSiegePreparationHandler = mission.GetMissionBehavior<SiegeMissionPreparationHandler>();
-                    if (existingSiegePreparationHandler == null)
+                    if (!TryEnsureSiegeScenePreparationBehavior(
+                            mission,
+                            scenarioContext,
+                            isSallyOutSubtype,
+                            isReliefForceAttack,
+                            out string siegePreparationDiagnostics))
                     {
-                        initializationStep = "create-siege-scene-preparation";
-                        var siegePreparationHandler = new SiegeMissionPreparationHandler(
-                            isSallyOut: false,
-                            isReliefForceAttack: false,
-                            (scenarioContext.SiegeContext?.WallHitPointRatios ?? new List<float>()).ToArray(),
-                            scenarioContext.SiegeContext?.HasAnySiegeTower == true);
-                        mission.AddMissionBehavior(siegePreparationHandler);
-                        initializationStep = "siege-scene-preparation-onbehaviorinitialize";
-                        siegePreparationHandler.OnBehaviorInitialize();
-                        initializationStep = "siege-scene-preparation-afterstart";
-                        siegePreparationHandler.AfterStart();
+                        reason = siegePreparationDiagnostics ?? "siege-scene-preparation-failed";
+                        return false;
                     }
                 }
 
@@ -280,10 +280,6 @@ namespace CoopSpectator.Infrastructure
                     return false;
                 }
 
-                initializationStep = "configure-spawn-horses";
-                spawnLogic.SetSpawnHorses(BattleSideEnum.Defender, SideHasMountedTroops(suppliers, BattleSideEnum.Defender));
-                spawnLogic.SetSpawnHorses(BattleSideEnum.Attacker, SideHasMountedTroops(suppliers, BattleSideEnum.Attacker));
-
                 initializationStep = "override-native-battle-size";
                 int nativeBattleSizeBeforeOverride = GetNativeBattleSize(spawnLogic);
                 if (!TryOverrideNativeBattleSize(spawnLogic, battleSizeBudget, out string battleSizeOverrideDiagnostics))
@@ -293,50 +289,119 @@ namespace CoopSpectator.Infrastructure
                 }
                 int nativeBattleSizeAfterOverride = GetNativeBattleSize(spawnLogic);
 
-                initializationStep = "init-with-single-phase";
-                PushSpawnLogicInitTeamSideOverride(mission, playerSide);
-                List<TeamSideOverrideState> temporaryTeamSideOverrides =
-                    PushInitTeamSideSanitization(mission, playerSide, source);
-                try
+                if (useSiegeAmbushController)
                 {
-                    initializationStep = "ensure-deployment-team-plans-post-sanitization";
-                    if (!TryEnsureDeploymentPlanTeamPlans(mission, source, out string postSanitizationDeploymentPlanDiagnostics))
+                    initializationStep = "ensure-siege-team-ai-contract";
+                    if (!TryEnsureMissionTeamAiContract(
+                            mission,
+                            missionTeamAiType,
+                            source,
+                            out string teamAiDiagnostics))
                     {
-                        reason = postSanitizationDeploymentPlanDiagnostics ?? "deployment-team-plan-bridge-post-sanitization-failed";
+                        reason = teamAiDiagnostics ?? "mission-team-ai-contract-failed";
                         return false;
                     }
 
-                    string combinedDeploymentPlanDiagnostics = deploymentPlanDiagnostics;
-                    if (!string.Equals(postSanitizationDeploymentPlanDiagnostics, deploymentPlanDiagnostics, StringComparison.Ordinal))
+                    initializationStep = "init-siege-ambush-controller";
+                    PushSpawnLogicInitTeamSideOverride(mission, playerSide);
+                    List<TeamSideOverrideState> temporaryTeamSideOverrides =
+                        PushInitTeamSideSanitization(mission, playerSide, source);
+                    try
                     {
-                        combinedDeploymentPlanDiagnostics +=
-                            " PostSanitization={" + (postSanitizationDeploymentPlanDiagnostics ?? string.Empty) + "}";
-                    }
+                        initializationStep = "ensure-deployment-team-plans-post-sanitization";
+                        if (!TryEnsureDeploymentPlanTeamPlans(mission, source, out string postSanitizationDeploymentPlanDiagnostics))
+                        {
+                            reason = postSanitizationDeploymentPlanDiagnostics ?? "deployment-team-plan-bridge-post-sanitization-failed";
+                            return false;
+                        }
 
-                    initializationStep = "log-bootstrap-contract";
-                    LogBootstrapContractSnapshot(
-                        mission,
-                        spawnLogic,
-                        playerSide,
-                        supplierDiagnostics +
-                        " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
-                        " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}",
-                        "pre-init-with-single-phase",
-                        source);
-                    initializationStep = "init-with-single-phase";
-                    spawnLogic.InitWithSinglePhase(
-                        defenderTotal,
-                        attackerTotal,
-                        defenderInitial,
-                        attackerInitial,
-                        spawnDefenders: defenderTotal > 0,
-                        spawnAttackers: attackerTotal > 0,
-                        in spawnSettings);
+                        string combinedDeploymentPlanDiagnostics = deploymentPlanDiagnostics;
+                        if (!string.Equals(postSanitizationDeploymentPlanDiagnostics, deploymentPlanDiagnostics, StringComparison.Ordinal))
+                        {
+                            combinedDeploymentPlanDiagnostics +=
+                                " PostSanitization={" + (postSanitizationDeploymentPlanDiagnostics ?? string.Empty) + "}";
+                        }
+
+                        initializationStep = "log-bootstrap-contract";
+                        LogBootstrapContractSnapshot(
+                            mission,
+                            spawnLogic,
+                            playerSide,
+                            supplierDiagnostics +
+                            " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                            " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}" +
+                            " MissionTeamAI={" + teamAiDiagnostics + "}",
+                            "pre-init-siege-ambush-controller",
+                            source);
+
+                        initializationStep = "ensure-siege-ambush-controller";
+                        if (!TryEnsureSiegeAmbushControllerInitialized(
+                                mission,
+                                defenderTotal,
+                                attackerTotal,
+                                out string siegeAmbushDiagnostics))
+                        {
+                            reason = siegeAmbushDiagnostics ?? "siege-ambush-controller-failed";
+                            return false;
+                        }
+                    }
+                    finally
+                    {
+                        PopInitTeamSideSanitization(temporaryTeamSideOverrides, source);
+                        PopSpawnLogicInitTeamSideOverride(mission);
+                    }
                 }
-                finally
+                else
                 {
-                    PopInitTeamSideSanitization(temporaryTeamSideOverrides, source);
-                    PopSpawnLogicInitTeamSideOverride(mission);
+                    initializationStep = "configure-spawn-horses";
+                    spawnLogic.SetSpawnHorses(BattleSideEnum.Defender, SideHasMountedTroops(suppliers, BattleSideEnum.Defender));
+                    spawnLogic.SetSpawnHorses(BattleSideEnum.Attacker, SideHasMountedTroops(suppliers, BattleSideEnum.Attacker));
+
+                    initializationStep = "init-with-single-phase";
+                    PushSpawnLogicInitTeamSideOverride(mission, playerSide);
+                    List<TeamSideOverrideState> temporaryTeamSideOverrides =
+                        PushInitTeamSideSanitization(mission, playerSide, source);
+                    try
+                    {
+                        initializationStep = "ensure-deployment-team-plans-post-sanitization";
+                        if (!TryEnsureDeploymentPlanTeamPlans(mission, source, out string postSanitizationDeploymentPlanDiagnostics))
+                        {
+                            reason = postSanitizationDeploymentPlanDiagnostics ?? "deployment-team-plan-bridge-post-sanitization-failed";
+                            return false;
+                        }
+
+                        string combinedDeploymentPlanDiagnostics = deploymentPlanDiagnostics;
+                        if (!string.Equals(postSanitizationDeploymentPlanDiagnostics, deploymentPlanDiagnostics, StringComparison.Ordinal))
+                        {
+                            combinedDeploymentPlanDiagnostics +=
+                                " PostSanitization={" + (postSanitizationDeploymentPlanDiagnostics ?? string.Empty) + "}";
+                        }
+
+                        initializationStep = "log-bootstrap-contract";
+                        LogBootstrapContractSnapshot(
+                            mission,
+                            spawnLogic,
+                            playerSide,
+                            supplierDiagnostics +
+                            " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                            " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}",
+                            "pre-init-with-single-phase",
+                            source);
+                        initializationStep = "init-with-single-phase";
+                        spawnLogic.InitWithSinglePhase(
+                            defenderTotal,
+                            attackerTotal,
+                            defenderInitial,
+                            attackerInitial,
+                            spawnDefenders: defenderTotal > 0,
+                            spawnAttackers: attackerTotal > 0,
+                            in spawnSettings);
+                    }
+                    finally
+                    {
+                        PopInitTeamSideSanitization(temporaryTeamSideOverrides, source);
+                        PopSpawnLogicInitTeamSideOverride(mission);
+                    }
                 }
                 initializationStep = "subscribe-agent-removal-events";
                 mission.OnBeforeAgentRemoved -= OnMissionBeforeAgentRemoved;
@@ -466,14 +531,16 @@ namespace CoopSpectator.Infrastructure
             if (string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase))
             {
-                reason = "siege-subtype-guarded:" + siegeSubtype + ":requires-sally-out-controller";
-                return false;
+                battleSpawnTag = BattleSpawnLogic.SallyOutTag;
+                battleSizeType = Mission.BattleSizeType.SallyOut;
+                return true;
             }
 
             if (string.Equals(siegeSubtype, "Relief", StringComparison.OrdinalIgnoreCase))
             {
-                reason = "siege-subtype-guarded:Relief:requires-relief-force-controller";
-                return false;
+                battleSpawnTag = BattleSpawnLogic.ReliefForceAttackTag;
+                battleSizeType = Mission.BattleSizeType.Siege;
+                return true;
             }
 
             if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase))
@@ -490,6 +557,229 @@ namespace CoopSpectator.Infrastructure
 
             reason = "siege-subtype-guarded:" + siegeSubtype;
             return false;
+        }
+
+        private static bool RequiresSiegeAmbushController(BattleScenarioContextMessage scenarioContext)
+        {
+            string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
+            return string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(siegeSubtype, "Relief", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSallyOutSiegeSubtype(BattleScenarioContextMessage scenarioContext)
+        {
+            string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
+            return string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsReliefSiegeSubtype(BattleScenarioContextMessage scenarioContext)
+        {
+            string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
+            return string.Equals(siegeSubtype, "Relief", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static Mission.MissionTeamAITypeEnum ResolveMissionTeamAiType(BattleScenarioContextMessage scenarioContext)
+        {
+            if (scenarioContext?.IsSiegeBattle != true)
+                return Mission.MissionTeamAITypeEnum.FieldBattle;
+
+            if (IsSallyOutSiegeSubtype(scenarioContext))
+                return Mission.MissionTeamAITypeEnum.SallyOut;
+
+            if (string.Equals(scenarioContext.SiegeContext?.SiegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase))
+                return Mission.MissionTeamAITypeEnum.NoTeamAI;
+
+            return Mission.MissionTeamAITypeEnum.Siege;
+        }
+
+        private static bool TryEnsureSiegeScenePreparationBehavior(
+            Mission mission,
+            BattleScenarioContextMessage scenarioContext,
+            bool isSallyOutSubtype,
+            bool isReliefForceAttack,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            MissionBehavior existingSiegePreparationHandler = mission.GetMissionBehavior<SiegeMissionPreparationHandler>();
+            if (existingSiegePreparationHandler != null)
+            {
+                diagnostics = "existing";
+                return true;
+            }
+
+            var siegePreparationHandler = new SiegeMissionPreparationHandler(
+                isSallyOutSubtype,
+                isReliefForceAttack,
+                (scenarioContext?.SiegeContext?.WallHitPointRatios ?? new List<float>()).ToArray(),
+                scenarioContext?.SiegeContext?.HasAnySiegeTower == true);
+            mission.AddMissionBehavior(siegePreparationHandler);
+            siegePreparationHandler.OnBehaviorInitialize();
+            siegePreparationHandler.AfterStart();
+            diagnostics =
+                "created IsSallyOut=" + isSallyOutSubtype +
+                " IsReliefForceAttack=" + isReliefForceAttack;
+            return true;
+        }
+
+        private static bool TryEnsureMissionTeamAiContract(
+            Mission mission,
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            string source,
+            out string diagnostics)
+        {
+            diagnostics = "team-ai-not-required";
+            if (mission == null)
+                return false;
+
+            if (missionTeamAiType != Mission.MissionTeamAITypeEnum.Siege &&
+                missionTeamAiType != Mission.MissionTeamAITypeEnum.SallyOut)
+            {
+                return true;
+            }
+
+            bool attackerReady = TryEnsureMissionTeamAiForTeam(
+                mission,
+                mission.AttackerTeam,
+                missionTeamAiType,
+                out string attackerDiagnostics);
+            bool defenderReady = TryEnsureMissionTeamAiForTeam(
+                mission,
+                mission.DefenderTeam,
+                missionTeamAiType,
+                out string defenderDiagnostics);
+            diagnostics =
+                "TeamAIType=" + missionTeamAiType +
+                " Attacker={" + attackerDiagnostics + "}" +
+                " Defender={" + defenderDiagnostics + "}" +
+                " Source=" + (source ?? "unknown");
+            return attackerReady && defenderReady;
+        }
+
+        private static bool TryEnsureMissionTeamAiForTeam(
+            Mission mission,
+            Team team,
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            out string diagnostics)
+        {
+            diagnostics = "team-null";
+            if (mission == null || team == null)
+                return false;
+
+            TeamAIComponent desiredTeamAi = CreateDesiredTeamAi(mission, team, missionTeamAiType);
+            if (desiredTeamAi == null)
+            {
+                diagnostics = "team-ai-unavailable Type=" + missionTeamAiType + " Side=" + team.Side;
+                return false;
+            }
+
+            string desiredTypeName = desiredTeamAi.GetType().Name;
+            string existingTypeName = team.TeamAI?.GetType().Name ?? "null";
+            bool changed = !string.Equals(existingTypeName, desiredTypeName, StringComparison.Ordinal);
+            if (changed)
+            {
+                team.AddTeamAI(desiredTeamAi);
+                AddMissionTeamAiTactics(team, missionTeamAiType);
+                team.QuerySystem?.Expire();
+                team.ResetTactic();
+            }
+
+            diagnostics =
+                "Side=" + team.Side +
+                " ExistingType=" + existingTypeName +
+                " DesiredType=" + desiredTypeName +
+                " Changed=" + changed +
+                " HasTeamAI=" + team.HasTeamAi;
+            return team.HasTeamAi;
+        }
+
+        private static TeamAIComponent CreateDesiredTeamAi(
+            Mission mission,
+            Team team,
+            Mission.MissionTeamAITypeEnum missionTeamAiType)
+        {
+            if (mission == null || team == null)
+                return null;
+
+            switch (missionTeamAiType)
+            {
+                case Mission.MissionTeamAITypeEnum.Siege:
+                    return team.Side == BattleSideEnum.Attacker
+                        ? (TeamAIComponent)new TeamAISiegeAttacker(mission, team, 5f, 1f)
+                        : new TeamAISiegeDefender(mission, team, 5f, 1f);
+
+                case Mission.MissionTeamAITypeEnum.SallyOut:
+                    return team.Side == BattleSideEnum.Attacker
+                        ? (TeamAIComponent)new TeamAISallyOutDefender(mission, team, 5f, 1f)
+                        : new TeamAISallyOutAttacker(mission, team, 5f, 1f);
+
+                case Mission.MissionTeamAITypeEnum.FieldBattle:
+                    return new TeamAIGeneral(mission, team);
+
+                default:
+                    return null;
+            }
+        }
+
+        private static void AddMissionTeamAiTactics(Team team, Mission.MissionTeamAITypeEnum missionTeamAiType)
+        {
+            if (team == null || !team.HasTeamAi)
+                return;
+
+            switch (missionTeamAiType)
+            {
+                case Mission.MissionTeamAITypeEnum.Siege:
+                    if (team.Side == BattleSideEnum.Attacker)
+                        team.AddTacticOption(new TacticBreachWalls(team));
+                    else if (team.Side == BattleSideEnum.Defender)
+                        team.AddTacticOption(new TacticDefendCastle(team));
+                    break;
+
+                case Mission.MissionTeamAITypeEnum.SallyOut:
+                    if (team.Side == BattleSideEnum.Defender)
+                        team.AddTacticOption(new TacticSallyOutHitAndRun(team));
+                    if (team.Side == BattleSideEnum.Attacker)
+                        team.AddTacticOption(new TacticSallyOutDefense(team));
+                    team.AddTacticOption(new TacticCharge(team));
+                    break;
+            }
+        }
+
+        private static bool TryEnsureSiegeAmbushControllerInitialized(
+            Mission mission,
+            int defenderTotal,
+            int attackerTotal,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            CoopExactCampaignSiegeAmbushMissionController controller =
+                mission.GetMissionBehavior<CoopExactCampaignSiegeAmbushMissionController>();
+            bool created = false;
+            if (controller == null)
+            {
+                controller = new CoopExactCampaignSiegeAmbushMissionController(defenderTotal, attackerTotal);
+                mission.AddMissionBehavior(controller);
+                created = true;
+            }
+            else
+            {
+                controller.UpdateTroopCounts(defenderTotal, attackerTotal);
+            }
+
+            controller.EnsureInitializedAndStarted();
+            diagnostics =
+                "Created=" + created +
+                " Started=" + controller.HasStarted +
+                " DefenderTotal=" + defenderTotal +
+                " AttackerTotal=" + attackerTotal;
+            return controller.HasStarted;
         }
 
         private static void LogBootstrapContractSnapshot(
