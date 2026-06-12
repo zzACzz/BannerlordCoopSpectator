@@ -5684,6 +5684,10 @@ namespace CoopSpectator.MissionBehaviors
             TryUpdateBattlePhaseState(mission, phaseSource);
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "phase-tick", "update-phase-after", phaseSource);
             TryConsumeBattlePhaseRequests(mission);
+            ExactCampaignArmyBootstrap.TrySyncMissionTeamAiActivationState(
+                mission,
+                CoopBattlePhaseRuntimeState.GetPhase(),
+                phaseSource + " exact-team-ai-gate");
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "phase-tick", "warmup-fallback-before", phaseSource);
             TryApplyNativeBattleMapWarmupFallback(mission, phaseSource);
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "phase-tick", "warmup-fallback-after", phaseSource);
@@ -24111,7 +24115,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (!IsExplicitSelectableSourceReady(currentPhase, selectableSource))
+            if (!IsExplicitSelectableSourceReady(mission, side, currentPhase, selectableSource))
             {
                 reason =
                     "selectable source not ready" +
@@ -25212,7 +25216,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (!IsExplicitSelectableSourceReady(currentPhase, selectableSource))
+            if (!IsExplicitSelectableSourceReady(mission, side, currentPhase, selectableSource))
             {
                 reason = "selectable-source-not-ready";
                 return false;
@@ -25222,7 +25226,11 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
-        private static bool IsExplicitSelectableSourceReady(CoopBattlePhase currentPhase, string selectableSource)
+        private static bool IsExplicitSelectableSourceReady(
+            Mission mission,
+            BattleSideEnum side,
+            CoopBattlePhase currentPhase,
+            string selectableSource)
         {
             if (string.IsNullOrWhiteSpace(selectableSource) ||
                 currentPhase < CoopBattlePhase.PreBattleHold ||
@@ -25232,6 +25240,16 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             if (selectableSource.StartsWith("live-prebattle-materialized", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            bool allowSiegePrebattleAllowedFallback =
+                mission != null &&
+                side != BattleSideEnum.None &&
+                currentPhase < CoopBattlePhase.BattleActive &&
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext?.IsSiegeBattle == true &&
+                HasTrackedBattlefieldEntryStateForSide(mission, side) &&
+                selectableSource.StartsWith("allowed-prebattle", StringComparison.OrdinalIgnoreCase);
+            if (allowSiegePrebattleAllowedFallback)
                 return true;
 
             return currentPhase >= CoopBattlePhase.BattleActive &&
@@ -26614,7 +26632,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (!IsExplicitSelectableSourceReady(currentPhase, selectableSource))
+            if (!IsExplicitSelectableSourceReady(mission, authoritativeSide, currentPhase, selectableSource))
             {
                 reason =
                     "battle data still loading" +

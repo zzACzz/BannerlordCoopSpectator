@@ -37,6 +37,8 @@ namespace CoopSpectator.Infrastructure
         private static Mission _spawnLogicInitSideOverrideMission;
         private static BattleSideEnum _spawnLogicInitSideOverride = BattleSideEnum.None;
         private static int _spawnLogicInitSideOverrideDepth;
+        private static Mission _lastLoggedTeamAiActivationStateMission;
+        private static string _lastLoggedTeamAiActivationStateKey = string.Empty;
         private static readonly FieldInfo TeamSideBackingField =
             typeof(Team).GetField("<Side>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo TeamAiBackingField =
@@ -131,6 +133,8 @@ namespace CoopSpectator.Infrastructure
             _nextDeferredLogUtc = DateTime.MinValue;
             _nextRuntimeDiagnosticsLogUtc = DateTime.MinValue;
             _lastRuntimeDiagnosticsSummary = string.Empty;
+            _lastLoggedTeamAiActivationStateMission = null;
+            _lastLoggedTeamAiActivationStateKey = string.Empty;
         }
 
         public static bool TryInitialize(
@@ -210,6 +214,8 @@ namespace CoopSpectator.Infrastructure
                 bool isReliefForceAttack = IsReliefSiegeSubtype(scenarioContext);
                 bool isSiegeAssaultSubtype = IsSiegeAssaultSubtype(scenarioContext);
                 Mission.MissionTeamAITypeEnum missionTeamAiType = ResolveMissionTeamAiType(scenarioContext);
+                bool deferMissionTeamAiActivationUntilBattleActive =
+                    ShouldDeferMissionTeamAiActivationUntilBattleActive(missionTeamAiType);
                 string teamAiDiagnostics = "team-ai-not-applied";
 
                 initializationStep = "ensure-campaign-object-catalogs";
@@ -253,6 +259,7 @@ namespace CoopSpectator.Infrastructure
                 if (!TryEnsureMissionTeamAiContract(
                         mission,
                         missionTeamAiType,
+                        shouldActivateTeamAi: !deferMissionTeamAiActivationUntilBattleActive,
                         source,
                         out teamAiDiagnostics))
                 {
@@ -710,6 +717,13 @@ namespace CoopSpectator.Infrastructure
             return Mission.MissionTeamAITypeEnum.Siege;
         }
 
+        private static bool ShouldDeferMissionTeamAiActivationUntilBattleActive(
+            Mission.MissionTeamAITypeEnum missionTeamAiType)
+        {
+            return missionTeamAiType == Mission.MissionTeamAITypeEnum.Siege ||
+                   missionTeamAiType == Mission.MissionTeamAITypeEnum.SallyOut;
+        }
+
         private static bool TryEnsureSiegeScenePreparationBehavior(
             Mission mission,
             BattleScenarioContextMessage scenarioContext,
@@ -849,6 +863,7 @@ namespace CoopSpectator.Infrastructure
         private static bool TryEnsureMissionTeamAiContract(
             Mission mission,
             Mission.MissionTeamAITypeEnum missionTeamAiType,
+            bool shouldActivateTeamAi,
             string source,
             out string diagnostics)
         {
@@ -861,6 +876,9 @@ namespace CoopSpectator.Infrastructure
             {
                 return true;
             }
+
+            if (!shouldActivateTeamAi)
+                return TrySuppressMissionTeamAiContract(mission, missionTeamAiType, out diagnostics);
 
             Team firstTeam;
             Team secondTeam;
@@ -890,6 +908,205 @@ namespace CoopSpectator.Infrastructure
                 " " + secondLabel + "={" + secondDiagnostics + "}" +
                 " Source=" + (source ?? "unknown");
             return firstReady && secondReady;
+        }
+
+        private static bool TrySuppressMissionTeamAiContract(
+            Mission mission,
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            var teamDiagnostics = new List<string>();
+            bool changed = false;
+            foreach (Team team in new[] { mission.AttackerTeam, mission.DefenderTeam })
+            {
+                if (team == null || team.Side == BattleSideEnum.None)
+                    continue;
+
+                TeamAIComponent existingTeamAi = team.TeamAI;
+                string existingTypeName = existingTeamAi?.GetType().Name ?? "null";
+                if (existingTeamAi == null)
+                {
+                    teamDiagnostics.Add("Side=" + team.Side + " ExistingType=null Cleared=False");
+                    continue;
+                }
+
+                if (TeamAiBackingField == null)
+                {
+                    diagnostics =
+                        "team-ai-backing-field-missing Type=" + missionTeamAiType +
+                        " Side=" + team.Side;
+                    return false;
+                }
+
+                try
+                {
+                    if (team.HasTeamAi)
+                        team.ResetTactic();
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    TeamAiBackingField.SetValue(team, null);
+                    team.QuerySystem?.Expire();
+                    changed = true;
+                    teamDiagnostics.Add("Side=" + team.Side + " ExistingType=" + existingTypeName + " Cleared=True");
+                }
+                catch (Exception ex)
+                {
+                    diagnostics =
+                        "team-ai-clear-failed Type=" + missionTeamAiType +
+                        " Side=" + team.Side +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message;
+                    return false;
+                }
+            }
+
+            diagnostics =
+                "DeferredUntilBattleActive=True" +
+                " Changed=" + changed +
+                " Teams=[" + string.Join("; ", teamDiagnostics) + "]";
+            return true;
+        }
+
+        private static bool HasExpectedMissionTeamAiContract(
+            Mission mission,
+            Mission.MissionTeamAITypeEnum missionTeamAiType)
+        {
+            if (mission == null)
+                return false;
+
+            switch (missionTeamAiType)
+            {
+                case Mission.MissionTeamAITypeEnum.Siege:
+                    return mission.AttackerTeam?.TeamAI is TeamAISiegeAttacker &&
+                           mission.DefenderTeam?.TeamAI is TeamAISiegeDefender;
+
+                case Mission.MissionTeamAITypeEnum.SallyOut:
+                    return mission.AttackerTeam?.TeamAI is TeamAISallyOutDefender &&
+                           mission.DefenderTeam?.TeamAI is TeamAISallyOutAttacker;
+
+                default:
+                    return true;
+            }
+        }
+
+        private static bool IsMissionTeamAiSuppressed(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            return mission.AttackerTeam?.TeamAI == null &&
+                   mission.DefenderTeam?.TeamAI == null;
+        }
+
+        private static void LogMissionTeamAiActivationState(
+            Mission mission,
+            CoopBattlePhase currentPhase,
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            bool shouldActivateTeamAi,
+            bool success,
+            string diagnostics,
+            string source)
+        {
+            string attackerType = mission?.AttackerTeam?.TeamAI?.GetType().Name ?? "null";
+            string defenderType = mission?.DefenderTeam?.TeamAI?.GetType().Name ?? "null";
+            string logKey =
+                currentPhase + "|" +
+                missionTeamAiType + "|" +
+                shouldActivateTeamAi + "|" +
+                success + "|" +
+                attackerType + "|" +
+                defenderType + "|" +
+                (diagnostics ?? string.Empty);
+            if (ReferenceEquals(_lastLoggedTeamAiActivationStateMission, mission) &&
+                string.Equals(_lastLoggedTeamAiActivationStateKey, logKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastLoggedTeamAiActivationStateMission = mission;
+            _lastLoggedTeamAiActivationStateKey = logKey;
+            ModLogger.Info(
+                "ExactCampaignArmyBootstrap: synced deferred mission team AI activation state. " +
+                "Scene=" + (mission?.SceneName ?? "null") +
+                " Phase=" + currentPhase +
+                " TeamAIType=" + missionTeamAiType +
+                " Activate=" + shouldActivateTeamAi +
+                " Success=" + success +
+                " AttackerAI=" + attackerType +
+                " DefenderAI=" + defenderType +
+                " Diagnostics={" + (diagnostics ?? string.Empty) + "}" +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        public static void TrySyncMissionTeamAiActivationState(
+            Mission mission,
+            CoopBattlePhase currentPhase,
+            string source)
+        {
+            if (!IsActive(mission))
+                return;
+
+            BattleScenarioContextMessage scenarioContext = ResolveScenarioContextForMission(mission);
+            Mission.MissionTeamAITypeEnum missionTeamAiType = ResolveMissionTeamAiType(scenarioContext);
+            if (!ShouldDeferMissionTeamAiActivationUntilBattleActive(missionTeamAiType))
+                return;
+
+            bool shouldActivateTeamAi =
+                currentPhase >= CoopBattlePhase.BattleActive &&
+                currentPhase < CoopBattlePhase.BattleEnded;
+            if (shouldActivateTeamAi)
+            {
+                if (HasExpectedMissionTeamAiContract(mission, missionTeamAiType))
+                {
+                    LogMissionTeamAiActivationState(
+                        mission,
+                        currentPhase,
+                        missionTeamAiType,
+                        shouldActivateTeamAi,
+                        success: true,
+                        diagnostics: "already-active",
+                        source: source);
+                    return;
+                }
+            }
+            else
+            {
+                if (IsMissionTeamAiSuppressed(mission))
+                {
+                    LogMissionTeamAiActivationState(
+                        mission,
+                        currentPhase,
+                        missionTeamAiType,
+                        shouldActivateTeamAi,
+                        success: true,
+                        diagnostics: "already-suppressed",
+                        source: source);
+                    return;
+                }
+            }
+
+            bool success = TryEnsureMissionTeamAiContract(
+                mission,
+                missionTeamAiType,
+                shouldActivateTeamAi,
+                source,
+                out string diagnostics);
+            LogMissionTeamAiActivationState(
+                mission,
+                currentPhase,
+                missionTeamAiType,
+                shouldActivateTeamAi,
+                success,
+                diagnostics,
+                source);
         }
 
         private static void ResolveMissionTeamAiInitializationOrder(

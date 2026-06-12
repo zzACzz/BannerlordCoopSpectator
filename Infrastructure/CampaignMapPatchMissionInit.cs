@@ -45,12 +45,22 @@ namespace CoopSpectator.Infrastructure
 
             if (IsSiegeScenario(snapshot))
             {
+                string siegeSubtype = snapshot?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
+                if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(siegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
+                {
+                    ModLogger.Info(
+                        source + ": skipped campaign map patch context for closed siege runtime. " +
+                        "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                        " SiegeSubtype=" + (string.IsNullOrWhiteSpace(siegeSubtype) ? "unknown" : siegeSubtype) + ".");
+                    BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " skipped-closed-siege-map-patch");
+                    return;
+                }
+
                 ModLogger.Info(
-                    source + ": skipped campaign map patch context for siege runtime. " +
+                    source + ": enabling campaign map patch context for siege runtime. " +
                     "RuntimeScene=" + (runtimeScene ?? "unknown") +
-                    " SiegeSubtype=" + (snapshot?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? "unknown") + ".");
-                BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " skipped-siege-map-patch");
-                return;
+                    " SiegeSubtype=" + (string.IsNullOrWhiteSpace(siegeSubtype) ? "unknown" : siegeSubtype) + ".");
             }
 
             if (SceneRuntimeClassifier.IsVillageBattleScene(runtimeScene))
