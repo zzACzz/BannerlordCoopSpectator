@@ -10282,6 +10282,9 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || !GameNetwork.IsServer || !IsSceneAwareBattleMapRuntime(mission))
                 return;
 
+            if (BattleShellSuppressionPatch.IsNativeBattleShellSuppressionRuntime(mission))
+                return;
+
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
             if (currentPhase >= CoopBattlePhase.BattleEnded)
                 return;
@@ -10731,6 +10734,24 @@ namespace CoopSpectator.MissionBehaviors
             Team defenderTeam = mission.Teams?.Defender;
             if (attackerTeam == null || defenderTeam == null)
                 return;
+
+            if (ShouldDeferOpenSiegeBattlefieldMaterializationUntilSpawnPath(mission, out string siegeSpawnPathDeferReason))
+            {
+                CampaignMapPatchMissionInit.TryRepairLiveMissionContract(
+                    mission,
+                    (source ?? "unknown") + " siege-spawn-path-gate");
+                DateTime nowUtc = DateTime.UtcNow;
+                if (nowUtc >= _nextExactSceneMaterializationDeferLogUtc)
+                {
+                    _nextExactSceneMaterializationDeferLogUtc = nowUtc.AddSeconds(2);
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: deferring battlefield materialization on open siege scene until native spawn path is ready. " +
+                        siegeSpawnPathDeferReason +
+                        " Source=" + (source ?? "unknown"));
+                }
+
+                return;
+            }
 
             if (ShouldDeferExactSceneInitialBattlefieldMaterialization(mission, out string exactSceneMaterializationDeferReason))
             {
@@ -11430,6 +11451,43 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             reason = authorityAnchorSummary;
+            return true;
+        }
+
+        private static bool ShouldDeferOpenSiegeBattlefieldMaterializationUntilSpawnPath(Mission mission, out string reason)
+        {
+            reason = string.Empty;
+            if (mission == null || !IsSceneAwareBattleMapRuntime(mission))
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
+            if (scenarioContext?.IsSiegeBattle != true ||
+                !string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (mission.HasSpawnPath)
+                return false;
+
+            bool hasSceneMapPatch = false;
+            try
+            {
+                hasSceneMapPatch = mission.HasSceneMapPatch();
+            }
+            catch
+            {
+            }
+
+            reason =
+                "Scene=" + (mission.SceneName ?? "null") +
+                " Mode=" + mission.Mode +
+                " MissionState=" + mission.CurrentState +
+                " HasSceneMapPatch=" + hasSceneMapPatch +
+                " SiegeSubtype=" + siegeSubtype;
             return true;
         }
 

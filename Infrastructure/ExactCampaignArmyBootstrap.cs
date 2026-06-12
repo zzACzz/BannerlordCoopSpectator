@@ -350,6 +350,21 @@ namespace CoopSpectator.Infrastructure
                     battleSpawnLogic.AfterStart();
                 }
 
+                initializationStep = "repair-live-contract-after-battle-spawn-logic";
+                CampaignMapPatchMissionInit.TryRepairLiveMissionContract(
+                    mission,
+                    (source ?? "unknown") + " exact-native-bootstrap-post-battle-spawn");
+                if (isSiegeAssaultSubtype && !mission.HasSpawnPath)
+                {
+                    reason =
+                        "siege-assault-spawn-path-not-ready" +
+                        " Scene=" + (mission.SceneName ?? "null") +
+                        " Mode=" + mission.Mode +
+                        " MissionState=" + mission.CurrentState +
+                        " HasSceneMapPatch=" + SafeHasSceneMapPatch(mission);
+                    return false;
+                }
+
                 initializationStep = "resolve-agent-spawn-logic";
                 NativeMissionAgentSpawnLogic spawnLogic = mission.GetMissionBehavior<NativeMissionAgentSpawnLogic>();
                 if (spawnLogic == null)

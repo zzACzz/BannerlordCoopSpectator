@@ -21,10 +21,10 @@ namespace CoopSpectator
         /// <summary>ТЗ A: true = тільки proof-of-load, без Harmony і без реєстрації game mode. false = реєструємо TdmClone + Harmony (для Етапу 3.3 — тест з нашими mission behaviors і логуванням; UseTdmCloneForListedTest у Launcher має бути true).</summary>
         private const bool CleanModuleLoadOnly = false;
         private const bool EnableFixedTestCultures = false;
-        // Disabled after 2026-05-15 reconnect/load-crash triage:
-        // BattleShellSuppressionPatch manually bypasses native dedicated mission loading and
-        // correlates with access-violation crashes during battle scene startup.
-        private const bool EnableBattleShellSuppressionPatch = false;
+        // Re-enabled for siege no-deployment runtime after narrowing the patch scope:
+        // native warmup/timer/team-select shell suppression stays active, while the old
+        // dedicated manual mission-load bypass remains disabled inside the patch itself.
+        private const bool EnableBattleShellSuppressionPatch = true;
         private const string FixedAttackerCultureId = "empire";
         private const string FixedDefenderCultureId = "vlandia";
 

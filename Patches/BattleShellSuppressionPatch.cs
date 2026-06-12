@@ -39,6 +39,7 @@ namespace CoopSpectator.Patches
         private static string _lastDedicatedManualOnTickStepKey;
         private static readonly HashSet<string> _patchedMissionScreenPreLoadMethods = new HashSet<string>(StringComparer.Ordinal);
         private static Harmony _runtimeHarmony;
+        private const bool EnableDedicatedMissionLoadBypass = false;
 
         public static void Apply(Harmony harmony)
         {
@@ -213,6 +214,11 @@ namespace CoopSpectator.Patches
             }
 
             ModLogger.Info("BattleShellSuppressionPatch: native warmup/timer suppression patch pass completed. SuccessfulPatches=" + patchedCount + ".");
+        }
+
+        public static bool IsNativeBattleShellSuppressionRuntime(Mission mission)
+        {
+            return IsCoopBattleMapRuntime(mission);
         }
 
         private static bool TryPatchMethod(Harmony harmony, string typeName, string methodName, string prefixMethodName, params Type[] parameterTypes)
@@ -873,6 +879,9 @@ namespace CoopSpectator.Patches
 
         private static bool ShouldSkipEarlyDedicatedMissionClearResources(Mission mission, bool forceClearGPUResources)
         {
+            if (!EnableDedicatedMissionLoadBypass)
+                return false;
+
             if (!GameNetwork.IsServer || mission == null || !forceClearGPUResources)
                 return false;
 
@@ -909,6 +918,9 @@ namespace CoopSpectator.Patches
 
         private static bool ShouldSkipDedicatedMissionScreenPreLoad(Mission mission)
         {
+            if (!EnableDedicatedMissionLoadBypass)
+                return false;
+
             if (!GameNetwork.IsServer || mission == null)
                 return false;
 
@@ -1108,6 +1120,9 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                if (!EnableDedicatedMissionLoadBypass)
+                    return false;
+
                 if (!GameNetwork.IsServer || missionStateInstance == null || !IsDedicatedServerProcess())
                     return false;
 
@@ -1145,6 +1160,9 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                if (!EnableDedicatedMissionLoadBypass)
+                    return false;
+
                 if (!GameNetwork.IsServer || missionStateInstance == null || !IsDedicatedServerProcess())
                     return false;
 
@@ -1272,6 +1290,9 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                if (!EnableDedicatedMissionLoadBypass)
+                    return;
+
                 if (_runtimeHarmony == null || !GameNetwork.IsServer || !IsDedicatedServerProcess())
                     return;
 
