@@ -268,14 +268,26 @@ namespace CoopSpectator.Infrastructure
                 if (isSiegeAssaultSubtype)
                 {
                     initializationStep = "ensure-siege-assault-state-handler";
+                    bool requireSiegeStateHandler = !IsDedicatedServerProcess();
                     if (!TryEnsureMissionBehaviorAvailableByTypeName(
                             mission,
                             "SandBox.Missions.MissionLogics.CampaignSiegeStateHandler",
                             "CampaignSiegeStateHandler",
                             out siegeStateHandlerDiagnostics))
                     {
-                        reason = siegeStateHandlerDiagnostics ?? "siege-assault-state-handler-failed";
-                        return false;
+                        if (requireSiegeStateHandler)
+                        {
+                            reason = siegeStateHandlerDiagnostics ?? "siege-assault-state-handler-failed";
+                            return false;
+                        }
+
+                        ModLogger.Info(
+                            "ExactCampaignArmyBootstrap: continuing siege assault bootstrap without optional CampaignSiegeStateHandler on dedicated server. " +
+                            "Scene=" + (sceneName ?? "null") +
+                            " Diagnostics=" + (siegeStateHandlerDiagnostics ?? "unknown") +
+                            " Source=" + (source ?? "unknown"));
+                        siegeStateHandlerDiagnostics =
+                            "OptionalDedicatedSkip={" + (siegeStateHandlerDiagnostics ?? "unknown") + "}";
                     }
                 }
 
@@ -1113,8 +1125,8 @@ namespace CoopSpectator.Infrastructure
             catch (Exception ex)
             {
                 diagnostics =
-                    "Existing=False Created=False Reason=" + ex.GetType().Name +
-                    ":" + ex.Message;
+                    "Existing=False Created=False Reason=" +
+                    DescribeBehaviorAvailabilityException(ex);
                 return false;
             }
         }
@@ -1177,11 +1189,60 @@ namespace CoopSpectator.Infrastructure
             catch (Exception ex)
             {
                 diagnostics =
-                    "Existing=False Created=False Reason=" + ex.GetType().Name +
-                    ":" + ex.Message +
+                    "Existing=False Created=False Reason=" +
+                    DescribeBehaviorAvailabilityException(ex) +
                     " BehaviorName=" + behaviorName;
                 return false;
             }
+        }
+
+        private static bool IsDedicatedServerProcess()
+        {
+            try
+            {
+                string processName = System.Diagnostics.Process.GetCurrentProcess().ProcessName ?? string.Empty;
+                return processName.IndexOf("Dedicated", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string DescribeBehaviorAvailabilityException(Exception ex)
+        {
+            if (ex == null)
+                return "unknown-exception";
+
+            Exception actual = ex is TargetInvocationException invocationException &&
+                               invocationException.InnerException != null
+                ? invocationException.InnerException
+                : ex;
+
+            var diagnostics = new StringBuilder();
+            if (!ReferenceEquals(actual, ex))
+            {
+                diagnostics.Append("Wrapper=")
+                    .Append(ex.GetType().Name)
+                    .Append(":")
+                    .Append(ex.Message)
+                    .Append(' ');
+            }
+
+            diagnostics.Append("Root=")
+                .Append(actual.GetType().Name)
+                .Append(":")
+                .Append(actual.Message);
+
+            if (actual.InnerException != null)
+            {
+                diagnostics.Append(" Inner=")
+                    .Append(actual.InnerException.GetType().Name)
+                    .Append(":")
+                    .Append(actual.InnerException.Message);
+            }
+
+            return diagnostics.ToString();
         }
 
         private static Type ResolveRuntimeType(string typeFullName, params string[] preferredAssemblyNames)

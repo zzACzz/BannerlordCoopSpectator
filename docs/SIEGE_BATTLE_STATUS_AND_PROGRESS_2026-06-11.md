@@ -507,6 +507,35 @@ Build integration:
   - чи зміниться вибір стартових позицій `battle_set` після вирівнювання no-deployment contract (контракту режиму без етапу розгортання);
   - чи залишиться проблема спавну окремим blocker (блокером), уже без домішки deployment-підготовки.
 
+## Оновлення після діагностики `Loading Battle Data` та зриву `ExactCampaignArmyBootstrap` (2026-06-12)
+
+- Новий live-run (живий прогін) уточнив, що поточний blocker уже не в самому `battle snapshot transport` (транспорті мережевого snapshot бою):
+  - client отримує `V2 battle snapshot manifest` (маніфест V2 snapshot бою), запитує всі `chunk` (частини), доходить до `TransmissionId=1` і застосовує snapshot;
+  - server приймає `range ack` (підтвердження діапазону chunk-ів) і `complete ack` (підтвердження завершення), тобто транспорт snapshot працює до кінця;
+  - після цього client більше не падає від відсутнього snapshot, але зависає на `Loading Battle Data`.
+- Точний ланцюг відмови тепер підтверджений логами:
+  - до `20:07:44` client уже має застосований snapshot;
+  - о `20:07:50` server підтверджує `V2 battle snapshot completion` (завершення V2 snapshot бою) і починає слати `EntryStatusSnapshot` (знімок стану вибору/готовності);
+  - цей статус приходить як `BattleDataReady=False`, `Lifecycle=NoSide`, `SelectableEntryCount=0`, `CanStartBattle=False`, причина `Loading battle data...`;
+  - у той самий момент server намагається активувати `ExactCampaignArmyBootstrap` (точний нативоподібний bootstrap армій), але падає на `CampaignSiegeStateHandler` (хендлері кампанійного стану облоги);
+  - через цей зрив runtime не переходить у `SiegeAssaultNoDeployment`, а лишається у старому `FieldBattle shell` (оболонці польового бою), де далі безкінечно працює `spawn path gate` (запобіжник по готовності шляху spawn) з `HasSpawnPath=False`.
+- Практичний висновок:
+  - `Loading Battle Data` зараз є вже вторинним симптомом;
+  - первинний root cause (коренева причина) у тому, що `SiegeAssaultNoDeployment` не добігає до активного exact-bootstrap runtime-path (виконуваного шляху точного bootstrap), бо `CampaignSiegeStateHandler` зриває ініціалізацію на dedicated server (виділеному сервері);
+  - старий `spawn path gate` після цього лише консервує місію в `SideSelection` (виборі сторони) і не дає перейти до справжнього assault spawn flow (потоку спавну зовнішнього штурму).
+- Додаткова перевірка native-коду:
+  - декомпіляція `SandBox.Missions.MissionLogics.CampaignSiegeStateHandler` показала, що його конструктор читає `PlayerEncounter.Battle`;
+  - для dedicated server це сильний індикатор, що handler спирається на campaign-local encounter context (локальний кампанійний контекст encounter-події), якого на виділеному сервері може не бути або він може бути неповним.
+- Поточний кодовий крок після цієї діагностики:
+  - `Infrastructure/ExactCampaignArmyBootstrap.cs` тепер не валить весь `SiegeAssaultNoDeployment` bootstrap, якщо `CampaignSiegeStateHandler` не вдалося підняти саме на dedicated server;
+  - для таких відмов handler переводиться у `best-effort` (необов’язковий крок), а не в критичну помилку;
+  - одночасно розширена діагностика `TargetInvocationException` (винятку виклику через reflection), щоб лог показував не лише wrapper (зовнішню оболонку винятку), а й `inner exception` (внутрішній виняток).
+- Що має перевірити наступний live-run:
+  - чи зможе `ExactCampaignArmyBootstrap` тепер реально перейти в активний `SiegeAssaultNoDeployment` runtime-path;
+  - чи зникне нескінченний `Loading Battle Data`;
+  - чи перестане старий `spawn path gate` бути головним виконуваним шляхом;
+  - і лише після цього стане видно, чи є окремий залишковий blocker саме в assault spawn positions (позиціях спавну штурму) або `battle_set` selection (виборі battle_set).
+
 ## Короткий висновок
 
 На поточний момент siege-система вже не знаходиться в стадії "немає архітектури". Архітектурний каркас уже є:
