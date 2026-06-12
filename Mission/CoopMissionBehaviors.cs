@@ -25077,6 +25077,10 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
+            bool useLenientSiegeSideSelectionReadiness =
+                currentPhase >= CoopBattlePhase.PreBattleHold &&
+                currentPhase < CoopBattlePhase.BattleActive &&
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext?.IsSiegeBattle == true;
             bool hasReadySide = false;
             foreach (BattleSideEnum side in new[] { BattleSideEnum.Attacker, BattleSideEnum.Defender })
             {
@@ -25092,6 +25096,9 @@ namespace CoopSpectator.MissionBehaviors
                         out _,
                         out _))
                 {
+                    if (useLenientSiegeSideSelectionReadiness)
+                        continue;
+
                     readinessReason = "Loading battle data...";
                     return false;
                 }
@@ -25105,7 +25112,9 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            readinessStage = "SideSelection";
+            readinessStage = currentPhase < CoopBattlePhase.BattleActive
+                ? "SideSelection"
+                : "RespawnSelection";
             readinessReason = "Battle data ready.";
             return true;
         }

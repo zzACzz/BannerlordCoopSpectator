@@ -728,10 +728,14 @@ namespace CoopSpectator.Infrastructure
                 return true;
             }
 
+            float[] nativeSafeWallHitPointRatios = ResolveNativeSafeWallHitPointRatios(
+                mission,
+                scenarioContext,
+                out string wallRatioDiagnostics);
             var siegePreparationHandler = new SiegeMissionPreparationHandler(
                 isSallyOutSubtype,
                 isReliefForceAttack,
-                (scenarioContext?.SiegeContext?.WallHitPointRatios ?? new List<float>()).ToArray(),
+                nativeSafeWallHitPointRatios,
                 scenarioContext?.SiegeContext?.HasAnySiegeTower == true);
             mission.AddMissionBehavior(siegePreparationHandler);
             try
@@ -740,7 +744,8 @@ namespace CoopSpectator.Infrastructure
                 siegePreparationHandler.AfterStart();
                 diagnostics =
                     "created IsSallyOut=" + isSallyOutSubtype +
-                    " IsReliefForceAttack=" + isReliefForceAttack;
+                    " IsReliefForceAttack=" + isReliefForceAttack +
+                    " WallRatioSanitization=" + wallRatioDiagnostics;
             }
             catch (Exception ex)
             {
@@ -750,6 +755,7 @@ namespace CoopSpectator.Infrastructure
                     ex.GetType().Name + ":" + ex.Message +
                     " IsSallyOut=" + isSallyOutSubtype +
                     " IsReliefForceAttack=" + isReliefForceAttack +
+                    " WallRatioSanitization=" + wallRatioDiagnostics +
                     " BestEffort=" + allowBestEffortAssaultContinuation;
                 if (!allowBestEffortAssaultContinuation)
                     return false;
@@ -762,6 +768,82 @@ namespace CoopSpectator.Infrastructure
                     " Diagnostics=" + diagnostics);
             }
             return true;
+        }
+
+        private static float[] ResolveNativeSafeWallHitPointRatios(
+            Mission mission,
+            BattleScenarioContextMessage scenarioContext,
+            out string diagnostics)
+        {
+            diagnostics = "empty";
+            List<float> rawRatios = scenarioContext?.SiegeContext?.WallHitPointRatios?
+                .Where(value => !float.IsNaN(value) && !float.IsInfinity(value))
+                .Select(value => value < 0f ? 0f : (value > 1f ? 1f : value))
+                .ToList() ?? new List<float>();
+            if (rawRatios.Count <= 0)
+                return Array.Empty<float>();
+
+            int breakableWallCount = CountBreakableSiegeWallSegments(mission);
+            if (breakableWallCount <= 0)
+            {
+                diagnostics =
+                    "cleared-for-native-safety RawCount=" + rawRatios.Count +
+                    " BreakableWallCount=0";
+                return Array.Empty<float>();
+            }
+
+            if (breakableWallCount > 2)
+            {
+                diagnostics =
+                    "cleared-for-native-safety RawCount=" + rawRatios.Count +
+                    " BreakableWallCount=" + breakableWallCount +
+                    " NativeLimit=2";
+                return Array.Empty<float>();
+            }
+
+            int safeCount = Math.Min(rawRatios.Count, breakableWallCount);
+            if (safeCount <= 0)
+            {
+                diagnostics =
+                    "cleared-for-native-safety RawCount=" + rawRatios.Count +
+                    " BreakableWallCount=" + breakableWallCount;
+                return Array.Empty<float>();
+            }
+
+            if (safeCount == rawRatios.Count)
+            {
+                diagnostics =
+                    "unchanged Count=" + rawRatios.Count +
+                    " BreakableWallCount=" + breakableWallCount;
+                return rawRatios.ToArray();
+            }
+
+            diagnostics =
+                "trimmed-for-native-safety RawCount=" + rawRatios.Count +
+                " SafeCount=" + safeCount +
+                " BreakableWallCount=" + breakableWallCount;
+            return rawRatios.Take(safeCount).ToArray();
+        }
+
+        private static int CountBreakableSiegeWallSegments(Mission mission)
+        {
+            if (mission?.ActiveMissionObjects == null)
+                return 0;
+
+            try
+            {
+                return mission.ActiveMissionObjects
+                    .FindAllWithType<WallSegment>()
+                    .Count(wallSegment =>
+                        wallSegment != null &&
+                        wallSegment.DefenseSide != FormationAI.BehaviorSide.BehaviorSideNotSet &&
+                        wallSegment.GameEntity != null &&
+                        wallSegment.GameEntity.GetChildren().Any(child => child != null && child.HasTag("broken_child")));
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private static bool TryEnsureMissionTeamAiContract(
