@@ -710,6 +710,12 @@ namespace CoopSpectator.Infrastructure
             if (IsSallyOutSiegeSubtype(scenarioContext))
                 return Mission.MissionTeamAITypeEnum.SallyOut;
 
+            // Native OpenSiegeMissionNoDeployment currently seeds assault missions through
+            // MissionCombatantsLogic(FieldBattle), so the coop exact-runtime must not
+            // force Siege TeamAI onto the hybrid MultiplayerBattle shell.
+            if (IsSiegeAssaultSubtype(scenarioContext))
+                return Mission.MissionTeamAITypeEnum.FieldBattle;
+
             if (string.Equals(scenarioContext.SiegeContext?.SiegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(scenarioContext.SiegeContext?.SiegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
                 return Mission.MissionTeamAITypeEnum.NoTeamAI;
@@ -880,6 +886,17 @@ namespace CoopSpectator.Infrastructure
             if (!shouldActivateTeamAi)
                 return TrySuppressMissionTeamAiContract(mission, missionTeamAiType, out diagnostics);
 
+            if (!TryEnsureMissionTeamAiRuntimePrerequisites(
+                    mission,
+                    missionTeamAiType,
+                    out string prerequisiteDiagnostics))
+            {
+                diagnostics =
+                    "prerequisites={" + prerequisiteDiagnostics + "} " +
+                    "Source=" + (source ?? "unknown");
+                return false;
+            }
+
             Team firstTeam;
             Team secondTeam;
             string firstLabel;
@@ -908,6 +925,102 @@ namespace CoopSpectator.Infrastructure
                 " " + secondLabel + "={" + secondDiagnostics + "}" +
                 " Source=" + (source ?? "unknown");
             return firstReady && secondReady;
+        }
+
+        private static bool TryEnsureMissionTeamAiRuntimePrerequisites(
+            Mission mission,
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            out string diagnostics)
+        {
+            diagnostics = "not-required";
+            if (mission == null)
+            {
+                diagnostics = "mission-null";
+                return false;
+            }
+
+            if (missionTeamAiType != Mission.MissionTeamAITypeEnum.Siege &&
+                missionTeamAiType != Mission.MissionTeamAITypeEnum.SallyOut)
+            {
+                return true;
+            }
+
+            if (!TryEnsureMissionBehaviorAvailable(
+                    mission,
+                    mission.GetMissionBehavior<CasualtyHandler>(),
+                    () => new CasualtyHandler(),
+                    "CasualtyHandler",
+                    out string casualtyDiagnostics))
+            {
+                diagnostics = "CasualtyHandler={" + casualtyDiagnostics + "}";
+                return false;
+            }
+
+            if (!TryEnsureMissionBehaviorAvailable(
+                    mission,
+                    mission.GetMissionBehavior<BattlePowerCalculationLogic>(),
+                    () => new BattlePowerCalculationLogic(),
+                    "BattlePowerCalculationLogic",
+                    out string battlePowerDiagnostics))
+            {
+                diagnostics =
+                    "CasualtyHandler={" + casualtyDiagnostics + "} " +
+                    "BattlePowerCalculationLogic={" + battlePowerDiagnostics + "}";
+                return false;
+            }
+
+            diagnostics =
+                "CasualtyHandler={" + casualtyDiagnostics + "} " +
+                "BattlePowerCalculationLogic={" + battlePowerDiagnostics + "}";
+            return true;
+        }
+
+        private static bool TryEnsureMissionBehaviorAvailable<TBehavior>(
+            Mission mission,
+            TBehavior existingBehavior,
+            Func<TBehavior> behaviorFactory,
+            string behaviorName,
+            out string diagnostics)
+            where TBehavior : MissionBehavior
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            if (existingBehavior != null)
+            {
+                diagnostics = "Existing=True Created=False";
+                return true;
+            }
+
+            if (behaviorFactory == null)
+            {
+                diagnostics = "Existing=False Created=False Reason=factory-null";
+                return false;
+            }
+
+            try
+            {
+                TBehavior behavior = behaviorFactory();
+                if (behavior == null)
+                {
+                    diagnostics = "Existing=False Created=False Reason=factory-returned-null";
+                    return false;
+                }
+
+                mission.AddMissionBehavior(behavior);
+                behavior.OnBehaviorInitialize();
+                behavior.AfterStart();
+                diagnostics = "Existing=False Created=True RuntimeType=" + behavior.GetType().Name;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "Existing=False Created=False Reason=" + ex.GetType().Name +
+                    ":" + ex.Message;
+                return false;
+            }
         }
 
         private static bool TrySuppressMissionTeamAiContract(

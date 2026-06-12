@@ -345,6 +345,11 @@ namespace CoopSpectator.Infrastructure
                 return Mission.MissionTeamAITypeEnum.SallyOut;
             }
 
+            // Native siege no-deployment assault currently runs through
+            // MissionCombatantsLogic(FieldBattle), not Siege TeamAI.
+            if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
+                return Mission.MissionTeamAITypeEnum.FieldBattle;
+
             return Mission.MissionTeamAITypeEnum.Siege;
         }
 

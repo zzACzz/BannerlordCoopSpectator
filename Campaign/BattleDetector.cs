@@ -6327,12 +6327,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 string missionSceneName = mission?.SceneName ?? string.Empty;
                 MapEvent battle = PlayerEncounter.Battle ?? PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty?.MapEvent;
                 Settlement encounterSettlement = PlayerEncounter.EncounterSettlement ?? battle?.MapEventSettlement ?? MobileParty.MainParty?.CurrentSettlement;
-                if (ShouldUseMissionSceneForSiegeAssault(battle, encounterSettlement, missionSceneName))
-                {
-                    context.BattleSceneName = missionSceneName;
-                    context.Source = "mission-scene-siege-assault";
-                    return context;
-                }
+                bool useMissionSceneForSiegeAssault =
+                    ShouldUseMissionSceneForSiegeAssault(battle, encounterSettlement, missionSceneName);
 
                 if (battle != null &&
                     encounterSettlement?.IsVillage == true &&
@@ -6375,6 +6371,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 object mapPatch = getMapPatchAtPosition.Invoke(mapSceneWrapper, mapPatchArgs);
                 if (mapPatch == null)
                 {
+                    if (useMissionSceneForSiegeAssault)
+                    {
+                        context.BattleSceneName = missionSceneName;
+                        context.Source = "mission-scene-siege-assault/map-patch-null";
+                        return context;
+                    }
+
                     context.BattleSceneName = string.IsNullOrWhiteSpace(context.WorldMapSceneName) ? "unknown" : context.WorldMapSceneName;
                     context.Source = "map-patch-null";
                     return context;
@@ -6392,6 +6395,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 {
                     context.MapPatchNormalizedX = mapPatchNormalizedX;
                     context.MapPatchNormalizedY = mapPatchNormalizedY;
+                }
+
+                if (useMissionSceneForSiegeAssault)
+                {
+                    context.BattleSceneName = missionSceneName;
+                    context.Source = "mission-scene-siege-assault/map-patch";
+                    return context;
                 }
 
                 if (sceneModel == null)

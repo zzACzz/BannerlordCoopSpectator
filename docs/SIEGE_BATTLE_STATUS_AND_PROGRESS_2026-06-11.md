@@ -55,6 +55,45 @@
   - не змінюється `SallyOut`, `BlockadeSallyOut`, `Relief` і `LordsHall`.
 - Після цієї правки потрібен повторний live-прогін міста і фортеці, щоб підтвердити, що `dedicated` більше стартує на fortification-сцені, а не на `battle_terrain_*`.
 
+## Оновлення після crash/root-cause дослідження `SiegeAssault` (2026-06-12)
+
+- Підтверджено, що попередня правка scene-routing (маршрутизації сцени) спрацювала:
+  - `BattleDetector` тепер передає в snapshot саме fortification-сцену (`empire_town_d`), а не польовий `battle_terrain_*`;
+  - `MissionState.OpenNew` на `dedicated server` більше не деградує `SiegeAssault` у польову сцену.
+- Новий підтверджений `crash root cause` (коренева причина падіння) локалізовано вже не в scene-bootstrap (запуску сцени), а в пізньому ввімкненні `TeamAI` (бойового ШІ команд):
+  - сервер падав у `Team.AddTeamAI(...)`;
+  - стек доходив до `TacticDefendCastle -> TeamQuerySystem.RemainingPowerRatio`;
+  - у dump (дампі пам’яті) було підтверджено, що в місії відсутній `BattlePowerCalculationLogic` (логіка підрахунку бойової сили), хоча `CasualtyHandler` (облік втрат) уже був.
+- Поточна ізольована правка в моді:
+  - `Infrastructure/ExactCampaignArmyBootstrap.cs` тепер перед активацією `Siege` / `SallyOut` `TeamAI` примусово перевіряє й, за потреби, додає мінімальні native-передумови:
+    - `CasualtyHandler`
+    - `BattlePowerCalculationLogic`
+  - якщо ці prerequisite behaviors (обов’язкові поведінкові модулі-передумови) не вдалося підняти, `TeamAI` не активується і місія не повинна падати в цьому місці.
+- Важлива нова неоднозначність, яку вже підтверджено декомпіляцією native-коду:
+  - `SandBoxMissions.OpenSiegeMissionNoDeployment(...)` у поточній версії гри створює `MissionCombatantsLogic(... MissionTeamAITypeEnum.FieldBattle ...)`, а не `Siege`;
+  - тобто наш поточний exact-runtime (точний runtime перенесення) усе ще відрізняється від native no-deployment siege-контракту по командному AI;
+  - це поки що не виправлялося в коді цим кроком, бо це вже окрема архітектурна зміна з вищим ризиком регресії.
+- Що це означає практично:
+  - поточний крок закриває відому точку серверного падіння під час активації siege `TeamAI`;
+  - але він не означає, що spawn у `SiegeAssault` уже приведений до native-поведінки;
+  - проблема спавну всередині міста залишається окремим відкритим blocker (блокером) і тепер її треба розбирати через розрив між нашим hybrid runtime (гібридним runtime) і native no-deployment siege-контрактом, а не через map scene routing.
+
+## Оновлення після вирівнювання `SiegeAssault` під native `no deployment` контракт (2026-06-12)
+
+- Для `SiegeAssault` прийнято й закодовано окреме архітектурне рішення:
+  - зовнішній штурм облоги більше не намагається жити як `MissionTeamAIType=Siege`;
+  - замість цього `ExactCampaignArmyBootstrap` і `CampaignMapPatchMissionInit` тепер вирівнюють такий сценарій під native `OpenSiegeMissionNoDeployment(...)` семантику;
+  - на практиці це означає `MissionTeamAITypeEnum.FieldBattle` для `SiegeAssault`, а не `Siege`.
+- Чому це зроблено:
+  - поточний coop-runtime (кооперативний runtime) для міської облоги все ще піднімається в `MultiplayerBattle` shell (мультиплеєрній оболонці місії) з гібридним набором mission teams (команд місії);
+  - пізнє примусове ввімкнення native siege `TeamAI` на такому runtime вело до server crash (серверного падіння) у `BattlePowerCalculationLogic -> TacticDefendCastle`.
+- Який ефект очікується від цього кроку:
+  - сервер більше не повинен падати саме на шляху активації siege `TeamAI` для `SiegeAssault`;
+  - `SallyOut`, `BlockadeSallyOut`, `Relief`, `LordsHall` і `Blockade` цим кроком не переводяться на нову семантику й лишаються на своїх окремих контрактах.
+- Що цей крок свідомо НЕ закриває:
+  - він сам по собі не гарантує правильний spawn contract (контракт спавну) атакуючих поза стінами й оборонців на стінах;
+  - якщо після цієї правки спавн і далі піде в місті, наступний root cause (коренева причина) вже буде шукатися в `spawn path`/`deployment plan` (шляху спавну й плані розгортання), а не в `TeamAI`.
+
 ## Підтипи облог і їхній поточний runtime-стан
 
 ### SiegeAssault
@@ -62,6 +101,7 @@
 - Визначається як `battle.IsSiegeAssault == true`, якщо це не `LordsHall`.
 - Працює як зовнішня siege-місія через загальний `exact campaign bootstrap` (точний bootstrap перенесення кампанійного бою).
 - Не використовує окремий custom controller (власний контролер місії), а спирається на native `MissionAgentSpawnLogic` (рідну логіку spawn агентів) плюс наш exact-transfer layer (шар точного перенесення стану).
+- Для `no deployment` шляху тепер вирівнюється під `MissionTeamAITypeEnum.FieldBattle`, а не під `MissionTeamAITypeEnum.Siege`.
 - Використовує загальний `battle result` і `writeback` pipeline.
 
 ### SallyOut
@@ -270,6 +310,8 @@ Build integration:
 ## Відомі обмеження і відкриті неоднозначності
 
 - Повний live-proof (живе підтвердження) для `SiegeAssault` по місту і по фортеці ще не зафіксований у цьому циклі робіт.
+- Для `SiegeAssault` лишається відкрита native-невідповідність між нашим `MissionTeamAIType=Siege` шляхом і native `OpenSiegeMissionNoDeployment(...)`, який у поточній версії гри стартує через `MissionCombatantsLogic(... FieldBattle ...)`.
+- Поточний `SiegeAssault` усе ще не має підтвердженого native-equivalent spawn contract (еквівалентного native-контракту спавну) для атакуючих поза стінами та оборонців на стінах.
 - Повний live-proof для `SallyOut`, `Relief` і `BlockadeSallyOut` ще не завершений.
 - `Blockade` поки що залишається окремим `non-mission path`; для нього ще не будувався окремий battle-runtime, і це наразі свідоме рішення.
 - Потрібно живим прогоном перевірити, чи всі keep / lords hall сцени стабільно містять потрібні `FightAreaMarker`-об’єкти.
