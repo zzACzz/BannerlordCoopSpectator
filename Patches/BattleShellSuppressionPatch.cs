@@ -5,6 +5,7 @@ using System.Reflection;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Network.Messages;
 using HarmonyLib;
 using TaleWorlds.MountAndBlade;
 
@@ -37,6 +38,7 @@ namespace CoopSpectator.Patches
         private static string _lastMissionBehaviorStackObservationKey;
         private static string _lastDedicatedManualLoadMissionStepKey;
         private static string _lastDedicatedManualOnTickStepKey;
+        private static string _lastSiegeStartupPassThroughLogKey;
         private static readonly HashSet<string> _patchedMissionScreenPreLoadMethods = new HashSet<string>(StringComparer.Ordinal);
         private static Harmony _runtimeHarmony;
         private const bool EnableDedicatedMissionLoadBypass = false;
@@ -519,6 +521,9 @@ namespace CoopSpectator.Patches
             if (!IsCoopBattleMapRuntime(mission))
                 return false;
 
+            if (ShouldAllowNativeSiegeAssaultStartupPath(mission, source))
+                return false;
+
             MissionLobbyComponent lobbyComponent = mission.GetMissionBehavior<MissionLobbyComponent>();
             MissionLobbyComponent.MultiplayerGameState? lobbyState = lobbyComponent?.CurrentMultiplayerState;
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
@@ -579,6 +584,76 @@ namespace CoopSpectator.Patches
             }
 
             return true;
+        }
+
+        private static bool ShouldAllowNativeSiegeAssaultStartupPath(Mission mission, string source)
+        {
+            if (!GameNetwork.IsServer || mission == null || !IsDedicatedServerProcess())
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
+            if (scenarioContext?.IsSiegeBattle != true ||
+                !string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (!IsEarlyNativeSiegeStartupWindow(mission))
+                return false;
+
+            string modeName = SafeMissionModeName(mission);
+            string key =
+                (source ?? "unknown") + "|" +
+                (mission.SceneName ?? "unknown") + "|" +
+                modeName + "|" +
+                mission.CurrentState;
+            if (!string.Equals(_lastSiegeStartupPassThroughLogKey, key, StringComparison.Ordinal))
+            {
+                _lastSiegeStartupPassThroughLogKey = key;
+                ModLogger.Info(
+                    "BattleShellSuppressionPatch: allowed native siege-assault startup path before coop shell suppression. " +
+                    "Source=" + (source ?? "unknown") +
+                    " Scene=" + (mission.SceneName ?? "unknown") +
+                    " Mode=" + modeName +
+                    " MissionState=" + mission.CurrentState +
+                    " BattlePhase=" + CoopBattlePhaseRuntimeState.GetPhase() +
+                    " HasLobbyComponent=" + (mission.GetMissionBehavior<MissionLobbyComponent>() != null) +
+                    " HasTimerComponent=" + (mission.GetMissionBehavior<MultiplayerTimerComponent>() != null) +
+                    " HasTeamSelectComponent=" + (mission.GetMissionBehavior<MultiplayerTeamSelectComponent>() != null) + ".");
+            }
+
+            return true;
+        }
+
+        private static bool IsEarlyNativeSiegeStartupWindow(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            if (string.Equals(SafeMissionModeName(mission), "StartUp", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            Mission.State missionState = mission.CurrentState;
+            return missionState == Mission.State.NewlyCreated ||
+                   missionState == Mission.State.Initializing;
+        }
+
+        private static string SafeMissionModeName(Mission mission)
+        {
+            if (mission == null)
+                return string.Empty;
+
+            try
+            {
+                return mission.Mode.ToString();
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private static bool IsCoopBattleMapRuntime(Mission mission)

@@ -374,6 +374,31 @@ Build integration:
   - що атакуючі вже фактично спавняться поза стінами, а оборонці на стінах;
   - що відключення vanilla MP warmup shell не відкриває новий regressions path (шлях регресії) у переході до спостереження/вселення.
 
+## Оновлення після кроку для `SiegeAssault` early startup pass-through (2026-06-12)
+
+- Підтверджена нова робоча гіпотеза: поточний blocker (блокер) для міської/фортецької `SiegeAssault` сидить ще до spawn path (маршруту спавну), на стику між native startup (нативним стартом місії) і `BattleShellSuppressionPatch` (патчем приглушення нативної бойової оболонки).
+- Симптом цього розриву в логах був стабільний:
+  - dedicated server (виділений сервер) залишався в `Mode=StartUp`, `ModeReady=False`, `MissionState=Initializing`, `IsLoadingFinished=False`;
+  - клієнт через це зависав у `Loading data` і не доходив до готового battle-data contract (контракту готових даних бою).
+- Поточна правка ізолює тільки цей ранній етап:
+  - у `Patches/BattleShellSuppressionPatch.cs` для `SiegeAssault` на dedicated server доданий server-only startup pass-through (серверний тимчасовий пропуск стартового нативного шляху);
+  - пропуск діє лише поки місія ще в `StartUp`, `NewlyCreated` або `Initializing`;
+  - після виходу з цього вікна suppression (приглушення) знову працює як раніше.
+- Принципово важливо, що цей крок не змінює:
+  - `MissionTeamAIType` для `siege no deployment` (облоги без етапу розстановки);
+  - `spawn-path gate` (умову очікування маршруту спавну);
+  - `materialization guard` (запобіжник матеріалізації), який і далі не дозволяє штучно спавнити армії в місті, поки `HasSpawnPath=False`.
+- Практичний сенс цього кроку:
+  - дати native warmup/timer startup (нативному старту прогріву і таймера) завершити ранню ініціалізацію місії;
+  - прибрати deadlock (взаємне блокування станів), де coop runtime чекає готовності місії, а місія не доходить до готовності через надто раннє suppression.
+- Локальна верифікація цього кроку:
+  - `dotnet build C:\dev\projects\BannerlordCoopSpectator3\CoopSpectator.csproj -c Release` пройшов без нових errors (помилок);
+  - `dotnet build C:\dev\projects\BannerlordCoopSpectator3\DedicatedServer\CoopSpectatorDedicated.csproj -c Release` пройшов без нових errors;
+  - лишилися тільки попередні warnings (попередження), які вже були в проєкті.
+- Що має підтвердити наступний live-run (живий прогін):
+  - чи виходить `SiegeAssault` із `StartUp` і чи зникає вічний `Loading data`;
+  - якщо так, чи стає наступним видимим blocker саме `HasSpawnPath=False`, а не ранній mission startup.
+
 ## Короткий висновок
 
 На поточний момент siege-система вже не знаходиться в стадії "немає архітектури". Архітектурний каркас уже є:
