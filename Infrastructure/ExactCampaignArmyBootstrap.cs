@@ -244,17 +244,37 @@ namespace CoopSpectator.Infrastructure
                     return false;
                 }
 
+                string siegePreparationDiagnostics = "not-required";
                 initializationStep = "resolve-siege-scene-preparation";
-                if (scenarioContext?.IsSiegeBattle == true && !useLordsHallController)
+                if (scenarioContext?.IsSiegeBattle == true && !useLordsHallController && !isSiegeAssaultSubtype)
                 {
                     if (!TryEnsureSiegeScenePreparationBehavior(
                             mission,
                             scenarioContext,
                             isSallyOutSubtype,
                             isReliefForceAttack,
-                            out string siegePreparationDiagnostics))
+                            out siegePreparationDiagnostics))
                     {
                         reason = siegePreparationDiagnostics ?? "siege-scene-preparation-failed";
+                        return false;
+                    }
+                }
+                else if (isSiegeAssaultSubtype)
+                {
+                    siegePreparationDiagnostics = "skipped-native-no-deployment";
+                }
+
+                string siegeStateHandlerDiagnostics = "not-required";
+                if (isSiegeAssaultSubtype)
+                {
+                    initializationStep = "ensure-siege-assault-state-handler";
+                    if (!TryEnsureMissionBehaviorAvailableByTypeName(
+                            mission,
+                            "SandBox.Missions.MissionLogics.CampaignSiegeStateHandler",
+                            "CampaignSiegeStateHandler",
+                            out siegeStateHandlerDiagnostics))
+                    {
+                        reason = siegeStateHandlerDiagnostics ?? "siege-assault-state-handler-failed";
                         return false;
                     }
                 }
@@ -526,6 +546,8 @@ namespace CoopSpectator.Infrastructure
                                 " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
                                 " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}" +
                                 " MissionTeamAI={" + teamAiDiagnostics + "}" +
+                                " SiegeScenePrep={" + siegePreparationDiagnostics + "}" +
+                                " SiegeStateHandler={" + siegeStateHandlerDiagnostics + "}" +
                                 " SiegeAssaultScenePrep={" + siegeAssaultScenePreparationDiagnostics + "}" +
                                 " BattlePower={" + siegeAssaultBattlePowerDiagnostics + "}" +
                                 " RuntimeContract={SiegeAssaultNoDeployment}",
@@ -1095,6 +1117,99 @@ namespace CoopSpectator.Infrastructure
                     ":" + ex.Message;
                 return false;
             }
+        }
+
+        private static bool TryEnsureMissionBehaviorAvailableByTypeName(
+            Mission mission,
+            string behaviorTypeFullName,
+            string behaviorName,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            if (string.IsNullOrWhiteSpace(behaviorTypeFullName))
+            {
+                diagnostics = "Existing=False Created=False Reason=type-name-empty";
+                return false;
+            }
+
+            MissionBehavior existingBehavior = mission.MissionBehaviors?
+                .FirstOrDefault(behavior => string.Equals(
+                    behavior?.GetType().FullName,
+                    behaviorTypeFullName,
+                    StringComparison.Ordinal));
+            if (existingBehavior != null)
+            {
+                diagnostics = "Existing=True Created=False RuntimeType=" + existingBehavior.GetType().Name;
+                return true;
+            }
+
+            try
+            {
+                Type behaviorType = ResolveRuntimeType(behaviorTypeFullName, "SandBox");
+                if (behaviorType == null)
+                {
+                    diagnostics = "Existing=False Created=False Reason=type-not-found FullName=" + behaviorTypeFullName;
+                    return false;
+                }
+
+                if (!typeof(MissionBehavior).IsAssignableFrom(behaviorType))
+                {
+                    diagnostics = "Existing=False Created=False Reason=type-not-mission-behavior RuntimeType=" + behaviorType.FullName;
+                    return false;
+                }
+
+                var behavior = Activator.CreateInstance(behaviorType) as MissionBehavior;
+                if (behavior == null)
+                {
+                    diagnostics = "Existing=False Created=False Reason=activator-returned-null RuntimeType=" + behaviorType.FullName;
+                    return false;
+                }
+
+                mission.AddMissionBehavior(behavior);
+                behavior.OnBehaviorInitialize();
+                behavior.AfterStart();
+                diagnostics = "Existing=False Created=True RuntimeType=" + behavior.GetType().Name;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "Existing=False Created=False Reason=" + ex.GetType().Name +
+                    ":" + ex.Message +
+                    " BehaviorName=" + behaviorName;
+                return false;
+            }
+        }
+
+        private static Type ResolveRuntimeType(string typeFullName, params string[] preferredAssemblyNames)
+        {
+            if (string.IsNullOrWhiteSpace(typeFullName))
+                return null;
+
+            if (preferredAssemblyNames != null)
+            {
+                foreach (string assemblyName in preferredAssemblyNames)
+                {
+                    if (string.IsNullOrWhiteSpace(assemblyName))
+                        continue;
+
+                    Type resolvedType = Type.GetType(typeFullName + ", " + assemblyName, throwOnError: false);
+                    if (resolvedType != null)
+                        return resolvedType;
+                }
+            }
+
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type resolvedType = assembly?.GetType(typeFullName, throwOnError: false, ignoreCase: false);
+                if (resolvedType != null)
+                    return resolvedType;
+            }
+
+            return null;
         }
 
         private static bool TrySuppressMissionTeamAiContract(

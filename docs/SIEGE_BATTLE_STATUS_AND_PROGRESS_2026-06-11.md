@@ -482,6 +482,31 @@ Build integration:
   - вона не міняє server bootstrap (серверний bootstrap);
   - вона не доводить, що spawn у місті є вже окремою проблемою, бо раніше client взагалі падав через wrong scene contract (неправильний контракт сцени).
 
+## Оновлення після звірки `SiegeAssaultNoDeployment` з native `OpenSiegeMissionNoDeployment(...)` (2026-06-12)
+
+- Новий live-run (живий прогін) підтвердив, що:
+  - місія більше не падає;
+  - `scene contract` (контракт сцени) уже відкривається правильно;
+  - але `spawn` (точки появи бійців) все ще йде в місті;
+  - стіни та ворота можуть спочатку стояти, а потім візуально переходити у зруйнований стан.
+- Додаткова звірка з native `IL` (проміжним кодом .NET) показала дві точні розбіжності саме в `SiegeAssaultNoDeployment`:
+  - наш coop-runtime додавав `SiegeMissionPreparationHandler` (хендлер підготовки облогових об'єктів), хоча в перевіреному `OpenSiegeMissionNoDeployment(...)` цей шлях не підтверджений;
+  - наш coop-runtime не підіймав `CampaignSiegeStateHandler` (хендлер кампанійного стану облоги), хоча native `OpenSiegeMissionNoDeployment(...)` його додає.
+- Практичний висновок:
+  - для `SiegeAssaultNoDeployment` ми мали `deployment divergence` (розходження з deployment-логікою, тобто з логікою сценарію, де є етап розгортання перед боєм);
+  - це добре пояснює окремо і пізнє візуальне руйнування стін/воріт, і те, чому поточний siege runtime (режим виконання облоги) лишався гібридним навіть після стабілізації старту місії.
+- Поточний кодовий крок:
+  - `ExactCampaignArmyBootstrap` тепер не додає `SiegeMissionPreparationHandler` для `SiegeAssaultNoDeployment`;
+  - замість цього для `SiegeAssaultNoDeployment` окремо забезпечується `CampaignSiegeStateHandler` через `reflection` (рефлексію, тобто runtime-створення native типу за іменем без жорсткої compile-time залежності);
+  - у `contract snapshot` (знімку контракту запуску) тепер окремо логуються:
+    - `SiegeScenePrep={...}`;
+    - `SiegeStateHandler={...}`;
+    - `SiegeAssaultScenePrep={...}`.
+- Що цей крок уже має перевірити наступний live-run:
+  - чи зникне пізній візуальний перехід стін і воріт у зруйнований стан;
+  - чи зміниться вибір стартових позицій `battle_set` після вирівнювання no-deployment contract (контракту режиму без етапу розгортання);
+  - чи залишиться проблема спавну окремим blocker (блокером), уже без домішки deployment-підготовки.
+
 ## Короткий висновок
 
 На поточний момент siege-система вже не знаходиться в стадії "немає архітектури". Архітектурний каркас уже є:
