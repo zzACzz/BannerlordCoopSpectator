@@ -75,6 +75,10 @@ namespace CoopSpectator.Patches
             ModLogger.Info("MissionState.OpenNew ENTER missionName=" + (missionName ?? "") + " (engine will create mission then call behavior factory).");
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(rec, "MissionState.OpenNew prefix");
             LogMissionOpenHandlerContract(missionName, handler, addDefaultMissionBehaviors, needsMemoryCleanup);
+            CampaignMissionShellRuntimeState.Capture(
+                missionName,
+                rec.SceneName,
+                "MissionState.OpenNew prefix");
 
             bool isOfficialBattleMission = string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal);
             bool isCoopBattleFactory = IsCoopBattleBehaviorFactory(handler);

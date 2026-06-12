@@ -67,6 +67,7 @@
     <Compile Include="..\Infrastructure\BattleMapContractDiagnostics.cs" Link="Infrastructure\BattleMapContractDiagnostics.cs" />
     <Compile Include="..\Infrastructure\BattleCommanderResolver.cs" Link="Infrastructure\BattleCommanderResolver.cs" />
     <Compile Include="..\Infrastructure\BattleSnapshotBinarySerializer.cs" Link="Infrastructure\BattleSnapshotBinarySerializer.cs" />
+    <Compile Include="..\Infrastructure\CampaignMissionShellRuntimeState.cs" Link="Infrastructure\CampaignMissionShellRuntimeState.cs" />
     <Compile Include="..\Infrastructure\CampaignMapPatchMissionInit.cs" Link="Infrastructure\CampaignMapPatchMissionInit.cs" />
     <Compile Include="..\Infrastructure\CampaignMultiplayerHeroClassResolver.cs" Link="Infrastructure\CampaignMultiplayerHeroClassResolver.cs" />
     <Compile Include="..\Infrastructure\ExactBattleAgentSpawnTraceBridgeFile.cs" Link="Infrastructure\ExactBattleAgentSpawnTraceBridgeFile.cs" />
@@ -74,6 +75,7 @@
     <Compile Include="..\Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" Link="Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignArmyBootstrap.cs" Link="Infrastructure\ExactCampaignArmyBootstrap.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultNoDeploymentRuntime.cs" Link="Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultNoDeploymentRuntime.cs" />
+    <Compile Include="..\Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultWithDeploymentRuntime.cs" Link="Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultWithDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />

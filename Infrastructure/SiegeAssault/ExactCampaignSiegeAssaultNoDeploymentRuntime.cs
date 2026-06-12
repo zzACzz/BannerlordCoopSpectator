@@ -11,8 +11,10 @@ namespace CoopSpectator.Infrastructure
         public static bool IsSiegeAssaultScenario(BattleScenarioContextMessage scenarioContext)
         {
             string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
+            string missionShell = scenarioContext?.SiegeContext?.MissionShell ?? string.Empty;
             return scenarioContext?.IsSiegeBattle == true &&
-                   string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase);
+                   string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase) &&
+                   !CampaignMissionShellRuntimeState.IsWithDeploymentMissionShell(missionShell);
         }
 
         public static bool TryPrepareLateBattleSpawnLogic(Mission mission, out string diagnostics)

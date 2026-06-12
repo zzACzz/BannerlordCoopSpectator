@@ -536,6 +536,38 @@ Build integration:
   - чи перестане старий `spawn path gate` бути головним виконуваним шляхом;
   - і лише після цього стане видно, чи є окремий залишковий blocker саме в assault spawn positions (позиціях спавну штурму) або `battle_set` selection (виборі battle_set).
 
+## Оновлення після підтвердження host `SiegeMissionWithDeployment` і розділення `SiegeAssault` shell-path (2026-06-12)
+
+- Нове підтвердження по реальному campaign host (хосту кампанії):
+  - для поточного міського штурму host відкриває не `SiegeMissionNoDeployment`, а саме `SiegeMissionWithDeployment`;
+  - отже попереднє зведення всіх `SiegeAssault` у `SiegeAssaultNoDeployment` було архітектурно неправильним для цієї гілки облоги;
+  - саме це пояснює, чому server/client починали жити в різних `scene contract` (контрактах сцени): host мав deployment-shell (оболонку з фазою розгортання), а coop-runtime на dedicated server (виділеному сервері) насильно зводив той самий сценарій у no-deployment path (шлях без фази розгортання).
+- Ізольований кодовий крок цього етапу:
+  - у `Network/Messages/BattleStartMessage.cs` та `Infrastructure/BattleSnapshotBinarySerializer.cs` додано нове поле `MissionShell` (тип нативної місії для siege-сценарію);
+  - schema version (версію схеми) snapshot піднято з `4` до `5`, щоб `MissionShell` стабільно передавався між campaign, dedicated server і client;
+  - у `Patches/MissionStateOpenNewPatches.cs` додано capture (захоплення) реального host mission shell у момент `MissionState.OpenNew(...)`;
+  - для цього з’явився окремий `Infrastructure/CampaignMissionShellRuntimeState.cs`, який короткоживуче зберігає лише підтверджені siege-shell значення `SiegeMissionWithDeployment` або `SiegeMissionNoDeployment`;
+  - у `Campaign/BattleDetector.cs` цей shell тепер підтягується в `BattleSiegeContextMessage`, тобто siege snapshot більше не втрачає інформацію про те, яку саме native облогу відкрив host.
+- Розділення runtime-path (шляхів виконання) тепер стало явним:
+  - `Infrastructure/SiegeAssault/ExactCampaignSiegeAssaultNoDeploymentRuntime.cs` більше не вважає `SiegeMissionWithDeployment` своїм сценарієм;
+  - додано новий файл `Infrastructure/SiegeAssault/ExactCampaignSiegeAssaultWithDeploymentRuntime.cs`;
+  - `ExactCampaignArmyBootstrap` і `CampaignMapPatchMissionInit` тепер розводять `SiegeAssaultWithDeployment` та `SiegeAssaultNoDeployment` окремо, а не через одну спільну гілку.
+- Що тепер робиться саме для `SiegeAssaultWithDeployment`:
+  - mission team AI (тип командного AI сторін) переводиться в `Siege`, а не в `FieldBattle`;
+  - більше не пропускається `spawn path repair` (ремонт шляху spawn), який раніше спеціально скипався лише для no-deployment path;
+  - піднімається окремий deployment behavior contract (контракт поведінок для фази розгортання): `MissionSiegeEnginesLogic`, `SiegeDeploymentHandler`, `SiegeDeploymentMissionController`;
+  - spawn horses (спавн коней) як і раніше примусово вимикається для обох сторін;
+  - bootstrap log (лог ініціалізації) тепер фіксує окремий `RuntimeContract={SiegeAssaultWithDeployment}`.
+- Що залишається непідтвердженим після цього кроку:
+  - чи дасть цей shell-split (розділення оболонок місії) правильний spawn атакуючих поза стінами, а оборонців на стінах;
+  - чи зникне `Loading Battle Data`, якщо його джерелом був саме попередній no-deployment/runtime mismatch (розрив між no-deployment шляхом і реальною runtime-оболонкою);
+  - чи достатньо поточного deployment behavior contract без окремої емуляції full deployment phase (повної фази розгортання).
+- Поточний технічний стан етапу:
+  - `dotnet build CoopSpectator.csproj -c Debug` проходить успішно;
+  - `dotnet build DedicatedServer/CoopSpectatorDedicated.csproj -c Debug` проходить успішно;
+  - нових compile error (помилок компіляції) на цьому кроці не з’явилось;
+  - залишаються старі попередження `MSB3277` по `System.Management` і `CS0162` по unreachable code (недосяжному коду).
+
 ## Короткий висновок
 
 На поточний момент siege-система вже не знаходиться в стадії "немає архітектури". Архітектурний каркас уже є:

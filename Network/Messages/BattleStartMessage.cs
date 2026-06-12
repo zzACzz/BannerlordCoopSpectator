@@ -77,6 +77,7 @@ namespace CoopSpectator.Network.Messages
     public sealed class BattleSiegeContextMessage
     {
         public string SiegeSubtype { get; set; }
+        public string MissionShell { get; set; }
         public string SettlementId { get; set; }
         public string SettlementKind { get; set; }
         public string SettlementCultureId { get; set; }
@@ -93,6 +94,7 @@ namespace CoopSpectator.Network.Messages
             return new BattleSiegeContextMessage
             {
                 SiegeSubtype = SiegeSubtype,
+                MissionShell = MissionShell,
                 SettlementId = SettlementId,
                 SettlementKind = SettlementKind,
                 SettlementCultureId = SettlementCultureId,

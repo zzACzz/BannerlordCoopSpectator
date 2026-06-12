@@ -3847,7 +3847,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     IsSiegeBattle = isSiegeBattle,
                     Source = battle != null ? "map-event+settlement" : "scene/settlement-fallback",
                     SiegeContext = isSiegeBattle
-                        ? BuildSiegeContextSafe(encounterSettlement, siegeSubtype)
+                        ? BuildSiegeContextSafe(encounterSettlement, siegeSubtype, missionScene)
                         : null
                 };
             }
@@ -3924,11 +3924,19 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return null;
         }
 
-        private static BattleSiegeContextMessage BuildSiegeContextSafe(Settlement encounterSettlement, string siegeSubtype)
+        private static BattleSiegeContextMessage BuildSiegeContextSafe(
+            Settlement encounterSettlement,
+            string siegeSubtype,
+            string missionScene)
         {
+            CampaignMissionShellRuntimeState.TryGetMissionShell(
+                missionScene,
+                out string missionShell,
+                out _);
             var siegeContext = new BattleSiegeContextMessage
             {
                 SiegeSubtype = siegeSubtype ?? string.Empty,
+                MissionShell = missionShell ?? string.Empty,
                 SettlementId = encounterSettlement?.StringId ?? string.Empty,
                 SettlementKind = ResolveSettlementKind(encounterSettlement),
                 SettlementCultureId = encounterSettlement?.Culture?.StringId ?? string.Empty,

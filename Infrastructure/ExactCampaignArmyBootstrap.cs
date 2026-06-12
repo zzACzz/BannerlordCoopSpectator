@@ -21,7 +21,8 @@ namespace CoopSpectator.Infrastructure
             None = 0,
             NativeSpawnLogic = 1,
             LordsHallController = 2,
-            SiegeAssaultNoDeployment = 3
+            SiegeAssaultNoDeployment = 3,
+            SiegeAssaultWithDeployment = 4
         }
 
         private static Mission _activeMission;
@@ -96,7 +97,8 @@ namespace CoopSpectator.Infrastructure
         private static bool UsesSpawnLogicRuntimeMode(ActiveBootstrapMode mode)
         {
             return mode == ActiveBootstrapMode.NativeSpawnLogic ||
-                   mode == ActiveBootstrapMode.SiegeAssaultNoDeployment;
+                   mode == ActiveBootstrapMode.SiegeAssaultNoDeployment ||
+                   mode == ActiveBootstrapMode.SiegeAssaultWithDeployment;
         }
 
         public static bool TryGetSpawnLogicInitTeamSideOverride(
@@ -219,7 +221,9 @@ namespace CoopSpectator.Infrastructure
                 bool useLordsHallController = IsLordsHallSiegeSubtype(scenarioContext);
                 bool isSallyOutSubtype = IsSallyOutSiegeSubtype(scenarioContext);
                 bool isReliefForceAttack = IsReliefSiegeSubtype(scenarioContext);
-                bool isSiegeAssaultSubtype = ExactCampaignSiegeAssaultNoDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+                bool isSiegeAssaultWithDeploymentSubtype = ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+                bool isSiegeAssaultNoDeploymentSubtype = ExactCampaignSiegeAssaultNoDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+                bool isAnySiegeAssaultSubtype = isSiegeAssaultWithDeploymentSubtype || isSiegeAssaultNoDeploymentSubtype;
                 Mission.MissionTeamAITypeEnum missionTeamAiType = ResolveMissionTeamAiType(scenarioContext);
                 bool deferMissionTeamAiActivationUntilBattleActive =
                     ShouldDeferMissionTeamAiActivationUntilBattleActive(missionTeamAiType);
@@ -246,7 +250,9 @@ namespace CoopSpectator.Infrastructure
 
                 string siegePreparationDiagnostics = "not-required";
                 initializationStep = "resolve-siege-scene-preparation";
-                if (scenarioContext?.IsSiegeBattle == true && !useLordsHallController && !isSiegeAssaultSubtype)
+                if (scenarioContext?.IsSiegeBattle == true &&
+                    !useLordsHallController &&
+                    !isSiegeAssaultNoDeploymentSubtype)
                 {
                     if (!TryEnsureSiegeScenePreparationBehavior(
                             mission,
@@ -259,13 +265,13 @@ namespace CoopSpectator.Infrastructure
                         return false;
                     }
                 }
-                else if (isSiegeAssaultSubtype)
+                else if (isSiegeAssaultNoDeploymentSubtype)
                 {
                     siegePreparationDiagnostics = "skipped-native-no-deployment";
                 }
 
                 string siegeStateHandlerDiagnostics = "not-required";
-                if (isSiegeAssaultSubtype)
+                if (isAnySiegeAssaultSubtype)
                 {
                     initializationStep = "ensure-siege-assault-state-handler";
                     bool requireSiegeStateHandler = !IsDedicatedServerProcess();
@@ -288,6 +294,19 @@ namespace CoopSpectator.Infrastructure
                             " Source=" + (source ?? "unknown"));
                         siegeStateHandlerDiagnostics =
                             "OptionalDedicatedSkip={" + (siegeStateHandlerDiagnostics ?? "unknown") + "}";
+                    }
+                }
+
+                string siegeAssaultDeploymentDiagnostics = "not-required";
+                if (isSiegeAssaultWithDeploymentSubtype)
+                {
+                    initializationStep = "ensure-siege-assault-with-deployment-behaviors";
+                    if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureMissionBehaviorContract(
+                            mission,
+                            out siegeAssaultDeploymentDiagnostics))
+                    {
+                        reason = siegeAssaultDeploymentDiagnostics ?? "siege-assault-with-deployment-contract-failed";
+                        return false;
                     }
                 }
 
@@ -394,7 +413,7 @@ namespace CoopSpectator.Infrastructure
                     mission,
                     (source ?? "unknown") + " exact-native-bootstrap-post-battle-spawn");
                 string siegeAssaultScenePreparationDiagnostics = "not-applicable";
-                if (isSiegeAssaultSubtype)
+                if (isSiegeAssaultNoDeploymentSubtype)
                 {
                     initializationStep = "prepare-siege-assault-no-deployment-scene";
                     if (!ExactCampaignSiegeAssaultNoDeploymentRuntime.TryPrepareLateBattleSpawnLogic(
@@ -434,7 +453,7 @@ namespace CoopSpectator.Infrastructure
                 }
 
                 string siegeAssaultBattlePowerDiagnostics = "not-required";
-                if (isSiegeAssaultSubtype)
+                if (isSiegeAssaultNoDeploymentSubtype)
                 {
                     initializationStep = "ensure-siege-assault-battle-power";
                     if (!TryEnsureMissionBehaviorAvailable(
@@ -547,7 +566,38 @@ namespace CoopSpectator.Infrastructure
                                 " PostSanitization={" + (postSanitizationDeploymentPlanDiagnostics ?? string.Empty) + "}";
                         }
 
-                        if (isSiegeAssaultSubtype)
+                        if (isSiegeAssaultWithDeploymentSubtype)
+                        {
+                            initializationStep = "log-siege-assault-with-deployment-contract";
+                            LogBootstrapContractSnapshot(
+                                mission,
+                                spawnLogic,
+                                playerSide,
+                                supplierDiagnostics +
+                                " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                                " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}" +
+                                " MissionTeamAI={" + teamAiDiagnostics + "}" +
+                                " SiegeScenePrep={" + siegePreparationDiagnostics + "}" +
+                                " SiegeStateHandler={" + siegeStateHandlerDiagnostics + "}" +
+                                " SiegeAssaultDeployment={" + siegeAssaultDeploymentDiagnostics + "}" +
+                                " RuntimeContract={SiegeAssaultWithDeployment}",
+                                "pre-init-siege-assault-with-deployment",
+                                source);
+                            initializationStep = "init-siege-assault-with-deployment";
+                            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.TryApplyNativeLikeSpawnHandlerContract(
+                                    spawnLogic,
+                                    defenderTotal,
+                                    attackerTotal,
+                                    defenderInitial,
+                                    attackerInitial,
+                                    in spawnSettings,
+                                    out string siegeAssaultWithDeploymentSpawnDiagnostics))
+                            {
+                                reason = siegeAssaultWithDeploymentSpawnDiagnostics ?? "siege-assault-with-deployment-init-failed";
+                                return false;
+                            }
+                        }
+                        else if (isSiegeAssaultNoDeploymentSubtype)
                         {
                             initializationStep = "log-siege-assault-no-deployment-contract";
                             LogBootstrapContractSnapshot(
@@ -629,9 +679,11 @@ namespace CoopSpectator.Infrastructure
                 _activeMission = mission;
                 _activeSpawnLogic = spawnLogic;
                 _activeSuppliers = suppliers;
-                _activeMode = isSiegeAssaultSubtype
-                    ? ActiveBootstrapMode.SiegeAssaultNoDeployment
-                    : ActiveBootstrapMode.NativeSpawnLogic;
+                _activeMode = isSiegeAssaultWithDeploymentSubtype
+                    ? ActiveBootstrapMode.SiegeAssaultWithDeployment
+                    : isSiegeAssaultNoDeploymentSubtype
+                        ? ActiveBootstrapMode.SiegeAssaultNoDeployment
+                        : ActiveBootstrapMode.NativeSpawnLogic;
                 _activePlayerSide = playerSide;
                 _activePlayerTeam = mission.PlayerTeam;
                 _activePlayerEnemyTeam = mission.PlayerEnemyTeam;
@@ -807,7 +859,8 @@ namespace CoopSpectator.Infrastructure
 
         private static bool IsSiegeAssaultSubtype(BattleScenarioContextMessage scenarioContext)
         {
-            return ExactCampaignSiegeAssaultNoDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext) ||
+                   ExactCampaignSiegeAssaultNoDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
         }
 
         private static Mission.MissionTeamAITypeEnum ResolveMissionTeamAiType(BattleScenarioContextMessage scenarioContext)
@@ -818,10 +871,13 @@ namespace CoopSpectator.Infrastructure
             if (IsSallyOutSiegeSubtype(scenarioContext))
                 return Mission.MissionTeamAITypeEnum.SallyOut;
 
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                return Mission.MissionTeamAITypeEnum.Siege;
+
             // Native OpenSiegeMissionNoDeployment currently seeds assault missions through
             // MissionCombatantsLogic(FieldBattle), so the coop exact-runtime must not
             // force Siege TeamAI onto the hybrid MultiplayerBattle shell.
-            if (IsSiegeAssaultSubtype(scenarioContext))
+            if (ExactCampaignSiegeAssaultNoDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
                 return Mission.MissionTeamAITypeEnum.FieldBattle;
 
             if (string.Equals(scenarioContext.SiegeContext?.SiegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase) ||

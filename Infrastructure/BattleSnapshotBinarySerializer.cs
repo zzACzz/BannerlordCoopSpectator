@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 4;
+        private const int SchemaVersion = 5;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -62,6 +62,7 @@ namespace CoopSpectator.Infrastructure
                     if (schemaVersion != 1 &&
                         schemaVersion != 2 &&
                         schemaVersion != 3 &&
+                        schemaVersion != 4 &&
                         schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
@@ -131,7 +132,7 @@ namespace CoopSpectator.Infrastructure
                 BattleSizeBudgetSource = ReadString(reader),
                 PlayerSide = ReadString(reader),
                 PlayerTroopsReceivedDamageMultiplier = schemaVersion >= 2 ? reader.ReadSingle() : 1f,
-                ScenarioContext = schemaVersion >= 4 ? ReadBattleScenarioContext(reader) : null,
+                ScenarioContext = schemaVersion >= 4 ? ReadBattleScenarioContext(reader, schemaVersion) : null,
                 Sides = ReadList(reader, itemReader => ReadBattleSide(itemReader, schemaVersion)) ?? new List<BattleSideSnapshotMessage>()
             };
         }
@@ -149,7 +150,7 @@ namespace CoopSpectator.Infrastructure
             WriteBattleSiegeContext(writer, context.SiegeContext);
         }
 
-        private static BattleScenarioContextMessage ReadBattleScenarioContext(BinaryReader reader)
+        private static BattleScenarioContextMessage ReadBattleScenarioContext(BinaryReader reader, int schemaVersion)
         {
             if (!reader.ReadBoolean())
                 return null;
@@ -160,7 +161,7 @@ namespace CoopSpectator.Infrastructure
                 ScenarioKind = ReadString(reader),
                 IsSiegeBattle = reader.ReadBoolean(),
                 Source = ReadString(reader),
-                SiegeContext = ReadBattleSiegeContext(reader)
+                SiegeContext = ReadBattleSiegeContext(reader, schemaVersion)
             };
         }
 
@@ -171,6 +172,7 @@ namespace CoopSpectator.Infrastructure
                 return;
 
             WriteString(writer, siegeContext.SiegeSubtype);
+            WriteString(writer, siegeContext.MissionShell);
             WriteString(writer, siegeContext.SettlementId);
             WriteString(writer, siegeContext.SettlementKind);
             WriteString(writer, siegeContext.SettlementCultureId);
@@ -183,7 +185,7 @@ namespace CoopSpectator.Infrastructure
             WriteList(writer, siegeContext.DefenderSiegeEngineTypeIds, WriteString);
         }
 
-        private static BattleSiegeContextMessage ReadBattleSiegeContext(BinaryReader reader)
+        private static BattleSiegeContextMessage ReadBattleSiegeContext(BinaryReader reader, int schemaVersion)
         {
             if (!reader.ReadBoolean())
                 return null;
@@ -191,6 +193,7 @@ namespace CoopSpectator.Infrastructure
             return new BattleSiegeContextMessage
             {
                 SiegeSubtype = ReadString(reader),
+                MissionShell = schemaVersion >= 5 ? ReadString(reader) : string.Empty,
                 SettlementId = ReadString(reader),
                 SettlementKind = ReadString(reader),
                 SettlementCultureId = ReadString(reader),
