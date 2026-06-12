@@ -39,6 +39,8 @@ namespace CoopSpectator.Infrastructure
         private static int _spawnLogicInitSideOverrideDepth;
         private static readonly FieldInfo TeamSideBackingField =
             typeof(Team).GetField("<Side>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo TeamAiBackingField =
+            typeof(Team).GetField("<TeamAI>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo DefaultMissionDeploymentPlanTeamDeploymentPlansField =
             typeof(DefaultMissionDeploymentPlan).GetField("_teamDeploymentPlans", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly PropertyInfo MissionInitializerRecordProperty =
@@ -732,11 +734,33 @@ namespace CoopSpectator.Infrastructure
                 (scenarioContext?.SiegeContext?.WallHitPointRatios ?? new List<float>()).ToArray(),
                 scenarioContext?.SiegeContext?.HasAnySiegeTower == true);
             mission.AddMissionBehavior(siegePreparationHandler);
-            siegePreparationHandler.OnBehaviorInitialize();
-            siegePreparationHandler.AfterStart();
-            diagnostics =
-                "created IsSallyOut=" + isSallyOutSubtype +
-                " IsReliefForceAttack=" + isReliefForceAttack;
+            try
+            {
+                siegePreparationHandler.OnBehaviorInitialize();
+                siegePreparationHandler.AfterStart();
+                diagnostics =
+                    "created IsSallyOut=" + isSallyOutSubtype +
+                    " IsReliefForceAttack=" + isReliefForceAttack;
+            }
+            catch (Exception ex)
+            {
+                bool allowBestEffortAssaultContinuation = !isSallyOutSubtype && !isReliefForceAttack;
+                diagnostics =
+                    "created-faulted " +
+                    ex.GetType().Name + ":" + ex.Message +
+                    " IsSallyOut=" + isSallyOutSubtype +
+                    " IsReliefForceAttack=" + isReliefForceAttack +
+                    " BestEffort=" + allowBestEffortAssaultContinuation;
+                if (!allowBestEffortAssaultContinuation)
+                    return false;
+
+                ModLogger.Info(
+                    "ExactCampaignArmyBootstrap: siege scene preparation faulted during assault bootstrap; " +
+                    "continuing in best-effort mode because late exact runtime only needs spawn/runtime " +
+                    "contracts at this stage. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " Diagnostics=" + diagnostics);
+            }
             return true;
         }
 
@@ -831,19 +855,35 @@ namespace CoopSpectator.Infrastructure
             string desiredTypeName = desiredTeamAi.GetType().Name;
             string existingTypeName = team.TeamAI?.GetType().Name ?? "null";
             bool changed = !string.Equals(existingTypeName, desiredTypeName, StringComparison.Ordinal);
+            if (!TryPrepareMissionTeamAiTactics(
+                    team,
+                    changed ? desiredTeamAi : team.TeamAI,
+                    missionTeamAiType,
+                    out string tacticsDiagnostics))
+            {
+                diagnostics =
+                    "Side=" + team.Side +
+                    " ExistingType=" + existingTypeName +
+                    " DesiredType=" + desiredTypeName +
+                    " Changed=" + changed +
+                    " Tactics={" + tacticsDiagnostics + "}";
+                return false;
+            }
+
             if (changed)
             {
                 team.AddTeamAI(desiredTeamAi);
-                AddMissionTeamAiTactics(team, missionTeamAiType);
-                team.QuerySystem?.Expire();
-                team.ResetTactic();
             }
+
+            team.QuerySystem?.Expire();
+            team.ResetTactic();
 
             diagnostics =
                 "Side=" + team.Side +
                 " ExistingType=" + existingTypeName +
                 " DesiredType=" + desiredTypeName +
                 " Changed=" + changed +
+                " Tactics={" + tacticsDiagnostics + "}" +
                 " HasTeamAI=" + team.HasTeamAi;
             return team.HasTeamAi;
         }
@@ -876,26 +916,70 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        private static void AddMissionTeamAiTactics(Team team, Mission.MissionTeamAITypeEnum missionTeamAiType)
+        private static bool TryPrepareMissionTeamAiTactics(
+            Team team,
+            TeamAIComponent targetTeamAi,
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            out string diagnostics)
         {
-            if (team == null || !team.HasTeamAi)
+            diagnostics = "team-ai-null";
+            if (team == null || targetTeamAi == null)
+                return false;
+
+            TeamAIComponent originalTeamAi = team.TeamAI;
+            bool temporarilyAssignedTeamAi = false;
+            try
+            {
+                if (!ReferenceEquals(originalTeamAi, targetTeamAi))
+                {
+                    if (TeamAiBackingField == null)
+                    {
+                        diagnostics = "team-ai-backing-field-missing";
+                        return false;
+                    }
+
+                    TeamAiBackingField.SetValue(team, targetTeamAi);
+                    temporarilyAssignedTeamAi = true;
+                }
+
+                targetTeamAi.ClearTacticOptions();
+                AddMissionTeamAiTactics(targetTeamAi, team, missionTeamAiType);
+                diagnostics =
+                    "PreparedForType=" + missionTeamAiType +
+                    " Side=" + team.Side +
+                    " TemporaryAssign=" + temporarilyAssignedTeamAi;
+                return true;
+            }
+            finally
+            {
+                if (temporarilyAssignedTeamAi && TeamAiBackingField != null)
+                    TeamAiBackingField.SetValue(team, originalTeamAi);
+            }
+        }
+
+        private static void AddMissionTeamAiTactics(
+            TeamAIComponent teamAi,
+            Team team,
+            Mission.MissionTeamAITypeEnum missionTeamAiType)
+        {
+            if (team == null || teamAi == null)
                 return;
 
             switch (missionTeamAiType)
             {
                 case Mission.MissionTeamAITypeEnum.Siege:
                     if (team.Side == BattleSideEnum.Attacker)
-                        team.AddTacticOption(new TacticBreachWalls(team));
+                        teamAi.AddTacticOption(new TacticBreachWalls(team));
                     else if (team.Side == BattleSideEnum.Defender)
-                        team.AddTacticOption(new TacticDefendCastle(team));
+                        teamAi.AddTacticOption(new TacticDefendCastle(team));
                     break;
 
                 case Mission.MissionTeamAITypeEnum.SallyOut:
                     if (team.Side == BattleSideEnum.Defender)
-                        team.AddTacticOption(new TacticSallyOutHitAndRun(team));
+                        teamAi.AddTacticOption(new TacticSallyOutHitAndRun(team));
                     if (team.Side == BattleSideEnum.Attacker)
-                        team.AddTacticOption(new TacticSallyOutDefense(team));
-                    team.AddTacticOption(new TacticCharge(team));
+                        teamAi.AddTacticOption(new TacticSallyOutDefense(team));
+                    teamAi.AddTacticOption(new TacticCharge(team));
                     break;
             }
         }
