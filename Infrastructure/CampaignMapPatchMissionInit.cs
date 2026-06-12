@@ -26,10 +26,11 @@ namespace CoopSpectator.Infrastructure
 
         public static void TryApply(ref MissionInitializerRecord record, string runtimeScene, string logSource)
         {
+            string source = string.IsNullOrWhiteSpace(logSource) ? "CampaignMapPatchMissionInit" : logSource;
+            TryPrimeEarlySnapshotFromLocalRoster(runtimeScene, source + " pre-classify");
             if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(runtimeScene))
                 return;
 
-            string source = string.IsNullOrWhiteSpace(logSource) ? "CampaignMapPatchMissionInit" : logSource;
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " pre-apply");
             ApplyVillageBattleSceneContext(ref record, runtimeScene, source);
             BattleSnapshotMessage snapshot = TryResolveSnapshot(source);
@@ -312,6 +313,56 @@ namespace CoopSpectator.Infrastructure
             return changed;
         }
 
+        public static bool TryPrimeEarlySnapshotFromLocalRoster(string runtimeScene, string logSource)
+        {
+            if (!GameNetwork.IsClient)
+                return false;
+
+            try
+            {
+                BattleSnapshotMessage current = BattleSnapshotRuntimeState.GetCurrent();
+                if ((current?.Sides?.Count ?? 0) > 0)
+                    return false;
+            }
+            catch
+            {
+            }
+
+            if (!CustomGameJoinContextState.ShouldAllowLocalBattleRosterFileFallback())
+                return false;
+
+            BattleSnapshotMessage snapshot;
+            try
+            {
+                snapshot = BattleRosterFileHelper.PeekSnapshot();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    (string.IsNullOrWhiteSpace(logSource) ? "CampaignMapPatchMissionInit" : logSource) +
+                    ": early local snapshot prime failed while reading battle roster. " +
+                    "RuntimeScene=" + (runtimeScene ?? "null") +
+                    " Message=" + ex.Message);
+                return false;
+            }
+
+            if ((snapshot?.Sides?.Count ?? 0) <= 0)
+                return false;
+
+            if (!IsRuntimeSceneCompatibleWithSnapshot(runtimeScene, snapshot))
+                return false;
+
+            string source = string.IsNullOrWhiteSpace(logSource) ? "CampaignMapPatchMissionInit" : logSource;
+            BattleSnapshotRuntimeState.SetCurrent(snapshot, source + " battle-roster-prime");
+            ModLogger.Info(
+                source + ": primed battle snapshot runtime state from local battle roster before mission open. " +
+                "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                " SnapshotMapScene=" + (snapshot.MapScene ?? "null") +
+                " SnapshotMultiplayerScene=" + (snapshot.MultiplayerScene ?? "null") +
+                " SiegeSubtype=" + (snapshot.ScenarioContext?.SiegeContext?.SiegeSubtype ?? "none") + ".");
+            return true;
+        }
+
         private static BattleSnapshotMessage TryResolveSnapshot(string source)
         {
             try
@@ -345,6 +396,15 @@ namespace CoopSpectator.Infrastructure
         private static bool IsSiegeScenario(BattleSnapshotMessage snapshot)
         {
             return snapshot?.ScenarioContext?.IsSiegeBattle == true;
+        }
+
+        private static bool IsRuntimeSceneCompatibleWithSnapshot(string runtimeScene, BattleSnapshotMessage snapshot)
+        {
+            if (string.IsNullOrWhiteSpace(runtimeScene) || snapshot == null)
+                return false;
+
+            return string.Equals(runtimeScene, snapshot.MapScene ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(runtimeScene, snapshot.MultiplayerScene ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         }
 
         private static Mission.MissionTeamAITypeEnum ResolveMissionTeamAiType(BattleScenarioContextMessage scenarioContext)

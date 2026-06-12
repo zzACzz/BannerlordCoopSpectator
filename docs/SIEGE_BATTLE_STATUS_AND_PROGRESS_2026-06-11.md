@@ -463,6 +463,25 @@ Build integration:
   - що `battle_set` на fortification-scene (сцені укріплення) тепер вибирається правильно не лише в коді, а й у live runtime (живому виконанні місії);
   - що `Loading Data` (екран завантаження даних) більше не застрягатиме, якщо попередній blocker (блокер) справді був у старому spawn-path repair (ремонті шляху спавну).
 
+## Оновлення після client `scene contract` crash-дослідження `SiegeAssault` (2026-06-12)
+
+- Підтверджено окрему кореневу проблему саме на client-side (боці клієнта) для `SiegeAssault`:
+  - server відкривав `empire_town_d` вже з `SceneLevels=level_1 siege` і `SceneHasMapPatch=True`;
+  - client входив у `MissionState.OpenNew(...)` раніше, ніж отримував `CoopMissionNetworkBridge.V2` snapshot;
+  - через це `SceneRuntimeClassifier` ще не бачив siege-контекст, `CampaignMapPatchMissionInit.TryApply(...)` виходив до `TryResolveSnapshot(...)`, і місія відкривалась як базове місто без siege-рівня.
+- Наслідок підтверджено логами:
+  - на client масово йшли `MissionObject ... could not be found`;
+  - далі через кілька секунд йшов native crash `0xC0000005`;
+  - тобто новий blocker (блокер) був не в самій materialization (матеріалізації бійців), а раніше, у розсинхронізації `scene contract` між server і client.
+- Внесена локальна правка:
+  - `Infrastructure/CampaignMapPatchMissionInit.cs` тепер вміє рано підняти snapshot з `battle_roster.json` ще до `scene-aware` перевірки;
+  - цей prime (раннє підняття знімка стану) спрацьовує тільки якщо runtime snapshot ще порожній, дозволений `local battle roster fallback` (резерв з local battle roster файлу) і `runtimeScene` збігається з `MapScene`/`MultiplayerScene` із snapshot;
+  - після цього `TryApply(...)` вже може виставити `SceneLevels=level_N siege` і `SceneHasMapPatch=True` ще до фактичного `MissionState.OpenNew`.
+- Межі цієї правки:
+  - вона не міняє `field battle` і `village battle`;
+  - вона не міняє server bootstrap (серверний bootstrap);
+  - вона не доводить, що spawn у місті є вже окремою проблемою, бо раніше client взагалі падав через wrong scene contract (неправильний контракт сцени).
+
 ## Короткий висновок
 
 На поточний момент siege-система вже не знаходиться в стадії "немає архітектури". Архітектурний каркас уже є:
