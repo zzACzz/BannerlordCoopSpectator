@@ -20,7 +20,8 @@ namespace CoopSpectator.Infrastructure
         {
             None = 0,
             NativeSpawnLogic = 1,
-            LordsHallController = 2
+            LordsHallController = 2,
+            SiegeAssaultNoDeployment = 3
         }
 
         private static Mission _activeMission;
@@ -90,6 +91,12 @@ namespace CoopSpectator.Infrastructure
             return mission != null &&
                    ReferenceEquals(_activeMission, mission) &&
                    _activeMode != ActiveBootstrapMode.None;
+        }
+
+        private static bool UsesSpawnLogicRuntimeMode(ActiveBootstrapMode mode)
+        {
+            return mode == ActiveBootstrapMode.NativeSpawnLogic ||
+                   mode == ActiveBootstrapMode.SiegeAssaultNoDeployment;
         }
 
         public static bool TryGetSpawnLogicInitTeamSideOverride(
@@ -212,7 +219,7 @@ namespace CoopSpectator.Infrastructure
                 bool useLordsHallController = IsLordsHallSiegeSubtype(scenarioContext);
                 bool isSallyOutSubtype = IsSallyOutSiegeSubtype(scenarioContext);
                 bool isReliefForceAttack = IsReliefSiegeSubtype(scenarioContext);
-                bool isSiegeAssaultSubtype = IsSiegeAssaultSubtype(scenarioContext);
+                bool isSiegeAssaultSubtype = ExactCampaignSiegeAssaultNoDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
                 Mission.MissionTeamAITypeEnum missionTeamAiType = ResolveMissionTeamAiType(scenarioContext);
                 bool deferMissionTeamAiActivationUntilBattleActive =
                     ShouldDeferMissionTeamAiActivationUntilBattleActive(missionTeamAiType);
@@ -354,15 +361,17 @@ namespace CoopSpectator.Infrastructure
                 CampaignMapPatchMissionInit.TryRepairLiveMissionContract(
                     mission,
                     (source ?? "unknown") + " exact-native-bootstrap-post-battle-spawn");
-                if (isSiegeAssaultSubtype && !mission.HasSpawnPath)
+                string siegeAssaultScenePreparationDiagnostics = "not-applicable";
+                if (isSiegeAssaultSubtype)
                 {
-                    reason =
-                        "siege-assault-spawn-path-not-ready" +
-                        " Scene=" + (mission.SceneName ?? "null") +
-                        " Mode=" + mission.Mode +
-                        " MissionState=" + mission.CurrentState +
-                        " HasSceneMapPatch=" + SafeHasSceneMapPatch(mission);
-                    return false;
+                    initializationStep = "prepare-siege-assault-no-deployment-scene";
+                    if (!ExactCampaignSiegeAssaultNoDeploymentRuntime.TryPrepareLateBattleSpawnLogic(
+                            mission,
+                            out siegeAssaultScenePreparationDiagnostics))
+                    {
+                        reason = siegeAssaultScenePreparationDiagnostics ?? "siege-assault-scene-preparation-failed";
+                        return false;
+                    }
                 }
 
                 initializationStep = "resolve-agent-spawn-logic";
@@ -390,6 +399,22 @@ namespace CoopSpectator.Infrastructure
                     battleReinforcementsSpawnController.OnBehaviorInitialize();
                     initializationStep = "battle-reinforcements-controller-afterstart";
                     battleReinforcementsSpawnController.AfterStart();
+                }
+
+                string siegeAssaultBattlePowerDiagnostics = "not-required";
+                if (isSiegeAssaultSubtype)
+                {
+                    initializationStep = "ensure-siege-assault-battle-power";
+                    if (!TryEnsureMissionBehaviorAvailable(
+                            mission,
+                            mission.GetMissionBehavior<BattlePowerCalculationLogic>(),
+                            () => new BattlePowerCalculationLogic(),
+                            "BattlePowerCalculationLogic",
+                            out siegeAssaultBattlePowerDiagnostics))
+                    {
+                        reason = siegeAssaultBattlePowerDiagnostics ?? "siege-assault-battle-power-failed";
+                        return false;
+                    }
                 }
 
                 initializationStep = "build-native-wave-spawn-settings";
@@ -471,13 +496,6 @@ namespace CoopSpectator.Infrastructure
                 }
                 else
                 {
-                    initializationStep = "configure-spawn-horses";
-                    bool spawnDefenderHorses = !isSiegeAssaultSubtype && SideHasMountedTroops(suppliers, BattleSideEnum.Defender);
-                    bool spawnAttackerHorses = !isSiegeAssaultSubtype && SideHasMountedTroops(suppliers, BattleSideEnum.Attacker);
-                    spawnLogic.SetSpawnHorses(BattleSideEnum.Defender, spawnDefenderHorses);
-                    spawnLogic.SetSpawnHorses(BattleSideEnum.Attacker, spawnAttackerHorses);
-
-                    initializationStep = "init-with-single-phase";
                     PushSpawnLogicInitTeamSideOverride(mission, playerSide);
                     List<TeamSideOverrideState> temporaryTeamSideOverrides =
                         PushInitTeamSideSanitization(mission, playerSide, source);
@@ -497,27 +515,66 @@ namespace CoopSpectator.Infrastructure
                                 " PostSanitization={" + (postSanitizationDeploymentPlanDiagnostics ?? string.Empty) + "}";
                         }
 
-                        initializationStep = "log-bootstrap-contract";
-                        LogBootstrapContractSnapshot(
-                            mission,
-                            spawnLogic,
-                            playerSide,
-                            supplierDiagnostics +
-                            " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
-                            " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}" +
-                            " MissionTeamAI={" + teamAiDiagnostics + "}" +
-                            " SpawnHorses={Defender=" + spawnDefenderHorses + " Attacker=" + spawnAttackerHorses + "}",
-                            "pre-init-with-single-phase",
-                            source);
-                        initializationStep = "init-with-single-phase";
-                        spawnLogic.InitWithSinglePhase(
-                            defenderTotal,
-                            attackerTotal,
-                            defenderInitial,
-                            attackerInitial,
-                            spawnDefenders: defenderTotal > 0,
-                            spawnAttackers: attackerTotal > 0,
-                            in spawnSettings);
+                        if (isSiegeAssaultSubtype)
+                        {
+                            initializationStep = "log-siege-assault-no-deployment-contract";
+                            LogBootstrapContractSnapshot(
+                                mission,
+                                spawnLogic,
+                                playerSide,
+                                supplierDiagnostics +
+                                " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                                " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}" +
+                                " MissionTeamAI={" + teamAiDiagnostics + "}" +
+                                " SiegeAssaultScenePrep={" + siegeAssaultScenePreparationDiagnostics + "}" +
+                                " BattlePower={" + siegeAssaultBattlePowerDiagnostics + "}" +
+                                " RuntimeContract={SiegeAssaultNoDeployment}",
+                                "pre-init-siege-assault-no-deployment",
+                                source);
+                            initializationStep = "init-siege-assault-no-deployment";
+                            if (!ExactCampaignSiegeAssaultNoDeploymentRuntime.TryApplyNativeLikeSpawnHandlerContract(
+                                    spawnLogic,
+                                    defenderTotal,
+                                    attackerTotal,
+                                    defenderInitial,
+                                    attackerInitial,
+                                    in spawnSettings,
+                                    out string siegeAssaultSpawnDiagnostics))
+                            {
+                                reason = siegeAssaultSpawnDiagnostics ?? "siege-assault-no-deployment-init-failed";
+                                return false;
+                            }
+                        }
+                        else
+                        {
+                            initializationStep = "configure-spawn-horses";
+                            bool spawnDefenderHorses = SideHasMountedTroops(suppliers, BattleSideEnum.Defender);
+                            bool spawnAttackerHorses = SideHasMountedTroops(suppliers, BattleSideEnum.Attacker);
+                            spawnLogic.SetSpawnHorses(BattleSideEnum.Defender, spawnDefenderHorses);
+                            spawnLogic.SetSpawnHorses(BattleSideEnum.Attacker, spawnAttackerHorses);
+
+                            initializationStep = "log-bootstrap-contract";
+                            LogBootstrapContractSnapshot(
+                                mission,
+                                spawnLogic,
+                                playerSide,
+                                supplierDiagnostics +
+                                " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                                " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}" +
+                                " MissionTeamAI={" + teamAiDiagnostics + "}" +
+                                " SpawnHorses={Defender=" + spawnDefenderHorses + " Attacker=" + spawnAttackerHorses + "}",
+                                "pre-init-with-single-phase",
+                                source);
+                            initializationStep = "init-with-single-phase";
+                            spawnLogic.InitWithSinglePhase(
+                                defenderTotal,
+                                attackerTotal,
+                                defenderInitial,
+                                attackerInitial,
+                                spawnDefenders: defenderTotal > 0,
+                                spawnAttackers: attackerTotal > 0,
+                                in spawnSettings);
+                        }
                     }
                     finally
                     {
@@ -538,7 +595,9 @@ namespace CoopSpectator.Infrastructure
                 _activeMission = mission;
                 _activeSpawnLogic = spawnLogic;
                 _activeSuppliers = suppliers;
-                _activeMode = ActiveBootstrapMode.NativeSpawnLogic;
+                _activeMode = isSiegeAssaultSubtype
+                    ? ActiveBootstrapMode.SiegeAssaultNoDeployment
+                    : ActiveBootstrapMode.NativeSpawnLogic;
                 _activePlayerSide = playerSide;
                 _activePlayerTeam = mission.PlayerTeam;
                 _activePlayerEnemyTeam = mission.PlayerEnemyTeam;
@@ -564,6 +623,7 @@ namespace CoopSpectator.Infrastructure
                     " NativeBattleSizeAfterOverride=" + nativeBattleSizeAfterOverride +
                     " DefenderSpawnHorses=" + spawnLogic.GetSpawnHorses(BattleSideEnum.Defender) +
                     " AttackerSpawnHorses=" + spawnLogic.GetSpawnHorses(BattleSideEnum.Attacker) +
+                    " BootstrapMode=" + _activeMode +
                     " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
                     " ObjectCatalog={" + ExactCampaignObjectCatalogBootstrap.LastSummary + "}" +
                     " SupplierDiagnostics=" + supplierDiagnostics +
@@ -713,8 +773,7 @@ namespace CoopSpectator.Infrastructure
 
         private static bool IsSiegeAssaultSubtype(BattleScenarioContextMessage scenarioContext)
         {
-            string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
-            return string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase);
+            return ExactCampaignSiegeAssaultNoDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
         }
 
         private static Mission.MissionTeamAITypeEnum ResolveMissionTeamAiType(BattleScenarioContextMessage scenarioContext)
@@ -1990,7 +2049,7 @@ namespace CoopSpectator.Infrastructure
         private static void OnNativeReinforcementsSpawned(BattleSideEnum side, int spawnedCount)
         {
             Mission mission = _activeMission;
-            if (_activeMode != ActiveBootstrapMode.NativeSpawnLogic || _activeSpawnLogic == null || mission == null)
+            if (!UsesSpawnLogicRuntimeMode(_activeMode) || _activeSpawnLogic == null || mission == null)
                 return;
 
             ModLogger.Info(
@@ -2083,7 +2142,7 @@ namespace CoopSpectator.Infrastructure
             if (!IsActive(mission) || _reinforcementsEnabled == enabled)
                 return;
 
-            if (_activeMode == ActiveBootstrapMode.NativeSpawnLogic)
+            if (UsesSpawnLogicRuntimeMode(_activeMode))
             {
                 _activeSpawnLogic?.SetReinforcementsSpawnEnabled(enabled);
             }
@@ -2160,7 +2219,7 @@ namespace CoopSpectator.Infrastructure
             if (!IsActive(mission))
                 return false;
 
-            if (_activeMode == ActiveBootstrapMode.NativeSpawnLogic && _activeSpawnLogic != null)
+            if (UsesSpawnLogicRuntimeMode(_activeMode) && _activeSpawnLogic != null)
             {
                 attackerRemaining = Math.Max(0, _activeSpawnLogic.NumberOfRemainingAttackerTroops);
                 defenderRemaining = Math.Max(0, _activeSpawnLogic.NumberOfRemainingDefenderTroops);
@@ -2187,7 +2246,7 @@ namespace CoopSpectator.Infrastructure
                 return;
 
             string summary;
-            if (_activeMode == ActiveBootstrapMode.NativeSpawnLogic)
+            if (UsesSpawnLogicRuntimeMode(_activeMode))
             {
                 if (_activeSpawnLogic == null)
                     return;

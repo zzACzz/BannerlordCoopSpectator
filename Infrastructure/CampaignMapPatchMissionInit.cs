@@ -210,6 +210,20 @@ namespace CoopSpectator.Infrastructure
             string source = string.IsNullOrWhiteSpace(logSource) ? "CampaignMapPatchMissionInit.LiveMissionRepair" : logSource;
             bool changed = false;
             bool initializerPatched = false;
+            BattleSnapshotMessage snapshot = null;
+            bool skipSpawnPathRepairForSiegeAssault = false;
+            string siegeSubtype = "none";
+
+            try
+            {
+                snapshot = TryResolveSnapshot(source + " live-contract");
+                skipSpawnPathRepairForSiegeAssault =
+                    ExactCampaignSiegeAssaultNoDeploymentRuntime.IsSiegeAssaultScenario(snapshot?.ScenarioContext);
+                siegeSubtype = snapshot?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? "none";
+            }
+            catch
+            {
+            }
 
             try
             {
@@ -239,7 +253,6 @@ namespace CoopSpectator.Infrastructure
 
             try
             {
-                BattleSnapshotMessage snapshot = TryResolveSnapshot(source + " team-ai");
                 Mission.MissionTeamAITypeEnum targetType = ResolveMissionTeamAiType(snapshot?.ScenarioContext);
                 if (mission.MissionTeamAIType != targetType)
                 {
@@ -251,7 +264,7 @@ namespace CoopSpectator.Infrastructure
                         "Scene=" + (mission.SceneName ?? "null") +
                         " PreviousType=" + previousType +
                         " NewType=" + mission.MissionTeamAIType +
-                        " SiegeSubtype=" + (snapshot?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? "none") + ".");
+                        " SiegeSubtype=" + siegeSubtype + ".");
                 }
             }
             catch (Exception ex)
@@ -265,12 +278,15 @@ namespace CoopSpectator.Infrastructure
             bool spawnPathReinitialized = false;
             try
             {
-                object spawnPathSelectorObject = BattleSpawnPathSelectorField?.GetValue(mission);
-                if (spawnPathSelectorObject is BattleSpawnPathSelector selector)
+                if (!skipSpawnPathRepairForSiegeAssault)
                 {
-                    selector.Initialize();
-                    spawnPathReinitialized = selector.IsInitialized;
-                    changed = true;
+                    object spawnPathSelectorObject = BattleSpawnPathSelectorField?.GetValue(mission);
+                    if (spawnPathSelectorObject is BattleSpawnPathSelector selector)
+                    {
+                        selector.Initialize();
+                        spawnPathReinitialized = selector.IsInitialized;
+                        changed = true;
+                    }
                 }
             }
             catch (Exception ex)
@@ -286,8 +302,10 @@ namespace CoopSpectator.Infrastructure
                 "Scene=" + (mission.SceneName ?? "null") +
                 " InitializerPatched=" + initializerPatched +
                 " MissionTeamAIType=" + mission.MissionTeamAIType +
+                " SiegeSubtype=" + siegeSubtype +
                 " HasSceneMapPatch=" + SafeHasSceneMapPatch(mission) +
                 " HasSpawnPath=" + SafeHasSpawnPath(mission) +
+                " SpawnPathRepairSkipped=" + skipSpawnPathRepairForSiegeAssault +
                 " SpawnPathReinitialized=" + spawnPathReinitialized +
                 " Changed=" + changed + ".");
 

@@ -73,6 +73,7 @@
     <Compile Include="..\Infrastructure\ExactBattleEntryCompatibilityBridgeFile.cs" Link="Infrastructure\ExactBattleEntryCompatibilityBridgeFile.cs" />
     <Compile Include="..\Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" Link="Infrastructure\ExactBattleRuntimeBundleBridgeFile.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignArmyBootstrap.cs" Link="Infrastructure\ExactCampaignArmyBootstrap.cs" />
+    <Compile Include="..\Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultNoDeploymentRuntime.cs" Link="Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultNoDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />

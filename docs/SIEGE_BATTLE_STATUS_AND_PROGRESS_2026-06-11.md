@@ -102,6 +102,8 @@
 - Працює як зовнішня siege-місія через загальний `exact campaign bootstrap` (точний bootstrap перенесення кампанійного бою).
 - Не використовує окремий custom controller (власний контролер місії), а спирається на native `MissionAgentSpawnLogic` (рідну логіку spawn агентів) плюс наш exact-transfer layer (шар точного перенесення стану).
 - Для `no deployment` шляху тепер вирівнюється під `MissionTeamAITypeEnum.FieldBattle`, а не під `MissionTeamAITypeEnum.Siege`.
+- Поточний live-launch (живий шлях запуску) на `dedicated server` підтверджено як `MissionState.OpenNew(... "MultiplayerBattle" ...)` через native `MultiplayerMissions.OpenBattleMission(...)`, а не як окремий `MultiplayerSiege`-запуск.
+- Через це зовнішня `SiegeAssault` зараз фактично живе в `hybrid shell` (гібридній оболонці місії) між campaign `OpenSiegeMissionNoDeployment(...)` і official `MultiplayerBattle`.
 - Використовує загальний `battle result` і `writeback` pipeline.
 
 ### SallyOut
@@ -310,8 +312,12 @@ Build integration:
 ## Відомі обмеження і відкриті неоднозначності
 
 - Повний live-proof (живе підтвердження) для `SiegeAssault` по місту і по фортеці ще не зафіксований у цьому циклі робіт.
-- Для `SiegeAssault` лишається відкрита native-невідповідність між нашим `MissionTeamAIType=Siege` шляхом і native `OpenSiegeMissionNoDeployment(...)`, який у поточній версії гри стартує через `MissionCombatantsLogic(... FieldBattle ...)`.
+- Для `SiegeAssault` відкритий уже не лише `MissionTeamAIType`-розрив, а повний `launch/spawn contract mismatch` (розрив між контрактами запуску й спавну) між:
+  - campaign `OpenSiegeMissionNoDeployment(...)`;
+  - official `MultiplayerBattle`;
+  - official `MultiplayerSiege`.
 - Поточний `SiegeAssault` усе ще не має підтвердженого native-equivalent spawn contract (еквівалентного native-контракту спавну) для атакуючих поза стінами та оборонців на стінах.
+- Для перевірених campaign fortification-scene (кампанійних сцен укріплень) лишається технічна неоднозначність: частина spawn-маркерів може жити не в самій `.xscene`, а у вкладених prefab (заготовках об’єктів) або інших бінарних ресурсах сцени.
 - Повний live-proof для `SallyOut`, `Relief` і `BlockadeSallyOut` ще не завершений.
 - `Blockade` поки що залишається окремим `non-mission path`; для нього ще не будувався окремий battle-runtime, і це наразі свідоме рішення.
 - Потрібно живим прогоном перевірити, чи всі keep / lords hall сцени стабільно містять потрібні `FightAreaMarker`-об’єкти.
@@ -398,6 +404,64 @@ Build integration:
 - Що має підтвердити наступний live-run (живий прогін):
   - чи виходить `SiegeAssault` із `StartUp` і чи зникає вічний `Loading data`;
   - якщо так, чи стає наступним видимим blocker саме `HasSpawnPath=False`, а не ранній mission startup.
+
+## Оновлення після exact launch/spawn-contract дослідження `SiegeAssault` (2026-06-12)
+
+- Нові логи й декомпіляція вже дозволяють зафіксувати точніший root cause (кореневу причину), ніж попередня гіпотеза про `HasSpawnPath=False`.
+- Що підтверджено по живому запуску:
+  - реальна місія відкривається через `MissionState.OpenNew` з `MissionName=MultiplayerBattle`;
+  - `HandlerMethod` у live-логах іде як native `<OpenBattleMission>b__3_0`;
+  - тобто поточний runtime для `SiegeAssault` реально стартує в official `MultiplayerBattle`, а не в official `MultiplayerSiege`.
+- Що підтверджено декомпіляцією official `MultiplayerBattle`:
+  - `MultiplayerMissions.OpenBattleMission(...)` створює `MissionMultiplayerFlagDomination`;
+  - цей шлях використовує `FlagDominationSpawnFrameBehavior` (поведінку вибору точок спавну для battle/TDM-подібної оболонки) і `FlagDominationSpawningBehavior` (поведінку самого мережевого спавну);
+  - для initial spawn (початкового спавну) ця гілка шукає `starting`-зону, а не `sp_zone_0`.
+- Що підтверджено декомпіляцією official `MultiplayerSiege`:
+  - `MultiplayerMissions.OpenSiegeMission(...)` створює `MissionMultiplayerSiege`;
+  - цей шлях використовує `SiegeSpawnFrameBehavior` (поведінку вибору точок спавну для мережевої облоги) і `SiegeSpawningBehavior` (поведінку самого мережевого облогового спавну);
+  - `SiegeSpawnFrameBehavior` працює через `sp_zone_0`, `spawnpoint`, `attacker`, `defender`.
+- Що підтверджено декомпіляцією campaign `siege no deployment` (облоги без етапу розстановки):
+  - `SandBoxMissions.OpenSiegeMissionNoDeployment(...)` не використовує `MissionMultiplayerSiege`;
+  - він будує місію через `BattleSpawnLogic("battle_set" / "sally_out_set" / "relief_force_attack_set")`;
+  - додає `MissionCombatantsLogic(FieldBattle або SallyOut)`, `CampaignSiegeStateHandler`, `CreateCampaignMissionAgentSpawnLogic(...)`, `BattlePowerCalculationLogic`, `SandBoxBattleMissionSpawnHandler`.
+- Практичний висновок із цих трьох шарів:
+  - поточна проблема спавну більше не описується як "сцена неправильна" або "потрібно лише дочекатися `HasSpawnPath=True`";
+  - фактичний розрив у тому, що ми запускаємо campaign `SiegeAssault`-сцену в official `MultiplayerBattle` shell (офіційній мультиплеєрній бойовій оболонці), тоді як native multiplayer siege живе на іншому spawn-контракті й інших scene tags (тегах сцени).
+- Що підтверджено по сценах:
+  - перевірені campaign fortification-scene `empire_town_d`, `empire_town_j_siege`, `empire_siege_001` містять siege-орієнтовані маркери типу `attacker_wait_pos`, `strategycameraattacker`, `strategycameradefender`, `archer_position_attacker`;
+  - текстовий тег `sp_zone_0` знайдено в `Modules\Native\SceneObj\mp_siege_map_*`, але не в перевірених campaign fortification-scenes;
+  - це сильний індикатор, що official `MultiplayerSiege` прив'язаний до окремого MP scene contract (контракту сцени мультиплеєрної облоги), а не до звичайних campaign town/castle scenes (кампанійних сцен міста/фортеці).
+- Що це означає для нашого обраного напряму `siege no deployment`:
+  - правильна ціль для coop spectator (кооперативного спостерігача) зараз не в тому, щоб насильно перевести міську облогу на official `MultiplayerSiege`;
+  - правильна ціль у тому, щоб усередині ізольованого coop-шару відтворити саме campaign `OpenSiegeMissionNoDeployment(...)` spawn contract.
+- Що це означає для подальшої діагностики:
+  - `Mission.HasSpawnPath` більше не можна вважати єдиним або достатнім критерієм готовності `SiegeAssault`;
+  - якщо live-місія й далі стартує як `MultiplayerBattle`, наступні правки треба звіряти вже не лише з generic spawn path selector (загальним селектором маршрутів спавну), а з точним campaign no-deployment spawn flow (точним потоком спавну кампанійної облоги без розстановки).
+
+## Оновлення після винесення `SiegeAssaultNoDeployment` в окремий runtime-path (виконуваний шлях) (2026-06-12)
+
+- У коді з’явився окремий helper (допоміжний модуль) `Infrastructure/SiegeAssault/ExactCampaignSiegeAssaultNoDeploymentRuntime.cs`, який ізолює саме зовнішній штурм `SiegeAssault` від інших siege-підтипів.
+- Що тепер робиться тільки для `SiegeAssault`:
+  - перед `InitWithSinglePhase(...)` примусово викликається `BattleSpawnLogic.OnPreMissionTick(0f)`, щоб підготувати `battle_set` (набір сценових маркерів для бойового розгортання) ще в нашому late bootstrap (пізньому bootstrap-етапі запуску);
+  - `spawn horses` (спавн коней) для обох сторін жорстко вимикається, як у native `OpenSiegeMissionNoDeployment(...)`;
+  - runtime mode (режим виконання) тепер фіксується окремо як `SiegeAssaultNoDeployment`, а не змішується з загальним `NativeSpawnLogic`.
+- Друга ізоляційна правка внесена в `CampaignMapPatchMissionInit.TryRepairLiveMissionContract(...)`:
+  - для `SiegeAssault` більше не виконується безумовний `BattleSpawnPathSelector.Initialize()` (перезапуск селектора шляхів спавну);
+  - це зроблено свідомо, бо для `no deployment` шляху native-контракт не спирається на `mission.HasSpawnPath` як на обов’язкову передумову;
+  - у лог тепер пишеться `SpawnPathRepairSkipped=true/false`, щоб наступний live-прогін (живий прогін) дав точну відповідь, чи цей repair-path (шлях ремонту контракту) ще десь втручається.
+- `ExactCampaignArmyBootstrap` тепер додатково:
+  - реєструє `BattlePowerCalculationLogic` для `SiegeAssault`, якщо її бракує;
+  - запускає для `SiegeAssault` окремий contract snapshot (знімок контракту запуску) з міткою `RuntimeContract={SiegeAssaultNoDeployment}`;
+  - використовує спільну runtime-синхронізацію підкріплень і залишків військ для обох spawn-logic path (шляхів, які спираються на нативну spawn-логіку): `NativeSpawnLogic` і `SiegeAssaultNoDeployment`.
+- `DedicatedServer/CoopSpectatorDedicated.csproj` також оновлено, щоб серверна збірка реально включала новий `SiegeAssault` helper, а не компілювала старий набір `Infrastructure` без нього.
+- Поточний підтверджений технічний стан цього кроку:
+  - `dotnet build CoopSpectator.csproj -c Release` проходить успішно;
+  - `dotnet build DedicatedServer/CoopSpectatorDedicated.csproj -c Release` проходить успішно;
+  - залишаються звичні попередження `MSB3277` по `System.Management` і `CS0162` по unreachable code (недосяжному коду), але нових compile error (помилок компіляції) після цього кроку немає.
+- Що ще НЕ підтверджено цим кроком:
+  - що атакуючі реально почнуть спавнитись поза стінами, а оборонці на стінах;
+  - що `battle_set` на fortification-scene (сцені укріплення) тепер вибирається правильно не лише в коді, а й у live runtime (живому виконанні місії);
+  - що `Loading Data` (екран завантаження даних) більше не застрягатиме, якщо попередній blocker (блокер) справді був у старому spawn-path repair (ремонті шляху спавну).
 
 ## Короткий висновок
 
