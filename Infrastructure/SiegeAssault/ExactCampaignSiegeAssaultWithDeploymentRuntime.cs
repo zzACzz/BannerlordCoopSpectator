@@ -24,11 +24,16 @@ namespace CoopSpectator.Infrastructure
                    CampaignMissionShellRuntimeState.IsWithDeploymentMissionShell(missionShell);
         }
 
-        public static bool TryEnsureMissionBehaviorContract(Mission mission, out string diagnostics)
+        public static bool TryEnsureMissionBehaviorContract(
+            Mission mission,
+            BattleSideEnum playerSide,
+            out string diagnostics)
         {
             diagnostics = "mission-null";
             if (mission == null)
                 return false;
+
+            bool isPlayerAttacker = playerSide == BattleSideEnum.Attacker;
 
             if (!TryEnsureMissionBehaviorAvailable(
                     mission,
@@ -46,7 +51,7 @@ namespace CoopSpectator.Infrastructure
             if (!TryEnsureMissionBehaviorAvailable(
                     mission,
                     mission.GetMissionBehavior<SiegeDeploymentHandler>(),
-                    () => new SiegeDeploymentHandler(false),
+                    () => new SiegeDeploymentHandler(isPlayerAttacker),
                     "SiegeDeploymentHandler",
                     out string deploymentHandlerDiagnostics))
             {
@@ -59,7 +64,7 @@ namespace CoopSpectator.Infrastructure
             if (!TryEnsureMissionBehaviorAvailable(
                     mission,
                     mission.GetMissionBehavior<SiegeDeploymentMissionController>(),
-                    () => new SiegeDeploymentMissionController(false),
+                    () => new SiegeDeploymentMissionController(isPlayerAttacker),
                     "SiegeDeploymentMissionController",
                     out string deploymentControllerDiagnostics))
             {

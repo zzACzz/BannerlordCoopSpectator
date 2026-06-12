@@ -298,17 +298,6 @@ namespace CoopSpectator.Infrastructure
                 }
 
                 string siegeAssaultDeploymentDiagnostics = "not-required";
-                if (isSiegeAssaultWithDeploymentSubtype)
-                {
-                    initializationStep = "ensure-siege-assault-with-deployment-behaviors";
-                    if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureMissionBehaviorContract(
-                            mission,
-                            out siegeAssaultDeploymentDiagnostics))
-                    {
-                        reason = siegeAssaultDeploymentDiagnostics ?? "siege-assault-with-deployment-contract-failed";
-                        return false;
-                    }
-                }
 
                 initializationStep = "apply-mission-team-ai-type";
                 mission.MissionTeamAIType = missionTeamAiType;
@@ -450,6 +439,19 @@ namespace CoopSpectator.Infrastructure
                     battleReinforcementsSpawnController.OnBehaviorInitialize();
                     initializationStep = "battle-reinforcements-controller-afterstart";
                     battleReinforcementsSpawnController.AfterStart();
+                }
+
+                if (isSiegeAssaultWithDeploymentSubtype)
+                {
+                    initializationStep = "ensure-siege-assault-with-deployment-behaviors";
+                    if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureMissionBehaviorContract(
+                            mission,
+                            playerSide,
+                            out siegeAssaultDeploymentDiagnostics))
+                    {
+                        reason = siegeAssaultDeploymentDiagnostics ?? "siege-assault-with-deployment-contract-failed";
+                        return false;
+                    }
                 }
 
                 string siegeAssaultBattlePowerDiagnostics = "not-required";
