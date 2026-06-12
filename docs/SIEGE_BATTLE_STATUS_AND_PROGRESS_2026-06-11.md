@@ -568,6 +568,30 @@ Build integration:
   - нових compile error (помилок компіляції) на цьому кроці не з’явилось;
   - залишаються старі попередження `MSB3277` по `System.Management` і `CS0162` по unreachable code (недосяжному коду).
 
+## Оновлення після явного побудування `deployment plan` для `SiegeAssaultWithDeployment` (2026-06-12)
+
+- Новий крок ізолює проблему саме в `SiegeAssaultWithDeployment` (штурмі облоги з deployment phase, тобто з фазою розстановки) і не змінює `field battle` (польовий бій), `village battle` (бій у селі), `SallyOut` (вилазку), `Relief` (бій деблокади) чи `LordsHall` (бій у залі лорда).
+- Що саме змінено в коді:
+  - у `Infrastructure/SiegeAssault/ExactCampaignSiegeAssaultWithDeploymentRuntime.cs` додано окремий `deployment plan contract builder` (побудовник контракту плану розстановки), який:
+    - бере війська прямо з `IMissionTroopSupplier` (постачальника військ місії);
+    - рахує формації та mounted/foot composition (склад піших і кінних) по кожній місійній команді;
+    - примусово будує `MakeDeploymentPlan` і `MakeReinforcementDeploymentPlan` для всіх бойових команд місії;
+    - жорстко ставить `SetSpawnWithHorses(..., false)` для siege assault (облогового штурму), щоб кіннота не заходила в сцену верхи.
+  - у `Infrastructure/ExactCampaignArmyBootstrap.cs` цей крок тепер викликається лише в гілці `SiegeAssaultWithDeployment` перед `InitWithSinglePhase(...)`.
+- Чому це зроблено:
+  - native `MissionAgentSpawnLogic.InitWithSinglePhase(...)` (рідна ініціалізація однієї фази спавну) не будує `deployment plan` сам по собі;
+  - побудова плану відбувається пізніше в `CheckDeployment()` (внутрішній перевірці готовності розстановки), але для цього місія вже має мати коректні `team plans` (плани команд) і придатні troop counts (кількості військ по формаціях);
+  - попередня наша логіка гарантувала лише наявність порожніх `team plans`, але не заповнювала їх військами.
+- Яку гіпотезу перевіряє наступний live-run (живий прогін):
+  - чи підуть атакуючі в зовнішні siege spawn positions (позиції спавну облоги зовні стін), а не в міський центр;
+  - чи підуть оборонці на стіни/внутрішні defensive positions (оборонні позиції), а не в ті самі міські точки;
+  - чи зникне зависання `Loading Battle Data` (екрана завантаження бойових даних), якщо його причиною був саме порожній/непобудований deployment-контракт.
+- Поточний технічний стан після цього кроку:
+  - `dotnet build CoopSpectator.csproj -c Release` пройшов успішно;
+  - `dotnet build DedicatedServer/CoopSpectatorDedicated.csproj -c Release` пройшов успішно;
+  - нових compile errors (помилок компіляції) не з’явилось;
+  - залишились старі попередження `MSB3277` по `System.Management` і `CS0162` по unreachable code (недосяжному коду).
+
 ## Короткий висновок
 
 На поточний момент siege-система вже не знаходиться в стадії "немає архітектури". Архітектурний каркас уже є:

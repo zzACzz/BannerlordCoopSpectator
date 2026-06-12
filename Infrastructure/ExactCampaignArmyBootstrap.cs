@@ -568,6 +568,17 @@ namespace CoopSpectator.Infrastructure
 
                         if (isSiegeAssaultWithDeploymentSubtype)
                         {
+                            initializationStep = "prepare-siege-assault-with-deployment-plan";
+                            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.TryPrepareDeploymentPlanContract(
+                                    mission,
+                                    suppliers,
+                                    playerSide,
+                                    out string siegeAssaultWithDeploymentPlanDiagnostics))
+                            {
+                                reason = siegeAssaultWithDeploymentPlanDiagnostics ?? "siege-assault-with-deployment-plan-failed";
+                                return false;
+                            }
+
                             initializationStep = "log-siege-assault-with-deployment-contract";
                             LogBootstrapContractSnapshot(
                                 mission,
@@ -580,6 +591,7 @@ namespace CoopSpectator.Infrastructure
                                 " SiegeScenePrep={" + siegePreparationDiagnostics + "}" +
                                 " SiegeStateHandler={" + siegeStateHandlerDiagnostics + "}" +
                                 " SiegeAssaultDeployment={" + siegeAssaultDeploymentDiagnostics + "}" +
+                                " SiegeAssaultDeploymentPlan={" + siegeAssaultWithDeploymentPlanDiagnostics + "}" +
                                 " RuntimeContract={SiegeAssaultWithDeployment}",
                                 "pre-init-siege-assault-with-deployment",
                                 source);
