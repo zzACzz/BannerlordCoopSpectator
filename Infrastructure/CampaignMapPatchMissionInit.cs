@@ -47,6 +47,20 @@ namespace CoopSpectator.Infrastructure
             if (IsSiegeScenario(snapshot))
             {
                 string siegeSubtype = snapshot?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
+                if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
+                {
+                    record.SceneHasMapPatch = false;
+                    record.PatchCoordinates = new Vec2(0f, 0f);
+                    record.PatchEncounterDir = new Vec2(0f, 0f);
+                    ModLogger.Info(
+                        source + ": skipped campaign map patch context for open siege assault runtime. " +
+                        "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                        " SiegeSubtype=" + (string.IsNullOrWhiteSpace(siegeSubtype) ? "unknown" : siegeSubtype) +
+                        " SceneLevels=" + (record.SceneLevels ?? "null") + ".");
+                    BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " skipped-open-siege-assault-map-patch");
+                    return;
+                }
+
                 if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(siegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
                 {
@@ -235,8 +249,8 @@ namespace CoopSpectator.Infrastructure
                     TryApply(ref record, runtimeScene, source + " initializer");
                     bool writeBackSucceeded = TrySetMissionInitializerRecord(mission, record);
 
-                    initializerPatched = writeBackSucceeded && record.SceneHasMapPatch;
-                    changed |= (!hadPatchBefore && record.SceneHasMapPatch);
+                    initializerPatched = writeBackSucceeded && (record.SceneHasMapPatch || hadPatchBefore != record.SceneHasMapPatch);
+                    changed |= hadPatchBefore != record.SceneHasMapPatch;
                     changed |= !string.Equals(previousSceneLevels, record.SceneLevels, StringComparison.Ordinal);
                     if (TryGetMissionInitializerRecord(mission, out MissionInitializerRecord storedRecord))
                         BattleMapContractDiagnostics.LogMissionInitializerRecordState(storedRecord, source + " live-mission-record");
@@ -315,7 +329,7 @@ namespace CoopSpectator.Infrastructure
 
         public static bool TryPrimeEarlySnapshotFromLocalRoster(string runtimeScene, string logSource)
         {
-            if (!GameNetwork.IsClient)
+            if (!GameNetwork.IsClient && !GameNetwork.IsServer)
                 return false;
 
             try
@@ -328,7 +342,7 @@ namespace CoopSpectator.Infrastructure
             {
             }
 
-            if (!CustomGameJoinContextState.ShouldAllowLocalBattleRosterFileFallback())
+            if (GameNetwork.IsClient && !CustomGameJoinContextState.ShouldAllowLocalBattleRosterFileFallback())
                 return false;
 
             BattleSnapshotMessage snapshot;

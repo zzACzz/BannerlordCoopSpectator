@@ -182,6 +182,8 @@ namespace CoopSpectator.Patches
 
             return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null ||
                    mission.GetMissionBehavior<MissionMultiplayerCoopBattleClient>() != null ||
+                   mission.GetMissionBehavior<MissionMultiplayerCoopSiegeAssaultWithDeployment>() != null ||
+                   mission.GetMissionBehavior<MissionMultiplayerCoopSiegeAssaultWithDeploymentClient>() != null ||
                    mission.GetMissionBehavior<CoopMissionClientLogic>() != null ||
                    mission.GetMissionBehavior<CoopMissionSpawnLogic>() != null ||
                    mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null;

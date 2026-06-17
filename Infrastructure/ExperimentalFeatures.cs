@@ -25,6 +25,56 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableCustomCoopSelectionOverlay = true;
 
         /// <summary>
+        /// Siege replay client isolation: keep the custom coop selection overlay
+        /// out of SiegeMissionWithDeployment while native scene loading is being
+        /// stabilized. Battle and village flows continue to use the shared flag.
+        /// </summary>
+        public const bool EnableSiegeReplayCustomCoopSelectionOverlay = true;
+
+        /// <summary>
+        /// Siege replay client isolation: keep the singleplayer formation marker
+        /// Gauntlet view out of SiegeMissionWithDeployment while native scene
+        /// loading is being stabilized.
+        /// </summary>
+        public const bool EnableSiegeReplayFormationMarkerUi = false;
+
+        /// <summary>
+        /// Siege replay client isolation: keep MissionLobbyEquipmentNetworkComponent
+        /// out of SiegeMissionWithDeployment while isolating the native client
+        /// crash during scene loading. Other mission flows keep their own policy.
+        /// </summary>
+        public const bool EnableSiegeReplayLobbyEquipmentNetworkComponent = false;
+
+        /// <summary>
+        /// Siege replay server isolation: skip the battle-flow team bootstrap
+        /// during SiegeMissionWithDeployment AfterStart while isolating the
+        /// native crash around Mission.Teams.Add/team synchronization.
+        /// </summary>
+        public const bool EnableSiegeReplayServerTeamBootstrap = false;
+
+        /// <summary>
+        /// Siege replay server diagnostics: log the low-level team-add corridor
+        /// around MissionLobbyComponent.EarlyStart and Mission.Teams.Add without
+        /// changing team creation or synchronization behavior.
+        /// </summary>
+        public const bool EnableSiegeReplayTeamAddDiagnostics = true;
+
+        /// <summary>
+        /// Siege replay server fix: create native-like attacker/defender teams
+        /// before MissionLobbyComponent.EarlyStart creates the spectator team.
+        /// This is scoped to SiegeMissionWithDeployment runtime only.
+        /// </summary>
+        public const bool EnableSiegeReplayEarlyNativeTeamBootstrap = true;
+
+        /// <summary>
+        /// Siege replay server fix: mount DefaultBattleMissionAgentSpawnLogic in
+        /// the initial SiegeMissionWithDeployment stack before native deployment
+        /// controllers initialize, then let the exact army bootstrap apply the
+        /// native with-deployment false/false spawn contract.
+        /// </summary>
+        public const bool EnableSiegeReplayInitialNativeSpawnLogicBootstrap = true;
+
+        /// <summary>
         /// Temporary crash-isolation flag: create the custom mission gauntlet layer
         /// without loading the CoopSelection movie. This lets us prove whether the
         /// hard crash is inside LoadMovie/prefab binding or earlier in mission view startup.
@@ -134,5 +184,28 @@ namespace CoopSpectator.Infrastructure
         /// it unconditionally during mission-screen startup.
         /// </summary>
         public const bool EnableBattleMapClientEquipmentNetworkComponent = true;
+
+        /// <summary>
+        /// Targeted hot-path diagnostics for exact SiegeAssault mission-object sync
+        /// on the wrapped MP client shell. Disabled by default because it hooks
+        /// `SynchronizeMissionObject` and can emit extra logs during large siege
+        /// object bursts.
+        /// </summary>
+        public static readonly bool EnableExactSiegeMissionObjectSyncDiagnostics =
+            string.Equals(
+                global::System.Environment.GetEnvironmentVariable("COOPSPECTATOR_EXACT_SIEGE_SYNC_DIAGNOSTICS"),
+                "1",
+                global::System.StringComparison.Ordinal);
+
+        /// <summary>
+        /// Targeted hot-path diagnostics for exact CreateAgent payload comparison.
+        /// Disabled by default because it scans battle rosters and emits large logs
+        /// for every materialized agent.
+        /// </summary>
+        public static readonly bool EnableExactCreateAgentCorridorDiagnostics =
+            string.Equals(
+                global::System.Environment.GetEnvironmentVariable("COOPSPECTATOR_EXACT_CREATE_AGENT_DIAGNOSTICS"),
+                "1",
+                global::System.StringComparison.Ordinal);
     }
 }

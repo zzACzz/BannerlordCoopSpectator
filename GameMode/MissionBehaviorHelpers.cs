@@ -335,6 +335,49 @@ namespace CoopSpectator.GameMode
             return null;
         }
 
+        public static MissionBehavior TryCreateMissionMultiplayerEscapeMenu(string gameType)
+        {
+            try
+            {
+                Type multiplayerViewCreatorType =
+                    Type.GetType(
+                        "TaleWorlds.MountAndBlade.Multiplayer.View.MissionViews.MultiplayerViewCreator, TaleWorlds.MountAndBlade.Multiplayer.View",
+                        throwOnError: false)
+                    ?? TryResolveTypeFromLoadedAssemblies("TaleWorlds.MountAndBlade.Multiplayer.View.MissionViews.MultiplayerViewCreator");
+                if (multiplayerViewCreatorType == null)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: MissionMultiplayerEscapeMenu creation skipped because MultiplayerViewCreator is unavailable in current runtime.");
+                    return null;
+                }
+
+                MethodInfo createMethod = multiplayerViewCreatorType.GetMethod(
+                    "CreateMissionMultiplayerEscapeMenu",
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    types: new[] { typeof(string) },
+                    modifiers: null);
+                if (createMethod == null)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: MissionMultiplayerEscapeMenu creation skipped because MultiplayerViewCreator.CreateMissionMultiplayerEscapeMenu(string) was not found.");
+                    return null;
+                }
+
+                if (createMethod.Invoke(null, new object[] { string.IsNullOrWhiteSpace(gameType) ? "Siege" : gameType }) is MissionBehavior behavior)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: MissionMultiplayerEscapeMenu created via MultiplayerViewCreator for GameType=" + (string.IsNullOrWhiteSpace(gameType) ? "Siege" : gameType) + ".");
+                    return behavior;
+                }
+
+                ModLogger.Info("MissionBehaviorHelpers: MissionMultiplayerEscapeMenu creation returned null or non-MissionBehavior.");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: MissionMultiplayerEscapeMenu creation failed: " + ex.Message);
+                return null;
+            }
+        }
+
         private static MissionBehavior TryCreateViewCreatorBehavior(
             string methodName,
             Type[] parameterTypes,
@@ -662,6 +705,113 @@ namespace CoopSpectator.GameMode
             catch (Exception ex)
             {
                 ModLogger.Error("[TdmCloneStack] MissionScoreboardComponent create failed (MissionCustomGameServerComponent.AfterStart may crash): " + ex.Message, ex);
+                return null;
+            }
+        }
+
+        public static MissionBehavior TryCreateSiegeMissionScoreboardComponent()
+        {
+            try
+            {
+                Type scoreboardDataType =
+                    TryResolveTypeFromLoadedAssemblies("TaleWorlds.MountAndBlade.Multiplayer.SiegeScoreboardData")
+                    ?? TryResolveTypeFromLoadedAssemblies("TaleWorlds.MountAndBlade.SiegeScoreboardData");
+                if (scoreboardDataType == null)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: SiegeScoreboardData type not found.");
+                    return null;
+                }
+
+                object scoreboardData = Activator.CreateInstance(scoreboardDataType);
+                if (!(scoreboardData is IScoreboardData scoreboard))
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: SiegeScoreboardData instance does not implement IScoreboardData.");
+                    return null;
+                }
+
+                return new MissionScoreboardComponent(scoreboard);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error("MissionBehaviorHelpers: siege MissionScoreboardComponent create failed.", ex);
+                return null;
+            }
+        }
+
+        public static MissionBehavior TryCreateMissionMatchHistoryComponentIfConditionsAreMet()
+        {
+            try
+            {
+                Type type =
+                    TryResolveTypeFromLoadedAssemblies("TaleWorlds.MountAndBlade.MissionMatchHistoryComponent")
+                    ?? TryResolveTypeFromLoadedAssemblies("TaleWorlds.MountAndBlade.Multiplayer.MissionMatchHistoryComponent");
+                if (type == null)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: MissionMatchHistoryComponent type not found.");
+                    return null;
+                }
+
+                MethodInfo factory = type.GetMethod(
+                    "CreateIfConditionsAreMet",
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    types: Type.EmptyTypes,
+                    modifiers: null);
+                if (factory != null)
+                {
+                    if (factory.Invoke(null, null) is MissionBehavior createdByFactory)
+                    {
+                        ModLogger.Info("MissionBehaviorHelpers: MissionMatchHistoryComponent created via CreateIfConditionsAreMet.");
+                        return createdByFactory;
+                    }
+
+                    ModLogger.Info("MissionBehaviorHelpers: MissionMatchHistoryComponent factory returned null.");
+                    return null;
+                }
+
+                if (Activator.CreateInstance(type) is MissionBehavior createdDirectly)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: MissionMatchHistoryComponent created via parameterless ctor fallback.");
+                    return createdDirectly;
+                }
+
+                ModLogger.Info("MissionBehaviorHelpers: MissionMatchHistoryComponent create fallback returned non-MissionBehavior.");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: MissionMatchHistoryComponent create failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        public static MissionBehavior TryCreateSiegeSpawnComponent()
+        {
+            try
+            {
+                Type spawnFrameType = TryResolveTypeFromLoadedAssemblies("TaleWorlds.MountAndBlade.SiegeSpawnFrameBehavior");
+                Type spawningBehaviorType = TryResolveTypeFromLoadedAssemblies("TaleWorlds.MountAndBlade.SiegeSpawningBehavior");
+                if (spawnFrameType == null || spawningBehaviorType == null)
+                {
+                    ModLogger.Info(
+                        "MissionBehaviorHelpers: siege spawn component suppressed because frame or spawning behavior type is missing. " +
+                        "HasSpawnFrameType=" + (spawnFrameType != null) +
+                        " HasSpawningBehaviorType=" + (spawningBehaviorType != null) + ".");
+                    return null;
+                }
+
+                if (!(Activator.CreateInstance(spawnFrameType) is SpawnFrameBehaviorBase spawnFrameBehavior) ||
+                    !(Activator.CreateInstance(spawningBehaviorType) is SpawningBehaviorBase spawningBehavior))
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: siege spawn component suppressed because supporting types could not be constructed.");
+                    return null;
+                }
+
+                return new SpawnComponent(spawnFrameBehavior, spawningBehavior);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: siege SpawnComponent create failed: " + ex.Message);
                 return null;
             }
         }

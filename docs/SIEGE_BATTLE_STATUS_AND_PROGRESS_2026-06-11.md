@@ -1,308 +1,385 @@
-# Siege Battle Working Status (2026-06-13)
+# Стан розробки Siege Battle
 
-## Мета документа
+Оновлено: 2026-06-16.
 
-Це робочий документ по siege system (системі облог) у `BannerlordCoopSpectator3`.
+Це living status document (живий документ стану), який треба продовжувати вести в нових чатах під час розробки режиму облоги в `BannerlordCoopSpectator3`.
 
-Він має містити лише:
+## Призначення
 
-- поточні підтверджені факти;
-- спростовані гіпотези, які більше не можна використовувати як основу для рішень;
-- відкриті питання;
-- наслідки для наступного плану впровадження.
+Документ фіксує тільки актуальний стан `SiegeAssault` з `SiegeMissionWithDeployment`, поточні підтверджені межі падіння, цільову поведінку режиму і наступні технічні кроки.
 
-Документ не ведеться як історичний журнал усіх проміжних здогадок.
+Це не історичний журнал усіх спроб. Застарілі гіпотези треба прибирати або переносити в блок "Спростовано", якщо вони ще корисні як запобіжник від повторення помилок.
 
-## Межі документа
+## Кінцева ціль
 
-Документ покриває лише siege-підтипи:
+Зробити coop siege assault (кооперативний штурм облоги) максимально 1:1 як кампанійна битва при осаді стін міста або фортеці.
 
-- `SiegeAssault` (основний штурм облоги);
-- `SallyOut` (вилазка);
-- `BlockadeSallyOut` (вилазка під час блокади);
-- `Relief` (бій зовні під час деблокади);
-- `LordsHall` (бій у залі лорда);
-- `Blockade` (блокада як non-mission path, тобто шлях без запуску звичайної наземної місії).
+Цільовий mission shell (оболонка місії) для кампанійного штурму:
 
-`Field battle` (польова битва) і `village battle` (бій у селі) лишаються окремими стабільними системами й тут розглядаються тільки як regression boundary (межа регресійної перевірки).
+- `SiegeMissionWithDeployment`.
+
+Нецільові шляхи:
+
+- `OpenSiegeMissionNoDeployment` - лише reference path (референсний шлях для порівняння), не ціль для 1:1 replay (відтворення один в один).
+- `MultiplayerBattle` з вручну доінжектованими siege behavior (поведінками облоги) - відхилений hybrid path (гібридний шлях), бо він змішує field battle flow (послідовність польової битви) з native siege deployment lifecycle (рідним життєвим циклом облогової розстановки).
+
+`SiegeAssault` має лишатися окремим flow (послідовністю роботи), не змішаним із field battle (польовою битвою), village battle (битвою в селі), `SallyOut`, `Relief`, `LordsHall`, `BlockadeSallyOut` або `Blockade`.
+
+## Цільовий gameplay flow
+
+1. Host (хост) запускає кампанійну облогу.
+2. Сервер відкриває `SiegeMissionWithDeployment` і входить у `Deployment` phase (фазу розстановки).
+3. Клієнти під час завантаження місії обирають сторону, як у польовій битві.
+4. Після вибору сторони клієнти обирають бійця з roster (списку доступних записів армії), як у польовій битві.
+5. На відміну від польової битви, клієнти не вселяються в бійців одразу.
+6. До завершення deployment phase звичайні гравці чекають у стані очікування.
+7. У кожної сторони є commander (командир), якщо в roster є валідний командирський запис.
+8. Якщо клієнт обирає командира своєї сторони, він входить у native commander deployment flow (рідну послідовність командирської розстановки).
+9. Командир бачить campaign-like deployment menu (меню розстановки як у кампанії).
+10. Командир може:
+    - вручну розставити війська;
+    - натиснути auto deploy (автоматична розстановка).
+11. Після завершення deployment commander вселяється у свого бійця.
+12. Після завершення deployment звичайні клієнти вселяються у вибраних бійців.
+13. Якщо host стартує бій до ручного завершення:
+    - сторона без командира отримує server-side auto deploy (серверну автоматичну розстановку);
+    - сторона з командиром, який не завершив розстановку, отримує auto deploy для нерозставлених або незавершених частин;
+    - після цього місія переходить у `BattleActive`.
 
 ## Поточний підтверджений стан
 
-- Для поточного міського штурму campaign host (хост кампанії) відкриває саме `SiegeMissionWithDeployment`, а не `SiegeMissionNoDeployment`.
-- Поточна runtime scene (сцена виконання) правильно визначається як `empire_town_d`, тобто проблема більше не в scene routing (маршрутизації сцени) до `battle_terrain_*`.
-- Snapshot transport (транспорт знімка стану) між campaign, dedicated server і client працює: клієнт отримує `V2 battle snapshot payload`.
-- Перед exact bootstrap (точною нативоподібною ініціалізацією) dedicated server уже встигає відновити `Mission.PlayerTeam` і `Mission.PlayerEnemyTeam`.
-- Поточний основний blocker (блокер) для live-прогону `SiegeAssaultWithDeployment` виникає раніше за побудову `deployment plan` (плану розгортання): сервер валиться на `SiegeDeploymentMissionController`.
-- Після цього збою система скочується в старий fallback path (резервний шлях виконання) з `HasSpawnPath=False`, через що materialization (матеріалізація бійців) не доходить до бойової готовності.
-- Клієнт зависає на `Loading Battle Data` не через втрату snapshot, а як вторинний наслідок того, що сервер не добудовує authoritative runtime state (авторитетний стан виконання).
+### Що вже не є головним blocker
 
-## Джерела підтвердження
+- Shell routing (маршрутизація оболонки місії) вже не є головним blocker: live shell (фактична оболонка місії) доходить до `SiegeMissionWithDeployment`.
+- Server-side blocker (серверний блокер) по `MultiplayerMissionAgentVisualSpawnComponent` знято: серверний стек більше не повинен тягнути client-only behavior (поведінку лише для клієнта).
+- Server-side blocker по `ConsoleMatchStartEndHandler` знято: на сервері він optional (необов'язковий).
+- Старий дефіцит campaign object data (кампанійних об'єктних даних) на клієнті більше не є підтвердженим поточним blocker:
+  - `CampaignCharacterType=TaleWorlds.CampaignSystem.CharacterObject`;
+  - `CampaignCultureType=TaleWorlds.CampaignSystem.CultureObject`.
 
-Ключові свіжі джерела:
+### Що підтверджено останніми прогонами
 
-- `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_46748.txt`
-- `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_43604.txt`
-- `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_48820.txt`
-- `C:\ProgramData\Mount and Blade II Bannerlord\logs\watchdog_log_43604.txt`
-- `C:\dev\projects\BannerlordCoopSpectator3\tmp_sandboxmissions_ildasm.txt`
-- `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\ExactCampaignArmyBootstrap.cs`
+- Сервер відкриває siege mission (місію облоги).
+- Сервер збирає siege stack (стек поведінок облоги).
+- Сервер доходить до mission behavior preload (попереднього завантаження поведінок місії).
+- У серверному preload stack вже були:
+  - `SpawnComponent`;
+  - `MissionSiegeEnginesLogic`;
+  - `SiegeDeploymentHandler`;
+  - `SiegeDeploymentMissionController`;
+  - `MissionNetworkComponent`.
+- Клієнт відкриває `SiegeMissionWithDeployment`.
+- Клієнтський stack (стек поведінок клієнта) збирається успішно.
+- `MissionSiegeEnginesLogic factory succeeded`.
+- `client validation passed`.
+- Клієнт доходить до `MissionScreen`.
+- Клієнт починає завантажувати сцену `empire_town_d`.
+- Далі клієнт падає в native crash (нативне падіння) під час або після завантаження сцени.
+
+### Остання зафіксована межа серверного падіння
+
+Останній проаналізований прогін перед оновленням документа:
+
+- сервер: `rgl_log_72528.txt` / `watchdog_log_72528.txt`;
+- клієнт: `rgl_log_55424.txt` / `watchdog_log_55424.txt`;
+- SP host (single-player host, локальний кампанійний хост): `rgl_log_44140.txt` / `watchdog_log_44140.txt`;
+- клієнтський dump (дамп падіння): `C:\ProgramData\Mount and Blade II Bannerlord\crashes\2026-06-16_03.40.18\dump.dmp`;
+- серверний dump: `C:\ProgramData\Mount and Blade II Bannerlord\crashes\2026-06-16_03.40.20\dump.dmp`.
+
+Сервер доходив до:
+
+- `CoopSiegeAssaultWithDeployment server: AfterStart completed. Scene=empire_town_d Mode=Deployment HasAttacker=True HasDefender=True`;
+- `observed native MultiplayerWarmupComponent.AfterStart entry`;
+- `suppressed dedicated siege replay MultiplayerWarmupComponent.AfterStart native original during deployment`.
+
+Нові маркери для:
+
+- `MultiplayerWarmupComponent.OnPreDisplayMissionTick`;
+- `MultiplayerTimerComponent.StartTimerAsServer`;
+
+не з'явились.
+
+Висновок: серверний crash window (вікно падіння) після приглушення `MultiplayerWarmupComponent.AfterStart`, але до `OnPreDisplayMissionTick` / `StartTimerAsServer`.
+
+## Останній впроваджений діагностичний крок
+
+Файл:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+
+Додано вузькі server-only postfix markers (серверні маркери після завершення методу) для:
+
+- `TaleWorlds.MountAndBlade.Mission.AfterStart`;
+- `TaleWorlds.MountAndBlade.MissionLobbyComponent.AfterStart`;
+- `TaleWorlds.MountAndBlade.MissionCustomGameServerComponent.AfterStart`;
+- `TaleWorlds.MountAndBlade.MissionNetworkComponent.AfterStart`;
+- `TaleWorlds.MountAndBlade.MissionLobbyEquipmentNetworkComponent.AfterStart`;
+- `TaleWorlds.MountAndBlade.MultiplayerTeamSelectComponent.AfterStart`.
+
+Також додано:
+
+- `TryPatchPostfixMethod`;
+- `PatchPostfixMethod`;
+- `LogAfterStartPostfixObservation`;
+- `HasMissionBehaviorTypeName`.
+
+Важливо:
+
+- server stack (серверний стек поведінок) цим кроком не змінювався;
+- нових suppression (приглушень оригінальних методів) не додавалось;
+- це лише діагностика boundary completion (перевірки, які межі `AfterStart` завершились перед падінням).
+
+Build status (стан збірки) після цього кроку:
+
+- `dotnet build CoopSpectator.csproj -c Release` - успішно, `0 Error(s)`;
+- `dotnet build DedicatedServer\CoopSpectatorDedicated.csproj -c Release` - успішно, `0 Error(s)`;
+- залишились старі warnings (попередження): `CS0162 unreachable code` і `System.Management` version conflict;
+- git stage / commit / branch не виконувались;
+- Git попереджав, що `Patches\BattleShellSuppressionPatch.cs` може бути переведений з `LF` у `CRLF` при наступному торканні Git.
+
+## Актуальна інтерпретація наступного прогону
+
+У новому серверному `rgl_log` треба знайти patch markers (маркери встановлення патчів):
+
+- `BattleShellSuppressionPatch: patched postfix TaleWorlds.MountAndBlade.Mission.AfterStart`;
+- `BattleShellSuppressionPatch: patched postfix TaleWorlds.MountAndBlade.MissionLobbyComponent.AfterStart`;
+- `BattleShellSuppressionPatch: patched postfix TaleWorlds.MountAndBlade.MissionCustomGameServerComponent.AfterStart`;
+- `BattleShellSuppressionPatch: patched postfix TaleWorlds.MountAndBlade.MissionNetworkComponent.AfterStart`;
+- `BattleShellSuppressionPatch: patched postfix TaleWorlds.MountAndBlade.MissionLobbyEquipmentNetworkComponent.AfterStart`;
+- `BattleShellSuppressionPatch: patched postfix TaleWorlds.MountAndBlade.MultiplayerTeamSelectComponent.AfterStart`.
+
+Потім треба знайти runtime markers (маркери виконання під час місії):
+
+- `BattleShellSuppressionPatch: observed AfterStart postfix boundary. Source=... completed`.
+
+Логіка:
+
+- якщо є `Mission.AfterStart completed`, то `Mission.AfterStart` не є точкою падіння;
+- якщо є `MissionLobbyComponent.AfterStart completed`, але немає `MissionNetworkComponent.AfterStart completed`, crash window між ними;
+- якщо всі `AfterStart` postfix markers є, crash уже після `AfterStart chain` (ланцюга після старту), і наступна діагностика має перейти до tick/deployment/scene activation boundary (межі тіку, розстановки або активації сцени).
+
+## Поточний кодовий зріз
+
+### Siege mission stack
+
+Ключовий файл:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.cs`
+
+Серверний stack будується окремо від клієнтського:
+
+- `BuildServerMissionBehaviors(...)`;
+- `BuildClientMissionBehaviors(...)`;
+- `ValidateServerStackSanity(...)`;
+- `ValidateClientStackSanity(...)`.
+
+Серверний stack містить:
+
+- `MissionLobbyComponent`;
+- `MissionMultiplayerCoopSiegeAssaultWithDeployment`;
+- `MultiplayerWarmupComponent`;
+- `MultiplayerTimerComponent`;
+- `MissionLobbyEquipmentNetworkComponent`;
+- `SpawnComponent`;
+- `MultiplayerTeamSelectComponent`;
+- boundary/hard-border behaviors (поведінки меж сцени);
+- `MissionSiegeEnginesLogic`;
+- `SiegeDeploymentHandler`;
+- `SiegeDeploymentMissionController`;
+- `CoopMissionNetworkBridge`.
+
+На dedicated server (виділеному сервері) `CoopMissionSpawnLogic` свідомо не додається одразу, поки native siege bootstrap (рідний старт облоги) нестабільний.
+
+Клієнтський stack містить:
+
+- `MissionLobbyComponent`;
+- `MultiplayerWarmupComponent`;
+- `MissionMultiplayerCoopSiegeAssaultWithDeploymentClient`;
+- `MultiplayerTimerComponent`;
+- `MultiplayerMissionAgentVisualSpawnComponent`;
+- `ConsoleMatchStartEndHandler`;
+- `MultiplayerTeamSelectComponent`;
+- boundary/hard-border behaviors;
+- `MissionSiegeEnginesLogic`;
+- `SiegeDeploymentHandler`;
+- `SiegeDeploymentMissionController`;
+- `MissionBehaviorDiagnostic`;
+- `CoopMissionNetworkBridge`;
+- optional UI behaviors (необов'язкові UI поведінки), які зараз використовуються для isolation (ізоляції) клієнтського падіння.
+
+Client-only isolation toggles (перемикачі ізоляції клієнтських поведінок) уже є для:
+
+- `MissionLobbyEquipmentNetworkComponent`;
+- `MissionGauntletFormationMarker`;
+- `CoopMissionSelectionView`.
+
+### Deployment runtime
+
+Ключовий файл:
+
 - `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultWithDeploymentRuntime.cs`
 
-Ключові підтверджені логові точки:
-
-- host:
-  - `rgl_log_46748.txt:4115` -> `CampaignMissionShellRuntimeState: captured siege mission shell. MissionShell=SiegeMissionWithDeployment`
-  - `rgl_log_46748.txt:4117` -> `Opening new mission SiegeMissionWithDeployment`
-  - `rgl_log_46748.txt:4914` -> `RuntimeScene=empire_town_d Terrain=SiegeAssault`
-- dedicated:
-  - `rgl_log_43604.txt:50022` -> `AppliedPlayerTeam=Attacker#2 AppliedPlayerEnemyTeam=Defender#3`
-  - `rgl_log_43604.txt:50034` -> optional skip `CampaignSiegeStateHandler` на dedicated server
-  - `rgl_log_43604.txt:50036` -> `SiegeDeploymentMissionController={Existing=False Created=False Reason=NullReferenceException...}`
-  - `rgl_log_43604.txt:50054` -> `HasSpawnPath=False`
-  - `rgl_log_43604.txt:50056` -> deferred battlefield materialization
-  - `rgl_log_43604.txt:49934` -> `AuthoritativeMaterializedAgentEntrySnapshot ... EntryCount=0`
-- client:
-  - `rgl_log_48820.txt:6317` -> `applied V2 battle snapshot payload on client`
-  - `rgl_log_48820.txt:25919` -> `BattleDataReady=False ... AuthoritativeMaterializedAgentEntryCount=0`
-  - численні `SynchronizeMissionObject` defer-повідомлення після цього
-
-## Поточний стан по siege-підтипах
+Важливі методи:
+
+- `IsSiegeAssaultScenario(...)`;
+- `ShouldMountLiveDeploymentControllers(...)`;
+- `TryEnsureMissionBehaviorContract(...)`;
+- `IsDeploymentRuntimeActive(...)`;
+- `IsDeploymentPhaseBlockingBattleStart(...)`;
+- `HasDeploymentLifecycleFinished(...)`;
+- `ShouldBlockPeerRespawnUntilBattleActive(...)`;
+- `TryForceAutoDeployAndFinishDeployment(...)`;
+- `TryPrepareDeploymentPlanContract(...)`;
+- `TryApplyNativeLikeSpawnHandlerContract(...)`.
 
-### SiegeAssault
+Фактичний стан:
 
-- `SiegeAssault` більше не вважається одним сценарієм.
-- Для нього вже існують окремі runtime-path (шляхи виконання):
-  - `SiegeAssaultWithDeployment`
-  - `SiegeAssaultNoDeployment`
-- Поточний live reproducer (відтворюваний живий сценарій) для міського штурму йде через `SiegeAssaultWithDeployment`.
-- Саме цей шлях зараз має критичний blocker у фазі bootstrap.
-- `SiegeAssaultNoDeployment` лишається окремим кодовим шляхом, але в поточному документі немає нового live-підтвердження, що саме він використовується для останнього міського прогону.
-
-### SallyOut
-
-- Ізольований у власний subtype-aware path (шлях, чутливий до підтипу).
-- Для mission AI (бойового ШІ місії) іде через `MissionTeamAITypeEnum.SallyOut`.
-- Для spawn contract (контракту створення військ) використовує `BattleSpawnLogic.SallyOutTag`.
-- Поточних свіжих live-регресій у цьому документі не зафіксовано.
-
-### BlockadeSallyOut
-
-- На рівні runtime зараз іде через ту саму гілку, що й `SallyOut`.
-- Потребує окремого live-proof (живого підтвердження), що нативна семантика блокадної вилазки не має додаткових відмінностей.
-
-### Relief
-
-- Має окремий subtype-aware spawn path.
-- Використовує `BattleSpawnLogic.ReliefForceAttackTag`.
-- Лишається на загальному `ExactCampaignArmyBootstrap`, але не змішується з `SiegeAssault`.
-
-### LordsHall
-
-- Уже ізольований в окремий `CoopExactCampaignLordsHallMissionController`.
-- Не залежить від зовнішнього siege spawn shell.
-- Використовує indoor roster (внутрішній склад місії) з `MissionReadyEntryOrder`.
-- Поточний документ не виявив нових blocker для цього сценарію.
-
-### Blockade
-
-- Навмисно лишається окремим `non-mission path`.
-- Не повинен запускатися як звичайна наземна місія через той самий bootstrap, що `SiegeAssault`, `SallyOut` чи `Relief`.
-
-## Native launch sequence для `SiegeAssaultWithDeployment`
-
-Декомпіляція `SandBoxMissions.OpenSiegeMissionWithDeployment(...)` показує такий підтверджений порядок:
-
-1. Створюється `BattleSpawnLogic`.
-2. Додаються базові mission behavior (місійні компоненти): `MissionOptionsComponent`, `CampaignMissionComponent`, `BattleEndLogic`, `BattleReinforcementsSpawnController`.
-3. Додається `MissionCombatantsLogic`.
-4. Додається `SiegeMissionPreparationHandler`.
-5. Додається `CampaignSiegeStateHandler`.
-6. Додається `SandBoxSiegeMissionSpawnHandler` або інший підтиповий controller залежно від сценарію.
-7. Створюється `CreateCampaignMissionAgentSpawnLogic(...)`, тобто native `DefaultBattleMissionAgentSpawnLogic`.
-8. Додаються battle/runtime logic (бойові та runtime-компоненти): `BattlePowerCalculationLogic`, `BattleObserverMissionLogic`, `BattleAgentLogic`, `BattleSurgeonLogic`, `MountAgentLogic`, `BannerBearerLogic`, `AgentHumanAILogic`, `AmmoSupplyLogic`, `AgentVictoryLogic`, `AssignPlayerRoleInTeamMissionController`, `SandboxGeneralsAndCaptainsAssignmentLogic`, `MissionAgentPanicHandler`, `MissionBoundaryPlacer`, `MissionBoundaryCrossingHandler`, `AgentMoraleInteractionLogic`, `HighlightsController`, `BattleHighlightsController`, `EquipmentControllerLeaveLogic`.
-9. Лише після цього додаються siege deployment behavior:
-   - `MissionSiegeEnginesLogic`
-   - `SiegeDeploymentHandler`
-   - `SiegeDeploymentMissionController`
-
-Ключовий факт: native код піднімає `DefaultBattleMissionAgentSpawnLogic` раніше за `SiegeDeploymentHandler` і `SiegeDeploymentMissionController`.
-
-## Поточний dedicated bootstrap sequence для `SiegeAssaultWithDeployment`
-
-Поточний код на dedicated server іде так:
-
-1. `ExactCampaignArmyBootstrap` читає scenario/siege context.
-2. Піднімає `SiegeMissionPreparationHandler`, якщо це потрібно для siege-сцени.
-3. Пробує підняти `CampaignSiegeStateHandler`, але на dedicated server це зараз best-effort step (необов'язковий крок).
-4. Занадто рано викликає `ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureMissionBehaviorContract(...)`.
-5. Цей helper додає:
-   - `MissionSiegeEnginesLogic`
-   - `SiegeDeploymentHandler`
-   - `SiegeDeploymentMissionController`
-6. Той самий helper одразу вручну викликає `OnBehaviorInitialize()` і `AfterStart()`.
-7. Лише пізніше `ExactCampaignArmyBootstrap` створює native `DefaultBattleMissionAgentSpawnLogic`.
-8. Ще пізніше додається `BattleReinforcementsSpawnController`.
-9. Лише після цього код доходить до `TryPrepareDeploymentPlanContract(...)` і `InitWithSinglePhase(...)`.
-
-Ключовий факт: у нас `SiegeDeploymentMissionController` створюється й стартує до того, як у місії гарантовано є native spawn logic у тому самому порядку, який очікує native `SiegeMissionWithDeployment`.
-
-## Підтверджені розбіжності між native і dedicated
-
-### Розбіжність 1. Порядок bootstrap
-
-- Native `spawn logic` створюється раніше.
-- У нас `deployment behavior` створюються раніше.
-- Це підтверджено і декомпіляцією, і кодом.
-
-### Розбіжність 2. Ручний lifecycle
-
-- Наш helper `TryEnsureMissionBehaviorAvailable(...)` не тільки додає behavior у місію, а й одразу викликає:
-  - `OnBehaviorInitialize()`
-  - `AfterStart()`
-- Це означає, що поведінка стартує в поточному live-runtime, а не в тому порядку, у якому її б піднімав native `MissionState.OpenNew(...)`.
-
-### Розбіжність 3. Optional skip `CampaignSiegeStateHandler`
-
-- На dedicated server `CampaignSiegeStateHandler` зараз не є обов'язковим, бо його підйом падає на `FileNotFoundException` по `TaleWorlds.CampaignSystem`.
-- Для поточного прогону це вже не є первинною точкою падіння, бо bootstrap іде далі.
-- Але це лишається підтвердженою відмінністю від campaign-host шляху.
-
-### Розбіжність 4. Сервер надсилає порожній battle readiness state
-
-- `AuthoritativeMaterializedAgentEntrySnapshot` з `EntryCount=0` і `EntryStatusSnapshot` відправляються до того, як bootstrap стає готовим.
-- Це пояснює, чому клієнт формально отримує дані, але не переходить у готовий бій.
-
-## Спростовані або застарілі гіпотези
-
-Ці гіпотези більше не можна використовувати як основу для нових рішень:
-
-- `Поточний міський SiegeAssault працює через SiegeMissionNoDeployment`
-  - спростовано; для поточного host-прогону підтверджено `SiegeMissionWithDeployment`.
-- `Поточна причина спавну в місті ще в routing на battle_terrain_*`
-  - спростовано; сцена вже коректно йде як `empire_town_d`.
-- `Поточний blocker це transport snapshot між server і client`
-  - спростовано; клієнт отримує й застосовує `V2 battle snapshot payload`.
-- `Поточний blocker це відсутність Mission.PlayerTeam перед bootstrap`
-  - спростовано для цього прогону; у логах перед exact bootstrap уже є `AppliedPlayerTeam=Attacker#2`.
-- `Порожній deployment plan є першою точкою відмови`
-  - застаріло як первинне пояснення для поточного прогону; код навіть не доходить до нового побудовника `deployment plan`.
-- `Головна проблема поточного міського штурму в MissionTeamAIType=Siege`
-  - застаріло як головне пояснення саме для цього live-run; тепер точка зриву раніша і сидить на `SiegeDeploymentMissionController`.
-
-## Поточний робочий root cause
-
-Найсильніше підтверджене поточне пояснення таке:
-
-- `SiegeAssaultWithDeployment` на dedicated server порушує native order (нативний порядок) створення mission behavior.
-- Через це `SiegeDeploymentMissionController` стартує в неправильному lifecycle context (контексті життєвого циклу), ще до того, як місія приведена до очікуваного native deployment state.
-- Саме це найкраще пояснює:
-  - `NullReferenceException` у `SiegeDeploymentMissionController`;
-  - відкат у fallback path;
-  - `HasSpawnPath=False`;
-  - `EntryCount=0`;
-  - клієнтський `Loading Battle Data`.
-
-Це ще не "закрита" коренева причина в сенсі повної перевірки фіксом і новим прогоном, але це вже найточніший робочий висновок на поточних даних.
-
-## Secondary symptoms після primary failure
-
-Нижче симптоми, які зараз не виглядають первинною причиною:
-
-- `Loading Battle Data` на клієнті;
-- масові `SynchronizeMissionObject` defer-повідомлення;
-- відсутність готових authoritative agent entries;
-- спавн у місті замість зовнішніх siege-позицій;
-- візуальний drift (розсинхрон) по стінах і воротах.
-
-Їх треба оцінювати повторно лише після того, як `SiegeAssaultWithDeployment` перестане валитися на bootstrap.
-
-## Наслідки для поточного плану
-
-Попередній план у цілому лишається правильним, але тепер він став точнішим.
-
-Що треба робити першим:
-
-1. Перебудувати `SiegeAssaultWithDeployment` bootstrap так, щоб `DefaultBattleMissionAgentSpawnLogic` і `BattleReinforcementsSpawnController` з'являлися раніше за `MissionSiegeEnginesLogic`, `SiegeDeploymentHandler` і `SiegeDeploymentMissionController`.
-2. Лишити цю зміну ізольованою тільки для `SiegeAssaultWithDeployment`.
-3. Після цього повторити live-run і тільки тоді перевіряти:
-   - чи працює зовнішній спавн атакуючих;
-   - чи оборонці стають на defensive positions (оборонні позиції);
-   - чи лишається проблема з `SynchronizeMissionObject`.
-
-Що поки не треба робити як перший крок:
-
-- не переписувати весь spawn placement logic (логіку розстановки спавну);
-- не міняти `SallyOut`, `Relief`, `LordsHall` або `field/village` flows;
-- не робити нові висновки про `deployment plan`, поки bootstrap не доходить до цього етапу.
-
-## Останній кодовий крок (ще без live-підтвердження)
-
-- `ExactCampaignArmyBootstrap` більше не піднімає `MissionSiegeEnginesLogic`, `SiegeDeploymentHandler` і `SiegeDeploymentMissionController` до створення `DefaultBattleMissionAgentSpawnLogic`.
-- Для `SiegeAssaultWithDeployment` ці deployment behavior тепер додаються лише після `DefaultBattleMissionAgentSpawnLogic` і `BattleReinforcementsSpawnController`.
-- `ExactCampaignSiegeAssaultWithDeploymentRuntime` більше не створює `SiegeDeploymentHandler(false)` і `SiegeDeploymentMissionController(false)` жорстко як defender-oriented path (шлях, орієнтований на захисника).
-- Замість цього в обидва behavior передається фактичний `playerSide` (сторона гравця), щоб їхній внутрішній deployment lifecycle ближче відповідав native `SiegeMissionWithDeployment`.
-- Цей крок ще не доводить, що зовнішній спавн уже виправлено, але прибирає підтверджений `ordering mismatch` і явну помилку з жорстким defender flag (прапором захисника).
-
-## Відкриті питання
-
-- Чи зникне `NullReferenceException`, якщо просто вирівняти порядок створення behavior під native sequence?
-- Чи вистачить лише reorder (перестановки порядку), чи доведеться додатково міняти спосіб ручного виклику `OnBehaviorInitialize()/AfterStart()`?
-- Чи є `SynchronizeMissionObject` storm (шторм відкладених синхронізацій) суто вторинним наслідком, чи це окремий blocker наступного рівня?
-- Чи буде `SiegeAssaultNoDeployment` потрібний для окремих сценаріїв на кшталт already-breached assault (штурму вже пробитих укріплень)? Поточний документ цього ще не підтверджує.
-- Чи потребує окремої синхронізації wall/gate state (стан стін і воріт) після стабілізації bootstrap?
-
-## Критичні файли та підсистеми
-
-Campaign / snapshot:
-
-- `Campaign/BattleDetector.cs`
-- `Infrastructure/BattleSnapshotRuntimeState.cs`
-- `Infrastructure/BattleSnapshotBinarySerializer.cs`
-- `Network/Messages/BattleStartMessage.cs`
-- `Infrastructure/CampaignMissionShellRuntimeState.cs`
-
-Dedicated bootstrap:
-
-- `Infrastructure/CampaignMapPatchMissionInit.cs`
-- `Infrastructure/ExactCampaignArmyBootstrap.cs`
-- `Infrastructure/SiegeAssault/ExactCampaignSiegeAssaultWithDeploymentRuntime.cs`
-- `Infrastructure/SiegeAssault/ExactCampaignSiegeAssaultNoDeploymentRuntime.cs`
-- `Patches/MissionStateOpenNewPatches.cs`
-
-Mission runtime:
-
-- `Mission/CoopMissionBehaviors.cs`
-- `Mission/CoopExactCampaignLordsHallMissionController.cs`
-
-Writeback:
-
-- `Infrastructure/CoopBattleResultBridgeFile.cs`
-- `Campaign/BattleDetector.cs`
-
-## Мінімальна siege regression-матриця
-
-Обов'язково лишається перевірити:
-
-- `SiegeAssault` на місті;
-- `SiegeAssault` на фортеці;
-- `SallyOut` на місті;
-- `SallyOut` на фортеці;
-- `Relief` на місті;
-- `Relief` на фортеці;
-- `LordsHall` на місті;
-- `LordsHall` на фортеці;
-- `BlockadeSallyOut`;
-- `Blockade` як `non-mission path`.
-
-Окремо для regression safety (безпеки від регресій):
-
-- `field battle`
-- `village battle`
-
-## Короткий висновок
-
-Станом на `2026-06-13` головна проблема поточного live `SiegeAssault` вже не в scene routing, не в snapshot transport і не в загальному `Loading Battle Data`.
-
-Поточний основний blocker сидить у `SiegeAssaultWithDeployment` bootstrap: dedicated server створює й стартує deployment behavior раніше, ніж це робить native `OpenSiegeMissionWithDeployment`.
-
-Саме це зараз є правильною основою для наступного кодового фіксу.
+- deployment runtime (рантайм розстановки) має власний стан активної місії;
+- battle start (старт бою) блокується, поки deployment runtime активний і native deployment lifecycle не завершений;
+- звичайний respawn/possession (повторне створення/вселення у бійця) блокується до `BattleActive`;
+- `TryForceAutoDeployAndFinishDeployment(...)` відтворює мінімальний native-like auto deploy path (шлях автоматичної розстановки, подібний до рідного):
+  - `DeployAllSiegeWeaponsOfPlayer()`;
+  - `AutoDeployTeamUsingTeamAI(...)` або `AutoDeployTeamUsingDeploymentPlan(...)`;
+  - `ForceUpdateAllUnits()`;
+  - `FinishDeployment()`.
+
+Поточний ризик: наявний auto deploy path працює для `Mission.PlayerTeam`. Для кінцевої цілі треба явно довести обидві сторони:
+
+- сторона без командира;
+- сторона з командиром, який не завершив ручну розстановку.
+
+### Battle phase і spawn gates
+
+Ключовий файл:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+
+Важливі методи:
+
+- `TryConsumeBattlePhaseRequests(...)`;
+- `TryResolveBattleDataReadinessForPeer(...)`;
+- `TryResolvePeerSpawnAvailability(...)`;
+- `ShouldAllowExactSiegeCommanderDeploymentSpawn(...)`;
+- `TryMatchExactSiegeCommanderDeploymentSelection(...)`;
+- `TryAssignExactCampaignCommanders(...)`.
+
+Фактичний стан:
+
+- host start request (запит старту від хоста) під час exact siege deployment спочатку проходить через `TryForceAutoDeployAndFinishDeployment(...)`;
+- якщо deployment still blocking (розстановка все ще блокує старт), перехід у `BattleActive` не відбувається;
+- звичайний peer (мережевий гравець) під час deployment отримує стан `CommanderDeployment`, якщо він не має права на commander deployment spawn;
+- commander-only exception (виняток лише для командира) дозволяє peer пройти readiness/spawn gate під час `Deployment`, якщо його вибраний entry (запис ростеру) збігається з commander entry.
+
+Це відповідає цільовій ідеї: звичайні гравці чекають завершення розстановки, командир може отримати ранній доступ до native deployment menu.
+
+### Selection UI
+
+Ключові файли:
+
+- `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopMissionSelectionView.cs`;
+- `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopSelectionUiHelpers.cs`;
+- `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopSelectionShellViewModels.cs`.
+
+Фактичний стан:
+
+- selection UI (інтерфейс вибору) вже вміє показувати commander badge (позначку командира);
+- commander entry визначається через `BattleCommanderResolver`;
+- `CoopMissionSelectionView` пригнічує кастомний overlay (накладений інтерфейс), якщо активний native deployment UI:
+  - `IsNativeDeploymentUiActive()`;
+  - `MissionScreen.IsDeploymentActive`.
+
+Це важливо для кінцевої цілі: коли commander переходить у native deployment menu, наш custom selection overlay не повинен перекривати рідний інтерфейс розстановки.
+
+## Спростовано або більше не є робочим напрямком
+
+- `OpenSiegeMissionNoDeployment` не є ціллю для кампанійного `SiegeAssault`.
+- Просте відкриття `MultiplayerBattle` на siege scene (сцені облоги) не дає 1:1 кампанійної облоги.
+- Ручне додавання `SiegeDeploymentHandler` і `SiegeDeploymentMissionController` у неправильний shell не є безпечним шляхом.
+- Поточний crash не треба більше пояснювати старим дефіцитом `CharacterObject` / `CultureObject` на клієнті без повторної перевірки логів.
+- Візуальний loading screen (екран завантаження) не означає, що прогресу немає: останні зміни вже переносили blocker між різними native boundaries (нативними межами).
+
+## Відкриті ризики
+
+- Поточний клієнтський crash іде в native scene/load path (рідний шлях завантаження сцени), тому C# лог може обриватись до корисного exception (винятку).
+- Серверний crash window ще треба звузити новими `AfterStart` postfix markers.
+- `MissionLobbyEquipmentNetworkComponent` на клієнті може бути потрібний для native siege spawn, але раніше був підозрюваним client-only crash node (вузлом клієнтського падіння).
+- `MissionCustomGameClientComponent` і custom selection overlay можуть конфліктувати з native deployment UI, якщо їх увімкнути до стабільної scene/deployment boundary.
+- `MissionGauntletFormationMarker` / formation marker UI (UI маркерів формацій) може чіпати deployment/order UI у невдалий момент.
+- `TryForceAutoDeployAndFinishDeployment(...)` ще треба розширити або довести так, щоб автоматично дорозставлялися обидві сторони, а не лише поточна `Mission.PlayerTeam`.
+- Для справжнього 1:1 потрібен не тільки старт місії, а й повна order replication (мережеве відтворення наказів) для командирської ручної розстановки.
+
+## Наступний порядок роботи
+
+1. Після нового прогону спочатку аналізувати останні серверні й клієнтські `rgl_log` та `watchdog_log`.
+2. На сервері перевірити, які `AfterStart postfix boundary` markers з'явились.
+3. На клієнті перевірити останню успішну точку перед native crash:
+   - `MissionScreen`;
+   - `IsDeploymentActive`;
+   - scene load `empire_town_d`;
+   - water/prefab loading;
+   - появу або відсутність client-only isolated behaviors.
+4. Якщо серверний crash window звузиться до конкретної `AfterStart` behavior, планувати наступний крок тільки для цієї behavior.
+5. Якщо всі `AfterStart` markers завершуються, переходити до наступних native boundaries:
+   - mission tick (тік місії);
+   - deployment controller tick (тік контролера розстановки);
+   - scene activation (активація сцени);
+   - preload/view boundary (межа попереднього завантаження/відображення).
+6. Не змінювати server stack без окремого плану.
+7. Не повертати польову або village battle логіку в siege flow.
+
+## Правило для нового чату
+
+У новому чаті цей файл треба вважати головним handoff document (документом передачі контексту) по режиму облоги.
+
+Новий чат має:
+
+- перед кожним новим етапом читати цей файл;
+- після кожного підтвердженого прогону оновлювати блоки:
+  - "Поточний підтверджений стан";
+  - "Остання зафіксована межа серверного падіння";
+  - "Актуальна інтерпретація наступного прогону";
+  - "Відкриті ризики";
+  - "Наступний порядок роботи";
+- прибирати неактуальні припущення, а не накопичувати історичний шум;
+- чітко розділяти:
+  - реалізовано в коді;
+  - підтверджено логами;
+  - цільова поведінка;
+  - гіпотеза;
+  - спростовано.
+
+Перед будь-якими code changes (змінами коду), build (збіркою), git operation (операцією Git) або file edit (редагуванням файлу) новий чат має спочатку дати план і чекати явного `ок`.
+
+## Ключові файли
+
+- `C:\dev\projects\BannerlordCoopSpectator3\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeployment.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentClient.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultWithDeploymentRuntime.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Patches\MissionStateOpenNewPatches.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopMissionSelectionView.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopSelectionUiHelpers.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopSelectionShellViewModels.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\BattleCommanderResolver.cs`
+
+## Native reference targets
+
+Для low-level research (низькорівневого дослідження) звірятись із:
+
+- `SandBox.SandBoxMissions.OpenSiegeMissionWithDeployment(...)`;
+- `SandBox.Missions.MissionLogics.SandBoxSiegeMissionSpawnHandler`;
+- `TaleWorlds.MountAndBlade.SiegeMissionPreparationHandler`;
+- `TaleWorlds.MountAndBlade.DeploymentPoint`;
+- `TaleWorlds.MountAndBlade.BattleSpawnPathSelector`;
+- `TaleWorlds.MountAndBlade.DefaultBattleMissionAgentSpawnLogic`;
+- `TaleWorlds.MountAndBlade.Missions.Handlers.SiegeDeploymentHandler`;
+- `TaleWorlds.MountAndBlade.SiegeDeploymentMissionController`;
+- `MissionOrderDeploymentControllerVM.ExecuteAutoDeploy()`;
+- `DeploymentHandler.FinishDeployment()`.
+
+Сцена для поточного replay path (шляху відтворення):
+
+- `C:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Bannerlord\Modules\SandBoxCore\SceneObj\empire_town_d\scene.xscene`.

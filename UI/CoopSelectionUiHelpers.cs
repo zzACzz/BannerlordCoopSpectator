@@ -1026,7 +1026,9 @@ namespace CoopSpectator.UI
             string readinessStage = status?.BattleDataReadinessStage?.Trim() ?? string.Empty;
             bool reconnectFinalize =
                 string.Equals(readinessStage, "ReconnectFinalize", StringComparison.OrdinalIgnoreCase);
-            if (reconnectFinalize && !string.IsNullOrWhiteSpace(readinessReason))
+            bool commanderDeployment =
+                string.Equals(readinessStage, "CommanderDeployment", StringComparison.OrdinalIgnoreCase);
+            if ((reconnectFinalize || commanderDeployment) && !string.IsNullOrWhiteSpace(readinessReason))
                 return readinessReason;
 
             if (!CoopMissionNetworkBridge.TryGetClientBattleSnapshotProgress(out CoopMissionNetworkBridge.ClientBattleSnapshotProgressInfo progress))

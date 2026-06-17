@@ -32,7 +32,15 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
         {
             _lastRequestedRuntimeSceneName = scene ?? string.Empty;
             bool battleMapRuntime = IsBattleMapSceneName(scene);
-            string missionShell = battleMapRuntime ? BattleMissionShell : TeamDeathmatchMissionShell;
+            string defaultMissionShell = battleMapRuntime ? BattleMissionShell : TeamDeathmatchMissionShell;
+            SiegeAssaultMissionOpenBridge.PreOpenContract preOpenContract =
+                SiegeAssaultMissionOpenBridge.Resolve(scene, defaultMissionShell);
+            string missionShell = !string.IsNullOrWhiteSpace(preOpenContract.LiveMissionShell)
+                ? preOpenContract.LiveMissionShell
+                : defaultMissionShell;
+            SiegeAssaultMissionOpenBridge.Capture(
+                preOpenContract,
+                "MissionMultiplayerCoopBattleMode.StartMultiplayerGame");
             if (battleMapRuntime && GameNetwork.IsServer)
             {
                 TryApplyBattleMapTimerOptionOverrides();
@@ -45,12 +53,17 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 "Opening mission CoopBattle, scene=" + (scene ?? "") +
                 ", shell=" + missionShell +
                 ", battleMapRuntime=" + battleMapRuntime +
+                ", preOpenContract={" + preOpenContract.Describe() + "}" +
                 ", timestamp=" + DateTime.UtcNow.ToString("o"));
             MissionInitializerRecord record = new MissionInitializerRecord(scene);
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, "CoopBattle mission init pre-apply");
             TryApplyCampaignMapPatchContext(ref record, scene);
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, "CoopBattle mission init pre-open");
-            MissionState.OpenNew(missionShell, record, CreateBehaviorsForMission);
+            InitializeMissionBehaviorsDelegate behaviorFactory = preOpenContract.IsSiegeAssaultWithDeployment
+                ? new InitializeMissionBehaviorsDelegate(
+                    MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.CreateBehaviorsForOfficialOpenNewBridge)
+                : new InitializeMissionBehaviorsDelegate(CreateBehaviorsForMission);
+            MissionState.OpenNew(missionShell, record, behaviorFactory);
         }
 
         private static void TryApplyBattleMapTimerOptionOverrides()
@@ -145,6 +158,11 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             catch (Exception ex) { ModLogger.Info("CoopBattle behavior list log failed: " + ex.Message); }
 
             return list;
+        }
+
+        internal static IEnumerable<MissionBehavior> CreateBehaviorsForOfficialOpenNewBridge(Mission mission)
+        {
+            return CreateBehaviorsForMission(mission);
         }
 
         private static List<MissionBehavior> BuildServerMissionBehaviorsForCoopBattle(Mission mission, bool isDedicated)

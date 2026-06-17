@@ -8,6 +8,7 @@ using System.Text;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Network.Messages;
 using HarmonyLib;
 using NetworkMessages.FromServer;
 using TaleWorlds.Core;
@@ -15,6 +16,7 @@ using TaleWorlds.Engine;
 using TaleWorlds.InputSystem;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Missions.Handlers;
 using TaleWorlds.MountAndBlade.Network.Messages;
 using TaleWorlds.ObjectSystem;
 
@@ -30,6 +32,9 @@ namespace CoopSpectator.Patches
             typeof(MissionPeer).GetField("_followedAgent", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo MissionMissilesDictionaryField =
             typeof(Mission).GetField("_missilesDictionary", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly object ExactSiegeMissionObjectSyncDiagnosticsLock = new object();
+        private static readonly HashSet<string> LoggedExactSiegeMissionObjectSyncDiagnosticKeys = new HashSet<string>();
+        private const int ExactSiegeMissionObjectSyncDiagnosticBudget = 64;
         private static MethodInfo _missionNetworkComponentHandleServerEventCreateAgentMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSetAgentActionSetMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSynchronizeAgentEquipmentMethod;
@@ -132,6 +137,8 @@ namespace CoopSpectator.Patches
             new List<DeferredClientSetAgentHealthPayload>();
         private static readonly List<DeferredClientMakeAgentDeadPayload> DeferredClientMakeAgentDeadPayloads =
             new List<DeferredClientMakeAgentDeadPayload>();
+        private static int _remainingExactSiegeMissionObjectSyncDiagnosticBudget = ExactSiegeMissionObjectSyncDiagnosticBudget;
+        private static bool _exactSiegeMissionObjectSyncDiagnosticBudgetExhaustedLogged;
 
         private enum SynchronizeMountedWeaponRole
         {
@@ -164,6 +171,7 @@ namespace CoopSpectator.Patches
         private static long _nextDeferredClientMakeAgentDeadSequence;
         private static int _unsafeImmediateClientAgentBaselineMaterializationDepth;
         private static readonly TimeSpan LocalFollowEchoSuppressionWindow = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan DeferredClientSiegeMissionObjectReplayDelay = TimeSpan.FromMilliseconds(750);
         private static DateTime _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
         private static int _localFollowEchoSuppressionAgentIndex = -1;
 
@@ -589,6 +597,12 @@ namespace CoopSpectator.Patches
             _lastExactCommanderOrderBarMovieBindingKey = null;
             _lastForcedExactCommanderTroopSelectionInputsKey = null;
             _lastExactCommanderOrderItemExecutionKey = null;
+            lock (ExactSiegeMissionObjectSyncDiagnosticsLock)
+            {
+                LoggedExactSiegeMissionObjectSyncDiagnosticKeys.Clear();
+                _remainingExactSiegeMissionObjectSyncDiagnosticBudget = ExactSiegeMissionObjectSyncDiagnosticBudget;
+                _exactSiegeMissionObjectSyncDiagnosticBudgetExhaustedLogged = false;
+            }
             if (!preserveCommanderOrderControlState)
             {
                 _suppressExactCommanderOrderHotkeyFallbackUntilRelease = false;
@@ -724,15 +738,21 @@ namespace CoopSpectator.Patches
             MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
                 nameof(MissionNetworkComponent_HandleServerEventSynchronizeMissionObject_Prefix),
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || prefix == null)
+            MethodInfo finalizer = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSynchronizeMissionObject_Finalizer),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null || finalizer == null)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSynchronizeMissionObject not found. Skip.");
                 return;
             }
 
             _missionNetworkComponentHandleServerEventSynchronizeMissionObjectMethod = target;
-            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSynchronizeMissionObject.");
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(prefix),
+                finalizer: new HarmonyMethod(finalizer));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/finalizer applied to MissionNetworkComponent.HandleServerEventSynchronizeMissionObject.");
         }
 
         private static void PatchMissionNetworkComponentSpawnWeaponWithNewEntity(Harmony harmony)
@@ -2895,6 +2915,126 @@ namespace CoopSpectator.Patches
             return TryGetLocalMissionObject(missionObjectId) as SpawnedItemEntity;
         }
 
+        private static void TryLogExactSiegeMissionObjectSyncDiagnostic(
+            Mission mission,
+            SynchronizeMissionObject synchronizeMissionObject,
+            string stage,
+            Exception exception = null,
+            string extraDetails = null)
+        {
+            if (!ExperimentalFeatures.EnableExactSiegeMissionObjectSyncDiagnostics ||
+                mission == null ||
+                synchronizeMissionObject == null)
+            {
+                return;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            {
+                return;
+            }
+
+            int missionObjectIdValue = GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId);
+            string diagnosticKey =
+                (stage ?? "unknown") + "|" +
+                missionObjectIdValue + "|" +
+                (exception?.GetType().FullName ?? "no-exception");
+
+            int remainingBudgetAfterReserve;
+            lock (ExactSiegeMissionObjectSyncDiagnosticsLock)
+            {
+                if (!LoggedExactSiegeMissionObjectSyncDiagnosticKeys.Add(diagnosticKey))
+                    return;
+
+                if (_remainingExactSiegeMissionObjectSyncDiagnosticBudget <= 0)
+                {
+                    if (!_exactSiegeMissionObjectSyncDiagnosticBudgetExhaustedLogged)
+                    {
+                        _exactSiegeMissionObjectSyncDiagnosticBudgetExhaustedLogged = true;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: exact siege SynchronizeMissionObject diagnostics budget exhausted. " +
+                            "Budget=" + ExactSiegeMissionObjectSyncDiagnosticBudget +
+                            " Scene=" + (mission.SceneName ?? "null") + ".");
+                    }
+
+                    return;
+                }
+
+                _remainingExactSiegeMissionObjectSyncDiagnosticBudget--;
+                remainingBudgetAfterReserve = _remainingExactSiegeMissionObjectSyncDiagnosticBudget;
+            }
+
+            MissionObject localMissionObject = TryGetLocalMissionObject(synchronizeMissionObject.MissionObjectId);
+            string localMissionObjectSummary = BuildLocalMissionObjectDiagnosticSummary(localMissionObject);
+            string contractSummary = BuildExactSiegeClientContractDiagnosticSummary(mission, scenarioContext);
+            string exceptionSummary = exception == null
+                ? "none"
+                : exception.GetType().FullName + ":" + exception.Message;
+
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: exact siege SynchronizeMissionObject diagnostic. " +
+                "Stage=" + (stage ?? "unknown") +
+                " MissionObjectId=" + missionObjectIdValue +
+                " MissionState=" + mission.CurrentState +
+                " MissionMode=" + mission.Mode +
+                " LocalMissionObject={" + localMissionObjectSummary + "}" +
+                " Contract={" + contractSummary + "}" +
+                " Exception=" + exceptionSummary +
+                " Extra={" + (extraDetails ?? "none") + "}" +
+                " RemainingBudget=" + remainingBudgetAfterReserve + ".");
+        }
+
+        private static string BuildExactSiegeClientContractDiagnosticSummary(
+            Mission mission,
+            BattleScenarioContextMessage scenarioContext)
+        {
+            bool hasSiegePreparationHandler = mission.GetMissionBehavior<SiegeMissionPreparationHandler>() != null;
+            bool hasSiegeEnginesLogic = mission.GetMissionBehavior<MissionSiegeEnginesLogic>() != null;
+            bool hasSiegeDeploymentHandler = mission.GetMissionBehavior<SiegeDeploymentHandler>() != null;
+            bool hasSiegeDeploymentController = mission.GetMissionBehavior<SiegeDeploymentMissionController>() != null;
+            bool requireDeploymentBridge =
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldInjectWrappedBattleClientDeploymentBehaviors(
+                    mission,
+                    scenarioContext,
+                    out string deploymentBridgePolicy);
+
+            return
+                "RequireDeploymentBridge=" + requireDeploymentBridge +
+                " DeploymentBridgePolicy=" + (deploymentBridgePolicy ?? "unknown") +
+                " HasSiegePreparationHandler=" + hasSiegePreparationHandler +
+                " HasSiegeEnginesLogic=" + hasSiegeEnginesLogic +
+                " HasSiegeDeploymentHandler=" + hasSiegeDeploymentHandler +
+                " HasSiegeDeploymentController=" + hasSiegeDeploymentController;
+        }
+
+        private static string BuildLocalMissionObjectDiagnosticSummary(MissionObject missionObject)
+        {
+            if (missionObject == null)
+                return "null";
+
+            string entityName = "null";
+            try
+            {
+                WeakGameEntity gameEntity = missionObject.GameEntity;
+                entityName = gameEntity.IsValid
+                    ? (gameEntity.Name ?? "null")
+                    : "invalid";
+            }
+            catch (Exception ex)
+            {
+                entityName = "unavailable:" + ex.GetType().Name;
+            }
+
+            return
+                "Type=" + missionObject.GetType().FullName +
+                " RuntimeId=" + GetMissionObjectIdValue(missionObject.Id) +
+                " Entity=" + entityName;
+        }
+
         private static bool MissionHasLocalMissile(int missileIndex)
         {
             if (missileIndex < 0)
@@ -3969,6 +4109,14 @@ namespace CoopSpectator.Patches
                 if (TryGetLocalMissionObject(synchronizeMissionObject.MissionObjectId) == null)
                     continue;
 
+                if (ShouldDelayDeferredClientSynchronizeMissionObjectReplay(
+                        mission,
+                        deferredPayload,
+                        out string _))
+                {
+                    continue;
+                }
+
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
                 try
@@ -3985,6 +4133,13 @@ namespace CoopSpectator.Patches
                 }
                 catch (Exception ex)
                 {
+                    TryLogExactSiegeMissionObjectSyncDiagnostic(
+                        mission,
+                        synchronizeMissionObject,
+                        "deferred-replay-exception",
+                        ex.GetBaseException(),
+                        "Attempts=" + deferredPayload.Attempts +
+                        " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown"));
                     if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
                     {
                         ModLogger.Info(
@@ -3996,6 +4151,91 @@ namespace CoopSpectator.Patches
                     }
                 }
             }
+        }
+
+        private static bool ShouldDelayDeferredClientSynchronizeMissionObjectReplay(
+            Mission mission,
+            DeferredClientSynchronizeMissionObjectPayload deferredPayload,
+            out string reason)
+        {
+            reason = string.Empty;
+            if (mission == null || deferredPayload?.Message == null)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            {
+                return false;
+            }
+
+            if (ShouldDeferExactSiegeMissionObjectSyncUntilClientContractReady(
+                    mission,
+                    out string clientContractReason))
+            {
+                reason =
+                    "SiegeAssaultWithDeployment client-contract-not-ready " +
+                    (clientContractReason ?? "unknown");
+                return true;
+            }
+
+            TimeSpan deferredAge = DateTime.UtcNow - deferredPayload.DeferredUtc;
+            if (deferredAge < DeferredClientSiegeMissionObjectReplayDelay)
+            {
+                reason =
+                    "SiegeAssaultWithDeployment stabilization-window " +
+                    "DeferredAgeMs=" + Math.Max(0, (int)deferredAge.TotalMilliseconds);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool ShouldDeferExactSiegeMissionObjectSyncUntilClientContractReady(
+            Mission mission,
+            out string reason)
+        {
+            reason = string.Empty;
+            if (mission == null)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            {
+                return false;
+            }
+
+            bool hasSiegePreparationHandler = mission.GetMissionBehavior<SiegeMissionPreparationHandler>() != null;
+            bool hasSiegeEnginesLogic = mission.GetMissionBehavior<MissionSiegeEnginesLogic>() != null;
+            bool hasSiegeDeploymentHandler = mission.GetMissionBehavior<SiegeDeploymentHandler>() != null;
+            bool hasSiegeDeploymentController = mission.GetMissionBehavior<SiegeDeploymentMissionController>() != null;
+            bool requireDeploymentBridge =
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldInjectWrappedBattleClientDeploymentBehaviors(
+                    mission,
+                    scenarioContext,
+                    out string deploymentBridgePolicy);
+            if (hasSiegePreparationHandler &&
+                hasSiegeEnginesLogic &&
+                (!requireDeploymentBridge ||
+                 (hasSiegeDeploymentHandler && hasSiegeDeploymentController)))
+            {
+                return false;
+            }
+
+            reason =
+                "Scene=" + (mission.SceneName ?? "null") +
+                " RequireDeploymentBridge=" + requireDeploymentBridge +
+                " DeploymentBridgePolicy=" + deploymentBridgePolicy +
+                " HasSiegePreparationHandler=" + hasSiegePreparationHandler +
+                " HasSiegeEnginesLogic=" + hasSiegeEnginesLogic +
+                " HasSiegeDeploymentHandler=" + hasSiegeDeploymentHandler +
+                " HasSiegeDeploymentController=" + hasSiegeDeploymentController;
+            return true;
         }
 
         private static void TryReplayDeferredClientAttachWeaponToWeaponInAgentEquipmentSlot(
@@ -6790,6 +7030,11 @@ namespace CoopSpectator.Patches
 
                 if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
                 {
+                    TryLogExactSiegeMissionObjectSyncDiagnostic(
+                        mission,
+                        synchronizeMissionObject,
+                        "deferred-snapshot-not-ready",
+                        extraDetails: "SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown"));
                     RegisterDeferredClientSynchronizeMissionObjectPayload(
                         synchronizeMissionObject,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
@@ -6800,8 +7045,31 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (ShouldDeferExactSiegeMissionObjectSyncUntilClientContractReady(
+                        mission,
+                        out string siegeClientContractReason))
+                {
+                    TryLogExactSiegeMissionObjectSyncDiagnostic(
+                        mission,
+                        synchronizeMissionObject,
+                        "deferred-client-contract-not-ready",
+                        extraDetails: "ContractReason=" + (siegeClientContractReason ?? "unknown"));
+                    RegisterDeferredClientSynchronizeMissionObjectPayload(
+                        synchronizeMissionObject,
+                        "siege-client-contract-not-ready:" + (siegeClientContractReason ?? "unknown"));
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client SynchronizeMissionObject until exact siege client contract is ready. " +
+                        "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
+                        " Reason=" + (siegeClientContractReason ?? "unknown"));
+                    return false;
+                }
+
                 if (HasDeferredClientSpawnWeaponWithNewEntityPayload(synchronizeMissionObject.MissionObjectId))
                 {
+                    TryLogExactSiegeMissionObjectSyncDiagnostic(
+                        mission,
+                        synchronizeMissionObject,
+                        "deferred-spawn-weapon-pending");
                     RegisterDeferredClientSynchronizeMissionObjectPayload(
                         synchronizeMissionObject,
                         "spawn-weapon-deferred");
@@ -6813,6 +7081,10 @@ namespace CoopSpectator.Patches
 
                 if (TryGetLocalMissionObject(synchronizeMissionObject.MissionObjectId) == null)
                 {
+                    TryLogExactSiegeMissionObjectSyncDiagnostic(
+                        mission,
+                        synchronizeMissionObject,
+                        "deferred-local-mission-object-missing");
                     RegisterDeferredClientSynchronizeMissionObjectPayload(
                         synchronizeMissionObject,
                         "local-mission-object-missing");
@@ -6829,6 +7101,36 @@ namespace CoopSpectator.Patches
                 ModLogger.Info("BattleMapSpawnHandoffPatch: SynchronizeMissionObject prefix failed open: " + ex.Message);
                 return true;
             }
+        }
+
+        private static Exception MissionNetworkComponent_HandleServerEventSynchronizeMissionObject_Finalizer(
+            Exception __exception,
+            GameNetworkMessage baseMessage)
+        {
+            if (__exception == null)
+                return null;
+
+            try
+            {
+                if (!(baseMessage is SynchronizeMissionObject synchronizeMissionObject))
+                    return __exception;
+
+                Mission mission = Mission.Current;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return __exception;
+
+                TryLogExactSiegeMissionObjectSyncDiagnostic(
+                    mission,
+                    synchronizeMissionObject,
+                    "native-handler-exception",
+                    __exception);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SynchronizeMissionObject finalizer failed open: " + ex.Message);
+            }
+
+            return __exception;
         }
 
         private static bool MissionNetworkComponent_HandleServerEventSpawnWeaponWithNewEntity_Prefix(GameNetworkMessage baseMessage)
@@ -10843,9 +11145,11 @@ namespace CoopSpectator.Patches
 
             int oldOrderSetCount = TryGetCollectionCount(TryGetInstanceMemberValue(existingDataSource, "OrderSets"));
             bool oldIsMultiplayer = TryGetInstanceBool(existingDataSource, "_isMultiplayer");
+            bool desiredIsDeployment = ShouldUseExactCommanderDeploymentAwareOrderVm(mission);
             if (!oldIsMultiplayer)
             {
                 dataSource = existingDataSource;
+                TryRefreshExactCommanderSingleplayerOrderDataSourceDeploymentParameters(mission, orderUiHandler, dataSource);
                 return false;
             }
 
@@ -10861,7 +11165,7 @@ namespace CoopSpectator.Patches
             object replacementDataSource;
             try
             {
-                replacementDataSource = missionOrderVmCtor.Invoke(new object[] { playerOrderController, false, false });
+                replacementDataSource = missionOrderVmCtor.Invoke(new object[] { playerOrderController, desiredIsDeployment, false });
             }
             catch
             {
@@ -10872,7 +11176,7 @@ namespace CoopSpectator.Patches
                 return false;
 
             TrySetInstanceMemberValue(replacementDataSource, "_isMultiplayer", false);
-            bool callbacksConfigured = TryConfigureExactCommanderSingleplayerOrderDataSource(orderUiHandler, replacementDataSource);
+            bool callbacksConfigured = TryConfigureExactCommanderSingleplayerOrderDataSource(mission, orderUiHandler, replacementDataSource);
             if (!callbacksConfigured)
                 return false;
 
@@ -10888,6 +11192,7 @@ namespace CoopSpectator.Patches
             if (inputRestrictions != null)
                 TrySetInstanceMemberValue(replacementDataSource, "InputRestrictions", inputRestrictions);
 
+            TryRefreshExactCommanderSingleplayerOrderDataSourceDeploymentParameters(mission, orderUiHandler, replacementDataSource);
             TryInvokeParameterlessMethod(replacementDataSource, "AfterInitialize");
             object replacementTroopController = TryGetInstanceMemberValue(replacementDataSource, "TroopController");
             TryInvokeParameterlessMethod(replacementTroopController, "UpdateTroops");
@@ -10925,7 +11230,58 @@ namespace CoopSpectator.Patches
             return true;
         }
 
-        private static bool TryConfigureExactCommanderSingleplayerOrderDataSource(object orderUiHandler, object dataSource)
+        private static bool ShouldUseExactCommanderDeploymentAwareOrderVm(Mission mission)
+        {
+            return mission != null &&
+                   ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission) &&
+                   mission.Mode == MissionMode.Deployment;
+        }
+
+        private static List<DeploymentPoint> BuildExactCommanderDeploymentPointList(Mission mission)
+        {
+            if (mission?.ActiveMissionObjects == null)
+                return new List<DeploymentPoint>();
+
+            try
+            {
+                return mission.ActiveMissionObjects
+                    .FindAllWithType<DeploymentPoint>()
+                    .Where(deploymentPoint => deploymentPoint != null && !deploymentPoint.IsDisabled)
+                    .ToList();
+            }
+            catch
+            {
+                return new List<DeploymentPoint>();
+            }
+        }
+
+        private static void TryRefreshExactCommanderSingleplayerOrderDataSourceDeploymentParameters(
+            Mission mission,
+            object orderUiHandler,
+            object dataSource)
+        {
+            if (orderUiHandler == null || dataSource == null)
+                return;
+
+            bool desiredIsDeployment = ShouldUseExactCommanderDeploymentAwareOrderVm(mission);
+            TrySetInstanceMemberValue(dataSource, "IsDeployment", desiredIsDeployment);
+
+            object troopController = TryGetInstanceMemberValue(dataSource, "TroopController");
+            if (troopController != null)
+                TrySetInstanceMemberValue(troopController, "IsDeployment", desiredIsDeployment);
+
+            object missionScreen = TryGetInstanceMemberValue(orderUiHandler, "MissionScreen");
+            object combatCamera = TryGetInstanceMemberValue(missionScreen, "CombatCamera");
+            List<DeploymentPoint> deploymentPoints = desiredIsDeployment
+                ? BuildExactCommanderDeploymentPointList(mission)
+                : new List<DeploymentPoint>();
+            TryInvokeMethod(dataSource, "SetDeploymentParemeters", combatCamera, deploymentPoints);
+        }
+
+        private static bool TryConfigureExactCommanderSingleplayerOrderDataSource(
+            Mission mission,
+            object orderUiHandler,
+            object dataSource)
         {
             if (orderUiHandler == null || dataSource == null)
                 return false;
@@ -10988,8 +11344,7 @@ namespace CoopSpectator.Patches
                 TryInvokeMethod(dataSource, "SetReturnKey", missionOrderCategory.GetGameKey(77));
             }
 
-            object combatCamera = TryGetInstanceMemberValue(missionScreen, "CombatCamera");
-            TryInvokeMethod(dataSource, "SetDeploymentParemeters", combatCamera, new System.Collections.Generic.List<DeploymentPoint>());
+            TryRefreshExactCommanderSingleplayerOrderDataSourceDeploymentParameters(mission, orderUiHandler, dataSource);
             return true;
         }
 
@@ -11017,6 +11372,7 @@ namespace CoopSpectator.Patches
                 dataSource,
                 entryId);
             bool orderBarMovieForced = TryForceExactCommanderOrderBarMovie(orderUiHandler, dataSource);
+            TryRefreshExactCommanderSingleplayerOrderDataSourceDeploymentParameters(mission, orderUiHandler, dataSource);
             bool isMultiplayerNow = TryGetInstanceBool(dataSource, "_isMultiplayer");
             bool canUseShortcutsNow = TryGetInstanceBool(dataSource, "CanUseShortcuts");
             bool changed =

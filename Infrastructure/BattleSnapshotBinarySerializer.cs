@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 5;
+        private const int SchemaVersion = 6;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -63,6 +63,7 @@ namespace CoopSpectator.Infrastructure
                         schemaVersion != 2 &&
                         schemaVersion != 3 &&
                         schemaVersion != 4 &&
+                        schemaVersion != 5 &&
                         schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
@@ -183,6 +184,8 @@ namespace CoopSpectator.Infrastructure
             WriteList(writer, siegeContext.WallHitPointRatios, (listWriter, value) => listWriter.Write(value));
             WriteList(writer, siegeContext.AttackerSiegeEngineTypeIds, WriteString);
             WriteList(writer, siegeContext.DefenderSiegeEngineTypeIds, WriteString);
+            WriteList(writer, siegeContext.AttackerSiegeEngines, WriteBattleSiegeEngineSnapshot);
+            WriteList(writer, siegeContext.DefenderSiegeEngines, WriteBattleSiegeEngineSnapshot);
         }
 
         private static BattleSiegeContextMessage ReadBattleSiegeContext(BinaryReader reader, int schemaVersion)
@@ -203,7 +206,34 @@ namespace CoopSpectator.Infrastructure
                 HasAnySiegeTower = reader.ReadBoolean(),
                 WallHitPointRatios = ReadList(reader, listReader => listReader.ReadSingle()) ?? new List<float>(),
                 AttackerSiegeEngineTypeIds = ReadList(reader, ReadString) ?? new List<string>(),
-                DefenderSiegeEngineTypeIds = ReadList(reader, ReadString) ?? new List<string>()
+                DefenderSiegeEngineTypeIds = ReadList(reader, ReadString) ?? new List<string>(),
+                AttackerSiegeEngines = schemaVersion >= 6
+                    ? ReadList(reader, ReadBattleSiegeEngineSnapshot) ?? new List<BattleSiegeEngineSnapshotMessage>()
+                    : new List<BattleSiegeEngineSnapshotMessage>(),
+                DefenderSiegeEngines = schemaVersion >= 6
+                    ? ReadList(reader, ReadBattleSiegeEngineSnapshot) ?? new List<BattleSiegeEngineSnapshotMessage>()
+                    : new List<BattleSiegeEngineSnapshotMessage>()
+            };
+        }
+
+        private static void WriteBattleSiegeEngineSnapshot(BinaryWriter writer, BattleSiegeEngineSnapshotMessage siegeEngine)
+        {
+            WriteString(writer, siegeEngine?.EngineTypeId);
+            writer.Write(siegeEngine?.Index ?? -1);
+            writer.Write(siegeEngine?.Health ?? 0f);
+            writer.Write(siegeEngine?.InitialHealth ?? 0f);
+            writer.Write(siegeEngine?.MaxHealth ?? 0f);
+        }
+
+        private static BattleSiegeEngineSnapshotMessage ReadBattleSiegeEngineSnapshot(BinaryReader reader)
+        {
+            return new BattleSiegeEngineSnapshotMessage
+            {
+                EngineTypeId = ReadString(reader),
+                Index = reader.ReadInt32(),
+                Health = reader.ReadSingle(),
+                InitialHealth = reader.ReadSingle(),
+                MaxHealth = reader.ReadSingle()
             };
         }
 

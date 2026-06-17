@@ -1,5 +1,7 @@
 using System;
 using CoopSpectator.MissionBehaviors;
+using TaleWorlds.Core;
+using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.Infrastructure
 {
@@ -122,6 +124,18 @@ namespace CoopSpectator.Infrastructure
                 canInjectBodyPropertiesAtCreateAgentTime = payloadDiagnostic.IncludeBodyProperties;
             }
 
+            BattleSideEnum battleSide = ResolveBattleSide(teamIndex);
+            if (ShouldForceDismountedSiegePreSpawnContract(
+                    battleSide,
+                    entryState,
+                    exactTransferContract))
+            {
+                ApplyDismountedSiegePreSpawnContract(exactTransferContract);
+                includeMountVisuals = false;
+                if (payloadDiagnostic != null)
+                    payloadDiagnostic.IncludeMountVisuals = false;
+            }
+
             if (!useContractDrivenPreSpawnPath && contractPlayerControlledOrigin)
             {
                 if (includeCape)
@@ -194,6 +208,57 @@ namespace CoopSpectator.Infrastructure
                    (entryState.IsHero ||
                     !string.IsNullOrWhiteSpace(entryState.HeroId) ||
                     string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static BattleSideEnum ResolveBattleSide(int teamIndex)
+        {
+            if (teamIndex == (int)BattleSideEnum.Attacker)
+                return BattleSideEnum.Attacker;
+
+            if (teamIndex == (int)BattleSideEnum.Defender)
+                return BattleSideEnum.Defender;
+
+            return BattleSideEnum.None;
+        }
+
+        private static bool ShouldForceDismountedSiegePreSpawnContract(
+            BattleSideEnum side,
+            RosterEntryState entryState,
+            ExactTransferSpawnContract contract)
+        {
+            if (side == BattleSideEnum.None ||
+                (entryState?.IsMounted != true && contract?.Mount?.IsMounted != true))
+            {
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            if (mission == null)
+                return false;
+
+            return ExactCampaignArmyBootstrap.TryGetSpawnHorses(mission, side, out bool spawnHorses) &&
+                   !spawnHorses;
+        }
+
+        private static void ApplyDismountedSiegePreSpawnContract(ExactTransferSpawnContract contract)
+        {
+            if (contract == null)
+                return;
+
+            if (contract.Identity != null)
+                contract.Identity.IsMountedExpected = false;
+
+            if (contract.Equipment != null)
+                contract.Equipment.IncludeMountVisualsInPreSpawn = false;
+
+            if (contract.Mount == null)
+                return;
+
+            contract.Mount.IsMounted = false;
+            contract.Mount.HorseItemId = null;
+            contract.Mount.HarnessItemId = null;
+            contract.Mount.ExpectedMountAgentIndex = null;
+            contract.Mount.RequiresVerifiedMountLink = false;
         }
     }
 }

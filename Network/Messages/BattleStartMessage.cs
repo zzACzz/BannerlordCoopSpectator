@@ -86,6 +86,8 @@ namespace CoopSpectator.Network.Messages
         public int WallLevel { get; set; }
         public bool HasAnySiegeTower { get; set; }
         public List<float> WallHitPointRatios { get; set; } = new List<float>();
+        public List<BattleSiegeEngineSnapshotMessage> AttackerSiegeEngines { get; set; } = new List<BattleSiegeEngineSnapshotMessage>();
+        public List<BattleSiegeEngineSnapshotMessage> DefenderSiegeEngines { get; set; } = new List<BattleSiegeEngineSnapshotMessage>();
         public List<string> AttackerSiegeEngineTypeIds { get; set; } = new List<string>();
         public List<string> DefenderSiegeEngineTypeIds { get; set; } = new List<string>();
 
@@ -103,8 +105,47 @@ namespace CoopSpectator.Network.Messages
                 WallLevel = WallLevel,
                 HasAnySiegeTower = HasAnySiegeTower,
                 WallHitPointRatios = WallHitPointRatios != null ? new List<float>(WallHitPointRatios) : new List<float>(),
+                AttackerSiegeEngines = CloneSiegeEngineList(AttackerSiegeEngines),
+                DefenderSiegeEngines = CloneSiegeEngineList(DefenderSiegeEngines),
                 AttackerSiegeEngineTypeIds = AttackerSiegeEngineTypeIds != null ? new List<string>(AttackerSiegeEngineTypeIds) : new List<string>(),
                 DefenderSiegeEngineTypeIds = DefenderSiegeEngineTypeIds != null ? new List<string>(DefenderSiegeEngineTypeIds) : new List<string>()
+            };
+        }
+
+        private static List<BattleSiegeEngineSnapshotMessage> CloneSiegeEngineList(List<BattleSiegeEngineSnapshotMessage> siegeEngines)
+        {
+            var clone = new List<BattleSiegeEngineSnapshotMessage>();
+            if (siegeEngines == null)
+                return clone;
+
+            for (int i = 0; i < siegeEngines.Count; i++)
+            {
+                BattleSiegeEngineSnapshotMessage siegeEngine = siegeEngines[i];
+                if (siegeEngine != null)
+                    clone.Add(siegeEngine.Clone());
+            }
+
+            return clone;
+        }
+    }
+
+    public sealed class BattleSiegeEngineSnapshotMessage
+    {
+        public string EngineTypeId { get; set; }
+        public int Index { get; set; } = -1;
+        public float Health { get; set; }
+        public float InitialHealth { get; set; }
+        public float MaxHealth { get; set; }
+
+        public BattleSiegeEngineSnapshotMessage Clone()
+        {
+            return new BattleSiegeEngineSnapshotMessage
+            {
+                EngineTypeId = EngineTypeId,
+                Index = Index,
+                Health = Health,
+                InitialHealth = InitialHealth,
+                MaxHealth = MaxHealth
             };
         }
     }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -9,6 +10,10 @@ namespace CoopSpectator.Infrastructure
 {
     public static class ExactCampaignObjectCatalogBootstrap
     {
+        private const string CampaignCharacterTypeName = "TaleWorlds.CampaignSystem.CharacterObject";
+        private const string CampaignCultureTypeName = "TaleWorlds.CampaignSystem.CultureObject";
+        private const string CampaignAssemblyName = "TaleWorlds.CampaignSystem";
+
         private static readonly object Sync = new object();
         private static readonly MethodInfo LoadXmlWithGameTypeMethod =
             typeof(MBObjectManager).GetMethod(
@@ -17,10 +22,30 @@ namespace CoopSpectator.Infrastructure
                 null,
                 new[] { typeof(string), typeof(bool), typeof(string), typeof(bool) },
                 null);
-        private static readonly string[] XmlCatalogs =
+        private static readonly MethodInfo RegisterTypeMethod =
+            typeof(MBObjectManager).GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                .FirstOrDefault(method =>
+                    string.Equals(method.Name, "RegisterType", StringComparison.Ordinal) &&
+                    method.IsGenericMethodDefinition &&
+                    method.GetParameters().Length == 5);
+        private static readonly FieldInfo ObjectTypeRecordsField =
+            typeof(MBObjectManager).GetField("ObjectTypeRecords", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly Type ObjectTypeRecordInterfaceType =
+            typeof(MBObjectManager).GetNestedType("IObjectTypeRecord", BindingFlags.NonPublic);
+        private static readonly PropertyInfo ObjectTypeRecordElementNameProperty =
+            ObjectTypeRecordInterfaceType?.GetProperty("ElementName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly PropertyInfo ObjectTypeRecordElementListNameProperty =
+            ObjectTypeRecordInterfaceType?.GetProperty("ElementListName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly PropertyInfo ObjectTypeRecordObjectClassProperty =
+            ObjectTypeRecordInterfaceType?.GetProperty("ObjectClass", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly string[] ItemXmlCatalogs =
         {
             "Items",
-            "EquipmentRosters",
+            "EquipmentRosters"
+        };
+
+        private static readonly string[] CampaignXmlCatalogs =
+        {
             "NPCCharacters",
             "SPCultures"
         };
@@ -42,7 +67,12 @@ namespace CoopSpectator.Infrastructure
             "battania_noble_armor"
         };
 
+        private static readonly TimeSpan RetryCooldown = TimeSpan.FromMinutes(2);
+
         private static bool _loaded;
+        private static bool _attempted;
+        private static int _attemptCount;
+        private static DateTime _nextRetryUtc = DateTime.MinValue;
         private static string _lastSummary = "not-attempted";
 
         public static string LastSummary => _lastSummary;
@@ -68,23 +98,107 @@ namespace CoopSpectator.Infrastructure
                 bool hadItemSamplesBefore = HasResolvedItemSamples(objectManager, out string beforeItemSamples);
                 int characterCountBefore = TryGetCharacterCount(objectManager);
                 int itemCountBefore = TryGetItemCount(objectManager);
-                if (_loaded && hadItemSamplesBefore)
+                Type campaignCharacterType = TryResolveCampaignType(CampaignCharacterTypeName);
+                Type campaignCultureType = TryResolveCampaignType(CampaignCultureTypeName);
+                bool canBootstrapCampaignCharacterCatalogs = campaignCharacterType != null && campaignCultureType != null;
+                bool alreadyResolved =
+                    hadItemSamplesBefore &&
+                    (!canBootstrapCampaignCharacterCatalogs || hadCharacterSamplesBefore);
+
+                if (_loaded && alreadyResolved)
                 {
                     _lastSummary =
                         "already-loaded" +
                         " CharacterCount=" + characterCountBefore +
                         " ItemCount=" + itemCountBefore +
+                        " CampaignCharacterType=" + (campaignCharacterType?.FullName ?? "unavailable") +
+                        " CampaignCultureType=" + (campaignCultureType?.FullName ?? "unavailable") +
                         " CharacterSamples={" + beforeCharacterSamples + "}" +
                         " ItemSamples={" + beforeItemSamples + "}";
                     return true;
                 }
 
-                var results = new List<string>();
-                TryRegisterTypeIfMissing<BasicCharacterObject>(objectManager, "NPCCharacter", "NPCCharacters", 43u, "NPCCharacter", results);
-                TryRegisterTypeIfMissing<BasicCultureObject>(objectManager, "Culture", "SPCultures", 17u, "Culture", results);
+                if (alreadyResolved)
+                {
+                    _loaded = true;
+                    _lastSummary =
+                        "resolved-by-existing-catalogs" +
+                        " CharacterCount=" + characterCountBefore +
+                        " ItemCount=" + itemCountBefore +
+                        " CampaignCharacterType=" + (campaignCharacterType?.FullName ?? "unavailable") +
+                        " CampaignCultureType=" + (campaignCultureType?.FullName ?? "unavailable") +
+                        " CharacterSamples={" + beforeCharacterSamples + "}" +
+                        " ItemSamples={" + beforeItemSamples + "}";
+                    return true;
+                }
 
-                foreach (string xmlCatalog in XmlCatalogs)
-                    TryLoadXml(objectManager, xmlCatalog, results);
+                DateTime utcNow = DateTime.UtcNow;
+                if (_attempted && utcNow < _nextRetryUtc)
+                {
+                    _lastSummary =
+                        "retry-cooldown" +
+                        " Loaded=" + _loaded +
+                        " AttemptCount=" + _attemptCount +
+                        " NextRetryUtc=" + _nextRetryUtc.ToString("O") +
+                        " CharacterCount=" + characterCountBefore +
+                        " ItemCount=" + itemCountBefore +
+                        " CampaignCharacterType=" + (campaignCharacterType?.FullName ?? "unavailable") +
+                        " CampaignCultureType=" + (campaignCultureType?.FullName ?? "unavailable") +
+                        " CharacterSamples={" + beforeCharacterSamples + "}" +
+                        " ItemSamples={" + beforeItemSamples + "}";
+                    return false;
+                }
+
+                _attempted = true;
+                _attemptCount++;
+                _nextRetryUtc = utcNow + RetryCooldown;
+
+                var results = new List<string>();
+                ExactCampaignRuntimeItemRegistry.EnsureCraftingSupportLoadedForBootstrap("exact-object-catalog-bootstrap:" + (source ?? "unknown"));
+
+                TryRegisterCampaignTypeIfMissing(
+                    objectManager,
+                    campaignCharacterType,
+                    "NPCCharacter",
+                    "NPCCharacters",
+                    16u,
+                    "NPCCharacter",
+                    results);
+                TryRegisterCampaignTypeIfMissing(
+                    objectManager,
+                    campaignCultureType,
+                    "Culture",
+                    "SPCultures",
+                    17u,
+                        "Culture",
+                        results);
+
+                if (hadItemSamplesBefore)
+                {
+                    results.Add("ItemCatalogs=skipped-already-resolved");
+                }
+                else
+                {
+                    foreach (string xmlCatalog in ItemXmlCatalogs)
+                        TryLoadXml(objectManager, xmlCatalog, results);
+                }
+
+                if (canBootstrapCampaignCharacterCatalogs)
+                {
+                    if (hadCharacterSamplesBefore)
+                    {
+                        results.Add("CampaignCatalogs=skipped-already-resolved");
+                    }
+                    else
+                    {
+                        foreach (string xmlCatalog in CampaignXmlCatalogs)
+                            TryLoadXml(objectManager, xmlCatalog, results);
+                    }
+                }
+                else
+                {
+                    results.Add("CampaignCatalogs=skipped-campaign-types-unavailable");
+                }
 
                 TryUnregisterNonReadyObjects(objectManager, results);
 
@@ -92,12 +206,16 @@ namespace CoopSpectator.Infrastructure
                 bool hasItemSamplesAfter = HasResolvedItemSamples(objectManager, out string afterItemSamples);
                 int characterCountAfter = TryGetCharacterCount(objectManager);
                 int itemCountAfter = TryGetItemCount(objectManager);
-                _loaded = hasItemSamplesAfter;
+                _loaded =
+                    hasItemSamplesAfter &&
+                    (!canBootstrapCampaignCharacterCatalogs || hasCharacterSamplesAfter);
                 _lastSummary =
                     "CharacterCountBefore=" + characterCountBefore +
                     " CharacterCountAfter=" + characterCountAfter +
                     " ItemCountBefore=" + itemCountBefore +
                     " ItemCountAfter=" + itemCountAfter +
+                    " CampaignCharacterType=" + (campaignCharacterType?.FullName ?? "unavailable") +
+                    " CampaignCultureType=" + (campaignCultureType?.FullName ?? "unavailable") +
                     " CharacterSamplesBefore={" + beforeCharacterSamples + "}" +
                     " CharacterSamplesAfter={" + afterCharacterSamples + "}" +
                     " ItemSamplesBefore={" + beforeItemSamples + "}" +
@@ -114,29 +232,255 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        private static void TryRegisterTypeIfMissing<TObject>(
+        private static void TryRegisterCampaignTypeIfMissing(
             MBObjectManager objectManager,
+            Type objectType,
             string objectNodeName,
             string objectTypeName,
             uint typeId,
             string label,
             List<string> results)
-            where TObject : MBObjectBase
         {
+            if (results == null)
+                return;
+
+            if (objectManager == null)
+            {
+                results.Add(label + "=object-manager-null");
+                return;
+            }
+
+            if (objectType == null)
+            {
+                results.Add(label + "=campaign-type-unavailable");
+                return;
+            }
+
             try
             {
-                if (IsTypeRegistered<TObject>(objectManager))
+                IList records = GetObjectTypeRecords(objectManager);
+                if (records == null)
                 {
-                    results.Add(label + "=already-registered");
+                    results.Add(label + "=object-type-records-unavailable");
                     return;
                 }
 
-                objectManager.RegisterType<TObject>(objectNodeName, objectTypeName, typeId);
-                results.Add(label + "=registered");
+                if (TryFindRecordIndex(records, objectNodeName, objectTypeName, objectType, out int exactRecordIndex))
+                {
+                    results.Add(label + "=already-registered-exact@index:" + exactRecordIndex);
+                    return;
+                }
+
+                int insertionIndex = ResolveInsertionIndex(records, objectNodeName, objectTypeName);
+                RegisterCampaignType(objectManager, objectType, objectNodeName, objectTypeName, typeId);
+                ReorderLastRegisteredRecord(records, objectNodeName, objectTypeName, objectType, insertionIndex);
+
+                records = GetObjectTypeRecords(objectManager);
+                if (TryFindRecordIndex(records, objectNodeName, objectTypeName, objectType, out int registeredIndex))
+                {
+                    results.Add(
+                        label +
+                        "=registered-reflection@index:" + registeredIndex +
+                        (insertionIndex >= 0 ? "/preferred-index:" + insertionIndex : string.Empty));
+                    return;
+                }
+
+                results.Add(label + "=register-verify-failed");
             }
             catch (Exception ex)
             {
                 results.Add(label + "=" + ex.GetType().Name);
+            }
+        }
+
+        private static void RegisterCampaignType(
+            MBObjectManager objectManager,
+            Type objectType,
+            string objectNodeName,
+            string objectTypeName,
+            uint typeId)
+        {
+            if (objectManager == null || objectType == null || RegisterTypeMethod == null)
+                return;
+
+            MethodInfo registerType = RegisterTypeMethod.MakeGenericMethod(objectType);
+            registerType.Invoke(objectManager, new object[] { objectNodeName, objectTypeName, typeId, true, false });
+        }
+
+        private static Type TryResolveCampaignType(string fullTypeName)
+        {
+            if (string.IsNullOrWhiteSpace(fullTypeName))
+                return null;
+
+            Type directType = Type.GetType(fullTypeName + ", " + CampaignAssemblyName, throwOnError: false);
+            if (directType != null)
+                return directType;
+
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (assembly == null)
+                    continue;
+
+                AssemblyName assemblyName = assembly.GetName();
+                if (!string.Equals(assemblyName?.Name, CampaignAssemblyName, StringComparison.Ordinal))
+                    continue;
+
+                Type resolvedType = assembly.GetType(fullTypeName, throwOnError: false, ignoreCase: false);
+                if (resolvedType != null)
+                    return resolvedType;
+            }
+
+            return null;
+        }
+
+        private static IList GetObjectTypeRecords(MBObjectManager objectManager)
+        {
+            if (objectManager == null || ObjectTypeRecordsField == null)
+                return null;
+
+            try
+            {
+                return ObjectTypeRecordsField.GetValue(objectManager) as IList;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool TryFindRecordIndex(
+            IList records,
+            string elementName,
+            string elementListName,
+            Type objectType,
+            out int index)
+        {
+            index = -1;
+            if (records == null)
+                return false;
+
+            for (int i = 0; i < records.Count; i++)
+            {
+                object record = records[i];
+                if (record == null)
+                    continue;
+
+                if (string.Equals(GetRecordElementName(record), elementName, StringComparison.Ordinal) &&
+                    string.Equals(GetRecordElementListName(record), elementListName, StringComparison.Ordinal) &&
+                    GetRecordObjectClass(record) == objectType)
+                {
+                    index = i;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static int ResolveInsertionIndex(IList records, string elementName, string elementListName)
+        {
+            if (records == null)
+                return -1;
+
+            int firstElementNameIndex = FindFirstRecordIndex(
+                records,
+                record => string.Equals(GetRecordElementName(record), elementName, StringComparison.Ordinal));
+            int firstElementListNameIndex = FindFirstRecordIndex(
+                records,
+                record => string.Equals(GetRecordElementListName(record), elementListName, StringComparison.Ordinal));
+
+            if (firstElementNameIndex >= 0 && firstElementListNameIndex >= 0)
+                return Math.Min(firstElementNameIndex, firstElementListNameIndex);
+
+            return Math.Max(firstElementNameIndex, firstElementListNameIndex);
+        }
+
+        private static int FindFirstRecordIndex(IList records, Func<object, bool> predicate)
+        {
+            if (records == null || predicate == null)
+                return -1;
+
+            for (int i = 0; i < records.Count; i++)
+            {
+                object record = records[i];
+                if (record != null && predicate(record))
+                    return i;
+            }
+
+            return -1;
+        }
+
+        private static void ReorderLastRegisteredRecord(
+            IList records,
+            string elementName,
+            string elementListName,
+            Type objectType,
+            int preferredIndex)
+        {
+            if (records == null || objectType == null)
+                return;
+
+            int registeredIndex = -1;
+            for (int i = records.Count - 1; i >= 0; i--)
+            {
+                object record = records[i];
+                if (record == null)
+                    continue;
+
+                if (string.Equals(GetRecordElementName(record), elementName, StringComparison.Ordinal) &&
+                    string.Equals(GetRecordElementListName(record), elementListName, StringComparison.Ordinal) &&
+                    GetRecordObjectClass(record) == objectType)
+                {
+                    registeredIndex = i;
+                    break;
+                }
+            }
+
+            if (registeredIndex < 0 || preferredIndex < 0 || registeredIndex == preferredIndex)
+                return;
+
+            object recordToMove = records[registeredIndex];
+            records.RemoveAt(registeredIndex);
+            if (preferredIndex > registeredIndex)
+                preferredIndex--;
+
+            preferredIndex = Math.Max(0, Math.Min(preferredIndex, records.Count));
+            records.Insert(preferredIndex, recordToMove);
+        }
+
+        private static string GetRecordElementName(object record)
+        {
+            try
+            {
+                return ObjectTypeRecordElementNameProperty?.GetValue(record, null) as string;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string GetRecordElementListName(object record)
+        {
+            try
+            {
+                return ObjectTypeRecordElementListNameProperty?.GetValue(record, null) as string;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Type GetRecordObjectClass(object record)
+        {
+            try
+            {
+                return ObjectTypeRecordObjectClassProperty?.GetValue(record, null) as Type;
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -176,33 +520,33 @@ namespace CoopSpectator.Infrastructure
         private static bool HasResolvedCharacterSamples(MBObjectManager objectManager, out string samples)
         {
             var parts = new List<string>(SampleCharacterIds.Length);
-            bool anyResolved = false;
+            bool allResolved = SampleCharacterIds.Length > 0;
             foreach (string sampleCharacterId in SampleCharacterIds)
             {
                 BasicCharacterObject character = TryResolveCharacter(objectManager, sampleCharacterId);
                 bool resolved = character != null;
-                anyResolved |= resolved;
+                allResolved &= resolved;
                 parts.Add(sampleCharacterId + "=" + resolved);
             }
 
             samples = string.Join(", ", parts);
-            return anyResolved;
+            return allResolved;
         }
 
         private static bool HasResolvedItemSamples(MBObjectManager objectManager, out string samples)
         {
             var parts = new List<string>(SampleItemIds.Length);
-            bool anyResolved = false;
+            bool allResolved = SampleItemIds.Length > 0;
             foreach (string sampleItemId in SampleItemIds)
             {
                 ItemObject item = TryResolveItem(objectManager, sampleItemId);
                 bool resolved = item != null;
-                anyResolved |= resolved;
+                allResolved &= resolved;
                 parts.Add(sampleItemId + "=" + resolved);
             }
 
             samples = string.Join(", ", parts);
-            return anyResolved;
+            return allResolved;
         }
 
         private static int TryGetCharacterCount(MBObjectManager objectManager)
@@ -229,22 +573,6 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        private static bool IsTypeRegistered<TObject>(MBObjectManager objectManager)
-            where TObject : MBObjectBase
-        {
-            if (objectManager == null)
-                return false;
-
-            try
-            {
-                return objectManager.GetObjectTypeList<TObject>() != null;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         private static BasicCharacterObject TryResolveCharacter(MBObjectManager objectManager, string characterId)
         {
             if (objectManager == null || string.IsNullOrWhiteSpace(characterId))
@@ -252,7 +580,8 @@ namespace CoopSpectator.Infrastructure
 
             try
             {
-                return objectManager.GetObject<BasicCharacterObject>(characterId);
+                return objectManager.GetObject("NPCCharacter", characterId) as BasicCharacterObject ??
+                       objectManager.GetObject<BasicCharacterObject>(characterId);
             }
             catch
             {

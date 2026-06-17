@@ -33,6 +33,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
         // BattleShellSuppressionPatch aggressively hijacks native mission-loading lifecycle
         // and correlates with host/client/dedicated access-violation crashes during mission load.
         private const bool EnableManualPatchMissionFlowBattleShell = false;
+        private const bool EnableManualPatchMissionFlowSiegeClientLoadingDiagnostics = true;
         private const bool EnableManualPatchMissionFlowBattleRuntime = true;
         private const bool EnableManualPatchMissionFlowBattleRuntimeEntryUi = true;
         private const bool EnableManualPatchMissionFlowBattleRuntimeSpawnHandoff = true;
@@ -121,6 +122,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                 $"MissionFlowUi={EnableManualPatchMissionFlowUi}, " +
                 $"OpenNew={EnableManualPatchMissionFlowOpenNew}, " +
                 $"BattleShell={EnableManualPatchMissionFlowBattleShell}, " +
+                $"SiegeClientLoadingDiagnostics={EnableManualPatchMissionFlowSiegeClientLoadingDiagnostics}, " +
                 $"BattleRuntime={EnableManualPatchMissionFlowBattleRuntime}, " +
                 $"EntryUi={EnableManualPatchMissionFlowBattleRuntimeEntryUi}, " +
                 $"SpawnHandoff={EnableManualPatchMissionFlowBattleRuntimeSpawnHandoff}, " +
@@ -232,6 +234,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                             {
                                 VanillaEntryUiSuppressionPatch.Apply(harmony);
                                 BattleMapHudSuppressionPatch.Apply(harmony);
+                                SiegeMissionGameTypeAliasPatch.Apply(harmony);
                             }
                             else
                             {
@@ -299,6 +302,15 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         else
                         {
                             ModLogger.Info("Startup isolation: skipped mission-flow battle-shell Apply(...) patch subgroup.");
+                        }
+
+                        if (EnableManualPatchMissionFlowSiegeClientLoadingDiagnostics)
+                        {
+                            BattleShellSuppressionPatch.ApplyClientMissionLoadingDiagnosticsOnly(harmony);
+                        }
+                        else
+                        {
+                            ModLogger.Info("Startup isolation: skipped mission-flow siege client loading diagnostics Apply(...) patch subgroup.");
                         }
                     }
                     else

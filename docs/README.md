@@ -16,6 +16,8 @@ Read in this order when opening a new window:
 
 ## Active Runtime Status
 
+- `docs/SIEGE_BATTLE_STATUS_AND_PROGRESS_2026-06-11.md`
+  Current siege-battle status and progress: subtype routing, exact bootstrap split, LordsHall indoor controller, Blockade guardrails, and the remaining live test matrix.
 - `docs/COOP_BATTLE_STABILIZATION_AND_CONNECTIVITY_HANDOFF_2026-04-18.md`
   Current move-on handoff after the battle/runtime recovery: what was stabilized, which low-level lessons actually worked, and which runtime files should now be treated as protected while connectivity work starts.
 - `docs/NEW_WINDOW_PROMPT_PUBLIC_OFFICIAL_AND_RADMIN_VPN_2026-04-18.md`

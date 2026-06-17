@@ -36,6 +36,16 @@ namespace CoopSpectator.MissionBehaviors
             return wroteSide || wroteEntry;
         }
 
+        public static bool TryBeginCommanderDeployment(BattleSideEnum side, string entryId, string source)
+        {
+            TrySelectEntry(side, entryId, (source ?? "commander-deployment") + " SelectEntry");
+            return TrySendClientRequest(
+                CoopBattleSelectionRequestKind.BeginCommanderDeployment,
+                side,
+                entryId,
+                (source ?? "commander-deployment") + " BeginCommanderDeployment");
+        }
+
         public static bool TrySelectSpectator(string source)
         {
             if (TrySendClientRequest(CoopBattleSelectionRequestKind.Spectate, BattleSideEnum.None, string.Empty, source))
@@ -99,7 +109,8 @@ namespace CoopSpectator.MissionBehaviors
         {
             reason = null;
             if (requestKind != CoopBattleSelectionRequestKind.SelectEntry &&
-                requestKind != CoopBattleSelectionRequestKind.SpawnNow)
+                requestKind != CoopBattleSelectionRequestKind.SpawnNow &&
+                requestKind != CoopBattleSelectionRequestKind.BeginCommanderDeployment)
             {
                 return false;
             }
@@ -620,12 +631,14 @@ namespace CoopSpectator.MissionBehaviors
                 bool shouldForceImmediateStatus =
                     message.RequestKind == CoopBattleSelectionRequestKind.SpawnNow ||
                     message.RequestKind == CoopBattleSelectionRequestKind.ForceRespawnable ||
-                    message.RequestKind == CoopBattleSelectionRequestKind.Spectate;
+                    message.RequestKind == CoopBattleSelectionRequestKind.Spectate ||
+                    message.RequestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment;
                 bool shouldForceStatusAfterRejectedInteractiveRequest =
                     !applied &&
                     (message.RequestKind == CoopBattleSelectionRequestKind.SelectSide ||
                      message.RequestKind == CoopBattleSelectionRequestKind.SelectEntry ||
-                     message.RequestKind == CoopBattleSelectionRequestKind.SpawnNow);
+                     message.RequestKind == CoopBattleSelectionRequestKind.SpawnNow ||
+                     message.RequestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment);
                 if ((applied && shouldForceImmediateStatus) || shouldForceStatusAfterRejectedInteractiveRequest)
                     TrySendImmediatePeerStatusPayloads(peer);
             }
@@ -1004,7 +1017,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (!IsEligibleRemotePeer(peer))
                     continue;
 
-                if (!IsPeerCurrentBattleSnapshotBootstrapReady(peer, out _))
+                if (!AreBootstrapDependentPeerPayloadsReady(peer, out _))
                     continue;
 
                 TrySendEntryStatusToPeer(peer, force: false);
@@ -1021,7 +1034,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (!IsEligibleRemotePeer(peer))
                     continue;
 
-                if (!IsPeerCurrentBattleSnapshotBootstrapReady(peer, out _))
+                if (!AreBootstrapDependentPeerPayloadsReady(peer, out _))
                     continue;
 
                 TrySendMaterializedAgentEntrySnapshotToPeer(peer, force: false);
@@ -1033,17 +1046,40 @@ namespace CoopSpectator.MissionBehaviors
             if (!IsEligibleRemotePeer(peer))
                 return;
 
-            if (!IsPeerCurrentBattleSnapshotBootstrapReady(peer, out string readinessSummary))
+            if (!AreBootstrapDependentPeerPayloadsReady(peer, out string readinessSummary))
             {
                 ModLogger.Info(
-                    "CoopMissionNetworkBridge: withheld bootstrap-dependent peer payloads until battle snapshot is acknowledged. " +
+                    "CoopMissionNetworkBridge: withheld bootstrap-dependent peer payloads until runtime bootstrap is ready. " +
                     "Peer=" + (peer.UserName ?? "null") +
-                    " SnapshotReadiness=" + (readinessSummary ?? "unknown"));
+                    " Readiness=" + (readinessSummary ?? "unknown"));
                 return;
             }
 
             TrySendMaterializedAgentEntrySnapshotToPeer(peer, force: true);
             TrySendEntryStatusToPeer(peer, force: true);
+        }
+
+        private bool AreBootstrapDependentPeerPayloadsReady(NetworkCommunicator peer, out string readinessSummary)
+        {
+            readinessSummary = string.Empty;
+            if (!IsPeerCurrentBattleSnapshotBootstrapReady(peer, out string snapshotReadinessSummary))
+            {
+                readinessSummary = "BattleSnapshot={" + (snapshotReadinessSummary ?? "unknown") + "}";
+                return false;
+            }
+
+            if (!CoopMissionSpawnLogic.AreAuthoritativePeerPayloadsReady(Mission, out string payloadReadinessSummary))
+            {
+                readinessSummary =
+                    "BattleSnapshot={" + (snapshotReadinessSummary ?? "unknown") + "} " +
+                    "Runtime={" + (payloadReadinessSummary ?? "unknown") + "}";
+                return false;
+            }
+
+            readinessSummary =
+                "BattleSnapshot={" + (snapshotReadinessSummary ?? "unknown") + "} " +
+                "Runtime={" + (payloadReadinessSummary ?? "unknown") + "}";
+            return true;
         }
 
         private void TrySendMaterializedAgentEntrySnapshotToPeer(NetworkCommunicator peer, bool force)

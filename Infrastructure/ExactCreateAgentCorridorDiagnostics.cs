@@ -22,6 +22,8 @@ namespace CoopSpectator.Infrastructure
         private static readonly Dictionary<int, ServerCreateAgentExpectedState> ServerStatesByAgentIndex =
             new Dictionary<int, ServerCreateAgentExpectedState>();
 
+        private static bool IsVerboseEnabled => ExperimentalFeatures.EnableExactCreateAgentCorridorDiagnostics;
+
         private sealed class ClientCreateAgentCorridorState
         {
             public int AgentIndex { get; set; }
@@ -180,6 +182,9 @@ namespace CoopSpectator.Infrastructure
                 };
             }
 
+            if (!IsVerboseEnabled)
+                return;
+
             string details =
                 "EntryId=" + (entryState.EntryId ?? "null") +
                 " TroopId=" + (exactOrigin.TroopId ?? "null") +
@@ -251,6 +256,9 @@ namespace CoopSpectator.Infrastructure
                         };
                     }
                 }
+
+                if (!IsVerboseEnabled)
+                    return;
 
                 string details =
                     "EntryId=" + (exactOrigin.EntryId ?? "null") +
@@ -417,6 +425,9 @@ namespace CoopSpectator.Infrastructure
             if (onWriteCount > 1)
                 return;
 
+            if (!IsVerboseEnabled)
+                return;
+
             WeaponSlotSnapshot[] actualMissionSlots = BuildMissionEquipmentWeaponSlots(createAgent.MissionEquipment);
             string details =
                 "AgentIndex=" + createAgent.AgentIndex +
@@ -538,6 +549,9 @@ namespace CoopSpectator.Infrastructure
                 onReadCount = state.CreateAgentOnReadEventCount;
             }
 
+            if (!IsVerboseEnabled)
+                return;
+
             WeaponSlotSnapshot[] actualMissionSlots = BuildMissionEquipmentWeaponSlots(createAgent.MissionEquipment);
             if (!HasSuspiciousNonWeaponFamilies(actualMissionSlots))
                 return;
@@ -568,15 +582,26 @@ namespace CoopSpectator.Infrastructure
             if (GameNetwork.IsServer || createAgent == null)
                 return;
 
+            string snapshotSummary =
+                "SnapshotReady=" + snapshotReady +
+                " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown");
+            ClientCreateAgentCorridorState state = GetOrCreateState(createAgent.AgentIndex);
+            if (!IsVerboseEnabled)
+            {
+                lock (Sync)
+                {
+                    state.SnapshotReadinessSummary = snapshotSummary;
+                    state.LastObservedUtc = DateTime.UtcNow;
+                }
+
+                return;
+            }
+
             string payloadSummary = BuildCreateAgentPayloadSummary(createAgent);
             string candidateSummary = BuildCreateAgentCandidateSummary(
                 createAgent,
                 out string candidateEntryId,
                 out string candidatePayloadComparisonSummary);
-            string snapshotSummary =
-                "SnapshotReady=" + snapshotReady +
-                " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown");
-            ClientCreateAgentCorridorState state = GetOrCreateState(createAgent.AgentIndex);
             lock (Sync)
             {
                 state.LastPayloadSummary = payloadSummary;
@@ -608,6 +633,17 @@ namespace CoopSpectator.Infrastructure
                 return;
 
             ClientCreateAgentCorridorState state = GetOrCreateState(createAgent.AgentIndex);
+            if (!IsVerboseEnabled)
+            {
+                lock (Sync)
+                {
+                    state.LastBypassReason = reason ?? "unknown";
+                    state.LastObservedUtc = DateTime.UtcNow;
+                }
+
+                return;
+            }
+
             string payloadSummary = BuildCreateAgentPayloadSummary(createAgent);
             string candidateSummary = BuildCreateAgentCandidateSummary(
                 createAgent,
@@ -642,6 +678,17 @@ namespace CoopSpectator.Infrastructure
                 return;
 
             ClientCreateAgentCorridorState state = GetOrCreateState(createAgent.AgentIndex);
+            if (!IsVerboseEnabled)
+            {
+                lock (Sync)
+                {
+                    state.LastMutationSummary = mutationSummary;
+                    state.LastObservedUtc = DateTime.UtcNow;
+                }
+
+                return;
+            }
+
             string payloadSummary = BuildCreateAgentPayloadSummary(createAgent);
             string candidateSummary = BuildCreateAgentCandidateSummary(
                 createAgent,
@@ -679,6 +726,17 @@ namespace CoopSpectator.Infrastructure
                 return;
 
             ClientCreateAgentCorridorState state = GetOrCreateState(createAgent.AgentIndex);
+            if (!IsVerboseEnabled)
+            {
+                lock (Sync)
+                {
+                    state.CreateAgentPostfixObserved = true;
+                    state.LastObservedUtc = DateTime.UtcNow;
+                }
+
+                return;
+            }
+
             string resolvedEntrySummary = BuildResolvedEntrySummary(agent, out string resolvedEntryId);
             string candidatePayloadComparisonSummary;
             lock (Sync)
@@ -769,6 +827,9 @@ namespace CoopSpectator.Infrastructure
             if (syncCount > 2)
                 return;
 
+            if (!IsVerboseEnabled)
+                return;
+
             string details =
                 "AgentIndex=" + message.AgentIndex +
                 " SyncCount=" + syncCount +
@@ -790,15 +851,22 @@ namespace CoopSpectator.Infrastructure
 
             ClientCreateAgentCorridorState state = GetOrCreateState(message.AgentIndex);
             int wieldCount;
+            lock (Sync)
+            {
+                state.WieldEventCount++;
+                state.LastObservedUtc = DateTime.UtcNow;
+                wieldCount = state.WieldEventCount;
+            }
+
+            if (!IsVerboseEnabled)
+                return;
+
             string payloadSummary = BuildSetWieldedPayloadSummary(message);
             string resolvedEntrySummary = BuildResolvedEntrySummary(agent, out string resolvedEntryId);
             lock (Sync)
             {
-                state.WieldEventCount++;
                 state.LastResolvedEntrySummary = resolvedEntrySummary;
                 state.LastResolvedEntryId = resolvedEntryId;
-                state.LastObservedUtc = DateTime.UtcNow;
-                wieldCount = state.WieldEventCount;
             }
 
             if (!suppressed &&
@@ -1797,6 +1865,9 @@ namespace CoopSpectator.Infrastructure
 
         private static void Log(string eventName, string details, bool persistToRuntimeBundle)
         {
+            if (!persistToRuntimeBundle && !IsVerboseEnabled)
+                return;
+
             ModLogger.Info(
                 "ExactCreateAgentCorridorDiagnostics: " +
                 (eventName ?? "unknown") +

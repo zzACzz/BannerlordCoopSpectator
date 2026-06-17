@@ -57,6 +57,23 @@ namespace CoopSpectator.Infrastructure
         private static bool _craftingSupportLoaded;
         private static string _craftingSupportSummary = "not-loaded";
 
+        internal static void EnsureCraftingSupportLoadedForBootstrap(string source)
+        {
+            MBObjectManager objectManager = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
+            if (objectManager == null)
+            {
+                ModLogger.Info(
+                    "ExactCampaignRuntimeItemRegistry: crafting support bootstrap skipped because object manager is null. " +
+                    "Source=" + (source ?? "unknown"));
+                return;
+            }
+
+            lock (Sync)
+            {
+                EnsureCraftingSupportLoaded(objectManager);
+            }
+        }
+
         public static void EnsureLoadedFromState(BattleRuntimeState runtimeState, string source)
         {
             if (!ExperimentalFeatures.EnableExactCampaignRuntimeItemRegistry || runtimeState == null)

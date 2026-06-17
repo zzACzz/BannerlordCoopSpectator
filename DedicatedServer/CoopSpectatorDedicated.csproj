@@ -37,6 +37,9 @@
     <Compile Include="SubModule.cs" />
     <Compile Include="SceneContractProbe.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattleMode.cs" Link="GameMode\MissionMultiplayerCoopBattleMode.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.cs" Link="GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeployment.cs" Link="GameMode\MissionMultiplayerCoopSiegeAssaultWithDeployment.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentClient.cs" Link="GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentClient.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattle.cs" Link="GameMode\MissionMultiplayerCoopBattle.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattleClient.cs" Link="GameMode\MissionMultiplayerCoopBattleClient.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopTdmMode.cs" Link="GameMode\MissionMultiplayerCoopTdmMode.cs" />
@@ -76,6 +79,7 @@
     <Compile Include="..\Infrastructure\ExactCampaignArmyBootstrap.cs" Link="Infrastructure\ExactCampaignArmyBootstrap.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultNoDeploymentRuntime.cs" Link="Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultNoDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultWithDeploymentRuntime.cs" Link="Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultWithDeploymentRuntime.cs" />
+    <Compile Include="..\Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs" Link="Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />

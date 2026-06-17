@@ -611,6 +611,8 @@ namespace CoopSpectator.Patches
 
             return mission.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null ||
                    mission.GetMissionBehavior<MissionMultiplayerCoopBattleClient>() != null ||
+                   mission.GetMissionBehavior<MissionMultiplayerCoopSiegeAssaultWithDeployment>() != null ||
+                   mission.GetMissionBehavior<MissionMultiplayerCoopSiegeAssaultWithDeploymentClient>() != null ||
                    mission.GetMissionBehavior<CoopMissionClientLogic>() != null ||
                    mission.GetMissionBehavior<CoopMissionSpawnLogic>() != null ||
                    mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null ||
@@ -906,6 +908,8 @@ namespace CoopSpectator.Patches
                 " SessionActive=" + GameNetwork.IsSessionActive +
                 " HasCoopBattleBehavior=" + (mission?.GetMissionBehavior<MissionMultiplayerCoopBattle>() != null) +
                 " HasCoopBattleClientBehavior=" + (mission?.GetMissionBehavior<MissionMultiplayerCoopBattleClient>() != null) +
+                " HasCoopSiegeBehavior=" + (mission?.GetMissionBehavior<MissionMultiplayerCoopSiegeAssaultWithDeployment>() != null) +
+                " HasCoopSiegeClientBehavior=" + (mission?.GetMissionBehavior<MissionMultiplayerCoopSiegeAssaultWithDeploymentClient>() != null) +
                 " HasCoopMissionClientLogic=" + (mission?.GetMissionBehavior<CoopMissionClientLogic>() != null) +
                 " HasCoopMissionSpawnLogic=" + (mission?.GetMissionBehavior<CoopMissionSpawnLogic>() != null) +
                 " HasCoopMissionNetworkBridge=" + (mission?.GetMissionBehavior<CoopMissionNetworkBridge>() != null) +

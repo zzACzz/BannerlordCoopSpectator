@@ -33,12 +33,19 @@ namespace CoopSpectator.Infrastructure
         private static Team _activePlayerTeam;
         private static Team _activePlayerEnemyTeam;
         private static bool _reinforcementsEnabled;
+        private static Mission _initialStackSpawnLogicMission;
+        private static NativeMissionAgentSpawnLogic _initialStackSpawnLogic;
+        private static IMissionTroopSupplier[] _initialStackSuppliers;
+        private static int _initialStackDefenderTotal;
+        private static int _initialStackAttackerTotal;
+        private static string _initialStackSupplierDiagnostics = string.Empty;
         private static DateTime _nextDeferredLogUtc = DateTime.MinValue;
         private static DateTime _nextRuntimeDiagnosticsLogUtc = DateTime.MinValue;
         private static string _lastRuntimeDiagnosticsSummary = string.Empty;
         private static Mission _spawnLogicInitSideOverrideMission;
         private static BattleSideEnum _spawnLogicInitSideOverride = BattleSideEnum.None;
         private static int _spawnLogicInitSideOverrideDepth;
+        private static readonly HashSet<Team> SpawnLogicInitTemporaryNonBattleTeams = new HashSet<Team>();
         private static Mission _lastLoggedTeamAiActivationStateMission;
         private static string _lastLoggedTeamAiActivationStateKey = string.Empty;
         private static readonly FieldInfo TeamSideBackingField =
@@ -94,11 +101,51 @@ namespace CoopSpectator.Infrastructure
                    _activeMode != ActiveBootstrapMode.None;
         }
 
+        public static bool TryGetSpawnHorses(Mission mission, BattleSideEnum side, out bool spawnHorses)
+        {
+            spawnHorses = false;
+            if (mission == null ||
+                side == BattleSideEnum.None ||
+                !ReferenceEquals(_activeMission, mission) ||
+                !UsesSpawnLogicRuntimeMode(_activeMode) ||
+                _activeSpawnLogic == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                spawnHorses = _activeSpawnLogic.GetSpawnHorses(side);
+                return true;
+            }
+            catch
+            {
+                spawnHorses = false;
+                return false;
+            }
+        }
+
         private static bool UsesSpawnLogicRuntimeMode(ActiveBootstrapMode mode)
         {
             return mode == ActiveBootstrapMode.NativeSpawnLogic ||
                    mode == ActiveBootstrapMode.SiegeAssaultNoDeployment ||
                    mode == ActiveBootstrapMode.SiegeAssaultWithDeployment;
+        }
+
+        public static bool TryGetSpawnLogicInitTeamSideOverride(
+            Team team,
+            BattleSideEnum currentSide,
+            out BattleSideEnum overrideSide)
+        {
+            if (team?.Mission != null &&
+                SpawnLogicInitTemporaryNonBattleTeams.Contains(team) &&
+                TryGetSpawnLogicInitTeamSideOverride(team.Mission, currentSide, out overrideSide))
+            {
+                return true;
+            }
+
+            overrideSide = BattleSideEnum.None;
+            return false;
         }
 
         public static bool TryGetSpawnLogicInitTeamSideOverride(
@@ -120,10 +167,24 @@ namespace CoopSpectator.Infrastructure
             return false;
         }
 
+        public static bool IsSpawnLogicInitTemporaryNonBattleTeam(Mission mission, Team team)
+        {
+            return mission != null &&
+                   team != null &&
+                   ReferenceEquals(_spawnLogicInitSideOverrideMission, mission) &&
+                   _spawnLogicInitSideOverrideDepth > 0 &&
+                   SpawnLogicInitTemporaryNonBattleTeams.Contains(team);
+        }
+
         public static void ResetForMission(Mission mission)
         {
             if (ReferenceEquals(_activeMission, mission))
                 return;
+
+            if (_activeMission != null)
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.ResetRuntimeState(
+                    _activeMission,
+                    "ExactCampaignArmyBootstrap.ResetForMission");
 
             if (_activeMission != null)
                 _activeMission.OnBeforeAgentRemoved -= OnMissionBeforeAgentRemoved;
@@ -139,11 +200,130 @@ namespace CoopSpectator.Infrastructure
             _activePlayerTeam = null;
             _activePlayerEnemyTeam = null;
             _reinforcementsEnabled = false;
+            SpawnLogicInitTemporaryNonBattleTeams.Clear();
+            if (!ReferenceEquals(_initialStackSpawnLogicMission, mission))
+            {
+                _initialStackSpawnLogicMission = null;
+                _initialStackSpawnLogic = null;
+                _initialStackSuppliers = null;
+                _initialStackDefenderTotal = 0;
+                _initialStackAttackerTotal = 0;
+                _initialStackSupplierDiagnostics = string.Empty;
+            }
             _nextDeferredLogUtc = DateTime.MinValue;
             _nextRuntimeDiagnosticsLogUtc = DateTime.MinValue;
             _lastRuntimeDiagnosticsSummary = string.Empty;
             _lastLoggedTeamAiActivationStateMission = null;
             _lastLoggedTeamAiActivationStateKey = string.Empty;
+        }
+
+        public static bool TryCreateInitialSiegeAssaultWithDeploymentSpawnLogic(
+            Mission mission,
+            BattleSideEnum playerSide,
+            string source,
+            out BattleSpawnLogic battleSpawnLogic,
+            out NativeMissionAgentSpawnLogic spawnLogic,
+            out BattleReinforcementsSpawnController battleReinforcementsSpawnController,
+            out string diagnostics)
+        {
+            battleSpawnLogic = null;
+            spawnLogic = null;
+            battleReinforcementsSpawnController = null;
+            diagnostics = "mission-null";
+
+            try
+            {
+                if (!ExperimentalFeatures.EnableSiegeReplayInitialNativeSpawnLogicBootstrap)
+                {
+                    diagnostics = "feature-disabled";
+                    return false;
+                }
+
+                if (!GameNetwork.IsServer)
+                {
+                    diagnostics = "not-server";
+                    return false;
+                }
+
+                if (mission == null)
+                    return false;
+
+                if (playerSide == BattleSideEnum.None)
+                {
+                    diagnostics = "player-side-none";
+                    return false;
+                }
+
+                string sceneName = mission.SceneName ?? string.Empty;
+                if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(sceneName))
+                {
+                    diagnostics = "scene-not-exact-campaign Scene=" + sceneName;
+                    return false;
+                }
+
+                BattleScenarioContextMessage scenarioContext = ResolveScenarioContextForMission(mission);
+                if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                {
+                    diagnostics =
+                        "not-siege-assault-with-deployment " +
+                        "ScenarioKind=" + (scenarioContext?.ScenarioKind ?? "null") +
+                        " SiegeSubtype=" + (scenarioContext?.SiegeContext?.SiegeSubtype ?? "null") +
+                        " MissionShell=" + (scenarioContext?.SiegeContext?.MissionShell ?? "null");
+                    return false;
+                }
+
+                if (!TryResolveBootstrapScenarioContract(
+                        scenarioContext,
+                        out string battleSpawnTag,
+                        out Mission.BattleSizeType battleSizeType,
+                        out string scenarioContractReason))
+                {
+                    diagnostics = scenarioContractReason ?? "scenario-contract-rejected";
+                    return false;
+                }
+
+                if (!TryBuildSuppliers(
+                        playerSide,
+                        scenarioContext,
+                        out IMissionTroopSupplier[] suppliers,
+                        out int defenderTotal,
+                        out int attackerTotal,
+                        out string supplierDiagnostics))
+                {
+                    diagnostics = supplierDiagnostics ?? "supplier-build-failed";
+                    return false;
+                }
+
+                battleSpawnLogic = new BattleSpawnLogic(battleSpawnTag);
+                spawnLogic = new NativeMissionAgentSpawnLogic(suppliers, playerSide, battleSizeType);
+                battleReinforcementsSpawnController = new BattleReinforcementsSpawnController();
+                _initialStackSpawnLogicMission = mission;
+                _initialStackSpawnLogic = spawnLogic;
+                _initialStackSuppliers = suppliers;
+                _initialStackDefenderTotal = defenderTotal;
+                _initialStackAttackerTotal = attackerTotal;
+                _initialStackSupplierDiagnostics = supplierDiagnostics ?? string.Empty;
+
+                diagnostics =
+                    "Created=True" +
+                    " Scene=" + sceneName +
+                    " PlayerSide=" + playerSide +
+                    " BattleSpawnTag=" + battleSpawnTag +
+                    " BattleSizeType=" + battleSizeType +
+                    " DefenderTotal=" + defenderTotal +
+                    " AttackerTotal=" + attackerTotal +
+                    " Suppliers={" + (supplierDiagnostics ?? "none") + "}" +
+                    " Source=" + (source ?? "unknown");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                diagnostics = "faulted " + ex.GetType().Name + ":" + ex.Message;
+                battleSpawnLogic = null;
+                spawnLogic = null;
+                battleReinforcementsSpawnController = null;
+                return false;
+            }
         }
 
         public static bool TryInitialize(
@@ -246,6 +426,17 @@ namespace CoopSpectator.Infrastructure
                 {
                     reason = supplierDiagnostics ?? "supplier-build-failed";
                     return false;
+                }
+                MissionBehavior initialStackSpawnLogicBehavior = mission.GetMissionBehavior<NativeMissionAgentSpawnLogic>();
+                if (ReferenceEquals(_initialStackSpawnLogicMission, mission) &&
+                    ReferenceEquals(_initialStackSpawnLogic, initialStackSpawnLogicBehavior) &&
+                    _initialStackSuppliers != null)
+                {
+                    suppliers = _initialStackSuppliers;
+                    defenderTotal = _initialStackDefenderTotal;
+                    attackerTotal = _initialStackAttackerTotal;
+                    supplierDiagnostics =
+                        "InitialStackReuse={" + (_initialStackSupplierDiagnostics ?? string.Empty) + "}";
                 }
 
                 string siegePreparationDiagnostics = "not-required";
@@ -388,6 +579,12 @@ namespace CoopSpectator.Infrastructure
                 MissionBehavior existingBattleSpawnLogic = mission.GetMissionBehavior<BattleSpawnLogic>();
                 if (existingBattleSpawnLogic == null)
                 {
+                    if (isSiegeAssaultWithDeploymentSubtype)
+                    {
+                        reason = "battle-spawn-logic-missing-from-initial-stack";
+                        return false;
+                    }
+
                     initializationStep = "create-battle-spawn-logic";
                     var battleSpawnLogic = new BattleSpawnLogic(battleSpawnTag);
                     mission.AddMissionBehavior(battleSpawnLogic);
@@ -418,6 +615,12 @@ namespace CoopSpectator.Infrastructure
                 NativeMissionAgentSpawnLogic spawnLogic = mission.GetMissionBehavior<NativeMissionAgentSpawnLogic>();
                 if (spawnLogic == null)
                 {
+                    if (isSiegeAssaultWithDeploymentSubtype)
+                    {
+                        reason = "agent-spawn-logic-missing-from-initial-stack";
+                        return false;
+                    }
+
                     initializationStep = "create-agent-spawn-logic";
                     spawnLogic = new NativeMissionAgentSpawnLogic(suppliers, playerSide, battleSizeType);
                     initializationStep = "add-agent-spawn-logic";
@@ -432,6 +635,12 @@ namespace CoopSpectator.Infrastructure
                 MissionBehavior existingBattleReinforcementsSpawnController = mission.GetMissionBehavior<BattleReinforcementsSpawnController>();
                 if (existingBattleReinforcementsSpawnController == null)
                 {
+                    if (isSiegeAssaultWithDeploymentSubtype)
+                    {
+                        reason = "battle-reinforcements-controller-missing-from-initial-stack";
+                        return false;
+                    }
+
                     initializationStep = "create-battle-reinforcements-controller";
                     var battleReinforcementsSpawnController = new BattleReinforcementsSpawnController();
                     mission.AddMissionBehavior(battleReinforcementsSpawnController);
@@ -446,6 +655,7 @@ namespace CoopSpectator.Infrastructure
                     initializationStep = "ensure-siege-assault-with-deployment-behaviors";
                     if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureMissionBehaviorContract(
                             mission,
+                            scenarioContext,
                             playerSide,
                             out siegeAssaultDeploymentDiagnostics))
                     {
@@ -597,8 +807,12 @@ namespace CoopSpectator.Infrastructure
                                 " RuntimeContract={SiegeAssaultWithDeployment}",
                                 "pre-init-siege-assault-with-deployment",
                                 source);
+                            CampaignMapPatchMissionInit.TryRepairLiveMissionContract(
+                                mission,
+                                (source ?? "unknown") + " exact-native-bootstrap-post-deployment-plan");
                             initializationStep = "init-siege-assault-with-deployment";
                             if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.TryApplyNativeLikeSpawnHandlerContract(
+                                    mission,
                                     spawnLogic,
                                     defenderTotal,
                                     attackerTotal,
@@ -610,6 +824,10 @@ namespace CoopSpectator.Infrastructure
                                 reason = siegeAssaultWithDeploymentSpawnDiagnostics ?? "siege-assault-with-deployment-init-failed";
                                 return false;
                             }
+
+                            CampaignMapPatchMissionInit.TryRepairLiveMissionContract(
+                                mission,
+                                (source ?? "unknown") + " exact-native-bootstrap-post-deployment-init");
                         }
                         else if (isSiegeAssaultNoDeploymentSubtype)
                         {
@@ -2041,7 +2259,9 @@ namespace CoopSpectator.Infrastructure
             }
 
             List<Team> battleTeams = mission.Teams?
-                .Where(team => team != null && team.Side != BattleSideEnum.None)
+                .Where(team => team != null &&
+                               team.Side != BattleSideEnum.None &&
+                               !IsSpawnLogicInitTemporaryNonBattleTeam(mission, team))
                 .ToList() ?? new List<Team>();
 
             List<Team> missingTeams = battleTeams
@@ -3074,6 +3294,7 @@ namespace CoopSpectator.Infrastructure
 
             _spawnLogicInitSideOverrideMission = null;
             _spawnLogicInitSideOverride = BattleSideEnum.None;
+            SpawnLogicInitTemporaryNonBattleTeams.Clear();
         }
 
         private static List<TeamSideOverrideState> PushInitTeamSideSanitization(
@@ -3102,12 +3323,14 @@ namespace CoopSpectator.Infrastructure
 
                 try
                 {
+                    SpawnLogicInitTemporaryNonBattleTeams.Add(team);
                     TeamSideBackingField.SetValue(team, playerSide);
-                    bool addedTemporaryDeploymentPlan = TryAddTemporaryDeploymentPlanForRemappedTeam(
-                        mission,
-                        team,
-                        source,
-                        out int temporaryDeploymentPlanIndex);
+                    bool addedTemporaryDeploymentPlan =
+                        TryAddTemporaryDeploymentPlanForRemappedTeam(
+                            mission,
+                            team,
+                            source,
+                            out int temporaryDeploymentPlanIndex);
                     overrides.Add(
                         new TeamSideOverrideState(
                             team,
@@ -3117,6 +3340,7 @@ namespace CoopSpectator.Infrastructure
                 }
                 catch (Exception ex)
                 {
+                    SpawnLogicInitTemporaryNonBattleTeams.Remove(team);
                     ModLogger.Info(
                         "ExactCampaignArmyBootstrap: failed to temporarily remap Team.Side=None during native bootstrap init. " +
                         "Scene=" + (mission.SceneName ?? "null") +
@@ -3137,6 +3361,7 @@ namespace CoopSpectator.Infrastructure
                     "Scene=" + (mission.SceneName ?? "null") +
                     " PlayerSide=" + playerSide +
                     " Teams=[" + overrideSummary + "] " +
+                    " DeploymentPlanBridge=excluded-from-battle-team-plans " +
                     " Source=" + (source ?? "unknown"));
             }
 
@@ -3163,9 +3388,11 @@ namespace CoopSpectator.Infrastructure
                 try
                 {
                     TeamSideBackingField.SetValue(state.Team, state.OriginalSide);
+                    SpawnLogicInitTemporaryNonBattleTeams.Remove(state.Team);
                 }
                 catch (Exception ex)
                 {
+                    SpawnLogicInitTemporaryNonBattleTeams.Remove(state.Team);
                     ModLogger.Info(
                         "ExactCampaignArmyBootstrap: failed to restore temporary Team.Side remap after native bootstrap init. " +
                         "Scene=" + (state.Team.Mission?.SceneName ?? "null") +

@@ -233,6 +233,11 @@ namespace CoopSpectator.Patches
                 " EquipmentInjected=" + WasEquipmentInjectedForEntry(exactOrigin.EntryId) +
                 " " + payloadDiagnostic.ToSummary();
             ModLogger.Info("ExactCampaignPreSpawnLoadoutPatch: Mission.SpawnAgent result. " + details);
+            CoopMissionSpawnLogic.QueueExactCampaignNativeSpawnedAgentRegistration(
+                __result,
+                exactOrigin.EntryId,
+                exactOrigin.Side,
+                "ExactCampaignPreSpawnLoadoutPatch.Mission.SpawnAgent");
             ExactCreateAgentCorridorDiagnostics.ObserveServerSpawnResult(
                 exactOrigin,
                 payloadDiagnostic,

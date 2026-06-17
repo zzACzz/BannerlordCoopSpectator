@@ -40,7 +40,7 @@ namespace CoopSpectator.Patches
                 return;
 
             if (!ExactCampaignArmyBootstrap.TryGetSpawnLogicInitTeamSideOverride(
-                    __instance.Mission,
+                    __instance,
                     __result,
                     out BattleSideEnum overrideSide))
             {

@@ -3998,16 +3998,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 var attackerSide = siegeEvent.GetSiegeEventSide(BattleSideEnum.Attacker);
                 var defenderSide = siegeEvent.GetSiegeEventSide(BattleSideEnum.Defender);
-                siegeContext.AttackerSiegeEngineTypeIds = BuildSiegeEngineTypeIdList(
-                    attackerSide != null ? siegeEvent.GetPreparedAndActiveSiegeEngines(attackerSide) : null);
-                siegeContext.DefenderSiegeEngineTypeIds = BuildSiegeEngineTypeIdList(
-                    defenderSide != null ? siegeEvent.GetPreparedAndActiveSiegeEngines(defenderSide) : null);
+                IEnumerable<MissionSiegeWeapon> attackerSiegeWeapons =
+                    attackerSide != null ? siegeEvent.GetPreparedAndActiveSiegeEngines(attackerSide) : null;
+                IEnumerable<MissionSiegeWeapon> defenderSiegeWeapons =
+                    defenderSide != null ? siegeEvent.GetPreparedAndActiveSiegeEngines(defenderSide) : null;
+                siegeContext.AttackerSiegeEngines = BuildSiegeEngineSnapshotList(attackerSiegeWeapons);
+                siegeContext.DefenderSiegeEngines = BuildSiegeEngineSnapshotList(defenderSiegeWeapons);
+                siegeContext.AttackerSiegeEngineTypeIds = BuildSiegeEngineTypeIdList(siegeContext.AttackerSiegeEngines);
+                siegeContext.DefenderSiegeEngineTypeIds = BuildSiegeEngineTypeIdList(siegeContext.DefenderSiegeEngines);
 
                 string siegeTowerId = DefaultSiegeEngineTypes.SiegeTower?.StringId ?? string.Empty;
-                siegeContext.HasAnySiegeTower = siegeContext.AttackerSiegeEngineTypeIds.Any(
-                    typeId => !string.IsNullOrWhiteSpace(typeId) &&
-                              (string.Equals(typeId, siegeTowerId, StringComparison.OrdinalIgnoreCase) ||
-                               string.Equals(typeId, DefaultSiegeEngineTypes.SiegeTower?.ToString(), StringComparison.OrdinalIgnoreCase)));
+                siegeContext.HasAnySiegeTower = siegeContext.AttackerSiegeEngines.Any(
+                    engine => engine != null &&
+                              !string.IsNullOrWhiteSpace(engine.EngineTypeId) &&
+                              (string.Equals(engine.EngineTypeId, siegeTowerId, StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(engine.EngineTypeId, DefaultSiegeEngineTypes.SiegeTower?.ToString(), StringComparison.OrdinalIgnoreCase)));
             }
             catch (Exception ex)
             {
@@ -4015,14 +4020,34 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
-        private static List<string> BuildSiegeEngineTypeIdList(IEnumerable<MissionSiegeWeapon> siegeWeapons)
+        private static List<BattleSiegeEngineSnapshotMessage> BuildSiegeEngineSnapshotList(IEnumerable<MissionSiegeWeapon> siegeWeapons)
         {
             if (siegeWeapons == null)
-                return new List<string>();
+                return new List<BattleSiegeEngineSnapshotMessage>();
 
             return siegeWeapons
                 .Where(weapon => weapon != null)
-                .Select(weapon => !string.IsNullOrWhiteSpace(weapon.Type?.StringId) ? weapon.Type.StringId : weapon.Type?.ToString())
+                .OrderBy(weapon => weapon.Index)
+                .Select(weapon => new BattleSiegeEngineSnapshotMessage
+                {
+                    EngineTypeId = !string.IsNullOrWhiteSpace(weapon.Type?.StringId) ? weapon.Type.StringId : weapon.Type?.ToString(),
+                    Index = weapon.Index,
+                    Health = weapon.Health,
+                    InitialHealth = weapon.InitialHealth,
+                    MaxHealth = weapon.MaxHealth
+                })
+                .Where(snapshot => !string.IsNullOrWhiteSpace(snapshot.EngineTypeId))
+                .ToList();
+        }
+
+        private static List<string> BuildSiegeEngineTypeIdList(IEnumerable<BattleSiegeEngineSnapshotMessage> siegeEngines)
+        {
+            if (siegeEngines == null)
+                return new List<string>();
+
+            return siegeEngines
+                .Where(engine => engine != null)
+                .Select(engine => engine.EngineTypeId)
                 .Where(typeId => !string.IsNullOrWhiteSpace(typeId))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();

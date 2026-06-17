@@ -67,6 +67,8 @@ namespace CoopSpectator
 
                 _hasAppliedFixedTestCultures = false;
 
+                CoopMissionSpawnLogic.TryRunDedicatedMissionNetworkBootstrap(currentMission);
+
                 if (ShouldDelayDedicatedMissionObserverActivation(currentMission))
                     return;
 
@@ -128,6 +130,18 @@ namespace CoopSpectator
 
             _pendingDedicatedObserverStableReadyTickCount = 0;
             TimeSpan elapsed = nowUtc - _pendingDedicatedObserverFirstSeenUtc;
+            if (CoopMissionSpawnLogic.ShouldDedicatedObserverUseStrictNativeReadyGate(mission))
+            {
+                LogDedicatedMissionObserverActivationWait(
+                    mission,
+                    elapsed.TotalSeconds < DedicatedObserverFallbackActivationTimeoutSeconds
+                        ? "waiting-native-ready-state"
+                        : "waiting-strict-native-ready-state",
+                    readyStateDetails +
+                    " ElapsedSeconds=" + elapsed.TotalSeconds.ToString("0.000"));
+                return true;
+            }
+
             if (elapsed.TotalSeconds < DedicatedObserverFallbackActivationTimeoutSeconds)
             {
                 LogDedicatedMissionObserverActivationWait(
@@ -171,17 +185,29 @@ namespace CoopSpectator
             bool hasLobbyComponent = mission.GetMissionBehavior<MissionLobbyComponent>() != null;
             bool hasTimerComponent = mission.GetMissionBehavior<MultiplayerTimerComponent>() != null;
             bool hasTeamSelectComponent = mission.GetMissionBehavior<MultiplayerTeamSelectComponent>() != null;
+            Mission.State missionState = mission.CurrentState;
+            bool missionStateReady =
+                missionState != Mission.State.NewlyCreated &&
+                missionState != Mission.State.Initializing;
+            bool strictReadyRequired =
+                CoopMissionSpawnLogic.ShouldDedicatedObserverUseStrictNativeReadyGate(mission);
 
             details =
                 "Scene=" + (string.IsNullOrWhiteSpace(sceneName) ? "(empty)" : sceneName) +
                 " Mode=" + modeName +
                 " ModeReady=" + modeReady +
+                " MissionState=" + missionState +
+                " MissionStateReady=" + missionStateReady +
                 " HasLobbyComponent=" + hasLobbyComponent +
                 " HasTimerComponent=" + hasTimerComponent +
-                " HasTeamSelectComponent=" + hasTeamSelectComponent;
+                " HasTeamSelectComponent=" + hasTeamSelectComponent +
+                " StrictReadyRequired=" + strictReadyRequired;
 
             if (string.IsNullOrWhiteSpace(sceneName))
                 return false;
+
+            if (strictReadyRequired)
+                return modeReady && missionStateReady && hasLobbyComponent && hasTimerComponent && hasTeamSelectComponent;
 
             return modeReady && hasLobbyComponent && hasTimerComponent && hasTeamSelectComponent;
         }
