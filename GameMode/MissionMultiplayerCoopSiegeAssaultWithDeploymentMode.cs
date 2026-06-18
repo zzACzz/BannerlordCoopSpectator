@@ -330,6 +330,12 @@ namespace CoopSpectator.GameMode
                 },
                 "MissionSiegeEnginesLogic",
                 required: true);
+            AddIfMissing(
+                list,
+                mission,
+                () => new BannerBearerLogic(),
+                "BannerBearerLogic",
+                required: false);
 
             bool shouldMountLiveDeploymentControllers =
                 ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldMountLiveDeploymentControllers(

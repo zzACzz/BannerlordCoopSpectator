@@ -5659,6 +5659,28 @@ namespace CoopSpectator.MissionBehaviors
 
             if (string.Equals(missionMode, "StartUp", StringComparison.OrdinalIgnoreCase))
             {
+                CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+                if (ShouldDedicatedObserverOwnExactSiegeLifecycle(mission) &&
+                    currentPhase >= CoopBattlePhase.PreBattleHold &&
+                    synchronizedPeerCount > 0 &&
+                    AreBattlefieldArmiesReadyForStart(
+                        mission,
+                        out string readinessSource,
+                        out int attackerActive,
+                        out int defenderActive))
+                {
+                    reason =
+                        "MissionMode=" + missionMode +
+                        " MissionTime=" + missionTime.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) +
+                        " SynchronizedPeers=" + synchronizedPeerCount +
+                        " ExactSiegeStartupGate=ready" +
+                        " Phase=" + currentPhase +
+                        " ReadinessSource=" + readinessSource +
+                        " AttackerActive=" + attackerActive +
+                        " DefenderActive=" + defenderActive;
+                    return false;
+                }
+
                 reason =
                     "MissionMode=" + missionMode +
                     " MissionTime=" + missionTime.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) +
@@ -6530,7 +6552,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (entryState?.IsMounted == true)
+            if (IsClientTroopEffectivelyMountedForVisualRefresh(agent, entryState, out string mountedContractReason))
             {
                 bool heroMountedEntry = IsHeroEntryEligibleForExactPersonalPerks(entryState);
                 if (agent.MountAgent == null)
@@ -6547,6 +6569,8 @@ namespace CoopSpectator.MissionBehaviors
                             reason =
                                 "mounted-entry-without-native-mount StableSignal=" +
                                 (stableSignalReason ?? "unknown") +
+                                " MountedContract=" +
+                                (mountedContractReason ?? "unknown") +
                                 " " +
                                 stateSummary;
                             return false;
@@ -6579,6 +6603,51 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return true;
+        }
+
+        private static bool IsClientTroopEffectivelyMountedForVisualRefresh(
+            Agent agent,
+            RosterEntryState entryState,
+            out string reason)
+        {
+            reason = null;
+            string entryId = entryState?.EntryId;
+            if (!string.IsNullOrWhiteSpace(entryId))
+            {
+                if (ExactTransferContractRuntimeCache.TryGetContract(entryId, out ExactTransferSpawnContract contract) &&
+                    contract != null)
+                {
+                    bool contractMounted =
+                        contract.Mount?.IsMounted == true ||
+                        contract.Identity?.IsMountedExpected == true;
+                    reason = contractMounted
+                        ? "exact-transfer-contract-mounted"
+                        : "exact-transfer-contract-dismounted";
+                    return contractMounted;
+                }
+
+                if (ExactTransferContractRuntimeCache.TryGetRuntimeState(entryId, out ExactTransferRuntimeState runtimeState) &&
+                    runtimeState != null)
+                {
+                    reason = runtimeState.IsMountedContract
+                        ? "exact-transfer-runtime-mounted"
+                        : "exact-transfer-runtime-dismounted";
+                    return runtimeState.IsMountedContract;
+                }
+            }
+
+            if (entryState?.ServerCreateContractResolved == true &&
+                entryState.ServerCreateInjectEquipment)
+            {
+                reason = entryState.ServerCreatePreSpawnIncludesMountVisuals
+                    ? "server-create-contract-mounted"
+                    : "server-create-contract-dismounted";
+                return entryState.ServerCreatePreSpawnIncludesMountVisuals;
+            }
+
+            bool snapshotOrLiveMounted = entryState?.IsMounted == true || agent?.MountAgent != null;
+            reason = snapshotOrLiveMounted ? "snapshot-or-live-mounted" : "snapshot-and-live-foot";
+            return snapshotOrLiveMounted;
         }
 
         private static bool IsClientMountedTroopBaselineReadyWithoutLiveMountLink(
@@ -6827,7 +6896,7 @@ namespace CoopSpectator.MissionBehaviors
             if (remainingSeconds <= 0d)
                 return false;
 
-            bool mountedTroop = entryState.IsMounted || agent.MountAgent != null;
+            bool mountedTroop = IsClientTroopEffectivelyMountedForVisualRefresh(agent, entryState, out _);
             if (!mountedTroop || IsLocalPeerControlledAgent(agent))
                 return false;
 
@@ -21442,7 +21511,31 @@ namespace CoopSpectator.MissionBehaviors
             try
             {
                 RosterEntryState targetEntryState = ResolveMaterializedEntryStateForPossessedAgent(targetAgent, pendingRequest);
-                Team peerTeam = missionPeer.Team ?? targetAgent.Team;
+                BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " replace-bot team");
+                Team authoritativeTeam = ResolveAuthoritativeMissionTeam(mission, missionPeer, authoritativeSide);
+                Team peerTeam = authoritativeTeam ?? missionPeer.Team ?? targetAgent.Team;
+                if (peerTeam == null || ReferenceEquals(peerTeam, mission.SpectatorTeam))
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: skipped materialized army possession because peer team is not playable. " +
+                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                        " AgentIndex=" + targetAgent.Index +
+                        " AuthoritativeSide=" + authoritativeSide +
+                        " MissionPeerTeamNull=" + (missionPeer.Team == null) +
+                        " TargetTeamNull=" + (targetAgent.Team == null) +
+                        " Source=" + (source ?? "unknown"));
+                    return false;
+                }
+
+                if (!ReferenceEquals(missionPeer.Team, peerTeam))
+                {
+                    SetServerMemberValue(missionPeer, "Team", peerTeam);
+                    if (!ReferenceEquals(GetServerMemberValue(missionPeer, "Team"), peerTeam))
+                        SetServerMemberValue(missionPeer, "_team", peerTeam);
+                    if (!ReferenceEquals(GetServerMemberValue(missionPeer, "Team"), peerTeam))
+                        SetServerMemberValue(missionPeer, "<Team>k__BackingField", peerTeam);
+                }
+
                 if (peerTeam != null && !ReferenceEquals(targetAgent.Team, peerTeam))
                 {
                     targetAgent.SetTeam(peerTeam, false);
@@ -21476,7 +21569,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (replacedAgent == null)
                 {
                     ModLogger.Info(
-                        "CoopMissionSpawnLogic: materialized army possession replace-bot returned null. " +
+                        "CoopMissionSpawnLogic: materialized army replace-bot returned null. " +
                         "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
                         " AgentIndex=" + targetAgent.Index +
                         " Formation=" + targetFormation.FormationIndex +
@@ -21551,7 +21644,18 @@ namespace CoopSpectator.MissionBehaviors
             }
             catch (Exception ex)
             {
-                ModLogger.Info("CoopMissionSpawnLogic: materialized army replace-bot failed (" + source + "): " + ex.Message);
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: materialized army replace-bot failed (" + source + "): " +
+                    ex.GetType().Name +
+                    ": " +
+                    ex.Message +
+                    " Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " AgentIndex=" + targetAgent.Index +
+                    " TargetTeamNull=" + (targetAgent.Team == null) +
+                    " MissionPeerTeamNull=" + (missionPeer.Team == null) +
+                    " MissionPeerControlledAgentNull=" + (missionPeer.ControlledAgent == null) +
+                    " PeerControlledAgentNull=" + (peer.ControlledAgent == null) +
+                    " ControlledFormationNull=" + (missionPeer.ControlledFormation == null));
                 return false;
             }
         }
@@ -24202,7 +24306,9 @@ namespace CoopSpectator.MissionBehaviors
             bool overlapsSelectionOrSpawnLifecycle =
                 requestKind == CoopBattleSelectionRequestKind.SelectEntry ||
                 requestKind == CoopBattleSelectionRequestKind.SpawnNow ||
-                requestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment;
+                requestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment ||
+                requestKind == CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment ||
+                requestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment;
             bool peerOccupiesActiveCoopLifeForRequest = overlapsSelectionOrSpawnLifecycle &&
                 IsPeerOccupyingActiveCoopLife(missionPeer);
             bool peerHasSpawnTransitionInFlight = overlapsSelectionOrSpawnLifecycle &&
@@ -24251,6 +24357,21 @@ namespace CoopSpectator.MissionBehaviors
                         requestedSide,
                         troopOrEntryId,
                         source + " commander-deployment");
+                case CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment:
+                    return TryAutoDeployCommanderDeploymentForPeer(
+                        mission,
+                        missionPeer,
+                        requestedSide,
+                        troopOrEntryId,
+                        source + " commander-auto-deploy");
+                case CoopBattleSelectionRequestKind.FinishCommanderDeployment:
+                    return TryCompleteCommanderDeploymentForPeer(
+                        mission,
+                        missionPeer,
+                        requestedSide,
+                        troopOrEntryId,
+                        forceAutoDeploy: true,
+                        source + " commander-finish-deployment");
                 case CoopBattleSelectionRequestKind.ForceRespawnable:
                     return TryForcePeerRespawnable(mission, missionPeer, source + " force-respawnable");
                 default:
@@ -24284,7 +24405,9 @@ namespace CoopSpectator.MissionBehaviors
             bool requestNeedsAssignedSide =
                 requestKind == CoopBattleSelectionRequestKind.SelectEntry ||
                 requestKind == CoopBattleSelectionRequestKind.SpawnNow ||
-                requestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment;
+                requestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment ||
+                requestKind == CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment ||
+                requestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment;
             if (readinessSide == BattleSideEnum.None &&
                 requestNeedsAssignedSide)
             {
@@ -24577,6 +24700,198 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private static bool TryAutoDeployCommanderDeploymentForPeer(
+            Mission mission,
+            MissionPeer missionPeer,
+            BattleSideEnum requestedSide,
+            string troopOrEntryId,
+            string source)
+        {
+            if (mission == null || missionPeer == null || !GameNetwork.IsServer)
+                return false;
+
+            bool selectionApplied = false;
+            if (requestedSide != BattleSideEnum.None || !string.IsNullOrWhiteSpace(troopOrEntryId))
+            {
+                selectionApplied = TryApplySelectionIntentToPeer(
+                    mission,
+                    missionPeer,
+                    requestedSide,
+                    troopOrEntryId,
+                    source + " select-commander");
+            }
+
+            BattleSideEnum authoritativeSide = requestedSide != BattleSideEnum.None
+                ? requestedSide
+                : ResolveAuthoritativeSide(missionPeer, mission, source + " authoritative-side");
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            CoopBattlePeerSessionState.TryBuild(
+                mission,
+                missionPeer,
+                source,
+                out CoopBattlePeerSessionSnapshot sessionSnapshot);
+
+            if (!ShouldAllowExactSiegeCommanderDeploymentSpawn(
+                    mission,
+                    missionPeer,
+                    authoritativeSide,
+                    currentPhase,
+                    sessionSnapshot,
+                    out string diagnostics))
+            {
+                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected commander auto-deploy request. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " Target=" + (troopOrEntryId ?? string.Empty) +
+                    " Phase=" + currentPhase +
+                    " Diagnostics=" + (diagnostics ?? string.Empty) +
+                    " SelectionApplied=" + selectionApplied +
+                    " Source=" + source);
+                return false;
+            }
+
+            bool autoDeployed =
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.TryAutoDeployDeploymentOnly(
+                    mission,
+                    out string deploymentDiagnostics);
+            if (!autoDeployed)
+            {
+                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: commander auto-deploy request did not apply deployment. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " Diagnostics=" + (deploymentDiagnostics ?? string.Empty) +
+                    " Source=" + source);
+                return false;
+            }
+
+            string selectedEntryId = CoopBattleAuthorityState.GetSelectedEntryId(missionPeer);
+            string selectedTroopId = CoopBattleAuthorityState.GetSelectedTroopId(missionPeer);
+            if (LooksLikeEntryId(troopOrEntryId))
+            {
+                if (string.IsNullOrWhiteSpace(selectedEntryId))
+                    selectedEntryId = troopOrEntryId;
+            }
+            else if (string.IsNullOrWhiteSpace(selectedTroopId))
+            {
+                selectedTroopId = troopOrEntryId;
+            }
+
+            CoopBattlePeerLifecycleRuntimeState.MarkWaiting(
+                missionPeer,
+                authoritativeSide,
+                selectedTroopId,
+                selectedEntryId,
+                source + " auto-deploy-only");
+
+            NetworkCommunicator acceptedPeer = missionPeer.GetNetworkPeer();
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: applied commander auto-deploy without spawn queue. " +
+                "Peer=" + (acceptedPeer?.UserName ?? acceptedPeer?.Index.ToString() ?? "none") +
+                " Side=" + authoritativeSide +
+                " EntryId=" + (selectedEntryId ?? string.Empty) +
+                " TroopId=" + (selectedTroopId ?? string.Empty) +
+                " Phase=" + currentPhase +
+                " SelectionApplied=" + selectionApplied +
+                " DeploymentDiagnostics=" + (deploymentDiagnostics ?? string.Empty) +
+                " Source=" + source);
+            return true;
+        }
+
+        private static bool TryCompleteCommanderDeploymentForPeer(
+            Mission mission,
+            MissionPeer missionPeer,
+            BattleSideEnum requestedSide,
+            string troopOrEntryId,
+            bool forceAutoDeploy,
+            string source)
+        {
+            if (mission == null || missionPeer == null || !GameNetwork.IsServer)
+                return false;
+
+            bool selectionApplied = false;
+            if (requestedSide != BattleSideEnum.None || !string.IsNullOrWhiteSpace(troopOrEntryId))
+            {
+                selectionApplied = TryApplySelectionIntentToPeer(
+                    mission,
+                    missionPeer,
+                    requestedSide,
+                    troopOrEntryId,
+                    source + " select-commander");
+            }
+
+            BattleSideEnum authoritativeSide = requestedSide != BattleSideEnum.None
+                ? requestedSide
+                : ResolveAuthoritativeSide(missionPeer, mission, source + " authoritative-side");
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            CoopBattlePeerSessionState.TryBuild(
+                mission,
+                missionPeer,
+                source,
+                out CoopBattlePeerSessionSnapshot sessionSnapshot);
+
+            if (!ShouldAllowExactSiegeCommanderDeploymentSpawn(
+                    mission,
+                    missionPeer,
+                    authoritativeSide,
+                    currentPhase,
+                    sessionSnapshot,
+                    out string diagnostics))
+            {
+                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected commander deployment completion request. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " Target=" + (troopOrEntryId ?? string.Empty) +
+                    " Phase=" + currentPhase +
+                    " Diagnostics=" + (diagnostics ?? string.Empty) +
+                    " SelectionApplied=" + selectionApplied +
+                    " Source=" + source);
+                return false;
+            }
+
+            string deploymentDiagnostics = string.Empty;
+            bool deploymentFinished = !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
+            if (!deploymentFinished && forceAutoDeploy)
+            {
+                deploymentFinished = ExactCampaignSiegeAssaultWithDeploymentRuntime.TryForceAutoDeployAndFinishDeployment(
+                    mission,
+                    out deploymentDiagnostics);
+            }
+
+            bool stillBlockingDeployment = ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
+            if (!deploymentFinished || stillBlockingDeployment)
+            {
+                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: commander deployment completion did not finish deployment. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " ForceAutoDeploy=" + forceAutoDeploy +
+                    " Finished=" + deploymentFinished +
+                    " StillBlocking=" + stillBlockingDeployment +
+                    " Diagnostics=" + (deploymentDiagnostics ?? string.Empty) +
+                    " Source=" + source);
+                return false;
+            }
+
+            bool queuedSpawn = TryQueueSpawnIntentForPeer(mission, missionPeer, source + " spawn-after-deployment");
+            NetworkCommunicator acceptedPeer = missionPeer.GetNetworkPeer();
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: completed commander deployment request. " +
+                "Peer=" + (acceptedPeer?.UserName ?? acceptedPeer?.Index.ToString() ?? "none") +
+                " Side=" + authoritativeSide +
+                " QueuedSpawn=" + queuedSpawn +
+                " SelectionApplied=" + selectionApplied +
+                " DeploymentDiagnostics=" + (deploymentDiagnostics ?? string.Empty) +
+                " Source=" + source);
+            return queuedSpawn;
+        }
+
         private static bool TryValidateRequestedSelectionTargetIsSelectable(
             Mission mission,
             MissionPeer missionPeer,
@@ -24652,6 +24967,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " spawn-ready");
+
             if (!TryResolvePeerSpawnAvailability(
                     mission,
                     missionPeer,

@@ -38,6 +38,7 @@ namespace CoopSpectator
         private static DateTime _pendingDedicatedObserverFirstSeenUtc = DateTime.MinValue;
         private static int _pendingDedicatedObserverStableReadyTickCount;
         private static string _lastDedicatedObserverActivationWaitDiagnosticKey = string.Empty;
+        private static string _lastDedicatedObserverTickExceptionKey = string.Empty;
         private const int DedicatedObserverRequiredStableReadyTicks = 3;
         private const double DedicatedObserverFallbackActivationTimeoutSeconds = 15.0d;
 
@@ -77,7 +78,44 @@ namespace CoopSpectator
             }
             catch (Exception ex)
             {
-                ModLogger.Info("CoopSpectatorDedicated: mission observer tick failed: " + ex.Message);
+                LogDedicatedObserverTickException(currentMission: Mission.Current, ex);
+            }
+        }
+
+        private static void LogDedicatedObserverTickException(Mission currentMission, Exception ex)
+        {
+            string modeName = GetDedicatedMissionModeName(currentMission);
+            string key =
+                (currentMission?.SceneName ?? "null") + "|" +
+                modeName + "|" +
+                ex.GetType().FullName + "|" +
+                (ex.TargetSite?.DeclaringType?.FullName ?? "null") + "." +
+                (ex.TargetSite?.Name ?? "null");
+            if (string.Equals(_lastDedicatedObserverTickExceptionKey, key, StringComparison.Ordinal))
+                return;
+
+            _lastDedicatedObserverTickExceptionKey = key;
+            ModLogger.Info(
+                "CoopSpectatorDedicated: mission observer tick failed. " +
+                "Mission=" + (currentMission?.SceneName ?? "null") +
+                " Mode=" + modeName +
+                " PendingObserverSameMission=" + ReferenceEquals(_pendingDedicatedObserverMission, currentMission) +
+                " ActivatedObserverSameMission=" + ReferenceEquals(_activatedDedicatedObserverMission, currentMission) +
+                " Exception=" + ex);
+        }
+
+        private static string GetDedicatedMissionModeName(Mission mission)
+        {
+            if (mission == null)
+                return "null";
+
+            try
+            {
+                return mission.Mode.ToString();
+            }
+            catch (Exception ex)
+            {
+                return "exception:" + ex.GetType().Name;
             }
         }
 

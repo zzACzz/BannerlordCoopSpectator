@@ -392,6 +392,278 @@ namespace CoopSpectator.UI
         }
     }
 
+    public sealed class CoopCommanderDeploymentVM : ViewModel, ICoopSelectionScreenViewModel
+    {
+        private readonly Action _onAutoDeploy;
+        private readonly Action _onBeginMission;
+        private readonly Action _onBack;
+        private MBBindingList<CoopCommanderDeploymentFormationVM> _formationsFirstHalf = new MBBindingList<CoopCommanderDeploymentFormationVM>();
+        private MBBindingList<CoopCommanderDeploymentFormationVM> _formationsSecondHalf = new MBBindingList<CoopCommanderDeploymentFormationVM>();
+        private string _titleText = "Order of Battle";
+        private string _sideTitleText = string.Empty;
+        private string _selectedNameText = string.Empty;
+        private string _selectedDetailText = string.Empty;
+        private string _selectedSummaryText = string.Empty;
+        private string _selectedCommanderBadgeText = "COMMANDER";
+        private string _statusText = "Pre Battle\nHold";
+        private string _hintText = string.Empty;
+        private string _autoDeployText = "Auto Deploy";
+        private string _beginMissionText = "Ready";
+        private bool _isAttacker;
+        private bool _canAutoDeploy;
+        private bool _canBeginMission;
+
+        public CoopCommanderDeploymentVM(
+            CoopSelectionUiSnapshot snapshot,
+            Action onAutoDeploy,
+            Action onBeginMission,
+            Action onBack)
+        {
+            _onAutoDeploy = onAutoDeploy;
+            _onBeginMission = onBeginMission;
+            _onBack = onBack;
+            Refresh(snapshot, force: true);
+        }
+
+        [DataSourceProperty] public MBBindingList<CoopCommanderDeploymentFormationVM> FormationsFirstHalf { get => _formationsFirstHalf; private set => SetField(ref _formationsFirstHalf, value, nameof(FormationsFirstHalf)); }
+        [DataSourceProperty] public MBBindingList<CoopCommanderDeploymentFormationVM> FormationsSecondHalf { get => _formationsSecondHalf; private set => SetField(ref _formationsSecondHalf, value, nameof(FormationsSecondHalf)); }
+        [DataSourceProperty] public string TitleText { get => _titleText; private set => SetField(ref _titleText, value, nameof(TitleText)); }
+        [DataSourceProperty] public string SideTitleText { get => _sideTitleText; private set => SetField(ref _sideTitleText, value, nameof(SideTitleText)); }
+        [DataSourceProperty] public string SelectedNameText { get => _selectedNameText; private set => SetField(ref _selectedNameText, value, nameof(SelectedNameText)); }
+        [DataSourceProperty] public string SelectedDetailText { get => _selectedDetailText; private set => SetField(ref _selectedDetailText, value, nameof(SelectedDetailText)); }
+        [DataSourceProperty] public string SelectedSummaryText { get => _selectedSummaryText; private set => SetField(ref _selectedSummaryText, value, nameof(SelectedSummaryText)); }
+        [DataSourceProperty] public string SelectedCommanderBadgeText { get => _selectedCommanderBadgeText; private set => SetField(ref _selectedCommanderBadgeText, value, nameof(SelectedCommanderBadgeText)); }
+        [DataSourceProperty] public string StatusText { get => _statusText; private set => SetField(ref _statusText, value, nameof(StatusText)); }
+        [DataSourceProperty] public string HintText { get => _hintText; private set => SetField(ref _hintText, value, nameof(HintText)); }
+        [DataSourceProperty] public string AutoDeployText { get => _autoDeployText; private set => SetField(ref _autoDeployText, value, nameof(AutoDeployText)); }
+        [DataSourceProperty] public string BeginMissionText { get => _beginMissionText; private set => SetField(ref _beginMissionText, value, nameof(BeginMissionText)); }
+        [DataSourceProperty] public bool IsAttacker { get => _isAttacker; private set => SetField(ref _isAttacker, value, nameof(IsAttacker)); }
+        [DataSourceProperty] public bool CanAutoDeploy { get => _canAutoDeploy; private set => SetField(ref _canAutoDeploy, value, nameof(CanAutoDeploy)); }
+        [DataSourceProperty] public bool CanBeginMission { get => _canBeginMission; private set => SetField(ref _canBeginMission, value, nameof(CanBeginMission)); }
+
+        public void Refresh(CoopSelectionUiSnapshot snapshot, bool force)
+        {
+            BattleSideEnum side = snapshot?.EffectiveSide ?? BattleSideEnum.None;
+            TitleText = "Order of Battle";
+            SideTitleText = CoopSelectionUiHelpers.ResolveSideDisplayName(snapshot?.BattleState, side);
+            StatusText = "Pre Battle\nHold";
+            SelectedNameText = CoopSelectionUiHelpers.BuildSelectedNameText(snapshot);
+            SelectedDetailText = CoopSelectionUiHelpers.BuildSelectedDetailText(snapshot);
+            SelectedSummaryText = CoopSelectionUiHelpers.BuildSelectedSummaryText(snapshot);
+            SelectedCommanderBadgeText = CoopSelectionUiHelpers.ResolveCommanderBadgeText(snapshot, snapshot?.SelectedEntryId);
+            if (string.IsNullOrWhiteSpace(SelectedCommanderBadgeText))
+                SelectedCommanderBadgeText = "COMMANDER";
+
+            IsAttacker = side == BattleSideEnum.Attacker;
+            CanAutoDeploy = snapshot != null && snapshot.BattleDataReady && side != BattleSideEnum.None;
+            CanBeginMission = CanAutoDeploy;
+            HintText = CanBeginMission
+                ? "Auto deployment will place every remaining formation before you enter the selected commander."
+                : "Waiting for battle deployment data.";
+            AutoDeployText = "Auto Deploy";
+            BeginMissionText = "Ready";
+
+            RefreshFormationLists(snapshot, force);
+        }
+
+        public void ExecuteAutoDeploy()
+        {
+            if (CanAutoDeploy)
+                _onAutoDeploy?.Invoke();
+        }
+
+        public void ExecuteBeginMission()
+        {
+            if (CanBeginMission)
+                _onBeginMission?.Invoke();
+        }
+
+        public void ExecuteBack()
+        {
+            _onBack?.Invoke();
+        }
+
+        private void RefreshFormationLists(CoopSelectionUiSnapshot snapshot, bool force)
+        {
+            List<CoopCommanderDeploymentFormationVM> formations = BuildFormationItems(snapshot);
+            int splitIndex = Math.Max(1, (formations.Count + 1) / 2);
+            FormationsFirstHalf = new MBBindingList<CoopCommanderDeploymentFormationVM>();
+            FormationsSecondHalf = new MBBindingList<CoopCommanderDeploymentFormationVM>();
+
+            for (int index = 0; index < formations.Count; index++)
+            {
+                if (index < splitIndex)
+                    FormationsFirstHalf.Add(formations[index]);
+                else
+                    FormationsSecondHalf.Add(formations[index]);
+            }
+
+            if (force)
+            {
+                OnPropertyChanged(nameof(FormationsFirstHalf));
+                OnPropertyChanged(nameof(FormationsSecondHalf));
+            }
+        }
+
+        private static List<CoopCommanderDeploymentFormationVM> BuildFormationItems(CoopSelectionUiSnapshot snapshot)
+        {
+            var groups = new Dictionary<string, FormationSummary>(StringComparer.OrdinalIgnoreCase);
+            string[] entryIds = snapshot == null
+                ? Array.Empty<string>()
+                : CoopSelectionUiHelpers.OrderSelectableEntryIdsForDisplay(snapshot);
+            foreach (string entryId in entryIds)
+            {
+                RosterEntryState entryState = CoopSelectionUiHelpers.ResolveEntryState(
+                    snapshot.EffectiveSide,
+                    entryId);
+                if (entryState == null)
+                    continue;
+
+                string groupKey = ResolveFormationGroupKey(entryState);
+                if (!groups.TryGetValue(groupKey, out FormationSummary summary))
+                {
+                    summary = new FormationSummary(
+                        groupKey,
+                        ResolveFormationTitle(groupKey),
+                        ResolveFormationClassText(groupKey),
+                        CoopSelectionUiHelpers.ResolveEntryIconType(entryState));
+                    groups[groupKey] = summary;
+                }
+
+                summary.Count += Math.Max(1, entryState.Count - Math.Max(0, entryState.WoundedCount));
+            }
+
+            var orderedGroups = new List<FormationSummary>();
+            AddGroupIfPresent(groups, orderedGroups, "Infantry");
+            AddGroupIfPresent(groups, orderedGroups, "Ranged");
+            AddGroupIfPresent(groups, orderedGroups, "Cavalry");
+            AddGroupIfPresent(groups, orderedGroups, "HorseArchers");
+            AddGroupIfPresent(groups, orderedGroups, "Heroes");
+
+            var items = new List<CoopCommanderDeploymentFormationVM>(orderedGroups.Count);
+            for (int index = 0; index < orderedGroups.Count; index++)
+                items.Add(CreateFormationVm(index + 1, orderedGroups[index]));
+
+            if (items.Count <= 0)
+                items.Add(CreateFormationVm(1, new FormationSummary("Commander", "Commander", "Hero", string.Empty) { Count = 1 }));
+
+            return items;
+        }
+
+        private static CoopCommanderDeploymentFormationVM CreateFormationVm(int number, FormationSummary summary)
+        {
+            return new CoopCommanderDeploymentFormationVM(
+                number.ToString(),
+                summary?.TitleText ?? string.Empty,
+                summary?.ClassText ?? string.Empty,
+                Math.Max(0, summary?.Count ?? 0).ToString(),
+                summary?.IconType ?? string.Empty);
+        }
+
+        private static void AddGroupIfPresent(
+            IDictionary<string, FormationSummary> groups,
+            IList<FormationSummary> orderedGroups,
+            string groupKey)
+        {
+            if (groups.TryGetValue(groupKey, out FormationSummary summary) && summary.Count > 0)
+                orderedGroups.Add(summary);
+        }
+
+        private static string ResolveFormationGroupKey(RosterEntryState entryState)
+        {
+            if (entryState == null)
+                return "Infantry";
+
+            if (entryState.IsHero)
+                return "Heroes";
+
+            if (entryState.IsMounted && entryState.IsRanged)
+                return "HorseArchers";
+
+            if (entryState.IsMounted)
+                return "Cavalry";
+
+            if (entryState.IsRanged)
+                return "Ranged";
+
+            return "Infantry";
+        }
+
+        private static string ResolveFormationTitle(string groupKey)
+        {
+            switch (groupKey)
+            {
+                case "Ranged":
+                    return "Ranged Infantry";
+                case "Cavalry":
+                    return "Cavalry";
+                case "HorseArchers":
+                    return "Horse Archers";
+                case "Heroes":
+                    return "Heroes";
+                default:
+                    return "Infantry";
+            }
+        }
+
+        private static string ResolveFormationClassText(string groupKey)
+        {
+            switch (groupKey)
+            {
+                case "Ranged":
+                    return "Archers";
+                case "Cavalry":
+                    return "Mounted";
+                case "HorseArchers":
+                    return "Mounted Ranged";
+                case "Heroes":
+                    return "Command";
+                default:
+                    return "Line";
+            }
+        }
+
+        private sealed class FormationSummary
+        {
+            public FormationSummary(string key, string titleText, string classText, string iconType)
+            {
+                Key = key;
+                TitleText = titleText;
+                ClassText = classText;
+                IconType = iconType;
+            }
+
+            public string Key { get; }
+            public string TitleText { get; }
+            public string ClassText { get; }
+            public string IconType { get; }
+            public int Count { get; set; }
+        }
+    }
+
+    public sealed class CoopCommanderDeploymentFormationVM : ViewModel
+    {
+        public CoopCommanderDeploymentFormationVM(
+            string numberText,
+            string titleText,
+            string classText,
+            string countText,
+            string iconType)
+        {
+            NumberText = numberText ?? string.Empty;
+            TitleText = titleText ?? string.Empty;
+            ClassText = classText ?? string.Empty;
+            CountText = countText ?? string.Empty;
+            IconType = iconType ?? string.Empty;
+        }
+
+        [DataSourceProperty] public string NumberText { get; }
+        [DataSourceProperty] public string TitleText { get; }
+        [DataSourceProperty] public string ClassText { get; }
+        [DataSourceProperty] public string CountText { get; }
+        [DataSourceProperty] public string IconType { get; }
+    }
+
     public sealed class CoopCharacterVisualVM : ViewModel
     {
         private bool _hasVisual;

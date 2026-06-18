@@ -16,7 +16,9 @@ namespace CoopSpectator.Network.Messages
         BattleSnapshotReadyAck = 5,
         BattleSnapshotBootstrapRequest = 6,
         BattleReconnectFinalizeReadyAck = 7,
-        BeginCommanderDeployment = 8
+        BeginCommanderDeployment = 8,
+        AutoDeployCommanderDeployment = 9,
+        FinishCommanderDeployment = 10
     }
 
     public enum CoopBattlePayloadKind
@@ -49,7 +51,7 @@ namespace CoopSpectator.Network.Messages
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
     public sealed class CoopBattleSelectionClientRequestMessage : GameNetworkMessage
     {
-        private static readonly CompressionInfo.Integer RequestKindCompressionInfo = new CompressionInfo.Integer(0, 8, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer RequestKindCompressionInfo = new CompressionInfo.Integer(0, 10, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer BattleSideCompressionInfo = new CompressionInfo.Integer(-1, 1, maximumValueGiven: true);
 
         public CoopBattleSelectionClientRequestMessage(

@@ -3,7 +3,9 @@ using System.Diagnostics; // Process, ProcessStartInfo
 using System.IO; // Path, File, Directory
 using System.Management; // ManagementObjectSearcher, Win32_Process
 using System.Threading; // Thread.Sleep для очікування дочірнього процесу
+using CoopSpectator.Campaign; // BattleRosterFileHelper
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback, CoopGameModeIds
+using CoopSpectator.Network.Messages; // BattleSnapshotMessage
 
 namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офіційний дедик-сервер) з кампанії
 {
@@ -546,8 +548,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         }
 
         /// <summary>Записує стартовий конфіг для listed flow: явний Map + add_map_to_usable_maps + start_game. UseTdmCloneForListedTest=true → GameType TdmClone.</summary>
-        private static string TryWriteStartupConfigForListedTest(string exePath, DedicatedServerLaunchSettings settings)
+        private static string TryWriteStartupConfigForListedTest(string exePath, DedicatedServerLaunchSettings settings, out string appliedScene, out string appliedGameType)
         {
+            appliedScene = TestListedScene;
+            appliedGameType = UseTdmCloneForListedTest ? CoopGameModeIds.TdmClone : CoopGameModeIds.OfficialTeamDeathmatch;
             string root = GetDedicatedServerRootFromExe(exePath);
             if (string.IsNullOrEmpty(root)) return null;
             string nativeDir = Path.Combine(root, "Modules", "Native");
@@ -556,16 +560,22 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             string configPath = Path.Combine(nativeDir, testConfigFileName);
             try
             {
-                string gameTypeId = UseTdmCloneForListedTest ? CoopGameModeIds.TdmClone : "TeamDeathmatch";
-                string content = BuildStartupConfigContent(settings, gameTypeId, TestListedScene, includeMapLine: true, includeAddMapLine: true);
+                string snapshotGameType;
+                string sceneSource;
+                appliedScene = ResolveListedStartupSceneFromBattleSnapshot(out snapshotGameType, out sceneSource);
+                appliedGameType = ResolveListedStartupGameType(snapshotGameType, appliedGameType);
+                string content = BuildStartupConfigContent(settings, appliedGameType, appliedScene, includeMapLine: true, includeAddMapLine: true);
                 File.WriteAllText(configPath, content);
                 ModLogger.Info(
                     "DedicatedHelper: wrote listed-test startup config to " + configPath +
-                    " [scene=" + TestListedScene +
+                    " [scene=" + appliedScene +
+                    " sceneSource=" + sceneSource +
                     " serverName=" + settings.ServerName +
                     " serverPasswordSet=" + (!string.IsNullOrWhiteSpace(settings.ServerPassword)) +
                     " maxPlayers=" + settings.MaxPlayerCount +
-                    " gameType=" + gameTypeId + " mapLine=true]");
+                    " gameType=" + appliedGameType +
+                    " snapshotGameType=" + (snapshotGameType ?? string.Empty) +
+                    " mapLine=true]");
                 return testConfigFileName;
             }
             catch (Exception ex)
@@ -576,6 +586,83 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         }
 
         /// <summary>Логує джерело startup state для діагностики (config applied, path, scene, gameType, serverName, adminPassword source, start_game sent via).</summary>
+        private static string ResolveListedStartupSceneFromBattleSnapshot(out string snapshotGameType, out string source)
+        {
+            snapshotGameType = null;
+            source = "fallback-test-listed-scene";
+
+            try
+            {
+                BattleSnapshotMessage snapshot = BattleRosterFileHelper.PeekSnapshot();
+                if (snapshot == null)
+                {
+                    ModLogger.Info("DedicatedHelper: listed startup scene uses fallback (battle snapshot missing). FallbackScene=" + TestListedScene + ".");
+                    return TestListedScene;
+                }
+
+                snapshotGameType = NormalizeSingleLine(snapshot.MultiplayerGameType);
+                string scene = NormalizeSingleLine(snapshot.MultiplayerScene);
+                if (string.IsNullOrWhiteSpace(scene))
+                    scene = NormalizeSingleLine(snapshot.MapScene);
+
+                if (string.IsNullOrWhiteSpace(scene) || string.Equals(scene, "unknown", StringComparison.OrdinalIgnoreCase))
+                {
+                    ModLogger.Info(
+                        "DedicatedHelper: listed startup scene uses fallback (snapshot scene missing). " +
+                        "SnapshotMapScene=" + (snapshot.MapScene ?? string.Empty) +
+                        " SnapshotMultiplayerScene=" + (snapshot.MultiplayerScene ?? string.Empty) +
+                        " FallbackScene=" + TestListedScene + ".");
+                    return TestListedScene;
+                }
+
+                source = "battle-roster-snapshot";
+                return scene;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("DedicatedHelper: listed startup scene snapshot resolve failed. " + ex.Message + " FallbackScene=" + TestListedScene + ".");
+                return TestListedScene;
+            }
+        }
+
+        private static string ResolveListedStartupGameType(string requestedGameType, string fallbackGameType)
+        {
+            string normalized = NormalizeSingleLine(requestedGameType);
+            if (IsOfficialDedicatedStartupGameType(normalized))
+                return normalized;
+
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                ModLogger.Info(
+                    "DedicatedHelper: listed startup GameType uses fallback because snapshot GameType is not an official dedicated startup mode. " +
+                    "SnapshotGameType=" + normalized +
+                    " FallbackGameType=" + fallbackGameType + ".");
+            }
+
+            return fallbackGameType;
+        }
+
+        private static bool IsOfficialDedicatedStartupGameType(string gameType)
+        {
+            if (string.IsNullOrWhiteSpace(gameType))
+                return false;
+
+            return string.Equals(gameType, CoopGameModeIds.OfficialBattle, StringComparison.Ordinal) ||
+                   string.Equals(gameType, CoopGameModeIds.OfficialTeamDeathmatch, StringComparison.Ordinal) ||
+                   string.Equals(gameType, "Siege", StringComparison.Ordinal) ||
+                   string.Equals(gameType, "Captain", StringComparison.Ordinal) ||
+                   string.Equals(gameType, "Skirmish", StringComparison.Ordinal) ||
+                   string.Equals(gameType, "FreeForAll", StringComparison.Ordinal) ||
+                   string.Equals(gameType, "Duel", StringComparison.Ordinal);
+        }
+
+        private static string NormalizeSingleLine(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? string.Empty
+                : value.Trim().Replace("\r", string.Empty).Replace("\n", string.Empty);
+        }
+
         private static void LogStartupState(bool configApplied, string configPath, string scene, string gameType, string serverName, string adminPasswordSource, string startGameSentVia)
         {
             ModLogger.Info("DedicatedHelper [startup] startup config applied = " + configApplied);
@@ -803,14 +890,16 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 string moddedConfigFile = null;
                 if (UseStartupConfigInModdedOfficialFlow)
                 {
-                    moddedConfigFile = TryWriteStartupConfigForListedTest(exePath, launchSettings);
+                    string moddedStartupScene;
+                    string moddedStartupGameType;
+                    moddedConfigFile = TryWriteStartupConfigForListedTest(exePath, launchSettings, out moddedStartupScene, out moddedStartupGameType);
                     string moddedConfigPath = "";
                     if (!string.IsNullOrEmpty(moddedConfigFile))
                     {
                         string root = GetDedicatedServerRootFromExe(exePath);
                         moddedConfigPath = !string.IsNullOrEmpty(root) ? Path.Combine(root, "Modules", "Native", moddedConfigFile) : moddedConfigFile;
                     }
-                    LogStartupState(!string.IsNullOrEmpty(moddedConfigFile), moddedConfigPath, TestListedScene, UseTdmCloneForListedTest ? "TdmClone" : "TeamDeathmatch", launchSettings.ServerName, "config file (listed-test)", string.IsNullOrEmpty(moddedConfigFile) ? "none" : "config");
+                    LogStartupState(!string.IsNullOrEmpty(moddedConfigFile), moddedConfigPath, moddedStartupScene, moddedStartupGameType, launchSettings.ServerName, "config file (listed-test)", string.IsNullOrEmpty(moddedConfigFile) ? "none" : "config");
                 }
                 else
                 {

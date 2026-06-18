@@ -112,9 +112,12 @@ namespace CoopSpectator.UI
             BattleSideEnum selectedSideOverride,
             string selectedEntryIdOverride,
             bool hasLocalControlledAgent,
-            bool reconnectSelectionContractActive)
+            bool reconnectSelectionContractActive,
+            string currentMissionName = null,
+            DateTime minStatusUpdatedUtc = default(DateTime))
         {
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            status = FilterStatusForCurrentMission(status, currentMissionName, minStatusUpdatedUtc);
             CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot currentSelection = CoopBattleSelectionBridgeFile.ReadCurrentSelection();
             BattleRuntimeState battleState = BattleSnapshotRuntimeState.GetState();
             bool battleDataReady = status?.BattleDataReady == true;
@@ -239,6 +242,33 @@ namespace CoopSpectator.UI
             snapshot.TeamRefreshKey = BuildTeamRefreshKey(snapshot);
             snapshot.ClassRefreshKey = BuildClassRefreshKey(snapshot);
             return snapshot;
+        }
+
+        private static CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot FilterStatusForCurrentMission(
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+            string currentMissionName,
+            DateTime minStatusUpdatedUtc)
+        {
+            if (status == null)
+                return null;
+
+            if (minStatusUpdatedUtc != DateTime.MinValue &&
+                status.UpdatedUtc != DateTime.MinValue &&
+                status.UpdatedUtc < minStatusUpdatedUtc)
+            {
+                return null;
+            }
+
+            string expectedMissionName = currentMissionName ?? string.Empty;
+            string statusMissionName = status.MissionName ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(expectedMissionName) &&
+                !string.IsNullOrWhiteSpace(statusMissionName) &&
+                !string.Equals(expectedMissionName, statusMissionName, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return status;
         }
 
         internal static BattleSideEnum NormalizeStatusSide(string rawSide)

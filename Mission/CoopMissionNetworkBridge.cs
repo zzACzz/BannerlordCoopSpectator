@@ -46,6 +46,24 @@ namespace CoopSpectator.MissionBehaviors
                 (source ?? "commander-deployment") + " BeginCommanderDeployment");
         }
 
+        public static bool TryAutoDeployCommanderDeployment(BattleSideEnum side, string entryId, string source)
+        {
+            return TrySendClientRequest(
+                CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment,
+                side,
+                entryId,
+                (source ?? "commander-deployment") + " AutoDeployCommanderDeployment");
+        }
+
+        public static bool TryFinishCommanderDeployment(BattleSideEnum side, string entryId, string source)
+        {
+            return TrySendClientRequest(
+                CoopBattleSelectionRequestKind.FinishCommanderDeployment,
+                side,
+                entryId,
+                (source ?? "commander-deployment") + " FinishCommanderDeployment");
+        }
+
         public static bool TrySelectSpectator(string source)
         {
             if (TrySendClientRequest(CoopBattleSelectionRequestKind.Spectate, BattleSideEnum.None, string.Empty, source))
@@ -110,7 +128,9 @@ namespace CoopSpectator.MissionBehaviors
             reason = null;
             if (requestKind != CoopBattleSelectionRequestKind.SelectEntry &&
                 requestKind != CoopBattleSelectionRequestKind.SpawnNow &&
-                requestKind != CoopBattleSelectionRequestKind.BeginCommanderDeployment)
+                requestKind != CoopBattleSelectionRequestKind.BeginCommanderDeployment &&
+                requestKind != CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment &&
+                requestKind != CoopBattleSelectionRequestKind.FinishCommanderDeployment)
             {
                 return false;
             }
@@ -632,13 +652,17 @@ namespace CoopSpectator.MissionBehaviors
                     message.RequestKind == CoopBattleSelectionRequestKind.SpawnNow ||
                     message.RequestKind == CoopBattleSelectionRequestKind.ForceRespawnable ||
                     message.RequestKind == CoopBattleSelectionRequestKind.Spectate ||
-                    message.RequestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment;
+                    message.RequestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment ||
+                    message.RequestKind == CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment ||
+                    message.RequestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment;
                 bool shouldForceStatusAfterRejectedInteractiveRequest =
                     !applied &&
                     (message.RequestKind == CoopBattleSelectionRequestKind.SelectSide ||
                      message.RequestKind == CoopBattleSelectionRequestKind.SelectEntry ||
                      message.RequestKind == CoopBattleSelectionRequestKind.SpawnNow ||
-                     message.RequestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment);
+                     message.RequestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment ||
+                     message.RequestKind == CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment ||
+                     message.RequestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment);
                 if ((applied && shouldForceImmediateStatus) || shouldForceStatusAfterRejectedInteractiveRequest)
                     TrySendImmediatePeerStatusPayloads(peer);
             }

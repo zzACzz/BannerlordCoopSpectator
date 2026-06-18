@@ -325,6 +325,27 @@ namespace CoopSpectator.Infrastructure
             Mission mission,
             out string diagnostics)
         {
+            return TryAutoDeployDeployment(
+                mission,
+                finishDeployment: true,
+                out diagnostics);
+        }
+
+        public static bool TryAutoDeployDeploymentOnly(
+            Mission mission,
+            out string diagnostics)
+        {
+            return TryAutoDeployDeployment(
+                mission,
+                finishDeployment: false,
+                out diagnostics);
+        }
+
+        private static bool TryAutoDeployDeployment(
+            Mission mission,
+            bool finishDeployment,
+            out string diagnostics)
+        {
             diagnostics = "mission-null";
             if (mission == null)
                 return false;
@@ -338,7 +359,7 @@ namespace CoopSpectator.Infrastructure
             if (HasDeploymentLifecycleFinished(mission))
             {
                 diagnostics = "deployment-already-finished";
-                return true;
+                return finishDeployment;
             }
 
             Team playerTeam = mission.PlayerTeam;
@@ -442,9 +463,10 @@ namespace CoopSpectator.Infrastructure
                     }
 
                     siegeDeploymentHandler.ForceUpdateAllUnits();
-                    siegeDeploymentHandler.FinishDeployment();
+                    if (finishDeployment)
+                        siegeDeploymentHandler.FinishDeployment();
                     forceUpdatedUnits = true;
-                    finishedDeployment = true;
+                    finishedDeployment = finishDeployment;
                     deploymentDiagnostics = "siege-handler-auto-deployed-all-battle-teams";
                 }
                 else
@@ -457,9 +479,10 @@ namespace CoopSpectator.Infrastructure
                     }
 
                     deploymentHandler.ForceUpdateAllUnits();
-                    deploymentHandler.FinishDeployment();
+                    if (finishDeployment)
+                        deploymentHandler.FinishDeployment();
                     forceUpdatedUnits = true;
-                    finishedDeployment = true;
+                    finishedDeployment = finishDeployment;
                     deploymentDiagnostics = "deployment-handler-auto-deployed-all-battle-teams";
                 }
             }
@@ -486,10 +509,11 @@ namespace CoopSpectator.Infrastructure
                 " PlayerSiegeWeaponsDeployed=" + playerSiegeWeaponsDeployed +
                 " AiSiegeWeaponsDeployed=" + aiSiegeWeaponsDeployed +
                 " ForceUpdatedUnits=" + forceUpdatedUnits +
+                " RequestedFinishDeployment=" + finishDeployment +
                 " FinishedDeploymentCall=" + finishedDeployment +
                 " NonFatalFaults=[" + string.Join("; ", nonFatalDeploymentFaults) + "]" +
                 " DeploymentFinished=" + deploymentFinished;
-            return deploymentFinished;
+            return finishDeployment ? deploymentFinished : autoDeployedTeamCount > 0;
         }
 
         public static bool TryPrepareDeploymentPlanContract(

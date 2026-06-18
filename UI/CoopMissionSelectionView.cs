@@ -1,15 +1,18 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
+using TaleWorlds.Engine;
 using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.InputSystem;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.View.MissionViews;
+using TaleWorlds.MountAndBlade.ViewModelCollection.OrderOfBattle;
 using TaleWorlds.ScreenSystem;
 
 namespace CoopSpectator.UI
@@ -18,10 +21,13 @@ namespace CoopSpectator.UI
     {
         private const string TeamMovieName = "CoopTeamSelection";
         private const string ClassMovieName = "CoopClassLoadout";
+        private const string CommanderDeploymentMovieName = "OrderOfBattle";
+        private static readonly bool EnableManualSiegeCommanderDeployment = true;
         private const float RefreshIntervalSeconds = 0.15f;
         private const float InitialOverlayDelaySeconds = 0.75f;
         private const float StartBattleHotkeyCooldownSeconds = 0.2f;
         private const float ReopenSelectionHotkeyCooldownSeconds = 0.2f;
+        private static readonly InputUsageMask CommanderDeploymentInputMask = (InputUsageMask)7;
         private static readonly TimeSpan LocalSpawnOverlaySuppressionDuration = TimeSpan.FromSeconds(2.5);
         private static readonly TimeSpan LocalSpawnPendingTimeout = TimeSpan.FromSeconds(20);
         private static readonly TimeSpan LocalSpawnPendingResendInterval = TimeSpan.FromSeconds(1.5);
@@ -32,6 +38,7 @@ namespace CoopSpectator.UI
         private GauntletLayer _gauntletLayer;
         private GauntletMovieIdentifier _movie;
         private ViewModel _viewModel;
+        private OrderOfBattleVM _commanderDeploymentViewModel;
         private ICoopSelectionScreenViewModel _screenViewModel;
         private CoopSelectionScreen _currentScreen;
         private CoopSelectionScreen _requestedScreen = CoopSelectionScreen.TeamSelection;
@@ -42,6 +49,7 @@ namespace CoopSpectator.UI
         private float _startBattleHotkeyCooldown;
         private bool _overlayLoadFailed;
         private bool _inputCaptured;
+        private bool _inputCapturedCommanderDeploymentMode;
         private bool _hadLocalControlledAgent;
         private bool _startBattleInstructionShown;
         private bool _spectatorOverlayHidden;
@@ -57,6 +65,8 @@ namespace CoopSpectator.UI
         private string _lastCameraPreviewLogKey = string.Empty;
         private bool _reconnectSelectionContractActive;
         private string _lastReconnectSelectionContractLogKey = string.Empty;
+        private DateTime _missionScreenInitializedUtc = DateTime.MinValue;
+        private string _lastIgnoredEntryStatusLogKey = string.Empty;
 
         public override void OnBehaviorInitialize()
         {
@@ -74,11 +84,13 @@ namespace CoopSpectator.UI
                 return;
 
             ViewOrderPriority = 25;
+            _missionScreenInitializedUtc = DateTime.UtcNow;
             _overlayStartupDelay = InitialOverlayDelaySeconds;
             _hadLocalControlledAgent = HasLocalControlledAgent();
             _startBattleInstructionShown = false;
             _reconnectSelectionContractActive = false;
             _lastReconnectSelectionContractLogKey = string.Empty;
+            _lastIgnoredEntryStatusLogKey = string.Empty;
             ClearLocalSpawnPending("mission-screen-initialize");
             ResetSelectionFlow("mission-screen-initialize");
             ModLogger.Info("CoopMissionSelectionView: OnMissionScreenInitialize, coop selection shell init deferred.");
@@ -108,6 +120,7 @@ namespace CoopSpectator.UI
             TryHandleStartBattleHotkey(dt, hasLocalControlledAgent);
             TryShowStartBattleInstruction(hasLocalControlledAgent);
             TryHandleReopenSelectionHotkey(dt, hasLocalControlledAgent);
+            TryTickCommanderDeploymentViewModel();
 
             if (_gauntletLayer == null)
             {
@@ -156,9 +169,14 @@ namespace CoopSpectator.UI
         {
             if (GameNetwork.IsClient && ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
             {
-                _spectatorOverlayHidden = true;
-                ReleaseCurrentMovie();
-                UpdateOverlayInputState(false);
+                if (_currentScreen != CoopSelectionScreen.None || _inputCaptured)
+                {
+                    _spectatorOverlayHidden = true;
+                    ReleaseOverlayInput();
+                    ReleaseCurrentMovie();
+                    UpdateOverlayInputState(false);
+                    return false;
+                }
             }
 
             return base.OnEscape();
@@ -221,7 +239,19 @@ namespace CoopSpectator.UI
                 return;
             }
 
-            bool loadedNewScreen = EnsureScreenLoaded(snapshot, desiredScreen);
+            bool loadedNewScreen;
+            try
+            {
+                loadedNewScreen = EnsureScreenLoaded(snapshot, desiredScreen);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error("CoopMissionSelectionView: failed to load coop selection screen.", ex);
+                _requestedScreen = CoopSelectionScreen.ClassLoadout;
+                ReleaseOverlayInput();
+                ReleaseCurrentMovie();
+                return;
+            }
             string refreshKey = GetRefreshKey(snapshot, desiredScreen);
             bool needsRefresh = force || loadedNewScreen || !string.Equals(_lastAppliedRefreshKey, refreshKey, StringComparison.Ordinal);
             if (needsRefresh && !loadedNewScreen)
@@ -241,12 +271,14 @@ namespace CoopSpectator.UI
                 _selectedSideOverride,
                 _selectedEntryIdOverride,
                 hasLocalControlledAgent,
-                _reconnectSelectionContractActive);
+                _reconnectSelectionContractActive,
+                Mission?.SceneName ?? string.Empty,
+                _missionScreenInitializedUtc);
         }
 
         private void UpdateReconnectSelectionContractState(bool hasLocalControlledAgent)
         {
-            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = ReadCurrentMissionEntryStatus();
             bool nextState = false;
             string reason = "inactive";
             if (!hasLocalControlledAgent && status != null)
@@ -290,6 +322,67 @@ namespace CoopSpectator.UI
             _reconnectSelectionContractActive = nextState;
         }
 
+        private CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot ReadCurrentMissionEntryStatus()
+        {
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            if (status == null)
+                return null;
+
+            if (IsEntryStatusCurrentForMission(status))
+                return status;
+
+            LogIgnoredEntryStatus(status);
+            return null;
+        }
+
+        private bool IsEntryStatusCurrentForMission(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status)
+        {
+            if (status == null)
+                return false;
+
+            if (_missionScreenInitializedUtc != DateTime.MinValue &&
+                status.UpdatedUtc != DateTime.MinValue &&
+                status.UpdatedUtc < _missionScreenInitializedUtc)
+            {
+                return false;
+            }
+
+            string missionName = Mission?.SceneName ?? string.Empty;
+            string statusMissionName = status.MissionName ?? string.Empty;
+            return string.IsNullOrWhiteSpace(missionName) ||
+                   string.IsNullOrWhiteSpace(statusMissionName) ||
+                   string.Equals(missionName, statusMissionName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void LogIgnoredEntryStatus(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status)
+        {
+            string missionName = Mission?.SceneName ?? string.Empty;
+            string key = string.Join("|", new[]
+            {
+                missionName,
+                status?.MissionName ?? string.Empty,
+                status?.UpdatedUtc.ToString("O") ?? string.Empty,
+                status?.HasAgent.ToString() ?? bool.FalseString,
+                status?.BattleDataReady.ToString() ?? bool.FalseString,
+                status?.AssignedSide ?? string.Empty,
+                status?.LifecycleState ?? string.Empty
+            });
+            if (string.Equals(_lastIgnoredEntryStatusLogKey, key, StringComparison.Ordinal))
+                return;
+
+            _lastIgnoredEntryStatusLogKey = key;
+            ModLogger.Info(
+                "CoopMissionSelectionView: ignored stale entry status. " +
+                "Mission=" + (missionName ?? string.Empty) +
+                " MissionInitUtc=" + _missionScreenInitializedUtc.ToString("O") +
+                " StatusMission=" + (status?.MissionName ?? string.Empty) +
+                " StatusUpdatedUtc=" + (status?.UpdatedUtc.ToString("O") ?? string.Empty) +
+                " HasAgent=" + (status?.HasAgent.ToString() ?? bool.FalseString) +
+                " BattleDataReady=" + (status?.BattleDataReady.ToString() ?? bool.FalseString) +
+                " AssignedSide=" + (status?.AssignedSide ?? string.Empty) +
+                " Lifecycle=" + (status?.LifecycleState ?? string.Empty));
+        }
+
         private static bool IsReconnectFinalizeStage(CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status)
         {
             return string.Equals(
@@ -316,7 +409,7 @@ namespace CoopSpectator.UI
             if (snapshot == null || !snapshot.CanShowOverlay || _spectatorOverlayHidden)
                 return CoopSelectionScreen.None;
 
-            if (IsNativeDeploymentUiActive())
+            if (EnableManualSiegeCommanderDeployment && IsNativeDeploymentUiActive())
                 return CoopSelectionScreen.None;
 
             if (ShouldKeepOverlaySuppressedWhileAwaitingLocalSpawn(snapshot))
@@ -332,6 +425,12 @@ namespace CoopSpectator.UI
 
             if (snapshot.ReconnectSelectionContractActive)
                 return DetermineReconnectDesiredScreen(snapshot);
+
+            if (_requestedScreen == CoopSelectionScreen.CommanderDeployment &&
+                IsCommanderDeploymentReady(snapshot))
+            {
+                return CoopSelectionScreen.CommanderDeployment;
+            }
 
             if (_requestedScreen == CoopSelectionScreen.ClassLoadout &&
                 _selectedSideOverride != BattleSideEnum.None &&
@@ -384,6 +483,39 @@ namespace CoopSpectator.UI
                    string.Equals(readinessStage, "RespawnSelection", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsCommanderDeploymentReady(CoopSelectionUiSnapshot snapshot)
+        {
+            if (snapshot == null ||
+                !snapshot.BattleDataReady ||
+                snapshot.EffectiveSide == BattleSideEnum.None ||
+                string.IsNullOrWhiteSpace(snapshot.SelectedEntryId))
+            {
+                return false;
+            }
+
+            string battlePhase = snapshot.BattlePhase ?? string.Empty;
+            if (string.Equals(battlePhase, nameof(CoopBattlePhase.BattleActive), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(battlePhase, nameof(CoopBattlePhase.BattleEnded), StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string readinessStage = snapshot.BattleDataReadinessStage ?? string.Empty;
+            if (!string.Equals(readinessStage, "UnitSelection", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(readinessStage, "CommanderDeployment", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = CoopSelectionUiHelpers.ResolveEntryState(
+                snapshot.EffectiveSide,
+                snapshot.SelectedEntryId);
+            return CoopSelectionUiHelpers.IsCommanderEntry(
+                snapshot.BattleState,
+                snapshot.EffectiveSide,
+                entryState);
+        }
+
         private static bool IsReconnectFinalizePendingWithAssignedSide(CoopSelectionUiSnapshot snapshot)
         {
             if (snapshot == null || snapshot.BattleDataReady || snapshot.AuthoritativeAssignedSide == BattleSideEnum.None)
@@ -397,8 +529,12 @@ namespace CoopSpectator.UI
 
         private bool EnsureScreenLoaded(CoopSelectionUiSnapshot snapshot, CoopSelectionScreen desiredScreen)
         {
-            if (_currentScreen == desiredScreen && _screenViewModel != null && _viewModel != null)
+            if (_currentScreen == desiredScreen &&
+                _viewModel != null &&
+                (desiredScreen == CoopSelectionScreen.CommanderDeployment || _screenViewModel != null))
+            {
                 return false;
+            }
 
             ReleaseCurrentMovie();
 
@@ -414,6 +550,19 @@ namespace CoopSpectator.UI
                 return true;
             }
 
+            if (desiredScreen == CoopSelectionScreen.CommanderDeployment)
+            {
+                OrderOfBattleVM commanderVm = CreateNativeCommanderDeploymentViewModel(snapshot);
+                _viewModel = commanderVm;
+                _commanderDeploymentViewModel = commanderVm;
+                _screenViewModel = null;
+                _movie = _gauntletLayer.LoadMovie(CommanderDeploymentMovieName, commanderVm);
+                _currentScreen = desiredScreen;
+                _lastAppliedRefreshKey = GetRefreshKey(snapshot, desiredScreen);
+                ModLogger.Info("CoopMissionSelectionView: loaded native OrderOfBattle commander deployment shell.");
+                return true;
+            }
+
             var classVm = new CoopClassLoadoutVM(snapshot, HandleUnitSelected, HandleSpawnRequested, HandleBackRequested);
             _viewModel = classVm;
             _screenViewModel = classVm;
@@ -422,6 +571,360 @@ namespace CoopSpectator.UI
             _lastAppliedRefreshKey = GetRefreshKey(snapshot, desiredScreen);
             ModLogger.Info("CoopMissionSelectionView: loaded coop class loadout shell.");
             return true;
+        }
+
+        private OrderOfBattleVM CreateNativeCommanderDeploymentViewModel(CoopSelectionUiSnapshot snapshot)
+        {
+            Mission mission = Mission;
+            if (mission == null)
+                throw new InvalidOperationException("mission-null");
+
+            if (!TryPrepareNativeCommanderDeploymentMissionState(
+                    mission,
+                    snapshot,
+                    out string prepareDiagnostics))
+            {
+                throw new InvalidOperationException("native-order-of-battle-prepare-failed " + prepareDiagnostics);
+            }
+
+            Camera missionCamera = ResolveMissionScreenCombatCamera();
+            if (missionCamera == null)
+                throw new InvalidOperationException("combat-camera-null");
+
+            var commanderVm = new OrderOfBattleVM();
+            commanderVm.Initialize(
+                mission,
+                missionCamera,
+                SelectNativeCommanderFormationAtIndex,
+                DeselectNativeCommanderFormationAtIndex,
+                ClearNativeCommanderFormationSelection,
+                HandleCommanderAutoDeployRequested,
+                HandleCommanderReadyRequested,
+                new Dictionary<int, Agent>());
+            commanderVm.IsEnabled = true;
+            commanderVm.AreCameraControlsEnabled = false;
+            commanderVm.CanStartMission = true;
+            TryRegisterOrderOfBattleHotKeys(commanderVm);
+
+            ModLogger.Info(
+                "CoopMissionSelectionView: prepared native OrderOfBattle commander deployment. " +
+                "Diagnostics={" + (prepareDiagnostics ?? string.Empty) + "}");
+            return commanderVm;
+        }
+
+        private bool TryPrepareNativeCommanderDeploymentMissionState(
+            Mission mission,
+            CoopSelectionUiSnapshot snapshot,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            BattleSideEnum side = snapshot?.EffectiveSide ?? BattleSideEnum.None;
+            if (side == BattleSideEnum.None)
+                side = _selectedSideOverride;
+            if (side == BattleSideEnum.None)
+            {
+                diagnostics = "side-none";
+                return false;
+            }
+
+            Team playerTeam = ResolveMissionTeamForSide(mission, side);
+            if (playerTeam == null)
+            {
+                diagnostics = "team-null Side=" + side;
+                return false;
+            }
+
+            string refreshDiagnostics = string.Empty;
+            bool relationReady = ReferenceEquals(mission.PlayerTeam, playerTeam) && mission.PlayerEnemyTeam != null;
+            if (!relationReady)
+            {
+                relationReady = TryRefreshMissionPlayerTeamRelationView(
+                    mission,
+                    playerTeam,
+                    "native-order-of-battle",
+                    out refreshDiagnostics);
+            }
+
+            if (!relationReady && !ReferenceEquals(mission.PlayerTeam, playerTeam))
+            {
+                try
+                {
+                    mission.PlayerTeam = playerTeam;
+                    relationReady = ReferenceEquals(mission.PlayerTeam, playerTeam);
+                    refreshDiagnostics = "fallback-set-player-team RelationReady=" + relationReady;
+                }
+                catch (Exception ex)
+                {
+                    refreshDiagnostics = "fallback-set-player-team-failed " + ex.GetType().Name + ":" + ex.Message;
+                }
+            }
+
+            bool setPlayerRole = false;
+            try
+            {
+                playerTeam.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
+                setPlayerRole = playerTeam.IsPlayerGeneral;
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "set-player-role-failed " +
+                    ex.GetType().Name + ":" + ex.Message +
+                    " Refresh={" + refreshDiagnostics + "}";
+                return false;
+            }
+
+            BannerBearerLogic bannerBearerLogic = mission.GetMissionBehavior<BannerBearerLogic>();
+            if (bannerBearerLogic == null)
+            {
+                diagnostics =
+                    "banner-bearer-logic-null" +
+                    " Side=" + side +
+                    " Team=" + playerTeam.Side + "#" + playerTeam.TeamIndex +
+                    " Refresh={" + refreshDiagnostics + "}";
+                return false;
+            }
+
+            OrderController orderController = playerTeam.PlayerOrderController;
+            if (orderController == null)
+            {
+                diagnostics =
+                    "player-order-controller-null" +
+                    " Side=" + side +
+                    " Team=" + playerTeam.Side + "#" + playerTeam.TeamIndex +
+                    " Refresh={" + refreshDiagnostics + "}";
+                return false;
+            }
+
+            if (!TryResolveCameraPreviewAgent(snapshot, out Agent selectedCommanderAgent) ||
+                selectedCommanderAgent?.Team == null ||
+                selectedCommanderAgent.Team.Side != side)
+            {
+                diagnostics =
+                    "selected-commander-agent-null" +
+                    " Side=" + side +
+                    " EntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                    " Team=" + playerTeam.Side + "#" + playerTeam.TeamIndex +
+                    " Refresh={" + refreshDiagnostics + "}";
+                return false;
+            }
+
+            bool orderOwnerAssigned = false;
+            try
+            {
+                orderController.Owner = selectedCommanderAgent;
+                orderOwnerAssigned = ReferenceEquals(orderController.Owner, selectedCommanderAgent);
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "player-order-owner-set-failed " +
+                    ex.GetType().Name + ":" + ex.Message +
+                    " Side=" + side +
+                    " EntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                    " AgentIndex=" + selectedCommanderAgent.Index +
+                    " Refresh={" + refreshDiagnostics + "}";
+                return false;
+            }
+
+            diagnostics =
+                "Side=" + side +
+                " Team=" + playerTeam.Side + "#" + playerTeam.TeamIndex +
+                " RelationReady=" + relationReady +
+                " PlayerTeam=" + (mission.PlayerTeam == null ? "null" : mission.PlayerTeam.Side + "#" + mission.PlayerTeam.TeamIndex) +
+                " PlayerEnemyTeam=" + (mission.PlayerEnemyTeam == null ? "null" : mission.PlayerEnemyTeam.Side + "#" + mission.PlayerEnemyTeam.TeamIndex) +
+                " SetPlayerGeneral=" + setPlayerRole +
+                " BannerBearerLogic=True" +
+                " OrderOwnerAssigned=" + orderOwnerAssigned +
+                " OrderOwnerAgentIndex=" + selectedCommanderAgent.Index +
+                " EntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                " Refresh={" + refreshDiagnostics + "}";
+            return ReferenceEquals(mission.PlayerTeam, playerTeam);
+        }
+
+        private static Team ResolveMissionTeamForSide(Mission mission, BattleSideEnum side)
+        {
+            if (mission == null)
+                return null;
+
+            try
+            {
+                if (side == BattleSideEnum.Attacker)
+                    return mission.AttackerTeam ?? mission.Teams?.Attacker;
+
+                if (side == BattleSideEnum.Defender)
+                    return mission.DefenderTeam ?? mission.Teams?.Defender;
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static bool TryRefreshMissionPlayerTeamRelationView(
+            Mission mission,
+            Team playerTeam,
+            string source,
+            out string diagnostics)
+        {
+            diagnostics = "refresh-method-missing";
+            if (mission == null || playerTeam == null)
+                return false;
+
+            try
+            {
+                Type coopBattleType = typeof(CoopMissionSelectionView).Assembly.GetType("CoopSpectator.GameMode.MissionMultiplayerCoopBattle");
+                MethodInfo method = coopBattleType?.GetMethod(
+                    "TryRefreshMissionPlayerTeamRelationView",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if (method == null)
+                    return false;
+
+                object[] parameters = { mission, playerTeam, source, null };
+                bool result = method.Invoke(null, parameters) is bool value && value;
+                diagnostics = parameters[3] as string ?? diagnostics;
+                return result;
+            }
+            catch (Exception ex)
+            {
+                diagnostics = "refresh-method-failed " + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        private Camera ResolveMissionScreenCombatCamera()
+        {
+            try
+            {
+                return MissionScreen?.CombatCamera;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void TryRegisterOrderOfBattleHotKeys(OrderOfBattleVM commanderVm)
+        {
+            if (commanderVm == null)
+                return;
+
+            try
+            {
+                var category = HotKeyManager.GetCategory("OrderOfBattleHotKeyCategory");
+                if (category == null)
+                    return;
+
+                TryRegisterHotKeyCategoryOnInputContext(TryGetInstancePropertyValue(_gauntletLayer, "Input"), category);
+                TryRegisterHotKeyCategoryOnInputContext(TryGetInstancePropertyValue(TryGetInstancePropertyValue(MissionScreen, "SceneLayer"), "Input"), category);
+                commanderVm.SetDoneInputKey(category.GetHotKey("Confirm"));
+                commanderVm.SetResetInputKey(category.GetHotKey("AutoDeploy"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: failed to register OrderOfBattle hotkeys: " + ex.Message);
+            }
+        }
+
+        private static bool TryRegisterHotKeyCategoryOnInputContext(object inputContext, object category)
+        {
+            if (inputContext == null || category == null)
+                return false;
+
+            try
+            {
+                MethodInfo method = inputContext.GetType()
+                    .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .FirstOrDefault(candidate =>
+                    {
+                        if (!string.Equals(candidate.Name, "RegisterHotKeyCategory", StringComparison.Ordinal))
+                            return false;
+
+                        ParameterInfo[] parameters = candidate.GetParameters();
+                        return parameters.Length == 1 &&
+                               parameters[0].ParameterType.IsInstanceOfType(category);
+                    });
+
+                if (method == null)
+                    return false;
+
+                method.Invoke(inputContext, new[] { category });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void SelectNativeCommanderFormationAtIndex(int formationIndex)
+        {
+            Formation formation = ResolveNativeCommanderFormationAtIndex(formationIndex);
+            OrderController orderController = Mission?.PlayerTeam?.PlayerOrderController;
+            if (formation == null || orderController == null)
+                return;
+
+            try
+            {
+                if (!orderController.IsFormationListening(formation) &&
+                    orderController.IsFormationSelectable(formation))
+                {
+                    orderController.SelectFormation(formation);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: native OOB select formation failed: " + ex.Message);
+            }
+        }
+
+        private void DeselectNativeCommanderFormationAtIndex(int formationIndex)
+        {
+            Formation formation = ResolveNativeCommanderFormationAtIndex(formationIndex);
+            OrderController orderController = Mission?.PlayerTeam?.PlayerOrderController;
+            if (formation == null || orderController == null)
+                return;
+
+            try
+            {
+                if (orderController.IsFormationListening(formation))
+                    orderController.DeselectFormation(formation);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: native OOB deselect formation failed: " + ex.Message);
+            }
+        }
+
+        private void ClearNativeCommanderFormationSelection()
+        {
+            try
+            {
+                Mission?.PlayerTeam?.PlayerOrderController?.ClearSelectedFormations();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: native OOB clear formation selection failed: " + ex.Message);
+            }
+        }
+
+        private Formation ResolveNativeCommanderFormationAtIndex(int formationIndex)
+        {
+            if (formationIndex < 0)
+                return null;
+
+            try
+            {
+                return Mission?.PlayerTeam?.FormationsIncludingEmpty?.ElementAtOrDefault(formationIndex);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private void HandleSideSelected(BattleSideEnum side)
@@ -521,7 +1024,8 @@ namespace CoopSpectator.UI
             {
                 ClearLocalSpawnPending("commander-deployment-requested");
                 _overlaySuppressedUntilUtc = DateTime.MinValue;
-                TrySendCommanderDeploymentRequest(snapshot, "CoopClassLoadoutUI CommanderDeployment");
+                if (TrySendCommanderDeploymentRequest(snapshot, "CoopClassLoadoutUI CommanderDeployment"))
+                    _requestedScreen = CoopSelectionScreen.CommanderDeployment;
                 RefreshOverlay(force: true, hasLocalControlledAgent);
                 return;
             }
@@ -535,6 +1039,9 @@ namespace CoopSpectator.UI
 
         private bool ShouldRequestSiegeCommanderDeployment(CoopSelectionUiSnapshot snapshot)
         {
+            if (!EnableManualSiegeCommanderDeployment)
+                return false;
+
             if (snapshot == null ||
                 snapshot.EffectiveSide == BattleSideEnum.None ||
                 string.IsNullOrWhiteSpace(snapshot.SelectedEntryId))
@@ -603,6 +1110,75 @@ namespace CoopSpectator.UI
                 " EntryId=" + (snapshot.SelectedEntryId ?? string.Empty) +
                 " Source=" + (source ?? "unknown"));
             return queued;
+        }
+
+        private void HandleCommanderAutoDeployRequested()
+        {
+            TrySendCommanderDeploymentCompletionRequest(
+                autoDeploy: true,
+                source: "CoopCommanderDeploymentUI AutoDeploy");
+        }
+
+        private void HandleCommanderReadyRequested()
+        {
+            TrySendCommanderDeploymentCompletionRequest(
+                autoDeploy: false,
+                source: "CoopCommanderDeploymentUI FinishDeployment");
+        }
+
+        private bool TrySendCommanderDeploymentCompletionRequest(bool autoDeploy, string source)
+        {
+            bool hasLocalControlledAgent = HasLocalControlledAgent();
+            CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
+            if (!IsCommanderDeploymentReady(snapshot))
+            {
+                InformationManager.DisplayMessage(new InformationMessage("Coop Battle: commander deployment is not ready."));
+                RefreshOverlay(force: true, hasLocalControlledAgent);
+                return false;
+            }
+
+            _selectedSideOverride = snapshot.EffectiveSide;
+            _selectedEntryIdOverride = snapshot.SelectedEntryId;
+            _requestedScreen = CoopSelectionScreen.CommanderDeployment;
+            _spectatorOverlayHidden = false;
+
+            bool queued = autoDeploy
+                ? CoopBattleNetworkRequestTransport.TryAutoDeployCommanderDeployment(snapshot.EffectiveSide, snapshot.SelectedEntryId, source)
+                : CoopBattleNetworkRequestTransport.TryFinishCommanderDeployment(snapshot.EffectiveSide, snapshot.SelectedEntryId, source);
+            if (queued && !autoDeploy)
+            {
+                MarkLocalSpawnPending(snapshot);
+                _overlaySuppressedUntilUtc = DateTime.UtcNow + LocalSpawnOverlaySuppressionDuration;
+                ReleaseOverlayInput();
+                ReleaseCurrentMovie();
+            }
+
+            InformationManager.DisplayMessage(
+                new InformationMessage(
+                    queued
+                        ? (autoDeploy
+                            ? "Coop Battle: commander auto deployment requested."
+                            : "Coop Battle: commander deployment finish requested.")
+                        : (autoDeploy
+                            ? "Coop Battle: commander auto deployment request failed."
+                            : "Coop Battle: commander deployment finish request failed.")));
+            ModLogger.Info(
+                "CoopMissionSelectionView: commander deployment completion request. " +
+                "Queued=" + queued +
+                " AutoDeploy=" + autoDeploy +
+                " Side=" + snapshot.EffectiveSide +
+                " EntryId=" + (snapshot.SelectedEntryId ?? string.Empty) +
+                " Source=" + (source ?? "unknown"));
+            if (autoDeploy || !queued)
+                RefreshOverlay(force: true, hasLocalControlledAgent);
+            return queued;
+        }
+
+        private void HandleCommanderBackRequested()
+        {
+            _requestedScreen = CoopSelectionScreen.ClassLoadout;
+            _spectatorOverlayHidden = false;
+            RefreshOverlay(force: true, HasLocalControlledAgent());
         }
 
         private void HandleBackRequested()
@@ -801,15 +1377,63 @@ namespace CoopSpectator.UI
             TrySendPendingSpawnRequests("CoopMissionSelectionView PendingRespawnResend", includeSelectEntry: true);
         }
 
+        private void TryTickCommanderDeploymentViewModel()
+        {
+            if (_currentScreen != CoopSelectionScreen.CommanderDeployment ||
+                _commanderDeploymentViewModel == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _commanderDeploymentViewModel.Tick();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: native OrderOfBattle tick failed: " + ex.Message);
+                _commanderDeploymentViewModel = null;
+            }
+        }
+
         private void UpdateOverlayInputState(bool shouldCaptureInput)
         {
-            if (_gauntletLayer == null || shouldCaptureInput == _inputCaptured)
+            if (_gauntletLayer == null)
                 return;
+
+            bool isCommanderDeploymentInputMode =
+                shouldCaptureInput &&
+                _currentScreen == CoopSelectionScreen.CommanderDeployment;
+            if (shouldCaptureInput == _inputCaptured &&
+                (!shouldCaptureInput || _inputCapturedCommanderDeploymentMode == isCommanderDeploymentInputMode))
+            {
+                return;
+            }
 
             ScreenBase missionScreen = MissionScreen;
             if (shouldCaptureInput)
             {
                 TrySetLayerActiveState(_gauntletLayer, true);
+                if (isCommanderDeploymentInputMode)
+                {
+                    TryLoseScreenManagerFocus(_gauntletLayer);
+                    TryInvokeLayerFocusCallback(_gauntletLayer, "HandleLoseFocus");
+                    _gauntletLayer.IsFocusLayer = false;
+                    _gauntletLayer.InputRestrictions.SetInputRestrictions(true, CommanderDeploymentInputMask);
+                    _gauntletLayer.InputRestrictions.SetMouseVisibility(true);
+                    TrySetScreenManagerMouseVisibility(true);
+                    if (missionScreen != null)
+                    {
+                        missionScreen.MouseVisible = true;
+                        ApplyMissionScreenOverlayMode(missionScreen, isOverlayActive: false);
+                        LogMissionScreenOverlayDiagnostics(missionScreen, "commander-deployment-capture");
+                    }
+
+                    _inputCaptured = true;
+                    _inputCapturedCommanderDeploymentMode = true;
+                    return;
+                }
+
                 _gauntletLayer.IsFocusLayer = true;
                 TrySetScreenManagerFocus(_gauntletLayer);
                 TryInvokeLayerFocusCallback(_gauntletLayer, "HandleGainFocus");
@@ -824,6 +1448,7 @@ namespace CoopSpectator.UI
                 }
 
                 _inputCaptured = true;
+                _inputCapturedCommanderDeploymentMode = false;
                 return;
             }
 
@@ -863,6 +1488,7 @@ namespace CoopSpectator.UI
             finally
             {
                 _inputCaptured = false;
+                _inputCapturedCommanderDeploymentMode = false;
             }
         }
 
@@ -900,6 +1526,7 @@ namespace CoopSpectator.UI
 
             _viewModel?.OnFinalize();
             _viewModel = null;
+            _commanderDeploymentViewModel = null;
             _screenViewModel = null;
             _currentScreen = CoopSelectionScreen.None;
             _lastAppliedRefreshKey = string.Empty;
@@ -1158,12 +1785,29 @@ namespace CoopSpectator.UI
         {
             if (snapshot == null)
             {
-                return desiredScreen == CoopSelectionScreen.TeamSelection ? "team|null" : "class|null";
+                if (desiredScreen == CoopSelectionScreen.TeamSelection)
+                    return "team|null";
+
+                return desiredScreen == CoopSelectionScreen.CommanderDeployment
+                    ? "commander|null"
+                    : "class|null";
             }
 
-            return desiredScreen == CoopSelectionScreen.TeamSelection
-                ? snapshot.TeamRefreshKey ?? string.Empty
-                : snapshot.ClassRefreshKey ?? string.Empty;
+            if (desiredScreen == CoopSelectionScreen.TeamSelection)
+                return snapshot.TeamRefreshKey ?? string.Empty;
+
+            if (desiredScreen == CoopSelectionScreen.CommanderDeployment)
+            {
+                return string.Join("\n", new[]
+                {
+                    "commander",
+                    snapshot.ClassRefreshKey ?? string.Empty,
+                    snapshot.BattlePhase ?? string.Empty,
+                    snapshot.Lifecycle ?? string.Empty
+                });
+            }
+
+            return snapshot.ClassRefreshKey ?? string.Empty;
         }
 
         private void TryHandleStartBattleHotkey(float dt, bool hasLocalControlledAgent)
@@ -1398,6 +2042,23 @@ namespace CoopSpectator.UI
             }
         }
 
+        internal static object TryGetInstancePropertyValue(object target, string propertyName)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(propertyName))
+                return null;
+
+            try
+            {
+                return target.GetType()
+                    .GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    ?.GetValue(target);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         internal static T? TryGetInstanceProperty<T>(object target, string propertyName) where T : struct
         {
             if (target == null || string.IsNullOrWhiteSpace(propertyName))
@@ -1421,7 +2082,8 @@ namespace CoopSpectator.UI
     {
         None = 0,
         TeamSelection = 1,
-        ClassLoadout = 2
+        ClassLoadout = 2,
+        CommanderDeployment = 3
     }
 
     internal interface ICoopSelectionScreenViewModel
