@@ -108,6 +108,10 @@
       <HintPath>$(BannerlordBinDir)\TaleWorlds.GauntletUI.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="TaleWorlds.TwoDimension">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.TwoDimension.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="TaleWorlds.Engine.GauntletUI">
       <HintPath>$(BannerlordBinDir)\TaleWorlds.Engine.GauntletUI.dll</HintPath>
       <Private>false</Private>
@@ -203,6 +207,10 @@
     </Reference>
     <Reference Include="TaleWorlds.GauntletUI" Condition="Exists('TaleWorlds.GauntletUI.dll')">
       <HintPath>TaleWorlds.GauntletUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.TwoDimension" Condition="Exists('TaleWorlds.TwoDimension.dll')">
+      <HintPath>TaleWorlds.TwoDimension.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="TaleWorlds.Engine.GauntletUI" Condition="Exists('TaleWorlds.Engine.GauntletUI.dll')">

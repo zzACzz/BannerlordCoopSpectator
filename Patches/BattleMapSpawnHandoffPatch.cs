@@ -5651,9 +5651,11 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            Formation formation = null;
-            if (createAgent.FormationIndex >= 0 && !GameNetwork.IsReplay)
-                formation = teamFromTeamIndex.GetFormation((FormationClass)createAgent.FormationIndex);
+            Formation formation = ResolveCreateAgentFormationForProjection(
+                mission,
+                teamFromTeamIndex,
+                createAgent,
+                character);
 
             Banner banner = ResolveStrictExactHeroCreateAgentBanner(teamFromTeamIndex, formation);
             Equipment createTimeSpawnEquipment = ResolveStrictExactHeroCreateAgentSpawnEquipment(contract, createAgent);
@@ -5781,11 +5783,6 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            Formation formation = null;
-            if (createAgent.FormationIndex >= 0 && !GameNetwork.IsReplay)
-                formation = teamFromTeamIndex.GetFormation((FormationClass)createAgent.FormationIndex);
-
-            Banner banner = ResolveStrictExactHeroCreateAgentBanner(teamFromTeamIndex, formation);
             bool resolvedStrictExactContract = TryResolveMountedHeroCreateAgentContractForPayloadAdapter(
                 createAgent,
                 out string entryId,
@@ -5802,6 +5799,12 @@ namespace CoopSpectator.Patches
             if (resolvedStrictExactContract && contract != null)
                 createTimeCharacter = ResolveStrictExactHeroCreateAgentCharacter(createAgent, contract) ?? createTimeCharacter;
 
+            Formation formation = ResolveCreateAgentFormationForProjection(
+                mission,
+                teamFromTeamIndex,
+                createAgent,
+                createTimeCharacter);
+            Banner banner = ResolveStrictExactHeroCreateAgentBanner(teamFromTeamIndex, formation);
             Equipment createTimeSpawnEquipment =
                 exactVisualHybridEligible
                     ? BuildMountedHeroExactVisualHybridSpawnEquipment(contract, createAgent)
@@ -6535,6 +6538,69 @@ namespace CoopSpectator.Patches
                 return mission.DefenderTeam ?? mission.Teams?.Defender;
 
             return teamFromTeamIndex;
+        }
+
+        private static Formation ResolveCreateAgentFormationForProjection(
+            Mission mission,
+            Team team,
+            CreateAgent createAgent,
+            BasicCharacterObject character)
+        {
+            if (mission == null ||
+                team == null ||
+                createAgent == null ||
+                createAgent.FormationIndex < 0 ||
+                GameNetwork.IsReplay)
+            {
+                return null;
+            }
+
+            FormationClass formationClass = (FormationClass)createAgent.FormationIndex;
+            if (ShouldUseDismountedSiegeCreateAgentFormation(mission, team, character))
+            {
+                try
+                {
+                    formationClass = mission.GetAgentTroopClass(team.Side, character).FallbackClass();
+                }
+                catch
+                {
+                    formationClass = character?.DefaultFormationClass.FallbackClass() ?? FormationClass.Infantry;
+                }
+            }
+
+            int formationIndex = (int)formationClass;
+            if (formationIndex < 0 || formationIndex >= (int)FormationClass.NumberOfRegularFormations)
+                formationClass = FormationClass.Infantry;
+
+            return team.GetFormation(formationClass);
+        }
+
+        private static bool ShouldUseDismountedSiegeCreateAgentFormation(
+            Mission mission,
+            Team team,
+            BasicCharacterObject character)
+        {
+            if (mission == null || team == null || character == null || team.Side == BattleSideEnum.None)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                return false;
+
+            if (ExactCampaignArmyBootstrap.TryGetSpawnHorses(mission, team.Side, out bool spawnHorses))
+                return !spawnHorses;
+
+            try
+            {
+                return mission.IsSiegeBattle;
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         private static BattleSideEnum ResolveCreateAgentPayloadBattleSideForPatch(int teamIndex)

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.Localization;
 using TaleWorlds.MountAndBlade;
@@ -53,6 +54,7 @@ namespace CoopSpectator.Infrastructure
                 int updatedHeroClasses = 0;
                 int unresolvedCharacters = 0;
                 int unresolvedHeroClasses = 0;
+                bool forceDismountedSiegeProjection = ShouldForceDismountedSiegeProjection(runtimeState);
 
                 foreach (RosterEntryState entryState in EnumerateEntries(runtimeState))
                 {
@@ -92,7 +94,8 @@ namespace CoopSpectator.Infrastructure
                         battleEquipment,
                         runtimeName,
                         hasExactBodyProperties,
-                        exactBodyProperties);
+                        exactBodyProperties,
+                        forceDismountedSiegeProjection);
 
                     if (!TryResolveBaseHeroClass(entryState, baseCharacter, out MultiplayerClassDivisions.MPHeroClass baseHeroClass, out bool treatAsTroop))
                     {
@@ -126,8 +129,17 @@ namespace CoopSpectator.Infrastructure
                     " CreatedHeroClasses=" + createdHeroClasses +
                     " UpdatedHeroClasses=" + updatedHeroClasses +
                     " UnresolvedCharacters=" + unresolvedCharacters +
-                    " UnresolvedHeroClasses=" + unresolvedHeroClasses);
+                    " UnresolvedHeroClasses=" + unresolvedHeroClasses +
+                    " DismountedSiegeProjection=" + forceDismountedSiegeProjection);
             }
+        }
+
+        private static bool ShouldForceDismountedSiegeProjection(BattleRuntimeState runtimeState)
+        {
+            BattleScenarioContextMessage scenarioContext =
+                runtimeState?.ScenarioContext ??
+                runtimeState?.Snapshot?.ScenarioContext;
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
         }
 
         public static void Clear(string reason)
@@ -430,11 +442,15 @@ namespace CoopSpectator.Infrastructure
                 Equipment battleEquipment,
                 TextObject runtimeName,
                 bool hasExactBodyProperties,
-                BodyProperties exactBodyProperties)
+                BodyProperties exactBodyProperties,
+                bool forceDismountedSiegeProjection)
             {
                 _battleEquipment = battleEquipment?.Clone(false) ?? CloneBattleEquipment(_baseCharacter) ?? new Equipment();
+                if (forceDismountedSiegeProjection)
+                    ClearMountEquipment(_battleEquipment);
+
                 _runtimeName = runtimeName ?? _baseCharacter?.Name ?? new TextObject(base.StringId ?? "exact_runtime");
-                _runtimeIsMounted = ResolveMounted(entryState, _battleEquipment, _baseCharacter);
+                _runtimeIsMounted = !forceDismountedSiegeProjection && ResolveMounted(entryState, _battleEquipment, _baseCharacter);
                 _runtimeIsRanged = ResolveRanged(entryState, _battleEquipment, _baseCharacter);
                 _runtimeIsHero = entryState?.IsHero == true || _baseCharacter?.IsHero == true;
                 _runtimeLevel = entryState?.HeroLevel > 0 ? entryState.HeroLevel : (_baseCharacter?.Level ?? 1);
@@ -454,7 +470,11 @@ namespace CoopSpectator.Infrastructure
                 Level = _runtimeLevel;
                 Age = _runtimeAge;
                 IsFemale = _runtimeIsFemale;
-                DefaultFormationClass = ResolveFormationClass(_runtimeIsMounted, _runtimeIsRanged, _baseCharacter);
+                DefaultFormationClass = ResolveFormationClass(
+                    _runtimeIsMounted,
+                    _runtimeIsRanged,
+                    _baseCharacter,
+                    forceDismountedSiegeProjection);
 
                 if (Culture == null && !string.IsNullOrWhiteSpace(entryState?.CultureId))
                 {
@@ -584,6 +604,21 @@ namespace CoopSpectator.Infrastructure
                 return baseCharacter?.IsMounted == true;
             }
 
+            private static void ClearMountEquipment(Equipment equipment)
+            {
+                if (equipment == null)
+                    return;
+
+                try
+                {
+                    equipment[EquipmentIndex.Horse] = default(EquipmentElement);
+                    equipment[EquipmentIndex.HorseHarness] = default(EquipmentElement);
+                }
+                catch
+                {
+                }
+            }
+
             private static bool ResolveRanged(RosterEntryState entryState, Equipment battleEquipment, BasicCharacterObject baseCharacter)
             {
                 if (entryState?.IsRanged == true)
@@ -605,8 +640,15 @@ namespace CoopSpectator.Infrastructure
                 return baseCharacter?.IsRanged == true;
             }
 
-            private static FormationClass ResolveFormationClass(bool isMounted, bool isRanged, BasicCharacterObject baseCharacter)
+            private static FormationClass ResolveFormationClass(
+                bool isMounted,
+                bool isRanged,
+                BasicCharacterObject baseCharacter,
+                bool forceDismountedSiegeProjection)
             {
+                if (forceDismountedSiegeProjection)
+                    return isRanged ? FormationClass.Ranged : FormationClass.Infantry;
+
                 if (isMounted && isRanged)
                     return FormationClass.HorseArcher;
                 if (isMounted)

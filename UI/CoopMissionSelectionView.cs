@@ -12,8 +12,11 @@ using TaleWorlds.InputSystem;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.View.MissionViews;
+using TaleWorlds.MountAndBlade.ViewModelCollection.Order;
+using TaleWorlds.MountAndBlade.ViewModelCollection.Order.Visual;
 using TaleWorlds.MountAndBlade.ViewModelCollection.OrderOfBattle;
 using TaleWorlds.ScreenSystem;
+using TaleWorlds.TwoDimension;
 
 namespace CoopSpectator.UI
 {
@@ -34,11 +37,18 @@ namespace CoopSpectator.UI
         private const int LocalSpawnPendingMaxRequestAttempts = 8;
         private static int _activeCameraPreviewAgentIndex = -1;
         private static string _activeCameraPreviewEntryId = string.Empty;
+        private static bool _commanderDeploymentOrderOfBattleActive;
+        private static bool _commanderDeploymentPlacementInputActive;
 
         private GauntletLayer _gauntletLayer;
         private GauntletMovieIdentifier _movie;
         private ViewModel _viewModel;
         private OrderOfBattleVM _commanderDeploymentViewModel;
+        private MissionOrderVM _commanderDeploymentOrderVm;
+        private SpriteCategory _commanderDeploymentSpriteCategory;
+        private object _commanderDeploymentOrderTroopPlacer;
+        private Action _commanderDeploymentOnUnitDeployedHandler;
+        private bool _commanderDeploymentOrderVmInitialized;
         private ICoopSelectionScreenViewModel _screenViewModel;
         private CoopSelectionScreen _currentScreen;
         private CoopSelectionScreen _requestedScreen = CoopSelectionScreen.TeamSelection;
@@ -91,6 +101,7 @@ namespace CoopSpectator.UI
             _reconnectSelectionContractActive = false;
             _lastReconnectSelectionContractLogKey = string.Empty;
             _lastIgnoredEntryStatusLogKey = string.Empty;
+            _commanderDeploymentPlacementInputActive = false;
             ClearLocalSpawnPending("mission-screen-initialize");
             ResetSelectionFlow("mission-screen-initialize");
             ModLogger.Info("CoopMissionSelectionView: OnMissionScreenInitialize, coop selection shell init deferred.");
@@ -147,6 +158,8 @@ namespace CoopSpectator.UI
             {
                 ReleaseOverlayInput();
                 ReleaseCurrentMovie();
+                _commanderDeploymentOrderOfBattleActive = false;
+                _commanderDeploymentPlacementInputActive = false;
 
                 if (_gauntletLayer != null)
                 {
@@ -552,15 +565,28 @@ namespace CoopSpectator.UI
 
             if (desiredScreen == CoopSelectionScreen.CommanderDeployment)
             {
-                OrderOfBattleVM commanderVm = CreateNativeCommanderDeploymentViewModel(snapshot);
-                _viewModel = commanderVm;
-                _commanderDeploymentViewModel = commanderVm;
-                _screenViewModel = null;
-                _movie = _gauntletLayer.LoadMovie(CommanderDeploymentMovieName, commanderVm);
-                _currentScreen = desiredScreen;
-                _lastAppliedRefreshKey = GetRefreshKey(snapshot, desiredScreen);
-                ModLogger.Info("CoopMissionSelectionView: loaded native OrderOfBattle commander deployment shell.");
-                return true;
+                _commanderDeploymentOrderOfBattleActive = true;
+                OrderOfBattleVM commanderVm = null;
+                try
+                {
+                    EnsureCommanderDeploymentSpriteCategoryLoaded();
+                    commanderVm = CreateNativeCommanderDeploymentViewModel(snapshot);
+
+                    _viewModel = commanderVm;
+                    _commanderDeploymentViewModel = commanderVm;
+                    _screenViewModel = null;
+                    _movie = _gauntletLayer.LoadMovie(CommanderDeploymentMovieName, commanderVm);
+                    _currentScreen = desiredScreen;
+                    _lastAppliedRefreshKey = GetRefreshKey(snapshot, desiredScreen);
+                    ModLogger.Info("CoopMissionSelectionView: loaded native OrderOfBattle commander deployment shell.");
+                    return true;
+                }
+                catch
+                {
+                    _commanderDeploymentOrderOfBattleActive = false;
+                    ReleaseCurrentMovie();
+                    throw;
+                }
             }
 
             var classVm = new CoopClassLoadoutVM(snapshot, HandleUnitSelected, HandleSpawnRequested, HandleBackRequested);
@@ -591,7 +617,7 @@ namespace CoopSpectator.UI
             if (missionCamera == null)
                 throw new InvalidOperationException("combat-camera-null");
 
-            var commanderVm = new OrderOfBattleVM();
+            var commanderVm = new CoopSiegeOrderOfBattleVM();
             commanderVm.Initialize(
                 mission,
                 missionCamera,
@@ -604,12 +630,448 @@ namespace CoopSpectator.UI
             commanderVm.IsEnabled = true;
             commanderVm.AreCameraControlsEnabled = false;
             commanderVm.CanStartMission = true;
+            commanderVm.AutoDeployText = GameTexts.FindText("str_auto_deploy").ToString();
             TryRegisterOrderOfBattleHotKeys(commanderVm);
+            TryCreateCommanderDeploymentOrderBridge(mission, missionCamera);
+            TryAttachCommanderDeploymentOrderTroopPlacerCallback(commanderVm);
+            TryRefreshNativeCommanderOrderOfBattleCounts(commanderVm, mission, "post-initialize");
 
             ModLogger.Info(
                 "CoopMissionSelectionView: prepared native OrderOfBattle commander deployment. " +
                 "Diagnostics={" + (prepareDiagnostics ?? string.Empty) + "}");
             return commanderVm;
+        }
+
+        private static void TryRefreshNativeCommanderOrderOfBattleCounts(
+            OrderOfBattleVM commanderVm,
+            Mission mission,
+            string source)
+        {
+            if (commanderVm == null)
+                return;
+
+            bool troopLookupRefreshed = TryInvokeOrderOfBattlePrivateMethod(commanderVm, "UpdateTroopTypeLookUpTable");
+            bool projectedCountsRefreshed = TryRefreshProjectedSiegeOrderOfBattleCounts(commanderVm, mission);
+            bool weightsRefreshed = TryInvokeOrderOfBattlePrivateMethod(commanderVm, "RefreshWeights");
+            projectedCountsRefreshed |= TryRefreshProjectedSiegeOrderOfBattleCounts(commanderVm, mission);
+
+            try
+            {
+                commanderVm.OnUnitDeployed();
+                projectedCountsRefreshed |= TryRefreshProjectedSiegeOrderOfBattleCounts(commanderVm, mission);
+            }
+            catch
+            {
+            }
+
+            if (CoopDebugConfig.OrderOfBattleDiagnostics)
+            {
+                LogNativeCommanderOrderOfBattleDiagnostics(
+                    commanderVm,
+                    mission,
+                    source,
+                    troopLookupRefreshed,
+                    weightsRefreshed,
+                    projectedCountsRefreshed);
+            }
+        }
+
+        private static bool TryInvokeOrderOfBattlePrivateMethod(OrderOfBattleVM commanderVm, string methodName)
+        {
+            if (commanderVm == null || string.IsNullOrWhiteSpace(methodName))
+                return false;
+
+            try
+            {
+                MethodInfo method = typeof(OrderOfBattleVM).GetMethod(
+                    methodName,
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                if (method == null)
+                    return false;
+
+                method.Invoke(commanderVm, null);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: native OrderOfBattle private refresh failed. " +
+                    "Method=" + methodName +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool TryRefreshProjectedSiegeOrderOfBattleCounts(OrderOfBattleVM commanderVm, Mission mission)
+        {
+            if (commanderVm == null ||
+                mission == null ||
+                !IsCommanderDeploymentOrderOfBattleActive())
+            {
+                return false;
+            }
+
+            try
+            {
+                FieldInfo lookupField = typeof(OrderOfBattleVM).GetField(
+                    "_visibleTroopTypeCountLookup",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                FieldInfo formationsField = typeof(OrderOfBattleVM).GetField(
+                    "_allFormations",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                if (!(lookupField?.GetValue(commanderVm) is IDictionary<FormationClass, int> lookup) ||
+                    !(formationsField?.GetValue(commanderVm) is IEnumerable<OrderOfBattleFormationItemVM> formationItems))
+                {
+                    return false;
+                }
+
+                int infantryCount = 0;
+                int rangedCount = 0;
+                var items = formationItems.Where(item => item?.Formation != null).ToList();
+                foreach (OrderOfBattleFormationItemVM formationItem in items)
+                {
+                    infantryCount += CountProjectedSiegeOrderOfBattleUnitsInClass(
+                        formationItem.Formation,
+                        FormationClass.Infantry);
+                    rangedCount += CountProjectedSiegeOrderOfBattleUnitsInClass(
+                        formationItem.Formation,
+                        FormationClass.Ranged);
+                }
+
+                lookup[FormationClass.Infantry] = infantryCount;
+                lookup[FormationClass.Ranged] = rangedCount;
+                lookup[FormationClass.Cavalry] = infantryCount;
+                lookup[FormationClass.HorseArcher] = rangedCount;
+
+                foreach (OrderOfBattleFormationItemVM formationItem in items)
+                {
+                    formationItem.OnSizeChanged();
+                    foreach (OrderOfBattleFormationClassVM classVm in formationItem.Classes)
+                    {
+                        if (classVm == null)
+                            continue;
+
+                        FormationClass projectedClass = DismountSiegeOrderOfBattleFormationClass(classVm.Class.FallbackClass());
+                        if (projectedClass != FormationClass.Infantry && projectedClass != FormationClass.Ranged)
+                        {
+                            classVm.TroopCountText = string.Empty;
+                            continue;
+                        }
+
+                        int formationClassCount = CountProjectedSiegeOrderOfBattleUnitsInClass(
+                            formationItem.Formation,
+                            classVm.Class);
+                        int totalClassCount = GetProjectedSiegeOrderOfBattleTotalCount(lookup, classVm.Class);
+                        classVm.TroopCountText = FormatOrderOfBattleTroopCountText(
+                            formationClassCount,
+                            totalClassCount);
+                    }
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: projected siege OrderOfBattle count refresh failed open. " +
+                    "Error=" + ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
+        }
+
+        private static int CountProjectedSiegeOrderOfBattleUnitsInClass(Formation formation, FormationClass formationClass)
+        {
+            if (formation == null)
+                return 0;
+
+            FormationClass projectedClass = DismountSiegeOrderOfBattleFormationClass(formationClass.FallbackClass());
+            if (projectedClass != FormationClass.Infantry && projectedClass != FormationClass.Ranged)
+                return 0;
+
+            return formation.GetCountOfUnitsWithCondition(agent =>
+                ResolveProjectedSiegeOrderOfBattleAgentClass(agent) == projectedClass);
+        }
+
+        private static FormationClass ResolveProjectedSiegeOrderOfBattleAgentClass(Agent agent)
+        {
+            if (agent == null || agent.IsMount)
+                return FormationClass.NumberOfAllFormations;
+
+            FormationClass formationClass = FormationClass.NumberOfAllFormations;
+            BasicCharacterObject character = agent.Character;
+            if (character != null)
+            {
+                try
+                {
+                    BattleSideEnum side = agent.Team?.Side ?? BattleSideEnum.None;
+                    if (Mission.Current != null && side != BattleSideEnum.None)
+                        formationClass = Mission.Current.GetAgentTroopClass(side, character);
+                    else
+                        formationClass = character.DefaultFormationClass;
+                }
+                catch
+                {
+                    formationClass = character.DefaultFormationClass;
+                }
+            }
+
+            if (!IsDefaultOrderOfBattleFormationClass(formationClass))
+                return agent.IsRangedCached ? FormationClass.Ranged : FormationClass.Infantry;
+
+            formationClass = DismountSiegeOrderOfBattleFormationClass(formationClass.FallbackClass());
+            if (formationClass == FormationClass.Ranged || formationClass == FormationClass.Infantry)
+                return formationClass;
+
+            return agent.IsRangedCached ? FormationClass.Ranged : FormationClass.Infantry;
+        }
+
+        private static FormationClass DismountSiegeOrderOfBattleFormationClass(FormationClass formationClass)
+        {
+            if (formationClass == FormationClass.Cavalry)
+                return FormationClass.Infantry;
+
+            if (formationClass == FormationClass.HorseArcher)
+                return FormationClass.Ranged;
+
+            return formationClass;
+        }
+
+        private static bool IsDefaultOrderOfBattleFormationClass(FormationClass formationClass)
+        {
+            return formationClass >= FormationClass.Infantry &&
+                   formationClass < FormationClass.NumberOfDefaultFormations;
+        }
+
+        private static int GetProjectedSiegeOrderOfBattleTotalCount(
+            IDictionary<FormationClass, int> lookup,
+            FormationClass formationClass)
+        {
+            if (lookup == null)
+                return 0;
+
+            FormationClass projectedClass = DismountSiegeOrderOfBattleFormationClass(formationClass.FallbackClass());
+            return lookup.TryGetValue(projectedClass, out int count) ? count : 0;
+        }
+
+        private static string FormatOrderOfBattleTroopCountText(int left, int right)
+        {
+            try
+            {
+                return GameTexts.FindText("str_LEFT_over_RIGHT")
+                    .SetTextVariable("LEFT", left)
+                    .SetTextVariable("RIGHT", right)
+                    .ToString();
+            }
+            catch
+            {
+                return left + " / " + right;
+            }
+        }
+
+        private static void LogNativeCommanderOrderOfBattleDiagnostics(
+            OrderOfBattleVM commanderVm,
+            Mission mission,
+            string source,
+            bool troopLookupRefreshed,
+            bool weightsRefreshed,
+            bool projectedCountsRefreshed)
+        {
+            try
+            {
+                Team playerTeam = mission?.PlayerTeam;
+                string teamSummary =
+                    playerTeam == null
+                        ? "Team=null"
+                        : "Team=" + playerTeam.Side + "#" + playerTeam.TeamIndex +
+                          " IsPlayerGeneral=" + playerTeam.IsPlayerGeneral +
+                          " Formations=" + playerTeam.FormationsIncludingEmpty.Count;
+
+                ModLogger.Info(
+                    "CoopMissionSelectionView: native OrderOfBattle diagnostics. " +
+                    "Source=" + (source ?? "unknown") +
+                    " TroopLookupRefreshed=" + troopLookupRefreshed +
+                    " WeightsRefreshed=" + weightsRefreshed +
+                    " ProjectedCountsRefreshed=" + projectedCountsRefreshed +
+                    " " + teamSummary +
+                    " VisibleLookup={" + BuildOrderOfBattleVisibleLookupSummary(commanderVm) + "}" +
+                    " FormationItems={" + BuildOrderOfBattleFormationItemSummary(commanderVm) + "}" +
+                    " NativeFormations={" + BuildNativeFormationClassSummary(playerTeam) + "}");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: native OrderOfBattle diagnostics failed: " + ex.Message);
+            }
+        }
+
+        private static string BuildOrderOfBattleVisibleLookupSummary(OrderOfBattleVM commanderVm)
+        {
+            try
+            {
+                FieldInfo field = typeof(OrderOfBattleVM).GetField(
+                    "_visibleTroopTypeCountLookup",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var lookup = field?.GetValue(commanderVm) as IDictionary<FormationClass, int>;
+                if (lookup == null)
+                    return "null";
+
+                return
+                    "Inf=" + GetLookupCount(lookup, FormationClass.Infantry) +
+                    ",Ranged=" + GetLookupCount(lookup, FormationClass.Ranged) +
+                    ",Cav=" + GetLookupCount(lookup, FormationClass.Cavalry) +
+                    ",HA=" + GetLookupCount(lookup, FormationClass.HorseArcher);
+            }
+            catch (Exception ex)
+            {
+                return "failed:" + ex.GetType().Name;
+            }
+        }
+
+        private static int GetLookupCount(IDictionary<FormationClass, int> lookup, FormationClass formationClass)
+        {
+            return lookup != null && lookup.TryGetValue(formationClass, out int count) ? count : -1;
+        }
+
+        private static string BuildOrderOfBattleFormationItemSummary(OrderOfBattleVM commanderVm)
+        {
+            try
+            {
+                FieldInfo field = typeof(OrderOfBattleVM).GetField(
+                    "_allFormations",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                if (!(field?.GetValue(commanderVm) is System.Collections.IEnumerable items))
+                    return "null";
+
+                var summaries = new List<string>();
+                foreach (object item in items)
+                {
+                    if (item == null)
+                        continue;
+
+                    Formation formation = TryGetPropertyValue<Formation>(item, "Formation");
+                    int troopCount = TryGetPropertyValue<int>(item, "TroopCount");
+                    int orderClass = TryGetPropertyValue<int>(item, "OrderOfBattleFormationClassInt");
+                    string classSummary = BuildOrderOfBattleFormationClassesSummary(item);
+                    summaries.Add(
+                        "F" + (formation?.Index ?? -1) +
+                        ":Count=" + troopCount +
+                        ",OobClass=" + orderClass +
+                        ",Classes=[" + classSummary + "]");
+                }
+
+                return summaries.Count == 0 ? "empty" : string.Join("; ", summaries);
+            }
+            catch (Exception ex)
+            {
+                return "failed:" + ex.GetType().Name;
+            }
+        }
+
+        private static string BuildOrderOfBattleFormationClassesSummary(object formationItem)
+        {
+            try
+            {
+                object classes = TryGetPropertyValue<object>(formationItem, "Classes");
+                if (!(classes is System.Collections.IEnumerable enumerable))
+                    return "null";
+
+                var summaries = new List<string>();
+                foreach (object classItem in enumerable)
+                {
+                    if (classItem == null)
+                        continue;
+
+                    FormationClass formationClass = TryGetPropertyValue<FormationClass>(classItem, "Class");
+                    int weight = TryGetPropertyValue<int>(classItem, "Weight");
+                    string troopCountText = TryGetPropertyValue<string>(classItem, "TroopCountText") ?? string.Empty;
+                    summaries.Add(formationClass + ":" + weight + ":" + troopCountText);
+                }
+
+                return summaries.Count == 0 ? "empty" : string.Join("|", summaries);
+            }
+            catch (Exception ex)
+            {
+                return "failed:" + ex.GetType().Name;
+            }
+        }
+
+        private static T TryGetPropertyValue<T>(object instance, string propertyName)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(propertyName))
+                return default(T);
+
+            try
+            {
+                PropertyInfo property = instance.GetType().GetProperty(
+                    propertyName,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                object value = property?.GetValue(instance, null);
+                return value is T typedValue ? typedValue : default(T);
+            }
+            catch
+            {
+                return default(T);
+            }
+        }
+
+        private static string BuildNativeFormationClassSummary(Team playerTeam)
+        {
+            if (playerTeam == null)
+                return "team-null";
+
+            try
+            {
+                var summaries = new List<string>();
+                foreach (Formation formation in playerTeam.FormationsIncludingEmpty)
+                {
+                    if (formation == null)
+                        continue;
+
+                    FormationQuerySystem query = formation.QuerySystem;
+                    string ratios =
+                        query == null
+                            ? "Q=null"
+                            : "Q=" +
+                              FormatRatio(query.InfantryUnitRatio) + "/" +
+                              FormatRatio(query.RangedUnitRatio) + "/" +
+                              FormatRatio(query.CavalryUnitRatio) + "/" +
+                              FormatRatio(query.RangedCavalryUnitRatio);
+                    summaries.Add(
+                        "F" + formation.Index +
+                        ":Count=" + formation.CountOfUnits +
+                        ",Alive=" + formation.GetCountOfUnitsWithCondition(agent => agent != null && agent.Health > 0f) +
+                        ",Logical=" + formation.LogicalClass +
+                        ",Physical=" + formation.PhysicalClass +
+                        ",Phys=" +
+                        CountPhysicalClass(formation, FormationClass.Infantry) + "/" +
+                        CountPhysicalClass(formation, FormationClass.Ranged) + "/" +
+                        CountPhysicalClass(formation, FormationClass.Cavalry) + "/" +
+                        CountPhysicalClass(formation, FormationClass.HorseArcher) +
+                        "," + ratios);
+                }
+
+                return summaries.Count == 0 ? "empty" : string.Join("; ", summaries);
+            }
+            catch (Exception ex)
+            {
+                return "failed:" + ex.GetType().Name;
+            }
+        }
+
+        private static int CountPhysicalClass(Formation formation, FormationClass formationClass)
+        {
+            try
+            {
+                return formation?.GetCountOfUnitsBelongingToPhysicalClass(formationClass, excludeBannerBearers: false) ?? 0;
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static string FormatRatio(float value)
+        {
+            return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private bool TryPrepareNativeCommanderDeploymentMissionState(
@@ -730,6 +1192,22 @@ namespace CoopSpectator.UI
                 return false;
             }
 
+            bool formationContractPrepared = TryPrepareNativeCommanderFormationContract(
+                playerTeam,
+                selectedCommanderAgent,
+                out string formationContractDiagnostics);
+            if (!formationContractPrepared)
+            {
+                diagnostics =
+                    "formation-contract-prepare-failed" +
+                    " Side=" + side +
+                    " EntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                    " AgentIndex=" + selectedCommanderAgent.Index +
+                    " FormationContract={" + formationContractDiagnostics + "}" +
+                    " Refresh={" + refreshDiagnostics + "}";
+                return false;
+            }
+
             diagnostics =
                 "Side=" + side +
                 " Team=" + playerTeam.Side + "#" + playerTeam.TeamIndex +
@@ -740,9 +1218,269 @@ namespace CoopSpectator.UI
                 " BannerBearerLogic=True" +
                 " OrderOwnerAssigned=" + orderOwnerAssigned +
                 " OrderOwnerAgentIndex=" + selectedCommanderAgent.Index +
+                " FormationContract={" + formationContractDiagnostics + "}" +
                 " EntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
                 " Refresh={" + refreshDiagnostics + "}";
             return ReferenceEquals(mission.PlayerTeam, playerTeam);
+        }
+
+        private static bool TryPrepareNativeCommanderFormationContract(
+            Team playerTeam,
+            Agent selectedCommanderAgent,
+            out string diagnostics)
+        {
+            diagnostics = "team-or-commander-null";
+            if (playerTeam == null || selectedCommanderAgent == null)
+                return false;
+
+            try
+            {
+                int formationCount = 0;
+                int formationsWithUnits = 0;
+                int ownedFormationsWithUnits = 0;
+                int selectableFormationsWithUnits = 0;
+                int physicalClassUnitCount = 0;
+
+                foreach (Formation formation in playerTeam.FormationsIncludingEmpty)
+                {
+                    if (formation == null || !ReferenceEquals(formation.Team, playerTeam))
+                        continue;
+
+                    formationCount++;
+                    formation.PlayerOwner = selectedCommanderAgent;
+
+                    if (formation.CountOfUnits <= 0)
+                        continue;
+
+                    formationsWithUnits++;
+                    if (ReferenceEquals(formation.PlayerOwner, selectedCommanderAgent))
+                        ownedFormationsWithUnits++;
+
+                    int aliveCount = formation.GetCountOfUnitsWithCondition(agent => agent != null && agent.Health > 0f);
+                    if (aliveCount > 0)
+                        selectableFormationsWithUnits++;
+
+                    formation.QuerySystem?.ExpireAfterUnitAddRemove();
+                    formation.QuerySystem?.EvaluateAllPreliminaryQueryData();
+                    physicalClassUnitCount += CountNativeOrderOfBattlePhysicalClassUnits(formation);
+                }
+
+                playerTeam.QuerySystem?.ExpireAfterUnitAddRemove();
+                playerTeam.QuerySystem?.Expire();
+
+                diagnostics =
+                    "Formations=" + formationCount +
+                    " WithUnits=" + formationsWithUnits +
+                    " OwnedWithUnits=" + ownedFormationsWithUnits +
+                    " SelectableWithUnits=" + selectableFormationsWithUnits +
+                    " PhysicalClassUnits=" + physicalClassUnitCount +
+                    " CommanderAgentIndex=" + selectedCommanderAgent.Index;
+                return ownedFormationsWithUnits == formationsWithUnits;
+            }
+            catch (Exception ex)
+            {
+                diagnostics = ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        private static int CountNativeOrderOfBattlePhysicalClassUnits(Formation formation)
+        {
+            if (formation == null)
+                return 0;
+
+            return formation.GetCountOfUnitsBelongingToPhysicalClass(FormationClass.Infantry, excludeBannerBearers: false) +
+                   formation.GetCountOfUnitsBelongingToPhysicalClass(FormationClass.Ranged, excludeBannerBearers: false) +
+                   formation.GetCountOfUnitsBelongingToPhysicalClass(FormationClass.Cavalry, excludeBannerBearers: false) +
+                   formation.GetCountOfUnitsBelongingToPhysicalClass(FormationClass.HorseArcher, excludeBannerBearers: false);
+        }
+
+        private bool TryEnsureCommanderDeploymentOrderBridge()
+        {
+            if (_commanderDeploymentOrderVm != null && _commanderDeploymentOrderVmInitialized)
+                return true;
+
+            Mission mission = Mission;
+            Camera missionCamera = ResolveMissionScreenCombatCamera();
+            if (mission == null || missionCamera == null)
+                return false;
+
+            return TryCreateCommanderDeploymentOrderBridge(mission, missionCamera);
+        }
+
+        private bool TryCreateCommanderDeploymentOrderBridge(Mission mission, Camera missionCamera)
+        {
+            ReleaseCommanderDeploymentOrderBridge();
+
+            OrderController orderController = mission?.PlayerTeam?.PlayerOrderController;
+            if (orderController == null || missionCamera == null)
+                return false;
+
+            try
+            {
+                _commanderDeploymentOrderVm = new MissionOrderVM(orderController, isDeployment: true, isMultiplayer: false);
+                _commanderDeploymentOrderVm.IsDeployment = true;
+                _commanderDeploymentOrderVm.SetCallbacks(CreateCommanderDeploymentOrderCallbacks());
+                _commanderDeploymentOrderVm.SetDeploymentParemeters(
+                    missionCamera,
+                    BuildCommanderDeploymentPointList(mission));
+                TryRegisterMissionOrderHotKeys(_commanderDeploymentOrderVm);
+                _commanderDeploymentOrderVm.AfterInitialize();
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "UpdateTroops");
+                _commanderDeploymentOrderVm.UpdateCanUseShortcuts(true);
+                _commanderDeploymentOrderVmInitialized = true;
+                ModLogger.Info("CoopMissionSelectionView: prepared safe commander MissionOrderVM bridge.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: failed to prepare safe commander MissionOrderVM bridge: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                ReleaseCommanderDeploymentOrderBridge();
+                return false;
+            }
+        }
+
+        private MissionOrderCallbacks CreateCommanderDeploymentOrderCallbacks()
+        {
+            return new MissionOrderCallbacks
+            {
+                RefreshVisuals = RefreshCommanderDeploymentOrderVisuals,
+                OnActivateToggleOrder = ActivateCommanderDeploymentToggleOrder,
+                OnDeactivateToggleOrder = DeactivateCommanderDeploymentToggleOrder,
+                OnTransferTroopsFinished = OnCommanderDeploymentTransferTroopsFinished,
+                OnBeforeOrder = OnBeforeCommanderDeploymentOrder,
+                ToggleMissionInputs = ToggleCommanderDeploymentMissionInputs,
+                SetSuspendTroopPlacer = SetCommanderDeploymentTroopPlacerSuspended,
+                GetVisualOrderExecutionParameters = GetCommanderDeploymentVisualOrderExecutionParameters
+            };
+        }
+
+        private static List<DeploymentPoint> BuildCommanderDeploymentPointList(Mission mission)
+        {
+            if (mission?.ActiveMissionObjects == null)
+                return new List<DeploymentPoint>();
+
+            try
+            {
+                return mission.ActiveMissionObjects
+                    .FindAllWithType<DeploymentPoint>()
+                    .Where(deploymentPoint => deploymentPoint != null && !deploymentPoint.IsDisabled)
+                    .ToList();
+            }
+            catch
+            {
+                return new List<DeploymentPoint>();
+            }
+        }
+
+        private void TryRegisterMissionOrderHotKeys(MissionOrderVM orderVm)
+        {
+            if (orderVm == null)
+                return;
+
+            try
+            {
+                GameKeyContext missionOrderCategory = HotKeyManager.GetCategory("MissionOrderHotkeyCategory");
+                GameKeyContext genericPanelCategory = HotKeyManager.GetCategory("GenericPanelGameKeyCategory");
+                object sceneInput = TryGetInstancePropertyValue(TryGetInstancePropertyValue(MissionScreen, "SceneLayer"), "Input");
+                object gauntletInput = TryGetInstancePropertyValue(_gauntletLayer, "Input");
+                if (missionOrderCategory != null)
+                    TryRegisterHotKeyCategoryOnInputContext(sceneInput, missionOrderCategory);
+                if (genericPanelCategory != null)
+                    TryRegisterHotKeyCategoryOnInputContext(gauntletInput, genericPanelCategory);
+
+                if (genericPanelCategory != null)
+                {
+                    orderVm.SetCancelInputKey(genericPanelCategory.GetHotKey("ToggleEscapeMenu"));
+                    TryInvokeInstanceMethodSuccessfully(orderVm.TroopController, "SetDoneInputKey", genericPanelCategory.GetHotKey("Confirm"));
+                    TryInvokeInstanceMethodSuccessfully(orderVm.TroopController, "SetCancelInputKey", genericPanelCategory.GetHotKey("Exit"));
+                    TryInvokeInstanceMethodSuccessfully(orderVm.TroopController, "SetResetInputKey", genericPanelCategory.GetHotKey("Reset"));
+                }
+
+                if (missionOrderCategory != null)
+                {
+                    for (int orderIndex = 0; orderIndex < 9; orderIndex++)
+                        orderVm.SetOrderIndexKey(orderIndex, missionOrderCategory.GetGameKey(69 + orderIndex));
+
+                    orderVm.SetReturnKey(missionOrderCategory.GetGameKey(77));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: failed to register MissionOrderVM bridge hotkeys: " + ex.Message);
+            }
+        }
+
+        private void ReleaseCommanderDeploymentOrderBridge()
+        {
+            if (_commanderDeploymentOrderVm != null)
+            {
+                try
+                {
+                    _commanderDeploymentOrderVm.OnFinalize();
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("CoopMissionSelectionView: safe commander MissionOrderVM bridge finalize failed: " + ex.Message);
+                }
+            }
+
+            _commanderDeploymentOrderVm = null;
+            _commanderDeploymentOrderVmInitialized = false;
+        }
+
+        private void RefreshCommanderDeploymentOrderVisuals()
+        {
+            TryRefreshNativeCommanderOrderOfBattleCounts(_commanderDeploymentViewModel, Mission, "mission-order-refresh-visuals");
+        }
+
+        private void ActivateCommanderDeploymentToggleOrder()
+        {
+            TryActivateNativeCommanderDeploymentPlacement(MissionScreen);
+        }
+
+        private void DeactivateCommanderDeploymentToggleOrder()
+        {
+            TryDeactivateNativeCommanderDeploymentPlacement(MissionScreen);
+        }
+
+        private void OnCommanderDeploymentTransferTroopsFinished()
+        {
+            TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm?.TroopController, "UpdateTroops");
+            TryRefreshNativeCommanderOrderOfBattleCounts(_commanderDeploymentViewModel, Mission, "mission-order-transfer-finished");
+        }
+
+        private void OnBeforeCommanderDeploymentOrder()
+        {
+            TryActivateNativeCommanderDeploymentPlacement(MissionScreen);
+        }
+
+        private void ToggleCommanderDeploymentMissionInputs(bool isLocked)
+        {
+            ScreenBase missionScreen = MissionScreen;
+            if (missionScreen == null)
+                return;
+
+            TryInvokeInstanceMethod(missionScreen, "SetCameraLockState", isLocked);
+            TrySetInstanceProperty(missionScreen, "LockCameraMovement", isLocked);
+        }
+
+        private void SetCommanderDeploymentTroopPlacerSuspended(bool isSuspended)
+        {
+            if (isSuspended)
+                TryDeactivateNativeCommanderDeploymentPlacement(MissionScreen);
+            else
+                TryActivateNativeCommanderDeploymentPlacement(MissionScreen);
+        }
+
+        private VisualOrderExecutionParameters GetCommanderDeploymentVisualOrderExecutionParameters()
+        {
+            OrderController orderController = Mission?.PlayerTeam?.PlayerOrderController;
+            Agent agent = orderController?.Owner ?? Agent.Main;
+            Formation formation = orderController?.SelectedFormations?.FirstOrDefault();
+            return new VisualOrderExecutionParameters(agent, formation, null);
         }
 
         private static Team ResolveMissionTeamForSide(Mission mission, BattleSideEnum side)
@@ -861,8 +1599,137 @@ namespace CoopSpectator.UI
             }
         }
 
+        private void EnsureCommanderDeploymentSpriteCategoryLoaded()
+        {
+            if (_commanderDeploymentSpriteCategory != null)
+                return;
+
+            try
+            {
+                _commanderDeploymentSpriteCategory = UIResourceManager.LoadSpriteCategory("ui_order_of_battle");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: failed to load OrderOfBattle sprite category: " + ex.Message);
+                _commanderDeploymentSpriteCategory = null;
+            }
+        }
+
+        private void ReleaseCommanderDeploymentSpriteCategory()
+        {
+            if (_commanderDeploymentSpriteCategory == null)
+                return;
+
+            try
+            {
+                _commanderDeploymentSpriteCategory.Unload();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: failed to unload OrderOfBattle sprite category: " + ex.Message);
+            }
+            finally
+            {
+                _commanderDeploymentSpriteCategory = null;
+            }
+        }
+
+        private void TryAttachCommanderDeploymentOrderTroopPlacerCallback(OrderOfBattleVM commanderVm)
+        {
+            if (commanderVm == null || _commanderDeploymentOnUnitDeployedHandler != null)
+                return;
+
+            object orderTroopPlacer = ResolveNativeCommanderOrderTroopPlacer();
+            if (orderTroopPlacer == null)
+                return;
+
+            Action handler = commanderVm.OnUnitDeployed;
+            if (!TryUpdateActionMember(orderTroopPlacer, "OnUnitDeployed", handler, add: true))
+                return;
+
+            _commanderDeploymentOrderTroopPlacer = orderTroopPlacer;
+            _commanderDeploymentOnUnitDeployedHandler = handler;
+        }
+
+        private void ReleaseCommanderDeploymentOrderTroopPlacerCallback()
+        {
+            if (_commanderDeploymentOrderTroopPlacer != null && _commanderDeploymentOnUnitDeployedHandler != null)
+            {
+                TryUpdateActionMember(
+                    _commanderDeploymentOrderTroopPlacer,
+                    "OnUnitDeployed",
+                    _commanderDeploymentOnUnitDeployedHandler,
+                    add: false);
+            }
+
+            _commanderDeploymentOrderTroopPlacer = null;
+            _commanderDeploymentOnUnitDeployedHandler = null;
+        }
+
+        private static bool TryUpdateActionMember(object instance, string memberName, Action handler, bool add)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(memberName) || handler == null)
+                return false;
+
+            try
+            {
+                Type type = instance.GetType();
+                FieldInfo field = FindInstanceField(type, memberName);
+                if (field != null && typeof(Delegate).IsAssignableFrom(field.FieldType))
+                {
+                    Delegate current = field.GetValue(instance) as Delegate;
+                    Delegate updated = add
+                        ? Delegate.Combine(current, handler)
+                        : Delegate.Remove(current, handler);
+                    if (updated == null || field.FieldType.IsInstanceOfType(updated))
+                    {
+                        field.SetValue(instance, updated);
+                        return true;
+                    }
+                }
+
+                PropertyInfo property = FindInstanceProperty(type, memberName);
+                MethodInfo setter = property?.GetSetMethod(true);
+                MethodInfo getter = property?.GetGetMethod(true);
+                if (property != null &&
+                    setter != null &&
+                    getter != null &&
+                    typeof(Delegate).IsAssignableFrom(property.PropertyType))
+                {
+                    Delegate current = getter.Invoke(instance, null) as Delegate;
+                    Delegate updated = add
+                        ? Delegate.Combine(current, handler)
+                        : Delegate.Remove(current, handler);
+                    if (updated == null || property.PropertyType.IsInstanceOfType(updated))
+                    {
+                        setter.Invoke(instance, new[] { updated });
+                        return true;
+                    }
+                }
+
+                EventInfo eventInfo = FindInstanceEvent(type, memberName);
+                if (eventInfo != null)
+                {
+                    if (add)
+                        eventInfo.AddEventHandler(instance, handler);
+                    else
+                        eventInfo.RemoveEventHandler(instance, handler);
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: OrderTroopPlacer OnUnitDeployed bridge update failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+            }
+
+            return false;
+        }
+
         private void SelectNativeCommanderFormationAtIndex(int formationIndex)
         {
+            TryActivateNativeCommanderDeploymentPlacement(MissionScreen);
             Formation formation = ResolveNativeCommanderFormationAtIndex(formationIndex);
             OrderController orderController = Mission?.PlayerTeam?.PlayerOrderController;
             if (formation == null || orderController == null)
@@ -870,6 +1737,13 @@ namespace CoopSpectator.UI
 
             try
             {
+                TryAlignNativeCommanderFormationOwner(formation, orderController.Owner);
+                if (TrySelectCommanderDeploymentOrderBridgeFormation(formationIndex))
+                    return;
+
+                if (TryInvokeNativeCommanderOrderUiHandlerMethod("SelectFormationAtIndex", formationIndex))
+                    return;
+
                 if (!orderController.IsFormationListening(formation) &&
                     orderController.IsFormationSelectable(formation))
                 {
@@ -884,6 +1758,7 @@ namespace CoopSpectator.UI
 
         private void DeselectNativeCommanderFormationAtIndex(int formationIndex)
         {
+            TryActivateNativeCommanderDeploymentPlacement(MissionScreen);
             Formation formation = ResolveNativeCommanderFormationAtIndex(formationIndex);
             OrderController orderController = Mission?.PlayerTeam?.PlayerOrderController;
             if (formation == null || orderController == null)
@@ -891,6 +1766,13 @@ namespace CoopSpectator.UI
 
             try
             {
+                TryAlignNativeCommanderFormationOwner(formation, orderController.Owner);
+                if (TryDeselectCommanderDeploymentOrderBridgeFormation(formationIndex))
+                    return;
+
+                if (TryInvokeNativeCommanderOrderUiHandlerMethod("DeselectFormationAtIndex", formationIndex))
+                    return;
+
                 if (orderController.IsFormationListening(formation))
                     orderController.DeselectFormation(formation);
             }
@@ -900,15 +1782,261 @@ namespace CoopSpectator.UI
             }
         }
 
+        private static void TryAlignNativeCommanderFormationOwner(Formation formation, Agent owner)
+        {
+            if (formation == null || owner == null || formation.Team == null || !ReferenceEquals(formation.Team, owner.Team))
+                return;
+
+            try
+            {
+                if (!ReferenceEquals(formation.PlayerOwner, owner))
+                    formation.PlayerOwner = owner;
+            }
+            catch
+            {
+            }
+        }
+
         private void ClearNativeCommanderFormationSelection()
         {
             try
             {
+                if (TryClearCommanderDeploymentOrderBridgeSelection())
+                    return;
+
+                if (TryInvokeNativeCommanderOrderUiHandlerMethod("ClearFormationSelection"))
+                    return;
+
                 Mission?.PlayerTeam?.PlayerOrderController?.ClearSelectedFormations();
             }
             catch (Exception ex)
             {
                 ModLogger.Info("CoopMissionSelectionView: native OOB clear formation selection failed: " + ex.Message);
+            }
+        }
+
+        private bool TrySelectCommanderDeploymentOrderBridgeFormation(int formationIndex)
+        {
+            if (!TryEnsureCommanderDeploymentOrderBridge())
+                return false;
+
+            try
+            {
+                bool handled = TryInvokeInstanceMethodSuccessfully(
+                    _commanderDeploymentOrderVm.TroopController,
+                    "OnSelectFormationWithIndex",
+                    formationIndex);
+                if (!handled)
+                {
+                    handled = TryInvokeInstanceMethodSuccessfully(
+                        _commanderDeploymentOrderVm,
+                        "OnTroopFormationSelected",
+                        formationIndex);
+                }
+
+                if (!handled)
+                    return false;
+
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "UpdateTroops");
+                TryRefreshNativeCommanderOrderOfBattleCounts(
+                    _commanderDeploymentViewModel,
+                    Mission,
+                    "mission-order-select-formation");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: safe MissionOrderVM select bridge failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TryDeselectCommanderDeploymentOrderBridgeFormation(int formationIndex)
+        {
+            if (!TryEnsureCommanderDeploymentOrderBridge())
+                return false;
+
+            try
+            {
+                bool handled = TryInvokeInstanceMethodSuccessfully(
+                    _commanderDeploymentOrderVm.TroopController,
+                    "OnDeselectFormation",
+                    formationIndex);
+                if (!handled)
+                    return false;
+
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "UpdateTroops");
+                TryRefreshNativeCommanderOrderOfBattleCounts(
+                    _commanderDeploymentViewModel,
+                    Mission,
+                    "mission-order-deselect-formation");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: safe MissionOrderVM deselect bridge failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TryClearCommanderDeploymentOrderBridgeSelection()
+        {
+            if (!TryEnsureCommanderDeploymentOrderBridge())
+                return false;
+
+            try
+            {
+                TryInvokeInstanceMethodSuccessfully(
+                    _commanderDeploymentOrderVm.DeploymentController,
+                    "ExecuteCancelSelectedDeploymentPoint");
+                Mission?.PlayerTeam?.PlayerOrderController?.ClearSelectedFormations();
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm, "TryCloseToggleOrder", false);
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "UpdateTroops");
+                TryRefreshNativeCommanderOrderOfBattleCounts(
+                    _commanderDeploymentViewModel,
+                    Mission,
+                    "mission-order-clear-selection");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: safe MissionOrderVM clear bridge failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TryActivateNativeCommanderDeploymentPlacement(ScreenBase missionScreen)
+        {
+            if (_commanderDeploymentViewModel != null)
+                TryAttachCommanderDeploymentOrderTroopPlacerCallback(_commanderDeploymentViewModel);
+
+            object orderTroopPlacer = ResolveNativeCommanderOrderTroopPlacer();
+            if (orderTroopPlacer == null)
+                return false;
+
+            try
+            {
+                TrySetInstanceProperty(orderTroopPlacer, "SuspendTroopPlacer", false);
+                object orderFlag = TryGetInstancePropertyValue(orderTroopPlacer, "OrderFlag");
+                if (missionScreen != null && orderFlag != null)
+                {
+                    TrySetInstanceProperty(missionScreen, "OrderFlag", orderFlag);
+                    TryInvokeInstanceMethod(missionScreen, "SetOrderFlagVisibility", true);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: native commander deployment placement bridge failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private void TryDeactivateNativeCommanderDeploymentPlacement(ScreenBase missionScreen)
+        {
+            object orderTroopPlacer = ResolveNativeCommanderOrderTroopPlacer();
+            if (orderTroopPlacer == null)
+                return;
+
+            try
+            {
+                TrySetInstanceProperty(orderTroopPlacer, "SuspendTroopPlacer", true);
+                if (missionScreen != null)
+                    TryInvokeInstanceMethod(missionScreen, "SetOrderFlagVisibility", false);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: native commander deployment placement bridge release failed: " + ex.Message);
+            }
+        }
+
+        private object ResolveNativeCommanderOrderTroopPlacer()
+        {
+            try
+            {
+                List<MissionBehavior> behaviors = Mission?.MissionBehaviors;
+                if (behaviors == null)
+                    return null;
+
+                for (int i = 0; i < behaviors.Count; i++)
+                {
+                    MissionBehavior behavior = behaviors[i];
+                    Type behaviorType = behavior?.GetType();
+                    if (behaviorType == null)
+                        continue;
+
+                    if (string.Equals(
+                            behaviorType.FullName,
+                            "TaleWorlds.MountAndBlade.View.MissionViews.Order.OrderTroopPlacer",
+                            StringComparison.Ordinal) ||
+                        string.Equals(behaviorType.Name, "OrderTroopPlacer", StringComparison.Ordinal))
+                    {
+                        return behavior;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private object ResolveNativeCommanderSingleplayerOrderUiHandler()
+        {
+            try
+            {
+                List<MissionBehavior> behaviors = Mission?.MissionBehaviors;
+                if (behaviors == null)
+                    return null;
+
+                for (int i = 0; i < behaviors.Count; i++)
+                {
+                    MissionBehavior behavior = behaviors[i];
+                    Type behaviorType = behavior?.GetType();
+                    if (behaviorType == null)
+                        continue;
+
+                    if (string.Equals(
+                            behaviorType.FullName,
+                            "TaleWorlds.MountAndBlade.GauntletUI.Mission.Singleplayer.MissionGauntletSingleplayerOrderUIHandler",
+                            StringComparison.Ordinal) ||
+                        string.Equals(behaviorType.Name, "MissionGauntletSingleplayerOrderUIHandler", StringComparison.Ordinal))
+                    {
+                        return behavior;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private bool TryInvokeNativeCommanderOrderUiHandlerMethod(string methodName, params object[] arguments)
+        {
+            object handler = ResolveNativeCommanderSingleplayerOrderUiHandler();
+            if (handler == null)
+                return false;
+
+            try
+            {
+                MethodInfo method = FindInstanceMethod(handler.GetType(), methodName, arguments);
+                if (method == null)
+                    return false;
+
+                method.Invoke(handler, arguments);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: native order UI handler bridge failed. " +
+                    "Method=" + (methodName ?? string.Empty) +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+                return false;
             }
         }
 
@@ -1114,6 +2242,7 @@ namespace CoopSpectator.UI
 
         private void HandleCommanderAutoDeployRequested()
         {
+            TryApplyCommanderDeploymentOrderBridgeAutoDeploy();
             TrySendCommanderDeploymentCompletionRequest(
                 autoDeploy: true,
                 source: "CoopCommanderDeploymentUI AutoDeploy");
@@ -1121,9 +2250,69 @@ namespace CoopSpectator.UI
 
         private void HandleCommanderReadyRequested()
         {
+            TryApplyCommanderDeploymentOrderBridgeReady();
             TrySendCommanderDeploymentCompletionRequest(
                 autoDeploy: false,
                 source: "CoopCommanderDeploymentUI FinishDeployment");
+        }
+
+        private void TryApplyCommanderDeploymentOrderBridgeAutoDeploy()
+        {
+            if (!TryEnsureCommanderDeploymentOrderBridge())
+                return;
+
+            try
+            {
+                bool handled = TryInvokeInstanceMethodSuccessfully(
+                    _commanderDeploymentOrderVm.DeploymentController,
+                    "ExecuteAutoDeploy");
+                if (!handled)
+                    handled = TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm, "OnDeployAll");
+
+                TryClearCommanderDeploymentOrderBridgeSelection();
+                TryRefreshNativeCommanderOrderOfBattleCounts(
+                    _commanderDeploymentViewModel,
+                    Mission,
+                    "mission-order-auto-deploy");
+                ModLogger.Info("CoopMissionSelectionView: applied safe MissionOrderVM auto deployment. Handled=" + handled);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: safe MissionOrderVM auto deploy bridge failed: " + ex.Message);
+            }
+        }
+
+        private void TryApplyCommanderDeploymentOrderBridgeReady()
+        {
+            if (!TryEnsureCommanderDeploymentOrderBridge())
+                return;
+
+            try
+            {
+                if (_commanderDeploymentViewModel?.CurrentConfiguration != null)
+                {
+                    TryInvokeInstanceMethodSuccessfully(
+                        _commanderDeploymentOrderVm,
+                        "OnFiltersSet",
+                        _commanderDeploymentViewModel.CurrentConfiguration);
+                }
+
+                bool handled = TryInvokeInstanceMethodSuccessfully(
+                    _commanderDeploymentOrderVm.DeploymentController,
+                    "ExecuteBeginMission");
+                if (!handled)
+                    handled = TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm, "OnDeploymentFinished");
+
+                TryRefreshNativeCommanderOrderOfBattleCounts(
+                    _commanderDeploymentViewModel,
+                    Mission,
+                    "mission-order-ready");
+                ModLogger.Info("CoopMissionSelectionView: applied safe MissionOrderVM ready deployment. Handled=" + handled);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: safe MissionOrderVM ready bridge failed: " + ex.Message);
+            }
         }
 
         private bool TrySendCommanderDeploymentCompletionRequest(bool autoDeploy, string source)
@@ -1388,11 +2577,13 @@ namespace CoopSpectator.UI
             try
             {
                 _commanderDeploymentViewModel.Tick();
+                _commanderDeploymentOrderVm?.Update();
             }
             catch (Exception ex)
             {
                 ModLogger.Info("CoopMissionSelectionView: native OrderOfBattle tick failed: " + ex.Message);
                 _commanderDeploymentViewModel = null;
+                ReleaseCommanderDeploymentOrderBridge();
             }
         }
 
@@ -1416,16 +2607,31 @@ namespace CoopSpectator.UI
                 TrySetLayerActiveState(_gauntletLayer, true);
                 if (isCommanderDeploymentInputMode)
                 {
-                    TryLoseScreenManagerFocus(_gauntletLayer);
-                    TryInvokeLayerFocusCallback(_gauntletLayer, "HandleLoseFocus");
-                    _gauntletLayer.IsFocusLayer = false;
+                    bool placementBridgeActive = TryActivateNativeCommanderDeploymentPlacement(missionScreen);
+                    _commanderDeploymentPlacementInputActive = placementBridgeActive;
+                    if (placementBridgeActive)
+                    {
+                        TryLoseScreenManagerFocus(_gauntletLayer);
+                        TryInvokeLayerFocusCallback(_gauntletLayer, "HandleLoseFocus");
+                        _gauntletLayer.IsFocusLayer = false;
+                    }
+                    else
+                    {
+                        _gauntletLayer.IsFocusLayer = true;
+                        TrySetScreenManagerFocus(_gauntletLayer);
+                        TryInvokeLayerFocusCallback(_gauntletLayer, "HandleGainFocus");
+                    }
+
                     _gauntletLayer.InputRestrictions.SetInputRestrictions(true, CommanderDeploymentInputMask);
                     _gauntletLayer.InputRestrictions.SetMouseVisibility(true);
                     TrySetScreenManagerMouseVisibility(true);
                     if (missionScreen != null)
                     {
                         missionScreen.MouseVisible = true;
-                        ApplyMissionScreenOverlayMode(missionScreen, isOverlayActive: false);
+                        if (placementBridgeActive)
+                            ApplyMissionScreenCommanderPlacementMode(missionScreen);
+                        else
+                            ApplyMissionScreenOverlayMode(missionScreen, isOverlayActive: true);
                         LogMissionScreenOverlayDiagnostics(missionScreen, "commander-deployment-capture");
                     }
 
@@ -1434,6 +2640,7 @@ namespace CoopSpectator.UI
                     return;
                 }
 
+                _commanderDeploymentPlacementInputActive = false;
                 _gauntletLayer.IsFocusLayer = true;
                 TrySetScreenManagerFocus(_gauntletLayer);
                 TryInvokeLayerFocusCallback(_gauntletLayer, "HandleGainFocus");
@@ -1460,6 +2667,7 @@ namespace CoopSpectator.UI
             if (_gauntletLayer == null && !_inputCaptured)
                 return;
 
+            bool wasCommanderDeploymentInputMode = _inputCapturedCommanderDeploymentMode;
             try
             {
                 if (_gauntletLayer != null)
@@ -1476,6 +2684,9 @@ namespace CoopSpectator.UI
                 ScreenBase missionScreen = MissionScreen;
                 if (missionScreen != null)
                 {
+                    if (wasCommanderDeploymentInputMode)
+                        TryDeactivateNativeCommanderDeploymentPlacement(missionScreen);
+
                     missionScreen.MouseVisible = false;
                     ApplyMissionScreenOverlayMode(missionScreen, isOverlayActive: false);
                     LogMissionScreenOverlayDiagnostics(missionScreen, "release");
@@ -1487,6 +2698,7 @@ namespace CoopSpectator.UI
             }
             finally
             {
+                _commanderDeploymentPlacementInputActive = false;
                 _inputCaptured = false;
                 _inputCapturedCommanderDeploymentMode = false;
             }
@@ -1518,10 +2730,24 @@ namespace CoopSpectator.UI
                 _viewModel != null ||
                 _screenViewModel != null ||
                 _currentScreen != CoopSelectionScreen.None;
+            bool hadCommanderDeploymentPresentation =
+                _currentScreen == CoopSelectionScreen.CommanderDeployment ||
+                _commanderDeploymentViewModel != null ||
+                _commanderDeploymentOrderVm != null ||
+                _commanderDeploymentOrderTroopPlacer != null ||
+                _commanderDeploymentSpriteCategory != null;
             if (_gauntletLayer != null && _movie != null)
             {
                 _gauntletLayer.ReleaseMovie(_movie);
                 _movie = null;
+            }
+
+            if (hadCommanderDeploymentPresentation)
+            {
+                TryDeactivateNativeCommanderDeploymentPlacement(MissionScreen);
+                ReleaseCommanderDeploymentOrderBridge();
+                ReleaseCommanderDeploymentOrderTroopPlacerCallback();
+                ReleaseCommanderDeploymentSpriteCategory();
             }
 
             _viewModel?.OnFinalize();
@@ -1529,6 +2755,7 @@ namespace CoopSpectator.UI
             _commanderDeploymentViewModel = null;
             _screenViewModel = null;
             _currentScreen = CoopSelectionScreen.None;
+            _commanderDeploymentOrderOfBattleActive = false;
             _lastAppliedRefreshKey = string.Empty;
             if (hadPresentation)
                 ClearCameraPreviewTarget("release-movie");
@@ -1657,6 +2884,23 @@ namespace CoopSpectator.UI
             }
 
             return false;
+        }
+
+        internal static bool IsCommanderDeploymentPlacementInputActive()
+        {
+            return _commanderDeploymentPlacementInputActive;
+        }
+
+        internal static bool IsCommanderDeploymentOrderOfBattleActive()
+        {
+            if (!_commanderDeploymentOrderOfBattleActive && !_commanderDeploymentPlacementInputActive)
+                return false;
+
+            Mission mission = Mission.Current;
+            if (mission == null)
+                return false;
+
+            return true;
         }
 
         internal static bool ShouldSuppressLocalPreviewFollowedAgentEcho(MissionPeer missionPeer, Agent followedAgent)
@@ -1925,6 +3169,16 @@ namespace CoopSpectator.UI
             TrySetInstanceProperty(missionScreen, "LockCameraMovement", isOverlayActive);
         }
 
+        internal static void ApplyMissionScreenCommanderPlacementMode(ScreenBase missionScreen)
+        {
+            if (missionScreen == null)
+                return;
+
+            TryInvokeInstanceMethod(missionScreen, "SetDisplayDialog", false);
+            TryInvokeInstanceMethod(missionScreen, "SetCameraLockState", true);
+            TrySetInstanceProperty(missionScreen, "LockCameraMovement", true);
+        }
+
         internal static void LogMissionScreenOverlayDiagnostics(ScreenBase missionScreen, string source)
         {
             if (missionScreen == null)
@@ -1996,6 +3250,100 @@ namespace CoopSpectator.UI
             }
         }
 
+        private static MethodInfo FindInstanceMethod(Type type, string methodName, params object[] arguments)
+        {
+            if (type == null || string.IsNullOrWhiteSpace(methodName))
+                return null;
+
+            for (Type currentType = type; currentType != null; currentType = currentType.BaseType)
+            {
+                MethodInfo method = currentType
+                    .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+                    .FirstOrDefault(candidate =>
+                        string.Equals(candidate.Name, methodName, StringComparison.Ordinal) &&
+                        AreMethodParametersCompatible(candidate.GetParameters(), arguments));
+                if (method != null)
+                    return method;
+            }
+
+            return null;
+        }
+
+        private static bool AreMethodParametersCompatible(ParameterInfo[] parameters, object[] arguments)
+        {
+            arguments = arguments ?? Array.Empty<object>();
+            if (parameters == null || parameters.Length != arguments.Length)
+                return false;
+
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                Type parameterType = parameters[i].ParameterType;
+                object argument = arguments[i];
+                if (argument == null)
+                {
+                    if (parameterType.IsValueType && Nullable.GetUnderlyingType(parameterType) == null)
+                        return false;
+                    continue;
+                }
+
+                if (!parameterType.IsInstanceOfType(argument))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static FieldInfo FindInstanceField(Type type, string fieldName)
+        {
+            if (type == null || string.IsNullOrWhiteSpace(fieldName))
+                return null;
+
+            for (Type currentType = type; currentType != null; currentType = currentType.BaseType)
+            {
+                FieldInfo field = currentType.GetField(
+                    fieldName,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+                if (field != null)
+                    return field;
+            }
+
+            return null;
+        }
+
+        private static PropertyInfo FindInstanceProperty(Type type, string propertyName)
+        {
+            if (type == null || string.IsNullOrWhiteSpace(propertyName))
+                return null;
+
+            for (Type currentType = type; currentType != null; currentType = currentType.BaseType)
+            {
+                PropertyInfo property = currentType.GetProperty(
+                    propertyName,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+                if (property != null)
+                    return property;
+            }
+
+            return null;
+        }
+
+        private static EventInfo FindInstanceEvent(Type type, string eventName)
+        {
+            if (type == null || string.IsNullOrWhiteSpace(eventName))
+                return null;
+
+            for (Type currentType = type; currentType != null; currentType = currentType.BaseType)
+            {
+                EventInfo eventInfo = currentType.GetEvent(
+                    eventName,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+                if (eventInfo != null)
+                    return eventInfo;
+            }
+
+            return null;
+        }
+
         internal static void TryInvokeInstanceMethod(object target, string methodName, params object[] arguments)
         {
             if (target == null || string.IsNullOrWhiteSpace(methodName))
@@ -2009,6 +3357,26 @@ namespace CoopSpectator.UI
             }
             catch
             {
+            }
+        }
+
+        private static bool TryInvokeInstanceMethodSuccessfully(object target, string methodName, params object[] arguments)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(methodName))
+                return false;
+
+            try
+            {
+                MethodInfo method = FindInstanceMethod(target.GetType(), methodName, arguments);
+                if (method == null)
+                    return false;
+
+                method.Invoke(target, arguments);
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 

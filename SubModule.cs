@@ -285,6 +285,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                             if (EnableManualPatchMissionFlowBattleRuntimeCameraPreview)
                             {
                                 MissionScreenCameraPreviewPatch.Apply(harmony);
+                                OrderOfBattleSiegeProjectedCountsPatch.Apply(harmony);
                             }
                             else
                             {

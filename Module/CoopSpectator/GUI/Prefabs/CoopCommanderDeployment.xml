@@ -1,0 +1,127 @@
+<Prefab>
+  <Window>
+    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="BlankWhiteSquare_9" Color="#00000033">
+      <Children>
+        <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="150" SuggestedHeight="70" HorizontalAlignment="Center" VerticalAlignment="Top" MarginTop="135" Sprite="BlankWhiteSquare_9" AlphaFactor="0.2" Color="#000000FF">
+          <Children>
+            <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Brush="MPClassLoadout.CountdownText" Text="@StatusText" />
+          </Children>
+        </Widget>
+
+        <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="385" SuggestedHeight="710" HorizontalAlignment="Left" MarginLeft="24" MarginTop="130" Sprite="BlankWhiteSquare_9" AlphaFactor="0.86" Color="#000000FF">
+          <Children>
+            <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="405" SuggestedHeight="5" HorizontalAlignment="Center" PositionYOffset="-2" Sprite="MPClassLoadout\panels_frame" />
+            <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="22" MarginRight="22" MarginTop="24" MarginBottom="24" StackLayout.LayoutMethod="VerticalTopToBottom">
+              <Children>
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPClassLoadout.FactionText" Brush.FontSize="30" Text="@TitleText" />
+                <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="18" MarginTop="10" MarginBottom="10" Sprite="MPClassLoadout\stats_divider" />
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPClassLoadout.ItemText" Text="@SelectedNameText" />
+                <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginTop="12" Brush="MPClassLoadout.SubclassGoldText" Text="@SelectedCommanderBadgeText" />
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="16" Brush="MPClassLoadout.SpawnText" Text="@SelectedDetailText" />
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="14" Brush="MPClassLoadout.ClassStatText" Text="@SelectedSummaryText" />
+                <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="18" MarginTop="22" MarginBottom="12" Sprite="MPClassLoadout\stats_divider" />
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPClassLoadout.SpawnText" Text="@HintText" />
+              </Children>
+            </ListPanel>
+            <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="405" SuggestedHeight="5" HorizontalAlignment="Center" VerticalAlignment="Bottom" PositionYOffset="2" Sprite="MPClassLoadout\panels_frame" />
+          </Children>
+        </Widget>
+
+        <ListPanel WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="560" SuggestedHeight="790" HorizontalAlignment="Right" MarginRight="45" MarginTop="90" Sprite="BlankWhiteSquare_9" AlphaFactor="0.86" Color="#000000FF" StackLayout.LayoutMethod="VerticalTopToBottom">
+          <Children>
+            <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="580" SuggestedHeight="5" HorizontalAlignment="Center" PositionYOffset="-2" Sprite="MPClassLoadout\panels_frame" />
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="22">
+              <Children>
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" Brush="MPClassLoadout.FactionText" Text="@SideTitleText" />
+                <Widget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Right" VerticalAlignment="Top" MarginRight="18" MarginTop="8">
+                  <Children>
+                    <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="45" SuggestedHeight="29" Sprite="MPHud\attacker" Color="#F4E1C4FF" AlphaFactor="0.7" IsVisible="@IsAttacker" />
+                    <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="45" SuggestedHeight="29" Sprite="MPHud\defender" Color="#F4E1C4FF" AlphaFactor="0.7" IsHidden="@IsAttacker" />
+                  </Children>
+                </Widget>
+              </Children>
+            </Widget>
+
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="20" HorizontalAlignment="Center" MarginTop="15" ClipContents="true">
+              <Children>
+                <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="664" SuggestedHeight="20" HorizontalAlignment="Center" Sprite="MPClassLoadout\divider_notched" />
+                <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="664" SuggestedHeight="20" HorizontalAlignment="Center" PositionYOffset="-1" Sprite="MPClassLoadout\divider_notched" VerticalFlip="true" />
+              </Children>
+            </Widget>
+
+            <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="18" MarginRight="18" MarginTop="8" MarginBottom="12" StackLayout.LayoutMethod="HorizontalLeftToRight">
+              <Children>
+                <ListPanel DataSource="{FormationsFirstHalf}" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginRight="6" StackLayout.LayoutMethod="VerticalTopToBottom">
+                  <ItemTemplate>
+                    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="96" MarginTop="7" Sprite="BlankWhiteSquare_9" AlphaFactor="0.5" Color="#161616FF">
+                      <Children>
+                        <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="4" Sprite="BlankWhiteSquare_9" Color="#D6B16AFF" />
+                        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="35" VerticalAlignment="Center" MarginLeft="12" Brush="MPClassLoadout.SubclassGoldText" Text="@NumberText" />
+                        <MultiplayerTroopTypeIconWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="52" SuggestedHeight="52" HorizontalAlignment="Left" VerticalAlignment="Center" MarginLeft="48" ForegroundWidget="IconForeground" IconSpriteType="@IconType" UseOriginalSize="false">
+                          <Children>
+                            <Widget Id="IconForeground" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Color="#F4E1C4FF" />
+                          </Children>
+                        </MultiplayerTroopTypeIconWidget>
+                        <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="112" MarginRight="64" VerticalAlignment="Center" StackLayout.LayoutMethod="VerticalTopToBottom">
+                          <Children>
+                            <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPClassLoadout.TroopBanner.SubClassText" Text="@TitleText" />
+                            <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="4" Brush="MPClassLoadout.ClassStatText" Text="@ClassText" />
+                          </Children>
+                        </ListPanel>
+                        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="52" HorizontalAlignment="Right" VerticalAlignment="Center" MarginRight="12" Brush="MPClassLoadout.ItemText" Text="@CountText" />
+                      </Children>
+                    </Widget>
+                  </ItemTemplate>
+                </ListPanel>
+
+                <ListPanel DataSource="{FormationsSecondHalf}" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="6" StackLayout.LayoutMethod="VerticalTopToBottom">
+                  <ItemTemplate>
+                    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="96" MarginTop="7" Sprite="BlankWhiteSquare_9" AlphaFactor="0.5" Color="#161616FF">
+                      <Children>
+                        <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="4" Sprite="BlankWhiteSquare_9" Color="#D6B16AFF" />
+                        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="35" VerticalAlignment="Center" MarginLeft="12" Brush="MPClassLoadout.SubclassGoldText" Text="@NumberText" />
+                        <MultiplayerTroopTypeIconWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="52" SuggestedHeight="52" HorizontalAlignment="Left" VerticalAlignment="Center" MarginLeft="48" ForegroundWidget="IconForeground" IconSpriteType="@IconType" UseOriginalSize="false">
+                          <Children>
+                            <Widget Id="IconForeground" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Color="#F4E1C4FF" />
+                          </Children>
+                        </MultiplayerTroopTypeIconWidget>
+                        <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="112" MarginRight="64" VerticalAlignment="Center" StackLayout.LayoutMethod="VerticalTopToBottom">
+                          <Children>
+                            <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="MPClassLoadout.TroopBanner.SubClassText" Text="@TitleText" />
+                            <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="4" Brush="MPClassLoadout.ClassStatText" Text="@ClassText" />
+                          </Children>
+                        </ListPanel>
+                        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="52" HorizontalAlignment="Right" VerticalAlignment="Center" MarginRight="12" Brush="MPClassLoadout.ItemText" Text="@CountText" />
+                      </Children>
+                    </Widget>
+                  </ItemTemplate>
+                </ListPanel>
+              </Children>
+            </ListPanel>
+
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="76" MarginLeft="20" MarginRight="20" MarginBottom="14">
+              <Children>
+                <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="150" SuggestedHeight="54" HorizontalAlignment="Left" VerticalAlignment="Center" Brush="WideButton.Flat" Command.Click="ExecuteBack" DoNotPassEventsToChildren="true" UpdateChildrenStates="true">
+                  <Children>
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" HorizontalAlignment="Center" VerticalAlignment="Center" Brush="MPLobby.PlayButton.Text" Text="Back" />
+                  </Children>
+                </ButtonWidget>
+                <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="190" SuggestedHeight="54" HorizontalAlignment="Center" VerticalAlignment="Center" Brush="WideButton.Flat" Command.Click="ExecuteAutoDeploy" IsEnabled="@CanAutoDeploy" DoNotPassEventsToChildren="true" UpdateChildrenStates="true">
+                  <Children>
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" HorizontalAlignment="Center" VerticalAlignment="Center" Brush="MPLobby.PlayButton.Text" Text="@AutoDeployText" />
+                  </Children>
+                </ButtonWidget>
+                <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="150" SuggestedHeight="54" HorizontalAlignment="Right" VerticalAlignment="Center" Brush="WideButton.Flat" Command.Click="ExecuteBeginMission" IsEnabled="@CanBeginMission" DoNotPassEventsToChildren="true" UpdateChildrenStates="true">
+                  <Children>
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" HorizontalAlignment="Center" VerticalAlignment="Center" Brush="MPLobby.PlayButton.Text" Text="@BeginMissionText" />
+                  </Children>
+                </ButtonWidget>
+              </Children>
+            </Widget>
+            <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="580" SuggestedHeight="5" HorizontalAlignment="Center" VerticalAlignment="Bottom" PositionYOffset="2" Sprite="MPClassLoadout\panels_frame" />
+          </Children>
+        </ListPanel>
+      </Children>
+    </Widget>
+  </Window>
+</Prefab>

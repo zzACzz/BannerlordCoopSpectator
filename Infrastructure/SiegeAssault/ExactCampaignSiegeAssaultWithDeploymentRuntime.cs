@@ -616,6 +616,7 @@ namespace CoopSpectator.Infrastructure
                     }
 
                     FormationClass formationClass = ResolveDeploymentFormationClass(mission, side, troop);
+                    bool forceDismountedDeploymentProjection = ShouldUseDismountedDeploymentProjection(mission, side);
                     if (!troopCountsByTeam.TryGetValue(troopTeam, out Dictionary<FormationClass, (int Foot, int Mounted)> formationCounts))
                     {
                         formationCounts = new Dictionary<FormationClass, (int Foot, int Mounted)>();
@@ -623,7 +624,7 @@ namespace CoopSpectator.Infrastructure
                     }
 
                     formationCounts.TryGetValue(formationClass, out (int Foot, int Mounted) currentCount);
-                    if (troop.HasMount())
+                    if (!forceDismountedDeploymentProjection && troop.HasMount())
                         formationCounts[formationClass] = (currentCount.Foot, currentCount.Mounted + 1);
                     else
                         formationCounts[formationClass] = (currentCount.Foot + 1, currentCount.Mounted);
@@ -1097,9 +1098,48 @@ namespace CoopSpectator.Infrastructure
             }
 
             formationClass = formationClass.FallbackClass();
+            if (ShouldUseDismountedDeploymentProjection(mission, side))
+                formationClass = DismountSiegeFormationClass(formationClass);
+
             int formationIndex = (int)formationClass;
             if (formationIndex < 0 || formationIndex >= 11)
                 return FormationClass.Infantry;
+
+            return formationClass;
+        }
+
+        private static bool ShouldUseDismountedDeploymentProjection(Mission mission, BattleSideEnum side)
+        {
+            if (mission == null || side == BattleSideEnum.None)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!IsSiegeAssaultScenario(scenarioContext))
+                return false;
+
+            if (ExactCampaignArmyBootstrap.TryGetSpawnHorses(mission, side, out bool spawnHorses))
+                return !spawnHorses;
+
+            try
+            {
+                return mission.IsSiegeBattle;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static FormationClass DismountSiegeFormationClass(FormationClass formationClass)
+        {
+            if (formationClass == FormationClass.Cavalry)
+                return FormationClass.Infantry;
+
+            if (formationClass == FormationClass.HorseArcher)
+                return FormationClass.Ranged;
 
             return formationClass;
         }

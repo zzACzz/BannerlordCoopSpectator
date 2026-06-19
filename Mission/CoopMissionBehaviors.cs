@@ -12286,7 +12286,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             Dictionary<FormationClass, (int Foot, int Mounted)> formationCounts =
-                BuildMaterializedDeploymentCountsForSide(side, out int plannedAgents, out bool hasMountedUnits);
+                BuildMaterializedDeploymentCountsForSide(mission, side, out int plannedAgents, out bool hasMountedUnits);
             if (formationCounts.Count == 0 || plannedAgents <= 0)
             {
                 ModLogger.Info(
@@ -12456,6 +12456,7 @@ namespace CoopSpectator.MissionBehaviors
         }
 
         private static Dictionary<FormationClass, (int Foot, int Mounted)> BuildMaterializedDeploymentCountsForSide(
+            Mission mission,
             BattleSideEnum side,
             out int plannedAgents,
             out bool hasMountedUnits)
@@ -12499,6 +12500,8 @@ namespace CoopSpectator.MissionBehaviors
 
                     AccumulateMaterializedDeploymentCount(
                         formationCounts,
+                        mission,
+                        side,
                         troop,
                         entryState,
                         seedCount,
@@ -12522,6 +12525,8 @@ namespace CoopSpectator.MissionBehaviors
 
                     AccumulateMaterializedDeploymentCount(
                         formationCounts,
+                        mission,
+                        side,
                         troop,
                         entryState,
                         extraCount,
@@ -12550,6 +12555,8 @@ namespace CoopSpectator.MissionBehaviors
 
                 AccumulateMaterializedDeploymentCount(
                     formationCounts,
+                    mission,
+                    side,
                     troop,
                     entryState: null,
                     spawnCount,
@@ -12562,6 +12569,8 @@ namespace CoopSpectator.MissionBehaviors
 
         private static void AccumulateMaterializedDeploymentCount(
             Dictionary<FormationClass, (int Foot, int Mounted)> formationCounts,
+            Mission mission,
+            BattleSideEnum side,
             BasicCharacterObject troop,
             RosterEntryState entryState,
             int count,
@@ -12571,11 +12580,14 @@ namespace CoopSpectator.MissionBehaviors
             if (formationCounts == null || troop == null || count <= 0)
                 return;
 
-            FormationClass formationClass = troop.DefaultFormationClass;
+            FormationClass formationClass = ResolveSiegeAwareFormationClass(mission, side, troop);
             if ((int)formationClass < 0 || (int)formationClass >= (int)FormationClass.NumberOfRegularFormations)
                 formationClass = FormationClass.Infantry;
 
-            bool isMounted = entryState?.IsMounted ?? (formationClass == FormationClass.Cavalry || formationClass == FormationClass.HorseArcher);
+            bool forceDismountedSiegeProjection = ShouldUseDismountedSiegeProjection(mission, side);
+            bool isMounted =
+                !forceDismountedSiegeProjection &&
+                (entryState?.IsMounted ?? (formationClass == FormationClass.Cavalry || formationClass == FormationClass.HorseArcher));
             if (!formationCounts.TryGetValue(formationClass, out (int Foot, int Mounted) existingCounts))
                 existingCounts = (0, 0);
 
@@ -12587,6 +12599,54 @@ namespace CoopSpectator.MissionBehaviors
             plannedAgents += count;
             if (isMounted)
                 hasMountedUnits = true;
+        }
+
+        private static FormationClass ResolveSiegeAwareFormationClass(
+            Mission mission,
+            BattleSideEnum side,
+            BasicCharacterObject troop)
+        {
+            FormationClass formationClass = troop?.DefaultFormationClass ?? FormationClass.Infantry;
+            try
+            {
+                if (troop != null && ShouldUseDismountedSiegeProjection(mission, side))
+                    formationClass = mission.GetAgentTroopClass(side, troop);
+            }
+            catch
+            {
+            }
+
+            formationClass = formationClass.FallbackClass();
+            int formationIndex = (int)formationClass;
+            if (formationIndex < 0 || formationIndex >= (int)FormationClass.NumberOfRegularFormations)
+                return FormationClass.Infantry;
+
+            return formationClass;
+        }
+
+        private static bool ShouldUseDismountedSiegeProjection(Mission mission, BattleSideEnum side)
+        {
+            if (mission == null || side == BattleSideEnum.None)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                return false;
+
+            if (ExactCampaignArmyBootstrap.TryGetSpawnHorses(mission, side, out bool spawnHorses))
+                return !spawnHorses;
+
+            try
+            {
+                return mission.IsSiegeBattle;
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         private static string BuildMaterializedDeploymentCountSummary(
@@ -12665,7 +12725,7 @@ namespace CoopSpectator.MissionBehaviors
 
             string entryId = entryState?.EntryId;
 
-            FormationClass formationClass = troop.DefaultFormationClass;
+            FormationClass formationClass = ResolveSiegeAwareFormationClass(mission, side, troop);
             ResolveMaterializedArmySpawnFrame(
                 mission,
                 team,
@@ -29227,14 +29287,29 @@ namespace CoopSpectator.MissionBehaviors
                 BasicCharacterObject controlledCharacter = missionPeer.ControlledAgent?.Character as BasicCharacterObject;
                 if (controlledCharacter != null)
                 {
-                    allowedClasses.Add(controlledCharacter.DefaultFormationClass);
+                    allowedClasses.Add(ResolveSiegeAwareFormationClass(mission, authoritativeSide, controlledCharacter));
                     continue;
                 }
 
                 foreach (BasicCharacterObject allowedCharacter in ResolveAllowedCharactersForPeerCulture(missionPeer))
                 {
                     if (allowedCharacter != null)
-                        allowedClasses.Add(allowedCharacter.DefaultFormationClass);
+                        allowedClasses.Add(ResolveSiegeAwareFormationClass(mission, authoritativeSide, allowedCharacter));
+                }
+            }
+
+            if (allowedClasses.Count == 0)
+            {
+                foreach (BattleSideEnum side in new[] { BattleSideEnum.Attacker, BattleSideEnum.Defender })
+                {
+                    foreach (RosterEntryState entryState in GetAllowedControlEntryStatesSnapshot(side))
+                    {
+                        BasicCharacterObject fallbackCharacter = TryResolveEntryPreferredCharacter(
+                            entryState?.EntryId,
+                            ResolveEntrySpawnTemplateId(entryState));
+                        if (fallbackCharacter != null)
+                            allowedClasses.Add(ResolveSiegeAwareFormationClass(mission, side, fallbackCharacter));
+                    }
                 }
             }
 
@@ -29244,7 +29319,7 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     BasicCharacterObject fallbackCharacter = ResolveAllowedCharacter(allowedTroopId);
                     if (fallbackCharacter != null)
-                        allowedClasses.Add(fallbackCharacter.DefaultFormationClass);
+                        allowedClasses.Add(ResolveSiegeAwareFormationClass(mission, BattleSideEnum.None, fallbackCharacter));
                 }
             }
 

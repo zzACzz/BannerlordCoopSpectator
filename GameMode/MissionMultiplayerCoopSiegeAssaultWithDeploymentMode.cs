@@ -182,6 +182,7 @@ namespace CoopSpectator.GameMode
                 "MultiplayerPreloadHelper");
 
             AppendSiegeAssaultRuntimeBehaviors(list, mission);
+            AppendRemoteClientSiegeDeploymentBridgeBehaviors(list, mission);
 
             list.Add(new MissionBehaviorDiagnostic());
             list.Add(new CoopMissionNetworkBridge());
@@ -367,6 +368,56 @@ namespace CoopSpectator.GameMode
                 () => new SiegeDeploymentMissionController(isPlayerAttacker),
                 "SiegeDeploymentMissionController",
                 required: true);
+        }
+
+        private static void AppendRemoteClientSiegeDeploymentBridgeBehaviors(List<MissionBehavior> list, Mission mission)
+        {
+            BattleScenarioContextMessage scenarioContext = ResolveScenarioContext();
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldInjectWrappedBattleClientDeploymentBehaviors(
+                    mission,
+                    scenarioContext,
+                    out string deploymentBridgePolicy))
+            {
+                ModLogger.Info(
+                    "CoopSiegeAssaultWithDeployment client: deployment bridge suppressed. " +
+                    "Scene=" + (mission?.SceneName ?? "null") +
+                    " Policy=" + (deploymentBridgePolicy ?? "unknown"));
+                return;
+            }
+
+            bool isPlayerAttacker = ResolvePlayerAttackerSide();
+            AddIfMissing(
+                list,
+                mission,
+                () => new SiegeDeploymentHandler(isPlayerAttacker),
+                "SiegeDeploymentHandler",
+                required: true);
+
+            bool hasMissionAgentSpawnLogic =
+                MissionBehaviorHelpers.ListContainsBehaviorType(list, "MissionAgentSpawnLogic") ||
+                MissionBehaviorHelpers.ListContainsBehaviorType(list, "DefaultBattleMissionAgentSpawnLogic") ||
+                GetExistingBehaviorByTypeName(mission, "MissionAgentSpawnLogic") != null ||
+                GetExistingBehaviorByTypeName(mission, "DefaultBattleMissionAgentSpawnLogic") != null;
+            bool addedDeploymentController = false;
+            if (hasMissionAgentSpawnLogic)
+            {
+                AddIfMissing(
+                    list,
+                    mission,
+                    () => new SiegeDeploymentMissionController(isPlayerAttacker),
+                    "SiegeDeploymentMissionController",
+                    required: true);
+                addedDeploymentController = true;
+            }
+
+            ModLogger.Info(
+                "CoopSiegeAssaultWithDeployment client: deployment bridge enabled. " +
+                "Scene=" + (mission?.SceneName ?? "null") +
+                " PlayerAttacker=" + isPlayerAttacker +
+                " Policy=" + (deploymentBridgePolicy ?? "unknown") +
+                " HasMissionAgentSpawnLogic=" + hasMissionAgentSpawnLogic +
+                " AddedSiegeDeploymentHandler=True" +
+                " AddedSiegeDeploymentController=" + addedDeploymentController + ".");
         }
 
         private static void LogDeploymentControllerDependencySnapshot(

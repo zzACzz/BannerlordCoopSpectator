@@ -4,6 +4,7 @@ using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.UI;
 using HarmonyLib;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.View.Screens;
 
@@ -36,6 +37,7 @@ namespace CoopSpectator.Patches
         public static void Apply(Harmony harmony)
         {
             PatchMissionScreenGetSpectatingData(harmony);
+            PatchMissionScreenFindNextCameraAttachableAgent(harmony);
             PatchMissionPeerFollowedAgent(harmony);
         }
 
@@ -58,6 +60,38 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
             ModLogger.Info("MissionScreenCameraPreviewPatch: prefix/postfix applied to MissionScreen.GetSpectatingData.");
+        }
+
+        private static void PatchMissionScreenFindNextCameraAttachableAgent(Harmony harmony)
+        {
+            MethodInfo target = null;
+            foreach (MethodInfo candidate in typeof(MissionScreen).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (!string.Equals(candidate.Name, "FindNextCameraAttachableAgent", StringComparison.Ordinal))
+                    continue;
+
+                ParameterInfo[] parameters = candidate.GetParameters();
+                if (parameters.Length == 4 &&
+                    parameters[0].ParameterType == typeof(Agent) &&
+                    parameters[2].ParameterType == typeof(int) &&
+                    parameters[3].ParameterType == typeof(Vec3))
+                {
+                    target = candidate;
+                    break;
+                }
+            }
+
+            MethodInfo prefix = typeof(MissionScreenCameraPreviewPatch).GetMethod(
+                nameof(MissionScreen_FindNextCameraAttachableAgent_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("MissionScreenCameraPreviewPatch: MissionScreen.FindNextCameraAttachableAgent not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("MissionScreenCameraPreviewPatch: prefix applied to MissionScreen.FindNextCameraAttachableAgent.");
         }
 
         private static void PatchMissionPeerFollowedAgent(Harmony harmony)
@@ -164,6 +198,31 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info("MissionScreenCameraPreviewPatch: GetSpectatingData postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static bool MissionScreen_FindNextCameraAttachableAgent_Prefix(
+            MissionScreen __instance,
+            Agent currentAgent,
+            ref Agent __result)
+        {
+            try
+            {
+                if (__instance?.Mission == null ||
+                    !GameNetwork.IsClient ||
+                    !GameNetwork.IsSessionActive ||
+                    !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(__instance.Mission.SceneName) ||
+                    !CoopMissionSelectionView.IsCommanderDeploymentPlacementInputActive())
+                {
+                    return true;
+                }
+
+                __result = currentAgent;
+                return false;
+            }
+            catch
+            {
+                return true;
             }
         }
 
