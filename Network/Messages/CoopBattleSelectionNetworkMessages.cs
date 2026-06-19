@@ -104,6 +104,75 @@ namespace CoopSpectator.Network.Messages
         }
     }
 
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
+    public sealed class CoopCommanderDeploymentFormationAssignmentsMessage : GameNetworkMessage
+    {
+        public const int BytesPerAssignment = 3;
+        public const int MaxAssignmentBytes = 4095;
+
+        private static readonly CompressionInfo.Integer BattleSideCompressionInfo = new CompressionInfo.Integer(-1, 1, maximumValueGiven: true);
+
+        public CoopCommanderDeploymentFormationAssignmentsMessage(
+            BattleSideEnum requestedSide,
+            byte[] assignmentBytes)
+        {
+            RequestedSide = requestedSide;
+            AssignmentBytes = assignmentBytes ?? Array.Empty<byte>();
+        }
+
+        public CoopCommanderDeploymentFormationAssignmentsMessage()
+        {
+            RequestedSide = BattleSideEnum.None;
+            AssignmentBytes = Array.Empty<byte>();
+        }
+
+        public BattleSideEnum RequestedSide { get; private set; }
+        public byte[] AssignmentBytes { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool bufferReadValid = true;
+            RequestedSide = (BattleSideEnum)ReadIntFromPacket(BattleSideCompressionInfo, ref bufferReadValid);
+            byte[] payloadBuffer = new byte[MaxAssignmentBytes];
+            int bytesRead = ReadByteArrayFromPacket(payloadBuffer, 0, MaxAssignmentBytes, ref bufferReadValid);
+            if (bytesRead <= 0)
+            {
+                AssignmentBytes = Array.Empty<byte>();
+            }
+            else if (bytesRead == payloadBuffer.Length)
+            {
+                AssignmentBytes = payloadBuffer;
+            }
+            else
+            {
+                AssignmentBytes = new byte[bytesRead];
+                Buffer.BlockCopy(payloadBuffer, 0, AssignmentBytes, 0, bytesRead);
+            }
+
+            return bufferReadValid;
+        }
+
+        protected override void OnWrite()
+        {
+            byte[] assignmentBytes = AssignmentBytes ?? Array.Empty<byte>();
+            int payloadLength = Math.Min(assignmentBytes.Length, MaxAssignmentBytes);
+            WriteIntToPacket((int)RequestedSide, BattleSideCompressionInfo);
+            if (payloadLength > 0)
+                WriteByteArrayToPacket(assignmentBytes, 0, payloadLength);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter()
+        {
+            return MultiplayerMessageFilter.Mission;
+        }
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopCommanderDeploymentFormationAssignments Side=" + RequestedSide +
+                " Bytes=" + (AssignmentBytes?.Length ?? 0);
+        }
+    }
+
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
     public sealed class CoopBattlePayloadChunkMessage : GameNetworkMessage
     {

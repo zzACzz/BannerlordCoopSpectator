@@ -128,6 +128,7 @@
     <Compile Include="..\Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" Link="Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" />
     <Compile Include="..\Patches\BattleMapSpawnHandoffPatch.cs" Link="Patches\BattleMapSpawnHandoffPatch.cs" />
     <Compile Include="..\Patches\MissionItemUsageSetFlagsGuardPatch.cs" Link="Patches\MissionItemUsageSetFlagsGuardPatch.cs" />
+    <Compile Include="..\Patches\CommanderDeploymentMissionNetworkComponentPatch.cs" Link="Patches\CommanderDeploymentMissionNetworkComponentPatch.cs" />
     <Compile Include="..\Patches\LateJoinPeerBootstrapGatePatch.cs" Link="Patches\LateJoinPeerBootstrapGatePatch.cs" />
     <Compile Include="..\Patches\FinishedLoadingMissionReadyGatePatch.cs" Link="Patches\FinishedLoadingMissionReadyGatePatch.cs" />
     <Compile Include="..\Patches\BattleShellSuppressionPatch.cs" Link="Patches\BattleShellSuppressionPatch.cs" />

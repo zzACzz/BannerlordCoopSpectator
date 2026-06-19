@@ -11,6 +11,8 @@ using CoopSpectator.Network.Messages;
 using CoopSpectator.Patches;
 using Newtonsoft.Json;
 using TaleWorlds.Core;
+using TaleWorlds.Engine;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Network.Messages;
 
@@ -62,6 +64,48 @@ namespace CoopSpectator.MissionBehaviors
                 side,
                 entryId,
                 (source ?? "commander-deployment") + " FinishCommanderDeployment");
+        }
+
+        public static bool TrySyncCommanderDeploymentFormationAssignments(
+            BattleSideEnum side,
+            byte[] assignmentBytes,
+            string source)
+        {
+            if (!GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive ||
+                assignmentBytes == null ||
+                assignmentBytes.Length <= 0)
+            {
+                return false;
+            }
+
+            if (assignmentBytes.Length > CoopCommanderDeploymentFormationAssignmentsMessage.MaxAssignmentBytes)
+            {
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: commander deployment formation sync payload is too large. " +
+                    "Side=" + side +
+                    " Bytes=" + assignmentBytes.Length +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(new CoopCommanderDeploymentFormationAssignmentsMessage(side, assignmentBytes));
+                GameNetwork.EndModuleEventAsClient();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: commander deployment formation sync send failed. " +
+                    "Side=" + side +
+                    " Bytes=" + assignmentBytes.Length +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+                return false;
+            }
         }
 
         public static bool TrySelectSpectator(string source)
@@ -332,6 +376,7 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsServer)
             {
                 registerer.RegisterBaseHandler<CoopBattleSelectionClientRequestMessage>(HandleClientSelectionRequest);
+                registerer.RegisterBaseHandler<CoopCommanderDeploymentFormationAssignmentsMessage>(HandleClientCommanderDeploymentFormationAssignments);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotChunkRequestMessage>(HandleClientBattleSnapshotChunkRequest);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotRangeAckMessage>(HandleClientBattleSnapshotRangeAck);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotCompleteAckMessage>(HandleClientBattleSnapshotCompleteAck);
@@ -672,6 +717,307 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return true;
+        }
+
+        private bool HandleClientCommanderDeploymentFormationAssignments(NetworkCommunicator peer, GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopCommanderDeploymentFormationAssignmentsMessage message))
+                return false;
+
+            try
+            {
+                bool applied = TryApplyCommanderDeploymentFormationAssignments(peer, message);
+                if (!applied && IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled())
+                {
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: ignored commander deployment formation assignment sync. " +
+                        "Peer=" + (peer?.UserName ?? "null") +
+                        " Side=" + message.RequestedSide +
+                        " Bytes=" + (message.AssignmentBytes?.Length ?? 0));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: commander deployment formation assignment sync failed. " +
+                    "Peer=" + (peer?.UserName ?? "null") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+
+            return true;
+        }
+
+        private bool TryApplyCommanderDeploymentFormationAssignments(
+            NetworkCommunicator peer,
+            CoopCommanderDeploymentFormationAssignmentsMessage message)
+        {
+            if (!GameNetwork.IsServer || peer == null || message == null)
+                return false;
+
+            byte[] assignmentBytes = message.AssignmentBytes ?? Array.Empty<byte>();
+            if (assignmentBytes.Length <= 0 ||
+                assignmentBytes.Length % CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerAssignment != 0)
+            {
+                return false;
+            }
+
+            if (!CoopMissionSpawnLogic.TryResolveCommanderDeploymentOrderLease(
+                    peer,
+                    out Team team,
+                    out _,
+                    out Agent commanderAgent))
+            {
+                return false;
+            }
+
+            if (message.RequestedSide != BattleSideEnum.None &&
+                team != null &&
+                team.Side != message.RequestedSide)
+            {
+                return false;
+            }
+
+            Mission mission = this.Mission ?? Mission.Current;
+            if (mission == null || team == null)
+                return false;
+
+            var moves = new List<(Agent Agent, Formation TargetFormation)>();
+            var impactedFormations = new HashSet<Formation>();
+            int decodedAssignments = 0;
+            int rejectedAssignments = 0;
+
+            for (int offset = 0; offset + 2 < assignmentBytes.Length; offset += CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerAssignment)
+            {
+                int agentIndex = assignmentBytes[offset] | (assignmentBytes[offset + 1] << 8);
+                int formationIndex = assignmentBytes[offset + 2];
+                decodedAssignments++;
+
+                Agent agent = ResolveMissionAgent(agentIndex);
+                Formation targetFormation = ResolveCommanderDeploymentFormation(team, formationIndex);
+                if (!IsValidCommanderDeploymentAssignmentAgent(agent, team) || targetFormation == null)
+                {
+                    rejectedAssignments++;
+                    continue;
+                }
+
+                Formation sourceFormation = agent.Formation;
+                if (ReferenceEquals(sourceFormation, targetFormation))
+                    continue;
+
+                if (sourceFormation != null)
+                    impactedFormations.Add(sourceFormation);
+                impactedFormations.Add(targetFormation);
+                moves.Add((agent, targetFormation));
+            }
+
+            if (moves.Count <= 0)
+                return decodedAssignments > 0 && rejectedAssignments < decodedAssignments;
+
+            bool previousTeleportingAgents = mission.IsTeleportingAgents;
+            try
+            {
+                mission.IsTeleportingAgents = true;
+
+                foreach (Formation formation in impactedFormations)
+                    TryStartCommanderDeploymentMassTransfer(formation);
+
+                foreach ((Agent agent, Formation targetFormation) in moves)
+                    agent.Formation = targetFormation;
+
+                foreach (Formation formation in impactedFormations)
+                    FinalizeCommanderDeploymentFormationAssignment(mission, team, formation, commanderAgent);
+
+                CoopMissionSpawnLogic.TryResolveCommanderDeploymentOrderLease(
+                    peer,
+                    out _,
+                    out _,
+                    out _);
+            }
+            finally
+            {
+                mission.IsTeleportingAgents = previousTeleportingAgents;
+            }
+
+            if (IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled())
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: applied commander deployment formation assignment sync. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " Side=" + team.Side +
+                    " Decoded=" + decodedAssignments +
+                    " AppliedMoves=" + moves.Count +
+                    " Rejected=" + rejectedAssignments);
+            }
+
+            return true;
+        }
+
+        private static bool IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled()
+        {
+            try
+            {
+                string value = Environment.GetEnvironmentVariable("COOPSPECTATOR_OOB_DIAGNOSTICS");
+                if (string.IsNullOrWhiteSpace(value))
+                    return false;
+
+                value = value.Trim();
+                return value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("on", StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static Agent ResolveMissionAgent(int agentIndex)
+        {
+            if (agentIndex < 0)
+                return null;
+
+            try
+            {
+                return TaleWorlds.MountAndBlade.Mission.MissionNetworkHelper.GetAgentFromIndex(agentIndex, canBeNull: true);
+            }
+            catch
+            {
+                Mission mission = Mission.Current;
+                if (mission?.AllAgents == null)
+                    return null;
+
+                for (int i = 0; i < mission.AllAgents.Count; i++)
+                {
+                    Agent candidate = mission.AllAgents[i];
+                    if (candidate != null && candidate.Index == agentIndex)
+                        return candidate;
+                }
+
+                return null;
+            }
+        }
+
+        private static Formation ResolveCommanderDeploymentFormation(Team team, int formationIndex)
+        {
+            if (team?.FormationsIncludingEmpty == null ||
+                formationIndex < 0 ||
+                formationIndex >= (int)FormationClass.NumberOfDefaultFormations)
+            {
+                return null;
+            }
+
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation != null && formation.Index == formationIndex)
+                    return formation;
+            }
+
+            return null;
+        }
+
+        private static bool IsValidCommanderDeploymentAssignmentAgent(Agent agent, Team team)
+        {
+            return agent != null &&
+                   team != null &&
+                   agent.IsActive() &&
+                   !agent.IsMount &&
+                   ReferenceEquals(agent.Team, team);
+        }
+
+        private static void TryStartCommanderDeploymentMassTransfer(Formation formation)
+        {
+            try
+            {
+                formation?.OnMassUnitTransferStart();
+            }
+            catch
+            {
+            }
+        }
+
+        private static void FinalizeCommanderDeploymentFormationAssignment(
+            Mission mission,
+            Team team,
+            Formation formation,
+            Agent commanderAgent)
+        {
+            if (mission == null || team == null || formation == null)
+                return;
+
+            try
+            {
+                if (commanderAgent != null && ReferenceEquals(commanderAgent.Team, team))
+                    formation.PlayerOwner = commanderAgent;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                team.TriggerOnFormationsChanged(formation);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                formation.OnMassUnitTransferEnd();
+            }
+            catch
+            {
+            }
+
+            TryEnsureCommanderDeploymentFormationPosition(mission, formation);
+
+            try
+            {
+                formation.ApplyActionOnEachUnit(
+                    agent => agent.ForceUpdateCachedAndFormationValues(updateOnlyMovement: false, arrangementChangeAllowed: false));
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                formation.QuerySystem?.ExpireAfterUnitAddRemove();
+                formation.QuerySystem?.Expire();
+                team.QuerySystem?.ExpireAfterUnitAddRemove();
+                team.QuerySystem?.Expire();
+            }
+            catch
+            {
+            }
+        }
+
+        private static void TryEnsureCommanderDeploymentFormationPosition(Mission mission, Formation formation)
+        {
+            if (mission?.Scene == null ||
+                formation == null ||
+                formation.CountOfUnits <= 0 ||
+                formation.OrderPositionIsValid)
+            {
+                return;
+            }
+
+            try
+            {
+                Vec2 averagePosition = formation.GetAveragePositionOfUnits(excludeDetachedUnits: false, excludePlayer: false);
+                float height = mission.Scene.GetTerrainHeight(averagePosition);
+                mission.Scene.GetHeightAtPoint(averagePosition, BodyFlags.None, ref height);
+                var worldPosition = new WorldPosition(
+                    mission.Scene,
+                    UIntPtr.Zero,
+                    new Vec3(averagePosition, height),
+                    hasValidZ: false);
+                formation.SetPositioning(worldPosition);
+            }
+            catch
+            {
+            }
         }
 
         private bool TryAcknowledgePeerBattleReconnectFinalize(NetworkCommunicator peer, string selectionId)

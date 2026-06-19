@@ -792,6 +792,15 @@ namespace CoopSpectator.UI
                 ResolveProjectedSiegeOrderOfBattleAgentClass(agent) == projectedClass);
         }
 
+        internal static bool IsCommanderDeploymentProjectedAgentInFormationClass(Agent agent, FormationClass formationClass)
+        {
+            FormationClass projectedClass = DismountSiegeOrderOfBattleFormationClass(formationClass.FallbackClass());
+            if (projectedClass != FormationClass.Infantry && projectedClass != FormationClass.Ranged)
+                return false;
+
+            return ResolveProjectedSiegeOrderOfBattleAgentClass(agent) == projectedClass;
+        }
+
         private static FormationClass ResolveProjectedSiegeOrderOfBattleAgentClass(Agent agent)
         {
             if (agent == null || agent.IsMount)

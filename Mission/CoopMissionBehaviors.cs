@@ -3647,6 +3647,8 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<int, string> _appliedFixedMissionCultureByPeer = new Dictionary<int, string>();
         private static readonly Dictionary<FormationClass, bool> _appliedCoopClassAvailabilityStates = new Dictionary<FormationClass, bool>();
         private static readonly Dictionary<int, int> _lastAlignedControlledAgentIndexByPeer = new Dictionary<int, int>();
+        private static readonly Dictionary<int, CommanderDeploymentOrderLeaseState> _commanderDeploymentOrderLeasesByPeer =
+            new Dictionary<int, CommanderDeploymentOrderLeaseState>();
         private static readonly Dictionary<int, string> _materializedArmyEntryIdByAgentIndex = new Dictionary<int, string>();
         private static readonly Dictionary<int, BattleSideEnum> _materializedArmySideByAgentIndex = new Dictionary<int, BattleSideEnum>();
         private static readonly Dictionary<int, Agent> _materializedAgentInstanceByIndex = new Dictionary<int, Agent>();
@@ -3748,6 +3750,17 @@ namespace CoopSpectator.MissionBehaviors
             public BattleSideEnum Side;
             public string Source;
         }
+
+        private sealed class CommanderDeploymentOrderLeaseState
+        {
+            public int PeerIndex;
+            public BattleSideEnum Side;
+            public string EntryId;
+            public int AgentIndex;
+            public int TeamIndex;
+            public DateTime UpdatedUtc;
+        }
+
         private static DateTime _nextExactSceneNativeBootstrapDeferLogUtc;
         private static DateTime _nextNativeBattleMapWarmupFallbackRefreshUtc;
         private static string _lastNativeBattleMapWarmupFallbackLogKey = string.Empty;
@@ -4981,6 +4994,7 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattleSpawnRuntimeState.Reset();
             CoopBattlePeerLifecycleRuntimeState.Reset();
             _lastAlignedControlledAgentIndexByPeer.Clear();
+            _commanderDeploymentOrderLeasesByPeer.Clear();
             _materializedArmyEntryIdByAgentIndex.Clear();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
@@ -5453,6 +5467,7 @@ namespace CoopSpectator.MissionBehaviors
             _appliedFixedMissionCultureByPeer.Clear();
             _appliedCoopClassAvailabilityStates.Clear();
             _lastAlignedControlledAgentIndexByPeer.Clear();
+            _commanderDeploymentOrderLeasesByPeer.Clear();
             _materializedArmyEntryIdByAgentIndex.Clear();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
@@ -11121,6 +11136,7 @@ namespace CoopSpectator.MissionBehaviors
                 _hasMaterializedBattlefieldArmies = false;
                 _hasLoggedMaterializedEquipmentCoverageSummary = false;
                 _lastAlignedControlledAgentIndexByPeer.Clear();
+                _commanderDeploymentOrderLeasesByPeer.Clear();
                 _materializedArmyEntryIdByAgentIndex.Clear();
                 _materializedArmySideByAgentIndex.Clear();
                 _materializedAgentInstanceByIndex.Clear();
@@ -24677,6 +24693,278 @@ namespace CoopSpectator.MissionBehaviors
             return applied;
         }
 
+        internal static bool TryResolveCommanderDeploymentOrderLease(
+            NetworkCommunicator peer,
+            out Team team,
+            out OrderController orderController,
+            out Agent commanderAgent)
+        {
+            team = null;
+            orderController = null;
+            commanderAgent = null;
+
+            try
+            {
+                if (!GameNetwork.IsServer || peer == null)
+                    return false;
+
+                Mission mission = Mission.Current;
+                if (mission == null ||
+                    !_commanderDeploymentOrderLeasesByPeer.TryGetValue(peer.Index, out CommanderDeploymentOrderLeaseState lease) ||
+                    lease == null)
+                {
+                    return false;
+                }
+
+                CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+                if (!IsExactSiegeCommanderDeploymentWindowActive(mission, currentPhase, out _))
+                    return false;
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                if (missionPeer == null)
+                    return false;
+
+                BattleSideEnum side = lease.Side != BattleSideEnum.None
+                    ? lease.Side
+                    : ResolveAuthoritativeSide(missionPeer, mission, "commander-order-lease resolve-side");
+                if (side == BattleSideEnum.None)
+                    return false;
+
+                Team resolvedTeam = ResolveAuthoritativeMissionTeam(mission, missionPeer, side);
+                if (resolvedTeam == null || ReferenceEquals(resolvedTeam, mission.SpectatorTeam))
+                    return false;
+
+                Agent resolvedCommanderAgent = ResolveCommanderDeploymentOrderLeaseAgent(
+                    mission,
+                    resolvedTeam,
+                    lease);
+                if (resolvedCommanderAgent == null)
+                    return false;
+
+                ApplyCommanderDeploymentOrderLeaseOwnership(
+                    mission,
+                    missionPeer,
+                    resolvedTeam,
+                    resolvedCommanderAgent);
+
+                OrderController resolvedOrderController = resolvedTeam.GetOrderControllerOf(resolvedCommanderAgent);
+                if (resolvedOrderController == null)
+                    resolvedOrderController = resolvedTeam.PlayerOrderController;
+
+                if (resolvedOrderController == null)
+                    return false;
+
+                resolvedOrderController.Owner = resolvedCommanderAgent;
+                team = resolvedTeam;
+                orderController = resolvedOrderController;
+                commanderAgent = resolvedCommanderAgent;
+                lease.Side = side;
+                lease.AgentIndex = resolvedCommanderAgent.Index;
+                lease.TeamIndex = resolvedTeam.TeamIndex;
+                lease.UpdatedUtc = DateTime.UtcNow;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryBeginCommanderDeploymentOrderLease(
+            Mission mission,
+            MissionPeer missionPeer,
+            BattleSideEnum side,
+            string selectedEntryId,
+            string source,
+            out string diagnostics)
+        {
+            diagnostics = string.Empty;
+            if (mission == null || missionPeer == null || !GameNetwork.IsServer)
+            {
+                diagnostics = "invalid-context";
+                return false;
+            }
+
+            NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+            if (peer == null)
+            {
+                diagnostics = "missing-peer";
+                return false;
+            }
+
+            if (side == BattleSideEnum.None)
+            {
+                diagnostics = "missing-side";
+                return false;
+            }
+
+            Team team = ResolveAuthoritativeMissionTeam(mission, missionPeer, side);
+            if (team == null || ReferenceEquals(team, mission.SpectatorTeam))
+            {
+                diagnostics = "missing-authoritative-team";
+                return false;
+            }
+
+            string commanderEntryId = selectedEntryId;
+            RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(
+                BattleSnapshotRuntimeState.GetState(),
+                side);
+            if (commanderEntry != null &&
+                !string.IsNullOrWhiteSpace(commanderEntry.EntryId) &&
+                (string.IsNullOrWhiteSpace(commanderEntryId) ||
+                 !DoesPossessedEntryMatchCommanderEntry(commanderEntry.EntryId, commanderEntryId)))
+            {
+                commanderEntryId = commanderEntry.EntryId;
+            }
+
+            Agent commanderAgent = ResolveLiveExactCampaignCommanderAgent(mission, team, commanderEntryId);
+            if (commanderAgent == null)
+            {
+                diagnostics = "missing-live-commander-agent";
+                return false;
+            }
+
+            ApplyCommanderDeploymentOrderLeaseOwnership(
+                mission,
+                missionPeer,
+                team,
+                commanderAgent);
+
+            _commanderDeploymentOrderLeasesByPeer[peer.Index] = new CommanderDeploymentOrderLeaseState
+            {
+                PeerIndex = peer.Index,
+                Side = side,
+                EntryId = commanderEntryId,
+                AgentIndex = commanderAgent.Index,
+                TeamIndex = team.TeamIndex,
+                UpdatedUtc = DateTime.UtcNow
+            };
+
+            diagnostics =
+                "lease-active" +
+                " team=" + team.TeamIndex +
+                " agent=" + commanderAgent.Index +
+                " entry=" + (commanderEntryId ?? "null");
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: began commander deployment order lease. " +
+                "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                " Side=" + side +
+                " TeamIndex=" + team.TeamIndex +
+                " EntryId=" + (commanderEntryId ?? string.Empty) +
+                " AgentIndex=" + commanderAgent.Index +
+                " Source=" + source);
+            return true;
+        }
+
+        private static void ClearCommanderDeploymentOrderLease(MissionPeer missionPeer, string source)
+        {
+            try
+            {
+                NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
+                if (peer == null)
+                    return;
+
+                if (!_commanderDeploymentOrderLeasesByPeer.Remove(peer.Index))
+                    return;
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: cleared commander deployment order lease. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " Source=" + source);
+            }
+            catch
+            {
+            }
+        }
+
+        private static Agent ResolveCommanderDeploymentOrderLeaseAgent(
+            Mission mission,
+            Team team,
+            CommanderDeploymentOrderLeaseState lease)
+        {
+            if (mission?.AllAgents == null || team == null || lease == null)
+                return null;
+
+            if (lease.AgentIndex >= 0)
+            {
+                for (int i = 0; i < mission.AllAgents.Count; i++)
+                {
+                    Agent candidate = mission.AllAgents[i];
+                    if (candidate == null ||
+                        candidate.Index != lease.AgentIndex ||
+                        !candidate.IsActive() ||
+                        candidate.IsMount ||
+                        !ReferenceEquals(candidate.Team, team))
+                    {
+                        continue;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(lease.EntryId) ||
+                        DoesAgentMatchAuthoritativeEntryId(candidate, lease.EntryId))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            return ResolveLiveExactCampaignCommanderAgent(mission, team, lease.EntryId);
+        }
+
+        private static void ApplyCommanderDeploymentOrderLeaseOwnership(
+            Mission mission,
+            MissionPeer missionPeer,
+            Team team,
+            Agent commanderAgent)
+        {
+            if (mission == null || missionPeer == null || team == null || commanderAgent == null)
+                return;
+
+            try
+            {
+                team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                commanderAgent.SetCanLeadFormationsRemotely(value: true);
+            }
+            catch
+            {
+            }
+
+            if (!ReferenceEquals(team.GeneralAgent, commanderAgent))
+                team.GeneralAgent = commanderAgent;
+
+            OrderController commanderOrderController = team.GetOrderControllerOf(commanderAgent);
+            if (commanderOrderController != null)
+                commanderOrderController.Owner = commanderAgent;
+
+            if (team.PlayerOrderController != null)
+                team.PlayerOrderController.Owner = commanderAgent;
+
+            Formation commanderFormation = commanderAgent.Formation;
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null || !ReferenceEquals(formation.Team, team))
+                    continue;
+
+                SetServerMemberValue(formation, "PlayerOwner", commanderAgent);
+                bool isOwnedFormation = formation.CountOfUnits > 0;
+                SetServerMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
+                SetServerMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
+            }
+
+            if (commanderFormation != null &&
+                ReferenceEquals(commanderFormation.Team, team) &&
+                !ReferenceEquals(commanderFormation.Captain, commanderAgent))
+            {
+                commanderFormation.Captain = commanderAgent;
+            }
+        }
+
         private static bool TryBeginCommanderDeploymentForPeer(
             Mission mission,
             MissionPeer missionPeer,
@@ -24740,6 +25028,27 @@ namespace CoopSpectator.MissionBehaviors
                 selectedTroopId = troopOrEntryId;
             }
 
+            bool orderLeaseStarted = TryBeginCommanderDeploymentOrderLease(
+                mission,
+                missionPeer,
+                authoritativeSide,
+                selectedEntryId,
+                source + " order-lease",
+                out string orderLeaseDiagnostics);
+            if (!orderLeaseStarted)
+            {
+                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected commander deployment request because order lease was unavailable. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " EntryId=" + (selectedEntryId ?? string.Empty) +
+                    " TroopId=" + (selectedTroopId ?? string.Empty) +
+                    " LeaseDiagnostics=" + (orderLeaseDiagnostics ?? string.Empty) +
+                    " Source=" + source);
+                return false;
+            }
+
             CoopBattlePeerLifecycleRuntimeState.MarkWaiting(
                 missionPeer,
                 authoritativeSide,
@@ -24756,6 +25065,7 @@ namespace CoopSpectator.MissionBehaviors
                 " TroopId=" + (selectedTroopId ?? string.Empty) +
                 " Phase=" + currentPhase +
                 " Diagnostics=" + (diagnostics ?? string.Empty) +
+                " OrderLease=" + (orderLeaseDiagnostics ?? string.Empty) +
                 " Source=" + source);
             return true;
         }
@@ -24940,6 +25250,8 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             bool queuedSpawn = TryQueueSpawnIntentForPeer(mission, missionPeer, source + " spawn-after-deployment");
+            if (queuedSpawn)
+                ClearCommanderDeploymentOrderLease(missionPeer, source + " completed");
             NetworkCommunicator acceptedPeer = missionPeer.GetNetworkPeer();
             ModLogger.Info(
                 "CoopMissionSpawnLogic: completed commander deployment request. " +
