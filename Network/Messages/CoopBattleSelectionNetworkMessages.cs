@@ -108,46 +108,39 @@ namespace CoopSpectator.Network.Messages
     public sealed class CoopCommanderDeploymentFormationAssignmentsMessage : GameNetworkMessage
     {
         public const int BytesPerAssignment = 3;
+        public const int BytesPerFormationLayout = 17;
         public const int MaxAssignmentBytes = 4095;
+        public const int MaxFormationLayoutBytes = 512;
 
         private static readonly CompressionInfo.Integer BattleSideCompressionInfo = new CompressionInfo.Integer(-1, 1, maximumValueGiven: true);
 
         public CoopCommanderDeploymentFormationAssignmentsMessage(
             BattleSideEnum requestedSide,
-            byte[] assignmentBytes)
+            byte[] assignmentBytes,
+            byte[] formationLayoutBytes)
         {
             RequestedSide = requestedSide;
             AssignmentBytes = assignmentBytes ?? Array.Empty<byte>();
+            FormationLayoutBytes = formationLayoutBytes ?? Array.Empty<byte>();
         }
 
         public CoopCommanderDeploymentFormationAssignmentsMessage()
         {
             RequestedSide = BattleSideEnum.None;
             AssignmentBytes = Array.Empty<byte>();
+            FormationLayoutBytes = Array.Empty<byte>();
         }
 
         public BattleSideEnum RequestedSide { get; private set; }
         public byte[] AssignmentBytes { get; private set; }
+        public byte[] FormationLayoutBytes { get; private set; }
 
         protected override bool OnRead()
         {
             bool bufferReadValid = true;
             RequestedSide = (BattleSideEnum)ReadIntFromPacket(BattleSideCompressionInfo, ref bufferReadValid);
-            byte[] payloadBuffer = new byte[MaxAssignmentBytes];
-            int bytesRead = ReadByteArrayFromPacket(payloadBuffer, 0, MaxAssignmentBytes, ref bufferReadValid);
-            if (bytesRead <= 0)
-            {
-                AssignmentBytes = Array.Empty<byte>();
-            }
-            else if (bytesRead == payloadBuffer.Length)
-            {
-                AssignmentBytes = payloadBuffer;
-            }
-            else
-            {
-                AssignmentBytes = new byte[bytesRead];
-                Buffer.BlockCopy(payloadBuffer, 0, AssignmentBytes, 0, bytesRead);
-            }
+            AssignmentBytes = ReadPayload(MaxAssignmentBytes, ref bufferReadValid);
+            FormationLayoutBytes = ReadPayload(MaxFormationLayoutBytes, ref bufferReadValid);
 
             return bufferReadValid;
         }
@@ -155,10 +148,10 @@ namespace CoopSpectator.Network.Messages
         protected override void OnWrite()
         {
             byte[] assignmentBytes = AssignmentBytes ?? Array.Empty<byte>();
-            int payloadLength = Math.Min(assignmentBytes.Length, MaxAssignmentBytes);
+            byte[] formationLayoutBytes = FormationLayoutBytes ?? Array.Empty<byte>();
             WriteIntToPacket((int)RequestedSide, BattleSideCompressionInfo);
-            if (payloadLength > 0)
-                WriteByteArrayToPacket(assignmentBytes, 0, payloadLength);
+            WritePayload(assignmentBytes, MaxAssignmentBytes);
+            WritePayload(formationLayoutBytes, MaxFormationLayoutBytes);
         }
 
         protected override MultiplayerMessageFilter OnGetLogFilter()
@@ -169,7 +162,30 @@ namespace CoopSpectator.Network.Messages
         protected override string OnGetLogFormat()
         {
             return "CoopCommanderDeploymentFormationAssignments Side=" + RequestedSide +
-                " Bytes=" + (AssignmentBytes?.Length ?? 0);
+                " Bytes=" + (AssignmentBytes?.Length ?? 0) +
+                " LayoutBytes=" + (FormationLayoutBytes?.Length ?? 0);
+        }
+
+        private byte[] ReadPayload(int maxBytes, ref bool bufferReadValid)
+        {
+            byte[] payloadBuffer = new byte[maxBytes];
+            int bytesRead = ReadByteArrayFromPacket(payloadBuffer, 0, maxBytes, ref bufferReadValid);
+            if (bytesRead <= 0)
+                return Array.Empty<byte>();
+
+            if (bytesRead == payloadBuffer.Length)
+                return payloadBuffer;
+
+            byte[] payload = new byte[bytesRead];
+            Buffer.BlockCopy(payloadBuffer, 0, payload, 0, bytesRead);
+            return payload;
+        }
+
+        private void WritePayload(byte[] payload, int maxBytes)
+        {
+            byte[] safePayload = payload ?? Array.Empty<byte>();
+            int payloadLength = Math.Min(safePayload.Length, maxBytes);
+            WriteByteArrayToPacket(safePayload, 0, payloadLength);
         }
     }
 

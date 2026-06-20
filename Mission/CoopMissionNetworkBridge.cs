@@ -69,6 +69,7 @@ namespace CoopSpectator.MissionBehaviors
         public static bool TrySyncCommanderDeploymentFormationAssignments(
             BattleSideEnum side,
             byte[] assignmentBytes,
+            byte[] formationLayoutBytes,
             string source)
         {
             if (!GameNetwork.IsClient ||
@@ -89,10 +90,21 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            byte[] safeLayoutBytes = formationLayoutBytes ?? Array.Empty<byte>();
+            if (safeLayoutBytes.Length > CoopCommanderDeploymentFormationAssignmentsMessage.MaxFormationLayoutBytes)
+            {
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: commander deployment formation layout payload is too large. " +
+                    "Side=" + side +
+                    " Bytes=" + safeLayoutBytes.Length +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
+
             try
             {
                 GameNetwork.BeginModuleEventAsClient();
-                GameNetwork.WriteMessage(new CoopCommanderDeploymentFormationAssignmentsMessage(side, assignmentBytes));
+                GameNetwork.WriteMessage(new CoopCommanderDeploymentFormationAssignmentsMessage(side, assignmentBytes, safeLayoutBytes));
                 GameNetwork.EndModuleEventAsClient();
                 return true;
             }
@@ -102,6 +114,7 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopBattleNetworkRequestTransport: commander deployment formation sync send failed. " +
                     "Side=" + side +
                     " Bytes=" + assignmentBytes.Length +
+                    " LayoutBytes=" + safeLayoutBytes.Length +
                     " Source=" + (source ?? "unknown") +
                     " Error=" + ex.Message);
                 return false;
@@ -781,10 +794,20 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || team == null)
                 return false;
 
+            Dictionary<int, CommanderDeploymentFormationLayout> formationLayouts =
+                DecodeCommanderDeploymentFormationLayouts(message.FormationLayoutBytes);
             var moves = new List<(Agent Agent, Formation TargetFormation)>();
             var impactedFormations = new HashSet<Formation>();
+            var layoutFormations = new HashSet<Formation>();
             int decodedAssignments = 0;
             int rejectedAssignments = 0;
+
+            foreach (KeyValuePair<int, CommanderDeploymentFormationLayout> layout in formationLayouts)
+            {
+                Formation formation = ResolveCommanderDeploymentFormation(team, layout.Key);
+                if (formation != null)
+                    layoutFormations.Add(formation);
+            }
 
             for (int offset = 0; offset + 2 < assignmentBytes.Length; offset += CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerAssignment)
             {
@@ -810,7 +833,7 @@ namespace CoopSpectator.MissionBehaviors
                 moves.Add((agent, targetFormation));
             }
 
-            if (moves.Count <= 0)
+            if (moves.Count <= 0 && layoutFormations.Count <= 0)
                 return decodedAssignments > 0 && rejectedAssignments < decodedAssignments;
 
             bool previousTeleportingAgents = mission.IsTeleportingAgents;
@@ -824,8 +847,21 @@ namespace CoopSpectator.MissionBehaviors
                 foreach ((Agent agent, Formation targetFormation) in moves)
                     agent.Formation = targetFormation;
 
-                foreach (Formation formation in impactedFormations)
-                    FinalizeCommanderDeploymentFormationAssignment(mission, team, formation, commanderAgent);
+                var formationsToFinalize = new HashSet<Formation>(impactedFormations);
+                foreach (Formation formation in layoutFormations)
+                    formationsToFinalize.Add(formation);
+
+                foreach (Formation formation in formationsToFinalize)
+                {
+                    formationLayouts.TryGetValue(formation.Index, out CommanderDeploymentFormationLayout layout);
+                    FinalizeCommanderDeploymentFormationAssignment(
+                        mission,
+                        team,
+                        formation,
+                        commanderAgent,
+                        impactedFormations.Contains(formation),
+                        layout);
+                }
 
                 CoopMissionSpawnLogic.TryResolveCommanderDeploymentOrderLease(
                     peer,
@@ -846,10 +882,25 @@ namespace CoopSpectator.MissionBehaviors
                     " Side=" + team.Side +
                     " Decoded=" + decodedAssignments +
                     " AppliedMoves=" + moves.Count +
+                    " Layouts=" + formationLayouts.Count +
                     " Rejected=" + rejectedAssignments);
             }
 
             return true;
+        }
+
+        private struct CommanderDeploymentFormationLayout
+        {
+            public CommanderDeploymentFormationLayout(Vec2 position, Vec2 direction)
+            {
+                Position = position;
+                Direction = direction;
+                IsValid = position.IsValid && direction.IsValid;
+            }
+
+            public bool IsValid { get; }
+            public Vec2 Position { get; }
+            public Vec2 Direction { get; }
         }
 
         private static bool IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled()
@@ -940,7 +991,9 @@ namespace CoopSpectator.MissionBehaviors
             Mission mission,
             Team team,
             Formation formation,
-            Agent commanderAgent)
+            Agent commanderAgent,
+            bool endMassTransfer,
+            CommanderDeploymentFormationLayout layout)
         {
             if (mission == null || team == null || formation == null)
                 return;
@@ -962,20 +1015,26 @@ namespace CoopSpectator.MissionBehaviors
             {
             }
 
-            try
+            if (endMassTransfer)
             {
-                formation.OnMassUnitTransferEnd();
-            }
-            catch
-            {
+                try
+                {
+                    formation.OnMassUnitTransferEnd();
+                }
+                catch
+                {
+                }
             }
 
-            TryEnsureCommanderDeploymentFormationPosition(mission, formation);
+            if (!TryApplyCommanderDeploymentFormationLayout(mission, formation, layout))
+                TryEnsureCommanderDeploymentFormationPosition(mission, formation);
 
             try
             {
                 formation.ApplyActionOnEachUnit(
                     agent => agent.ForceUpdateCachedAndFormationValues(updateOnlyMovement: false, arrangementChangeAllowed: false));
+                formation.SetHasPendingUnitPositions(hasPendingUnitPositions: false);
+                formation.SetMovementOrder(MovementOrder.MovementOrderStop);
             }
             catch
             {
@@ -991,6 +1050,90 @@ namespace CoopSpectator.MissionBehaviors
             catch
             {
             }
+        }
+
+        private static Dictionary<int, CommanderDeploymentFormationLayout> DecodeCommanderDeploymentFormationLayouts(byte[] formationLayoutBytes)
+        {
+            var layouts = new Dictionary<int, CommanderDeploymentFormationLayout>();
+            if (formationLayoutBytes == null ||
+                formationLayoutBytes.Length <= 0 ||
+                formationLayoutBytes.Length % CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerFormationLayout != 0)
+            {
+                return layouts;
+            }
+
+            for (int offset = 0; offset + CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerFormationLayout <= formationLayoutBytes.Length;)
+            {
+                int formationIndex = formationLayoutBytes[offset++];
+                float positionX = ReadSingleFromPayload(formationLayoutBytes, ref offset);
+                float positionY = ReadSingleFromPayload(formationLayoutBytes, ref offset);
+                float directionX = ReadSingleFromPayload(formationLayoutBytes, ref offset);
+                float directionY = ReadSingleFromPayload(formationLayoutBytes, ref offset);
+
+                if (formationIndex < 0 ||
+                    formationIndex >= (int)FormationClass.NumberOfDefaultFormations ||
+                    !IsFinite(positionX) ||
+                    !IsFinite(positionY) ||
+                    !IsFinite(directionX) ||
+                    !IsFinite(directionY))
+                {
+                    continue;
+                }
+
+                Vec2 direction = new Vec2(directionX, directionY);
+                if (!direction.IsValid || direction.LengthSquared < 0.0001f)
+                    direction = Vec2.Forward;
+                else
+                    direction = direction.Normalized();
+
+                layouts[formationIndex] = new CommanderDeploymentFormationLayout(
+                    new Vec2(positionX, positionY),
+                    direction);
+            }
+
+            return layouts;
+        }
+
+        private static bool TryApplyCommanderDeploymentFormationLayout(
+            Mission mission,
+            Formation formation,
+            CommanderDeploymentFormationLayout layout)
+        {
+            if (mission?.Scene == null ||
+                formation == null ||
+                !layout.IsValid)
+            {
+                return false;
+            }
+
+            try
+            {
+                float height = mission.Scene.GetTerrainHeight(layout.Position);
+                mission.Scene.GetHeightAtPoint(layout.Position, BodyFlags.None, ref height);
+                var worldPosition = new WorldPosition(
+                    mission.Scene,
+                    UIntPtr.Zero,
+                    new Vec3(layout.Position, height),
+                    hasValidZ: false);
+                formation.SetPositioning(worldPosition, layout.Direction);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static float ReadSingleFromPayload(byte[] payload, ref int offset)
+        {
+            float value = BitConverter.ToSingle(payload, offset);
+            offset += sizeof(float);
+            return value;
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
         }
 
         private static void TryEnsureCommanderDeploymentFormationPosition(Mission mission, Formation formation)

@@ -182,6 +182,12 @@ namespace CoopSpectator.UI
         {
             if (GameNetwork.IsClient && ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
             {
+                if (_currentScreen == CoopSelectionScreen.CommanderDeployment)
+                {
+                    TryDeactivateNativeCommanderDeploymentPlacement(MissionScreen);
+                    return base.OnEscape();
+                }
+
                 if (_currentScreen != CoopSelectionScreen.None || _inputCaptured)
                 {
                     _spectatorOverlayHidden = true;
@@ -805,6 +811,9 @@ namespace CoopSpectator.UI
         {
             if (agent == null || agent.IsMount)
                 return FormationClass.NumberOfAllFormations;
+
+            if (!agent.HasMount && agent.IsRangedCached)
+                return FormationClass.Ranged;
 
             FormationClass formationClass = FormationClass.NumberOfAllFormations;
             BasicCharacterObject character = agent.Character;
@@ -2056,7 +2065,17 @@ namespace CoopSpectator.UI
 
             try
             {
-                return Mission?.PlayerTeam?.FormationsIncludingEmpty?.ElementAtOrDefault(formationIndex);
+                IEnumerable<Formation> formations = Mission?.PlayerTeam?.FormationsIncludingEmpty;
+                if (formations == null)
+                    return null;
+
+                foreach (Formation formation in formations)
+                {
+                    if (formation?.Index == formationIndex)
+                        return formation;
+                }
+
+                return null;
             }
             catch
             {

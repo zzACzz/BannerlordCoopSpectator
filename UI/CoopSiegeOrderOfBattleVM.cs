@@ -9,11 +9,6 @@ namespace CoopSpectator.UI
 {
     internal sealed class CoopSiegeOrderOfBattleVM : OrderOfBattleVM
     {
-        private const int InfantryPrimarySlot = 0;
-        private const int RangedPrimarySlot = 1;
-        private const int InfantrySecondarySlot = 3;
-        private const int RangedSecondarySlot = 4;
-
         protected override void LoadConfiguration()
         {
             base.LoadConfiguration();
@@ -21,53 +16,109 @@ namespace CoopSpectator.UI
             if (_allFormations == null || _allFormations.Count <= 0)
                 return;
 
-            int infantryCount = CountProjectedUnitsInClass(FormationClass.Infantry);
-            int rangedCount = CountProjectedUnitsInClass(FormationClass.Ranged);
-
+            var usedFormationItems = new HashSet<OrderOfBattleFormationItemVM>();
             SeedProjectedClass(
                 DeploymentFormationClass.Infantry,
-                infantryCount,
-                InfantryPrimarySlot,
-                InfantrySecondarySlot);
+                FormationClass.Infantry,
+                usedFormationItems);
             SeedProjectedClass(
                 DeploymentFormationClass.Ranged,
-                rangedCount,
-                RangedPrimarySlot,
-                RangedSecondarySlot);
+                FormationClass.Ranged,
+                usedFormationItems);
 
-            ClearUnusedFormationSlots(new HashSet<int>
-            {
-                infantryCount > 0 ? InfantryPrimarySlot : -1,
-                infantryCount > 1 ? InfantrySecondarySlot : -1,
-                rangedCount > 0 ? RangedPrimarySlot : -1,
-                rangedCount > 1 ? RangedSecondarySlot : -1
-            });
+            ClearUnusedFormationSlots(usedFormationItems);
         }
 
         private void SeedProjectedClass(
             DeploymentFormationClass deploymentClass,
-            int totalCount,
-            int primarySlot,
-            int secondarySlot)
+            FormationClass projectedClass,
+            ISet<OrderOfBattleFormationItemVM> usedFormationItems)
         {
+            int totalCount = CountProjectedUnitsInClass(projectedClass);
             if (totalCount <= 0)
                 return;
 
-            OrderOfBattleFormationItemVM primaryItem = GetFormationItem(primarySlot);
-            if (primaryItem == null)
+            List<OrderOfBattleFormationItemVM> formationItems = CollectFormationItemsForProjectedClass(
+                projectedClass,
+                usedFormationItems);
+            if (formationItems.Count <= 0)
+            {
+                OrderOfBattleFormationItemVM fallbackItem = FindUnusedFormationItem(usedFormationItems, preferEmpty: false);
+                if (fallbackItem != null)
+                    formationItems.Add(fallbackItem);
+            }
+
+            if (totalCount > 1 && formationItems.Count == 1)
+            {
+                OrderOfBattleFormationItemVM secondaryItem = FindUnusedFormationItem(usedFormationItems, preferEmpty: true);
+                if (secondaryItem != null && !formationItems.Contains(secondaryItem))
+                    formationItems.Add(secondaryItem);
+            }
+
+            if (formationItems.Count <= 0)
                 return;
 
-            bool canSplit = totalCount > 1 && GetFormationItem(secondarySlot) != null;
-            int primaryWeight = canSplit ? 50 : 100;
-            int secondaryWeight = canSplit ? 50 : 0;
+            int slotCount = Math.Min(formationItems.Count, Math.Max(1, totalCount));
+            int baseWeight = 100 / slotCount;
+            int weightRemainder = 100 % slotCount;
+            for (int i = 0; i < slotCount; i++)
+            {
+                OrderOfBattleFormationItemVM formationItem = formationItems[i];
+                if (formationItem == null)
+                    continue;
 
-            RefreshFormationSlot(primaryItem, deploymentClass, primaryWeight);
+                int weight = baseWeight + (i < weightRemainder ? 1 : 0);
+                RefreshFormationSlot(formationItem, deploymentClass, weight);
+                usedFormationItems?.Add(formationItem);
+            }
+        }
 
-            if (!canSplit)
-                return;
+        private List<OrderOfBattleFormationItemVM> CollectFormationItemsForProjectedClass(
+            FormationClass projectedClass,
+            ISet<OrderOfBattleFormationItemVM> usedFormationItems)
+        {
+            var formationItems = new List<OrderOfBattleFormationItemVM>();
+            if (_allFormations == null)
+                return formationItems;
 
-            OrderOfBattleFormationItemVM secondaryItem = GetFormationItem(secondarySlot);
-            RefreshFormationSlot(secondaryItem, deploymentClass, secondaryWeight);
+            foreach (OrderOfBattleFormationItemVM formationItem in _allFormations)
+            {
+                if (formationItem?.Formation == null || usedFormationItems?.Contains(formationItem) == true)
+                    continue;
+
+                if (CountProjectedUnitsInClass(formationItem.Formation, projectedClass) > 0)
+                    formationItems.Add(formationItem);
+            }
+
+            return formationItems;
+        }
+
+        private OrderOfBattleFormationItemVM FindUnusedFormationItem(
+            ISet<OrderOfBattleFormationItemVM> usedFormationItems,
+            bool preferEmpty)
+        {
+            if (_allFormations == null)
+                return null;
+
+            OrderOfBattleFormationItemVM fallbackItem = null;
+            foreach (OrderOfBattleFormationItemVM formationItem in _allFormations)
+            {
+                if (formationItem == null || usedFormationItems?.Contains(formationItem) == true)
+                    continue;
+
+                bool isEmptyProjectedSlot =
+                    formationItem.Formation == null ||
+                    CountProjectedUnitsInClass(formationItem.Formation, FormationClass.Infantry) <= 0 &&
+                    CountProjectedUnitsInClass(formationItem.Formation, FormationClass.Ranged) <= 0;
+
+                if (!preferEmpty || isEmptyProjectedSlot)
+                    return formationItem;
+
+                if (fallbackItem == null)
+                    fallbackItem = formationItem;
+            }
+
+            return fallbackItem;
         }
 
         private void RefreshFormationSlot(
@@ -75,40 +126,30 @@ namespace CoopSpectator.UI
             DeploymentFormationClass deploymentClass,
             int weight)
         {
-            if (formationItem == null)
+            if (formationItem?.Formation == null)
                 return;
 
             formationItem.RefreshFormation(formationItem.Formation, deploymentClass, true);
             SetPrimaryClassWeight(formationItem, weight);
             formationItem.OnSizeChanged();
+            formationItem.UpdateAdjustable();
         }
 
-        private void ClearUnusedFormationSlots(ISet<int> usedSlots)
+        private void ClearUnusedFormationSlots(ISet<OrderOfBattleFormationItemVM> usedFormationItems)
         {
-            if (usedSlots == null)
+            if (usedFormationItems == null || _allFormations == null)
                 return;
 
-            for (int i = 0; i < _allFormations.Count; i++)
+            foreach (OrderOfBattleFormationItemVM formationItem in _allFormations)
             {
-                if (usedSlots.Contains(i))
-                    continue;
-
-                OrderOfBattleFormationItemVM formationItem = _allFormations[i];
-                if (formationItem == null)
+                if (formationItem?.Formation == null || usedFormationItems.Contains(formationItem))
                     continue;
 
                 formationItem.RefreshFormation(formationItem.Formation, DeploymentFormationClass.Unset, false);
                 SetPrimaryClassWeight(formationItem, 0);
                 formationItem.OnSizeChanged();
+                formationItem.UpdateAdjustable();
             }
-        }
-
-        private OrderOfBattleFormationItemVM GetFormationItem(int index)
-        {
-            if (index < 0 || _allFormations == null || index >= _allFormations.Count)
-                return null;
-
-            return _allFormations[index];
         }
 
         private static void SetPrimaryClassWeight(OrderOfBattleFormationItemVM formationItem, int weight)
@@ -135,17 +176,31 @@ namespace CoopSpectator.UI
             int count = 0;
             foreach (OrderOfBattleFormationItemVM item in _allFormations.Where(item => item?.Formation != null))
             {
-                count += item.Formation.GetCountOfUnitsWithCondition(agent =>
-                    ResolveProjectedSiegeAgentClass(agent) == projectedClass);
+                count += CountProjectedUnitsInClass(item.Formation, projectedClass);
             }
 
             return count;
+        }
+
+        private static int CountProjectedUnitsInClass(Formation formation, FormationClass projectedClass)
+        {
+            if (formation == null ||
+                projectedClass != FormationClass.Infantry && projectedClass != FormationClass.Ranged)
+            {
+                return 0;
+            }
+
+            return formation.GetCountOfUnitsWithCondition(agent =>
+                ResolveProjectedSiegeAgentClass(agent) == projectedClass);
         }
 
         private static FormationClass ResolveProjectedSiegeAgentClass(Agent agent)
         {
             if (agent == null || agent.IsMount)
                 return FormationClass.NumberOfAllFormations;
+
+            if (!agent.HasMount && agent.IsRangedCached)
+                return FormationClass.Ranged;
 
             FormationClass formationClass = FormationClass.NumberOfAllFormations;
             BasicCharacterObject character = agent.Character;
