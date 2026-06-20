@@ -35,6 +35,7 @@ namespace CoopSpectator.Patches
             PatchVisibleTroopTypeLookup(harmony);
             PatchRearrangeFormationsAccordingToFilters(harmony);
             PatchOrderOfBattleWeightAdjusted(harmony);
+            PatchOrderOfBattleFormationClassChanged(harmony);
         }
 
         private static Type GetOrderOfBattleUIHelperType()
@@ -229,6 +230,25 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, postfix: new HarmonyMethod(postfix));
             ModLogger.Info("OrderOfBattleSiegeProjectedCountsPatch: postfix applied to OrderOfBattleVM.OnWeightAdjusted.");
+        }
+
+        private static void PatchOrderOfBattleFormationClassChanged(Harmony harmony)
+        {
+            MethodInfo target = AccessTools.Method(
+                typeof(OrderOfBattleFormationItemVM),
+                "OnClassChanged");
+            MethodInfo postfix = typeof(OrderOfBattleSiegeProjectedCountsPatch).GetMethod(
+                nameof(OrderOfBattleFormationItemVM_OnClassChanged_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("OrderOfBattleSiegeProjectedCountsPatch: OrderOfBattleFormationItemVM.OnClassChanged not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("OrderOfBattleSiegeProjectedCountsPatch: postfix applied to OrderOfBattleFormationItemVM.OnClassChanged.");
         }
 
         private static bool OrderOfBattleUIHelper_GetTotalCountOfUnitsInClass_Prefix(
@@ -552,22 +572,47 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                LogProjectedWeightAdjustmentDiagnostics(
+                    "entry",
+                    __instance,
+                    formationClass,
+                    "IsApplying=" + _isApplyingProjectedWeightDistribution +
+                    " Active=" + ShouldProjectSiegeOrderOfBattleCounts());
+
                 if (_isApplyingProjectedWeightDistribution ||
                     !ShouldProjectSiegeOrderOfBattleCounts() ||
                     __instance == null ||
                     formationClass == null)
                 {
+                    LogProjectedWeightAdjustmentDiagnostics(
+                        "skip-guard",
+                        __instance,
+                        formationClass,
+                        "InstanceNull=" + (__instance == null) +
+                        " ClassNull=" + (formationClass == null));
                     return;
                 }
 
                 FormationClass projectedClass = DismountSiegeFormationClass(formationClass.Class.FallbackClass());
                 if (projectedClass != FormationClass.Infantry && projectedClass != FormationClass.Ranged)
+                {
+                    LogProjectedWeightAdjustmentDiagnostics(
+                        "skip-non-projected-class",
+                        __instance,
+                        formationClass,
+                        "ProjectedClass=" + projectedClass);
                     return;
+                }
 
                 _isApplyingProjectedWeightDistribution = true;
                 try
                 {
-                    TryApplyProjectedWeightDistribution(__instance, projectedClass);
+                    bool applied = TryApplyProjectedWeightDistribution(__instance, projectedClass);
+                    LogProjectedWeightAdjustmentDiagnostics(
+                        "applied",
+                        __instance,
+                        formationClass,
+                        "ProjectedClass=" + projectedClass + " Applied=" + applied);
                 }
                 finally
                 {
@@ -585,6 +630,94 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void OrderOfBattleFormationItemVM_OnClassChanged_Postfix(
+            OrderOfBattleFormationItemVM __instance)
+        {
+            try
+            {
+                LogProjectedClassChangedDiagnostics(
+                    "entry",
+                    __instance,
+                    "IsApplying=" + _isApplyingProjectedWeightDistribution +
+                    " Initial=" + CoopSiegeOrderOfBattleVM.IsApplyingInitialProjectedConfiguration +
+                    " Active=" + ShouldProjectSiegeOrderOfBattleCounts());
+
+                if (_isApplyingProjectedWeightDistribution ||
+                    CoopSiegeOrderOfBattleVM.IsApplyingInitialProjectedConfiguration ||
+                    !ShouldProjectSiegeOrderOfBattleCounts() ||
+                    __instance == null ||
+                    !__instance.HasFormation ||
+                    __instance.Classes == null)
+                {
+                    LogProjectedClassChangedDiagnostics(
+                        "skip-guard",
+                        __instance,
+                        "InstanceNull=" + (__instance == null) +
+                        " HasFormation=" + (__instance?.HasFormation.ToString() ?? "<null>") +
+                        " ClassesNull=" + (__instance?.Classes == null));
+                    return;
+                }
+
+                var projectedClasses = new HashSet<FormationClass>();
+                foreach (OrderOfBattleFormationClassVM classVm in __instance.Classes)
+                {
+                    if (classVm == null ||
+                        classVm.IsUnset ||
+                        !TryProjectSiegeFormationClass(classVm.Class, out FormationClass projectedClass))
+                    {
+                        continue;
+                    }
+
+                    projectedClasses.Add(projectedClass);
+                }
+
+                if (projectedClasses.Count <= 0)
+                {
+                    LogProjectedClassChangedDiagnostics(
+                        "skip-no-projected-classes",
+                        __instance,
+                        string.Empty);
+                    return;
+                }
+
+                List<OrderOfBattleFormationItemVM> formationItems = GetActiveOrderOfBattleFormationItems();
+                if (formationItems.Count <= 0)
+                {
+                    LogProjectedClassChangedDiagnostics(
+                        "skip-no-active-items",
+                        __instance,
+                        string.Empty);
+                    return;
+                }
+
+                _isApplyingProjectedWeightDistribution = true;
+                try
+                {
+                    foreach (FormationClass projectedClass in projectedClasses)
+                    {
+                        bool applied = TryApplyProjectedWeightDistribution(formationItems, projectedClass);
+                        LogProjectedClassChangedDiagnostics(
+                            "applied",
+                            __instance,
+                            "ProjectedClass=" + projectedClass + " Applied=" + applied);
+                    }
+                }
+                finally
+                {
+                    _isApplyingProjectedWeightDistribution = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "OrderOfBattleSiegeProjectedCountsPatch: projected class change distribution failed open: " +
+                        ex.GetType().Name + ":" + ex.Message);
+                }
+            }
+        }
+
         private static bool TryApplyProjectedWeightDistribution(
             OrderOfBattleVM orderOfBattleVm,
             FormationClass projectedClass)
@@ -593,12 +726,37 @@ namespace CoopSpectator.Patches
                 AllFormationsField == null ||
                 projectedClass != FormationClass.Infantry && projectedClass != FormationClass.Ranged)
             {
+                LogProjectedDistributionSkip(
+                    "vm-entry",
+                    projectedClass,
+                    "OrderOfBattleNull=" + (orderOfBattleVm == null) +
+                    " AllFormationsFieldNull=" + (AllFormationsField == null));
                 return false;
             }
 
             var formationItems = GetOrderOfBattleFormationItems(orderOfBattleVm);
-            if (formationItems.Count <= 0)
+            return TryApplyProjectedWeightDistribution(formationItems, projectedClass);
+        }
+
+        private static bool TryApplyProjectedWeightDistribution(
+            List<OrderOfBattleFormationItemVM> formationItems,
+            FormationClass projectedClass)
+        {
+            if (formationItems == null ||
+                projectedClass != FormationClass.Infantry && projectedClass != FormationClass.Ranged)
+            {
+                LogProjectedDistributionSkip(
+                    "items-entry",
+                    projectedClass,
+                    "FormationItemsNull=" + (formationItems == null));
                 return false;
+            }
+
+            if (formationItems.Count <= 0)
+            {
+                LogProjectedDistributionSkip("items-entry", projectedClass, "No formation items.");
+                return false;
+            }
 
             var targetClasses = new List<OrderOfBattleFormationClassVM>();
             var targetFormations = new Dictionary<Formation, OrderOfBattleFormationClassVM>();
@@ -621,19 +779,47 @@ namespace CoopSpectator.Patches
                 }
             }
 
+            LogProjectedDistributionSnapshot(
+                "targets-built",
+                projectedClass,
+                formationItems,
+                targetClasses,
+                null,
+                null,
+                null);
+
             if (targetClasses.Count <= 1)
+            {
+                LogProjectedDistributionSkip(
+                    "targets-built",
+                    projectedClass,
+                    "TargetClasses=" + targetClasses.Count);
                 return false;
+            }
 
             List<Agent> assignableAgents = CollectProjectedAssignmentAgents(
                 team: targetClasses[0]?.BelongedFormationItem?.Formation?.Team,
                 formationItems: formationItems,
                 projectedClass: projectedClass);
             if (assignableAgents.Count <= 0)
+            {
+                LogProjectedDistributionSkip(
+                    "assignable-built",
+                    projectedClass,
+                    "No assignable agents.");
                 return false;
+            }
 
             var desiredCountsByFormation = BuildProjectedDesiredCountsByFormation(targetClasses, assignableAgents.Count);
             if (desiredCountsByFormation.Count <= 0)
+            {
+                LogProjectedDistributionSkip(
+                    "desired-built",
+                    projectedClass,
+                    "No desired counts. TargetClasses=" + targetClasses.Count +
+                    " AssignableAgents=" + assignableAgents.Count);
                 return false;
+            }
 
             LogProjectedWeightDistributionDiagnostics(
                 "before-assignment",
@@ -662,22 +848,68 @@ namespace CoopSpectator.Patches
             }
 
             if (massTransferData.Count <= 1)
+            {
+                LogProjectedDistributionSnapshot(
+                    "mass-transfer-too-small",
+                    projectedClass,
+                    formationItems,
+                    targetClasses,
+                    desiredCountsByFormation,
+                    assignableAgents,
+                    massTransferData);
                 return false;
+            }
 
             Team team = targetClasses[0]?.BelongedFormationItem?.Formation?.Team;
             Mission mission = Mission.Current;
             if (team == null || mission == null)
+            {
+                LogProjectedDistributionSkip(
+                    "team-mission",
+                    projectedClass,
+                    "TeamNull=" + (team == null) + " MissionNull=" + (mission == null));
                 return false;
+            }
 
             bool previousTeleportingAgents = mission.IsTeleportingAgents;
             try
             {
                 mission.IsTeleportingAgents = true;
-                if (!TryApplyProjectedFormationAssignments(
+                bool applied = TryApplyProjectedFormationAssignmentsWithNativeRearrange(
+                    team,
+                    massTransferData,
+                    desiredCountsByFormation,
+                    projectedClass);
+                LogProjectedDistributionSnapshot(
+                    applied ? "native-rearrange-applied" : "native-rearrange-rejected",
+                    projectedClass,
+                    formationItems,
+                    targetClasses,
+                    desiredCountsByFormation,
+                    assignableAgents,
+                    massTransferData);
+                if (!applied)
+                {
+                    applied = TryApplyProjectedFormationAssignments(
                         targetClasses,
                         desiredCountsByFormation,
-                        assignableAgents))
+                        assignableAgents);
+                    LogProjectedDistributionSnapshot(
+                        applied ? "fallback-assignment-applied" : "fallback-assignment-rejected",
+                        projectedClass,
+                        formationItems,
+                        targetClasses,
+                        desiredCountsByFormation,
+                        assignableAgents,
+                        massTransferData);
+                }
+
+                if (!applied)
                 {
+                    LogProjectedDistributionSkip(
+                        "assignment",
+                        projectedClass,
+                        "Neither native rearrange nor fallback assignment applied.");
                     return false;
                 }
 
@@ -697,6 +929,59 @@ namespace CoopSpectator.Patches
             TrySyncCommanderDeploymentFormationAssignmentsForTeam(
                 team,
                 "OrderOfBattleSiegeProjectedCountsPatch.OnWeightAdjusted");
+            return true;
+        }
+
+        private static bool TryApplyProjectedFormationAssignmentsWithNativeRearrange(
+            Team team,
+            List<ValueTuple<Formation, int, TroopTraitsMask, List<Agent>>> massTransferData,
+            Dictionary<Formation, int> desiredCountsByFormation,
+            FormationClass projectedClass)
+        {
+            if (team == null ||
+                massTransferData == null ||
+                desiredCountsByFormation == null ||
+                massTransferData.Count <= 1 ||
+                desiredCountsByFormation.Count <= 0 ||
+                projectedClass != FormationClass.Infantry && projectedClass != FormationClass.Ranged)
+            {
+                return false;
+            }
+
+            try
+            {
+                team.RearrangeFormationsAccordingToFilter(massTransferData);
+            }
+            catch
+            {
+                return false;
+            }
+
+            return ProjectedFormationCountsMatchDesired(desiredCountsByFormation, projectedClass);
+        }
+
+        private static bool ProjectedFormationCountsMatchDesired(
+            Dictionary<Formation, int> desiredCountsByFormation,
+            FormationClass projectedClass)
+        {
+            if (desiredCountsByFormation == null ||
+                desiredCountsByFormation.Count <= 0 ||
+                projectedClass != FormationClass.Infantry && projectedClass != FormationClass.Ranged)
+            {
+                return false;
+            }
+
+            foreach (KeyValuePair<Formation, int> pair in desiredCountsByFormation)
+            {
+                Formation formation = pair.Key;
+                if (formation == null)
+                    return false;
+
+                int actualCount = CountProjectedUnitsInClass(formation, projectedClass);
+                if (actualCount != pair.Value)
+                    return false;
+            }
+
             return true;
         }
 
@@ -747,6 +1032,220 @@ namespace CoopSpectator.Patches
                     "OrderOfBattleSiegeProjectedCountsPatch: projected distribution diagnostics failed. " +
                     "Error=" + ex.GetType().Name + ":" + ex.Message);
             }
+        }
+
+        private static void LogProjectedWeightAdjustmentDiagnostics(
+            string stage,
+            OrderOfBattleVM orderOfBattleVm,
+            OrderOfBattleFormationClassVM formationClass,
+            string detail)
+        {
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics)
+                return;
+
+            try
+            {
+                Formation formation = formationClass?.BelongedFormationItem?.Formation;
+                ModLogger.Info(
+                    "OrderOfBattleSiegeProjectedCountsPatch: weight adjusted diagnostics. " +
+                    "Stage=" + (stage ?? string.Empty) +
+                    " Detail=" + (detail ?? string.Empty) +
+                    " Class=" + FormatOrderOfBattleClass(formationClass) +
+                    " Formation=" + FormatFormation(formation) +
+                    " Items=" + BuildFormationItemDiagnostics(GetOrderOfBattleFormationItems(orderOfBattleVm), FormationClass.Infantry));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "OrderOfBattleSiegeProjectedCountsPatch: weight adjusted diagnostics failed. " +
+                    "Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private static void LogProjectedClassChangedDiagnostics(
+            string stage,
+            OrderOfBattleFormationItemVM formationItem,
+            string detail)
+        {
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics)
+                return;
+
+            try
+            {
+                ModLogger.Info(
+                    "OrderOfBattleSiegeProjectedCountsPatch: class changed diagnostics. " +
+                    "Stage=" + (stage ?? string.Empty) +
+                    " Detail=" + (detail ?? string.Empty) +
+                    " Item=" + FormatFormationItem(formationItem, FormationClass.Infantry));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "OrderOfBattleSiegeProjectedCountsPatch: class changed diagnostics failed. " +
+                    "Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private static void LogProjectedDistributionSkip(
+            string stage,
+            FormationClass projectedClass,
+            string reason)
+        {
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics)
+                return;
+
+            ModLogger.Info(
+                "OrderOfBattleSiegeProjectedCountsPatch: projected distribution skipped. " +
+                "Stage=" + (stage ?? string.Empty) +
+                " ProjectedClass=" + projectedClass +
+                " Reason=" + (reason ?? string.Empty));
+        }
+
+        private static void LogProjectedDistributionSnapshot(
+            string stage,
+            FormationClass projectedClass,
+            List<OrderOfBattleFormationItemVM> formationItems,
+            List<OrderOfBattleFormationClassVM> targetClasses,
+            Dictionary<Formation, int> desiredCountsByFormation,
+            List<Agent> assignableAgents,
+            List<ValueTuple<Formation, int, TroopTraitsMask, List<Agent>>> massTransferData)
+        {
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics)
+                return;
+
+            try
+            {
+                ModLogger.Info(
+                    "OrderOfBattleSiegeProjectedCountsPatch: projected distribution snapshot. " +
+                    "Stage=" + (stage ?? string.Empty) +
+                    " ProjectedClass=" + projectedClass +
+                    " AssignableAgents=" + (assignableAgents?.Count ?? -1) +
+                    " Items={" + BuildFormationItemDiagnostics(formationItems, projectedClass) + "}" +
+                    " Targets={" + BuildTargetClassDiagnostics(targetClasses, desiredCountsByFormation, projectedClass) + "}" +
+                    " MassTransfer={" + BuildMassTransferDiagnostics(massTransferData, projectedClass) + "}");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "OrderOfBattleSiegeProjectedCountsPatch: projected distribution snapshot failed. " +
+                    "Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private static string BuildFormationItemDiagnostics(
+            IEnumerable<OrderOfBattleFormationItemVM> formationItems,
+            FormationClass projectedClass)
+        {
+            if (formationItems == null)
+                return "null";
+
+            var parts = new List<string>();
+            foreach (OrderOfBattleFormationItemVM formationItem in formationItems)
+                parts.Add(FormatFormationItem(formationItem, projectedClass));
+
+            return string.Join("; ", parts);
+        }
+
+        private static string FormatFormationItem(
+            OrderOfBattleFormationItemVM formationItem,
+            FormationClass projectedClass)
+        {
+            if (formationItem == null)
+                return "<null>";
+
+            Formation formation = formationItem.Formation;
+            return
+                FormatFormation(formation) +
+                ",has=" + formationItem.HasFormation +
+                ",selectable=" + formationItem.IsSelectable +
+                ",projected=" + CountProjectedUnitsInClass(formation, projectedClass) +
+                ",classes=[" + BuildClassListDiagnostics(formationItem.Classes) + "]";
+        }
+
+        private static string BuildClassListDiagnostics(MBBindingList<OrderOfBattleFormationClassVM> classes)
+        {
+            if (classes == null)
+                return "null";
+
+            var parts = new List<string>();
+            foreach (OrderOfBattleFormationClassVM classVm in classes)
+                parts.Add(FormatOrderOfBattleClass(classVm));
+
+            return string.Join(",", parts);
+        }
+
+        private static string BuildTargetClassDiagnostics(
+            List<OrderOfBattleFormationClassVM> targetClasses,
+            Dictionary<Formation, int> desiredCountsByFormation,
+            FormationClass projectedClass)
+        {
+            if (targetClasses == null)
+                return "null";
+
+            var parts = new List<string>();
+            foreach (OrderOfBattleFormationClassVM classVm in targetClasses)
+            {
+                Formation formation = classVm?.BelongedFormationItem?.Formation;
+                int desiredCount = -1;
+                if (formation != null && desiredCountsByFormation != null)
+                    desiredCountsByFormation.TryGetValue(formation, out desiredCount);
+
+                parts.Add(
+                    FormatFormation(formation) +
+                    ",class=" + FormatOrderOfBattleClass(classVm) +
+                    ",desired=" + desiredCount +
+                    ",projected=" + CountProjectedUnitsInClass(formation, projectedClass));
+            }
+
+            return string.Join("; ", parts);
+        }
+
+        private static string BuildMassTransferDiagnostics(
+            List<ValueTuple<Formation, int, TroopTraitsMask, List<Agent>>> massTransferData,
+            FormationClass projectedClass)
+        {
+            if (massTransferData == null)
+                return "null";
+
+            var parts = new List<string>();
+            foreach (ValueTuple<Formation, int, TroopTraitsMask, List<Agent>> transferData in massTransferData)
+            {
+                parts.Add(
+                    FormatFormation(transferData.Item1) +
+                    ",desired=" + transferData.Item2 +
+                    ",filter=" + transferData.Item3 +
+                    ",excluded=" + (transferData.Item4?.Count ?? -1) +
+                    ",projected=" + CountProjectedUnitsInClass(transferData.Item1, projectedClass));
+            }
+
+            return string.Join("; ", parts);
+        }
+
+        private static string FormatOrderOfBattleClass(OrderOfBattleFormationClassVM classVm)
+        {
+            if (classVm == null)
+                return "<null>";
+
+            Formation formation = classVm.BelongedFormationItem?.Formation;
+            return
+                "formation=" + FormatFormation(formation) +
+                ",class=" + classVm.Class +
+                ",fallback=" + classVm.Class.FallbackClass() +
+                ",weight=" + classVm.Weight +
+                ",unset=" + classVm.IsUnset +
+                ",locked=" + classVm.IsLocked;
+        }
+
+        private static string FormatFormation(Formation formation)
+        {
+            if (formation == null)
+                return "<null>";
+
+            return
+                "#" + (formation.Index + 1) +
+                "/team=" + (formation.Team?.TeamIndex.ToString() ?? "<null>") +
+                "/side=" + (formation.Team?.Side.ToString() ?? "<null>") +
+                "/count=" + formation.CountOfUnits;
         }
 
         private static List<Agent> CollectProjectedAssignmentAgents(
@@ -1002,6 +1501,35 @@ namespace CoopSpectator.Patches
             {
                 if (item is OrderOfBattleFormationItemVM formationItem)
                     formationItems.Add(formationItem);
+            }
+
+            return formationItems;
+        }
+
+        private static List<OrderOfBattleFormationItemVM> GetActiveOrderOfBattleFormationItems()
+        {
+            var formationItems = new List<OrderOfBattleFormationItemVM>();
+
+            try
+            {
+                Func<Func<OrderOfBattleFormationItemVM, bool>, IEnumerable<OrderOfBattleFormationItemVM>> callback =
+                    OrderOfBattleFormationItemVM.GetFormationWithCondition;
+                if (callback == null)
+                    return formationItems;
+
+                IEnumerable<OrderOfBattleFormationItemVM> items = callback(item => item?.Formation != null);
+                if (items == null)
+                    return formationItems;
+
+                foreach (OrderOfBattleFormationItemVM item in items)
+                {
+                    if (item?.Formation != null)
+                        formationItems.Add(item);
+                }
+            }
+            catch
+            {
+                formationItems.Clear();
             }
 
             return formationItems;
@@ -1354,36 +1882,38 @@ namespace CoopSpectator.Patches
             if (mission?.AllAgents == null)
                 return false;
 
-            var assignments = new List<ValueTuple<int, int>>();
-            for (int i = 0; i < mission.AllAgents.Count; i++)
+            var assignments = new List<ValueTuple<int, int, int>>();
+            int totalProjectedUnits = 0;
+            foreach (Formation formation in team.FormationsIncludingEmpty)
             {
-                Agent agent = mission.AllAgents[i];
-                Formation formation = agent?.Formation;
-                if (agent == null ||
-                    formation == null ||
-                    agent.Index < 0 ||
-                    agent.Index > ushort.MaxValue ||
-                    agent.IsMount ||
-                    !agent.IsActive() ||
-                    !ReferenceEquals(agent.Team, team) ||
+                if (formation == null ||
                     !ReferenceEquals(formation.Team, team) ||
                     formation.Index < 0 ||
-                    formation.Index >= (int)FormationClass.NumberOfDefaultFormations)
+                    formation.Index >= (int)FormationClass.NumberOfRegularFormations)
                 {
                     continue;
                 }
 
-                assignments.Add(new ValueTuple<int, int>(agent.Index, formation.Index));
+                int infantryCount = Math.Max(0, CountProjectedUnitsInClass(formation, FormationClass.Infantry));
+                int rangedCount = Math.Max(0, CountProjectedUnitsInClass(formation, FormationClass.Ranged));
+                if (infantryCount > ushort.MaxValue)
+                    infantryCount = ushort.MaxValue;
+                if (rangedCount > ushort.MaxValue)
+                    rangedCount = ushort.MaxValue;
+
+                assignments.Add(new ValueTuple<int, int, int>(formation.Index, infantryCount, rangedCount));
+                totalProjectedUnits += infantryCount + rangedCount;
             }
 
-            if (assignments.Count <= 0)
+            if (assignments.Count <= 0 || totalProjectedUnits <= 0)
                 return false;
 
             TryBuildCommanderDeploymentFormationLayoutPayload(team, out formationLayoutBytes);
 
             int maxAssignments =
-                CoopCommanderDeploymentFormationAssignmentsMessage.MaxAssignmentBytes /
-                CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerAssignment;
+                (CoopCommanderDeploymentFormationAssignmentsMessage.MaxAssignmentBytes -
+                 CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentHeaderBytes) /
+                CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerCompositionAssignment;
             if (assignments.Count > maxAssignments)
             {
                 if (CoopDebugConfig.OrderOfBattleDiagnostics)
@@ -1400,15 +1930,21 @@ namespace CoopSpectator.Patches
             }
 
             assignments.Sort((left, right) => left.Item1.CompareTo(right.Item1));
-            assignmentBytes = new byte[assignments.Count * CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerAssignment];
+            assignmentBytes = new byte[
+                CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentHeaderBytes +
+                assignments.Count * CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerCompositionAssignment];
             int offset = 0;
-            foreach (ValueTuple<int, int> assignment in assignments)
+            assignmentBytes[offset++] = CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadMarker;
+            assignmentBytes[offset++] = CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion;
+            assignmentBytes[offset++] = (byte)(assignments.Count & 0xFF);
+            foreach (ValueTuple<int, int, int> assignment in assignments)
             {
-                int agentIndex = assignment.Item1;
-                int formationIndex = assignment.Item2;
-                assignmentBytes[offset++] = (byte)(agentIndex & 0xFF);
-                assignmentBytes[offset++] = (byte)((agentIndex >> 8) & 0xFF);
+                int formationIndex = assignment.Item1;
+                int infantryCount = assignment.Item2;
+                int rangedCount = assignment.Item3;
                 assignmentBytes[offset++] = (byte)(formationIndex & 0xFF);
+                WriteUInt16ToPayload(assignmentBytes, ref offset, infantryCount);
+                WriteUInt16ToPayload(assignmentBytes, ref offset, rangedCount);
             }
 
             assignmentKey =
@@ -1420,6 +1956,13 @@ namespace CoopSpectator.Patches
                 "|L=" +
                 Convert.ToBase64String(formationLayoutBytes);
             return true;
+        }
+
+        private static void WriteUInt16ToPayload(byte[] payload, ref int offset, int value)
+        {
+            int safeValue = Math.Max(0, Math.Min(ushort.MaxValue, value));
+            payload[offset++] = (byte)(safeValue & 0xFF);
+            payload[offset++] = (byte)((safeValue >> 8) & 0xFF);
         }
 
         private static bool TryBuildCommanderDeploymentFormationLayoutPayload(
@@ -1439,7 +1982,7 @@ namespace CoopSpectator.Patches
             {
                 if (formation == null ||
                     formation.Index < 0 ||
-                    formation.Index >= (int)FormationClass.NumberOfDefaultFormations ||
+                    formation.Index >= (int)FormationClass.NumberOfRegularFormations ||
                     !formation.OrderPositionIsValid)
                 {
                     continue;

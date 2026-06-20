@@ -739,14 +739,25 @@ namespace CoopSpectator.MissionBehaviors
 
             try
             {
+                LogCommanderDeploymentAssignmentDiagnostics(
+                    "handler-entry",
+                    peer,
+                    message,
+                    null,
+                    0,
+                    0,
+                    0,
+                    0,
+                    string.Empty);
+
                 bool applied = TryApplyCommanderDeploymentFormationAssignments(peer, message);
                 if (!applied && IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled())
                 {
-                    ModLogger.Info(
-                        "CoopMissionNetworkBridge: ignored commander deployment formation assignment sync. " +
-                        "Peer=" + (peer?.UserName ?? "null") +
-                        " Side=" + message.RequestedSide +
-                        " Bytes=" + (message.AssignmentBytes?.Length ?? 0));
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: ignored commander deployment formation assignment sync. " +
+                    "Peer=" + (peer?.UserName ?? "null") +
+                    " Side=" + message.RequestedSide +
+                    " Bytes=" + (message.AssignmentBytes?.Length ?? 0));
                 }
             }
             catch (Exception ex)
@@ -765,21 +776,52 @@ namespace CoopSpectator.MissionBehaviors
             CoopCommanderDeploymentFormationAssignmentsMessage message)
         {
             if (!GameNetwork.IsServer || peer == null || message == null)
+            {
+                LogCommanderDeploymentAssignmentDiagnostics(
+                    "skip-context",
+                    peer,
+                    message,
+                    null,
+                    0,
+                    0,
+                    0,
+                    0,
+                    "IsServer=" + GameNetwork.IsServer);
                 return false;
+            }
 
             byte[] assignmentBytes = message.AssignmentBytes ?? Array.Empty<byte>();
-            if (assignmentBytes.Length <= 0 ||
-                assignmentBytes.Length % CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerAssignment != 0)
+            if (assignmentBytes.Length <= 0)
             {
+                LogCommanderDeploymentAssignmentDiagnostics(
+                    "skip-invalid-payload",
+                    peer,
+                    message,
+                    null,
+                    0,
+                    0,
+                    0,
+                    0,
+                    "AssignmentBytes=" + assignmentBytes.Length);
                 return false;
             }
 
             if (!CoopMissionSpawnLogic.TryResolveCommanderDeploymentOrderLease(
                     peer,
                     out Team team,
-                    out _,
+                    out OrderController orderController,
                     out Agent commanderAgent))
             {
+                LogCommanderDeploymentAssignmentDiagnostics(
+                    "skip-no-order-lease",
+                    peer,
+                    message,
+                    null,
+                    0,
+                    0,
+                    0,
+                    0,
+                    string.Empty);
                 return false;
             }
 
@@ -787,12 +829,34 @@ namespace CoopSpectator.MissionBehaviors
                 team != null &&
                 team.Side != message.RequestedSide)
             {
+                LogCommanderDeploymentAssignmentDiagnostics(
+                    "skip-side-mismatch",
+                    peer,
+                    message,
+                    team,
+                    0,
+                    0,
+                    0,
+                    0,
+                    string.Empty);
                 return false;
             }
 
             Mission mission = this.Mission ?? Mission.Current;
             if (mission == null || team == null)
+            {
+                LogCommanderDeploymentAssignmentDiagnostics(
+                    "skip-missing-mission-team",
+                    peer,
+                    message,
+                    team,
+                    0,
+                    0,
+                    0,
+                    0,
+                    "MissionNull=" + (mission == null));
                 return false;
+            }
 
             Dictionary<int, CommanderDeploymentFormationLayout> formationLayouts =
                 DecodeCommanderDeploymentFormationLayouts(message.FormationLayoutBytes);
@@ -807,6 +871,64 @@ namespace CoopSpectator.MissionBehaviors
                 Formation formation = ResolveCommanderDeploymentFormation(team, layout.Key);
                 if (formation != null)
                     layoutFormations.Add(formation);
+            }
+
+            LogCommanderDeploymentAssignmentDiagnostics(
+                "decoded",
+                peer,
+                message,
+                team,
+                0,
+                0,
+                0,
+                formationLayouts.Count,
+                "Before=[" + BuildCommanderDeploymentFormationSummary(team) + "]");
+
+            if (IsCommanderDeploymentCompositionAssignmentPayload(assignmentBytes))
+            {
+                if (!TryDecodeCommanderDeploymentFormationCompositionPayload(
+                        assignmentBytes,
+                        out List<CommanderDeploymentFormationComposition> compositionRecords,
+                        out string decodeError))
+                {
+                    LogCommanderDeploymentAssignmentDiagnostics(
+                        "skip-invalid-composition-payload",
+                        peer,
+                        message,
+                        team,
+                        0,
+                        0,
+                        0,
+                        formationLayouts.Count,
+                        decodeError ?? string.Empty);
+                    return false;
+                }
+
+                return TryApplyCommanderDeploymentFormationCompositionAssignments(
+                    peer,
+                    message,
+                    mission,
+                    team,
+                    orderController,
+                    commanderAgent,
+                    formationLayouts,
+                    layoutFormations,
+                    compositionRecords);
+            }
+
+            if (assignmentBytes.Length % CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerAssignment != 0)
+            {
+                LogCommanderDeploymentAssignmentDiagnostics(
+                    "skip-invalid-legacy-payload",
+                    peer,
+                    message,
+                    team,
+                    0,
+                    0,
+                    0,
+                    formationLayouts.Count,
+                    "AssignmentBytes=" + assignmentBytes.Length);
+                return false;
             }
 
             for (int offset = 0; offset + 2 < assignmentBytes.Length; offset += CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerAssignment)
@@ -833,8 +955,44 @@ namespace CoopSpectator.MissionBehaviors
                 moves.Add((agent, targetFormation));
             }
 
+            if (moves.Count <= 0)
+            {
+                LogCommanderDeploymentAssignmentWarningIfSuspicious(
+                    "legacy-no-moves",
+                    peer,
+                    message,
+                    team,
+                    decodedAssignments,
+                    moves.Count,
+                    rejectedAssignments,
+                    formationLayouts.Count,
+                    "After=[" + BuildCommanderDeploymentFormationSummary(team) + "]");
+            }
+
             if (moves.Count <= 0 && layoutFormations.Count <= 0)
+            {
+                LogCommanderDeploymentAssignmentDiagnostics(
+                    "no-moves",
+                    peer,
+                    message,
+                    team,
+                    decodedAssignments,
+                    moves.Count,
+                    rejectedAssignments,
+                    formationLayouts.Count,
+                    "After=[" + BuildCommanderDeploymentFormationSummary(team) + "]");
+                LogCommanderDeploymentAssignmentWarningIfSuspicious(
+                    "no-moves",
+                    peer,
+                    message,
+                    team,
+                    decodedAssignments,
+                    moves.Count,
+                    rejectedAssignments,
+                    formationLayouts.Count,
+                    "After=[" + BuildCommanderDeploymentFormationSummary(team) + "]");
                 return decodedAssignments > 0 && rejectedAssignments < decodedAssignments;
+            }
 
             bool previousTeleportingAgents = mission.IsTeleportingAgents;
             try
@@ -868,6 +1026,10 @@ namespace CoopSpectator.MissionBehaviors
                     out _,
                     out _,
                     out _);
+                CommanderDeploymentMissionNetworkComponentPatch.TryRefreshCommanderDeploymentSelection(
+                    peer,
+                    team,
+                    orderController);
             }
             finally
             {
@@ -883,10 +1045,607 @@ namespace CoopSpectator.MissionBehaviors
                     " Decoded=" + decodedAssignments +
                     " AppliedMoves=" + moves.Count +
                     " Layouts=" + formationLayouts.Count +
-                    " Rejected=" + rejectedAssignments);
+                    " Rejected=" + rejectedAssignments +
+                    " Formations=[" + BuildCommanderDeploymentFormationSummary(team) + "]");
             }
 
             return true;
+        }
+
+        private static bool IsCommanderDeploymentCompositionAssignmentPayload(byte[] assignmentBytes)
+        {
+            return assignmentBytes != null &&
+                   assignmentBytes.Length >= CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentHeaderBytes &&
+                   assignmentBytes[0] == CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadMarker;
+        }
+
+        private static bool TryDecodeCommanderDeploymentFormationCompositionPayload(
+            byte[] assignmentBytes,
+            out List<CommanderDeploymentFormationComposition> records,
+            out string error)
+        {
+            records = new List<CommanderDeploymentFormationComposition>();
+            error = string.Empty;
+
+            if (!IsCommanderDeploymentCompositionAssignmentPayload(assignmentBytes))
+            {
+                error = "missing-marker";
+                return false;
+            }
+
+            if (assignmentBytes[1] != CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion)
+            {
+                error = "unsupported-version:" + assignmentBytes[1];
+                return false;
+            }
+
+            int recordCount = assignmentBytes[2];
+            int expectedLength =
+                CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentHeaderBytes +
+                recordCount * CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerCompositionAssignment;
+            if (recordCount <= 0 || assignmentBytes.Length != expectedLength)
+            {
+                error = "invalid-length:" + assignmentBytes.Length + "/" + expectedLength;
+                return false;
+            }
+
+            int offset = CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentHeaderBytes;
+            for (int i = 0; i < recordCount; i++)
+            {
+                int formationIndex = assignmentBytes[offset++];
+                int infantryCount = ReadUInt16FromPayload(assignmentBytes, ref offset);
+                int rangedCount = ReadUInt16FromPayload(assignmentBytes, ref offset);
+                if (formationIndex < 0 ||
+                    formationIndex >= (int)FormationClass.NumberOfRegularFormations)
+                {
+                    continue;
+                }
+
+                records.Add(new CommanderDeploymentFormationComposition(
+                    formationIndex,
+                    infantryCount,
+                    rangedCount));
+            }
+
+            if (records.Count <= 0)
+            {
+                error = "no-valid-records";
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool TryApplyCommanderDeploymentFormationCompositionAssignments(
+            NetworkCommunicator peer,
+            CoopCommanderDeploymentFormationAssignmentsMessage message,
+            Mission mission,
+            Team team,
+            OrderController orderController,
+            Agent commanderAgent,
+            Dictionary<int, CommanderDeploymentFormationLayout> formationLayouts,
+            HashSet<Formation> layoutFormations,
+            List<CommanderDeploymentFormationComposition> compositionRecords)
+        {
+            if (mission == null ||
+                team == null ||
+                compositionRecords == null ||
+                compositionRecords.Count <= 0)
+            {
+                return false;
+            }
+
+            var infantryDesiredCounts = new Dictionary<Formation, int>();
+            var rangedDesiredCounts = new Dictionary<Formation, int>();
+            var compositionFormations = new HashSet<Formation>();
+            int decodedRecords = 0;
+            int rejectedRecords = 0;
+
+            foreach (CommanderDeploymentFormationComposition record in compositionRecords)
+            {
+                Formation formation = ResolveCommanderDeploymentFormation(team, record.FormationIndex);
+                if (formation == null)
+                {
+                    rejectedRecords++;
+                    continue;
+                }
+
+                compositionFormations.Add(formation);
+                infantryDesiredCounts[formation] = Math.Max(0, record.InfantryCount);
+                rangedDesiredCounts[formation] = Math.Max(0, record.RangedCount);
+                decodedRecords++;
+            }
+
+            if (decodedRecords <= 0)
+            {
+                LogCommanderDeploymentAssignmentWarningIfSuspicious(
+                    "composition-no-valid-records",
+                    peer,
+                    message,
+                    team,
+                    compositionRecords.Count,
+                    0,
+                    rejectedRecords,
+                    formationLayouts?.Count ?? 0,
+                    "Before=[" + BuildCommanderDeploymentFormationSummary(team) + "]");
+                return false;
+            }
+
+            List<Agent> infantryAgents = CollectCommanderDeploymentCompositionAgents(team, FormationClass.Infantry);
+            List<Agent> rangedAgents = CollectCommanderDeploymentCompositionAgents(team, FormationClass.Ranged);
+            NormalizeCommanderDeploymentDesiredCounts(infantryDesiredCounts, infantryAgents.Count);
+            NormalizeCommanderDeploymentDesiredCounts(rangedDesiredCounts, rangedAgents.Count);
+
+            var targetByAgent = new Dictionary<Agent, Formation>();
+            int assignedInfantry = BuildCommanderDeploymentCompositionTargets(
+                infantryDesiredCounts,
+                infantryAgents,
+                targetByAgent);
+            int assignedRanged = BuildCommanderDeploymentCompositionTargets(
+                rangedDesiredCounts,
+                rangedAgents,
+                targetByAgent);
+
+            var moves = new List<(Agent Agent, Formation TargetFormation)>();
+            var impactedFormations = new HashSet<Formation>();
+            foreach (KeyValuePair<Agent, Formation> assignment in targetByAgent)
+            {
+                Agent agent = assignment.Key;
+                Formation targetFormation = assignment.Value;
+                if (agent == null || targetFormation == null || ReferenceEquals(agent.Formation, targetFormation))
+                    continue;
+
+                if (agent.Formation != null)
+                    impactedFormations.Add(agent.Formation);
+                impactedFormations.Add(targetFormation);
+                moves.Add((agent, targetFormation));
+            }
+
+            if (targetByAgent.Count <= 0)
+            {
+                LogCommanderDeploymentAssignmentWarningIfSuspicious(
+                    "composition-no-assigned-agents",
+                    peer,
+                    message,
+                    team,
+                    decodedRecords,
+                    0,
+                    rejectedRecords,
+                    formationLayouts?.Count ?? 0,
+                    "InfantryAgents=" + infantryAgents.Count +
+                    " RangedAgents=" + rangedAgents.Count +
+                    " Before=[" + BuildCommanderDeploymentFormationSummary(team) + "]");
+            }
+
+            bool previousTeleportingAgents = mission.IsTeleportingAgents;
+            try
+            {
+                mission.IsTeleportingAgents = true;
+
+                foreach (Formation formation in impactedFormations)
+                    TryStartCommanderDeploymentMassTransfer(formation);
+
+                foreach ((Agent agent, Formation targetFormation) in moves)
+                    agent.Formation = targetFormation;
+
+                var formationsToFinalize = new HashSet<Formation>(compositionFormations);
+                foreach (Formation formation in layoutFormations ?? new HashSet<Formation>())
+                    formationsToFinalize.Add(formation);
+                foreach (Formation formation in impactedFormations)
+                    formationsToFinalize.Add(formation);
+
+                foreach (Formation formation in formationsToFinalize)
+                {
+                    if (formation == null)
+                        continue;
+
+                    CommanderDeploymentFormationLayout layout = default(CommanderDeploymentFormationLayout);
+                    if (formationLayouts != null)
+                        formationLayouts.TryGetValue(formation.Index, out layout);
+                    FinalizeCommanderDeploymentFormationAssignment(
+                        mission,
+                        team,
+                        formation,
+                        commanderAgent,
+                        impactedFormations.Contains(formation),
+                        layout);
+                }
+
+                CommanderDeploymentMissionNetworkComponentPatch.TryRefreshCommanderDeploymentSelection(
+                    peer,
+                    team,
+                    orderController);
+            }
+            finally
+            {
+                mission.IsTeleportingAgents = previousTeleportingAgents;
+            }
+
+            if (IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled())
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: applied commander deployment formation composition sync. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "<null>") +
+                    " Side=" + team.Side +
+                    " Records=" + decodedRecords +
+                    " AssignedInfantry=" + assignedInfantry +
+                    " AssignedRanged=" + assignedRanged +
+                    " AppliedMoves=" + moves.Count +
+                    " Layouts=" + (formationLayouts?.Count ?? 0) +
+                    " RejectedRecords=" + rejectedRecords +
+                    " Formations=[" + BuildCommanderDeploymentFormationSummary(team) + "]");
+            }
+
+            return targetByAgent.Count > 0 || (layoutFormations != null && layoutFormations.Count > 0);
+        }
+
+        private static int BuildCommanderDeploymentCompositionTargets(
+            Dictionary<Formation, int> desiredCounts,
+            List<Agent> assignableAgents,
+            Dictionary<Agent, Formation> targetByAgent)
+        {
+            if (desiredCounts == null ||
+                assignableAgents == null ||
+                targetByAgent == null ||
+                desiredCounts.Count <= 0 ||
+                assignableAgents.Count <= 0)
+            {
+                return 0;
+            }
+
+            var assignedAgents = new HashSet<Agent>();
+            var assignedCounts = new Dictionary<Formation, int>();
+            List<Formation> orderedFormations = GetCommanderDeploymentDesiredFormationsByIndex(desiredCounts);
+
+            foreach (Formation targetFormation in orderedFormations)
+            {
+                int desiredCount = Math.Max(0, desiredCounts[targetFormation]);
+                if (desiredCount <= 0)
+                    continue;
+
+                foreach (Agent agent in assignableAgents)
+                {
+                    if (agent == null ||
+                        assignedAgents.Contains(agent) ||
+                        targetByAgent.ContainsKey(agent) ||
+                        !ReferenceEquals(agent.Formation, targetFormation))
+                    {
+                        continue;
+                    }
+
+                    int assignedCount = GetCommanderDeploymentAssignedCount(assignedCounts, targetFormation);
+                    if (assignedCount >= desiredCount)
+                        break;
+
+                    targetByAgent[agent] = targetFormation;
+                    assignedAgents.Add(agent);
+                    assignedCounts[targetFormation] = assignedCount + 1;
+                }
+            }
+
+            foreach (Formation targetFormation in orderedFormations)
+            {
+                int desiredCount = Math.Max(0, desiredCounts[targetFormation]);
+                if (desiredCount <= 0)
+                    continue;
+
+                foreach (Agent agent in assignableAgents)
+                {
+                    if (agent == null ||
+                        assignedAgents.Contains(agent) ||
+                        targetByAgent.ContainsKey(agent))
+                    {
+                        continue;
+                    }
+
+                    int assignedCount = GetCommanderDeploymentAssignedCount(assignedCounts, targetFormation);
+                    if (assignedCount >= desiredCount)
+                        break;
+
+                    targetByAgent[agent] = targetFormation;
+                    assignedAgents.Add(agent);
+                    assignedCounts[targetFormation] = assignedCount + 1;
+                }
+            }
+
+            return assignedAgents.Count;
+        }
+
+        private static List<Agent> CollectCommanderDeploymentCompositionAgents(
+            Team team,
+            FormationClass projectedClass)
+        {
+            var agents = new List<Agent>();
+            Mission mission = Mission.Current;
+            if (team == null || mission?.AllAgents == null)
+                return agents;
+
+            for (int i = 0; i < mission.AllAgents.Count; i++)
+            {
+                Agent agent = mission.AllAgents[i];
+                if (agent == null ||
+                    agent.IsMount ||
+                    !agent.IsActive() ||
+                    !ReferenceEquals(agent.Team, team) ||
+                    agent.Formation == null ||
+                    !ReferenceEquals(agent.Formation.Team, team) ||
+                    ResolveCommanderDeploymentProjectedAgentClass(agent) != projectedClass)
+                {
+                    continue;
+                }
+
+                agents.Add(agent);
+            }
+
+            agents.Sort((left, right) =>
+            {
+                int leftFormationIndex = left?.Formation?.Index ?? int.MaxValue;
+                int rightFormationIndex = right?.Formation?.Index ?? int.MaxValue;
+                int formationCompare = leftFormationIndex.CompareTo(rightFormationIndex);
+                if (formationCompare != 0)
+                    return formationCompare;
+
+                return (left?.Index ?? int.MaxValue).CompareTo(right?.Index ?? int.MaxValue);
+            });
+            return agents;
+        }
+
+        private static FormationClass ResolveCommanderDeploymentProjectedAgentClass(Agent agent)
+        {
+            if (agent == null || agent.IsMount)
+                return FormationClass.NumberOfAllFormations;
+
+            if (!agent.HasMount && agent.IsRangedCached)
+                return FormationClass.Ranged;
+
+            FormationClass formationClass = FormationClass.NumberOfAllFormations;
+            BasicCharacterObject character = agent.Character;
+            if (character != null)
+            {
+                try
+                {
+                    BattleSideEnum side = agent.Team?.Side ?? BattleSideEnum.None;
+                    if (Mission.Current != null && side != BattleSideEnum.None)
+                        formationClass = Mission.Current.GetAgentTroopClass(side, character);
+                    else
+                        formationClass = character.DefaultFormationClass;
+                }
+                catch
+                {
+                    formationClass = character.DefaultFormationClass;
+                }
+            }
+
+            if (!IsCommanderDeploymentDefaultFormationClass(formationClass))
+                return agent.IsRangedCached ? FormationClass.Ranged : FormationClass.Infantry;
+
+            formationClass = DismountCommanderDeploymentSiegeFormationClass(formationClass.FallbackClass());
+            if (formationClass == FormationClass.Ranged || formationClass == FormationClass.Infantry)
+                return formationClass;
+
+            return agent.IsRangedCached ? FormationClass.Ranged : FormationClass.Infantry;
+        }
+
+        private static FormationClass DismountCommanderDeploymentSiegeFormationClass(FormationClass formationClass)
+        {
+            if (formationClass == FormationClass.Cavalry)
+                return FormationClass.Infantry;
+
+            if (formationClass == FormationClass.HorseArcher)
+                return FormationClass.Ranged;
+
+            return formationClass;
+        }
+
+        private static bool IsCommanderDeploymentDefaultFormationClass(FormationClass formationClass)
+        {
+            return formationClass >= FormationClass.Infantry &&
+                   formationClass < FormationClass.NumberOfDefaultFormations;
+        }
+
+        private static void NormalizeCommanderDeploymentDesiredCounts(
+            Dictionary<Formation, int> desiredCounts,
+            int availableUnits)
+        {
+            if (desiredCounts == null || desiredCounts.Count <= 0)
+                return;
+
+            availableUnits = Math.Max(0, availableUnits);
+            var keys = new List<Formation>(desiredCounts.Keys);
+            foreach (Formation formation in keys)
+                desiredCounts[formation] = Math.Max(0, desiredCounts[formation]);
+
+            int assignedUnits = 0;
+            foreach (int count in desiredCounts.Values)
+                assignedUnits += count;
+
+            while (assignedUnits > availableUnits)
+            {
+                Formation formation = FindCommanderDeploymentDesiredCountExtremum(desiredCounts, findMaximum: true);
+                if (formation == null || desiredCounts[formation] <= 0)
+                    break;
+
+                desiredCounts[formation]--;
+                assignedUnits--;
+            }
+
+            while (assignedUnits < availableUnits)
+            {
+                Formation formation = FindCommanderDeploymentDesiredCountExtremum(desiredCounts, findMaximum: true);
+                if (formation == null)
+                    break;
+
+                desiredCounts[formation]++;
+                assignedUnits++;
+            }
+        }
+
+        private static Formation FindCommanderDeploymentDesiredCountExtremum(
+            Dictionary<Formation, int> desiredCounts,
+            bool findMaximum)
+        {
+            Formation bestFormation = null;
+            int bestCount = findMaximum ? int.MinValue : int.MaxValue;
+            foreach (KeyValuePair<Formation, int> pair in desiredCounts)
+            {
+                Formation formation = pair.Key;
+                if (formation == null)
+                    continue;
+
+                bool isBetter =
+                    (findMaximum && pair.Value > bestCount) ||
+                    (!findMaximum && pair.Value < bestCount) ||
+                    (pair.Value == bestCount &&
+                     bestFormation != null &&
+                     formation.Index < bestFormation.Index);
+                if (!isBetter && bestFormation != null)
+                    continue;
+
+                bestFormation = formation;
+                bestCount = pair.Value;
+            }
+
+            return bestFormation;
+        }
+
+        private static List<Formation> GetCommanderDeploymentDesiredFormationsByIndex(
+            Dictionary<Formation, int> desiredCounts)
+        {
+            var formations = new List<Formation>();
+            if (desiredCounts == null)
+                return formations;
+
+            foreach (Formation formation in desiredCounts.Keys)
+            {
+                if (formation != null)
+                    formations.Add(formation);
+            }
+
+            formations.Sort((left, right) => left.Index.CompareTo(right.Index));
+            return formations;
+        }
+
+        private static int GetCommanderDeploymentAssignedCount(
+            Dictionary<Formation, int> assignedCounts,
+            Formation formation)
+        {
+            if (assignedCounts == null || formation == null)
+                return 0;
+
+            return assignedCounts.TryGetValue(formation, out int count) ? count : 0;
+        }
+
+        private static int ReadUInt16FromPayload(byte[] payload, ref int offset)
+        {
+            int value = payload[offset] | (payload[offset + 1] << 8);
+            offset += 2;
+            return value;
+        }
+
+        private static void LogCommanderDeploymentAssignmentDiagnostics(
+            string stage,
+            NetworkCommunicator peer,
+            CoopCommanderDeploymentFormationAssignmentsMessage message,
+            Team team,
+            int decodedAssignments,
+            int appliedMoves,
+            int rejectedAssignments,
+            int layoutCount,
+            string detail)
+        {
+            if (!IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled())
+                return;
+
+            try
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: commander deployment assignment diagnostics. " +
+                    "Stage=" + (stage ?? string.Empty) +
+                    " Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "<null>") +
+                    " RequestedSide=" + (message == null ? "<null>" : message.RequestedSide.ToString()) +
+                    " Team=" + (team?.TeamIndex.ToString() ?? "<null>") +
+                    " TeamSide=" + (team?.Side.ToString() ?? "<null>") +
+                    " AssignmentBytes=" + (message?.AssignmentBytes?.Length ?? 0) +
+                    " LayoutBytes=" + (message?.FormationLayoutBytes?.Length ?? 0) +
+                    " Decoded=" + decodedAssignments +
+                    " AppliedMoves=" + appliedMoves +
+                    " Rejected=" + rejectedAssignments +
+                    " Layouts=" + layoutCount +
+                    " Detail=" + (detail ?? string.Empty));
+            }
+            catch
+            {
+            }
+        }
+
+        private static readonly Dictionary<string, int> CommanderDeploymentAssignmentWarningCounts =
+            new Dictionary<string, int>();
+
+        private static void LogCommanderDeploymentAssignmentWarningIfSuspicious(
+            string stage,
+            NetworkCommunicator peer,
+            CoopCommanderDeploymentFormationAssignmentsMessage message,
+            Team team,
+            int decodedAssignments,
+            int appliedMoves,
+            int rejectedAssignments,
+            int layoutCount,
+            string detail)
+        {
+            if (IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled() ||
+                decodedAssignments <= 0 ||
+                (rejectedAssignments < decodedAssignments && layoutCount <= 0))
+            {
+                return;
+            }
+
+            string key = (stage ?? string.Empty) + ":" + (peer == null ? -1 : peer.Index);
+            lock (CommanderDeploymentAssignmentWarningCounts)
+            {
+                CommanderDeploymentAssignmentWarningCounts.TryGetValue(key, out int count);
+                if (count >= 5)
+                    return;
+
+                CommanderDeploymentAssignmentWarningCounts[key] = count + 1;
+            }
+
+            try
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: commander deployment assignment warning. " +
+                    "Stage=" + (stage ?? string.Empty) +
+                    " Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "<null>") +
+                    " RequestedSide=" + (message == null ? "<null>" : message.RequestedSide.ToString()) +
+                    " Team=" + (team?.TeamIndex.ToString() ?? "<null>") +
+                    " TeamSide=" + (team?.Side.ToString() ?? "<null>") +
+                    " AssignmentBytes=" + (message?.AssignmentBytes?.Length ?? 0) +
+                    " LayoutBytes=" + (message?.FormationLayoutBytes?.Length ?? 0) +
+                    " Decoded=" + decodedAssignments +
+                    " AppliedMoves=" + appliedMoves +
+                    " Rejected=" + rejectedAssignments +
+                    " Layouts=" + layoutCount +
+                    " Detail=" + (detail ?? string.Empty));
+            }
+            catch
+            {
+            }
+        }
+
+        private static string BuildCommanderDeploymentFormationSummary(Team team)
+        {
+            if (team?.FormationsIncludingEmpty == null)
+                return "<null>";
+
+            var parts = new List<string>();
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null)
+                    continue;
+
+                parts.Add("#" + formation.Index + "=" + formation.CountOfUnits);
+            }
+
+            return parts.Count <= 0 ? string.Empty : string.Join(",", parts.ToArray());
         }
 
         private struct CommanderDeploymentFormationLayout
@@ -901,6 +1660,23 @@ namespace CoopSpectator.MissionBehaviors
             public bool IsValid { get; }
             public Vec2 Position { get; }
             public Vec2 Direction { get; }
+        }
+
+        private struct CommanderDeploymentFormationComposition
+        {
+            public CommanderDeploymentFormationComposition(
+                int formationIndex,
+                int infantryCount,
+                int rangedCount)
+            {
+                FormationIndex = formationIndex;
+                InfantryCount = Math.Max(0, infantryCount);
+                RangedCount = Math.Max(0, rangedCount);
+            }
+
+            public int FormationIndex { get; }
+            public int InfantryCount { get; }
+            public int RangedCount { get; }
         }
 
         private static bool IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled()
@@ -953,7 +1729,7 @@ namespace CoopSpectator.MissionBehaviors
         {
             if (team?.FormationsIncludingEmpty == null ||
                 formationIndex < 0 ||
-                formationIndex >= (int)FormationClass.NumberOfDefaultFormations)
+                formationIndex >= (int)FormationClass.NumberOfRegularFormations)
             {
                 return null;
             }
@@ -1032,7 +1808,16 @@ namespace CoopSpectator.MissionBehaviors
             try
             {
                 formation.ApplyActionOnEachUnit(
-                    agent => agent.ForceUpdateCachedAndFormationValues(updateOnlyMovement: false, arrangementChangeAllowed: false));
+                    agent =>
+                    {
+                        if (agent == null || !agent.IsActive())
+                            return;
+
+                        agent.ForceUpdateCachedAndFormationValues(updateOnlyMovement: false, arrangementChangeAllowed: false);
+                        WorldPosition orderPosition = formation.GetOrderPositionOfUnit(agent);
+                        if (orderPosition.IsValid)
+                            agent.TeleportToPosition(orderPosition.GetGroundVec3());
+                    });
                 formation.SetHasPendingUnitPositions(hasPendingUnitPositions: false);
                 formation.SetMovementOrder(MovementOrder.MovementOrderStop);
             }
@@ -1071,7 +1856,7 @@ namespace CoopSpectator.MissionBehaviors
                 float directionY = ReadSingleFromPayload(formationLayoutBytes, ref offset);
 
                 if (formationIndex < 0 ||
-                    formationIndex >= (int)FormationClass.NumberOfDefaultFormations ||
+                    formationIndex >= (int)FormationClass.NumberOfRegularFormations ||
                     !IsFinite(positionX) ||
                     !IsFinite(positionY) ||
                     !IsFinite(directionX) ||

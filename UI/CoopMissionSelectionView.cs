@@ -45,7 +45,8 @@ namespace CoopSpectator.UI
         private ViewModel _viewModel;
         private OrderOfBattleVM _commanderDeploymentViewModel;
         private MissionOrderVM _commanderDeploymentOrderVm;
-        private SpriteCategory _commanderDeploymentSpriteCategory;
+        private SpriteCategory _commanderDeploymentOrderOfBattleSpriteCategory;
+        private SpriteCategory _commanderDeploymentOrderSpriteCategory;
         private object _commanderDeploymentOrderTroopPlacer;
         private Action _commanderDeploymentOnUnitDeployedHandler;
         private bool _commanderDeploymentOrderVmInitialized;
@@ -1619,37 +1620,63 @@ namespace CoopSpectator.UI
 
         private void EnsureCommanderDeploymentSpriteCategoryLoaded()
         {
-            if (_commanderDeploymentSpriteCategory != null)
-                return;
+            _commanderDeploymentOrderOfBattleSpriteCategory = TryLoadCommanderDeploymentSpriteCategory(
+                _commanderDeploymentOrderOfBattleSpriteCategory,
+                "ui_order_of_battle");
+            _commanderDeploymentOrderSpriteCategory = TryLoadCommanderDeploymentSpriteCategory(
+                _commanderDeploymentOrderSpriteCategory,
+                "ui_order");
+        }
+
+        private static SpriteCategory TryLoadCommanderDeploymentSpriteCategory(
+            SpriteCategory currentCategory,
+            string categoryName)
+        {
+            if (currentCategory != null)
+                return currentCategory;
 
             try
             {
-                _commanderDeploymentSpriteCategory = UIResourceManager.LoadSpriteCategory("ui_order_of_battle");
+                return UIResourceManager.LoadSpriteCategory(categoryName);
             }
             catch (Exception ex)
             {
-                ModLogger.Info("CoopMissionSelectionView: failed to load OrderOfBattle sprite category: " + ex.Message);
-                _commanderDeploymentSpriteCategory = null;
+                ModLogger.Info(
+                    "CoopMissionSelectionView: failed to load commander deployment sprite category " +
+                    categoryName + ": " + ex.Message);
+                return null;
             }
         }
 
         private void ReleaseCommanderDeploymentSpriteCategory()
         {
-            if (_commanderDeploymentSpriteCategory == null)
-                return;
+            _commanderDeploymentOrderOfBattleSpriteCategory = ReleaseCommanderDeploymentSpriteCategory(
+                _commanderDeploymentOrderOfBattleSpriteCategory,
+                "ui_order_of_battle");
+            _commanderDeploymentOrderSpriteCategory = ReleaseCommanderDeploymentSpriteCategory(
+                _commanderDeploymentOrderSpriteCategory,
+                "ui_order");
+        }
+
+        private static SpriteCategory ReleaseCommanderDeploymentSpriteCategory(
+            SpriteCategory category,
+            string categoryName)
+        {
+            if (category == null)
+                return null;
 
             try
             {
-                _commanderDeploymentSpriteCategory.Unload();
+                category.Unload();
             }
             catch (Exception ex)
             {
-                ModLogger.Info("CoopMissionSelectionView: failed to unload OrderOfBattle sprite category: " + ex.Message);
+                ModLogger.Info(
+                    "CoopMissionSelectionView: failed to unload commander deployment sprite category " +
+                    categoryName + ": " + ex.Message);
             }
-            finally
-            {
-                _commanderDeploymentSpriteCategory = null;
-            }
+
+            return null;
         }
 
         private void TryAttachCommanderDeploymentOrderTroopPlacerCallback(OrderOfBattleVM commanderVm)
@@ -2763,7 +2790,8 @@ namespace CoopSpectator.UI
                 _commanderDeploymentViewModel != null ||
                 _commanderDeploymentOrderVm != null ||
                 _commanderDeploymentOrderTroopPlacer != null ||
-                _commanderDeploymentSpriteCategory != null;
+                _commanderDeploymentOrderOfBattleSpriteCategory != null ||
+                _commanderDeploymentOrderSpriteCategory != null;
             if (_gauntletLayer != null && _movie != null)
             {
                 _gauntletLayer.ReleaseMovie(_movie);

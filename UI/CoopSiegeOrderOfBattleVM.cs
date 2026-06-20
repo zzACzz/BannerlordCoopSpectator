@@ -1,6 +1,8 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.ViewModelCollection.OrderOfBattle;
@@ -9,24 +11,38 @@ namespace CoopSpectator.UI
 {
     internal sealed class CoopSiegeOrderOfBattleVM : OrderOfBattleVM
     {
+        internal static bool IsApplyingInitialProjectedConfiguration { get; private set; }
+
         protected override void LoadConfiguration()
         {
-            base.LoadConfiguration();
+            IsApplyingInitialProjectedConfiguration = true;
 
-            if (_allFormations == null || _allFormations.Count <= 0)
-                return;
+            try
+            {
+                base.LoadConfiguration();
 
-            var usedFormationItems = new HashSet<OrderOfBattleFormationItemVM>();
-            SeedProjectedClass(
-                DeploymentFormationClass.Infantry,
-                FormationClass.Infantry,
-                usedFormationItems);
-            SeedProjectedClass(
-                DeploymentFormationClass.Ranged,
-                FormationClass.Ranged,
-                usedFormationItems);
+                if (_allFormations == null || _allFormations.Count <= 0)
+                    return;
 
-            ClearUnusedFormationSlots(usedFormationItems);
+                RestrictFormationClassSelectorsToSiegeClasses();
+
+                var usedFormationItems = new HashSet<OrderOfBattleFormationItemVM>();
+                SeedProjectedClass(
+                    DeploymentFormationClass.Infantry,
+                    FormationClass.Infantry,
+                    usedFormationItems);
+                SeedProjectedClass(
+                    DeploymentFormationClass.Ranged,
+                    FormationClass.Ranged,
+                    usedFormationItems);
+
+                ClearUnusedFormationSlots(usedFormationItems);
+                RestrictFormationClassSelectorsToSiegeClasses();
+            }
+            finally
+            {
+                IsApplyingInitialProjectedConfiguration = false;
+            }
         }
 
         private void SeedProjectedClass(
@@ -130,6 +146,7 @@ namespace CoopSpectator.UI
                 return;
 
             formationItem.RefreshFormation(formationItem.Formation, deploymentClass, true);
+            RestrictFormationClassSelectorToSiegeClasses(formationItem);
             SetPrimaryClassWeight(formationItem, weight);
             formationItem.OnSizeChanged();
             formationItem.UpdateAdjustable();
@@ -145,11 +162,241 @@ namespace CoopSpectator.UI
                 if (formationItem?.Formation == null || usedFormationItems.Contains(formationItem))
                     continue;
 
-                formationItem.RefreshFormation(formationItem.Formation, DeploymentFormationClass.Unset, false);
-                SetPrimaryClassWeight(formationItem, 0);
-                formationItem.OnSizeChanged();
-                formationItem.UpdateAdjustable();
+                ClearFormationSlot(formationItem);
             }
+        }
+
+        private static void ClearFormationSlot(OrderOfBattleFormationItemVM formationItem)
+        {
+            if (formationItem?.Formation == null)
+                return;
+
+            formationItem.RefreshFormation(formationItem.Formation, DeploymentFormationClass.Unset, false);
+            RestrictFormationClassSelectorToSiegeClasses(formationItem);
+            TrySetFormationClassSelectorIndex(formationItem, 0);
+
+            if (formationItem.Classes != null)
+            {
+                for (int i = 0; i < formationItem.Classes.Count; i++)
+                {
+                    OrderOfBattleFormationClassVM classVm = formationItem.Classes[i];
+                    if (classVm == null)
+                        continue;
+
+                    classVm.Class = FormationClass.NumberOfAllFormations;
+                    classVm.Weight = 0;
+                    classVm.IsLocked = false;
+                }
+            }
+
+            formationItem.HasFormation = false;
+            formationItem.IsSelectable = false;
+            formationItem.OnSizeChanged();
+            formationItem.UpdateAdjustable();
+        }
+
+        private void RestrictFormationClassSelectorsToSiegeClasses()
+        {
+            if (_allFormations == null)
+                return;
+
+            foreach (OrderOfBattleFormationItemVM formationItem in _allFormations)
+                RestrictFormationClassSelectorToSiegeClasses(formationItem);
+        }
+
+        private static void RestrictFormationClassSelectorToSiegeClasses(OrderOfBattleFormationItemVM formationItem)
+        {
+            if (formationItem == null)
+                return;
+
+            try
+            {
+                object selector = GetFormationClassSelector(formationItem);
+                PropertyInfo itemListProperty = selector?.GetType().GetProperty(
+                    "ItemList",
+                    BindingFlags.Instance | BindingFlags.Public);
+                if (!(itemListProperty?.GetValue(selector, null) is IEnumerable itemList))
+                    return;
+
+                var invalidItems = new List<object>();
+                foreach (object selectorItem in itemList)
+                {
+                    if (!TryReadDeploymentFormationClass(selectorItem, out DeploymentFormationClass deploymentClass))
+                        continue;
+
+                    bool isAllowed = IsAllowedSiegeDeploymentFormationClass(deploymentClass);
+                    SetSelectorItemCanBeSelected(selectorItem, isAllowed);
+                    if (!isAllowed)
+                        invalidItems.Add(selectorItem);
+                }
+
+                if (TryReadSelectedDeploymentFormationClass(selector, out DeploymentFormationClass selectedClass) &&
+                    !IsAllowedSiegeDeploymentFormationClass(selectedClass))
+                {
+                    TrySetFormationClassSelectorIndex(formationItem, 0);
+                }
+
+                RemoveInvalidFormationClassSelectorItems(itemList, invalidItems);
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool IsAllowedSiegeDeploymentFormationClass(DeploymentFormationClass deploymentClass)
+        {
+            return deploymentClass == DeploymentFormationClass.Unset ||
+                   deploymentClass == DeploymentFormationClass.Infantry ||
+                   deploymentClass == DeploymentFormationClass.Ranged ||
+                   deploymentClass == DeploymentFormationClass.InfantryAndRanged;
+        }
+
+        private static bool TryReadSelectedDeploymentFormationClass(
+            object selector,
+            out DeploymentFormationClass deploymentClass)
+        {
+            deploymentClass = DeploymentFormationClass.Unset;
+            try
+            {
+                PropertyInfo selectedItemProperty = selector?.GetType().GetProperty(
+                    "SelectedItem",
+                    BindingFlags.Instance | BindingFlags.Public);
+                object selectedItem = selectedItemProperty?.GetValue(selector, null);
+                return TryReadDeploymentFormationClass(selectedItem, out deploymentClass);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadDeploymentFormationClass(
+            object selectorItem,
+            out DeploymentFormationClass deploymentClass)
+        {
+            deploymentClass = DeploymentFormationClass.Unset;
+            if (selectorItem == null)
+                return false;
+
+            try
+            {
+                FieldInfo formationClassField = selectorItem.GetType().GetField(
+                    "FormationClass",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                object formationClassValue = formationClassField?.GetValue(selectorItem);
+                if (formationClassValue is DeploymentFormationClass fieldClass)
+                {
+                    deploymentClass = fieldClass;
+                    return true;
+                }
+
+                PropertyInfo formationClassIntProperty = selectorItem.GetType().GetProperty(
+                    "FormationClassInt",
+                    BindingFlags.Instance | BindingFlags.Public);
+                object formationClassIntValue = formationClassIntProperty?.GetValue(selectorItem, null);
+                if (formationClassIntValue is int classInt &&
+                    Enum.IsDefined(typeof(DeploymentFormationClass), classInt))
+                {
+                    deploymentClass = (DeploymentFormationClass)classInt;
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private static void SetSelectorItemCanBeSelected(object selectorItem, bool canBeSelected)
+        {
+            if (selectorItem == null)
+                return;
+
+            try
+            {
+                PropertyInfo canBeSelectedProperty = selectorItem.GetType().GetProperty(
+                    "CanBeSelected",
+                    BindingFlags.Instance | BindingFlags.Public);
+                if (canBeSelectedProperty == null || !canBeSelectedProperty.CanWrite)
+                    return;
+
+                object currentValue = canBeSelectedProperty.GetValue(selectorItem, null);
+                if (currentValue is bool currentCanBeSelected && currentCanBeSelected == canBeSelected)
+                    return;
+
+                canBeSelectedProperty.SetValue(selectorItem, canBeSelected, null);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void RemoveInvalidFormationClassSelectorItems(
+            object itemList,
+            List<object> invalidItems)
+        {
+            if (itemList == null || invalidItems == null || invalidItems.Count <= 0)
+                return;
+
+            try
+            {
+                Type itemListType = itemList.GetType();
+                foreach (object invalidItem in invalidItems)
+                {
+                    if (invalidItem == null)
+                        continue;
+
+                    MethodInfo removeMethod = itemListType.GetMethod(
+                        "Remove",
+                        BindingFlags.Instance | BindingFlags.Public,
+                        null,
+                        new[] { invalidItem.GetType() },
+                        null);
+                    removeMethod?.Invoke(itemList, new[] { invalidItem });
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void TrySetFormationClassSelectorIndex(
+            OrderOfBattleFormationItemVM formationItem,
+            int selectedIndex)
+        {
+            if (formationItem == null)
+                return;
+
+            try
+            {
+                object selector = GetFormationClassSelector(formationItem);
+                PropertyInfo selectedIndexProperty = selector?.GetType().GetProperty(
+                    "SelectedIndex",
+                    BindingFlags.Instance | BindingFlags.Public);
+                if (selectedIndexProperty == null || !selectedIndexProperty.CanWrite)
+                    return;
+
+                object currentValue = selectedIndexProperty.GetValue(selector, null);
+                if (currentValue is int currentIndex && currentIndex == selectedIndex)
+                    return;
+
+                selectedIndexProperty.SetValue(selector, selectedIndex, null);
+            }
+            catch
+            {
+            }
+        }
+
+        private static object GetFormationClassSelector(OrderOfBattleFormationItemVM formationItem)
+        {
+            if (formationItem == null)
+                return null;
+
+            PropertyInfo selectorProperty = typeof(OrderOfBattleFormationItemVM).GetProperty(
+                "FormationClassSelector",
+                BindingFlags.Instance | BindingFlags.Public);
+            return selectorProperty?.GetValue(formationItem, null);
         }
 
         private static void SetPrimaryClassWeight(OrderOfBattleFormationItemVM formationItem, int weight)
