@@ -42,6 +42,16 @@ namespace CoopSpectator.Patches
 
             PatchPrivateMethod(
                 harmony,
+                "HandleClientEventApplyOrder",
+                nameof(MissionNetworkComponent_HandleClientEventApplyOrder_Prefix),
+                new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) });
+            PatchPrivateMethod(
+                harmony,
+                "HandleClientEventApplyOrderWithPosition",
+                nameof(MissionNetworkComponent_HandleClientEventApplyOrderWithPosition_Prefix),
+                new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) });
+            PatchPrivateMethod(
+                harmony,
                 "HandleClientEventApplyOrderWithFormation",
                 nameof(MissionNetworkComponent_HandleClientEventApplyOrderWithFormation_Prefix),
                 new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) });
@@ -146,6 +156,78 @@ namespace CoopSpectator.Patches
 
             __result = orderController;
             return false;
+        }
+
+        private static bool MissionNetworkComponent_HandleClientEventApplyOrder_Prefix(
+            NetworkCommunicator networkPeer,
+            GameNetworkMessage baseMessage,
+            ref bool __result)
+        {
+            try
+            {
+                if (!TryResolveOrderLease(networkPeer, out Team team, out OrderController orderController))
+                    return true;
+
+                ApplyOrder message = baseMessage as ApplyOrder;
+                if (message == null || orderController == null)
+                    return true;
+
+                TryRefreshNativeSelectionFromShadow(networkPeer, team, orderController);
+                orderController.SetOrder(message.OrderType);
+
+                LogOrderDiagnostics(
+                    "simple-order-applied",
+                    networkPeer,
+                    orderController,
+                    "OrderType=" + message.OrderType +
+                    " Shadow=[" + BuildShadowSelectionSummary(networkPeer, team) + "]");
+
+                __result = true;
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static bool MissionNetworkComponent_HandleClientEventApplyOrderWithPosition_Prefix(
+            NetworkCommunicator networkPeer,
+            GameNetworkMessage baseMessage,
+            ref bool __result)
+        {
+            try
+            {
+                if (!TryResolveOrderLease(networkPeer, out Team team, out OrderController orderController))
+                    return true;
+
+                ApplyOrderWithPosition message = baseMessage as ApplyOrderWithPosition;
+                Mission mission = Mission.Current;
+                if (message == null || mission?.Scene == null || orderController == null)
+                    return true;
+
+                TryRefreshNativeSelectionFromShadow(networkPeer, team, orderController);
+                var orderPosition = new WorldPosition(
+                    mission.Scene,
+                    UIntPtr.Zero,
+                    message.Position,
+                    hasValidZ: false);
+                orderController.SetOrderWithPosition(message.OrderType, orderPosition);
+
+                LogOrderDiagnostics(
+                    "position-order-applied",
+                    networkPeer,
+                    orderController,
+                    "OrderType=" + message.OrderType +
+                    " Shadow=[" + BuildShadowSelectionSummary(networkPeer, team) + "]");
+
+                __result = true;
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         private static bool MissionNetworkComponent_HandleClientEventApplyOrderWithFormation_Prefix(

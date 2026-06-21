@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -11,10 +12,17 @@ using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.InputSystem;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.View.VisualOrders.Orders;
+using TaleWorlds.MountAndBlade.View.VisualOrders.Orders.ToggleOrders;
+using TaleWorlds.MountAndBlade.View.VisualOrders.OrderSets;
 using TaleWorlds.MountAndBlade.View.MissionViews;
 using TaleWorlds.MountAndBlade.ViewModelCollection.Order;
 using TaleWorlds.MountAndBlade.ViewModelCollection.Order.Visual;
+using TaleWorlds.MountAndBlade.ViewModelCollection.Order.Visual.Default.Orders.FormOrders;
+using TaleWorlds.MountAndBlade.ViewModelCollection.Order.Visual.Default.Orders.MovementOrders;
+using TaleWorlds.MountAndBlade.ViewModelCollection.Order.Visual.Default.Orders.ToggleOrders;
 using TaleWorlds.MountAndBlade.ViewModelCollection.OrderOfBattle;
+using TaleWorlds.Localization;
 using TaleWorlds.ScreenSystem;
 using TaleWorlds.TwoDimension;
 
@@ -25,6 +33,7 @@ namespace CoopSpectator.UI
         private const string TeamMovieName = "CoopTeamSelection";
         private const string ClassMovieName = "CoopClassLoadout";
         private const string CommanderDeploymentMovieName = "OrderOfBattle";
+        private const string CommanderDeploymentOrderMovieName = "OrderRadial";
         private static readonly bool EnableManualSiegeCommanderDeployment = true;
         private const float RefreshIntervalSeconds = 0.15f;
         private const float InitialOverlayDelaySeconds = 0.75f;
@@ -42,6 +51,7 @@ namespace CoopSpectator.UI
 
         private GauntletLayer _gauntletLayer;
         private GauntletMovieIdentifier _movie;
+        private GauntletMovieIdentifier _commanderDeploymentOrderMovie;
         private ViewModel _viewModel;
         private OrderOfBattleVM _commanderDeploymentViewModel;
         private MissionOrderVM _commanderDeploymentOrderVm;
@@ -50,6 +60,8 @@ namespace CoopSpectator.UI
         private object _commanderDeploymentOrderTroopPlacer;
         private Action _commanderDeploymentOnUnitDeployedHandler;
         private bool _commanderDeploymentOrderVmInitialized;
+        private CoopCommanderDeploymentVisualOrderProvider _commanderDeploymentVisualOrderProvider;
+        private bool _commanderDeploymentVisualOrderProviderRegistered;
         private ICoopSelectionScreenViewModel _screenViewModel;
         private CoopSelectionScreen _currentScreen;
         private CoopSelectionScreen _requestedScreen = CoopSelectionScreen.TeamSelection;
@@ -583,6 +595,7 @@ namespace CoopSpectator.UI
                     _commanderDeploymentViewModel = commanderVm;
                     _screenViewModel = null;
                     _movie = _gauntletLayer.LoadMovie(CommanderDeploymentMovieName, commanderVm);
+                    TryEnsureCommanderDeploymentOrderMovie();
                     _currentScreen = desiredScreen;
                     _lastAppliedRefreshKey = GetRefreshKey(snapshot, desiredScreen);
                     ModLogger.Info("CoopMissionSelectionView: loaded native OrderOfBattle commander deployment shell.");
@@ -1337,6 +1350,7 @@ namespace CoopSpectator.UI
 
             try
             {
+                TryEnsureCommanderDeploymentVisualOrderProviderRegistered();
                 _commanderDeploymentOrderVm = new MissionOrderVM(orderController, isDeployment: true, isMultiplayer: false);
                 _commanderDeploymentOrderVm.IsDeployment = true;
                 _commanderDeploymentOrderVm.SetCallbacks(CreateCommanderDeploymentOrderCallbacks());
@@ -1348,6 +1362,7 @@ namespace CoopSpectator.UI
                 TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "UpdateTroops");
                 _commanderDeploymentOrderVm.UpdateCanUseShortcuts(true);
                 _commanderDeploymentOrderVmInitialized = true;
+                TryEnsureCommanderDeploymentOrderMovie();
                 ModLogger.Info("CoopMissionSelectionView: prepared safe commander MissionOrderVM bridge.");
                 return true;
             }
@@ -1358,6 +1373,101 @@ namespace CoopSpectator.UI
                     ex.GetType().Name + ":" + ex.Message);
                 ReleaseCommanderDeploymentOrderBridge();
                 return false;
+            }
+        }
+
+        private void TryEnsureCommanderDeploymentVisualOrderProviderRegistered()
+        {
+            if (_commanderDeploymentVisualOrderProviderRegistered)
+                return;
+
+            try
+            {
+                _commanderDeploymentVisualOrderProvider = new CoopCommanderDeploymentVisualOrderProvider();
+                VisualOrderFactory.RegisterProvider(_commanderDeploymentVisualOrderProvider);
+                _commanderDeploymentVisualOrderProviderRegistered = true;
+                ModLogger.Info("CoopMissionSelectionView: registered commander deployment visual order provider.");
+            }
+            catch (Exception ex)
+            {
+                _commanderDeploymentVisualOrderProvider = null;
+                _commanderDeploymentVisualOrderProviderRegistered = false;
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander deployment visual order provider registration failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private void ReleaseCommanderDeploymentVisualOrderProvider()
+        {
+            if (!_commanderDeploymentVisualOrderProviderRegistered ||
+                _commanderDeploymentVisualOrderProvider == null)
+            {
+                _commanderDeploymentVisualOrderProvider = null;
+                _commanderDeploymentVisualOrderProviderRegistered = false;
+                return;
+            }
+
+            try
+            {
+                VisualOrderFactory.UnregisterProvider(_commanderDeploymentVisualOrderProvider);
+                ModLogger.Info("CoopMissionSelectionView: unregistered commander deployment visual order provider.");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander deployment visual order provider unregister failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+            }
+            finally
+            {
+                _commanderDeploymentVisualOrderProvider = null;
+                _commanderDeploymentVisualOrderProviderRegistered = false;
+            }
+        }
+
+        private bool TryEnsureCommanderDeploymentOrderMovie()
+        {
+            if (_commanderDeploymentOrderMovie != null)
+                return true;
+
+            if (_gauntletLayer == null || _commanderDeploymentOrderVm == null)
+                return false;
+
+            try
+            {
+                _commanderDeploymentOrderMovie = _gauntletLayer.LoadMovie(
+                    CommanderDeploymentOrderMovieName,
+                    _commanderDeploymentOrderVm);
+                ModLogger.Info("CoopMissionSelectionView: loaded safe commander OrderRadial bridge.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: failed to load safe commander OrderRadial bridge: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                _commanderDeploymentOrderMovie = null;
+                return false;
+            }
+        }
+
+        private void ReleaseCommanderDeploymentOrderMovie()
+        {
+            if (_commanderDeploymentOrderMovie == null)
+                return;
+
+            try
+            {
+                _gauntletLayer?.ReleaseMovie(_commanderDeploymentOrderMovie);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: safe commander OrderRadial movie release failed: " + ex.Message);
+            }
+            finally
+            {
+                _commanderDeploymentOrderMovie = null;
             }
         }
 
@@ -1434,6 +1544,8 @@ namespace CoopSpectator.UI
 
         private void ReleaseCommanderDeploymentOrderBridge()
         {
+            ReleaseCommanderDeploymentOrderMovie();
+
             if (_commanderDeploymentOrderVm != null)
             {
                 try
@@ -1448,6 +1560,7 @@ namespace CoopSpectator.UI
 
             _commanderDeploymentOrderVm = null;
             _commanderDeploymentOrderVmInitialized = false;
+            ReleaseCommanderDeploymentVisualOrderProvider();
         }
 
         private void RefreshCommanderDeploymentOrderVisuals()
@@ -1882,11 +1995,13 @@ namespace CoopSpectator.UI
                 if (!handled)
                     return false;
 
+                TryDeselectCommanderDeploymentSelectedOrderSet();
                 TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "UpdateTroops");
                 TryRefreshNativeCommanderOrderOfBattleCounts(
                     _commanderDeploymentViewModel,
                     Mission,
                     "mission-order-select-formation");
+                TryOpenCommanderDeploymentOrderMenuUnchecked();
                 return true;
             }
             catch (Exception ex)
@@ -2632,7 +2747,8 @@ namespace CoopSpectator.UI
             try
             {
                 _commanderDeploymentViewModel.Tick();
-                _commanderDeploymentOrderVm?.Update();
+                TryUpdateCommanderDeploymentOrderVmUnchecked();
+                TryTickCommanderDeploymentOrderHotkeys();
             }
             catch (Exception ex)
             {
@@ -2640,6 +2756,248 @@ namespace CoopSpectator.UI
                 _commanderDeploymentViewModel = null;
                 ReleaseCommanderDeploymentOrderBridge();
             }
+        }
+
+        private void TryUpdateCommanderDeploymentOrderVmUnchecked()
+        {
+            if (_commanderDeploymentOrderVm == null)
+                return;
+
+            if (!TryGetInstanceBool(_commanderDeploymentOrderVm, "IsToggleOrderShown"))
+            {
+                _commanderDeploymentOrderVm.Update();
+                return;
+            }
+
+            try
+            {
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "IntervalUpdate");
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "Update");
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "RefreshTroopFormationTargetVisuals");
+                TrySetInstanceProperty(
+                    _commanderDeploymentOrderVm,
+                    "UseAlternativeFormationLayout",
+                    TaleWorlds.InputSystem.Input.IsGamepadActive);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander deployment unchecked order update failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private void TryTickCommanderDeploymentOrderHotkeys()
+        {
+            if (_commanderDeploymentOrderVm == null ||
+                !_commanderDeploymentOrderVmInitialized)
+            {
+                return;
+            }
+
+            if (Input.IsKeyPressed(InputKey.BackSpace))
+            {
+                TryEnsureCommanderDeploymentOrderMovie();
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm, "ViewOrders");
+                return;
+            }
+
+            int orderHotkeyIndex = GetPressedCommanderDeploymentOrderHotkeyIndex();
+            if (orderHotkeyIndex < 0)
+                return;
+
+            TryHandleCommanderDeploymentOrderHotkey(orderHotkeyIndex);
+        }
+
+        private bool TryHandleCommanderDeploymentOrderHotkey(int orderHotkeyIndex)
+        {
+            if (orderHotkeyIndex < 0 || !TryEnsureCommanderDeploymentOrderBridge())
+                return false;
+
+            TryEnsureCommanderDeploymentOrderMovie();
+
+            try
+            {
+                object selectedOrderSet = TryGetInstanceMemberValue(_commanderDeploymentOrderVm, "SelectedOrderSet");
+                if (selectedOrderSet != null)
+                    return TryExecuteCommanderDeploymentSelectedOrderSetHotkey(selectedOrderSet, orderHotkeyIndex);
+
+                bool openInvoked = TryOpenCommanderDeploymentOrderMenuUnchecked();
+                if (!openInvoked)
+                    return false;
+
+                object orderSets = TryGetInstanceMemberValue(_commanderDeploymentOrderVm, "OrderSets");
+                if (orderHotkeyIndex == 8 && OrderSetCollectionContainsReturnOnlySet(orderSets))
+                {
+                    bool? closeResult = TryInvokeBoolMethod(_commanderDeploymentOrderVm, "TryCloseToggleOrder", false);
+                    return closeResult == true;
+                }
+
+                object orderSetAtIndex = TryInvokeInstanceMethodWithResult(
+                    _commanderDeploymentOrderVm,
+                    "GetOrderSetAtIndex",
+                    orderHotkeyIndex);
+                if (orderSetAtIndex == null || IsReturnOnlyOrderSet(orderSetAtIndex))
+                    return false;
+
+                return TrySelectCommanderDeploymentOrderSetUnchecked(orderSetAtIndex);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander deployment order hotkey failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TryOpenCommanderDeploymentOrderMenuUnchecked()
+        {
+            if (!TryEnsureCommanderDeploymentOrderBridge())
+                return false;
+
+            if (TryGetInstanceBool(_commanderDeploymentOrderVm, "IsToggleOrderShown"))
+                return true;
+
+            Mission mission = Mission;
+            OrderController orderController = mission?.PlayerTeam?.PlayerOrderController;
+            if (mission == null || orderController == null)
+                return false;
+
+            TryEnsureCommanderDeploymentVisualOrderProviderRegistered();
+            TryEnsureCommanderDeploymentOrderMovie();
+
+            try
+            {
+                if (orderController.SelectedFormations == null || orderController.SelectedFormations.Count == 0)
+                    orderController.SelectAllFormations();
+
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm, "PopulateOrderSets");
+                _commanderDeploymentOrderVm.UpdateCanUseShortcuts(true);
+                mission.IsOrderMenuOpen = true;
+                TrySetInstanceProperty(_commanderDeploymentOrderVm, "IsToggleOrderShown", true);
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "UpdateTroops");
+                TrySetInstanceProperty(_commanderDeploymentOrderVm.TroopController, "IsTransferActive", false);
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.DeploymentController, "ProcessSiegeMachines");
+                if (orderController.SelectedFormations == null || orderController.SelectedFormations.Count == 0)
+                    TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "SelectAllFormations");
+
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm, "OnOrderShownToggle");
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm, "SetActiveOrders");
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "UpdateTroops");
+                TryRefreshNativeCommanderOrderOfBattleCounts(
+                    _commanderDeploymentViewModel,
+                    mission,
+                    "mission-order-open-unchecked");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander deployment unchecked order open failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TrySelectCommanderDeploymentOrderSetUnchecked(object orderSet)
+        {
+            if (orderSet == null)
+                return false;
+
+            try
+            {
+                VisualOrderExecutionParameters executionParameters = GetCommanderDeploymentVisualOrderExecutionParameters();
+                if (!TryInvokeInstanceMethodSuccessfully(orderSet, "ExecuteAction", executionParameters))
+                    return false;
+
+                if (!TryGetInstanceBool(_commanderDeploymentOrderVm, "IsToggleOrderShown") &&
+                    !IsSoloOrderSet(orderSet))
+                {
+                    TryOpenCommanderDeploymentOrderMenuUnchecked();
+                }
+
+                _commanderDeploymentOrderVm.UpdateCanUseShortcuts(true);
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm, "SetActiveOrders");
+                TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "UpdateTroops");
+                TryRefreshNativeCommanderOrderOfBattleCounts(
+                    _commanderDeploymentViewModel,
+                    Mission,
+                    "mission-order-select-set-unchecked");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander deployment unchecked order set select failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TryExecuteCommanderDeploymentSelectedOrderSetHotkey(object selectedOrderSet, int orderHotkeyIndex)
+        {
+            object orders = TryGetInstanceMemberValue(selectedOrderSet, "Orders");
+            int selectedOrderCount = TryGetCollectionCount(orders);
+            if (selectedOrderCount <= 0)
+                return false;
+
+            if (orderHotkeyIndex == 8 && OrderItemCollectionContainsReturnVisualOrder(orders))
+                return TryInvokeInstanceMethodSuccessfully(selectedOrderSet, "ExecuteDeSelect");
+
+            if (orderHotkeyIndex >= selectedOrderCount)
+                return false;
+
+            object orderItem = TryGetCollectionItem(orders, orderHotkeyIndex);
+            object visualOrder = TryGetInstanceMemberValue(orderItem, "Order");
+            if (IsReturnVisualOrderInstance(visualOrder))
+                return TryInvokeInstanceMethodSuccessfully(selectedOrderSet, "ExecuteDeSelect");
+
+            VisualOrderExecutionParameters executionParameters = GetCommanderDeploymentVisualOrderExecutionParameters();
+            if (orderItem == null ||
+                !TryInvokeInstanceMethodSuccessfully(orderItem, "ExecuteAction", executionParameters))
+            {
+                return false;
+            }
+
+            TryInvokeInstanceMethodSuccessfully(selectedOrderSet, "ExecuteDeSelect");
+            TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "UpdateTroops");
+            TryRefreshNativeCommanderOrderOfBattleCounts(
+                _commanderDeploymentViewModel,
+                Mission,
+                "mission-order-hotkey");
+            return true;
+        }
+
+        private void TryDeselectCommanderDeploymentSelectedOrderSet()
+        {
+            object selectedOrderSet = TryGetInstanceMemberValue(_commanderDeploymentOrderVm, "SelectedOrderSet");
+            if (selectedOrderSet != null)
+                TryInvokeInstanceMethodSuccessfully(selectedOrderSet, "ExecuteDeSelect");
+        }
+
+        private static int GetPressedCommanderDeploymentOrderHotkeyIndex()
+        {
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.F1))
+                return 0;
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.F2))
+                return 1;
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.F3))
+                return 2;
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.F4))
+                return 3;
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.F5))
+                return 4;
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.F6))
+                return 5;
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.F7))
+                return 6;
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.F8))
+                return 7;
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.F9))
+                return 8;
+
+            return -1;
         }
 
         private void UpdateOverlayInputState(bool shouldCaptureInput)
@@ -3480,6 +3838,234 @@ namespace CoopSpectator.UI
             catch
             {
                 return null;
+            }
+        }
+
+        private static object TryGetInstanceMemberValue(object target, string memberName)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(memberName))
+                return null;
+
+            try
+            {
+                PropertyInfo property = FindInstanceProperty(target.GetType(), memberName);
+                if (property != null && property.GetIndexParameters().Length == 0)
+                    return property.GetValue(target);
+
+                FieldInfo field = FindInstanceField(target.GetType(), memberName);
+                if (field != null)
+                    return field.GetValue(target);
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static object TryInvokeInstanceMethodWithResult(object target, string methodName, params object[] arguments)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(methodName))
+                return null;
+
+            try
+            {
+                MethodInfo method = FindInstanceMethod(target.GetType(), methodName, arguments);
+                return method?.Invoke(target, arguments);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool? TryInvokeBoolMethod(object target, string methodName, params object[] arguments)
+        {
+            object result = TryInvokeInstanceMethodWithResult(target, methodName, arguments);
+            return result is bool value ? value : (bool?)null;
+        }
+
+        private static bool TryGetInstanceBool(object target, string memberName)
+        {
+            object value = TryGetInstanceMemberValue(target, memberName);
+            return value is bool boolValue && boolValue;
+        }
+
+        private static int TryGetCollectionCount(object collection)
+        {
+            if (collection == null)
+                return 0;
+
+            if (collection is ICollection nonGenericCollection)
+                return nonGenericCollection.Count;
+
+            int count = 0;
+            if (collection is IEnumerable enumerable)
+            {
+                foreach (object _ in enumerable)
+                    count++;
+            }
+
+            return count;
+        }
+
+        private static object TryGetCollectionItem(object collection, int index)
+        {
+            if (collection == null || index < 0)
+                return null;
+
+            if (collection is IList list)
+                return index < list.Count ? list[index] : null;
+
+            if (collection is IEnumerable enumerable)
+            {
+                int currentIndex = 0;
+                foreach (object item in enumerable)
+                {
+                    if (currentIndex == index)
+                        return item;
+                    currentIndex++;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool IsReturnVisualOrderInstance(object visualOrder)
+        {
+            return visualOrder != null &&
+                   string.Equals(visualOrder.GetType().Name, "ReturnVisualOrder", StringComparison.Ordinal);
+        }
+
+        private static bool OrderItemCollectionContainsReturnVisualOrder(object orderItems)
+        {
+            if (!(orderItems is IEnumerable enumerable))
+                return false;
+
+            foreach (object orderItem in enumerable)
+            {
+                object visualOrder = TryGetInstanceMemberValue(orderItem, "Order");
+                if (IsReturnVisualOrderInstance(visualOrder))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsReturnOnlyOrderSet(object orderSet)
+        {
+            if (orderSet == null || !IsSoloOrderSet(orderSet))
+                return false;
+
+            object orders = TryGetInstanceMemberValue(orderSet, "Orders");
+            object firstOrderItem = TryGetCollectionItem(orders, 0);
+            object visualOrder = TryGetInstanceMemberValue(firstOrderItem, "Order");
+            return IsReturnVisualOrderInstance(visualOrder);
+        }
+
+        private static bool IsSoloOrderSet(object orderSet)
+        {
+            return orderSet != null && TryGetInstanceBool(orderSet, "HasSingleOrder");
+        }
+
+        private static bool OrderSetCollectionContainsReturnOnlySet(object orderSets)
+        {
+            if (!(orderSets is IEnumerable enumerable))
+                return false;
+
+            foreach (object orderSet in enumerable)
+            {
+                if (IsReturnOnlyOrderSet(orderSet))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private sealed class CoopCommanderDeploymentVisualOrderProvider : VisualOrderProvider
+        {
+            public override bool IsAvailable()
+            {
+                Mission mission = Mission.Current;
+                if (mission?.PlayerTeam?.PlayerOrderController == null)
+                    return false;
+
+                return CoopMissionSelectionView.IsCommanderDeploymentOrderOfBattleActive();
+            }
+
+            public override MBReadOnlyList<VisualOrderSet> GetOrders()
+            {
+                return TaleWorlds.InputSystem.Input.IsGamepadActive
+                    ? GetDefaultOrders(includeShortcutOrders: false)
+                    : GetDefaultOrders(includeShortcutOrders: true);
+            }
+
+            private static MBReadOnlyList<VisualOrderSet> GetDefaultOrders(bool includeShortcutOrders)
+            {
+                var orders = new MBList<VisualOrderSet>();
+
+                var movementSet = new GenericVisualOrderSet(
+                    "order_type_movement",
+                    new TextObject("{=KiJd6Xik}Movement"),
+                    useActiveOrderForIconId: true,
+                    useActiveOrderForName: true);
+                movementSet.AddOrder(new MoveVisualOrder("order_movement_move"));
+                movementSet.AddOrder(new FollowMeVisualOrder("order_movement_follow"));
+                movementSet.AddOrder(new ChargeVisualOrder("order_movement_charge"));
+                movementSet.AddOrder(new AdvanceVisualOrder("order_movement_advance"));
+                movementSet.AddOrder(new FallbackVisualOrder("order_movement_fallback"));
+                movementSet.AddOrder(new StopVisualOrder("order_movement_stop"));
+                movementSet.AddOrder(new RetreatVisualOrder("order_movement_retreat"));
+                movementSet.AddOrder(new ReturnVisualOrder());
+
+                var formSet = new GenericVisualOrderSet(
+                    "order_type_form",
+                    new TextObject("{=iBk2wbn3}Form"),
+                    useActiveOrderForIconId: true,
+                    useActiveOrderForName: true);
+                var lineOrder = new ArrangementVisualOrder(ArrangementOrder.ArrangementOrderEnum.Line, "order_form_line");
+                var shieldWallOrder = new ArrangementVisualOrder(ArrangementOrder.ArrangementOrderEnum.ShieldWall, "order_form_close");
+                formSet.AddOrder(lineOrder);
+                formSet.AddOrder(shieldWallOrder);
+                formSet.AddOrder(new ArrangementVisualOrder(ArrangementOrder.ArrangementOrderEnum.Loose, "order_form_loose"));
+                formSet.AddOrder(new ArrangementVisualOrder(ArrangementOrder.ArrangementOrderEnum.Circle, "order_form_circular"));
+                formSet.AddOrder(new ArrangementVisualOrder(ArrangementOrder.ArrangementOrderEnum.Square, "order_form_schiltron"));
+                formSet.AddOrder(new ArrangementVisualOrder(ArrangementOrder.ArrangementOrderEnum.Skein, "order_form_v"));
+                formSet.AddOrder(new ArrangementVisualOrder(ArrangementOrder.ArrangementOrderEnum.Column, "order_form_column"));
+                formSet.AddOrder(new ArrangementVisualOrder(ArrangementOrder.ArrangementOrderEnum.Scatter, "order_form_scatter"));
+                formSet.AddOrder(new ReturnVisualOrder());
+
+                var toggleSet = new GenericVisualOrderSet(
+                    "order_type_toggle",
+                    new TextObject("{=0HTNYQz2}Toggle"),
+                    useActiveOrderForIconId: false,
+                    useActiveOrderForName: false);
+                var facingOrder = new ToggleFacingVisualOrder("order_toggle_facing");
+                var fireOrder = new GenericToggleVisualOrder("order_toggle_fire", (OrderType)32, (OrderType)31);
+                var mountedOrder = new GenericToggleVisualOrder("order_toggle_mount", (OrderType)34, (OrderType)35);
+                var delegateOrder = new GenericToggleVisualOrder("order_toggle_ai", (OrderType)36, (OrderType)37);
+                var transferOrder = new TransferTroopsVisualOrder();
+                toggleSet.AddOrder(facingOrder);
+                toggleSet.AddOrder(fireOrder);
+                toggleSet.AddOrder(mountedOrder);
+                toggleSet.AddOrder(delegateOrder);
+                toggleSet.AddOrder(transferOrder);
+                toggleSet.AddOrder(new ReturnVisualOrder());
+
+                orders.Add(movementSet);
+                orders.Add(formSet);
+                orders.Add(toggleSet);
+                if (includeShortcutOrders)
+                {
+                    orders.Add(new SingleVisualOrderSet(fireOrder));
+                    orders.Add(new SingleVisualOrderSet(mountedOrder));
+                    orders.Add(new SingleVisualOrderSet(delegateOrder));
+                    orders.Add(new SingleVisualOrderSet(facingOrder));
+                    orders.Add(new SingleVisualOrderSet(shieldWallOrder));
+                    orders.Add(new SingleVisualOrderSet(lineOrder));
+                }
+
+                return orders;
             }
         }
 
