@@ -1073,16 +1073,21 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (assignmentBytes[1] != CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion)
+            byte payloadVersion = assignmentBytes[1];
+            if (payloadVersion != CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion1 &&
+                payloadVersion != CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion)
             {
-                error = "unsupported-version:" + assignmentBytes[1];
+                error = "unsupported-version:" + payloadVersion;
                 return false;
             }
 
             int recordCount = assignmentBytes[2];
+            int bytesPerRecord = payloadVersion == CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion1
+                ? CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerCompositionAssignmentVersion1
+                : CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerCompositionAssignment;
             int expectedLength =
                 CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentHeaderBytes +
-                recordCount * CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerCompositionAssignment;
+                recordCount * bytesPerRecord;
             if (recordCount <= 0 || assignmentBytes.Length != expectedLength)
             {
                 error = "invalid-length:" + assignmentBytes.Length + "/" + expectedLength;
@@ -1095,6 +1100,14 @@ namespace CoopSpectator.MissionBehaviors
                 int formationIndex = assignmentBytes[offset++];
                 int infantryCount = ReadUInt16FromPayload(assignmentBytes, ref offset);
                 int rangedCount = ReadUInt16FromPayload(assignmentBytes, ref offset);
+                TroopTraitsMask infantryFilter = TroopTraitsMask.Melee;
+                TroopTraitsMask rangedFilter = TroopTraitsMask.Ranged;
+                if (payloadVersion >= CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion)
+                {
+                    infantryFilter = (TroopTraitsMask)ReadUInt16FromPayload(assignmentBytes, ref offset);
+                    rangedFilter = (TroopTraitsMask)ReadUInt16FromPayload(assignmentBytes, ref offset);
+                }
+
                 if (formationIndex < 0 ||
                     formationIndex >= (int)FormationClass.NumberOfRegularFormations)
                 {
@@ -1104,7 +1117,9 @@ namespace CoopSpectator.MissionBehaviors
                 records.Add(new CommanderDeploymentFormationComposition(
                     formationIndex,
                     infantryCount,
-                    rangedCount));
+                    rangedCount,
+                    SanitizeCommanderDeploymentCompositionFilter(infantryFilter, FormationClass.Infantry),
+                    SanitizeCommanderDeploymentCompositionFilter(rangedFilter, FormationClass.Ranged)));
             }
 
             if (records.Count <= 0)
@@ -1137,6 +1152,8 @@ namespace CoopSpectator.MissionBehaviors
 
             var infantryDesiredCounts = new Dictionary<Formation, int>();
             var rangedDesiredCounts = new Dictionary<Formation, int>();
+            var infantryFilters = new Dictionary<Formation, TroopTraitsMask>();
+            var rangedFilters = new Dictionary<Formation, TroopTraitsMask>();
             var compositionFormations = new HashSet<Formation>();
             int decodedRecords = 0;
             int rejectedRecords = 0;
@@ -1153,6 +1170,12 @@ namespace CoopSpectator.MissionBehaviors
                 compositionFormations.Add(formation);
                 infantryDesiredCounts[formation] = Math.Max(0, record.InfantryCount);
                 rangedDesiredCounts[formation] = Math.Max(0, record.RangedCount);
+                infantryFilters[formation] = SanitizeCommanderDeploymentCompositionFilter(
+                    record.InfantryFilter,
+                    FormationClass.Infantry);
+                rangedFilters[formation] = SanitizeCommanderDeploymentCompositionFilter(
+                    record.RangedFilter,
+                    FormationClass.Ranged);
                 decodedRecords++;
             }
 
@@ -1179,10 +1202,12 @@ namespace CoopSpectator.MissionBehaviors
             var targetByAgent = new Dictionary<Agent, Formation>();
             int assignedInfantry = BuildCommanderDeploymentCompositionTargets(
                 infantryDesiredCounts,
+                infantryFilters,
                 infantryAgents,
                 targetByAgent);
             int assignedRanged = BuildCommanderDeploymentCompositionTargets(
                 rangedDesiredCounts,
+                rangedFilters,
                 rangedAgents,
                 targetByAgent);
 
@@ -1281,6 +1306,7 @@ namespace CoopSpectator.MissionBehaviors
 
         private static int BuildCommanderDeploymentCompositionTargets(
             Dictionary<Formation, int> desiredCounts,
+            Dictionary<Formation, TroopTraitsMask> filters,
             List<Agent> assignableAgents,
             Dictionary<Agent, Formation> targetByAgent)
         {
@@ -1295,7 +1321,7 @@ namespace CoopSpectator.MissionBehaviors
 
             var assignedAgents = new HashSet<Agent>();
             var assignedCounts = new Dictionary<Formation, int>();
-            List<Formation> orderedFormations = GetCommanderDeploymentDesiredFormationsByIndex(desiredCounts);
+            List<Formation> orderedFormations = GetCommanderDeploymentDesiredFormationsByPriority(desiredCounts, filters);
 
             foreach (Formation targetFormation in orderedFormations)
             {
@@ -1303,12 +1329,18 @@ namespace CoopSpectator.MissionBehaviors
                 if (desiredCount <= 0)
                     continue;
 
-                foreach (Agent agent in assignableAgents)
+                TroopTraitsMask filter = GetCommanderDeploymentCompositionFilter(filters, targetFormation);
+                List<Agent> orderedAgents = GetCommanderDeploymentAgentsByPriority(
+                    assignableAgents,
+                    assignedAgents,
+                    targetByAgent,
+                    targetFormation,
+                    filter);
+                foreach (Agent agent in orderedAgents)
                 {
                     if (agent == null ||
                         assignedAgents.Contains(agent) ||
-                        targetByAgent.ContainsKey(agent) ||
-                        !ReferenceEquals(agent.Formation, targetFormation))
+                        targetByAgent.ContainsKey(agent))
                     {
                         continue;
                     }
@@ -1349,6 +1381,82 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return assignedAgents.Count;
+        }
+
+        private static TroopTraitsMask SanitizeCommanderDeploymentCompositionFilter(
+            TroopTraitsMask filter,
+            FormationClass projectedClass)
+        {
+            const TroopTraitsMask formationClassTraits =
+                TroopTraitsMask.Melee |
+                TroopTraitsMask.Ranged |
+                TroopTraitsMask.Mount;
+
+            TroopTraitsMask safeFilter = filter & TroopTraitsMask.All;
+            safeFilter &= ~formationClassTraits;
+            safeFilter |= projectedClass == FormationClass.Ranged
+                ? TroopTraitsMask.Ranged
+                : TroopTraitsMask.Melee;
+            return safeFilter;
+        }
+
+        private static TroopTraitsMask GetCommanderDeploymentCompositionFilter(
+            Dictionary<Formation, TroopTraitsMask> filters,
+            Formation formation)
+        {
+            if (filters != null &&
+                formation != null &&
+                filters.TryGetValue(formation, out TroopTraitsMask filter))
+            {
+                return filter & TroopTraitsMask.All;
+            }
+
+            return TroopTraitsMask.Melee | TroopTraitsMask.Ranged;
+        }
+
+        private static List<Agent> GetCommanderDeploymentAgentsByPriority(
+            List<Agent> assignableAgents,
+            HashSet<Agent> assignedAgents,
+            Dictionary<Agent, Formation> targetByAgent,
+            Formation targetFormation,
+            TroopTraitsMask filter)
+        {
+            var agents = new List<Agent>();
+            if (assignableAgents == null)
+                return agents;
+
+            foreach (Agent agent in assignableAgents)
+            {
+                if (agent != null &&
+                    (assignedAgents == null || !assignedAgents.Contains(agent)) &&
+                    (targetByAgent == null || !targetByAgent.ContainsKey(agent)))
+                {
+                    agents.Add(agent);
+                }
+            }
+
+            TroopFilteringUtilities.GetPriorityFunction(filter, out Func<Agent, int> priorityFunc);
+            agents.Sort((left, right) =>
+            {
+                int priorityCompare = priorityFunc(right).CompareTo(priorityFunc(left));
+                if (priorityCompare != 0)
+                    return priorityCompare;
+
+                bool leftAlreadyInTarget = ReferenceEquals(left?.Formation, targetFormation);
+                bool rightAlreadyInTarget = ReferenceEquals(right?.Formation, targetFormation);
+                if (leftAlreadyInTarget != rightAlreadyInTarget)
+                    return leftAlreadyInTarget ? -1 : 1;
+
+                int leftFormationIndex = left?.Formation?.Index ?? int.MaxValue;
+                int rightFormationIndex = right?.Formation?.Index ?? int.MaxValue;
+                int formationCompare = leftFormationIndex.CompareTo(rightFormationIndex);
+                if (formationCompare != 0)
+                    return formationCompare;
+
+                return (left?.Index ?? int.MaxValue).CompareTo(right?.Index ?? int.MaxValue);
+            });
+
+            return agents;
         }
 
         private static List<Agent> CollectCommanderDeploymentCompositionAgents(
@@ -1525,6 +1633,36 @@ namespace CoopSpectator.MissionBehaviors
             return formations;
         }
 
+        private static List<Formation> GetCommanderDeploymentDesiredFormationsByPriority(
+            Dictionary<Formation, int> desiredCounts,
+            Dictionary<Formation, TroopTraitsMask> filters)
+        {
+            List<Formation> formations = GetCommanderDeploymentDesiredFormationsByIndex(desiredCounts);
+            formations.Sort((left, right) =>
+            {
+                int leftPriority = TroopFilteringUtilities.GetMaxPriority(
+                    GetCommanderDeploymentCompositionFilter(filters, left));
+                int rightPriority = TroopFilteringUtilities.GetMaxPriority(
+                    GetCommanderDeploymentCompositionFilter(filters, right));
+                int priorityCompare = rightPriority.CompareTo(leftPriority);
+                if (priorityCompare != 0)
+                    return priorityCompare;
+
+                int leftCount = desiredCounts != null && left != null && desiredCounts.TryGetValue(left, out int lc)
+                    ? lc
+                    : 0;
+                int rightCount = desiredCounts != null && right != null && desiredCounts.TryGetValue(right, out int rc)
+                    ? rc
+                    : 0;
+                int countCompare = leftCount.CompareTo(rightCount);
+                if (countCompare != 0)
+                    return countCompare;
+
+                return (left?.Index ?? int.MaxValue).CompareTo(right?.Index ?? int.MaxValue);
+            });
+            return formations;
+        }
+
         private static int GetCommanderDeploymentAssignedCount(
             Dictionary<Formation, int> assignedCounts,
             Formation formation)
@@ -1667,16 +1805,22 @@ namespace CoopSpectator.MissionBehaviors
             public CommanderDeploymentFormationComposition(
                 int formationIndex,
                 int infantryCount,
-                int rangedCount)
+                int rangedCount,
+                TroopTraitsMask infantryFilter,
+                TroopTraitsMask rangedFilter)
             {
                 FormationIndex = formationIndex;
                 InfantryCount = Math.Max(0, infantryCount);
                 RangedCount = Math.Max(0, rangedCount);
+                InfantryFilter = infantryFilter & TroopTraitsMask.All;
+                RangedFilter = rangedFilter & TroopTraitsMask.All;
             }
 
             public int FormationIndex { get; }
             public int InfantryCount { get; }
             public int RangedCount { get; }
+            public TroopTraitsMask InfantryFilter { get; }
+            public TroopTraitsMask RangedFilter { get; }
         }
 
         private static bool IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled()

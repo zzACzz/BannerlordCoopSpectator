@@ -25,6 +25,7 @@ namespace CoopSpectator.Patches
 
         private static string _lastSentCommanderDeploymentFormationAssignmentsKey = string.Empty;
         private static bool _isApplyingProjectedWeightDistribution;
+        private static bool _isFinalizingProjectedFilterDistribution;
 
         public static void Apply(Harmony harmony)
         {
@@ -35,6 +36,7 @@ namespace CoopSpectator.Patches
             PatchVisibleTroopTypeLookup(harmony);
             PatchRearrangeFormationsAccordingToFilters(harmony);
             PatchOrderOfBattleWeightAdjusted(harmony);
+            PatchOrderOfBattleFilterUseToggled(harmony);
             PatchOrderOfBattleFormationClassChanged(harmony);
         }
 
@@ -230,6 +232,26 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, postfix: new HarmonyMethod(postfix));
             ModLogger.Info("OrderOfBattleSiegeProjectedCountsPatch: postfix applied to OrderOfBattleVM.OnWeightAdjusted.");
+        }
+
+        private static void PatchOrderOfBattleFilterUseToggled(Harmony harmony)
+        {
+            MethodInfo target = AccessTools.Method(
+                typeof(OrderOfBattleVM),
+                "OnFilterUseToggled",
+                new[] { typeof(OrderOfBattleFormationItemVM) });
+            MethodInfo postfix = typeof(OrderOfBattleSiegeProjectedCountsPatch).GetMethod(
+                nameof(OrderOfBattleVM_OnFilterUseToggled_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("OrderOfBattleSiegeProjectedCountsPatch: OrderOfBattleVM.OnFilterUseToggled not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("OrderOfBattleSiegeProjectedCountsPatch: postfix applied to OrderOfBattleVM.OnFilterUseToggled.");
         }
 
         private static void PatchOrderOfBattleFormationClassChanged(Harmony harmony)
@@ -625,6 +647,38 @@ namespace CoopSpectator.Patches
                 {
                     ModLogger.Info(
                         "OrderOfBattleSiegeProjectedCountsPatch: projected weight distribution failed open: " +
+                        ex.GetType().Name + ":" + ex.Message);
+                }
+            }
+        }
+
+        private static void OrderOfBattleVM_OnFilterUseToggled_Postfix(
+            OrderOfBattleVM __instance,
+            OrderOfBattleFormationItemVM formationItem)
+        {
+            try
+            {
+                if (!ShouldProjectSiegeOrderOfBattleCounts() ||
+                    !GameNetwork.IsClient ||
+                    !GameNetwork.IsSessionActive)
+                {
+                    return;
+                }
+
+                Team team = formationItem?.Formation?.Team;
+                if (team == null || team.Side == BattleSideEnum.None)
+                    return;
+
+                TrySyncCommanderDeploymentFormationAssignmentsForTeam(
+                    team,
+                    "OrderOfBattleSiegeProjectedCountsPatch.OnFilterUseToggled");
+            }
+            catch (Exception ex)
+            {
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "OrderOfBattleSiegeProjectedCountsPatch: filter toggle sync failed open: " +
                         ex.GetType().Name + ":" + ex.Message);
                 }
             }
@@ -1850,6 +1904,8 @@ namespace CoopSpectator.Patches
                 if (targetTeam == null || targetTeam.Side == BattleSideEnum.None)
                     return;
 
+                TryFinalizeProjectedFilterDistributionForTeam(targetTeam);
+
                 TrySyncCommanderDeploymentFormationAssignmentsForTeam(
                     targetTeam,
                     "OrderOfBattleSiegeProjectedCountsPatch.RearrangeFormationsAccordingToFilters");
@@ -1862,6 +1918,57 @@ namespace CoopSpectator.Patches
                         "OrderOfBattleSiegeProjectedCountsPatch: commander deployment formation assignment sync failed open: " +
                         ex.GetType().Name + ":" + ex.Message);
                 }
+            }
+        }
+
+        private static void TryFinalizeProjectedFilterDistributionForTeam(Team team)
+        {
+            if (_isFinalizingProjectedFilterDistribution || team == null)
+                return;
+
+            Mission mission = Mission.Current;
+            if (mission == null)
+                return;
+
+            List<OrderOfBattleFormationItemVM> formationItems = GetActiveOrderOfBattleFormationItems();
+            if (formationItems == null || formationItems.Count <= 0)
+                return;
+
+            var formationsToRefresh = new HashSet<Formation>();
+            foreach (OrderOfBattleFormationItemVM formationItem in formationItems)
+            {
+                Formation formation = formationItem?.Formation;
+                if (formation != null && ReferenceEquals(formation.Team, team))
+                    formationsToRefresh.Add(formation);
+            }
+
+            if (formationsToRefresh.Count <= 0)
+                return;
+
+            bool previousTeleportingAgents = mission.IsTeleportingAgents;
+            _isFinalizingProjectedFilterDistribution = true;
+            try
+            {
+                mission.IsTeleportingAgents = true;
+                foreach (Formation formation in formationsToRefresh)
+                    FinalizeProjectedWeightDistributionFormation(mission, team, formation);
+
+                foreach (OrderOfBattleFormationItemVM formationItem in formationItems)
+                {
+                    if (formationItem?.Formation == null ||
+                        !formationsToRefresh.Contains(formationItem.Formation))
+                    {
+                        continue;
+                    }
+
+                    formationItem.OnSizeChanged();
+                    formationItem.MakeMarkerWorldPositionDirty();
+                }
+            }
+            finally
+            {
+                mission.IsTeleportingAgents = previousTeleportingAgents;
+                _isFinalizingProjectedFilterDistribution = false;
             }
         }
 
@@ -1882,7 +1989,8 @@ namespace CoopSpectator.Patches
             if (mission?.AllAgents == null)
                 return false;
 
-            var assignments = new List<ValueTuple<int, int, int>>();
+            List<OrderOfBattleFormationItemVM> formationItems = GetActiveOrderOfBattleFormationItems();
+            var assignments = new List<ValueTuple<int, int, int, TroopTraitsMask, TroopTraitsMask>>();
             int totalProjectedUnits = 0;
             foreach (Formation formation in team.FormationsIncludingEmpty)
             {
@@ -1901,7 +2009,15 @@ namespace CoopSpectator.Patches
                 if (rangedCount > ushort.MaxValue)
                     rangedCount = ushort.MaxValue;
 
-                assignments.Add(new ValueTuple<int, int, int>(formation.Index, infantryCount, rangedCount));
+                OrderOfBattleFormationItemVM formationItem = FindOrderOfBattleFormationItem(formationItems, formation);
+                TroopTraitsMask infantryFilter = BuildProjectedTroopFilter(formationItem, FormationClass.Infantry);
+                TroopTraitsMask rangedFilter = BuildProjectedTroopFilter(formationItem, FormationClass.Ranged);
+                assignments.Add(new ValueTuple<int, int, int, TroopTraitsMask, TroopTraitsMask>(
+                    formation.Index,
+                    infantryCount,
+                    rangedCount,
+                    infantryFilter,
+                    rangedFilter));
                 totalProjectedUnits += infantryCount + rangedCount;
             }
 
@@ -1937,14 +2053,18 @@ namespace CoopSpectator.Patches
             assignmentBytes[offset++] = CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadMarker;
             assignmentBytes[offset++] = CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion;
             assignmentBytes[offset++] = (byte)(assignments.Count & 0xFF);
-            foreach (ValueTuple<int, int, int> assignment in assignments)
+            foreach (ValueTuple<int, int, int, TroopTraitsMask, TroopTraitsMask> assignment in assignments)
             {
                 int formationIndex = assignment.Item1;
                 int infantryCount = assignment.Item2;
                 int rangedCount = assignment.Item3;
+                TroopTraitsMask infantryFilter = assignment.Item4;
+                TroopTraitsMask rangedFilter = assignment.Item5;
                 assignmentBytes[offset++] = (byte)(formationIndex & 0xFF);
                 WriteUInt16ToPayload(assignmentBytes, ref offset, infantryCount);
                 WriteUInt16ToPayload(assignmentBytes, ref offset, rangedCount);
+                WriteUInt16ToPayload(assignmentBytes, ref offset, (int)infantryFilter);
+                WriteUInt16ToPayload(assignmentBytes, ref offset, (int)rangedFilter);
             }
 
             assignmentKey =
@@ -1956,6 +2076,22 @@ namespace CoopSpectator.Patches
                 "|L=" +
                 Convert.ToBase64String(formationLayoutBytes);
             return true;
+        }
+
+        private static OrderOfBattleFormationItemVM FindOrderOfBattleFormationItem(
+            List<OrderOfBattleFormationItemVM> formationItems,
+            Formation formation)
+        {
+            if (formationItems == null || formation == null)
+                return null;
+
+            foreach (OrderOfBattleFormationItemVM formationItem in formationItems)
+            {
+                if (ReferenceEquals(formationItem?.Formation, formation))
+                    return formationItem;
+            }
+
+            return null;
         }
 
         private static void WriteUInt16ToPayload(byte[] payload, ref int offset, int value)

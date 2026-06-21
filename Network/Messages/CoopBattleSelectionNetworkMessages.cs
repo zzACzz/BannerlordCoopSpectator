@@ -109,9 +109,11 @@ namespace CoopSpectator.Network.Messages
     {
         public const int BytesPerAssignment = 3;
         public const byte CompositionAssignmentPayloadMarker = 0xFE;
-        public const byte CompositionAssignmentPayloadVersion = 1;
+        public const byte CompositionAssignmentPayloadVersion1 = 1;
+        public const byte CompositionAssignmentPayloadVersion = 2;
         public const int CompositionAssignmentHeaderBytes = 3;
-        public const int BytesPerCompositionAssignment = 5;
+        public const int BytesPerCompositionAssignmentVersion1 = 5;
+        public const int BytesPerCompositionAssignment = 9;
         public const int BytesPerFormationLayout = 17;
         public const int MaxAssignmentBytes = 4095;
         public const int MaxFormationLayoutBytes = 512;
