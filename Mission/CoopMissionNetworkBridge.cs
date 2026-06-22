@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using CoopSpectator.GameMode;
@@ -15,6 +16,11 @@ using TaleWorlds.Engine;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Network.Messages;
+#if !COOPSPECTATOR_DEDICATED
+using TaleWorlds.MountAndBlade.View;
+using TaleWorlds.MountAndBlade.View.MissionViews;
+using TaleWorlds.MountAndBlade.View.Tableaus.Thumbnails;
+#endif
 
 namespace CoopSpectator.MissionBehaviors
 {
@@ -260,6 +266,1179 @@ namespace CoopSpectator.MissionBehaviors
                     " Error=" + ex.Message);
                 return false;
             }
+        }
+    }
+
+#if !COOPSPECTATOR_DEDICATED
+    internal sealed class CoopSiegeDeploymentBoundaryMarkerView : MissionView
+    {
+        private static readonly BodyFlags BoundaryHeightBodyFlags = (BodyFlags)540127625;
+        private const string BoundaryWallEntityName = "coop_siege_deployment_boundary_wall";
+        private const string BoundaryFallbackMarkerMeshName = "order_flag_small";
+
+        private readonly string _prefabName;
+        private readonly float _markerInterval;
+        private readonly Dictionary<BattleSideEnum, Dictionary<string, List<GameEntity>>> _boundaryMarkersBySide =
+            new Dictionary<BattleSideEnum, Dictionary<string, List<GameEntity>>>();
+        private readonly HashSet<string> _loggedDiagnosticsKeys = new HashSet<string>(StringComparer.Ordinal);
+        private GameEntity _cachedEntity;
+        private bool _initialized;
+        private bool _boundaryMarkersRemoved = true;
+        private string _lastDiagnosticsKey = string.Empty;
+
+        public CoopSiegeDeploymentBoundaryMarkerView(string prefabName, float markerInterval)
+        {
+            _prefabName = string.IsNullOrWhiteSpace(prefabName) ? "swallowtail_banner" : prefabName;
+            _markerInterval = Math.Max(markerInterval, 0.0001f);
+        }
+
+        public override void AfterStart()
+        {
+            if (_initialized)
+                return;
+
+            base.AfterStart();
+            EnsureSideMarkerMap(BattleSideEnum.Defender);
+            EnsureSideMarkerMap(BattleSideEnum.Attacker);
+            _boundaryMarkersRemoved = false;
+            _initialized = true;
+        }
+
+        protected override void OnEndMission()
+        {
+            base.OnEndMission();
+            TryRemoveBoundaryMarkers();
+        }
+
+        public override void OnRemoveBehavior()
+        {
+            TryRemoveBoundaryMarkers();
+            base.OnRemoveBehavior();
+        }
+
+        public bool TryEnsureBoundaryMarkersForTeam(DefaultMissionDeploymentPlan deploymentPlan, Team team, string source)
+        {
+            if (deploymentPlan == null || team == null || team.Side == BattleSideEnum.None)
+                return false;
+
+            AfterStart();
+
+            Dictionary<string, List<GameEntity>> sideMarkers = EnsureSideMarkerMap(team.Side);
+            if (sideMarkers == null)
+                return false;
+
+            bool ensuredAny = false;
+            int createdMarkerCount = 0;
+            int createdWallCount = 0;
+            int createdFallbackMarkerCount = 0;
+            int boundaryCount = 0;
+            int boundaryPointCount = 0;
+
+            try
+            {
+                Banner banner = ResolveBannerForSide(team.Side);
+                foreach (var boundary in deploymentPlan.GetDeploymentBoundaries(team))
+                {
+                    string key = string.IsNullOrWhiteSpace(boundary.Item1)
+                        ? "boundary_" + boundaryCount.ToString()
+                        : boundary.Item1;
+                    boundaryCount++;
+
+                    List<Vec2> points = boundary.Item2?.ToList();
+                    ensuredAny |= TryEnsureBoundaryMarkersForPoints(
+                        sideMarkers,
+                        team.Side,
+                        key,
+                        points,
+                        banner,
+                        ref createdMarkerCount,
+                        ref createdWallCount,
+                        ref createdFallbackMarkerCount,
+                        ref boundaryPointCount);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryMarkerView: ensure failed. " +
+                        "Side=" + team.Side +
+                        " Source=" + (source ?? "unknown") +
+                        " Error=" + ex.Message);
+                }
+
+                return ensuredAny;
+            }
+
+            if (CoopDebugConfig.OrderOfBattleDiagnostics)
+            {
+                string diagnosticsKey =
+                    team.Side + "|" + boundaryCount + "|" + boundaryPointCount + "|" + createdMarkerCount + "|" +
+                    createdWallCount + "|" + createdFallbackMarkerCount;
+                if (!string.Equals(_lastDiagnosticsKey, diagnosticsKey, StringComparison.Ordinal))
+                {
+                    _lastDiagnosticsKey = diagnosticsKey;
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryMarkerView: ensured visible deployment boundaries. " +
+                        "Side=" + team.Side +
+                        " BoundaryCount=" + boundaryCount +
+                        " BoundaryPointCount=" + boundaryPointCount +
+                        " CreatedMarkerCount=" + createdMarkerCount +
+                        " CreatedWallCount=" + createdWallCount +
+                        " CreatedFallbackMarkerCount=" + createdFallbackMarkerCount +
+                        " Source=" + (source ?? "unknown"));
+                }
+            }
+
+            return ensuredAny;
+        }
+
+        public bool TryEnsureSceneDeploymentBoundaryMarkersForTeam(Team team, string source)
+        {
+            if (team == null || team.Side == BattleSideEnum.None)
+                return false;
+
+            AfterStart();
+
+            Dictionary<string, List<GameEntity>> sideMarkers = EnsureSideMarkerMap(team.Side);
+            if (sideMarkers == null)
+                return false;
+
+            bool ensuredAny = false;
+            int createdMarkerCount = 0;
+            int createdWallCount = 0;
+            int createdFallbackMarkerCount = 0;
+            int boundaryCount = 0;
+            int boundaryPointCount = 0;
+
+            try
+            {
+                Banner banner = ResolveBannerForSide(team.Side);
+                foreach (var sceneBoundary in MBSceneUtilities.GetDeploymentBoundaries(team.Side))
+                {
+                    string key = string.IsNullOrWhiteSpace(sceneBoundary.Item1)
+                        ? "scene_boundary_" + boundaryCount.ToString()
+                        : "scene_" + sceneBoundary.Item1;
+                    boundaryCount++;
+
+                    List<Vec2> points = CreateSceneDeploymentBoundaryPoints(sceneBoundary.Item2);
+                    ensuredAny |= TryEnsureBoundaryMarkersForPoints(
+                        sideMarkers,
+                        team.Side,
+                        key,
+                        points,
+                        banner,
+                        ref createdMarkerCount,
+                        ref createdWallCount,
+                        ref createdFallbackMarkerCount,
+                        ref boundaryPointCount);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryMarkerView: scene boundary ensure failed. " +
+                        "Side=" + team.Side +
+                        " Source=" + (source ?? "unknown") +
+                        " Error=" + ex.Message);
+                }
+
+                return ensuredAny;
+            }
+
+            if (CoopDebugConfig.OrderOfBattleDiagnostics)
+            {
+                string diagnosticsKey =
+                    "scene|" + team.Side + "|" + boundaryCount + "|" + boundaryPointCount + "|" +
+                    createdMarkerCount + "|" + createdWallCount + "|" + createdFallbackMarkerCount;
+                if (!string.Equals(_lastDiagnosticsKey, diagnosticsKey, StringComparison.Ordinal))
+                {
+                    _lastDiagnosticsKey = diagnosticsKey;
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryMarkerView: ensured visible scene deployment boundaries. " +
+                        "Side=" + team.Side +
+                        " BoundaryCount=" + boundaryCount +
+                        " BoundaryPointCount=" + boundaryPointCount +
+                        " CreatedMarkerCount=" + createdMarkerCount +
+                        " CreatedWallCount=" + createdWallCount +
+                        " CreatedFallbackMarkerCount=" + createdFallbackMarkerCount +
+                        " Source=" + (source ?? "unknown"));
+                }
+            }
+
+            return ensuredAny;
+        }
+
+        private bool TryEnsureBoundaryMarkersForPoints(
+            Dictionary<string, List<GameEntity>> sideMarkers,
+            BattleSideEnum side,
+            string key,
+            ICollection<Vec2> points,
+            Banner banner,
+            ref int createdMarkerCount,
+            ref int createdWallCount,
+            ref int createdFallbackMarkerCount,
+            ref int boundaryPointCount)
+        {
+            if (sideMarkers == null || string.IsNullOrWhiteSpace(key))
+                return false;
+
+            if (sideMarkers.ContainsKey(key))
+                return true;
+
+            List<Vec2> pointList = points?.ToList();
+            if (pointList == null || pointList.Count < 2)
+                return false;
+
+            boundaryPointCount += pointList.Count;
+            List<GameEntity> markers = new List<GameEntity>();
+            if (TryCreateBoundaryWallEntity(pointList, side, markers, key))
+                createdWallCount++;
+
+            for (int i = 0; i < pointList.Count; i++)
+            {
+                createdFallbackMarkerCount += MarkLine(
+                    pointList[i],
+                    pointList[(i + 1) % pointList.Count],
+                    markers,
+                    banner);
+            }
+
+            sideMarkers[key] = markers;
+            createdMarkerCount += markers.Count;
+            if (markers.Count > 0)
+            {
+                _boundaryMarkersRemoved = false;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static List<Vec2> CreateSceneDeploymentBoundaryPoints(ICollection<Vec2> sourcePoints)
+        {
+            if (sourcePoints == null || sourcePoints.Count < 2)
+                return null;
+
+            try
+            {
+                MBList<Vec2> boundary = new MBList<Vec2>(sourcePoints);
+                MBSceneUtilities.RadialSortBoundary(ref boundary);
+                MBSceneUtilities.FindConvexHull(ref boundary);
+                return boundary.ToList();
+            }
+            catch
+            {
+                return sourcePoints.ToList();
+            }
+        }
+
+        private Dictionary<string, List<GameEntity>> EnsureSideMarkerMap(BattleSideEnum side)
+        {
+            if (side == BattleSideEnum.None)
+                return null;
+
+            if (!_boundaryMarkersBySide.TryGetValue(side, out Dictionary<string, List<GameEntity>> markers))
+            {
+                markers = new Dictionary<string, List<GameEntity>>(StringComparer.Ordinal);
+                _boundaryMarkersBySide[side] = markers;
+            }
+
+            return markers;
+        }
+
+        private Banner ResolveBannerForSide(BattleSideEnum side)
+        {
+            try
+            {
+                if (side == BattleSideEnum.Attacker)
+                    return Mission?.AttackerTeam?.Banner;
+                if (side == BattleSideEnum.Defender)
+                    return Mission?.DefenderTeam?.Banner;
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private int MarkLine(Vec2 startPoint, Vec2 endPoint, List<GameEntity> boundary, Banner banner)
+        {
+            Scene scene = Mission?.Scene;
+            if (scene == null || boundary == null)
+                return 0;
+
+            Vec3 start = new Vec3(startPoint, 0f, -1f);
+            Vec3 end = new Vec3(endPoint, 0f, -1f);
+            Vec3 delta = end - start;
+            float length = delta.Length;
+            if (length <= 0.001f)
+                return 0;
+
+            Vec3 step = delta;
+            step.Normalize();
+            step *= _markerInterval;
+
+            int fallbackMarkerCount = 0;
+            for (float distance = 0f; distance < length; distance += _markerInterval)
+            {
+                MatrixFrame frame = MatrixFrame.Identity;
+                frame.rotation.RotateAboutUp(delta.RotationZ + (float)Math.PI / 2f);
+                frame.origin = start;
+                frame.origin.z = ResolveMarkerHeight(scene, frame.origin.AsVec2);
+
+                Vec3 scale = Vec3.One * 0.45f;
+                frame.Scale(in scale);
+
+                GameEntity marker = MakeEntity(scene, banner);
+                if (marker != null)
+                {
+                    marker.SetFrame(ref frame, true);
+                    marker.SetVisibilityExcludeParents(true);
+                    boundary.Add(marker);
+                }
+
+                GameEntity fallbackMarker = MakeFallbackBoundaryMarkerEntity(scene);
+                if (fallbackMarker != null)
+                {
+                    fallbackMarker.SetFrame(ref frame, true);
+                    fallbackMarker.SetVisibilityExcludeParents(true);
+                    boundary.Add(fallbackMarker);
+                    fallbackMarkerCount++;
+                }
+
+                start += step;
+            }
+
+            return fallbackMarkerCount;
+        }
+
+        private float ResolveMarkerHeight(Scene scene, Vec2 point)
+        {
+            float height = 0f;
+            bool hasHeight = false;
+            try
+            {
+                hasHeight = scene.GetHeightAtPoint(point, BoundaryHeightBodyFlags, ref height);
+            }
+            catch
+            {
+                hasHeight = false;
+            }
+
+            if (!hasHeight)
+            {
+                try
+                {
+                    height = scene.GetTerrainHeight(point);
+                    scene.GetHeightAtPoint(point, BodyFlags.None, ref height);
+                }
+                catch
+                {
+                    height = 0f;
+                }
+            }
+
+            return height + 0.2f;
+        }
+
+        private bool TryCreateBoundaryWallEntity(
+            ICollection<Vec2> points,
+            BattleSideEnum side,
+            List<GameEntity> boundary,
+            string boundaryKey)
+        {
+            Scene scene = Mission?.Scene;
+            if (scene == null || points == null || points.Count < 3 || boundary == null)
+                return false;
+
+            try
+            {
+                Mesh mesh = BoundaryWallView.CreateBoundaryMesh(scene, points, ResolveBoundaryWallColor(side));
+                if (mesh == null)
+                {
+                    LogDiagnosticsOnce(
+                        "boundary-wall-null|" + side + "|" + (boundaryKey ?? string.Empty),
+                        "CoopSiegeDeploymentBoundaryMarkerView: boundary wall mesh was null. " +
+                        "Side=" + side +
+                        " BoundaryKey=" + (boundaryKey ?? string.Empty) +
+                        " PointCount=" + points.Count);
+                    return false;
+                }
+
+                GameEntity wall = GameEntity.CreateEmpty(scene, true, true, true);
+                if (wall == null)
+                {
+                    LogDiagnosticsOnce(
+                        "boundary-wall-entity-null|" + side + "|" + (boundaryKey ?? string.Empty),
+                        "CoopSiegeDeploymentBoundaryMarkerView: boundary wall entity was null. " +
+                        "Side=" + side +
+                        " BoundaryKey=" + (boundaryKey ?? string.Empty));
+                    return false;
+                }
+
+                wall.AddMesh(mesh, true);
+                MatrixFrame identity = MatrixFrame.Identity;
+                wall.SetGlobalFrame(in identity, true);
+                wall.Name = BoundaryWallEntityName + "_" + side + "_" + (boundaryKey ?? "boundary");
+                wall.SetMobility((GameEntity.Mobility)0);
+                wall.EntityFlags = (EntityFlags)(wall.EntityFlags | (EntityFlags)1073741824);
+                wall.SetVisibilityExcludeParents(true);
+                boundary.Add(wall);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogDiagnosticsOnce(
+                    "boundary-wall-exception|" + side + "|" + (boundaryKey ?? string.Empty),
+                    "CoopSiegeDeploymentBoundaryMarkerView: boundary wall creation failed. " +
+                    "Side=" + side +
+                    " BoundaryKey=" + (boundaryKey ?? string.Empty) +
+                    " Error=" + ex.Message);
+                return false;
+            }
+        }
+
+        private static uint ResolveBoundaryWallColor(BattleSideEnum side)
+        {
+            if (side == BattleSideEnum.Attacker)
+                return new Color(0f, 0.8f, 0.8f).ToUnsignedInteger();
+
+            return new Color(0f, 0f, 0.8f).ToUnsignedInteger();
+        }
+
+        private GameEntity MakeEntity(Scene scene, Banner banner)
+        {
+            if (scene == null)
+                return null;
+
+            if (_cachedEntity == null)
+            {
+                try
+                {
+                    _cachedEntity = GameEntity.Instantiate(null, _prefabName, false, true, string.Empty);
+                }
+                catch (Exception ex)
+                {
+                    LogDiagnosticsOnce(
+                        "boundary-prefab-cache-exception",
+                        "CoopSiegeDeploymentBoundaryMarkerView: cached boundary prefab instantiate failed. " +
+                        "Prefab=" + _prefabName +
+                        " Error=" + ex.Message);
+                }
+            }
+
+            GameEntity entity = null;
+            if (_cachedEntity != null)
+            {
+                try
+                {
+                    entity = GameEntity.CopyFrom(scene, _cachedEntity, true, true);
+                }
+                catch (Exception ex)
+                {
+                    LogDiagnosticsOnce(
+                        "boundary-prefab-copy-exception",
+                        "CoopSiegeDeploymentBoundaryMarkerView: boundary prefab copy failed. " +
+                        "Prefab=" + _prefabName +
+                        " Error=" + ex.Message);
+                }
+            }
+
+            if (entity == null)
+            {
+                try
+                {
+                    entity = GameEntity.Instantiate(scene, _prefabName, false, true, string.Empty);
+                }
+                catch (Exception ex)
+                {
+                    LogDiagnosticsOnce(
+                        "boundary-prefab-direct-exception",
+                        "CoopSiegeDeploymentBoundaryMarkerView: direct boundary prefab instantiate failed. " +
+                        "Prefab=" + _prefabName +
+                        " Error=" + ex.Message);
+                }
+            }
+
+            if (entity == null)
+            {
+                LogDiagnosticsOnce(
+                    "boundary-prefab-null",
+                    "CoopSiegeDeploymentBoundaryMarkerView: boundary prefab entity was null. Prefab=" + _prefabName);
+                return null;
+            }
+
+            entity.SetMobility(GameEntity.Mobility.Dynamic);
+            ApplyBannerMaterial(entity, banner);
+            return entity;
+        }
+
+        private GameEntity MakeFallbackBoundaryMarkerEntity(Scene scene)
+        {
+            if (scene == null)
+                return null;
+
+            try
+            {
+                GameEntity entity = GameEntity.CreateEmpty(scene, true, true, true);
+                if (entity == null)
+                    return null;
+
+                entity.EntityFlags = (EntityFlags)(entity.EntityFlags | (EntityFlags)4194304);
+                MetaMesh markerMesh = MetaMesh.GetCopy(BoundaryFallbackMarkerMeshName, true, false);
+                if (markerMesh == null)
+                {
+                    LogDiagnosticsOnce(
+                        "boundary-fallback-mesh-null",
+                        "CoopSiegeDeploymentBoundaryMarkerView: fallback boundary marker mesh was null. " +
+                        "Mesh=" + BoundaryFallbackMarkerMeshName);
+                    entity.Remove(103);
+                    return null;
+                }
+
+                entity.AddComponent(markerMesh);
+                entity.SetMobility(GameEntity.Mobility.Dynamic);
+                entity.SetVisibilityExcludeParents(true);
+                return entity;
+            }
+            catch (Exception ex)
+            {
+                LogDiagnosticsOnce(
+                    "boundary-fallback-marker-exception",
+                    "CoopSiegeDeploymentBoundaryMarkerView: fallback boundary marker creation failed. " +
+                    "Mesh=" + BoundaryFallbackMarkerMeshName +
+                    " Error=" + ex.Message);
+                return null;
+            }
+        }
+
+        private void ApplyBannerMaterial(GameEntity entity, Banner banner)
+        {
+            if (entity == null || banner == null)
+                return;
+
+            try
+            {
+                Mesh firstMesh = entity.GetFirstMesh();
+                Material sourceMaterial = firstMesh?.GetMaterial();
+                if (sourceMaterial == null)
+                    return;
+
+                Material tableauMaterial = sourceMaterial.CreateCopy();
+                banner.GetTableauTextureSmall(
+                    BannerDebugInfo.CreateManual(GetType().Name),
+                    texture =>
+                    {
+                        if (texture != null)
+                            tableauMaterial.SetTexture(Material.MBTextureType.DiffuseMap, texture);
+                    });
+                firstMesh.SetMaterial(tableauMaterial);
+            }
+            catch
+            {
+            }
+        }
+
+        private void LogDiagnosticsOnce(string key, string message)
+        {
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics || string.IsNullOrWhiteSpace(key))
+                return;
+
+            try
+            {
+                if (_loggedDiagnosticsKeys.Add(key))
+                    ModLogger.Info(message ?? key);
+            }
+            catch
+            {
+            }
+        }
+
+        private void TryRemoveBoundaryMarkers()
+        {
+            if (_boundaryMarkersRemoved)
+                return;
+
+            foreach (Dictionary<string, List<GameEntity>> markersByBoundary in _boundaryMarkersBySide.Values)
+            {
+                foreach (List<GameEntity> markers in markersByBoundary.Values.ToList())
+                {
+                    foreach (GameEntity marker in markers)
+                    {
+                        try
+                        {
+                            marker?.Remove(103);
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+
+                markersByBoundary.Clear();
+            }
+
+            _boundaryMarkersRemoved = true;
+        }
+    }
+#endif
+
+    internal static class CoopSiegeDeploymentBoundaryRuntime
+    {
+        private const string BoundaryMarkerTypeFullName =
+            "TaleWorlds.MountAndBlade.View.MissionViews.Singleplayer.MissionDeploymentBoundaryMarker";
+        private const string BoundaryMarkerAssemblyQualifiedName =
+            BoundaryMarkerTypeFullName + ", TaleWorlds.MountAndBlade.View";
+        private const string BoundaryMarkerPrefabName = "swallowtail_banner";
+        private const float BoundaryMarkerInterval = 2f;
+
+        private static readonly FieldInfo DefaultMissionDeploymentPlanTeamDeploymentPlansField =
+            typeof(DefaultMissionDeploymentPlan).GetField("_teamDeploymentPlans", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        public static bool IsCoopSiegeDeploymentMission(Mission mission)
+        {
+            if (mission == null ||
+                mission.Scene == null ||
+                !MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.HasCoopSiegeRuntimeMarker(mission))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                return true;
+
+            try
+            {
+                return mission.IsSiegeBattle;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static bool TryEnsureDeploymentPlanBoundaries(Mission mission, Team team, string source)
+        {
+            if (!IsCoopSiegeDeploymentMission(mission) ||
+                team == null ||
+                team.Side == BattleSideEnum.None ||
+                !mission.GetDeploymentPlan<DefaultMissionDeploymentPlan>(out DefaultMissionDeploymentPlan deploymentPlan) ||
+                deploymentPlan == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!TryEnsureDeploymentPlanHasTeamPlan(deploymentPlan, team))
+                    return false;
+
+                if (!TryHasDeploymentBoundaries(deploymentPlan, team))
+                {
+                    try
+                    {
+                        deploymentPlan.MakeDeploymentPlan(team);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                return TryHasDeploymentBoundaries(deploymentPlan, team);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static bool TryClampCommanderDeploymentPosition(
+            Mission mission,
+            Team team,
+            ref WorldPosition position,
+            string source)
+        {
+            if (!TryEnsureDeploymentPlanBoundaries(mission, team, source) ||
+                !mission.GetDeploymentPlan<DefaultMissionDeploymentPlan>(out DefaultMissionDeploymentPlan deploymentPlan) ||
+                deploymentPlan == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                Vec2 originalPosition = position.GetGroundVec3().AsVec2;
+                if (!originalPosition.IsValid ||
+                    deploymentPlan.IsPositionInsideDeploymentBoundaries(team, in originalPosition))
+                {
+                    return false;
+                }
+
+                deploymentPlan.ProjectPositionToDeploymentBoundaries(team, ref position);
+                Vec2 projectedPosition = position.GetGroundVec3().AsVec2;
+                if (projectedPosition.IsValid &&
+                    deploymentPlan.IsPositionInsideDeploymentBoundaries(team, in projectedPosition))
+                {
+                    return true;
+                }
+
+                Vec2 closestPosition = deploymentPlan.GetClosestDeploymentBoundaryPosition(team, in originalPosition);
+                if (!closestPosition.IsValid)
+                    return false;
+
+                position = CreateWorldPositionOnMissionGround(mission, closestPosition);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static bool TryEnsureVisibleDeploymentBoundaryMarkers(
+            Mission mission,
+            object missionScreen,
+            Team team,
+            string source)
+        {
+            if (!GameNetwork.IsClient ||
+                GameNetwork.IsServer ||
+                !IsCoopSiegeDeploymentMission(mission) ||
+                team == null ||
+                team.Side == BattleSideEnum.None)
+            {
+                return false;
+            }
+
+            bool hasTeamDeploymentPlanBoundaries = TryEnsureDeploymentPlanBoundaries(mission, team, source);
+
+#if !COOPSPECTATOR_DEDICATED
+            CoopSiegeDeploymentBoundaryMarkerView coopMarker = ResolveExistingCoopBoundaryMarker(mission);
+            if (coopMarker == null)
+                coopMarker = TryCreateAndAttachCoopBoundaryMarker(mission, missionScreen);
+            if (coopMarker != null)
+            {
+                bool ensuredAny = false;
+                if (hasTeamDeploymentPlanBoundaries &&
+                    mission.GetDeploymentPlan<DefaultMissionDeploymentPlan>(out DefaultMissionDeploymentPlan coopDeploymentPlan) &&
+                    coopDeploymentPlan != null)
+                {
+                    ensuredAny = coopMarker.TryEnsureBoundaryMarkersForTeam(
+                        coopDeploymentPlan,
+                        team,
+                        source ?? "unknown");
+                }
+
+                if (!ensuredAny)
+                {
+                    ensuredAny = coopMarker.TryEnsureSceneDeploymentBoundaryMarkersForTeam(
+                        team,
+                        (source ?? "unknown") + " scene");
+                }
+
+                Team enemyTeamForCoopMarker = mission.PlayerEnemyTeam;
+                if (enemyTeamForCoopMarker != null && enemyTeamForCoopMarker != team)
+                {
+                    bool hasEnemyDeploymentPlanBoundaries = TryEnsureDeploymentPlanBoundaries(
+                        mission,
+                        enemyTeamForCoopMarker,
+                        (source ?? "unknown") + " enemy");
+                    bool ensuredEnemy = false;
+                    if (hasEnemyDeploymentPlanBoundaries &&
+                        mission.GetDeploymentPlan<DefaultMissionDeploymentPlan>(out DefaultMissionDeploymentPlan enemyDeploymentPlan) &&
+                        enemyDeploymentPlan != null)
+                    {
+                        ensuredEnemy = coopMarker.TryEnsureBoundaryMarkersForTeam(
+                            enemyDeploymentPlan,
+                            enemyTeamForCoopMarker,
+                            (source ?? "unknown") + " enemy");
+                    }
+
+                    if (!ensuredEnemy)
+                    {
+                        ensuredEnemy = coopMarker.TryEnsureSceneDeploymentBoundaryMarkersForTeam(
+                            enemyTeamForCoopMarker,
+                            (source ?? "unknown") + " enemy scene");
+                    }
+
+                    ensuredAny |= ensuredEnemy;
+                }
+
+                if (ensuredAny)
+                    return true;
+            }
+#endif
+
+            object marker = ResolveExistingBoundaryMarker(mission);
+            if (marker == null)
+                marker = TryCreateAndAttachBoundaryMarker(mission, missionScreen);
+            if (marker == null)
+                return false;
+
+            TryEnsureBoundaryMarkerInitialized(marker);
+            if (!TryAddDeploymentBoundaryMarkersDirectly(marker, mission, team))
+                TryInvokeInstanceMethod(marker, "OnDeploymentPlanMade", team, true);
+
+            Team enemyTeam = mission.PlayerEnemyTeam;
+            if (enemyTeam != null && enemyTeam != team)
+            {
+                TryEnsureDeploymentPlanBoundaries(mission, enemyTeam, source + " enemy");
+                if (!TryAddDeploymentBoundaryMarkersDirectly(marker, mission, enemyTeam))
+                    TryInvokeInstanceMethod(marker, "OnDeploymentPlanMade", enemyTeam, true);
+            }
+
+            return true;
+        }
+
+        public static void TryRemoveVisibleDeploymentBoundaryMarkers(
+            Mission mission,
+            object missionScreen,
+            string source)
+        {
+            try
+            {
+                List<MissionBehavior> behaviors = mission?.MissionBehaviors;
+                if (behaviors == null)
+                    return;
+
+                for (int i = behaviors.Count - 1; i >= 0; i--)
+                {
+                    MissionBehavior behavior = behaviors[i];
+                    if (!IsBoundaryMarker(behavior))
+                        continue;
+
+                    TryInvokeInstanceMethod(missionScreen, "UnregisterView", behavior);
+                    mission.RemoveMissionBehavior(behavior);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool TryEnsureDeploymentPlanHasTeamPlan(DefaultMissionDeploymentPlan deploymentPlan, Team team)
+        {
+            if (deploymentPlan == null || team == null)
+                return false;
+
+            if (TryHasDeploymentPlanTeamEntry(deploymentPlan, team))
+                return true;
+
+            try
+            {
+                deploymentPlan.Initialize();
+            }
+            catch
+            {
+                return false;
+            }
+
+            return TryHasDeploymentPlanTeamEntry(deploymentPlan, team);
+        }
+
+        private static bool TryHasDeploymentPlanTeamEntry(DefaultMissionDeploymentPlan deploymentPlan, Team team)
+        {
+            if (DefaultMissionDeploymentPlanTeamDeploymentPlansField == null)
+                return true;
+
+            try
+            {
+                if (!(DefaultMissionDeploymentPlanTeamDeploymentPlansField.GetValue(deploymentPlan) is System.Collections.IEnumerable entries))
+                    return false;
+
+                foreach (object entry in entries)
+                {
+                    if (entry == null)
+                        continue;
+
+                    FieldInfo item1Field = entry.GetType().GetField("Item1", BindingFlags.Instance | BindingFlags.Public);
+                    if (item1Field != null && ReferenceEquals(item1Field.GetValue(entry), team))
+                        return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private static bool TryHasDeploymentBoundaries(DefaultMissionDeploymentPlan deploymentPlan, Team team)
+        {
+            try
+            {
+                return deploymentPlan.HasDeploymentBoundaries(team);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static WorldPosition CreateWorldPositionOnMissionGround(Mission mission, Vec2 position)
+        {
+            float height = mission.Scene.GetTerrainHeight(position);
+            mission.Scene.GetHeightAtPoint(position, BodyFlags.None, ref height);
+            return new WorldPosition(
+                mission.Scene,
+                UIntPtr.Zero,
+                new Vec3(position, height),
+                hasValidZ: false);
+        }
+
+#if !COOPSPECTATOR_DEDICATED
+        private static CoopSiegeDeploymentBoundaryMarkerView TryCreateAndAttachCoopBoundaryMarker(
+            Mission mission,
+            object missionScreen)
+        {
+            try
+            {
+                if (mission == null)
+                    return null;
+
+                CoopSiegeDeploymentBoundaryMarkerView marker =
+                    new CoopSiegeDeploymentBoundaryMarkerView(BoundaryMarkerPrefabName, BoundaryMarkerInterval);
+
+                if (!TryInvokeInstanceMethod(missionScreen, "AddMissionView", marker))
+                    mission.AddMissionBehavior(marker);
+
+                marker.AfterStart();
+                return marker;
+            }
+            catch (Exception ex)
+            {
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                    ModLogger.Info("CoopSiegeDeploymentBoundaryRuntime: coop boundary marker attach failed. Error=" + ex.Message);
+                return null;
+            }
+        }
+
+        private static CoopSiegeDeploymentBoundaryMarkerView ResolveExistingCoopBoundaryMarker(Mission mission)
+        {
+            try
+            {
+                List<MissionBehavior> behaviors = mission?.MissionBehaviors;
+                if (behaviors == null)
+                    return null;
+
+                foreach (MissionBehavior behavior in behaviors)
+                {
+                    if (behavior is CoopSiegeDeploymentBoundaryMarkerView marker)
+                        return marker;
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+#endif
+
+        private static object TryCreateAndAttachBoundaryMarker(Mission mission, object missionScreen)
+        {
+            try
+            {
+                Type markerType = ResolveBoundaryMarkerType();
+                if (markerType == null)
+                    return null;
+
+                object marker = Activator.CreateInstance(markerType, BoundaryMarkerPrefabName, BoundaryMarkerInterval);
+                if (!(marker is MissionBehavior markerBehavior))
+                    return null;
+
+                if (!TryInvokeInstanceMethod(missionScreen, "AddMissionView", marker))
+                {
+                    mission.AddMissionBehavior(markerBehavior);
+                }
+
+                return marker;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Type ResolveBoundaryMarkerType()
+        {
+            Type type = Type.GetType(BoundaryMarkerAssemblyQualifiedName, throwOnError: false);
+            if (type != null)
+                return type;
+
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    type = assembly.GetType(BoundaryMarkerTypeFullName, throwOnError: false);
+                    if (type != null)
+                        return type;
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
+        }
+
+        private static object ResolveExistingBoundaryMarker(Mission mission)
+        {
+            try
+            {
+                List<MissionBehavior> behaviors = mission?.MissionBehaviors;
+                if (behaviors == null)
+                    return null;
+
+                foreach (MissionBehavior behavior in behaviors)
+                {
+                    if (IsNativeBoundaryMarker(behavior))
+                        return behavior;
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static bool IsBoundaryMarker(object value)
+        {
+#if !COOPSPECTATOR_DEDICATED
+            if (value is CoopSiegeDeploymentBoundaryMarkerView)
+                return true;
+#endif
+
+            return IsNativeBoundaryMarker(value);
+        }
+
+        private static bool IsNativeBoundaryMarker(object value)
+        {
+            Type type = value?.GetType();
+            return type != null &&
+                   (string.Equals(type.FullName, BoundaryMarkerTypeFullName, StringComparison.Ordinal) ||
+                    string.Equals(type.Name, "MissionDeploymentBoundaryMarker", StringComparison.Ordinal));
+        }
+
+        private static void TryEnsureBoundaryMarkerInitialized(object marker)
+        {
+            try
+            {
+                FieldInfo markerField = marker
+                    .GetType()
+                    .GetField("_boundaryMarkersPerSide", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (markerField?.GetValue(marker) is Array markerArray &&
+                    markerArray.Length >= 2 &&
+                    markerArray.GetValue(0) != null &&
+                    markerArray.GetValue(1) != null)
+                {
+                    return;
+                }
+            }
+            catch
+            {
+            }
+
+            TryInvokeInstanceMethod(marker, "AfterStart");
+        }
+
+        private static bool TryAddDeploymentBoundaryMarkersDirectly(
+            object marker,
+            Mission mission,
+            Team team)
+        {
+            if (marker == null ||
+                !TryEnsureDeploymentPlanBoundaries(mission, team, "visible-marker-direct") ||
+                !mission.GetDeploymentPlan<DefaultMissionDeploymentPlan>(out DefaultMissionDeploymentPlan deploymentPlan) ||
+                deploymentPlan == null)
+            {
+                return false;
+            }
+
+            bool addedAny = false;
+            try
+            {
+                foreach (var boundary in deploymentPlan.GetDeploymentBoundaries(team))
+                {
+                    var markerBoundary = new KeyValuePair<string, ICollection<Vec2>>(
+                        boundary.Item1,
+                        boundary.Item2);
+                    addedAny |= TryInvokeInstanceMethod(
+                        marker,
+                        "AddBoundaryMarkerForSide",
+                        team.Side,
+                        markerBoundary);
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            return addedAny;
+        }
+
+        private static bool TryInvokeInstanceMethod(object target, string methodName, params object[] arguments)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(methodName))
+                return false;
+
+            try
+            {
+                MethodInfo method = FindInstanceMethod(target.GetType(), methodName, arguments);
+                if (method == null)
+                    return false;
+
+                method.Invoke(target, arguments);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static MethodInfo FindInstanceMethod(Type type, string methodName, object[] arguments)
+        {
+            for (Type currentType = type; currentType != null; currentType = currentType.BaseType)
+            {
+                MethodInfo[] methods = currentType.GetMethods(
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+                foreach (MethodInfo method in methods)
+                {
+                    if (!string.Equals(method.Name, methodName, StringComparison.Ordinal))
+                        continue;
+
+                    ParameterInfo[] parameters = method.GetParameters();
+                    if (parameters.Length != (arguments?.Length ?? 0))
+                        continue;
+
+                    bool matches = true;
+                    for (int i = 0; i < parameters.Length; i++)
+                    {
+                        object argument = arguments[i];
+                        if (argument != null && !parameters[i].ParameterType.IsInstanceOfType(argument))
+                        {
+                            matches = false;
+                            break;
+                        }
+                    }
+
+                    if (matches)
+                        return method;
+                }
+            }
+
+            return null;
         }
     }
 
@@ -2044,6 +3223,11 @@ namespace CoopSpectator.MissionBehaviors
                     UIntPtr.Zero,
                     new Vec3(layout.Position, height),
                     hasValidZ: false);
+                CoopSiegeDeploymentBoundaryRuntime.TryClampCommanderDeploymentPosition(
+                    mission,
+                    formation.Team,
+                    ref worldPosition,
+                    "server-formation-layout");
                 formation.SetPositioning(worldPosition, layout.Direction);
                 return true;
             }
@@ -2085,6 +3269,11 @@ namespace CoopSpectator.MissionBehaviors
                     UIntPtr.Zero,
                     new Vec3(averagePosition, height),
                     hasValidZ: false);
+                CoopSiegeDeploymentBoundaryRuntime.TryClampCommanderDeploymentPosition(
+                    mission,
+                    formation.Team,
+                    ref worldPosition,
+                    "server-formation-layout-fallback");
                 formation.SetPositioning(worldPosition);
             }
             catch
