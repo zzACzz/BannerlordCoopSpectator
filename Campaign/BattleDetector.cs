@@ -3948,6 +3948,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     : new List<float>()
             };
 
+            PopulateMissionInitializerContext(siegeContext);
             PopulateSiegeEngineContext(encounterSettlement?.SiegeEvent, siegeContext);
             return siegeContext;
         }
@@ -3987,6 +3988,51 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             return string.Empty;
+        }
+
+        private static void PopulateMissionInitializerContext(BattleSiegeContextMessage siegeContext)
+        {
+            if (siegeContext == null)
+                return;
+
+            try
+            {
+                Mission mission = Mission.Current;
+                object boxedRecord =
+                    TryGetPropertyValue(mission, "InitializerRecord") ??
+                    TryGetPropertyValue(mission, "<InitializerRecord>k__BackingField");
+                if (!(boxedRecord is MissionInitializerRecord record))
+                    return;
+
+                siegeContext.HasMissionInitializerRecord = true;
+                siegeContext.MissionInitializerSource = "Mission.Current.InitializerRecord";
+                siegeContext.MissionInitializerSceneName = !string.IsNullOrWhiteSpace(record.SceneName)
+                    ? record.SceneName
+                    : mission?.SceneName ?? string.Empty;
+                siegeContext.MissionInitializerSceneLevels = record.SceneLevels ?? string.Empty;
+                siegeContext.MissionInitializerSceneUpgradeLevel = record.SceneUpgradeLevel;
+                siegeContext.MissionInitializerPlayingInCampaignMode = record.PlayingInCampaignMode;
+                siegeContext.MissionInitializerSceneHasMapPatch = record.SceneHasMapPatch;
+                siegeContext.MissionInitializerDecalAtlasGroup = record.DecalAtlasGroup;
+                siegeContext.MissionInitializerTerrainType = record.TerrainType;
+
+                if (ExperimentalFeatures.EnableBattleMapFullContractDiagnostics)
+                {
+                    ModLogger.Info(
+                        "BattleDetector: captured siege mission initializer profile. " +
+                        "SceneName=" + (siegeContext.MissionInitializerSceneName ?? "null") +
+                        " SceneLevels=" + (siegeContext.MissionInitializerSceneLevels ?? "null") +
+                        " SceneUpgradeLevel=" + siegeContext.MissionInitializerSceneUpgradeLevel +
+                        " PlayingInCampaignMode=" + siegeContext.MissionInitializerPlayingInCampaignMode +
+                        " SceneHasMapPatch=" + siegeContext.MissionInitializerSceneHasMapPatch +
+                        " DecalAtlasGroup=" + siegeContext.MissionInitializerDecalAtlasGroup +
+                        " TerrainType=" + siegeContext.MissionInitializerTerrainType + ".");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to capture siege mission initializer profile. " + ex.Message);
+            }
         }
 
         private static void PopulateSiegeEngineContext(SiegeEvent siegeEvent, BattleSiegeContextMessage siegeContext)

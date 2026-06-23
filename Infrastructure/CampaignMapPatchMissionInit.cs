@@ -49,6 +49,7 @@ namespace CoopSpectator.Infrastructure
                 string siegeSubtype = snapshot?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
                 if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
                 {
+                    ApplyOpenSiegeAssaultSceneProfile(ref record, snapshot, runtimeScene, source);
                     record.SceneHasMapPatch = false;
                     record.PatchCoordinates = new Vec2(0f, 0f);
                     record.PatchEncounterDir = new Vec2(0f, 0f);
@@ -194,7 +195,26 @@ namespace CoopSpectator.Infrastructure
                 return;
             }
 
-            int wallLevel = snapshot.ScenarioContext.SiegeContext?.WallLevel ?? 0;
+            BattleSiegeContextMessage siegeContext = snapshot.ScenarioContext.SiegeContext;
+            string exactSceneLevels = siegeContext?.MissionInitializerSceneLevels ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(exactSceneLevels))
+            {
+                if (string.Equals(record.SceneLevels, exactSceneLevels, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                string previousSceneLevels = record.SceneLevels;
+                record.SceneLevels = exactSceneLevels;
+                ModLogger.Info(
+                    source + ": applied exact siege mission initializer scene-level context. " +
+                    "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                    " SiegeSubtype=" + (string.IsNullOrWhiteSpace(siegeSubtype) ? "unknown" : siegeSubtype) +
+                    " PreviousSceneLevels=" + (previousSceneLevels ?? "null") +
+                    " SceneLevels=" + (record.SceneLevels ?? "null") +
+                    " ExactSource=" + (siegeContext?.MissionInitializerSource ?? "unknown") + ".");
+                return;
+            }
+
+            int wallLevel = siegeContext?.WallLevel ?? 0;
             if (wallLevel < 1)
                 wallLevel = 1;
             if (wallLevel > 3)
@@ -211,6 +231,59 @@ namespace CoopSpectator.Infrastructure
                 " SiegeSubtype=" + (string.IsNullOrWhiteSpace(siegeSubtype) ? "unknown" : siegeSubtype) +
                 " WallLevel=" + wallLevel +
                 " SceneLevels=" + (record.SceneLevels ?? "null") + ".");
+        }
+
+        private static void ApplyOpenSiegeAssaultSceneProfile(
+            ref MissionInitializerRecord record,
+            BattleSnapshotMessage snapshot,
+            string runtimeScene,
+            string source)
+        {
+            if (!ExperimentalFeatures.EnableExactSiegeCampaignSceneInitializerProfile)
+                return;
+
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(snapshot?.ScenarioContext))
+                return;
+
+            bool previousPlayingInCampaignMode = record.PlayingInCampaignMode;
+            int previousDecalAtlasGroup = record.DecalAtlasGroup;
+            int previousTerrainType = record.TerrainType;
+            int previousSceneUpgradeLevel = record.SceneUpgradeLevel;
+            BattleSiegeContextMessage siegeContext = snapshot?.ScenarioContext?.SiegeContext;
+            bool hasExactInitializer = siegeContext?.HasMissionInitializerRecord == true;
+            int targetDecalAtlasGroup = hasExactInitializer && siegeContext.MissionInitializerDecalAtlasGroup >= 0
+                ? siegeContext.MissionInitializerDecalAtlasGroup
+                : 3;
+            int targetTerrainType = hasExactInitializer && siegeContext.MissionInitializerTerrainType >= 0
+                ? siegeContext.MissionInitializerTerrainType
+                : (int)TerrainType.Plain;
+            int targetSceneUpgradeLevel = hasExactInitializer && siegeContext.MissionInitializerSceneUpgradeLevel >= 0
+                ? siegeContext.MissionInitializerSceneUpgradeLevel
+                : record.SceneUpgradeLevel;
+
+            // Campaign mode pulls singleplayer mission views and expects campaign-only initializer fields.
+            // Preserve the multiplayer value here; only mirror safe visual fields used by the campaign siege scene.
+            record.DecalAtlasGroup = targetDecalAtlasGroup;
+            record.TerrainType = targetTerrainType;
+            record.SceneUpgradeLevel = targetSceneUpgradeLevel;
+
+            if (previousDecalAtlasGroup == record.DecalAtlasGroup &&
+                previousTerrainType == record.TerrainType &&
+                previousSceneUpgradeLevel == record.SceneUpgradeLevel)
+            {
+                return;
+            }
+
+            ModLogger.Info(
+                source + ": applied safe campaign siege scene initializer profile. " +
+                "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                " PreservedPlayingInCampaignMode=" + previousPlayingInCampaignMode +
+                " PreviousDecalAtlasGroup=" + previousDecalAtlasGroup +
+                " NewDecalAtlasGroup=" + record.DecalAtlasGroup +
+                " PreviousTerrainType=" + previousTerrainType +
+                " NewTerrainType=" + record.TerrainType +
+                " PreviousSceneUpgradeLevel=" + previousSceneUpgradeLevel +
+                " SceneUpgradeLevel=" + record.SceneUpgradeLevel + ".");
         }
 
         public static bool TryRepairLiveMissionContract(Mission mission, string logSource)

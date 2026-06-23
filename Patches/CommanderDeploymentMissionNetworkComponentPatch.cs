@@ -212,6 +212,11 @@ namespace CoopSpectator.Patches
                     UIntPtr.Zero,
                     message.Position,
                     hasValidZ: false);
+                CoopSiegeDeploymentBoundaryRuntime.TryClampCommanderDeploymentPosition(
+                    mission,
+                    team,
+                    ref orderPosition,
+                    "server-position-order");
                 orderController.SetOrderWithPosition(message.OrderType, orderPosition);
 
                 LogOrderDiagnostics(
@@ -341,6 +346,16 @@ namespace CoopSpectator.Patches
                     mission.IsTeleportingAgents = true;
                     var position1 = new WorldPosition(mission.Scene, UIntPtr.Zero, message.Position1, hasValidZ: false);
                     var position2 = new WorldPosition(mission.Scene, UIntPtr.Zero, message.Position2, hasValidZ: false);
+                    CoopSiegeDeploymentBoundaryRuntime.TryClampCommanderDeploymentPosition(
+                        mission,
+                        team,
+                        ref position1,
+                        "server-two-position-order-start");
+                    CoopSiegeDeploymentBoundaryRuntime.TryClampCommanderDeploymentPosition(
+                        mission,
+                        team,
+                        ref position2,
+                        "server-two-position-order-end");
                     bool nativeSelectionMatchesShadow = !shouldUseShadowSelection ||
                         IsNativeSelectionEquivalentToShadow(orderController, shadowFormations);
                     if (nativeSelectionMatchesShadow)

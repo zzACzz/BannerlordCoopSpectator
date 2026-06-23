@@ -372,7 +372,14 @@ namespace CoopSpectator.Patches
                 return;
             }
 
-            float[] wallHitPointRatios = ResolveClientSafeSiegeWallHitPointRatios(scenarioContext);
+            float[] wallHitPointRatios =
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.ResolveIntactWallHitPointRatiosForScenePreparation(
+                    mission,
+                    scenarioContext,
+                    out string wallRatioDiagnostics);
+            ModLogger.Info(
+                "MissionStateOpenNewPatches: resolved exact siege client wall scene-preparation ratios. " +
+                "Diagnostics=" + wallRatioDiagnostics);
             bool addedSiegePreparation = TryAddBehaviorIfMissing(
                 list,
                 () => new SiegeMissionPreparationHandler(
@@ -492,15 +499,6 @@ namespace CoopSpectator.Patches
 
             return string.Equals(sideKey, BattleSideEnum.Attacker.ToString(), StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(sideKey, "attacker", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static float[] ResolveClientSafeSiegeWallHitPointRatios(BattleScenarioContextMessage scenarioContext)
-        {
-            List<float> wallHitPointRatios = scenarioContext?.SiegeContext?.WallHitPointRatios?
-                .Where(value => !float.IsNaN(value) && !float.IsInfinity(value))
-                .Select(value => value < 0f ? 0f : (value > 1f ? 1f : value))
-                .ToList() ?? new List<float>();
-            return wallHitPointRatios.ToArray();
         }
 
         private static bool TryAddBehaviorIfMissing(

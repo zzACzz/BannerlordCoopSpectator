@@ -75,6 +75,14 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableSiegeReplayInitialNativeSpawnLogicBootstrap = true;
 
         /// <summary>
+        /// Exact SiegeMissionWithDeployment scene initializer profile: mirror the
+        /// native campaign siege initializer fields that affect scene material
+        /// and campaign-mode object setup, while keeping map-patch repair out of
+        /// open siege scenes.
+        /// </summary>
+        public static readonly bool EnableExactSiegeCampaignSceneInitializerProfile = true;
+
+        /// <summary>
         /// Temporary crash-isolation flag: create the custom mission gauntlet layer
         /// without loading the CoopSelection movie. This lets us prove whether the
         /// hard crash is inside LoadMovie/prefab binding or earlier in mission view startup.

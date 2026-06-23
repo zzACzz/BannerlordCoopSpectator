@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using CoopSpectator.Network.Messages;
@@ -28,6 +29,153 @@ namespace CoopSpectator.Infrastructure
             return scenarioContext?.IsSiegeBattle == true &&
                    string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase) &&
                    CampaignMissionShellRuntimeState.IsWithDeploymentMissionShell(missionShell);
+        }
+
+        public static float[] ResolveIntactWallHitPointRatiosForScenePreparation(
+            Mission mission,
+            BattleScenarioContextMessage scenarioContext,
+            out string diagnostics)
+        {
+            List<float> rawRatios = scenarioContext?.SiegeContext?.WallHitPointRatios?
+                .Where(value => !float.IsNaN(value) && !float.IsInfinity(value))
+                .ToList() ?? new List<float>();
+
+            int activeMissionObjectCount = CountActiveMissionObjects(mission);
+            int breakableWallCount = CountBreakableSiegeWallSegments(mission);
+            if (breakableWallCount > 0 && breakableWallCount <= 2)
+            {
+                float[] outputRatios = CreateSceneAlignedWallHitPointRatios(rawRatios, breakableWallCount);
+                diagnostics =
+                    "campaign-ratios Source=Scene" +
+                    " RawCount=" + rawRatios.Count +
+                    " ActiveMissionObjects=" + activeMissionObjectCount +
+                    " BreakableWallCount=" + breakableWallCount +
+                    " OutputCount=" + outputRatios.Length +
+                    " RawValues=[" + FormatRatioList(rawRatios) + "]" +
+                    " OutputValues=[" + FormatRatioList(outputRatios) + "]";
+                return outputRatios;
+            }
+
+            if (breakableWallCount > 2)
+            {
+                diagnostics =
+                    "cleared-for-native-safety Source=Scene" +
+                    " RawCount=" + rawRatios.Count +
+                    " ActiveMissionObjects=" + activeMissionObjectCount +
+                    " BreakableWallCount=" + breakableWallCount +
+                    " NativeLimit=2";
+                return Array.Empty<float>();
+            }
+
+            if (activeMissionObjectCount <= 0 && rawRatios.Count > 0 && rawRatios.Count <= 2)
+            {
+                float[] outputRatios = CreateWallHitPointRatios(rawRatios);
+                diagnostics =
+                    "campaign-ratios Source=SnapshotFallback" +
+                    " RawCount=" + rawRatios.Count +
+                    " ActiveMissionObjects=" + activeMissionObjectCount +
+                    " BreakableWallCount=" + breakableWallCount +
+                    " OutputCount=" + outputRatios.Length +
+                    " RawValues=[" + FormatRatioList(rawRatios) + "]" +
+                    " OutputValues=[" + FormatRatioList(outputRatios) + "]";
+                return outputRatios;
+            }
+
+            diagnostics =
+                "empty-for-native-safety" +
+                " RawCount=" + rawRatios.Count +
+                " ActiveMissionObjects=" + activeMissionObjectCount +
+                " BreakableWallCount=" + breakableWallCount +
+                " RawValues=[" + FormatRatioList(rawRatios) + "]";
+            return Array.Empty<float>();
+        }
+
+        private static float[] CreateSceneAlignedWallHitPointRatios(List<float> rawRatios, int count)
+        {
+            if (count <= 0)
+                return Array.Empty<float>();
+
+            var ratios = new float[count];
+            for (int i = 0; i < ratios.Length; i++)
+            {
+                ratios[i] = i < rawRatios.Count
+                    ? ClampWallHitPointRatio(rawRatios[i])
+                    : 1f;
+            }
+
+            return ratios;
+        }
+
+        private static float[] CreateWallHitPointRatios(List<float> rawRatios)
+        {
+            if (rawRatios == null || rawRatios.Count <= 0)
+                return Array.Empty<float>();
+
+            var ratios = new float[rawRatios.Count];
+            for (int i = 0; i < ratios.Length; i++)
+                ratios[i] = ClampWallHitPointRatio(rawRatios[i]);
+
+            return ratios;
+        }
+
+        private static float ClampWallHitPointRatio(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return 1f;
+
+            if (value < 0f)
+                return 0f;
+
+            if (value > 1f)
+                return 1f;
+
+            return value;
+        }
+
+        private static string FormatRatioList(IEnumerable<float> ratios)
+        {
+            if (ratios == null)
+                return string.Empty;
+
+            return string.Join(
+                ",",
+                ratios.Select(value => ClampWallHitPointRatio(value).ToString("0.###", CultureInfo.InvariantCulture)));
+        }
+
+        private static int CountActiveMissionObjects(Mission mission)
+        {
+            if (mission?.ActiveMissionObjects == null)
+                return 0;
+
+            try
+            {
+                return mission.ActiveMissionObjects.Count;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static int CountBreakableSiegeWallSegments(Mission mission)
+        {
+            if (mission?.ActiveMissionObjects == null)
+                return 0;
+
+            try
+            {
+                return mission.ActiveMissionObjects
+                    .FindAllWithType<WallSegment>()
+                    .Count(wallSegment =>
+                        wallSegment != null &&
+                        wallSegment.DefenseSide != FormationAI.BehaviorSide.BehaviorSideNotSet &&
+                        wallSegment.GameEntity != null &&
+                        wallSegment.GameEntity.GetChildren().Any(child => child != null && child.HasTag("broken_child")));
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         public static bool ShouldInjectWrappedBattleClientDeploymentBehaviors(

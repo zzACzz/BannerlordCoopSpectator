@@ -126,6 +126,49 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static void LogSiegeSceneObjectParity(Mission mission, string source)
+        {
+            if (!ExperimentalFeatures.EnableBattleMapFullContractDiagnostics || mission == null)
+                return;
+
+            string safeSource = string.IsNullOrWhiteSpace(source) ? "unknown" : source;
+            string logKey = "siege-scene-object-parity|" + RuntimeHelpers.GetHashCode(mission) + "|" + safeSource;
+            if (!LoggedKeys.Add(logKey))
+                return;
+
+            try
+            {
+                List<WallSegment> wallSegments = mission.ActiveMissionObjects != null
+                    ? mission.ActiveMissionObjects.FindAllWithType<WallSegment>().Where(segment => segment != null).ToList()
+                    : new List<WallSegment>();
+                int wallSegmentsWithSolidChild = wallSegments.Count(segment => HasChildWithTag(segment, "solid_child"));
+                int wallSegmentsWithBrokenChild = wallSegments.Count(segment => HasChildWithTag(segment, "broken_child"));
+                int defensiveWallSegments = wallSegments.Count(segment =>
+                    segment != null &&
+                    segment.DefenseSide != FormationAI.BehaviorSide.BehaviorSideNotSet);
+
+                ModLogger.Info(
+                    "BattleMapContractDiagnostics: siege scene object parity. " +
+                    "Source=" + safeSource +
+                    " Scene=" + (mission.SceneName ?? "null") +
+                    " ActiveMissionObjects=" + SafeInt(() => mission.ActiveMissionObjects?.Count ?? 0) +
+                    " WallSegments=" + wallSegments.Count +
+                    " DefensiveWallSegments=" + defensiveWallSegments +
+                    " WallSegmentsWithSolidChild=" + wallSegmentsWithSolidChild +
+                    " WallSegmentsWithBrokenChild=" + wallSegmentsWithBrokenChild +
+                    " SceneTagCounts={" + BuildSceneTagCountSummary(mission) + "}" +
+                    " WallSamples=[" + string.Join(", ", wallSegments.Take(8).Select(BuildMissionObjectEntityName)) + "]");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleMapContractDiagnostics: siege scene object parity failed. " +
+                    "Source=" + safeSource +
+                    " Scene=" + (mission.SceneName ?? "null") +
+                    " Message=" + ex.Message);
+            }
+        }
+
         public static void LogDeploymentPlanContract(
             Mission mission,
             Team focusTeam,
@@ -209,8 +252,11 @@ namespace CoopSpectator.Infrastructure
             return
                 "SceneName=" + (record.SceneName ?? "null") +
                 " SceneLevels=" + (record.SceneLevels ?? "null") +
+                " SceneUpgradeLevel=" + record.SceneUpgradeLevel +
                 " PlayingInCampaignMode=" + record.PlayingInCampaignMode +
                 " SceneHasMapPatch=" + record.SceneHasMapPatch +
+                " DecalAtlasGroup=" + record.DecalAtlasGroup +
+                " TerrainType=" + record.TerrainType +
                 " DamageToFriendsMultiplier=" + record.DamageToFriendsMultiplier.ToString("0.###", CultureInfo.InvariantCulture) +
                 " DamageFromPlayerToFriendsMultiplier=" + record.DamageFromPlayerToFriendsMultiplier.ToString("0.###", CultureInfo.InvariantCulture) +
                 " PatchCoordinates=" + FormatVec2(record.PatchCoordinates) +
@@ -231,8 +277,11 @@ namespace CoopSpectator.Infrastructure
                 return
                     "SceneName=" + FormatValue(TryReadMember(record, "SceneName")) +
                     " SceneLevels=" + FormatValue(TryReadMember(record, "SceneLevels")) +
+                    " SceneUpgradeLevel=" + FormatValue(TryReadMember(record, "SceneUpgradeLevel")) +
                     " PlayingInCampaignMode=" + FormatValue(TryReadMember(record, "PlayingInCampaignMode")) +
                     " SceneHasMapPatch=" + FormatValue(TryReadMember(record, "SceneHasMapPatch")) +
+                    " DecalAtlasGroup=" + FormatValue(TryReadMember(record, "DecalAtlasGroup")) +
+                    " TerrainType=" + FormatValue(TryReadMember(record, "TerrainType")) +
                     " DamageToFriendsMultiplier=" + FormatValue(TryReadMember(record, "DamageToFriendsMultiplier")) +
                     " DamageFromPlayerToFriendsMultiplier=" + FormatValue(TryReadMember(record, "DamageFromPlayerToFriendsMultiplier")) +
                     " PatchCoordinates=" + FormatValue(TryReadMember(record, "PatchCoordinates")) +
@@ -394,6 +443,68 @@ namespace CoopSpectator.Infrastructure
             }
 
             return string.Join(" | ", summaries);
+        }
+
+        private static string BuildSceneTagCountSummary(Mission mission)
+        {
+            return
+                "siege=" + CountSceneEntitiesWithTagExpression(mission, "siege") +
+                " level_1=" + CountSceneEntitiesWithTagExpression(mission, "level_1") +
+                " level_2=" + CountSceneEntitiesWithTagExpression(mission, "level_2") +
+                " level_3=" + CountSceneEntitiesWithTagExpression(mission, "level_3") +
+                " solid_child=" + CountSceneEntitiesWithTagExpression(mission, "solid_child") +
+                " broken_child=" + CountSceneEntitiesWithTagExpression(mission, "broken_child");
+        }
+
+        private static int CountSceneEntitiesWithTagExpression(Mission mission, string tagExpression)
+        {
+            if (mission?.Scene == null || string.IsNullOrWhiteSpace(tagExpression))
+                return -1;
+
+            try
+            {
+                return mission.Scene.FindEntitiesWithTagExpression(tagExpression).Count(entity => entity != null);
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static bool HasChildWithTag(MissionObject missionObject, string tag)
+        {
+            if (missionObject == null || string.IsNullOrWhiteSpace(tag))
+                return false;
+
+            try
+            {
+                return missionObject.GameEntity.GetChildren().Any(child => child != null && child.HasTag(tag));
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string BuildMissionObjectEntityName(MissionObject missionObject)
+        {
+            if (missionObject == null)
+                return "null";
+
+            try
+            {
+                WeakGameEntity gameEntity = missionObject.GameEntity;
+                if (!gameEntity.IsValid)
+                    return "invalid";
+
+                return string.IsNullOrWhiteSpace(gameEntity.Name)
+                    ? "unnamed"
+                    : gameEntity.Name;
+            }
+            catch (Exception ex)
+            {
+                return "failed:" + ex.GetType().Name;
+            }
         }
 
         private static string BuildTeamDeploymentSummary(

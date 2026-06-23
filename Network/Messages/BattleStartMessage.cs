@@ -85,6 +85,15 @@ namespace CoopSpectator.Network.Messages
         public string CurrentSiegeState { get; set; }
         public int WallLevel { get; set; }
         public bool HasAnySiegeTower { get; set; }
+        public bool HasMissionInitializerRecord { get; set; }
+        public string MissionInitializerSource { get; set; }
+        public string MissionInitializerSceneName { get; set; }
+        public string MissionInitializerSceneLevels { get; set; }
+        public int MissionInitializerSceneUpgradeLevel { get; set; } = -1;
+        public bool MissionInitializerPlayingInCampaignMode { get; set; }
+        public bool MissionInitializerSceneHasMapPatch { get; set; }
+        public int MissionInitializerDecalAtlasGroup { get; set; } = -1;
+        public int MissionInitializerTerrainType { get; set; } = -1;
         public List<float> WallHitPointRatios { get; set; } = new List<float>();
         public List<BattleSiegeEngineSnapshotMessage> AttackerSiegeEngines { get; set; } = new List<BattleSiegeEngineSnapshotMessage>();
         public List<BattleSiegeEngineSnapshotMessage> DefenderSiegeEngines { get; set; } = new List<BattleSiegeEngineSnapshotMessage>();
@@ -104,6 +113,15 @@ namespace CoopSpectator.Network.Messages
                 CurrentSiegeState = CurrentSiegeState,
                 WallLevel = WallLevel,
                 HasAnySiegeTower = HasAnySiegeTower,
+                HasMissionInitializerRecord = HasMissionInitializerRecord,
+                MissionInitializerSource = MissionInitializerSource,
+                MissionInitializerSceneName = MissionInitializerSceneName,
+                MissionInitializerSceneLevels = MissionInitializerSceneLevels,
+                MissionInitializerSceneUpgradeLevel = MissionInitializerSceneUpgradeLevel,
+                MissionInitializerPlayingInCampaignMode = MissionInitializerPlayingInCampaignMode,
+                MissionInitializerSceneHasMapPatch = MissionInitializerSceneHasMapPatch,
+                MissionInitializerDecalAtlasGroup = MissionInitializerDecalAtlasGroup,
+                MissionInitializerTerrainType = MissionInitializerTerrainType,
                 WallHitPointRatios = WallHitPointRatios != null ? new List<float>(WallHitPointRatios) : new List<float>(),
                 AttackerSiegeEngines = CloneSiegeEngineList(AttackerSiegeEngines),
                 DefenderSiegeEngines = CloneSiegeEngineList(DefenderSiegeEngines),

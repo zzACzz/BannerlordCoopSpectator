@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 6;
+        private const int SchemaVersion = 7;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -64,6 +64,7 @@ namespace CoopSpectator.Infrastructure
                         schemaVersion != 3 &&
                         schemaVersion != 4 &&
                         schemaVersion != 5 &&
+                        schemaVersion != 6 &&
                         schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
@@ -186,6 +187,15 @@ namespace CoopSpectator.Infrastructure
             WriteList(writer, siegeContext.DefenderSiegeEngineTypeIds, WriteString);
             WriteList(writer, siegeContext.AttackerSiegeEngines, WriteBattleSiegeEngineSnapshot);
             WriteList(writer, siegeContext.DefenderSiegeEngines, WriteBattleSiegeEngineSnapshot);
+            writer.Write(siegeContext.HasMissionInitializerRecord);
+            WriteString(writer, siegeContext.MissionInitializerSource);
+            WriteString(writer, siegeContext.MissionInitializerSceneName);
+            WriteString(writer, siegeContext.MissionInitializerSceneLevels);
+            writer.Write(siegeContext.MissionInitializerSceneUpgradeLevel);
+            writer.Write(siegeContext.MissionInitializerPlayingInCampaignMode);
+            writer.Write(siegeContext.MissionInitializerSceneHasMapPatch);
+            writer.Write(siegeContext.MissionInitializerDecalAtlasGroup);
+            writer.Write(siegeContext.MissionInitializerTerrainType);
         }
 
         private static BattleSiegeContextMessage ReadBattleSiegeContext(BinaryReader reader, int schemaVersion)
@@ -212,7 +222,16 @@ namespace CoopSpectator.Infrastructure
                     : new List<BattleSiegeEngineSnapshotMessage>(),
                 DefenderSiegeEngines = schemaVersion >= 6
                     ? ReadList(reader, ReadBattleSiegeEngineSnapshot) ?? new List<BattleSiegeEngineSnapshotMessage>()
-                    : new List<BattleSiegeEngineSnapshotMessage>()
+                    : new List<BattleSiegeEngineSnapshotMessage>(),
+                HasMissionInitializerRecord = schemaVersion >= 7 && reader.ReadBoolean(),
+                MissionInitializerSource = schemaVersion >= 7 ? ReadString(reader) : string.Empty,
+                MissionInitializerSceneName = schemaVersion >= 7 ? ReadString(reader) : string.Empty,
+                MissionInitializerSceneLevels = schemaVersion >= 7 ? ReadString(reader) : string.Empty,
+                MissionInitializerSceneUpgradeLevel = schemaVersion >= 7 ? reader.ReadInt32() : -1,
+                MissionInitializerPlayingInCampaignMode = schemaVersion >= 7 && reader.ReadBoolean(),
+                MissionInitializerSceneHasMapPatch = schemaVersion >= 7 && reader.ReadBoolean(),
+                MissionInitializerDecalAtlasGroup = schemaVersion >= 7 ? reader.ReadInt32() : -1,
+                MissionInitializerTerrainType = schemaVersion >= 7 ? reader.ReadInt32() : -1
             };
         }
 

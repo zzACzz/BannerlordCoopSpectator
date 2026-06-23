@@ -5,6 +5,7 @@ using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
+using TaleWorlds.Engine;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Missions.Handlers;
 using TaleWorlds.MountAndBlade.Multiplayer;
@@ -108,7 +109,10 @@ namespace CoopSpectator.GameMode
                 MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies("TaleWorlds.MountAndBlade.MultiplayerPreloadHelper"),
                 "MultiplayerPreloadHelper");
 
-            AppendSiegeAssaultRuntimeBehaviors(list, mission);
+            AppendSiegeAssaultRuntimeBehaviors(
+                list,
+                mission,
+                includeScenePreparation: true);
 
             list.Add(new CoopMissionNetworkBridge());
             if (isDedicated)
@@ -181,7 +185,10 @@ namespace CoopSpectator.GameMode
                 MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies("TaleWorlds.MountAndBlade.MultiplayerPreloadHelper"),
                 "MultiplayerPreloadHelper");
 
-            AppendSiegeAssaultRuntimeBehaviors(list, mission);
+            AppendSiegeAssaultRuntimeBehaviors(
+                list,
+                mission,
+                includeScenePreparation: false);
             AppendRemoteClientSiegeDeploymentBridgeBehaviors(list, mission);
 
             list.Add(new MissionBehaviorDiagnostic());
@@ -283,28 +290,57 @@ namespace CoopSpectator.GameMode
                 ModLogger.Info("CoopSiegeAssaultWithDeployment client validation passed.");
         }
 
-        private static void AppendSiegeAssaultRuntimeBehaviors(List<MissionBehavior> list, Mission mission)
+        private static void AppendSiegeAssaultRuntimeBehaviors(
+            List<MissionBehavior> list,
+            Mission mission,
+            bool includeScenePreparation)
         {
             BattleScenarioContextMessage scenarioContext = ResolveScenarioContext();
             bool isPlayerAttacker = ResolvePlayerAttackerSide();
-            float[] wallHitPointRatios = ResolveSafeWallHitPointRatios(scenarioContext);
+            if (includeScenePreparation)
+            {
+                float[] wallHitPointRatios =
+                    ExactCampaignSiegeAssaultWithDeploymentRuntime.ResolveIntactWallHitPointRatiosForScenePreparation(
+                        mission,
+                        scenarioContext,
+                        out string wallRatioDiagnostics);
+                bool hasAnySiegeTower = scenarioContext?.SiegeContext?.HasAnySiegeTower == true;
+                ModLogger.Info(
+                    "CoopSiegeAssaultWithDeployment: resolved siege wall scene-preparation ratios. " +
+                    "HasAnySiegeTower=" + hasAnySiegeTower +
+                    " Diagnostics=" + wallRatioDiagnostics);
+
+                AddIfMissing(
+                    list,
+                    mission,
+                    () => new SiegeMissionPreparationHandler(
+                        isSallyOut: false,
+                        isReliefForceAttack: false,
+                        wallHitPointRatios,
+                        hasAnySiegeTower),
+                    "SiegeMissionPreparationHandler",
+                    required: false);
+
+                AddIfMissing(
+                    list,
+                    mission,
+                    () => MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies(
+                        "SandBox.Missions.MissionLogics.CampaignSiegeStateHandler"),
+                    "CampaignSiegeStateHandler",
+                    required: false);
+            }
+            else
+            {
+                ModLogger.Info(
+                    "CoopSiegeAssaultWithDeployment: skipped server-only siege scene preparation on client. " +
+                    "Scene=" + (mission?.SceneName ?? "null") + ".");
+            }
 
             AddIfMissing(
                 list,
                 mission,
-                () => new SiegeMissionPreparationHandler(
-                    isSallyOut: false,
-                    isReliefForceAttack: false,
-                    wallHitPointRatios,
-                    scenarioContext?.SiegeContext?.HasAnySiegeTower == true),
-                "SiegeMissionPreparationHandler",
-                required: false);
-            AddIfMissing(
-                list,
-                mission,
-                () => MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies(
-                    "SandBox.Missions.MissionLogics.CampaignSiegeStateHandler"),
-                "CampaignSiegeStateHandler",
+                () => new SiegeSceneObjectParityProbeBehavior(),
+                "SiegeSceneObjectParityProbeBehavior",
                 required: false);
             AddIfMissing(
                 list,
@@ -568,15 +604,6 @@ namespace CoopSpectator.GameMode
                    string.Equals(sideKey, "attacker", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static float[] ResolveSafeWallHitPointRatios(BattleScenarioContextMessage scenarioContext)
-        {
-            List<float> wallHitPointRatios = scenarioContext?.SiegeContext?.WallHitPointRatios?
-                .Where(value => !float.IsNaN(value) && !float.IsInfinity(value))
-                .Select(value => value < 0f ? 0f : (value > 1f ? 1f : value))
-                .ToList() ?? new List<float>();
-            return wallHitPointRatios.ToArray();
-        }
-
         private static void AddOptional(List<MissionBehavior> list, MissionBehavior behavior, string name)
         {
             if (behavior == null)
@@ -615,6 +642,47 @@ namespace CoopSpectator.GameMode
             catch
             {
                 return false;
+            }
+        }
+
+        private sealed class SiegeSceneObjectParityProbeBehavior : MissionLogic
+        {
+            private int _remainingTickProbes = 3;
+            private float _elapsedSeconds;
+            private float _nextProbeSeconds = 0.5f;
+
+            public override void AfterStart()
+            {
+                Log("AfterStart");
+            }
+
+            public override void OnMissionTick(float dt)
+            {
+                if (!ExperimentalFeatures.EnableBattleMapFullContractDiagnostics)
+                    return;
+
+                if (_remainingTickProbes <= 0)
+                    return;
+
+                _elapsedSeconds += dt;
+                if (_elapsedSeconds < _nextProbeSeconds)
+                    return;
+
+                Log("Tick" + (4 - _remainingTickProbes));
+                _remainingTickProbes--;
+                _nextProbeSeconds = _elapsedSeconds + 1f;
+            }
+
+            private void Log(string phase)
+            {
+                Mission mission = Mission;
+                if (mission == null)
+                    return;
+
+                string side = GameNetwork.IsServer ? "server" : "client";
+                BattleMapContractDiagnostics.LogSiegeSceneObjectParity(
+                    mission,
+                    "SiegeSceneObjectParityProbeBehavior." + phase + "." + side);
             }
         }
 

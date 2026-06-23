@@ -69,8 +69,6 @@ namespace CoopSpectator.Patches
                 "MissionGauntletSiegeEngineMarker",
                 "TaleWorlds.MountAndBlade.View.MissionViews.Singleplayer.DeploymentMissionView",
                 "DeploymentMissionView",
-                "TaleWorlds.MountAndBlade.View.MissionViews.Singleplayer.MissionDeploymentBoundaryMarker",
-                "MissionDeploymentBoundaryMarker",
                 "SandBox.View.Missions.MissionPreloadView",
                 "MissionPreloadView",
                 "SandBox.View.Missions.MissionCampaignBattleSpectatorView",

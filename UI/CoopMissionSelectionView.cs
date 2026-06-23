@@ -39,6 +39,11 @@ namespace CoopSpectator.UI
         private const float InitialOverlayDelaySeconds = 0.75f;
         private const float StartBattleHotkeyCooldownSeconds = 0.2f;
         private const float ReopenSelectionHotkeyCooldownSeconds = 0.2f;
+        private const float CommanderDeploymentFreeCameraMoveSpeed = 18f;
+        private const float CommanderDeploymentFreeCameraFastMoveMultiplier = 3f;
+        private const float CommanderDeploymentFreeCameraLookSensitivity = 0.0035f;
+        private const float CommanderDeploymentFreeCameraMinPitch = -1.3659099f;
+        private const float CommanderDeploymentFreeCameraMaxPitch = 1.1219974f;
         private static readonly InputUsageMask CommanderDeploymentInputMask = (InputUsageMask)7;
         private static readonly TimeSpan LocalSpawnOverlaySuppressionDuration = TimeSpan.FromSeconds(2.5);
         private static readonly TimeSpan LocalSpawnPendingTimeout = TimeSpan.FromSeconds(20);
@@ -48,6 +53,7 @@ namespace CoopSpectator.UI
         private static string _activeCameraPreviewEntryId = string.Empty;
         private static bool _commanderDeploymentOrderOfBattleActive;
         private static bool _commanderDeploymentPlacementInputActive;
+        private float _commanderDeploymentBoundaryRefreshTimer;
 
         private GauntletLayer _gauntletLayer;
         private GauntletMovieIdentifier _movie;
@@ -60,6 +66,10 @@ namespace CoopSpectator.UI
         private object _commanderDeploymentOrderTroopPlacer;
         private Action _commanderDeploymentOnUnitDeployedHandler;
         private bool _commanderDeploymentOrderVmInitialized;
+        private Camera _commanderDeploymentFreeCamera;
+        private bool _commanderDeploymentFreeCameraActive;
+        private float _commanderDeploymentFreeCameraYaw;
+        private float _commanderDeploymentFreeCameraPitch;
         private CoopCommanderDeploymentVisualOrderProvider _commanderDeploymentVisualOrderProvider;
         private bool _commanderDeploymentVisualOrderProviderRegistered;
         private ICoopSelectionScreenViewModel _screenViewModel;
@@ -145,6 +155,8 @@ namespace CoopSpectator.UI
             TryShowStartBattleInstruction(hasLocalControlledAgent);
             TryHandleReopenSelectionHotkey(dt, hasLocalControlledAgent);
             TryTickCommanderDeploymentViewModel();
+            TryTickCommanderDeploymentBoundaries(dt);
+            TryTickCommanderDeploymentFreeCamera(dt);
 
             if (_gauntletLayer == null)
             {
@@ -171,6 +183,11 @@ namespace CoopSpectator.UI
             {
                 ReleaseOverlayInput();
                 ReleaseCurrentMovie();
+                CoopSiegeDeploymentBoundaryRuntime.TryRemoveVisibleDeploymentBoundaryMarkers(
+                    Mission,
+                    MissionScreen,
+                    "mission-screen-finalize");
+                TryDeactivateCommanderDeploymentFreeCamera(MissionScreen, "mission-screen-finalize");
                 _commanderDeploymentOrderOfBattleActive = false;
                 _commanderDeploymentPlacementInputActive = false;
 
@@ -1356,7 +1373,7 @@ namespace CoopSpectator.UI
                 _commanderDeploymentOrderVm.SetCallbacks(CreateCommanderDeploymentOrderCallbacks());
                 _commanderDeploymentOrderVm.SetDeploymentParemeters(
                     missionCamera,
-                    BuildCommanderDeploymentPointList(mission));
+                    BuildCommanderDeploymentPointList(mission, mission.PlayerTeam));
                 TryRegisterMissionOrderHotKeys(_commanderDeploymentOrderVm);
                 _commanderDeploymentOrderVm.AfterInitialize();
                 TryInvokeInstanceMethodSuccessfully(_commanderDeploymentOrderVm.TroopController, "UpdateTroops");
@@ -1486,16 +1503,20 @@ namespace CoopSpectator.UI
             };
         }
 
-        private static List<DeploymentPoint> BuildCommanderDeploymentPointList(Mission mission)
+        private static List<DeploymentPoint> BuildCommanderDeploymentPointList(Mission mission, Team deploymentTeam)
         {
             if (mission?.ActiveMissionObjects == null)
                 return new List<DeploymentPoint>();
 
+            BattleSideEnum side = deploymentTeam?.Side ?? BattleSideEnum.None;
             try
             {
                 return mission.ActiveMissionObjects
                     .FindAllWithType<DeploymentPoint>()
-                    .Where(deploymentPoint => deploymentPoint != null && !deploymentPoint.IsDisabled)
+                    .Where(deploymentPoint =>
+                        deploymentPoint != null &&
+                        !deploymentPoint.IsDisabled &&
+                        (side == BattleSideEnum.None || deploymentPoint.Side == side))
                     .ToList();
             }
             catch
@@ -1571,6 +1592,7 @@ namespace CoopSpectator.UI
         private void ActivateCommanderDeploymentToggleOrder()
         {
             TryActivateNativeCommanderDeploymentPlacement(MissionScreen);
+            TryEnsureCommanderDeploymentBoundaries("activate-toggle-order");
         }
 
         private void DeactivateCommanderDeploymentToggleOrder()
@@ -1587,6 +1609,7 @@ namespace CoopSpectator.UI
         private void OnBeforeCommanderDeploymentOrder()
         {
             TryActivateNativeCommanderDeploymentPlacement(MissionScreen);
+            TryEnsureCommanderDeploymentBoundaries("before-order");
         }
 
         private void ToggleCommanderDeploymentMissionInputs(bool isLocked)
@@ -1594,6 +1617,12 @@ namespace CoopSpectator.UI
             ScreenBase missionScreen = MissionScreen;
             if (missionScreen == null)
                 return;
+
+            if (_currentScreen == CoopSelectionScreen.CommanderDeployment)
+            {
+                TryApplyCommanderDeploymentFreeCameraScreenState(missionScreen);
+                return;
+            }
 
             TryInvokeInstanceMethod(missionScreen, "SetCameraLockState", isLocked);
             TrySetInstanceProperty(missionScreen, "LockCameraMovement", isLocked);
@@ -2077,6 +2106,8 @@ namespace CoopSpectator.UI
             try
             {
                 TrySetInstanceProperty(orderTroopPlacer, "SuspendTroopPlacer", false);
+                TryInvokeInstanceMethod(orderTroopPlacer, "RestrictOrdersToDeploymentBoundaries", true);
+                TryEnsureCommanderDeploymentBoundaries("native-placement-activate");
                 object orderFlag = TryGetInstancePropertyValue(orderTroopPlacer, "OrderFlag");
                 if (missionScreen != null && orderFlag != null)
                 {
@@ -2084,6 +2115,7 @@ namespace CoopSpectator.UI
                     TryInvokeInstanceMethod(missionScreen, "SetOrderFlagVisibility", true);
                 }
 
+                TryActivateCommanderDeploymentFreeCamera(missionScreen, "native-placement-activate");
                 return true;
             }
             catch (Exception ex)
@@ -2101,6 +2133,7 @@ namespace CoopSpectator.UI
 
             try
             {
+                TryInvokeInstanceMethod(orderTroopPlacer, "RestrictOrdersToDeploymentBoundaries", false);
                 TrySetInstanceProperty(orderTroopPlacer, "SuspendTroopPlacer", true);
                 if (missionScreen != null)
                     TryInvokeInstanceMethod(missionScreen, "SetOrderFlagVisibility", false);
@@ -2758,6 +2791,253 @@ namespace CoopSpectator.UI
             }
         }
 
+        private void TryTickCommanderDeploymentBoundaries(float dt)
+        {
+            if (_currentScreen != CoopSelectionScreen.CommanderDeployment)
+            {
+                _commanderDeploymentBoundaryRefreshTimer = 0f;
+                return;
+            }
+
+            _commanderDeploymentBoundaryRefreshTimer -= dt;
+            if (_commanderDeploymentBoundaryRefreshTimer > 0f)
+                return;
+
+            _commanderDeploymentBoundaryRefreshTimer = 0.5f;
+            TryEnsureCommanderDeploymentBoundaries("commander-deployment-boundary-tick");
+        }
+
+        private void TryEnsureCommanderDeploymentBoundaries(string source)
+        {
+            Mission mission = Mission;
+            Team team = mission?.PlayerTeam;
+            if (mission == null || team == null)
+                return;
+
+            CoopSiegeDeploymentBoundaryRuntime.TryEnsureDeploymentPlanBoundaries(
+                mission,
+                team,
+                source ?? "unknown");
+            CoopSiegeDeploymentBoundaryRuntime.TryEnsureVisibleDeploymentBoundaryMarkers(
+                mission,
+                MissionScreen,
+                team,
+                source ?? "unknown");
+
+            object orderTroopPlacer = ResolveNativeCommanderOrderTroopPlacer();
+            if (orderTroopPlacer != null)
+                TryInvokeInstanceMethod(orderTroopPlacer, "RestrictOrdersToDeploymentBoundaries", true);
+        }
+
+        private void TryTickCommanderDeploymentFreeCamera(float dt)
+        {
+            if (_currentScreen != CoopSelectionScreen.CommanderDeployment)
+            {
+                if (_commanderDeploymentFreeCameraActive || _commanderDeploymentFreeCamera != null)
+                    TryDeactivateCommanderDeploymentFreeCamera(MissionScreen, "commander-deployment-screen-left");
+                return;
+            }
+
+            ScreenBase missionScreen = MissionScreen;
+            if (missionScreen == null)
+                return;
+
+            if (!_commanderDeploymentFreeCameraActive &&
+                !TryActivateCommanderDeploymentFreeCamera(missionScreen, "commander-deployment-camera-tick"))
+            {
+                return;
+            }
+
+            Camera camera = _commanderDeploymentFreeCamera;
+            if (camera == null)
+                return;
+
+            TryApplyCommanderDeploymentFreeCameraScreenState(missionScreen);
+
+            float safeDt = Math.Max(0f, Math.Min(dt, 0.1f));
+            MatrixFrame frame = camera.Frame;
+            bool changed = false;
+
+            if (Input.IsKeyDown(InputKey.RightMouseButton))
+            {
+                float lookX = Input.GetMouseMoveX();
+                float lookY = Input.GetMouseMoveY();
+                object sceneInput = ResolveMissionSceneInput();
+                lookX += TryGetInputGameKeyAxis(sceneInput, "CameraAxisX") * 20f * safeDt;
+                lookY += TryGetInputGameKeyAxis(sceneInput, "CameraAxisY") * 20f * safeDt;
+
+                if (Math.Abs(lookX) > 0.001f || Math.Abs(lookY) > 0.001f)
+                {
+                    _commanderDeploymentFreeCameraYaw += lookX * CommanderDeploymentFreeCameraLookSensitivity;
+                    _commanderDeploymentFreeCameraPitch -= lookY * CommanderDeploymentFreeCameraLookSensitivity;
+                    _commanderDeploymentFreeCameraPitch = MBMath.ClampFloat(
+                        _commanderDeploymentFreeCameraPitch,
+                        CommanderDeploymentFreeCameraMinPitch,
+                        CommanderDeploymentFreeCameraMaxPitch);
+
+                    MatrixFrame rotatedFrame = MatrixFrame.Identity;
+                    rotatedFrame.origin = frame.origin;
+                    rotatedFrame.rotation.RotateAboutUp(_commanderDeploymentFreeCameraYaw);
+                    rotatedFrame.rotation.RotateAboutSide(_commanderDeploymentFreeCameraPitch);
+                    frame = rotatedFrame;
+                    changed = true;
+                }
+            }
+
+            object input = ResolveMissionSceneInput();
+            float moveX = TryGetInputGameKeyAxis(input, "MovementAxisX");
+            float moveY = TryGetInputGameKeyAxis(input, "MovementAxisY");
+            if (Input.IsKeyDown(InputKey.A))
+                moveX -= 1f;
+            if (Input.IsKeyDown(InputKey.D))
+                moveX += 1f;
+            if (Input.IsKeyDown(InputKey.W))
+                moveY += 1f;
+            if (Input.IsKeyDown(InputKey.S))
+                moveY -= 1f;
+
+            float moveZ = 0f;
+            if (Input.IsKeyDown(InputKey.Space) || Input.IsKeyDown(InputKey.E))
+                moveZ += 1f;
+            if (Input.IsKeyDown(InputKey.LeftControl) || Input.IsKeyDown(InputKey.RightControl) || Input.IsKeyDown(InputKey.Q))
+                moveZ -= 1f;
+
+            Vec3 movement = BuildCommanderDeploymentFreeCameraMovement(frame, moveX, moveY, moveZ);
+            if (movement.IsNonZero)
+            {
+                float moveAmount = movement.Normalize();
+                float speed = CommanderDeploymentFreeCameraMoveSpeed;
+                if (Input.IsKeyDown(InputKey.LeftShift) || Input.IsKeyDown(InputKey.RightShift))
+                    speed *= CommanderDeploymentFreeCameraFastMoveMultiplier;
+
+                frame.origin += movement * (speed * safeDt * Math.Min(1f, moveAmount));
+                changed = true;
+            }
+
+            if (changed)
+                camera.Frame = frame;
+        }
+
+        private bool TryActivateCommanderDeploymentFreeCamera(ScreenBase missionScreen, string source)
+        {
+            if (missionScreen == null)
+                return false;
+
+            Camera combatCamera = ResolveMissionScreenCombatCamera();
+            if (combatCamera == null)
+                return false;
+
+            try
+            {
+                if (_commanderDeploymentFreeCamera == null)
+                    _commanderDeploymentFreeCamera = Camera.CreateCamera();
+
+                if (!_commanderDeploymentFreeCameraActive)
+                {
+                    _commanderDeploymentFreeCamera.FillParametersFrom(combatCamera);
+                    _commanderDeploymentFreeCamera.Frame = combatCamera.Frame;
+                    MatrixFrame frame = _commanderDeploymentFreeCamera.Frame;
+                    _commanderDeploymentFreeCameraYaw = frame.rotation.f.RotationZ;
+                    _commanderDeploymentFreeCameraPitch = MBMath.ClampFloat(
+                        frame.rotation.f.RotationX,
+                        CommanderDeploymentFreeCameraMinPitch,
+                        CommanderDeploymentFreeCameraMaxPitch);
+                    TryResetMissionScreenCameraPreviewState(missionScreen);
+                    _commanderDeploymentFreeCameraActive = true;
+                }
+
+                TryApplyCommanderDeploymentFreeCameraScreenState(missionScreen);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander deployment free camera activation failed. " +
+                    "Source=" + (source ?? "unknown") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
+        }
+
+        private void TryApplyCommanderDeploymentFreeCameraScreenState(ScreenBase missionScreen)
+        {
+            if (missionScreen == null || _commanderDeploymentFreeCamera == null)
+                return;
+
+            TrySetInstanceProperty(missionScreen, "CustomCamera", _commanderDeploymentFreeCamera);
+            TrySetInstanceField(missionScreen, "AllowInputWithCustomCamera", true);
+            TryInvokeInstanceMethod(missionScreen, "SetCameraLockState", false);
+            TrySetInstanceProperty(missionScreen, "LockCameraMovement", false);
+            Camera combatCamera = ResolveMissionScreenCombatCamera();
+            combatCamera?.FillParametersFrom(_commanderDeploymentFreeCamera);
+            TryResetMissionScreenCameraPreviewState(missionScreen);
+        }
+
+        private void TryDeactivateCommanderDeploymentFreeCamera(ScreenBase missionScreen, string source)
+        {
+            if (!_commanderDeploymentFreeCameraActive && _commanderDeploymentFreeCamera == null)
+                return;
+
+            try
+            {
+                if (missionScreen != null)
+                {
+                    TrySetInstanceProperty(missionScreen, "CustomCamera", null);
+                    TrySetInstanceField(missionScreen, "AllowInputWithCustomCamera", false);
+                }
+
+                _commanderDeploymentFreeCamera?.ReleaseCamera();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander deployment free camera release failed. " +
+                    "Source=" + (source ?? "unknown") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+            finally
+            {
+                _commanderDeploymentFreeCamera = null;
+                _commanderDeploymentFreeCameraActive = false;
+                _commanderDeploymentFreeCameraYaw = 0f;
+                _commanderDeploymentFreeCameraPitch = 0f;
+            }
+        }
+
+        private object ResolveMissionSceneInput()
+        {
+            return TryGetInstancePropertyValue(TryGetInstancePropertyValue(MissionScreen, "SceneLayer"), "Input");
+        }
+
+        private static float TryGetInputGameKeyAxis(object inputContext, string axisName)
+        {
+            object value = TryInvokeInstanceMethodWithResult(inputContext, "GetGameKeyAxis", axisName);
+            return value is float floatValue ? floatValue : 0f;
+        }
+
+        private static Vec3 BuildCommanderDeploymentFreeCameraMovement(
+            MatrixFrame frame,
+            float moveX,
+            float moveY,
+            float moveZ)
+        {
+            Vec3 forward = frame.rotation.f;
+            forward.z = 0f;
+            if (forward.LengthSquared > 0.0001f)
+                forward.Normalize();
+            else
+                forward = Vec3.Forward;
+
+            Vec3 side = frame.rotation.s;
+            side.z = 0f;
+            if (side.LengthSquared > 0.0001f)
+                side.Normalize();
+            else
+                side = Vec3.Side;
+
+            return side * moveX + forward * moveY + Vec3.Up * moveZ;
+        }
+
         private void TryUpdateCommanderDeploymentOrderVmUnchecked()
         {
             if (_commanderDeploymentOrderVm == null)
@@ -3098,7 +3378,10 @@ namespace CoopSpectator.UI
                 if (missionScreen != null)
                 {
                     if (wasCommanderDeploymentInputMode)
+                    {
                         TryDeactivateNativeCommanderDeploymentPlacement(missionScreen);
+                        TryDeactivateCommanderDeploymentFreeCamera(missionScreen, "release-overlay-input");
+                    }
 
                     missionScreen.MouseVisible = false;
                     ApplyMissionScreenOverlayMode(missionScreen, isOverlayActive: false);
@@ -3158,6 +3441,11 @@ namespace CoopSpectator.UI
 
             if (hadCommanderDeploymentPresentation)
             {
+                CoopSiegeDeploymentBoundaryRuntime.TryRemoveVisibleDeploymentBoundaryMarkers(
+                    Mission,
+                    MissionScreen,
+                    "release-current-movie");
+                TryDeactivateCommanderDeploymentFreeCamera(MissionScreen, "release-current-movie");
                 TryDeactivateNativeCommanderDeploymentPlacement(MissionScreen);
                 ReleaseCommanderDeploymentOrderBridge();
                 ReleaseCommanderDeploymentOrderTroopPlacerCallback();
@@ -3170,6 +3458,7 @@ namespace CoopSpectator.UI
             _screenViewModel = null;
             _currentScreen = CoopSelectionScreen.None;
             _commanderDeploymentOrderOfBattleActive = false;
+            _commanderDeploymentBoundaryRefreshTimer = 0f;
             _lastAppliedRefreshKey = string.Empty;
             if (hadPresentation)
                 ClearCameraPreviewTarget("release-movie");
@@ -3589,8 +3878,8 @@ namespace CoopSpectator.UI
                 return;
 
             TryInvokeInstanceMethod(missionScreen, "SetDisplayDialog", false);
-            TryInvokeInstanceMethod(missionScreen, "SetCameraLockState", true);
-            TrySetInstanceProperty(missionScreen, "LockCameraMovement", true);
+            TryInvokeInstanceMethod(missionScreen, "SetCameraLockState", false);
+            TrySetInstanceProperty(missionScreen, "LockCameraMovement", false);
         }
 
         internal static void LogMissionScreenOverlayDiagnostics(ScreenBase missionScreen, string source)
