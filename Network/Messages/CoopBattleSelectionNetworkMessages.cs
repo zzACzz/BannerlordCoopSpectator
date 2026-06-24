@@ -195,6 +195,86 @@ namespace CoopSpectator.Network.Messages
         }
     }
 
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
+    public sealed class CoopCommanderDeploymentSiegeMachineSelectionMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer BattleSideCompressionInfo = new CompressionInfo.Integer(-1, 1, maximumValueGiven: true);
+
+        public CoopCommanderDeploymentSiegeMachineSelectionMessage(
+            BattleSideEnum requestedSide,
+            MissionObjectId deploymentPointId,
+            Vec3 deploymentPointPosition,
+            MissionObjectId siegeWeaponId,
+            string siegeWeaponTypeName,
+            bool clearSelection)
+        {
+            RequestedSide = requestedSide;
+            DeploymentPointId = deploymentPointId;
+            DeploymentPointPosition = deploymentPointPosition;
+            SiegeWeaponId = siegeWeaponId;
+            SiegeWeaponTypeName = string.IsNullOrWhiteSpace(siegeWeaponTypeName) ? string.Empty : siegeWeaponTypeName.Trim();
+            ClearSelection = clearSelection;
+        }
+
+        public CoopCommanderDeploymentSiegeMachineSelectionMessage()
+        {
+            RequestedSide = BattleSideEnum.None;
+            DeploymentPointId = MissionObjectId.Invalid;
+            DeploymentPointPosition = Vec3.Zero;
+            SiegeWeaponId = MissionObjectId.Invalid;
+            SiegeWeaponTypeName = string.Empty;
+            ClearSelection = false;
+        }
+
+        public BattleSideEnum RequestedSide { get; private set; }
+        public MissionObjectId DeploymentPointId { get; private set; }
+        public Vec3 DeploymentPointPosition { get; private set; }
+        public MissionObjectId SiegeWeaponId { get; private set; }
+        public string SiegeWeaponTypeName { get; private set; }
+        public bool ClearSelection { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool bufferReadValid = true;
+            RequestedSide = (BattleSideEnum)ReadIntFromPacket(BattleSideCompressionInfo, ref bufferReadValid);
+            DeploymentPointId = GameNetworkMessage.ReadMissionObjectIdFromPacket(ref bufferReadValid);
+            DeploymentPointPosition = GameNetworkMessage.ReadVec3FromPacket(
+                CompressionBasic.PositionCompressionInfo,
+                ref bufferReadValid);
+            SiegeWeaponId = GameNetworkMessage.ReadMissionObjectIdFromPacket(ref bufferReadValid);
+            SiegeWeaponTypeName = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
+            ClearSelection = ReadBoolFromPacket(ref bufferReadValid);
+            return bufferReadValid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket((int)RequestedSide, BattleSideCompressionInfo);
+            GameNetworkMessage.WriteMissionObjectIdToPacket(DeploymentPointId);
+            GameNetworkMessage.WriteVec3ToPacket(
+                DeploymentPointPosition,
+                CompressionBasic.PositionCompressionInfo);
+            GameNetworkMessage.WriteMissionObjectIdToPacket(SiegeWeaponId);
+            WriteStringToPacket(SiegeWeaponTypeName ?? string.Empty);
+            WriteBoolToPacket(ClearSelection);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter()
+        {
+            return MultiplayerMessageFilter.Mission;
+        }
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopCommanderDeploymentSiegeMachineSelection Side=" + RequestedSide +
+                " DeploymentPointId=" + DeploymentPointId +
+                " DeploymentPointPosition=" + DeploymentPointPosition +
+                " SiegeWeaponId=" + SiegeWeaponId +
+                " SiegeWeaponTypeName=" + (SiegeWeaponTypeName ?? string.Empty) +
+                " Clear=" + ClearSelection;
+        }
+    }
+
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
     public sealed class CoopBattlePayloadChunkMessage : GameNetworkMessage
     {

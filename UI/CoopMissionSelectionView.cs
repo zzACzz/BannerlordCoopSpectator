@@ -12,6 +12,8 @@ using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.InputSystem;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Missions;
+using TaleWorlds.MountAndBlade.Missions.Handlers;
 using TaleWorlds.MountAndBlade.View.VisualOrders.Orders;
 using TaleWorlds.MountAndBlade.View.VisualOrders.Orders.ToggleOrders;
 using TaleWorlds.MountAndBlade.View.VisualOrders.OrderSets;
@@ -34,6 +36,7 @@ namespace CoopSpectator.UI
         private const string ClassMovieName = "CoopClassLoadout";
         private const string CommanderDeploymentMovieName = "OrderOfBattle";
         private const string CommanderDeploymentOrderMovieName = "OrderRadial";
+        private const string CommanderSiegeMachineDeploymentMovieName = "Siege";
         private static readonly bool EnableManualSiegeCommanderDeployment = true;
         private const float RefreshIntervalSeconds = 0.15f;
         private const float InitialOverlayDelaySeconds = 0.75f;
@@ -58,9 +61,11 @@ namespace CoopSpectator.UI
         private GauntletLayer _gauntletLayer;
         private GauntletMovieIdentifier _movie;
         private GauntletMovieIdentifier _commanderDeploymentOrderMovie;
+        private GauntletMovieIdentifier _commanderSiegeMachineDeploymentMovie;
         private ViewModel _viewModel;
         private OrderOfBattleVM _commanderDeploymentViewModel;
         private MissionOrderVM _commanderDeploymentOrderVm;
+        private CoopSiegeMachineDeploymentVM _commanderSiegeMachineDeploymentVm;
         private SpriteCategory _commanderDeploymentOrderOfBattleSpriteCategory;
         private SpriteCategory _commanderDeploymentOrderSpriteCategory;
         private object _commanderDeploymentOrderTroopPlacer;
@@ -458,8 +463,13 @@ namespace CoopSpectator.UI
             if (snapshot == null || !snapshot.CanShowOverlay || _spectatorOverlayHidden)
                 return CoopSelectionScreen.None;
 
-            if (EnableManualSiegeCommanderDeployment && IsNativeDeploymentUiActive())
+            if (EnableManualSiegeCommanderDeployment &&
+                IsNativeDeploymentUiActive() &&
+                _requestedScreen != CoopSelectionScreen.CommanderDeployment &&
+                _currentScreen != CoopSelectionScreen.CommanderDeployment)
+            {
                 return CoopSelectionScreen.None;
+            }
 
             if (ShouldKeepOverlaySuppressedWhileAwaitingLocalSpawn(snapshot))
                 return CoopSelectionScreen.None;
@@ -613,6 +623,7 @@ namespace CoopSpectator.UI
                     _screenViewModel = null;
                     _movie = _gauntletLayer.LoadMovie(CommanderDeploymentMovieName, commanderVm);
                     TryEnsureCommanderDeploymentOrderMovie();
+                    TryEnsureCommanderSiegeMachineDeploymentMovie(snapshot);
                     _currentScreen = desiredScreen;
                     _lastAppliedRefreshKey = GetRefreshKey(snapshot, desiredScreen);
                     ModLogger.Info("CoopMissionSelectionView: loaded native OrderOfBattle commander deployment shell.");
@@ -650,6 +661,19 @@ namespace CoopSpectator.UI
                 throw new InvalidOperationException("native-order-of-battle-prepare-failed " + prepareDiagnostics);
             }
 
+            string siegeUiDiagnostics = "coop-siege-machine-overlay";
+            BattleScenarioContextMessage scenarioContext =
+                snapshot?.BattleState?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetScenarioContext();
+            BattleSideEnum side = snapshot?.EffectiveSide ?? mission.PlayerTeam?.Side ?? BattleSideEnum.None;
+            if (side == BattleSideEnum.None)
+                side = _selectedSideOverride;
+            ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureCommanderDeploymentUiContract(
+                mission,
+                scenarioContext,
+                side,
+                out siegeUiDiagnostics);
+
             Camera missionCamera = ResolveMissionScreenCombatCamera();
             if (missionCamera == null)
                 throw new InvalidOperationException("combat-camera-null");
@@ -675,7 +699,8 @@ namespace CoopSpectator.UI
 
             ModLogger.Info(
                 "CoopMissionSelectionView: prepared native OrderOfBattle commander deployment. " +
-                "Diagnostics={" + (prepareDiagnostics ?? string.Empty) + "}");
+                "Diagnostics={" + (prepareDiagnostics ?? string.Empty) + "} " +
+                "SiegeUi={" + (siegeUiDiagnostics ?? string.Empty) + "}");
             return commanderVm;
         }
 
@@ -949,6 +974,86 @@ namespace CoopSpectator.UI
             catch (Exception ex)
             {
                 ModLogger.Info("CoopMissionSelectionView: native OrderOfBattle diagnostics failed: " + ex.Message);
+            }
+        }
+
+        private static void LogCommanderDeploymentSiegeMachineDiagnostics(
+            MissionOrderVM orderVm,
+            Mission mission,
+            string source,
+            string detail)
+        {
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics)
+                return;
+
+            try
+            {
+                Team playerTeam = mission?.PlayerTeam;
+                MissionOrderDeploymentControllerVM deploymentController = orderVm?.DeploymentController;
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander siege deployment diagnostics. " +
+                    "Source=" + (source ?? "unknown") +
+                    " Team=" + (playerTeam == null ? "<null>" : playerTeam.Side + "#" + playerTeam.TeamIndex) +
+                    " HasSiegeEnginesLogic=" + (mission?.GetMissionBehavior<MissionSiegeEnginesLogic>() != null) +
+                    " HasSiegeDeploymentHandler=" + (mission?.GetMissionBehavior<SiegeDeploymentHandler>() != null) +
+                    " HasSiegeDeploymentController=" + (mission?.GetMissionBehavior<SiegeDeploymentMissionController>() != null) +
+                    " SiegeMachineList=" + (deploymentController?.SiegeMachineList?.Count ?? -1) +
+                    " DeploymentTargets=" + (deploymentController?.DeploymentTargets?.Count ?? -1) +
+                    " SiegeDeploymentList=" + (deploymentController?.SiegeDeploymentList?.Count ?? -1) +
+                    " Points={" + BuildCommanderDeploymentPointSummary(mission, playerTeam) + "} " +
+                    " Detail={" + (detail ?? string.Empty) + "}");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander siege deployment diagnostics failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private static string BuildCommanderDeploymentPointSummary(Mission mission, Team team)
+        {
+            if (mission?.ActiveMissionObjects == null)
+                return "mission-null";
+
+            try
+            {
+                BattleSideEnum side = team?.Side ?? BattleSideEnum.None;
+                int total = 0;
+                int forSide = 0;
+                int deployableWeaponCount = 0;
+                int deployedCount = 0;
+                foreach (DeploymentPoint deploymentPoint in mission.ActiveMissionObjects.FindAllWithType<DeploymentPoint>())
+                {
+                    if (deploymentPoint == null || deploymentPoint.IsDisabled)
+                        continue;
+
+                    total++;
+                    if (side != BattleSideEnum.None && deploymentPoint.Side != side)
+                        continue;
+
+                    forSide++;
+                    try
+                    {
+                        deployableWeaponCount += deploymentPoint.DeployableWeapons?.Count() ?? 0;
+                    }
+                    catch
+                    {
+                    }
+
+                    if (deploymentPoint.IsDeployed)
+                        deployedCount++;
+                }
+
+                return "Total=" + total +
+                       " Side=" + side +
+                       " SidePoints=" + forSide +
+                       " DeployableWeapons=" + deployableWeaponCount +
+                       " Deployed=" + deployedCount;
+            }
+            catch (Exception ex)
+            {
+                return "failed:" + ex.GetType().Name;
             }
         }
 
@@ -1367,6 +1472,7 @@ namespace CoopSpectator.UI
 
             try
             {
+                string siegeUiDiagnostics = "coop-siege-machine-overlay";
                 TryEnsureCommanderDeploymentVisualOrderProviderRegistered();
                 _commanderDeploymentOrderVm = new MissionOrderVM(orderController, isDeployment: true, isMultiplayer: false);
                 _commanderDeploymentOrderVm.IsDeployment = true;
@@ -1380,6 +1486,11 @@ namespace CoopSpectator.UI
                 _commanderDeploymentOrderVm.UpdateCanUseShortcuts(true);
                 _commanderDeploymentOrderVmInitialized = true;
                 TryEnsureCommanderDeploymentOrderMovie();
+                LogCommanderDeploymentSiegeMachineDiagnostics(
+                    _commanderDeploymentOrderVm,
+                    mission,
+                    "create-mission-order-bridge",
+                    siegeUiDiagnostics);
                 ModLogger.Info("CoopMissionSelectionView: prepared safe commander MissionOrderVM bridge.");
                 return true;
             }
@@ -1485,6 +1596,93 @@ namespace CoopSpectator.UI
             finally
             {
                 _commanderDeploymentOrderMovie = null;
+            }
+        }
+
+        private bool TryEnsureCommanderSiegeMachineDeploymentMovie(CoopSelectionUiSnapshot snapshot)
+        {
+            if (_commanderSiegeMachineDeploymentMovie != null)
+                return true;
+
+            Mission mission = Mission;
+            Camera missionCamera = ResolveMissionScreenCombatCamera();
+            BattleSideEnum side = snapshot?.EffectiveSide ?? mission?.PlayerTeam?.Side ?? BattleSideEnum.None;
+            if (_gauntletLayer == null || mission == null || missionCamera == null || side == BattleSideEnum.None)
+                return false;
+
+            try
+            {
+                BattleScenarioContextMessage scenarioContext =
+                    snapshot?.BattleState?.ScenarioContext ??
+                    BattleSnapshotRuntimeState.GetScenarioContext();
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureCommanderDeploymentUiContract(
+                    mission,
+                    scenarioContext,
+                    side,
+                    out string _);
+
+                _commanderSiegeMachineDeploymentVm = new CoopSiegeMachineDeploymentVM(mission, side, missionCamera);
+                if (!_commanderSiegeMachineDeploymentVm.HasDeploymentTargets)
+                {
+                    _commanderSiegeMachineDeploymentVm.OnFinalize();
+                    _commanderSiegeMachineDeploymentVm = null;
+                    ModLogger.Info(
+                        "CoopMissionSelectionView: commander siege machine deployment overlay skipped; no deployment targets.");
+                    return false;
+                }
+
+                _commanderSiegeMachineDeploymentMovie = _gauntletLayer.LoadMovie(
+                    CommanderSiegeMachineDeploymentMovieName,
+                    _commanderSiegeMachineDeploymentVm);
+                ModLogger.Info("CoopMissionSelectionView: loaded coop commander siege machine deployment overlay.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: failed to load coop commander siege machine deployment overlay: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                ReleaseCommanderSiegeMachineDeploymentMovie();
+                return false;
+            }
+        }
+
+        private void ReleaseCommanderSiegeMachineDeploymentMovie()
+        {
+            if (_commanderSiegeMachineDeploymentMovie != null)
+            {
+                try
+                {
+                    _gauntletLayer?.ReleaseMovie(_commanderSiegeMachineDeploymentMovie);
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionSelectionView: coop commander siege machine deployment movie release failed: " +
+                        ex.Message);
+                }
+                finally
+                {
+                    _commanderSiegeMachineDeploymentMovie = null;
+                }
+            }
+
+            if (_commanderSiegeMachineDeploymentVm != null)
+            {
+                try
+                {
+                    _commanderSiegeMachineDeploymentVm.OnFinalize();
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionSelectionView: coop commander siege machine deployment VM finalize failed: " +
+                        ex.Message);
+                }
+                finally
+                {
+                    _commanderSiegeMachineDeploymentVm = null;
+                }
             }
         }
 
@@ -2782,12 +2980,14 @@ namespace CoopSpectator.UI
                 _commanderDeploymentViewModel.Tick();
                 TryUpdateCommanderDeploymentOrderVmUnchecked();
                 TryTickCommanderDeploymentOrderHotkeys();
+                _commanderSiegeMachineDeploymentVm?.Tick(ResolveMissionScreenCombatCamera());
             }
             catch (Exception ex)
             {
                 ModLogger.Info("CoopMissionSelectionView: native OrderOfBattle tick failed: " + ex.Message);
                 _commanderDeploymentViewModel = null;
                 ReleaseCommanderDeploymentOrderBridge();
+                ReleaseCommanderSiegeMachineDeploymentMovie();
             }
         }
 
@@ -3430,6 +3630,8 @@ namespace CoopSpectator.UI
                 _currentScreen == CoopSelectionScreen.CommanderDeployment ||
                 _commanderDeploymentViewModel != null ||
                 _commanderDeploymentOrderVm != null ||
+                _commanderSiegeMachineDeploymentMovie != null ||
+                _commanderSiegeMachineDeploymentVm != null ||
                 _commanderDeploymentOrderTroopPlacer != null ||
                 _commanderDeploymentOrderOfBattleSpriteCategory != null ||
                 _commanderDeploymentOrderSpriteCategory != null;
@@ -3447,6 +3649,7 @@ namespace CoopSpectator.UI
                     "release-current-movie");
                 TryDeactivateCommanderDeploymentFreeCamera(MissionScreen, "release-current-movie");
                 TryDeactivateNativeCommanderDeploymentPlacement(MissionScreen);
+                ReleaseCommanderSiegeMachineDeploymentMovie();
                 ReleaseCommanderDeploymentOrderBridge();
                 ReleaseCommanderDeploymentOrderTroopPlacerCallback();
                 ReleaseCommanderDeploymentSpriteCategory();

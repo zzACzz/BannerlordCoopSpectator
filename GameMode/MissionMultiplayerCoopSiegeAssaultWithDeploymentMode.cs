@@ -395,7 +395,7 @@ namespace CoopSpectator.GameMode
             AddIfMissing(
                 list,
                 mission,
-                () => new SiegeDeploymentHandler(isPlayerAttacker),
+                () => ExactCampaignSiegeAssaultWithDeploymentRuntime.CreateSiegeDeploymentHandler(isPlayerAttacker),
                 "SiegeDeploymentHandler",
                 required: true);
             AddIfMissing(
@@ -425,7 +425,7 @@ namespace CoopSpectator.GameMode
             AddIfMissing(
                 list,
                 mission,
-                () => new SiegeDeploymentHandler(isPlayerAttacker),
+                () => ExactCampaignSiegeAssaultWithDeploymentRuntime.CreateSiegeDeploymentHandler(isPlayerAttacker),
                 "SiegeDeploymentHandler",
                 required: true);
 
@@ -563,8 +563,7 @@ namespace CoopSpectator.GameMode
             for (int i = 0; i < mission.MissionBehaviors.Count; i++)
             {
                 MissionBehavior behavior = mission.MissionBehaviors[i];
-                if (behavior != null &&
-                    string.Equals(behavior.GetType().Name, shortTypeName, StringComparison.Ordinal))
+                if (MissionBehaviorHelpers.IsBehaviorTypeOrBaseType(behavior, shortTypeName))
                 {
                     return behavior;
                 }

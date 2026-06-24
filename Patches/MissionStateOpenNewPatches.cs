@@ -428,7 +428,7 @@ namespace CoopSpectator.Patches
             {
                 addedSiegeDeploymentHandler = TryAddBehaviorIfMissing(
                     list,
-                    () => new SiegeDeploymentHandler(isPlayerAttacker),
+                    () => ExactCampaignSiegeAssaultWithDeploymentRuntime.CreateSiegeDeploymentHandler(isPlayerAttacker),
                     new[] { "SiegeDeploymentHandler" },
                     "MissionStateOpenNewPatches: wrapped Battle client injected SiegeDeploymentHandler for exact siege assault runtime.",
                     "MissionStateOpenNewPatches: wrapped Battle client already had SiegeDeploymentHandler for exact siege assault runtime.");
@@ -540,9 +540,11 @@ namespace CoopSpectator.Patches
                 if (behavior == null)
                     continue;
 
-                string typeName = behavior.GetType().Name ?? string.Empty;
-                if (expected.Contains(typeName))
-                    return true;
+                foreach (string expectedName in expected)
+                {
+                    if (MissionBehaviorHelpers.IsBehaviorTypeOrBaseType(behavior, expectedName))
+                        return true;
+                }
             }
 
             return false;

@@ -118,13 +118,27 @@ namespace CoopSpectator.GameMode
             if (list == null || string.IsNullOrEmpty(typeShortName)) return false;
             for (int i = 0; i < list.Count; i++)
             {
-                if (list[i] != null && list[i].GetType().Name == typeShortName)
+                if (IsBehaviorTypeOrBaseType(list[i], typeShortName))
                     return true;
             }
             return false;
         }
 
         /// <summary>Створює behavior за повним ім'ям типу з збірки Multiplayer. Повертає null і логує, якщо тип не знайдено або створення не вдалося.</summary>
+        public static bool IsBehaviorTypeOrBaseType(MissionBehavior behavior, string typeShortName)
+        {
+            if (behavior == null || string.IsNullOrEmpty(typeShortName))
+                return false;
+
+            for (Type type = behavior.GetType(); type != null; type = type.BaseType)
+            {
+                if (type.Name == typeShortName)
+                    return true;
+            }
+
+            return false;
+        }
+
         public static MissionBehavior TryCreateBehavior(string fullTypeName)
         {
             if (string.IsNullOrEmpty(fullTypeName)) return null;

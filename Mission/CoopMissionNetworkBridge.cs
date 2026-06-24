@@ -15,7 +15,10 @@ using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Missions;
+using TaleWorlds.MountAndBlade.Missions.Handlers;
 using TaleWorlds.MountAndBlade.Network.Messages;
+using TaleWorlds.MountAndBlade.Objects.Siege;
 #if !COOPSPECTATOR_DEDICATED
 using TaleWorlds.MountAndBlade.View;
 using TaleWorlds.MountAndBlade.View.MissionViews;
@@ -125,6 +128,109 @@ namespace CoopSpectator.MissionBehaviors
                     " Error=" + ex.Message);
                 return false;
             }
+        }
+
+        public static bool TrySyncCommanderDeploymentSiegeMachineSelection(
+            BattleSideEnum side,
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon,
+            bool clearSelection,
+            string source)
+        {
+            if (!GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive ||
+                side == BattleSideEnum.None ||
+                deploymentPoint == null ||
+                (!clearSelection && siegeWeapon == null))
+            {
+                return false;
+            }
+
+            try
+            {
+                Vec3 deploymentPointPosition = ResolveCommanderDeploymentPointPosition(deploymentPoint);
+                string siegeWeaponTypeName = clearSelection
+                    ? string.Empty
+                    : ResolveCommanderDeploymentSiegeWeaponTypeName(siegeWeapon);
+                MissionObjectId siegeWeaponId = clearSelection
+                    ? MissionObjectId.Invalid
+                    : siegeWeapon.Id;
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(new CoopCommanderDeploymentSiegeMachineSelectionMessage(
+                    side,
+                    deploymentPoint.Id,
+                    deploymentPointPosition,
+                    siegeWeaponId,
+                    siegeWeaponTypeName,
+                    clearSelection));
+                GameNetwork.EndModuleEventAsClient();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: commander deployment siege machine sync send failed. " +
+                    "Side=" + side +
+                    " DeploymentPoint=" + FormatCommanderDeploymentPointForClientLog(deploymentPoint) +
+                    " SiegeWeaponId=" + (siegeWeapon == null ? MissionObjectId.Invalid.ToString() : siegeWeapon.Id.ToString()) +
+                    " SiegeWeaponType=" + ResolveCommanderDeploymentSiegeWeaponTypeName(siegeWeapon) +
+                    " Clear=" + clearSelection +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+                return false;
+            }
+        }
+
+        private static Vec3 ResolveCommanderDeploymentPointPosition(DeploymentPoint deploymentPoint)
+        {
+            if (deploymentPoint == null)
+                return Vec3.Zero;
+
+            try
+            {
+                return deploymentPoint.GetDeploymentOrigin();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                return deploymentPoint.GameEntity.GlobalPosition;
+            }
+            catch
+            {
+                return Vec3.Zero;
+            }
+        }
+
+        private static string ResolveCommanderDeploymentSiegeWeaponTypeName(SiegeWeapon siegeWeapon)
+        {
+            if (siegeWeapon == null)
+                return string.Empty;
+
+            try
+            {
+                Type weaponType = MissionSiegeWeaponsController.GetWeaponType(siegeWeapon);
+                if (weaponType != null)
+                    return weaponType.FullName ?? weaponType.Name;
+            }
+            catch
+            {
+            }
+
+            return siegeWeapon.GetType().FullName ?? siegeWeapon.GetType().Name;
+        }
+
+        private static string FormatCommanderDeploymentPointForClientLog(DeploymentPoint deploymentPoint)
+        {
+            if (deploymentPoint == null)
+                return "<null>";
+
+            Vec3 position = ResolveCommanderDeploymentPointPosition(deploymentPoint);
+            return "Id=" + deploymentPoint.Id +
+                   "/Side=" + deploymentPoint.Side +
+                   "/Position=" + position;
         }
 
         public static bool TrySelectSpectator(string source)
@@ -1488,6 +1594,28 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly TimeSpan BattleSnapshotAssemblyIdleTimeout = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan BattleSnapshotBootstrapRequestRetryDelay = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan BattleReconnectFinalizeReadyAckRetryDelay = TimeSpan.FromMilliseconds(900);
+        private static readonly FieldInfo CommanderDeploymentPointWeaponsField =
+            typeof(DeploymentPoint).GetField("_weapons", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo CommanderDeploymentPointOnDeploymentStateChangedField =
+            typeof(DeploymentPoint).GetField(
+                "OnDeploymentStateChanged",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly MethodInfo CommanderDeploymentPointDetermineTypeMethod =
+            typeof(DeploymentPoint).GetMethod("DetermineDeploymentPointType", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo CommanderDeploymentSiegeControllerWeaponsField =
+            typeof(MissionSiegeWeaponsController).GetField("_weapons", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo CommanderDeploymentSiegeControllerUndeployedWeaponsField =
+            typeof(MissionSiegeWeaponsController).GetField("_undeployedWeapons", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo CommanderDeploymentSiegeControllerDeployedWeaponsField =
+            typeof(MissionSiegeWeaponsController).GetField("_deployedWeapons", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo CommanderDeploymentSiegeWeaponRemoveOnDeployEntitiesField =
+            typeof(SiegeWeapon).GetField("_removeOnDeployEntities", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo CommanderDeploymentSiegeWeaponAddOnDeployEntitiesField =
+            typeof(SiegeWeapon).GetField("_addOnDeployEntities", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo CommanderDeploymentSiegeWeaponRemoveOnDeployTagField =
+            typeof(SiegeWeapon).GetField("RemoveOnDeployTag", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo CommanderDeploymentSiegeWeaponAddOnDeployTagField =
+            typeof(SiegeWeapon).GetField("AddOnDeployTag", BindingFlags.Instance | BindingFlags.NonPublic);
         private const int BattleSnapshotInitialWindowChunks = 4;
         private const int BattleSnapshotMaxInflightChunksPerPeer = 8;
         private const int BattleSnapshotRangeAckEveryNewChunks = 4;
@@ -1569,6 +1697,7 @@ namespace CoopSpectator.MissionBehaviors
             {
                 registerer.RegisterBaseHandler<CoopBattleSelectionClientRequestMessage>(HandleClientSelectionRequest);
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentFormationAssignmentsMessage>(HandleClientCommanderDeploymentFormationAssignments);
+                registerer.RegisterBaseHandler<CoopCommanderDeploymentSiegeMachineSelectionMessage>(HandleClientCommanderDeploymentSiegeMachineSelection);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotChunkRequestMessage>(HandleClientBattleSnapshotChunkRequest);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotRangeAckMessage>(HandleClientBattleSnapshotRangeAck);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotCompleteAckMessage>(HandleClientBattleSnapshotCompleteAck);
@@ -1948,6 +2077,2174 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return true;
+        }
+
+        private bool HandleClientCommanderDeploymentSiegeMachineSelection(NetworkCommunicator peer, GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopCommanderDeploymentSiegeMachineSelectionMessage message))
+                return false;
+
+            try
+            {
+                bool applied = TryApplyCommanderDeploymentSiegeMachineSelection(peer, message);
+                LogCommanderDeploymentSiegeMachineDiagnostics(
+                    applied ? "applied" : "ignored",
+                    peer,
+                    message,
+                    null,
+                    string.Empty);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: commander deployment siege machine sync failed. " +
+                    "Peer=" + (peer?.UserName ?? "null") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+
+            return true;
+        }
+
+        private bool TryApplyCommanderDeploymentSiegeMachineSelection(
+            NetworkCommunicator peer,
+            CoopCommanderDeploymentSiegeMachineSelectionMessage message)
+        {
+            if (!GameNetwork.IsServer || Mission == null || peer == null || message == null)
+            {
+                LogCommanderDeploymentSiegeMachineDiagnostics(
+                    "skip-context",
+                    peer,
+                    message,
+                    null,
+                    "IsServer=" + GameNetwork.IsServer);
+                return false;
+            }
+
+            if (!CoopSiegeDeploymentBoundaryRuntime.IsCoopSiegeDeploymentMission(Mission))
+            {
+                LogCommanderDeploymentSiegeMachineDiagnostics(
+                    "skip-not-coop-siege-deployment",
+                    peer,
+                    message,
+                    null,
+                    string.Empty);
+                return false;
+            }
+
+            if (!CoopMissionSpawnLogic.TryResolveCommanderDeploymentOrderLease(
+                    peer,
+                    out Team team,
+                    out _,
+                    out _))
+            {
+                LogCommanderDeploymentSiegeMachineDiagnostics(
+                    "skip-no-order-lease",
+                    peer,
+                    message,
+                    null,
+                    string.Empty);
+                return false;
+            }
+
+            if (team == null ||
+                team.Side == BattleSideEnum.None ||
+                (message.RequestedSide != BattleSideEnum.None && team.Side != message.RequestedSide))
+            {
+                LogCommanderDeploymentSiegeMachineDiagnostics(
+                    "skip-side-mismatch",
+                    peer,
+                    message,
+                    team,
+                    "TeamSide=" + (team?.Side.ToString() ?? "<null>"));
+                return false;
+            }
+
+            DeploymentPoint deploymentPoint = ResolveCommanderDeploymentPointById(
+                message.DeploymentPointId,
+                team.Side,
+                out string deploymentPointIdResolutionDiagnostics);
+            string deploymentPointResolutionDiagnostics = "IdResolution={" + deploymentPointIdResolutionDiagnostics + "}";
+            if (deploymentPoint == null)
+            {
+                deploymentPoint = ResolveCommanderDeploymentPoint(
+                    team.Side,
+                    message.DeploymentPointPosition,
+                    message.SiegeWeaponTypeName,
+                    out string fallbackDeploymentPointResolutionDiagnostics);
+                deploymentPointResolutionDiagnostics +=
+                    " FallbackResolution={" + fallbackDeploymentPointResolutionDiagnostics + "}";
+            }
+
+            if (deploymentPoint == null ||
+                deploymentPoint.Side != team.Side)
+            {
+                LogCommanderDeploymentSiegeMachineDiagnostics(
+                    "skip-invalid-deployment-point",
+                    peer,
+                    message,
+                    team,
+                    "Resolved=" + FormatDeploymentPoint(deploymentPoint) +
+                    " Resolution=" + deploymentPointResolutionDiagnostics);
+                return false;
+            }
+
+            SiegeWeapon siegeWeapon = null;
+            Type siegeWeaponType = null;
+            DeploymentPoint deploymentPointToDisbandForMove = null;
+            string siegeWeaponResolutionDiagnostics = string.Empty;
+            string siegeWeaponCountDiagnostics = string.Empty;
+            string moveSourceDiagnostics = string.Empty;
+            string moveSourcePreparationDiagnostics = string.Empty;
+            string siegeControllerDiagnostics = string.Empty;
+            string serverPreparationDiagnostics = TryPrepareCommanderDeploymentPointForServer(
+                deploymentPoint,
+                null,
+                enableObjects: false);
+            if (!message.ClearSelection)
+            {
+                siegeWeapon = ResolveCommanderDeploymentSiegeWeaponById(
+                    deploymentPoint,
+                    team.Side,
+                    message.SiegeWeaponId,
+                    message.SiegeWeaponTypeName,
+                    out string siegeWeaponIdResolutionDiagnostics);
+                siegeWeaponResolutionDiagnostics =
+                    "IdResolution={" + siegeWeaponIdResolutionDiagnostics + "}";
+                if (siegeWeapon == null)
+                {
+                    siegeWeapon = ResolveCommanderDeploymentSiegeWeapon(
+                        deploymentPoint,
+                        team.Side,
+                        message.SiegeWeaponTypeName,
+                        allowDisabled: true);
+                    siegeWeaponResolutionDiagnostics += " FallbackByType=" + FormatSiegeWeapon(siegeWeapon);
+                }
+
+                if (!IsValidCommanderDeploymentSiegeWeapon(
+                        deploymentPoint,
+                        siegeWeapon,
+                        team.Side,
+                        allowDisabled: true,
+                        out siegeWeaponType,
+                        out string invalidSiegeWeaponReason))
+                {
+                    LogCommanderDeploymentSiegeMachineDiagnostics(
+                        "skip-invalid-siege-weapon",
+                        peer,
+                        message,
+                        team,
+                        "DeploymentPoint=" + FormatDeploymentPoint(deploymentPoint) +
+                        " SiegeWeapon=" + FormatSiegeWeapon(siegeWeapon) +
+                        " SiegeWeaponResolution=" + siegeWeaponResolutionDiagnostics +
+                        " ServerPreparation=" + serverPreparationDiagnostics +
+                        " Reason=" + (invalidSiegeWeaponReason ?? string.Empty));
+                    return false;
+                }
+
+                serverPreparationDiagnostics = TryPrepareCommanderDeploymentPointForServer(
+                    deploymentPoint,
+                    siegeWeapon,
+                    enableObjects: true);
+
+                int maxCount = GetCommanderDeploymentMaxSiegeWeaponCount(team.Side, siegeWeaponType);
+                if (maxCount <= 0)
+                {
+                    LogCommanderDeploymentSiegeMachineDiagnostics(
+                        "skip-campaign-siege-weapon-not-allowed",
+                        peer,
+                        message,
+                        team,
+                        "WeaponType=" + (siegeWeaponType?.Name ?? "<null>") +
+                        " MaxCount=" + maxCount);
+                    return false;
+                }
+
+                if (!ReferenceEquals(deploymentPoint.DeployedWeapon, siegeWeapon))
+                {
+                    int remainingCount = GetCommanderDeploymentRemainingSiegeWeaponCount(
+                        team.Side,
+                        siegeWeaponType,
+                        deploymentPoint,
+                        maxCount,
+                        out string remainingCountDiagnostics);
+                    siegeWeaponCountDiagnostics =
+                        "MaxCount=" + maxCount +
+                        " RemainingCount=" + remainingCount +
+                        " RemainingDiagnostics={" + remainingCountDiagnostics + "}";
+                    if (remainingCount <= 0)
+                    {
+                        deploymentPointToDisbandForMove = FindCommanderDeploymentPointToDisbandForMove(
+                            team.Side,
+                            siegeWeaponType,
+                            deploymentPoint,
+                            out moveSourceDiagnostics);
+                        if (deploymentPointToDisbandForMove == null)
+                        {
+                            LogCommanderDeploymentSiegeMachineDiagnostics(
+                                "skip-no-remaining-count",
+                                peer,
+                                message,
+                                team,
+                                "WeaponType=" + (siegeWeaponType?.Name ?? "<null>") +
+                                " SiegeWeaponCount=" + siegeWeaponCountDiagnostics +
+                                " MoveSourceResolution={" + moveSourceDiagnostics + "}");
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            if (message.ClearSelection)
+            {
+                siegeWeaponType = null;
+            }
+            else if (siegeWeaponType == null &&
+                     !TryResolveCommanderDeploymentSiegeWeaponType(siegeWeapon, out siegeWeaponType))
+            {
+                LogCommanderDeploymentSiegeMachineDiagnostics(
+                    "skip-unresolved-siege-weapon-type",
+                    peer,
+                    message,
+                    team,
+                    "SiegeWeapon=" + FormatSiegeWeapon(siegeWeapon));
+                return false;
+            }
+
+            SiegeDeploymentHandler siegeDeploymentHandler = Mission.GetMissionBehavior<SiegeDeploymentHandler>();
+            string applyStep = "start";
+            try
+            {
+                if (!message.ClearSelection &&
+                    siegeWeapon != null)
+                {
+                    applyStep = "pre-controlled-apply";
+                    siegeControllerDiagnostics = BuildCommanderDeploymentSiegeControllerDiagnostics(
+                        team.Side,
+                        deploymentPoint,
+                        siegeWeapon);
+                    LogCommanderDeploymentSiegeMachineDiagnostics(
+                        "pre-deploy-controller-state",
+                        peer,
+                        message,
+                        team,
+                        "DeploymentPoint=" + FormatDeploymentPoint(deploymentPoint) +
+                        " SiegeWeapon=" + FormatSiegeWeapon(siegeWeapon) +
+                        " SiegeController={" + siegeControllerDiagnostics + "}");
+                }
+
+                applyStep = "controlled-siege-machine-apply";
+                if (!CoopSiegeMachineDeploymentController.TryApplySelection(
+                        Mission,
+                        team,
+                        deploymentPoint,
+                        siegeWeapon,
+                        deploymentPointToDisbandForMove,
+                        message.ClearSelection,
+                        siegeDeploymentHandler,
+                        IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled(),
+                        out string controlledApplyDiagnostics))
+                {
+                    throw new InvalidOperationException(
+                        "commander deployment controlled siege machine apply failed. " + controlledApplyDiagnostics);
+                }
+
+                siegeControllerDiagnostics = AppendCommanderDeploymentDiagnostics(
+                    siegeControllerDiagnostics,
+                    "ControlledApply",
+                    controlledApplyDiagnostics);
+                applyStep = "controlled-siege-machine-apply-complete";
+                LogCommanderDeploymentSiegeMachineDiagnostics(
+                    "applied-detail",
+                    peer,
+                    message,
+                    team,
+                    "DeploymentPoint=" + FormatDeploymentPoint(deploymentPoint) +
+                    " SiegeWeapon=" + FormatSiegeWeapon(siegeWeapon) +
+                    " DisbandedForMove=" + FormatDeploymentPoint(deploymentPointToDisbandForMove) +
+                    " SiegeWeaponResolution=" + siegeWeaponResolutionDiagnostics +
+                    " SiegeWeaponCount=" + siegeWeaponCountDiagnostics +
+                    " MoveSourceResolution={" + moveSourceDiagnostics + "}" +
+                    " MoveSourcePreparation={" + moveSourcePreparationDiagnostics + "}" +
+                    " ServerPreparation=" + serverPreparationDiagnostics +
+                    " Resolution=" + deploymentPointResolutionDiagnostics +
+                    " SiegeController={" + siegeControllerDiagnostics + "}" +
+                    " ApplyStep=" + applyStep);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogCommanderDeploymentSiegeMachineDiagnostics(
+                    "apply-failed",
+                    peer,
+                    message,
+                    team,
+                    ex.GetType().Name + ":" + ex.Message +
+                    " ApplyStep=" + applyStep +
+                    " DeploymentPoint=" + FormatDeploymentPoint(deploymentPoint) +
+                    " SiegeWeapon=" + FormatSiegeWeapon(siegeWeapon) +
+                    " DisbandedForMove=" + FormatDeploymentPoint(deploymentPointToDisbandForMove) +
+                    " SiegeWeaponResolution=" + siegeWeaponResolutionDiagnostics +
+                    " SiegeWeaponCount=" + siegeWeaponCountDiagnostics +
+                    " MoveSourceResolution={" + moveSourceDiagnostics + "}" +
+                    " MoveSourcePreparation={" + moveSourcePreparationDiagnostics + "}" +
+                    " ServerPreparation=" + serverPreparationDiagnostics +
+                    " Resolution=" + deploymentPointResolutionDiagnostics +
+                    " SiegeController={" + siegeControllerDiagnostics + "}");
+                return false;
+            }
+        }
+
+        private static T ResolveMissionObject<T>(MissionObjectId missionObjectId)
+            where T : MissionObject
+        {
+            if (missionObjectId == MissionObjectId.Invalid)
+                return null;
+
+            try
+            {
+                T networkObject = TaleWorlds.MountAndBlade.Mission.MissionNetworkHelper
+                    .GetMissionObjectFromMissionObjectId(missionObjectId) as T;
+                if (networkObject != null)
+                    return networkObject;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                TaleWorlds.MountAndBlade.Mission mission = TaleWorlds.MountAndBlade.Mission.Current;
+                if (mission?.ActiveMissionObjects != null)
+                {
+                    foreach (T candidate in mission.ActiveMissionObjects.FindAllWithType<T>())
+                    {
+                        if (candidate != null && candidate.Id == missionObjectId)
+                            return candidate;
+                    }
+                }
+
+                if (mission?.MissionObjects != null)
+                {
+                    foreach (T candidate in mission.MissionObjects.FindAllWithType<T>())
+                    {
+                        if (candidate != null && candidate.Id == missionObjectId)
+                            return candidate;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private DeploymentPoint ResolveCommanderDeploymentPointById(
+            MissionObjectId deploymentPointId,
+            BattleSideEnum side,
+            out string diagnostics)
+        {
+            diagnostics = "DeploymentPointId=" + deploymentPointId;
+            if (deploymentPointId == MissionObjectId.Invalid)
+            {
+                diagnostics += " Reason=invalid-id";
+                return null;
+            }
+
+            DeploymentPoint deploymentPoint = ResolveMissionObject<DeploymentPoint>(deploymentPointId);
+            diagnostics += " Resolved=" + FormatDeploymentPoint(deploymentPoint);
+            if (deploymentPoint == null)
+                return null;
+
+            if (deploymentPoint.Side != side)
+            {
+                diagnostics += " Reason=side-mismatch ExpectedSide=" + side;
+                return null;
+            }
+
+            return deploymentPoint;
+        }
+
+        private DeploymentPoint ResolveCommanderDeploymentPoint(
+            BattleSideEnum side,
+            Vec3 requestedPosition,
+            string requestedWeaponTypeName,
+            out string diagnostics)
+        {
+            diagnostics = string.Empty;
+            if (side == BattleSideEnum.None || Mission == null)
+            {
+                diagnostics = "invalid-context";
+                return null;
+            }
+
+            try
+            {
+                DeploymentPoint nearestEnabledPoint = null;
+                DeploymentPoint nearestAnyPoint = null;
+                float nearestEnabledDistanceSquared = float.MaxValue;
+                float nearestAnyDistanceSquared = float.MaxValue;
+                Vec2 requestedPosition2D = requestedPosition.AsVec2;
+                bool hasValidRequestedPosition = requestedPosition2D.LengthSquared > 1f;
+                int candidateCount = 0;
+                int enabledCandidateCount = 0;
+                int disabledCandidateCount = 0;
+                int skippedNoMatchingWeaponCount = 0;
+                List<DeploymentPoint> deploymentPoints = EnumerateCommanderDeploymentPoints().ToList();
+                string sourceDiagnostics = BuildCommanderDeploymentPointSourceDiagnostics(deploymentPoints.Count);
+                foreach (DeploymentPoint deploymentPoint in deploymentPoints)
+                {
+                    if (deploymentPoint == null ||
+                        deploymentPoint.Side != side)
+                    {
+                        continue;
+                    }
+
+                    if (!HasCommanderDeploymentPointMatchingSiegeWeapon(
+                            deploymentPoint,
+                            side,
+                            requestedWeaponTypeName))
+                    {
+                        skippedNoMatchingWeaponCount++;
+                        continue;
+                    }
+
+                    candidateCount++;
+                    if (deploymentPoint.IsDisabled)
+                        disabledCandidateCount++;
+                    else
+                        enabledCandidateCount++;
+
+                    Vec3 candidatePosition = ResolveCommanderDeploymentPointPosition(deploymentPoint);
+                    float distanceSquared = (candidatePosition.AsVec2 - requestedPosition2D).LengthSquared;
+                    if (distanceSquared < nearestAnyDistanceSquared)
+                    {
+                        nearestAnyPoint = deploymentPoint;
+                        nearestAnyDistanceSquared = distanceSquared;
+                    }
+
+                    if (!deploymentPoint.IsDisabled &&
+                        distanceSquared < nearestEnabledDistanceSquared)
+                    {
+                        nearestEnabledPoint = deploymentPoint;
+                        nearestEnabledDistanceSquared = distanceSquared;
+                    }
+                }
+
+                bool hasRequestedWeaponType = !string.IsNullOrWhiteSpace(requestedWeaponTypeName);
+                float strictDistanceLimitSquared = hasRequestedWeaponType ? 25f : 625f;
+                float fallbackDistanceLimitSquared = hasRequestedWeaponType ? strictDistanceLimitSquared : 1000000f;
+                bool nearestAnyStrictMatch = nearestAnyPoint != null &&
+                    nearestAnyDistanceSquared <= strictDistanceLimitSquared;
+                bool nearestEnabledStrictMatch = nearestEnabledPoint != null &&
+                    nearestEnabledDistanceSquared <= strictDistanceLimitSquared;
+
+                DeploymentPoint nearestPoint = null;
+                float nearestDistanceSquared = float.MaxValue;
+                string nearestSelectionReason = "none";
+                if (hasRequestedWeaponType)
+                {
+                    if (nearestAnyStrictMatch)
+                    {
+                        nearestPoint = nearestAnyPoint;
+                        nearestDistanceSquared = nearestAnyDistanceSquared;
+                        nearestSelectionReason = nearestAnyPoint.IsDisabled
+                            ? "nearest-any-strict-disabled"
+                            : "nearest-any-strict-enabled";
+                    }
+                    else if (nearestEnabledStrictMatch)
+                    {
+                        nearestPoint = nearestEnabledPoint;
+                        nearestDistanceSquared = nearestEnabledDistanceSquared;
+                        nearestSelectionReason = "nearest-enabled-strict";
+                    }
+                }
+                else
+                {
+                    nearestPoint = nearestEnabledPoint ?? nearestAnyPoint;
+                    nearestDistanceSquared = nearestEnabledPoint != null
+                        ? nearestEnabledDistanceSquared
+                        : nearestAnyDistanceSquared;
+                    nearestSelectionReason = nearestEnabledPoint != null
+                        ? "nearest-enabled-fallback"
+                        : (nearestAnyPoint != null ? "nearest-any-fallback" : "none");
+                }
+
+                bool disabledPointFallback = nearestPoint != null && nearestPoint.IsDisabled;
+                bool strictMatch = nearestPoint != null && nearestDistanceSquared <= strictDistanceLimitSquared;
+                bool fallbackMatch =
+                    nearestPoint != null &&
+                    hasValidRequestedPosition &&
+                    nearestDistanceSquared <= fallbackDistanceLimitSquared;
+                diagnostics =
+                    "Candidates=" + candidateCount +
+                    " EnabledCandidates=" + enabledCandidateCount +
+                    " DisabledCandidates=" + disabledCandidateCount +
+                    " SkippedNoMatchingWeapon=" + skippedNoMatchingWeaponCount +
+                    " RequestedPositionValid=" + hasValidRequestedPosition +
+                    " RequestedPosition=" + requestedPosition +
+                    " RequestedWeaponType=" + (requestedWeaponTypeName ?? string.Empty) +
+                    " HasRequestedWeaponType=" + hasRequestedWeaponType +
+                    " Sources={" + sourceDiagnostics + "}" +
+                    " Nearest=" + FormatDeploymentPoint(nearestPoint) +
+                    " NearestDistanceSquared=" + nearestDistanceSquared +
+                    " NearestSelectionReason=" + nearestSelectionReason +
+                    " NearestAny=" + FormatDeploymentPoint(nearestAnyPoint) +
+                    " NearestAnyDistanceSquared=" + nearestAnyDistanceSquared +
+                    " NearestAnyStrictMatch=" + nearestAnyStrictMatch +
+                    " NearestEnabled=" + FormatDeploymentPoint(nearestEnabledPoint) +
+                    " NearestEnabledDistanceSquared=" + nearestEnabledDistanceSquared +
+                    " NearestEnabledStrictMatch=" + nearestEnabledStrictMatch +
+                    " StrictDistanceLimitSquared=" + strictDistanceLimitSquared +
+                    " StrictMatch=" + strictMatch +
+                    " FallbackMatch=" + fallbackMatch +
+                    " FallbackDistanceLimitSquared=" + fallbackDistanceLimitSquared +
+                    " DisabledPointFallback=" + disabledPointFallback;
+                return strictMatch || fallbackMatch ? nearestPoint : null;
+            }
+            catch (Exception ex)
+            {
+                diagnostics = "exception:" + ex.GetType().Name + ":" + ex.Message;
+                return null;
+            }
+        }
+
+        private static bool HasCommanderDeploymentPointMatchingSiegeWeapon(
+            DeploymentPoint deploymentPoint,
+            BattleSideEnum side,
+            string requestedWeaponTypeName)
+        {
+            if (deploymentPoint == null)
+                return false;
+
+            if (string.IsNullOrWhiteSpace(requestedWeaponTypeName))
+                return true;
+
+            try
+            {
+                foreach (SiegeWeapon siegeWeapon in EnumerateCommanderDeploymentPointSiegeWeapons(deploymentPoint))
+                {
+                    if (siegeWeapon == null || siegeWeapon.Side != side)
+                        continue;
+
+                    if (IsCommanderDeploymentSiegeWeaponTypeMatch(siegeWeapon, requestedWeaponTypeName))
+                        return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private IEnumerable<DeploymentPoint> EnumerateCommanderDeploymentPoints()
+        {
+            var result = new List<DeploymentPoint>();
+
+            try
+            {
+                SiegeDeploymentHandler siegeDeploymentHandler = Mission?.GetMissionBehavior<SiegeDeploymentHandler>();
+                if (siegeDeploymentHandler?.AllDeploymentPoints != null)
+                {
+                    foreach (DeploymentPoint deploymentPoint in siegeDeploymentHandler.AllDeploymentPoints)
+                    {
+                        if (deploymentPoint != null && !result.Contains(deploymentPoint))
+                            result.Add(deploymentPoint);
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if (Mission?.ActiveMissionObjects != null)
+                {
+                    foreach (DeploymentPoint deploymentPoint in Mission.ActiveMissionObjects.FindAllWithType<DeploymentPoint>())
+                    {
+                        if (deploymentPoint != null && !result.Contains(deploymentPoint))
+                            result.Add(deploymentPoint);
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if (Mission?.MissionObjects != null)
+                {
+                    foreach (DeploymentPoint deploymentPoint in Mission.MissionObjects.FindAllWithType<DeploymentPoint>())
+                    {
+                        if (deploymentPoint != null && !result.Contains(deploymentPoint))
+                            result.Add(deploymentPoint);
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return result;
+        }
+
+        private string BuildCommanderDeploymentPointSourceDiagnostics(int enumeratedCount)
+        {
+            int handlerCount = -1;
+            int activeCount = -1;
+            int missionObjectCount = -1;
+
+            try
+            {
+                SiegeDeploymentHandler siegeDeploymentHandler = Mission?.GetMissionBehavior<SiegeDeploymentHandler>();
+                if (siegeDeploymentHandler?.AllDeploymentPoints != null)
+                    handlerCount = siegeDeploymentHandler.AllDeploymentPoints.Count();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if (Mission?.ActiveMissionObjects != null)
+                    activeCount = Mission.ActiveMissionObjects.FindAllWithType<DeploymentPoint>().Count();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if (Mission?.MissionObjects != null)
+                    missionObjectCount = Mission.MissionObjects.FindAllWithType<DeploymentPoint>().Count();
+            }
+            catch
+            {
+            }
+
+            return
+                "Enumerated=" + enumeratedCount +
+                " HandlerAll=" + handlerCount +
+                " Active=" + activeCount +
+                " MissionObjects=" + missionObjectCount;
+        }
+
+        private static Vec3 ResolveCommanderDeploymentPointPosition(DeploymentPoint deploymentPoint)
+        {
+            if (deploymentPoint == null)
+                return Vec3.Zero;
+
+            try
+            {
+                return deploymentPoint.GetDeploymentOrigin();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                return deploymentPoint.GameEntity.GlobalPosition;
+            }
+            catch
+            {
+                return Vec3.Zero;
+            }
+        }
+
+        private SiegeWeapon ResolveCommanderDeploymentSiegeWeapon(
+            DeploymentPoint deploymentPoint,
+            BattleSideEnum side,
+            string requestedWeaponTypeName,
+            bool allowDisabled = false)
+        {
+            if (deploymentPoint == null ||
+                side == BattleSideEnum.None ||
+                string.IsNullOrWhiteSpace(requestedWeaponTypeName))
+            {
+                return null;
+            }
+
+            try
+            {
+                foreach (SiegeWeapon siegeWeapon in EnumerateCommanderDeploymentPointSiegeWeapons(deploymentPoint))
+                {
+                    if (siegeWeapon == null ||
+                        (!allowDisabled && siegeWeapon.IsDisabled) ||
+                        siegeWeapon.Side != side)
+                    {
+                        continue;
+                    }
+
+                    if (IsCommanderDeploymentSiegeWeaponTypeMatch(siegeWeapon, requestedWeaponTypeName))
+                        return siegeWeapon;
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private SiegeWeapon ResolveCommanderDeploymentSiegeWeaponById(
+            DeploymentPoint deploymentPoint,
+            BattleSideEnum side,
+            MissionObjectId siegeWeaponId,
+            string requestedWeaponTypeName,
+            out string diagnostics)
+        {
+            diagnostics = "SiegeWeaponId=" + siegeWeaponId;
+            if (deploymentPoint == null)
+            {
+                diagnostics += " Reason=null-deployment-point";
+                return null;
+            }
+
+            if (siegeWeaponId == MissionObjectId.Invalid)
+            {
+                diagnostics += " Reason=invalid-id";
+                return null;
+            }
+
+            SiegeWeapon siegeWeapon = ResolveMissionObject<SiegeWeapon>(siegeWeaponId);
+            diagnostics += " Resolved=" + FormatSiegeWeapon(siegeWeapon);
+            if (siegeWeapon == null)
+                return null;
+
+            if (siegeWeapon.Side != side)
+            {
+                diagnostics += " Reason=side-mismatch ExpectedSide=" + side;
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(requestedWeaponTypeName) &&
+                !IsCommanderDeploymentSiegeWeaponTypeMatch(siegeWeapon, requestedWeaponTypeName))
+            {
+                diagnostics += " Reason=type-mismatch RequestedType=" + requestedWeaponTypeName;
+                return null;
+            }
+
+            bool foundUnderPoint = false;
+            try
+            {
+                foreach (SiegeWeapon candidate in EnumerateCommanderDeploymentPointSiegeWeapons(deploymentPoint))
+                {
+                    if (ReferenceEquals(candidate, siegeWeapon))
+                    {
+                        foundUnderPoint = true;
+                        break;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            diagnostics += " FoundUnderPoint=" + foundUnderPoint;
+            return foundUnderPoint ? siegeWeapon : null;
+        }
+
+        private static IEnumerable<SiegeWeapon> EnumerateCommanderDeploymentPointSiegeWeapons(DeploymentPoint deploymentPoint)
+        {
+            var result = new List<SiegeWeapon>();
+            if (deploymentPoint == null)
+                return result;
+
+            AddCommanderDeploymentPointSiegeWeapons(result, SafeEnumerateDeployableWeapons(deploymentPoint));
+            AddCommanderDeploymentPointSiegeWeapons(result, SafeGetWeaponsUnder(deploymentPoint));
+            return result;
+        }
+
+        private static IEnumerable<SynchedMissionObject> SafeEnumerateDeployableWeapons(DeploymentPoint deploymentPoint)
+        {
+            try
+            {
+                return deploymentPoint?.DeployableWeapons?.ToList() ?? new List<SynchedMissionObject>();
+            }
+            catch
+            {
+                return new List<SynchedMissionObject>();
+            }
+        }
+
+        private static IEnumerable<SynchedMissionObject> SafeGetWeaponsUnder(DeploymentPoint deploymentPoint)
+        {
+            try
+            {
+                return deploymentPoint?.GetWeaponsUnder()?.ToList() ?? new List<SynchedMissionObject>();
+            }
+            catch
+            {
+                return new List<SynchedMissionObject>();
+            }
+        }
+
+        private static void AddCommanderDeploymentPointSiegeWeapons(
+            ICollection<SiegeWeapon> output,
+            IEnumerable<SynchedMissionObject> candidates)
+        {
+            if (output == null || candidates == null)
+                return;
+
+            foreach (SynchedMissionObject candidate in candidates)
+            {
+                if (candidate is SiegeWeapon siegeWeapon && !output.Contains(siegeWeapon))
+                    output.Add(siegeWeapon);
+            }
+        }
+
+        private static bool IsCommanderDeploymentSiegeWeaponTypeMatch(
+            SiegeWeapon siegeWeapon,
+            string requestedWeaponTypeName)
+        {
+            if (siegeWeapon == null || string.IsNullOrWhiteSpace(requestedWeaponTypeName))
+                return false;
+
+            if (!TryResolveCommanderDeploymentSiegeWeaponType(siegeWeapon, out Type weaponType) ||
+                weaponType == null)
+            {
+                return false;
+            }
+
+            return string.Equals(weaponType.FullName, requestedWeaponTypeName, StringComparison.Ordinal) ||
+                   string.Equals(weaponType.Name, requestedWeaponTypeName, StringComparison.Ordinal);
+        }
+
+        private static string TryPrepareCommanderDeploymentMoveSourceForDisband(
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon)
+        {
+            if (!IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled() &&
+                siegeWeapon == null)
+            {
+                return string.Empty;
+            }
+
+            string error = string.Empty;
+            bool tickAuxInvoked = false;
+            string removeOnDeployEntitiesDiagnostics = string.Empty;
+            string addOnDeployEntitiesDiagnostics = string.Empty;
+            try
+            {
+                removeOnDeployEntitiesDiagnostics = TryEnsureCommanderDeploymentSiegeWeaponDeployEntityList(
+                    siegeWeapon,
+                    CommanderDeploymentSiegeWeaponRemoveOnDeployEntitiesField,
+                    CommanderDeploymentSiegeWeaponRemoveOnDeployTagField,
+                    "remove");
+            }
+            catch (Exception ex)
+            {
+                error = AppendCommanderDeploymentPreparationError(error, "remove-on-deploy-list", ex);
+            }
+
+            try
+            {
+                addOnDeployEntitiesDiagnostics = TryEnsureCommanderDeploymentSiegeWeaponDeployEntityList(
+                    siegeWeapon,
+                    CommanderDeploymentSiegeWeaponAddOnDeployEntitiesField,
+                    CommanderDeploymentSiegeWeaponAddOnDeployTagField,
+                    "add");
+            }
+            catch (Exception ex)
+            {
+                error = AppendCommanderDeploymentPreparationError(error, "add-on-deploy-list", ex);
+            }
+
+            try
+            {
+                if (siegeWeapon != null)
+                {
+                    siegeWeapon.TickAuxForInit();
+                    tickAuxInvoked = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                error = AppendCommanderDeploymentPreparationError(error, "tick-aux", ex);
+            }
+
+            if (!IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled())
+                return string.Empty;
+
+            return
+                "DeploymentPoint=" + FormatDeploymentPoint(deploymentPoint) +
+                " SiegeWeapon=" + FormatSiegeWeapon(siegeWeapon) +
+                " RemoveOnDeploy={" + removeOnDeployEntitiesDiagnostics + "}" +
+                " AddOnDeploy={" + addOnDeployEntitiesDiagnostics + "}" +
+                " TickAuxInvoked=" + tickAuxInvoked +
+                " Error=" + (string.IsNullOrWhiteSpace(error) ? "<none>" : error);
+        }
+
+        private static string TryEnsureCommanderDeploymentSiegeWeaponDeployEntityList(
+            SiegeWeapon siegeWeapon,
+            FieldInfo listField,
+            FieldInfo tagField,
+            string label)
+        {
+            if (siegeWeapon == null)
+                return "Skipped=True Reason=siege-weapon-null";
+
+            if (listField == null)
+                return "Skipped=True Reason=list-field-missing Label=" + (label ?? string.Empty);
+
+            object existingValue = listField.GetValue(siegeWeapon);
+            if (existingValue is List<GameEntity> existingList)
+            {
+                return
+                    "Existing=True Initialized=False Count=" + existingList.Count +
+                    " Label=" + (label ?? string.Empty);
+            }
+
+            string tag = string.Empty;
+            if (tagField != null)
+                tag = tagField.GetValue(siegeWeapon) as string ?? string.Empty;
+
+            List<GameEntity> entities = new List<GameEntity>();
+            if (!string.IsNullOrWhiteSpace(tag))
+            {
+                try
+                {
+                    entities = TaleWorlds.MountAndBlade.Mission.Current?.Scene?
+                        .FindEntitiesWithTag(tag)
+                        .ToList() ?? new List<GameEntity>();
+                }
+                catch
+                {
+                    entities = new List<GameEntity>();
+                }
+            }
+
+            listField.SetValue(siegeWeapon, entities);
+            return
+                "Existing=False Initialized=True Count=" + entities.Count +
+                " Label=" + (label ?? string.Empty) +
+                " Tag=" + (tag ?? string.Empty);
+        }
+
+        private DeploymentPoint FindCommanderDeploymentPointToDisbandForMove(
+            BattleSideEnum side,
+            Type weaponType,
+            DeploymentPoint targetDeploymentPoint,
+            out string diagnostics)
+        {
+            diagnostics = string.Empty;
+            if (side == BattleSideEnum.None ||
+                weaponType == null ||
+                Mission == null)
+            {
+                diagnostics = "invalid-context";
+                return null;
+            }
+
+            try
+            {
+                int scannedCount = 0;
+                int skippedTargetCount = 0;
+                int skippedSideCount = 0;
+                int disabledPointCount = 0;
+                int skippedNotDeployedCount = 0;
+                int skippedInvalidWeaponCount = 0;
+                int disabledWeaponCount = 0;
+                int skippedTypeMismatchCount = 0;
+
+                foreach (DeploymentPoint deploymentPoint in EnumerateCommanderDeploymentPoints())
+                {
+                    scannedCount++;
+                    if (deploymentPoint == null)
+                    {
+                        continue;
+                    }
+
+                    if (ReferenceEquals(deploymentPoint, targetDeploymentPoint))
+                    {
+                        skippedTargetCount++;
+                        continue;
+                    }
+
+                    if (deploymentPoint.Side != side)
+                    {
+                        skippedSideCount++;
+                        continue;
+                    }
+
+                    if (deploymentPoint.IsDisabled)
+                        disabledPointCount++;
+
+                    if (!deploymentPoint.IsDeployed || deploymentPoint.DeployedWeapon == null)
+                    {
+                        skippedNotDeployedCount++;
+                        continue;
+                    }
+
+                    SiegeWeapon deployedSiegeWeapon = deploymentPoint.DeployedWeapon as SiegeWeapon;
+                    if (deployedSiegeWeapon == null)
+                    {
+                        skippedInvalidWeaponCount++;
+                        continue;
+                    }
+
+                    if (deployedSiegeWeapon.IsDisabled)
+                        disabledWeaponCount++;
+
+                    if (TryResolveCommanderDeploymentSiegeWeaponType(deployedSiegeWeapon, out Type deployedType) &&
+                        deployedType == weaponType)
+                    {
+                        diagnostics =
+                            "Scanned=" + scannedCount +
+                            " SkippedTarget=" + skippedTargetCount +
+                            " SkippedSide=" + skippedSideCount +
+                            " DisabledPointsSeen=" + disabledPointCount +
+                            " SkippedNotDeployed=" + skippedNotDeployedCount +
+                            " SkippedInvalidWeapon=" + skippedInvalidWeaponCount +
+                            " DisabledWeaponsSeen=" + disabledWeaponCount +
+                            " SkippedTypeMismatch=" + skippedTypeMismatchCount +
+                            " Selected=" + FormatDeploymentPoint(deploymentPoint) +
+                            " SelectedWeapon=" + FormatSiegeWeapon(deployedSiegeWeapon);
+                        return deploymentPoint;
+                    }
+
+                    skippedTypeMismatchCount++;
+                }
+
+                diagnostics =
+                    "Scanned=" + scannedCount +
+                    " SkippedTarget=" + skippedTargetCount +
+                    " SkippedSide=" + skippedSideCount +
+                    " DisabledPointsSeen=" + disabledPointCount +
+                    " SkippedNotDeployed=" + skippedNotDeployedCount +
+                    " SkippedInvalidWeapon=" + skippedInvalidWeaponCount +
+                    " DisabledWeaponsSeen=" + disabledWeaponCount +
+                    " SkippedTypeMismatch=" + skippedTypeMismatchCount +
+                    " Selected=<null>";
+            }
+            catch (Exception ex)
+            {
+                diagnostics = "exception:" + ex.GetType().Name + ":" + ex.Message;
+            }
+
+            return null;
+        }
+
+        private static bool IsValidCommanderDeploymentSiegeWeapon(
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon,
+            BattleSideEnum side,
+            bool allowDisabled,
+            out Type weaponType,
+            out string invalidReason)
+        {
+            weaponType = null;
+            invalidReason = string.Empty;
+
+            if (deploymentPoint == null ||
+                siegeWeapon == null ||
+                (!allowDisabled && siegeWeapon.IsDisabled) ||
+                siegeWeapon.Side != side)
+            {
+                invalidReason = "invalid-context-or-side";
+                return false;
+            }
+
+            if (!TryResolveCommanderDeploymentSiegeWeaponType(siegeWeapon, out weaponType))
+            {
+                invalidReason = "unresolved-weapon-type";
+                return false;
+            }
+
+            try
+            {
+                foreach (SiegeWeapon deployableWeapon in EnumerateCommanderDeploymentPointSiegeWeapons(deploymentPoint))
+                {
+                    if (ReferenceEquals(deployableWeapon, siegeWeapon))
+                        return true;
+                }
+            }
+            catch
+            {
+            }
+
+            invalidReason = "not-in-deployment-point-deployable-weapons";
+            return false;
+        }
+
+        private static string TryPrepareCommanderDeploymentPointForServer(
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon,
+            bool enableObjects)
+        {
+            if (deploymentPoint == null)
+                return "DeploymentPoint=<null>";
+
+            int weaponsUnderCount = -1;
+            bool weaponsFieldSet = false;
+            bool determineTypeInvoked = false;
+            bool deploymentPointEnabled = false;
+            bool siegeWeaponEnabled = false;
+            string error = string.Empty;
+
+            try
+            {
+                MBList<SynchedMissionObject> weaponsUnder = deploymentPoint.GetWeaponsUnder();
+                weaponsUnderCount = weaponsUnder?.Count ?? 0;
+                if (CommanderDeploymentPointWeaponsField != null && weaponsUnder != null)
+                {
+                    CommanderDeploymentPointWeaponsField.SetValue(deploymentPoint, weaponsUnder);
+                    weaponsFieldSet = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                error = AppendCommanderDeploymentPreparationError(error, "weapons", ex);
+            }
+
+            try
+            {
+                if (CommanderDeploymentPointDetermineTypeMethod != null)
+                {
+                    CommanderDeploymentPointDetermineTypeMethod.Invoke(deploymentPoint, Array.Empty<object>());
+                    determineTypeInvoked = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                error = AppendCommanderDeploymentPreparationError(error, "determine-type", ex);
+            }
+
+            try
+            {
+                if (enableObjects && deploymentPoint.IsDisabled)
+                {
+                    deploymentPoint.SetEnabledAndMakeVisible();
+                    deploymentPointEnabled = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                error = AppendCommanderDeploymentPreparationError(error, "enable-point", ex);
+            }
+
+            try
+            {
+                if (enableObjects && siegeWeapon != null && siegeWeapon.IsDisabled)
+                {
+                    siegeWeapon.SetEnabledAndMakeVisible();
+                    siegeWeaponEnabled = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                error = AppendCommanderDeploymentPreparationError(error, "enable-weapon", ex);
+            }
+
+            return "WeaponsUnder=" + weaponsUnderCount +
+                   " EnableObjects=" + enableObjects +
+                   " WeaponsFieldSet=" + weaponsFieldSet +
+                   " DetermineTypeInvoked=" + determineTypeInvoked +
+                   " DeploymentPointEnabled=" + deploymentPointEnabled +
+                   " SiegeWeaponEnabled=" + siegeWeaponEnabled +
+                   " Error=" + (string.IsNullOrWhiteSpace(error) ? "<none>" : error);
+        }
+
+        private static string AppendCommanderDeploymentPreparationError(
+            string current,
+            string step,
+            Exception exception)
+        {
+            string next = (step ?? "unknown") + ":" +
+                          (exception == null ? "<null>" : exception.GetType().Name + ":" + exception.Message);
+            return string.IsNullOrWhiteSpace(current) ? next : current + "|" + next;
+        }
+
+        private static bool TryResolveCommanderDeploymentSiegeWeaponType(
+            SiegeWeapon siegeWeapon,
+            out Type weaponType)
+        {
+            weaponType = null;
+            if (siegeWeapon == null)
+                return false;
+
+            try
+            {
+                weaponType = MissionSiegeWeaponsController.GetWeaponType(siegeWeapon);
+            }
+            catch
+            {
+                weaponType = siegeWeapon.GetType();
+            }
+
+            return weaponType != null;
+        }
+
+        private int GetCommanderDeploymentMaxSiegeWeaponCount(
+            BattleSideEnum side,
+            Type weaponType)
+        {
+            if (side == BattleSideEnum.None || weaponType == null || Mission == null)
+                return 0;
+
+            try
+            {
+                MissionSiegeEnginesLogic siegeEnginesLogic = Mission.GetMissionBehavior<MissionSiegeEnginesLogic>();
+                IMissionSiegeWeaponsController weaponsController = siegeEnginesLogic?.GetSiegeWeaponsController(side);
+                return weaponsController?.GetMaxDeployableWeaponCount(weaponType) ?? 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private int GetCommanderDeploymentRemainingSiegeWeaponCount(
+            BattleSideEnum side,
+            Type weaponType,
+            DeploymentPoint ignoredDeploymentPoint,
+            int maxCount,
+            out string diagnostics)
+        {
+            diagnostics = string.Empty;
+            if (side == BattleSideEnum.None || weaponType == null || Mission == null)
+            {
+                diagnostics = "invalid-context";
+                return 0;
+            }
+
+            try
+            {
+                int deployedCount = 0;
+                int scannedCount = 0;
+                int skippedIgnoredCount = 0;
+                int skippedSideCount = 0;
+                int disabledPointCount = 0;
+                int skippedNotDeployedCount = 0;
+                int skippedInvalidWeaponCount = 0;
+                int disabledWeaponCount = 0;
+                int skippedTypeMismatchCount = 0;
+                var countedPoints = new List<string>();
+
+                foreach (DeploymentPoint deploymentPoint in EnumerateCommanderDeploymentPoints())
+                {
+                    scannedCount++;
+                    if (deploymentPoint == null)
+                    {
+                        continue;
+                    }
+
+                    if (ReferenceEquals(deploymentPoint, ignoredDeploymentPoint))
+                    {
+                        skippedIgnoredCount++;
+                        continue;
+                    }
+
+                    if (deploymentPoint.Side != side)
+                    {
+                        skippedSideCount++;
+                        continue;
+                    }
+
+                    if (deploymentPoint.IsDisabled)
+                        disabledPointCount++;
+
+                    if (!deploymentPoint.IsDeployed || deploymentPoint.DeployedWeapon == null)
+                    {
+                        skippedNotDeployedCount++;
+                        continue;
+                    }
+
+                    SiegeWeapon deployedSiegeWeapon = deploymentPoint.DeployedWeapon as SiegeWeapon;
+                    if (deployedSiegeWeapon == null)
+                    {
+                        skippedInvalidWeaponCount++;
+                        continue;
+                    }
+
+                    if (deployedSiegeWeapon.IsDisabled)
+                        disabledWeaponCount++;
+
+                    if (MissionSiegeWeaponsController.GetWeaponType(deployedSiegeWeapon) == weaponType)
+                    {
+                        deployedCount++;
+                        countedPoints.Add(FormatDeploymentPoint(deploymentPoint) + "/" + FormatSiegeWeapon(deployedSiegeWeapon));
+                    }
+                    else
+                    {
+                        skippedTypeMismatchCount++;
+                    }
+                }
+
+                diagnostics =
+                    "Scanned=" + scannedCount +
+                    " DeployedCount=" + deployedCount +
+                    " SkippedIgnored=" + skippedIgnoredCount +
+                    " SkippedSide=" + skippedSideCount +
+                    " DisabledPointsSeen=" + disabledPointCount +
+                    " SkippedNotDeployed=" + skippedNotDeployedCount +
+                    " SkippedInvalidWeapon=" + skippedInvalidWeaponCount +
+                    " DisabledWeaponsSeen=" + disabledWeaponCount +
+                    " SkippedTypeMismatch=" + skippedTypeMismatchCount +
+                    " Counted=[" + string.Join(",", countedPoints) + "]";
+                return Math.Max(0, maxCount - deployedCount);
+            }
+            catch (Exception ex)
+            {
+                diagnostics = "exception:" + ex.GetType().Name + ":" + ex.Message;
+                return 0;
+            }
+        }
+
+        private static void ForceUpdateCommanderDeploymentTeamUnits(Team team)
+        {
+            if (team == null)
+                return;
+
+            try
+            {
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    formation?.ApplyActionOnEachUnit(agent =>
+                    {
+                        agent?.ForceUpdateCachedAndFormationValues(
+                            updateOnlyMovement: false,
+                            arrangementChangeAllowed: false);
+                    });
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void PrepareCommanderDeploymentFormationsForSiegeMachineAssignment(Team team)
+        {
+            if (team == null)
+                return;
+
+            try
+            {
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (formation == null)
+                        continue;
+
+                    formation.SetControlledByAI(true, true);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool TryDisbandCommanderDeploymentPointSafely(
+            DeploymentPoint deploymentPoint,
+            BattleSideEnum side,
+            string reason,
+            out string diagnostics)
+        {
+            diagnostics = "Reason=" + (reason ?? "<null>");
+            if (deploymentPoint == null)
+            {
+                diagnostics += " DeploymentPoint=<null>";
+                return true;
+            }
+
+            SiegeWeapon sourceSiegeWeapon = deploymentPoint.DeployedWeapon as SiegeWeapon;
+            bool wasDeployed = deploymentPoint.IsDeployed;
+            Exception disbandException = null;
+            try
+            {
+                if (deploymentPoint.IsDeployed)
+                    deploymentPoint.Disband();
+            }
+            catch (Exception ex)
+            {
+                disbandException = ex;
+            }
+
+            string controllerRecoveryDiagnostics =
+                TryRecoverCommanderDeploymentSiegeControllerAfterUndeploy(side, sourceSiegeWeapon);
+            bool released =
+                !wasDeployed ||
+                !deploymentPoint.IsDeployed ||
+                deploymentPoint.DeployedWeapon == null ||
+                !ReferenceEquals(deploymentPoint.DeployedWeapon, sourceSiegeWeapon);
+
+            diagnostics +=
+                " WasDeployed=" + wasDeployed +
+                " Released=" + released +
+                " DisbandError=" + (disbandException == null ? "<none>" : disbandException.GetType().Name + ":" + disbandException.Message) +
+                " ControllerRecovery={" + controllerRecoveryDiagnostics + "}";
+            return disbandException == null || released;
+        }
+
+        private static bool TryDeployCommanderDeploymentPointSafely(
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon,
+            BattleSideEnum side,
+            out string diagnostics)
+        {
+            diagnostics = string.Empty;
+            if (deploymentPoint == null || siegeWeapon == null)
+            {
+                diagnostics = "DeploymentPoint=" + FormatDeploymentPoint(deploymentPoint) +
+                              " SiegeWeapon=" + FormatSiegeWeapon(siegeWeapon);
+                return false;
+            }
+
+            Exception deployException = null;
+            try
+            {
+                deploymentPoint.Deploy(siegeWeapon);
+            }
+            catch (Exception ex)
+            {
+                deployException = ex;
+            }
+
+            string controllerRecoveryDiagnostics =
+                TryRecoverCommanderDeploymentSiegeControllerAfterDeploy(side, siegeWeapon);
+            bool deployed =
+                deploymentPoint.IsDeployed &&
+                ReferenceEquals(deploymentPoint.DeployedWeapon, siegeWeapon);
+
+            diagnostics =
+                "Deployed=" + deployed +
+                " DeployError=" + (deployException == null ? "<none>" : deployException.GetType().Name + ":" + deployException.Message) +
+                " ControllerRecovery={" + controllerRecoveryDiagnostics + "}";
+            return deployException == null || deployed;
+        }
+
+        private static string TryRecoverCommanderDeploymentSiegeControllerAfterUndeploy(
+            BattleSideEnum side,
+            SiegeWeapon siegeWeapon)
+        {
+            if (siegeWeapon == null)
+                return "SiegeWeapon=<null>";
+
+            if (!TryResolveCommanderDeploymentSiegeWeaponsController(
+                    side,
+                    out IMissionSiegeWeaponsController weaponsController,
+                    out string controllerDiagnostics))
+            {
+                return controllerDiagnostics;
+            }
+
+            object destructionComponent = TryGetCommanderDeploymentDestructionComponent(siegeWeapon);
+            string stateDiagnostics = BuildCommanderDeploymentControllerStateForWeapon(
+                weaponsController,
+                siegeWeapon,
+                destructionComponent,
+                out System.Collections.IList allWeapons,
+                out System.Collections.IList undeployedWeapons,
+                out System.Collections.IDictionary deployedWeapons,
+                out MissionSiegeWeapon deployedMissionWeapon,
+                out bool containsDeployedDestructionComponent,
+                out bool containsUndeployedWeapon);
+
+            string nativeDiagnostics = "<skipped>";
+            if (containsDeployedDestructionComponent)
+            {
+                try
+                {
+                    weaponsController.OnWeaponUndeployed(siegeWeapon);
+                    return "Native=True StateBefore={" + stateDiagnostics + "}";
+                }
+                catch (Exception ex)
+                {
+                    nativeDiagnostics = ex.GetType().Name + ":" + ex.Message;
+                }
+            }
+
+            string manualDiagnostics = TryEnsureCommanderDeploymentUndeployedWeapon(
+                siegeWeapon,
+                destructionComponent,
+                allWeapons,
+                undeployedWeapons,
+                deployedWeapons,
+                deployedMissionWeapon);
+
+            return "Native=" + nativeDiagnostics +
+                   " StateBefore={" + stateDiagnostics + "}" +
+                   " Manual={" + manualDiagnostics + "}" +
+                   " UndeployedBefore=" + containsUndeployedWeapon;
+        }
+
+        private static string TryEnsureCommanderDeploymentSiegeControllerReadyForDeploy(
+            BattleSideEnum side,
+            SiegeWeapon siegeWeapon)
+        {
+            if (siegeWeapon == null)
+                return "SiegeWeapon=<null>";
+
+            if (!TryResolveCommanderDeploymentSiegeWeaponsController(
+                    side,
+                    out IMissionSiegeWeaponsController weaponsController,
+                    out string controllerDiagnostics))
+            {
+                return controllerDiagnostics;
+            }
+
+            object destructionComponent = TryGetCommanderDeploymentDestructionComponent(siegeWeapon);
+            string stateDiagnostics = BuildCommanderDeploymentControllerStateForWeapon(
+                weaponsController,
+                siegeWeapon,
+                destructionComponent,
+                out System.Collections.IList allWeapons,
+                out System.Collections.IList undeployedWeapons,
+                out System.Collections.IDictionary deployedWeapons,
+                out MissionSiegeWeapon deployedMissionWeapon,
+                out bool containsDeployedDestructionComponent,
+                out bool containsUndeployedWeapon);
+
+            if (containsUndeployedWeapon)
+                return "Ready=True StateBefore={" + stateDiagnostics + "}";
+
+            string undeployRecoveryDiagnostics = containsDeployedDestructionComponent
+                ? TryRecoverCommanderDeploymentSiegeControllerAfterUndeploy(side, siegeWeapon)
+                : "<skipped>";
+            if (FindCommanderDeploymentMissionSiegeWeaponByType(
+                    undeployedWeapons,
+                    TryGetCommanderDeploymentSiegeEngineType(siegeWeapon)) != null)
+            {
+                return "Ready=True StateBefore={" + stateDiagnostics + "} UndeployRecovery={" + undeployRecoveryDiagnostics + "}";
+            }
+
+            string manualDiagnostics = TryEnsureCommanderDeploymentUndeployedWeapon(
+                siegeWeapon,
+                destructionComponent,
+                allWeapons,
+                undeployedWeapons,
+                deployedWeapons,
+                deployedMissionWeapon);
+            return "Ready=False StateBefore={" + stateDiagnostics + "}" +
+                   " UndeployRecovery={" + undeployRecoveryDiagnostics + "}" +
+                   " Manual={" + manualDiagnostics + "}";
+        }
+
+        private static string TryRecoverCommanderDeploymentSiegeControllerAfterDeploy(
+            BattleSideEnum side,
+            SiegeWeapon siegeWeapon)
+        {
+            if (siegeWeapon == null)
+                return "SiegeWeapon=<null>";
+
+            if (!TryResolveCommanderDeploymentSiegeWeaponsController(
+                    side,
+                    out IMissionSiegeWeaponsController weaponsController,
+                    out string controllerDiagnostics))
+            {
+                return controllerDiagnostics;
+            }
+
+            object destructionComponent = TryGetCommanderDeploymentDestructionComponent(siegeWeapon);
+            string stateDiagnostics = BuildCommanderDeploymentControllerStateForWeapon(
+                weaponsController,
+                siegeWeapon,
+                destructionComponent,
+                out System.Collections.IList allWeapons,
+                out System.Collections.IList undeployedWeapons,
+                out System.Collections.IDictionary deployedWeapons,
+                out _,
+                out bool containsDeployedDestructionComponent,
+                out bool containsUndeployedWeapon);
+
+            if (containsDeployedDestructionComponent)
+                return "Deployed=True StateBefore={" + stateDiagnostics + "}";
+
+            string nativeDiagnostics = "<skipped>";
+            if (containsUndeployedWeapon)
+            {
+                try
+                {
+                    weaponsController.OnWeaponDeployed(siegeWeapon);
+                    return "Native=True StateBefore={" + stateDiagnostics + "}";
+                }
+                catch (Exception ex)
+                {
+                    nativeDiagnostics = ex.GetType().Name + ":" + ex.Message;
+                }
+            }
+
+            string manualDiagnostics = TryEnsureCommanderDeploymentDeployedWeapon(
+                siegeWeapon,
+                destructionComponent,
+                allWeapons,
+                undeployedWeapons,
+                deployedWeapons);
+            return "Native=" + nativeDiagnostics +
+                   " StateBefore={" + stateDiagnostics + "}" +
+                   " Manual={" + manualDiagnostics + "}";
+        }
+
+        private static bool TryResolveCommanderDeploymentSiegeWeaponsController(
+            BattleSideEnum side,
+            out IMissionSiegeWeaponsController weaponsController,
+            out string diagnostics)
+        {
+            weaponsController = null;
+            diagnostics = string.Empty;
+            try
+            {
+                TaleWorlds.MountAndBlade.Mission mission = TaleWorlds.MountAndBlade.Mission.Current;
+                MissionSiegeEnginesLogic siegeEnginesLogic = mission?.GetMissionBehavior<MissionSiegeEnginesLogic>();
+                weaponsController = siegeEnginesLogic?.GetSiegeWeaponsController(side);
+                diagnostics = weaponsController == null
+                    ? "Controller=<null>"
+                    : "Controller=" + weaponsController.GetType().FullName;
+                return weaponsController != null;
+            }
+            catch (Exception ex)
+            {
+                diagnostics = "ControllerError=" + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        private static object TryGetCommanderDeploymentDestructionComponent(SiegeWeapon siegeWeapon)
+        {
+            try
+            {
+                return siegeWeapon?.DestructionComponent;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string BuildCommanderDeploymentControllerStateForWeapon(
+            IMissionSiegeWeaponsController weaponsController,
+            SiegeWeapon siegeWeapon,
+            object destructionComponent,
+            out System.Collections.IList allWeapons,
+            out System.Collections.IList undeployedWeapons,
+            out System.Collections.IDictionary deployedWeapons,
+            out MissionSiegeWeapon deployedMissionWeapon,
+            out bool containsDeployedDestructionComponent,
+            out bool containsUndeployedWeapon)
+        {
+            allWeapons = CommanderDeploymentSiegeControllerWeaponsField?.GetValue(weaponsController) as System.Collections.IList;
+            undeployedWeapons = CommanderDeploymentSiegeControllerUndeployedWeaponsField?.GetValue(weaponsController) as System.Collections.IList;
+            deployedWeapons = CommanderDeploymentSiegeControllerDeployedWeaponsField?.GetValue(weaponsController) as System.Collections.IDictionary;
+            deployedMissionWeapon = null;
+            containsDeployedDestructionComponent = false;
+            containsUndeployedWeapon = false;
+
+            SiegeEngineType weaponType = TryGetCommanderDeploymentSiegeEngineType(siegeWeapon);
+            try
+            {
+                if (deployedWeapons != null &&
+                    destructionComponent != null &&
+                    deployedWeapons.Contains(destructionComponent))
+                {
+                    containsDeployedDestructionComponent = true;
+                    deployedMissionWeapon = deployedWeapons[destructionComponent] as MissionSiegeWeapon;
+                }
+            }
+            catch
+            {
+            }
+
+            containsUndeployedWeapon =
+                FindCommanderDeploymentMissionSiegeWeaponByType(undeployedWeapons, weaponType) != null;
+
+            return "All=" + (allWeapons?.Count.ToString() ?? "<null>") +
+                   " Undeployed=" + (undeployedWeapons?.Count.ToString() ?? "<null>") +
+                   " Deployed=" + (deployedWeapons?.Count.ToString() ?? "<null>") +
+                   " ContainsDeployed=" + containsDeployedDestructionComponent +
+                   " ContainsUndeployedType=" + containsUndeployedWeapon +
+                   " Type=" + FormatCommanderDeploymentSiegeEngineType(weaponType);
+        }
+
+        private static string TryEnsureCommanderDeploymentUndeployedWeapon(
+            SiegeWeapon siegeWeapon,
+            object destructionComponent,
+            System.Collections.IList allWeapons,
+            System.Collections.IList undeployedWeapons,
+            System.Collections.IDictionary deployedWeapons,
+            MissionSiegeWeapon preferredMissionWeapon)
+        {
+            if (undeployedWeapons == null)
+                return "UndeployedList=<null>";
+
+            SiegeEngineType weaponType = TryGetCommanderDeploymentSiegeEngineType(siegeWeapon);
+            if (FindCommanderDeploymentMissionSiegeWeaponByType(undeployedWeapons, weaponType) != null)
+                return "AlreadyUndeployed=True";
+
+            MissionSiegeWeapon missionSiegeWeapon = preferredMissionWeapon ??
+                FindCommanderDeploymentReusableMissionSiegeWeapon(allWeapons, undeployedWeapons, deployedWeapons, weaponType);
+            if (missionSiegeWeapon == null)
+                return "MissionSiegeWeapon=<null>";
+
+            try
+            {
+                if (!ContainsCommanderDeploymentMissionSiegeWeapon(undeployedWeapons, missionSiegeWeapon))
+                    undeployedWeapons.Add(missionSiegeWeapon);
+
+                if (deployedWeapons != null &&
+                    destructionComponent != null &&
+                    deployedWeapons.Contains(destructionComponent))
+                {
+                    deployedWeapons.Remove(destructionComponent);
+                }
+
+                return "Added=True MissionWeapon=" + FormatCommanderDeploymentMissionSiegeWeapon(missionSiegeWeapon, weaponType);
+            }
+            catch (Exception ex)
+            {
+                return "Error=" + ex.GetType().Name + ":" + ex.Message;
+            }
+        }
+
+        private static string TryEnsureCommanderDeploymentDeployedWeapon(
+            SiegeWeapon siegeWeapon,
+            object destructionComponent,
+            System.Collections.IList allWeapons,
+            System.Collections.IList undeployedWeapons,
+            System.Collections.IDictionary deployedWeapons)
+        {
+            if (deployedWeapons == null)
+                return "DeployedDictionary=<null>";
+
+            if (destructionComponent == null)
+                return "DestructionComponent=<null>";
+
+            SiegeEngineType weaponType = TryGetCommanderDeploymentSiegeEngineType(siegeWeapon);
+            MissionSiegeWeapon missionSiegeWeapon =
+                FindCommanderDeploymentMissionSiegeWeaponByType(undeployedWeapons, weaponType) ??
+                FindCommanderDeploymentReusableMissionSiegeWeapon(allWeapons, undeployedWeapons, deployedWeapons, weaponType);
+            if (missionSiegeWeapon == null)
+                return "MissionSiegeWeapon=<null>";
+
+            try
+            {
+                if (undeployedWeapons != null &&
+                    ContainsCommanderDeploymentMissionSiegeWeapon(undeployedWeapons, missionSiegeWeapon))
+                {
+                    undeployedWeapons.Remove(missionSiegeWeapon);
+                }
+
+                if (!deployedWeapons.Contains(destructionComponent))
+                    deployedWeapons.Add(destructionComponent, missionSiegeWeapon);
+
+                return "Added=True MissionWeapon=" + FormatCommanderDeploymentMissionSiegeWeapon(missionSiegeWeapon, weaponType);
+            }
+            catch (Exception ex)
+            {
+                return "Error=" + ex.GetType().Name + ":" + ex.Message;
+            }
+        }
+
+        private static MissionSiegeWeapon FindCommanderDeploymentReusableMissionSiegeWeapon(
+            System.Collections.IList allWeapons,
+            System.Collections.IList undeployedWeapons,
+            System.Collections.IDictionary deployedWeapons,
+            SiegeEngineType weaponType)
+        {
+            MissionSiegeWeapon fromDeployed =
+                FindCommanderDeploymentMissionSiegeWeaponByType(GetCommanderDeploymentDictionaryValues(deployedWeapons), weaponType);
+            if (fromDeployed != null)
+                return fromDeployed;
+
+            if (allWeapons == null)
+                return null;
+
+            foreach (object entry in allWeapons)
+            {
+                MissionSiegeWeapon missionSiegeWeapon = TryExtractCommanderDeploymentMissionSiegeWeapon(entry);
+                if (!CommanderDeploymentMissionSiegeWeaponMatches(missionSiegeWeapon, weaponType))
+                    continue;
+
+                if (ContainsCommanderDeploymentMissionSiegeWeapon(undeployedWeapons, missionSiegeWeapon) ||
+                    ContainsCommanderDeploymentMissionSiegeWeapon(GetCommanderDeploymentDictionaryValues(deployedWeapons), missionSiegeWeapon))
+                {
+                    continue;
+                }
+
+                return missionSiegeWeapon;
+            }
+
+            return FindCommanderDeploymentMissionSiegeWeaponByType(allWeapons, weaponType);
+        }
+
+        private static System.Collections.IEnumerable GetCommanderDeploymentDictionaryValues(
+            System.Collections.IDictionary dictionary)
+        {
+            if (dictionary == null)
+                yield break;
+
+            foreach (object entry in dictionary)
+            {
+                if (entry is System.Collections.DictionaryEntry dictionaryEntry)
+                    yield return dictionaryEntry.Value;
+            }
+        }
+
+        private static MissionSiegeWeapon FindCommanderDeploymentMissionSiegeWeaponByType(
+            System.Collections.IEnumerable entries,
+            SiegeEngineType weaponType)
+        {
+            if (entries == null)
+                return null;
+
+            foreach (object entry in entries)
+            {
+                MissionSiegeWeapon missionSiegeWeapon = TryExtractCommanderDeploymentMissionSiegeWeapon(entry);
+                if (CommanderDeploymentMissionSiegeWeaponMatches(missionSiegeWeapon, weaponType))
+                    return missionSiegeWeapon;
+            }
+
+            return null;
+        }
+
+        private static bool ContainsCommanderDeploymentMissionSiegeWeapon(
+            System.Collections.IEnumerable entries,
+            MissionSiegeWeapon missionSiegeWeapon)
+        {
+            if (entries == null || missionSiegeWeapon == null)
+                return false;
+
+            foreach (object entry in entries)
+            {
+                if (ReferenceEquals(TryExtractCommanderDeploymentMissionSiegeWeapon(entry), missionSiegeWeapon))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool CommanderDeploymentMissionSiegeWeaponMatches(
+            MissionSiegeWeapon missionSiegeWeapon,
+            SiegeEngineType weaponType)
+        {
+            if (missionSiegeWeapon == null || weaponType == null)
+                return false;
+
+            if (ReferenceEquals(missionSiegeWeapon.Type, weaponType))
+                return true;
+
+            return string.Equals(
+                missionSiegeWeapon.Type?.StringId,
+                weaponType.StringId,
+                StringComparison.Ordinal);
+        }
+
+        private static string AppendCommanderDeploymentDiagnostics(
+            string existing,
+            string label,
+            string detail)
+        {
+            if (string.IsNullOrWhiteSpace(detail))
+                return existing ?? string.Empty;
+
+            string segment = (label ?? "Detail") + "={" + detail + "}";
+            if (string.IsNullOrWhiteSpace(existing))
+                return segment;
+
+            return existing + " " + segment;
+        }
+
+        private static string BuildCommanderDeploymentSiegeControllerDiagnostics(
+            BattleSideEnum side,
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon)
+        {
+            if (!IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled())
+                return string.Empty;
+
+            try
+            {
+                SiegeEngineType missionWeaponType = TryGetCommanderDeploymentSiegeEngineType(siegeWeapon);
+                Type weaponBaseType = TryGetCommanderDeploymentSiegeWeaponType(siegeWeapon);
+                TaleWorlds.MountAndBlade.Mission mission = TaleWorlds.MountAndBlade.Mission.Current;
+                MissionSiegeEnginesLogic siegeEnginesLogic = mission?.GetMissionBehavior<MissionSiegeEnginesLogic>();
+                IMissionSiegeWeaponsController weaponsController = null;
+                int maxDeployableCount = -1;
+                string controllerError = string.Empty;
+
+                try
+                {
+                    weaponsController = siegeEnginesLogic?.GetSiegeWeaponsController(side);
+                }
+                catch (Exception ex)
+                {
+                    controllerError = "get-controller:" + ex.GetType().Name + ":" + ex.Message;
+                }
+
+                try
+                {
+                    if (weaponsController != null && weaponBaseType != null)
+                        maxDeployableCount = weaponsController.GetMaxDeployableWeaponCount(weaponBaseType);
+                }
+                catch (Exception ex)
+                {
+                    controllerError = AppendCommanderDeploymentPreparationError(
+                        controllerError,
+                        "max-count",
+                        ex);
+                }
+
+                return
+                    "Event={" + BuildCommanderDeploymentPointEventDiagnostics(deploymentPoint) + "}" +
+                    " MissionScene=" + (mission?.SceneName ?? "<null>") +
+                    " MissionMode=" + (mission == null ? "<null>" : mission.Mode.ToString()) +
+                    " MissionState=" + (mission == null ? "<null>" : mission.CurrentState.ToString()) +
+                    " Logic=" + (siegeEnginesLogic == null ? "<null>" : siegeEnginesLogic.GetType().FullName) +
+                    " Controller=" + (weaponsController == null ? "<null>" : weaponsController.GetType().FullName) +
+                    " RequestedSide=" + side +
+                    " MissionWeaponType=" + FormatCommanderDeploymentSiegeEngineType(missionWeaponType) +
+                    " WeaponBaseType=" + (weaponBaseType == null ? "<null>" : weaponBaseType.FullName) +
+                    " MaxDeployableCount=" + maxDeployableCount +
+                    " Weapons={" + BuildCommanderDeploymentSiegeControllerListDiagnostics(
+                        CommanderDeploymentSiegeControllerWeaponsField,
+                        weaponsController,
+                        missionWeaponType) + "}" +
+                    " UndeployedWeapons={" + BuildCommanderDeploymentSiegeControllerListDiagnostics(
+                        CommanderDeploymentSiegeControllerUndeployedWeaponsField,
+                        weaponsController,
+                        missionWeaponType) + "}" +
+                    " DeployedWeapons={" + BuildCommanderDeploymentSiegeControllerListDiagnostics(
+                        CommanderDeploymentSiegeControllerDeployedWeaponsField,
+                        weaponsController,
+                        missionWeaponType) + "}" +
+                    " Error=" + (string.IsNullOrWhiteSpace(controllerError) ? "<none>" : controllerError);
+            }
+            catch (Exception ex)
+            {
+                return "exception:" + ex.GetType().Name + ":" + ex.Message;
+            }
+        }
+
+        private static string BuildCommanderDeploymentPointEventDiagnostics(DeploymentPoint deploymentPoint)
+        {
+            if (deploymentPoint == null)
+                return "DeploymentPoint=<null>";
+
+            if (CommanderDeploymentPointOnDeploymentStateChangedField == null)
+                return "FieldMissing=True";
+
+            try
+            {
+                Delegate handler = CommanderDeploymentPointOnDeploymentStateChangedField.GetValue(deploymentPoint) as Delegate;
+                if (handler == null)
+                    return "Count=0";
+
+                Delegate[] subscribers = handler.GetInvocationList();
+                var subscriberDescriptions = new List<string>();
+                int limit = Math.Min(subscribers.Length, 8);
+                for (int i = 0; i < limit; i++)
+                {
+                    Delegate subscriber = subscribers[i];
+                    MethodInfo method = subscriber?.Method;
+                    object target = subscriber?.Target;
+                    subscriberDescriptions.Add(
+                        (target == null ? "<static>" : target.GetType().FullName) +
+                        "." +
+                        (method == null ? "<null>" : method.Name));
+                }
+
+                return "Count=" + subscribers.Length +
+                       " Subscribers=[" + string.Join(",", subscriberDescriptions.ToArray()) + "]";
+            }
+            catch (Exception ex)
+            {
+                return "exception:" + ex.GetType().Name + ":" + ex.Message;
+            }
+        }
+
+        private static string BuildCommanderDeploymentSiegeControllerListDiagnostics(
+            FieldInfo field,
+            object weaponsController,
+            SiegeEngineType requestedType)
+        {
+            if (field == null)
+                return "FieldMissing=True";
+
+            if (weaponsController == null)
+                return "Controller=<null>";
+
+            try
+            {
+                object rawValue = field.GetValue(weaponsController);
+                if (!(rawValue is System.Collections.IEnumerable entries))
+                    return "Enumerable=False RawType=" + (rawValue == null ? "<null>" : rawValue.GetType().FullName);
+
+                int count = 0;
+                int exactMatches = 0;
+                int stringIdMatches = 0;
+                var itemDescriptions = new List<string>();
+                foreach (object entry in entries)
+                {
+                    MissionSiegeWeapon missionSiegeWeapon = TryExtractCommanderDeploymentMissionSiegeWeapon(entry);
+                    if (missionSiegeWeapon != null)
+                    {
+                        if (ReferenceEquals(missionSiegeWeapon.Type, requestedType))
+                            exactMatches++;
+
+                        if (requestedType != null &&
+                            string.Equals(
+                                missionSiegeWeapon.Type?.StringId,
+                                requestedType.StringId,
+                                StringComparison.Ordinal))
+                        {
+                            stringIdMatches++;
+                        }
+                    }
+
+                    if (itemDescriptions.Count < 8)
+                    {
+                        itemDescriptions.Add(
+                            "#" + count + "=" +
+                            (missionSiegeWeapon == null
+                                ? "<" + (entry == null ? "null" : entry.GetType().FullName) + ">"
+                                : FormatCommanderDeploymentMissionSiegeWeapon(missionSiegeWeapon, requestedType)));
+                    }
+
+                    count++;
+                }
+
+                return "Count=" + count +
+                       " ExactMatches=" + exactMatches +
+                       " StringIdMatches=" + stringIdMatches +
+                       " Items=[" + string.Join(",", itemDescriptions.ToArray()) + "]";
+            }
+            catch (Exception ex)
+            {
+                return "exception:" + ex.GetType().Name + ":" + ex.Message;
+            }
+        }
+
+        private static MissionSiegeWeapon TryExtractCommanderDeploymentMissionSiegeWeapon(object entry)
+        {
+            if (entry == null)
+                return null;
+
+            MissionSiegeWeapon missionSiegeWeapon = entry as MissionSiegeWeapon;
+            if (missionSiegeWeapon != null)
+                return missionSiegeWeapon;
+
+            try
+            {
+                PropertyInfo valueProperty = entry.GetType().GetProperty(
+                    "Value",
+                    BindingFlags.Instance | BindingFlags.Public);
+                return valueProperty?.GetValue(entry, null) as MissionSiegeWeapon;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string FormatCommanderDeploymentMissionSiegeWeapon(
+            MissionSiegeWeapon missionSiegeWeapon,
+            SiegeEngineType requestedType)
+        {
+            if (missionSiegeWeapon == null)
+                return "<null>";
+
+            return "Index=" + missionSiegeWeapon.Index +
+                   "/Type=" + FormatCommanderDeploymentSiegeEngineType(missionSiegeWeapon.Type) +
+                   "/Exact=" + ReferenceEquals(missionSiegeWeapon.Type, requestedType) +
+                   "/Health=" + FormatCommanderDeploymentFloat(missionSiegeWeapon.Health) +
+                   "/Initial=" + FormatCommanderDeploymentFloat(missionSiegeWeapon.InitialHealth) +
+                   "/Max=" + FormatCommanderDeploymentFloat(missionSiegeWeapon.MaxHealth);
+        }
+
+        private static SiegeEngineType TryGetCommanderDeploymentSiegeEngineType(SiegeWeapon siegeWeapon)
+        {
+            try
+            {
+                return siegeWeapon?.GetSiegeEngineType();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Type TryGetCommanderDeploymentSiegeWeaponType(SiegeWeapon siegeWeapon)
+        {
+            try
+            {
+                return siegeWeapon == null ? null : MissionSiegeWeaponsController.GetWeaponType(siegeWeapon);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string FormatCommanderDeploymentSiegeEngineType(SiegeEngineType siegeEngineType)
+        {
+            if (siegeEngineType == null)
+                return "<null>";
+
+            string stringId = string.IsNullOrWhiteSpace(siegeEngineType.StringId)
+                ? "<empty>"
+                : siegeEngineType.StringId;
+            return stringId +
+                   "/InstanceHash=" +
+                   System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(siegeEngineType);
+        }
+
+        private static string FormatCommanderDeploymentFloat(float value)
+        {
+            return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private static string FormatDeploymentPoint(DeploymentPoint deploymentPoint)
+        {
+            if (deploymentPoint == null)
+                return "<null>";
+
+            return "Id=" + deploymentPoint.Id +
+                   "/Side=" + deploymentPoint.Side +
+                   "/Disabled=" + deploymentPoint.IsDisabled +
+                   "/Deployed=" + deploymentPoint.IsDeployed;
+        }
+
+        private static string FormatSiegeWeapon(SiegeWeapon siegeWeapon)
+        {
+            if (siegeWeapon == null)
+                return "<null>";
+
+            return "Id=" + siegeWeapon.Id +
+                   "/Side=" + siegeWeapon.Side +
+                   "/Disabled=" + siegeWeapon.IsDisabled +
+                   "/Type=" + (siegeWeapon.GetSiegeEngineType()?.StringId ?? "<null>");
+        }
+
+        private static void LogCommanderDeploymentSiegeMachineDiagnostics(
+            string stage,
+            NetworkCommunicator peer,
+            CoopCommanderDeploymentSiegeMachineSelectionMessage message,
+            Team team,
+            string detail)
+        {
+            if (!IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled())
+                return;
+
+            try
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: commander deployment siege machine diagnostics. " +
+                    "Stage=" + (stage ?? string.Empty) +
+                    " Peer=" + (peer?.UserName ?? "<null>") +
+                    " Team=" + (team == null ? "<null>" : team.Side + "#" + team.TeamIndex) +
+                    " RequestedSide=" + (message?.RequestedSide.ToString() ?? "<null>") +
+                    " DeploymentPointId=" + (message == null ? "<null>" : message.DeploymentPointId.ToString()) +
+                    " DeploymentPointPosition=" + (message == null ? "<null>" : message.DeploymentPointPosition.ToString()) +
+                    " SiegeWeaponId=" + (message == null ? "<null>" : message.SiegeWeaponId.ToString()) +
+                    " SiegeWeaponType=" + (message?.SiegeWeaponTypeName ?? "<null>") +
+                    " Clear=" + (message?.ClearSelection.ToString() ?? "<null>") +
+                    " Detail=" + (detail ?? string.Empty));
+            }
+            catch
+            {
+            }
         }
 
         private bool TryApplyCommanderDeploymentFormationAssignments(

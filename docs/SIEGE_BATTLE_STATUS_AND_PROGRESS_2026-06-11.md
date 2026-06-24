@@ -1,12 +1,14 @@
 # Стан розробки Siege Battle
 
-Оновлено: 2026-06-24.
+Оновлено: 2026-06-25.
 
 Це living status document (живий документ стану), який треба продовжувати вести в нових чатах під час розробки режиму облоги в `BannerlordCoopSpectator3`.
 
-## Актуальний зріз на 2026-06-24
+## Актуальний зріз на 2026-06-25
 
 Останній підтверджений добрий стан: commander deployment menu (командирське меню розстановки) для облоги вже підтримує створення формацій, повзунки, миттєве переміщення формацій, нижнє меню наказів F1-F9, кнопки пріоритезації бійців і видимі deployment boundaries (межі розстановки). Після зміни пріоритезації бійці одразу переставляються на актуальні місця без додаткового руху формації. Після виправлення scene preparation split (розділення підготовки сцени між сервером і клієнтом) стіни та баштові секції в `empire_town_d` підтверджено відображаються цілими на клієнті.
+
+Окремо підтверджено новий етап по siege machines (облогових машинах): атакуюча баліста розміщується через меню розстановки, переміщується між точками і після кожного розміщення отримує стрільця. Попередня проблема, коли стрілець з'являвся лише при першому розміщенні або залишався біля старої точки після зняття балісти, більше не відтворюється в останньому прогоні.
 
 Останній контрольний commit (фіксація змін) перед поточним етапом:
 
@@ -30,6 +32,10 @@
 - Після зміни кнопок пріоритезації native rearrange (рідна перестановка формацій) одразу завершується локальним placement finalize (завершенням розстановки позицій), тому бійці, які вийшли або зайшли у формацію, миттєво стають на свої місця як у кампанії.
 - Deployment boundaries (межі розстановки) тепер підтверджено видно на клієнті як прапорці і прозору візуальну стіну. Логічне обмеження позицій працювало раніше, але тепер командир також бачить межі зони, як у кампанійному меню розстановки.
 - UI icons (іконки інтерфейсу) для додавання формації і вибору типу формації підтягуються після завантаження потрібних sprite categories (категорій графічних ресурсів).
+- Siege machine deployment (розміщення облогових машин) для атакуючої балісти підтверджено працює: командир може поставити балісту, прибрати її і повторно розмістити на іншій доступній точці.
+- Ballista operator assignment (призначення стрільця до балісти) підтверджено працює після кожного deploy (розміщення), а не лише після першого.
+- Controlled disband (кероване зняття машини з точки) тепер перед приховуванням машини виконує `ReleaseAgents` (явне звільнення агентів): старий `MovingAgent` / `UserAgent` (агент, що йде до точки або використовує її) від'єднується від старої балісти і повертається у формацію.
+- Server-side deployment point resolution (серверне зіставлення точки розміщення) виправлено для нестабільних client/server ids (клієнтських і серверних ідентифікаторів): для typed siege machine request (запиту з типом облогової машини) сервер обирає nearest matching point (найближчу відповідну точку) за позицією, тому повторне розміщення більше не відкидається як `skip-invalid-deployment-point`.
 - Для актуального siege projection (проєкції облоги) у списку типів залишені тільки релевантні варіанти:
   - infantry (піхота);
   - ranged (стрільці);
@@ -51,6 +57,11 @@
 - Для scene-tag fallback (резервного шляху через теги сцени) точки межі проходять через `RadialSortBoundary` (радіальне сортування точок) і `FindConvexHull` (побудову опуклої оболонки), щоб форма контуру відповідала кампанійному способу побудови.
 - Siege scene preparation (підготовка сцени облоги) тепер розділена за відповідальністю: `SiegeMissionPreparationHandler` (обробник підготовки облогової сцени) додається лише в server stack (серверний стек поведінок), а client stack (клієнтський стек поведінок) не запускає серверну логіку вибору цілих або зламаних стін.
 - `wallHitPointRatios` (коефіцієнти цілісності стін) більше не підміняються штучним forced-intact (примусовим "стіни цілі") у безпечному випадку. Для сцени з двома breakable wall segments (руйнованими сегментами стін) використовуються нормалізовані значення з campaign snapshot (знімка стану кампанії).
+- `CoopSiegeMachineDeploymentController` є controlled deployment controller (контролером керованого розміщення облогових машин), який не викликає небезпечний campaign deployment flow (кампанійну послідовність розміщення) напряму, а відтворює потрібну поведінку через безпечні MP-side operations (операції, безпечні для мультиплеєру).
+- При deploy (розміщенні) облогової машини контролер синхронізує `DeploymentPoint` (точку розміщення), `SiegeWeapon` (облогову машину), `MissionSiegeWeaponsController` (рідний контролер облогових машин), visible/physics state (видимість і фізичний стан), forced use (примусове використання машини формаціями) і detachment assignment (призначення агента до машини).
+- Якщо native `SiegeDeploymentHandler.AutoAssignDetachmentsForDeployment` (рідний обробник автоматичного призначення агентів до машин) недоступний або не може бути викликаний, використовується owned auto assign (власне автоматичне призначення): тимчасово дозволяється AI ticking (тик штучного інтелекту), агенти проходять через `TickAgent`, а `DetachmentManager.TickDetachments` призначає стрільця на доступний слот.
+- При clear/disband (очищенні або знятті машини з точки) контролер перед зміною видимості і стану машини явно звільняє агентів із її `StandingPoint` (точки взаємодії): `UserAgent`, `MovingAgent`, `DefendingAgents` (агенти, що використовують, йдуть до або захищають точку) і агентів із `agent.Detachment == siegeWeapon`.
+- `CoopMissionNetworkBridge` виконує server-side fallback resolution (серверне резервне зіставлення) для `DeploymentPoint`: якщо переданий `MissionObjectId` (ідентифікатор об'єкта місії) не валідний на сервері, точка зіставляється за позицією та типом облогової машини. Для typed request (запиту з типом машини) пріоритет має найближча відповідна точка будь-якого enabled/disabled state (активного або вимкненого стану), а не перша активна точка.
 
 ### Доктрина для небезпечних кампанійних елементів
 
@@ -68,7 +79,7 @@
 - Довести host start flow (послідовність старту хостом): якщо командир не завершив або командира немає, решта має дорозставитися auto-deploy (автоматичною розстановкою).
 - Перевірити вселення звичайних гравців після завершення deployment phase (фази розстановки).
 - Окремо стабілізувати вихід з lobby (лобі) і multiplayer menu (мультиплеєрного меню), бо раніше там були crash reports (звіти про падіння).
-- Після стабілізації старту бою перевірити siege engines (облогові машини), ladders (драбини), gates/breaches (ворота і проломи) та AI assault behavior (поведінку штурму штучного інтелекту).
+- Базову attacker ballista flow (послідовність роботи балісти атакуючих) підтверджено. Далі треба перевірити інші siege engines (облогові машини), defender-side machines (машини сторони оборони), ladders (драбини), gates/breaches (ворота і проломи) та AI assault behavior (поведінку штурму штучного інтелекту).
 - Чорні ділянки сцени ще треба окремо перевірити як scene/material pass (перевірку сцени та матеріалів), але відсутні стіни і баштові секції більше не є підтвердженою проблемою після виправлення scene preparation split.
 
 ### Маркери для наступних прогонів
@@ -77,6 +88,9 @@
 - Після створення нової формації і руху прапорцями мають переміщуватися саме її бійці.
 - Після зміни повзунка бійці мають перейти у нову формацію на сервері і рухатися разом з нею без додаткових ручних обхідних дій.
 - Після натискання priority filter button (кнопки фільтра пріоритезації) очікується негайне переставлення бійців без додаткового руху формації.
+- При переміщенні балісти між точками в логах має бути `ReleaseAgents={... Released=1 Attached=1 ...}` для старої точки, якщо біля старої машини вже був стрілець.
+- Після нового deploy (розміщення) балісти в логах має бути `AutoAssign={... DetachedAgents=1 ...}` або еквівалентний native auto assign (рідне автоматичне призначення), а біля балісти має стояти стрілець.
+- У `FallbackResolution` для повторного розміщення балісти не має бути `skip-invalid-deployment-point`; очікувані діагностичні маркери: `NearestSelectionReason`, `NearestAnyStrictMatch=True` або інший валідний selected point (обрана точка).
 
 ## Призначення
 
@@ -426,11 +440,14 @@ Client-only isolation toggles (перемикачі ізоляції клієн�
 - `C:\dev\projects\BannerlordCoopSpectator3\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeployment.cs`
 - `C:\dev\projects\BannerlordCoopSpectator3\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentClient.cs`
 - `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultWithDeploymentRuntime.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\SiegeAssault\CoopSiegeMachineDeploymentController.cs`
 - `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionNetworkBridge.cs`
 - `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`
 - `C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs`
 - `C:\dev\projects\BannerlordCoopSpectator3\Patches\MissionStateOpenNewPatches.cs`
 - `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopMissionSelectionView.cs`
+- `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopSiegeMachineDeploymentVM.cs`
 - `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopSelectionUiHelpers.cs`
 - `C:\dev\projects\BannerlordCoopSpectator3\UI\CoopSelectionShellViewModels.cs`
 - `C:\dev\projects\BannerlordCoopSpectator3\Infrastructure\BattleCommanderResolver.cs`

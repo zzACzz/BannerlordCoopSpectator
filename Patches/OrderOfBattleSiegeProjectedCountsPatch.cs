@@ -11,6 +11,8 @@ using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Objects.Siege;
+using TaleWorlds.MountAndBlade.ViewModelCollection.Order;
 using TaleWorlds.MountAndBlade.ViewModelCollection.OrderOfBattle;
 
 namespace CoopSpectator.Patches
@@ -38,6 +40,7 @@ namespace CoopSpectator.Patches
             PatchOrderOfBattleWeightAdjusted(harmony);
             PatchOrderOfBattleFilterUseToggled(harmony);
             PatchOrderOfBattleFormationClassChanged(harmony);
+            PatchCommanderDeploymentSiegeMachineSelection(harmony);
         }
 
         private static Type GetOrderOfBattleUIHelperType()
@@ -271,6 +274,26 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, postfix: new HarmonyMethod(postfix));
             ModLogger.Info("OrderOfBattleSiegeProjectedCountsPatch: postfix applied to OrderOfBattleFormationItemVM.OnClassChanged.");
+        }
+
+        private static void PatchCommanderDeploymentSiegeMachineSelection(Harmony harmony)
+        {
+            MethodInfo target = AccessTools.Method(
+                typeof(MissionOrderDeploymentControllerVM),
+                "OnSelectDeploymentSiegeMachine",
+                new[] { typeof(DeploymentSiegeMachineVM) });
+            MethodInfo postfix = typeof(OrderOfBattleSiegeProjectedCountsPatch).GetMethod(
+                nameof(MissionOrderDeploymentControllerVM_OnSelectDeploymentSiegeMachine_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("OrderOfBattleSiegeProjectedCountsPatch: MissionOrderDeploymentControllerVM.OnSelectDeploymentSiegeMachine not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("OrderOfBattleSiegeProjectedCountsPatch: postfix applied to MissionOrderDeploymentControllerVM.OnSelectDeploymentSiegeMachine.");
         }
 
         private static bool OrderOfBattleUIHelper_GetTotalCountOfUnitsInClass_Prefix(
@@ -767,6 +790,61 @@ namespace CoopSpectator.Patches
                 {
                     ModLogger.Info(
                         "OrderOfBattleSiegeProjectedCountsPatch: projected class change distribution failed open: " +
+                        ex.GetType().Name + ":" + ex.Message);
+                }
+            }
+        }
+
+        private static void MissionOrderDeploymentControllerVM_OnSelectDeploymentSiegeMachine_Postfix(
+            MissionOrderDeploymentControllerVM __instance,
+            DeploymentSiegeMachineVM item)
+        {
+            try
+            {
+                if (!CoopMissionSelectionView.IsCommanderDeploymentOrderOfBattleActive() ||
+                    !GameNetwork.IsClient ||
+                    !GameNetwork.IsSessionActive ||
+                    item?.DeploymentPoint == null)
+                {
+                    return;
+                }
+
+                Mission mission = Mission.Current;
+                Team playerTeam = mission?.PlayerTeam;
+                BattleSideEnum side = playerTeam?.Side ?? BattleSideEnum.None;
+                if (side == BattleSideEnum.None || item.DeploymentPoint.Side != side)
+                    return;
+
+                bool clearSelection = item.SiegeWeapon == null;
+                bool sent = CoopBattleNetworkRequestTransport.TrySyncCommanderDeploymentSiegeMachineSelection(
+                    side,
+                    item.DeploymentPoint,
+                    item.SiegeWeapon,
+                    clearSelection,
+                    "OrderOfBattleSiegeProjectedCountsPatch.OnSelectDeploymentSiegeMachine");
+                if (sent)
+                {
+                    ExactCampaignSiegeAssaultWithDeploymentRuntime.TryApplyCommanderDeploymentSiegeMachineSelectionLocally(
+                        mission,
+                        side,
+                        item.DeploymentPoint,
+                        item.SiegeWeapon,
+                        clearSelection,
+                        out string _);
+                }
+
+                LogCommanderDeploymentSiegeMachineSyncDiagnostics(
+                    sent ? "sent" : "send-failed",
+                    playerTeam,
+                    item,
+                    "Clear=" + clearSelection);
+            }
+            catch (Exception ex)
+            {
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "OrderOfBattleSiegeProjectedCountsPatch: commander deployment siege machine sync failed open: " +
                         ex.GetType().Name + ":" + ex.Message);
                 }
             }
@@ -1880,6 +1958,32 @@ namespace CoopSpectator.Patches
                     " Source=" + (source ?? string.Empty) +
                     " TeamIndex=" + (team?.TeamIndex.ToString() ?? "<null>") +
                     " Side=" + (team?.Side.ToString() ?? "<null>") +
+                    " Detail=" + (detail ?? string.Empty));
+            }
+            catch
+            {
+            }
+        }
+
+        private static void LogCommanderDeploymentSiegeMachineSyncDiagnostics(
+            string stage,
+            Team team,
+            DeploymentSiegeMachineVM item,
+            string detail)
+        {
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics)
+                return;
+
+            try
+            {
+                DeploymentPoint deploymentPoint = item?.DeploymentPoint;
+                SiegeWeapon siegeWeapon = item?.SiegeWeapon;
+                ModLogger.Info(
+                    "OrderOfBattleSiegeProjectedCountsPatch: commander deployment siege machine sync diagnostics. " +
+                    "Stage=" + (stage ?? string.Empty) +
+                    " Team=" + (team == null ? "<null>" : team.Side + "#" + team.TeamIndex) +
+                    " DeploymentPoint=" + (deploymentPoint == null ? "<null>" : deploymentPoint.Id + "/" + deploymentPoint.Side) +
+                    " SiegeWeapon=" + (siegeWeapon == null ? "<null>" : siegeWeapon.Id + "/" + siegeWeapon.GetSiegeEngineType()?.StringId) +
                     " Detail=" + (detail ?? string.Empty));
             }
             catch

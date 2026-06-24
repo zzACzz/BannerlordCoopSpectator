@@ -9,6 +9,7 @@ using TaleWorlds.Engine;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Network.Messages;
+using TaleWorlds.MountAndBlade.Objects.Siege;
 
 namespace CoopSpectator.Patches
 {
@@ -72,6 +73,11 @@ namespace CoopSpectator.Patches
                 new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) });
             PatchPrivateMethod(
                 harmony,
+                "HandleClientEventApplySiegeWeaponOrder",
+                nameof(MissionNetworkComponent_HandleClientEventApplySiegeWeaponOrder_Prefix),
+                new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) });
+            PatchPrivateMethod(
+                harmony,
                 "HandleClientEventClearSelectedFormations",
                 nameof(MissionNetworkComponent_HandleClientEventClearSelectedFormations_Prefix),
                 new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) });
@@ -82,13 +88,28 @@ namespace CoopSpectator.Patches
                 new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) });
             PatchPrivateMethod(
                 harmony,
+                "HandleClientEventSelectAllSiegeWeapons",
+                nameof(MissionNetworkComponent_HandleClientEventSelectAllSiegeWeapons_Prefix),
+                new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) });
+            PatchPrivateMethod(
+                harmony,
                 "HandleClientEventSelectFormation",
                 nameof(MissionNetworkComponent_HandleClientEventSelectFormation_Prefix),
                 new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) });
             PatchPrivateMethod(
                 harmony,
+                "HandleClientEventSelectSiegeWeapon",
+                nameof(MissionNetworkComponent_HandleClientEventSelectSiegeWeapon_Prefix),
+                new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) });
+            PatchPrivateMethod(
+                harmony,
                 "HandleClientEventUnselectFormation",
                 nameof(MissionNetworkComponent_HandleClientEventUnselectFormation_Prefix),
+                new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) });
+            PatchPrivateMethod(
+                harmony,
+                "HandleClientEventUnselectSiegeWeapon",
+                nameof(MissionNetworkComponent_HandleClientEventUnselectSiegeWeapon_Prefix),
                 new[] { typeof(NetworkCommunicator), typeof(GameNetworkMessage) });
         }
 
@@ -400,6 +421,37 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool MissionNetworkComponent_HandleClientEventApplySiegeWeaponOrder_Prefix(
+            NetworkCommunicator networkPeer,
+            GameNetworkMessage baseMessage,
+            ref bool __result)
+        {
+            try
+            {
+                if (!TryResolveOrderLease(networkPeer, out Team team, out OrderController orderController))
+                    return true;
+
+                ApplySiegeWeaponOrder message = baseMessage as ApplySiegeWeaponOrder;
+                if (message == null || orderController?.SiegeWeaponController == null)
+                    return true;
+
+                orderController.SiegeWeaponController.SetOrder(message.OrderType);
+                LogOrderDiagnostics(
+                    "siege-weapon-order-applied",
+                    networkPeer,
+                    orderController,
+                    "OrderType=" + message.OrderType +
+                    " Team=" + FormatTeam(team));
+
+                __result = true;
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
         private static bool MissionNetworkComponent_HandleClientEventClearSelectedFormations_Prefix(
             NetworkCommunicator networkPeer,
             GameNetworkMessage baseMessage,
@@ -456,6 +508,35 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool MissionNetworkComponent_HandleClientEventSelectAllSiegeWeapons_Prefix(
+            NetworkCommunicator networkPeer,
+            GameNetworkMessage baseMessage,
+            ref bool __result)
+        {
+            try
+            {
+                if (!TryResolveOrderLease(networkPeer, out Team team, out OrderController orderController))
+                    return true;
+
+                if (orderController?.SiegeWeaponController == null)
+                    return true;
+
+                orderController.SiegeWeaponController.SelectAll();
+                LogOrderDiagnostics(
+                    "select-all-siege-weapons",
+                    networkPeer,
+                    orderController,
+                    "Team=" + FormatTeam(team));
+
+                __result = true;
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
         private static bool MissionNetworkComponent_HandleClientEventSelectFormation_Prefix(
             NetworkCommunicator networkPeer,
             GameNetworkMessage baseMessage,
@@ -490,6 +571,38 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool MissionNetworkComponent_HandleClientEventSelectSiegeWeapon_Prefix(
+            NetworkCommunicator networkPeer,
+            GameNetworkMessage baseMessage,
+            ref bool __result)
+        {
+            try
+            {
+                if (!TryResolveOrderLease(networkPeer, out Team team, out OrderController orderController))
+                    return true;
+
+                SelectSiegeWeapon message = baseMessage as SelectSiegeWeapon;
+                SiegeWeapon siegeWeapon = message == null ? null : ResolveSiegeWeapon(message.SiegeWeaponId, team);
+                if (siegeWeapon != null && orderController?.SiegeWeaponController != null)
+                    orderController.SiegeWeaponController.Select(siegeWeapon);
+
+                LogOrderDiagnostics(
+                    "select-siege-weapon",
+                    networkPeer,
+                    orderController,
+                    "Requested=" + (message == null ? "<null>" : message.SiegeWeaponId.ToString()) +
+                    " Resolved=" + FormatSiegeWeapon(siegeWeapon) +
+                    " Team=" + FormatTeam(team));
+
+                __result = true;
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
         private static bool MissionNetworkComponent_HandleClientEventUnselectFormation_Prefix(
             NetworkCommunicator networkPeer,
             GameNetworkMessage baseMessage,
@@ -514,6 +627,38 @@ namespace CoopSpectator.Patches
                     "Requested=" + (message == null ? "<null>" : message.FormationIndex.ToString()) +
                     " Resolved=" + FormatFormation(formation) +
                     " Shadow=[" + BuildShadowSelectionSummary(networkPeer, team) + "]");
+
+                __result = true;
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static bool MissionNetworkComponent_HandleClientEventUnselectSiegeWeapon_Prefix(
+            NetworkCommunicator networkPeer,
+            GameNetworkMessage baseMessage,
+            ref bool __result)
+        {
+            try
+            {
+                if (!TryResolveOrderLease(networkPeer, out Team team, out OrderController orderController))
+                    return true;
+
+                UnselectSiegeWeapon message = baseMessage as UnselectSiegeWeapon;
+                SiegeWeapon siegeWeapon = message == null ? null : ResolveSiegeWeapon(message.SiegeWeaponId, team);
+                if (siegeWeapon != null && orderController?.SiegeWeaponController != null)
+                    orderController.SiegeWeaponController.Deselect(siegeWeapon);
+
+                LogOrderDiagnostics(
+                    "unselect-siege-weapon",
+                    networkPeer,
+                    orderController,
+                    "Requested=" + (message == null ? "<null>" : message.SiegeWeaponId.ToString()) +
+                    " Resolved=" + FormatSiegeWeapon(siegeWeapon) +
+                    " Team=" + FormatTeam(team));
 
                 __result = true;
                 return false;
@@ -610,6 +755,26 @@ namespace CoopSpectator.Patches
             }
 
             return null;
+        }
+
+        private static SiegeWeapon ResolveSiegeWeapon(MissionObjectId siegeWeaponId, Team team)
+        {
+            if (siegeWeaponId == MissionObjectId.Invalid || team == null)
+                return null;
+
+            try
+            {
+                SiegeWeapon siegeWeapon = TaleWorlds.MountAndBlade.Mission.MissionNetworkHelper
+                    .GetMissionObjectFromMissionObjectId(siegeWeaponId) as SiegeWeapon;
+                if (siegeWeapon == null || siegeWeapon.IsDisabled || siegeWeapon.Side != team.Side)
+                    return null;
+
+                return siegeWeapon;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static bool TryApplyShadowMoveToLineSegment(
@@ -943,6 +1108,25 @@ namespace CoopSpectator.Patches
                 "/team=" + (formation.Team?.TeamIndex.ToString() ?? "<null>") +
                 "/side=" + (formation.Team?.Side.ToString() ?? "<null>") +
                 "/count=" + formation.CountOfUnits;
+        }
+
+        private static string FormatTeam(Team team)
+        {
+            if (team == null)
+                return "<null>";
+
+            return "#" + team.TeamIndex + "/side=" + team.Side;
+        }
+
+        private static string FormatSiegeWeapon(SiegeWeapon siegeWeapon)
+        {
+            if (siegeWeapon == null)
+                return "<null>";
+
+            return "Id=" + siegeWeapon.Id +
+                "/side=" + siegeWeapon.Side +
+                "/disabled=" + siegeWeapon.IsDisabled +
+                "/type=" + (siegeWeapon.GetSiegeEngineType()?.StringId ?? "<null>");
         }
 
         private static bool IsFormationSelected(OrderController orderController, Formation formation)

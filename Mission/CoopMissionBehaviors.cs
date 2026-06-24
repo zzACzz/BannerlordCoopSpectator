@@ -10677,6 +10677,26 @@ namespace CoopSpectator.MissionBehaviors
                 allowRegression: false);
         }
 
+        private static bool IsBattlePhaseAiHoldDiagnosticsEnabled()
+        {
+            try
+            {
+                string value = Environment.GetEnvironmentVariable("COOPSPECTATOR_AI_HOLD_DIAGNOSTICS");
+                if (string.IsNullOrWhiteSpace(value))
+                    return false;
+
+                value = value.Trim();
+                return value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("on", StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static void TryApplyBattlePhaseAiHold(Mission mission, string source)
         {
             if (mission == null || !GameNetwork.IsServer)
@@ -10703,11 +10723,14 @@ namespace CoopSpectator.MissionBehaviors
             mission.PauseAITick = shouldPauseAi;
             _lastAppliedBattlePhaseAiHold = shouldPauseAi;
 
-            ModLogger.Info(
-                "CoopMissionSpawnLogic: battle phase AI hold state applied. " +
-                "Phase=" + currentPhase +
-                " PauseAITick=" + shouldPauseAi +
-                " Source=" + (source ?? "unknown"));
+            if (IsBattlePhaseAiHoldDiagnosticsEnabled())
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: battle phase AI hold state applied. " +
+                    "Phase=" + currentPhase +
+                    " PauseAITick=" + shouldPauseAi +
+                    " Source=" + (source ?? "unknown"));
+            }
         }
 
         private static void TryApplyNativeBattleMapWarmupFallback(Mission mission, string source)
