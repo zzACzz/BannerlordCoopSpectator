@@ -1691,6 +1691,34 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        public static bool TryBroadcastCommanderDeploymentSiegeMachineState(
+            Mission mission,
+            BattleSideEnum side,
+            out string diagnostics,
+            string source)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            if (!GameNetwork.IsServer || side == BattleSideEnum.None)
+            {
+                diagnostics =
+                    "invalid-context IsServer=" + GameNetwork.IsServer +
+                    " Side=" + side;
+                return false;
+            }
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null)
+            {
+                diagnostics = "bridge-missing";
+                return false;
+            }
+
+            return bridge.TryBroadcastCommanderDeploymentSiegeMachineState(side, out diagnostics, source);
+        }
+
         protected override void AddRemoveMessageHandlers(GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
         {
             if (GameNetwork.IsServer)
@@ -1710,6 +1738,7 @@ namespace CoopSpectator.MissionBehaviors
                 registerer.RegisterBaseHandler<CoopBattlePayloadChunkMessage>(HandleServerPayloadChunk);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotManifestMessage>(HandleServerBattleSnapshotManifest);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotChunkV2Message>(HandleServerBattleSnapshotChunkV2);
+                registerer.RegisterBaseHandler<CoopCommanderDeploymentSiegeMachineStateMessage>(HandleServerCommanderDeploymentSiegeMachineState);
                 ModLogger.Info("CoopMissionNetworkBridge: registered client payload chunk handler.");
             }
         }
@@ -2105,6 +2134,138 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private void HandleServerCommanderDeploymentSiegeMachineState(GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopCommanderDeploymentSiegeMachineStateMessage message))
+                return;
+
+            try
+            {
+                bool applied = TryApplyServerCommanderDeploymentSiegeMachineState(message);
+                LogCommanderDeploymentSiegeMachineStateDiagnostics(
+                    applied ? "applied" : "ignored",
+                    message,
+                    string.Empty);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: server commander deployment siege machine state handling failed. " +
+                    "Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private bool TryApplyServerCommanderDeploymentSiegeMachineState(
+            CoopCommanderDeploymentSiegeMachineStateMessage message)
+        {
+            if (!GameNetwork.IsClient || GameNetwork.IsServer || Mission == null || message == null)
+            {
+                LogCommanderDeploymentSiegeMachineStateDiagnostics(
+                    "skip-context",
+                    message,
+                    "IsClient=" + GameNetwork.IsClient +
+                    " IsServer=" + GameNetwork.IsServer +
+                    " HasMission=" + (Mission != null));
+                return false;
+            }
+
+            if (!CoopSiegeDeploymentBoundaryRuntime.IsCoopSiegeDeploymentMission(Mission))
+            {
+                LogCommanderDeploymentSiegeMachineStateDiagnostics(
+                    "skip-not-coop-siege-deployment",
+                    message,
+                    string.Empty);
+                return false;
+            }
+
+            BattleSideEnum side = message.RequestedSide;
+            if (side == BattleSideEnum.None)
+            {
+                LogCommanderDeploymentSiegeMachineStateDiagnostics(
+                    "skip-side-none",
+                    message,
+                    string.Empty);
+                return false;
+            }
+
+            DeploymentPoint deploymentPoint = ResolveCommanderDeploymentPointById(
+                message.DeploymentPointId,
+                side,
+                out string deploymentPointIdResolutionDiagnostics);
+            string deploymentPointResolutionDiagnostics = "IdResolution={" + deploymentPointIdResolutionDiagnostics + "}";
+            if (deploymentPoint == null)
+            {
+                deploymentPoint = ResolveCommanderDeploymentPoint(
+                    side,
+                    message.DeploymentPointPosition,
+                    message.SiegeWeaponTypeName,
+                    out string fallbackDeploymentPointResolutionDiagnostics);
+                deploymentPointResolutionDiagnostics +=
+                    " FallbackResolution={" + fallbackDeploymentPointResolutionDiagnostics + "}";
+            }
+
+            if (deploymentPoint == null || deploymentPoint.Side != side)
+            {
+                LogCommanderDeploymentSiegeMachineStateDiagnostics(
+                    "skip-invalid-deployment-point",
+                    message,
+                    "Resolved=" + FormatDeploymentPoint(deploymentPoint) +
+                    " Resolution=" + deploymentPointResolutionDiagnostics);
+                return false;
+            }
+
+            SiegeWeapon siegeWeapon = null;
+            string siegeWeaponResolutionDiagnostics = string.Empty;
+            if (!message.ClearSelection)
+            {
+                siegeWeapon = ResolveCommanderDeploymentSiegeWeaponById(
+                    deploymentPoint,
+                    side,
+                    message.SiegeWeaponId,
+                    message.SiegeWeaponTypeName,
+                    out string siegeWeaponIdResolutionDiagnostics);
+                siegeWeaponResolutionDiagnostics = "IdResolution={" + siegeWeaponIdResolutionDiagnostics + "}";
+                if (siegeWeapon == null)
+                {
+                    siegeWeapon = ResolveCommanderDeploymentSiegeWeapon(
+                        deploymentPoint,
+                        side,
+                        message.SiegeWeaponTypeName,
+                        allowDisabled: true);
+                    siegeWeaponResolutionDiagnostics += " FallbackByType=" + FormatSiegeWeapon(siegeWeapon);
+                }
+
+                if (siegeWeapon == null || siegeWeapon.Side != side)
+                {
+                    LogCommanderDeploymentSiegeMachineStateDiagnostics(
+                        "skip-invalid-siege-weapon",
+                        message,
+                        "DeploymentPoint=" + FormatDeploymentPoint(deploymentPoint) +
+                        " SiegeWeapon=" + FormatSiegeWeapon(siegeWeapon) +
+                        " SiegeWeaponResolution=" + siegeWeaponResolutionDiagnostics +
+                        " DeploymentPointResolution=" + deploymentPointResolutionDiagnostics);
+                    return false;
+                }
+            }
+
+            bool applied = ExactCampaignSiegeAssaultWithDeploymentRuntime.TryApplyCommanderDeploymentSiegeMachineSelectionLocally(
+                Mission,
+                side,
+                deploymentPoint,
+                siegeWeapon,
+                message.ClearSelection,
+                out string localApplyDiagnostics);
+            LogCommanderDeploymentSiegeMachineStateDiagnostics(
+                applied ? "applied-detail" : "apply-failed",
+                message,
+                "DeploymentPoint=" + FormatDeploymentPoint(deploymentPoint) +
+                " SiegeWeapon=" + FormatSiegeWeapon(siegeWeapon) +
+                " DeploymentPointResolution=" + deploymentPointResolutionDiagnostics +
+                " SiegeWeaponResolution=" + siegeWeaponResolutionDiagnostics +
+                " LocalApply={" + localApplyDiagnostics + "}");
+            return applied;
+        }
+
         private bool TryApplyCommanderDeploymentSiegeMachineSelection(
             NetworkCommunicator peer,
             CoopCommanderDeploymentSiegeMachineSelectionMessage message)
@@ -2392,6 +2553,94 @@ namespace CoopSpectator.MissionBehaviors
                     " SiegeController={" + siegeControllerDiagnostics + "}");
                 return false;
             }
+        }
+
+        private bool TryBroadcastCommanderDeploymentSiegeMachineState(
+            BattleSideEnum side,
+            out string diagnostics,
+            string source)
+        {
+            diagnostics = "invalid-context";
+            if (!GameNetwork.IsServer || Mission == null || side == BattleSideEnum.None)
+                return false;
+
+            if (GameNetwork.NetworkPeers == null)
+            {
+                diagnostics = "network-peers-null";
+                return false;
+            }
+
+            List<NetworkCommunicator> peers = GameNetwork.NetworkPeers
+                .Where(IsEligibleRemotePeer)
+                .ToList();
+            List<DeploymentPoint> deploymentPoints = EnumerateCommanderDeploymentPoints()
+                .Where(deploymentPoint => deploymentPoint != null &&
+                                          deploymentPoint.Side == side &&
+                                          deploymentPoint.IsDeployed &&
+                                          deploymentPoint.DeployedWeapon is SiegeWeapon)
+                .ToList();
+
+            int sentCount = 0;
+            int failedCount = 0;
+            var details = new List<string>();
+            foreach (DeploymentPoint deploymentPoint in deploymentPoints)
+            {
+                SiegeWeapon siegeWeapon = deploymentPoint.DeployedWeapon as SiegeWeapon;
+                if (siegeWeapon == null || siegeWeapon.Side != side)
+                    continue;
+
+                string siegeWeaponTypeName = BuildCommanderDeploymentSiegeWeaponTypeName(siegeWeapon);
+                Vec3 deploymentPointPosition = ResolveCommanderDeploymentPointPosition(deploymentPoint);
+                foreach (NetworkCommunicator peer in peers)
+                {
+                    try
+                    {
+                        GameNetwork.BeginModuleEventAsServer(peer);
+                        GameNetwork.WriteMessage(new CoopCommanderDeploymentSiegeMachineStateMessage(
+                            side,
+                            deploymentPoint.Id,
+                            deploymentPointPosition,
+                            siegeWeapon.Id,
+                            siegeWeaponTypeName,
+                            clearSelection: false));
+                        GameNetwork.EndModuleEventAsServer();
+                        sentCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        failedCount++;
+                        details.Add(
+                            "SendFailed Peer=" + (peer?.UserName ?? "<null>") +
+                            " Point=" + FormatDeploymentPoint(deploymentPoint) +
+                            " Weapon=" + FormatSiegeWeapon(siegeWeapon) +
+                            " Error=" + ex.GetType().Name + ":" + ex.Message);
+                    }
+                }
+            }
+
+            diagnostics =
+                "Side=" + side +
+                " Points=" + deploymentPoints.Count +
+                " Peers=" + peers.Count +
+                " Sent=" + sentCount +
+                " Failed=" + failedCount +
+                " Source=" + (source ?? "unknown") +
+                " Details=[" + string.Join("; ", details.ToArray()) + "]";
+            return failedCount == 0 && (sentCount > 0 || peers.Count <= 0);
+        }
+
+        private static string BuildCommanderDeploymentSiegeWeaponTypeName(SiegeWeapon siegeWeapon)
+        {
+            if (siegeWeapon == null)
+                return string.Empty;
+
+            if (TryResolveCommanderDeploymentSiegeWeaponType(siegeWeapon, out Type weaponType) &&
+                weaponType != null)
+            {
+                return weaponType.FullName ?? weaponType.Name;
+            }
+
+            return siegeWeapon.GetType().FullName ?? siegeWeapon.GetType().Name;
         }
 
         private static T ResolveMissionObject<T>(MissionObjectId missionObjectId)
@@ -4234,6 +4483,32 @@ namespace CoopSpectator.MissionBehaviors
                     "Stage=" + (stage ?? string.Empty) +
                     " Peer=" + (peer?.UserName ?? "<null>") +
                     " Team=" + (team == null ? "<null>" : team.Side + "#" + team.TeamIndex) +
+                    " RequestedSide=" + (message?.RequestedSide.ToString() ?? "<null>") +
+                    " DeploymentPointId=" + (message == null ? "<null>" : message.DeploymentPointId.ToString()) +
+                    " DeploymentPointPosition=" + (message == null ? "<null>" : message.DeploymentPointPosition.ToString()) +
+                    " SiegeWeaponId=" + (message == null ? "<null>" : message.SiegeWeaponId.ToString()) +
+                    " SiegeWeaponType=" + (message?.SiegeWeaponTypeName ?? "<null>") +
+                    " Clear=" + (message?.ClearSelection.ToString() ?? "<null>") +
+                    " Detail=" + (detail ?? string.Empty));
+            }
+            catch
+            {
+            }
+        }
+
+        private static void LogCommanderDeploymentSiegeMachineStateDiagnostics(
+            string stage,
+            CoopCommanderDeploymentSiegeMachineStateMessage message,
+            string detail)
+        {
+            if (!IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled())
+                return;
+
+            try
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: commander deployment siege machine state diagnostics. " +
+                    "Stage=" + (stage ?? string.Empty) +
                     " RequestedSide=" + (message?.RequestedSide.ToString() ?? "<null>") +
                     " DeploymentPointId=" + (message == null ? "<null>" : message.DeploymentPointId.ToString()) +
                     " DeploymentPointPosition=" + (message == null ? "<null>" : message.DeploymentPointPosition.ToString()) +

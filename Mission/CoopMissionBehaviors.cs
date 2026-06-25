@@ -10670,6 +10670,19 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
+            bool siegeMachinesReady =
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureAutoDeployedSiegeMachinesBeforeBattleStart(
+                    mission,
+                    out string siegeMachineAutoDeployDiagnostics);
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: processed start battle siege machine auto-deploy guarantee. " +
+                "CurrentPhase=" + currentPhase +
+                " Ready=" + siegeMachinesReady +
+                " Diagnostics={" + siegeMachineAutoDeployDiagnostics + "}" +
+                " Source=" + (requestSource ?? "unknown"));
+            if (!siegeMachinesReady)
+                return;
+
             CoopBattlePhaseRuntimeState.SetPhase(
                 CoopBattlePhase.BattleActive,
                 "bridge-file start battle request from " + (requestSource ?? "unknown"),
@@ -25148,6 +25161,7 @@ namespace CoopSpectator.MissionBehaviors
             bool autoDeployed =
                 ExactCampaignSiegeAssaultWithDeploymentRuntime.TryAutoDeployDeploymentOnly(
                     mission,
+                    authoritativeSide,
                     out string deploymentDiagnostics);
             if (!autoDeployed)
             {

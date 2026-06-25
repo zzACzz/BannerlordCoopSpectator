@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
+using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -694,6 +695,84 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        private static bool IsCoopCommanderDeploymentAutoDeployWindowActive(
+            Mission mission,
+            out string diagnostics)
+        {
+            diagnostics = "commander-window-inactive";
+            if (mission == null)
+            {
+                diagnostics = "commander-window-mission-null";
+                return false;
+            }
+
+            if (!IsDeploymentRuntimeActive(mission))
+            {
+                diagnostics = "commander-window-runtime-inactive";
+                return false;
+            }
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase < CoopBattlePhase.SideSelection)
+            {
+                diagnostics = "commander-window-phase-too-early Phase=" + currentPhase;
+                return false;
+            }
+
+            if (currentPhase >= CoopBattlePhase.BattleActive)
+            {
+                diagnostics = "commander-window-battle-active Phase=" + currentPhase;
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!IsSiegeAssaultScenario(scenarioContext))
+            {
+                diagnostics = "commander-window-not-siege-assault Phase=" + currentPhase;
+                return false;
+            }
+
+            bool hasSiegeDeploymentHandler = false;
+            bool hasDeploymentHandler = false;
+            bool hasSiegeEnginesLogic = false;
+            try
+            {
+                hasSiegeDeploymentHandler = mission.GetMissionBehavior<SiegeDeploymentHandler>() != null;
+                hasDeploymentHandler = mission.GetMissionBehavior<DeploymentHandler>() != null;
+                hasSiegeEnginesLogic = mission.GetMissionBehavior<MissionSiegeEnginesLogic>() != null;
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "commander-window-handler-check-failed " +
+                    ex.GetType().Name + ":" + ex.Message +
+                    " Phase=" + currentPhase;
+                return false;
+            }
+
+            if (!hasSiegeDeploymentHandler && !hasDeploymentHandler && !hasSiegeEnginesLogic)
+            {
+                diagnostics =
+                    "commander-window-deployment-runtime-pieces-missing" +
+                    " Phase=" + currentPhase +
+                    " HasSiegeDeploymentHandler=" + hasSiegeDeploymentHandler +
+                    " HasDeploymentHandler=" + hasDeploymentHandler +
+                    " HasSiegeEnginesLogic=" + hasSiegeEnginesLogic;
+                return false;
+            }
+
+            diagnostics =
+                "native-finished-but-coop-commander-window-active" +
+                " Phase=" + currentPhase +
+                " HasSiegeDeploymentHandler=" + hasSiegeDeploymentHandler +
+                " HasDeploymentHandler=" + hasDeploymentHandler +
+                " HasSiegeEnginesLogic=" + hasSiegeEnginesLogic;
+            return true;
+        }
+
         public static bool ShouldTreatAllowedPrebattleSelectableSourceAsReady(
             Mission mission,
             BattleSideEnum side,
@@ -743,6 +822,307 @@ namespace CoopSpectator.Infrastructure
                 out diagnostics);
         }
 
+        public static bool TryAutoDeployDeploymentOnly(
+            Mission mission,
+            BattleSideEnum side,
+            out string diagnostics)
+        {
+            return TryAutoDeployDeploymentForSide(
+                mission,
+                side,
+                treatSideAsPlayerSide: true,
+                out diagnostics);
+        }
+
+        private static bool TryAutoDeployDeploymentForSide(
+            Mission mission,
+            BattleSideEnum side,
+            bool treatSideAsPlayerSide,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            if (side == BattleSideEnum.None)
+            {
+                diagnostics = "side-none";
+                return false;
+            }
+
+            if (!IsDeploymentRuntimeActive(mission))
+            {
+                diagnostics = "deployment-runtime-inactive";
+                return false;
+            }
+
+            string lifecycleDiagnostics = "deployment-lifecycle-open";
+            if (HasDeploymentLifecycleFinished(mission))
+            {
+                if (!IsCoopCommanderDeploymentAutoDeployWindowActive(
+                        mission,
+                        out lifecycleDiagnostics))
+                {
+                    diagnostics = "deployment-already-finished " + lifecycleDiagnostics;
+                    return false;
+                }
+            }
+
+            Team battleTeam = mission.Teams?
+                .FirstOrDefault(team => IsBattleDeploymentTeam(mission, team) && team.Side == side);
+            if (battleTeam == null)
+            {
+                diagnostics = "battle-team-missing Side=" + side;
+                return false;
+            }
+
+            string deploymentPlanDiagnostics = "plan-not-remade";
+            if (mission.GetDeploymentPlan<IMissionDeploymentPlan>(out IMissionDeploymentPlan deploymentPlan) &&
+                deploymentPlan != null)
+            {
+                try
+                {
+                    deploymentPlan.RemakeDeploymentPlan(battleTeam);
+                    deploymentPlanDiagnostics = "remade " + DescribeDeploymentTeam(battleTeam);
+                }
+                catch (Exception ex)
+                {
+                    deploymentPlanDiagnostics =
+                        "faulted " +
+                        DescribeDeploymentTeam(battleTeam) +
+                        " " +
+                        ex.GetType().Name + ":" + ex.Message;
+                }
+            }
+            else
+            {
+                deploymentPlanDiagnostics = "plan-missing";
+            }
+
+            SiegeDeploymentHandler siegeDeploymentHandler = mission.GetMissionBehavior<SiegeDeploymentHandler>();
+            DeploymentHandler deploymentHandler = mission.GetMissionBehavior<DeploymentHandler>();
+
+            bool autoDeployedTeam = false;
+            bool forceUpdatedUnits = false;
+            bool siegeMachinesDeployed = false;
+            string siegeMachineDiagnostics = string.Empty;
+            bool siegeMachineStatePublished = false;
+            string siegeMachineStatePublishDiagnostics = string.Empty;
+            string teamDeploymentDiagnostics = string.Empty;
+            try
+            {
+                siegeMachinesDeployed = CoopSiegeMachineDeploymentController.TryAutoDeploySide(
+                    mission,
+                    battleTeam,
+                    siegeDeploymentHandler,
+                    treatSideAsPlayerSide,
+                    CoopDebugConfig.OrderOfBattleDiagnostics,
+                    out siegeMachineDiagnostics);
+                if (siegeMachinesDeployed)
+                {
+                    siegeMachineStatePublished = CoopMissionNetworkBridge.TryBroadcastCommanderDeploymentSiegeMachineState(
+                        mission,
+                        battleTeam.Side,
+                        out siegeMachineStatePublishDiagnostics,
+                        "ExactCampaignSiegeAssaultWithDeploymentRuntime.TryAutoDeployDeploymentForSide");
+                }
+
+                if (siegeDeploymentHandler != null)
+                {
+                    siegeDeploymentHandler.AutoDeployTeamUsingTeamAI(battleTeam);
+                    autoDeployedTeam = true;
+                    ForceUpdateDeploymentTeamUnits(battleTeam);
+                    forceUpdatedUnits = true;
+                    teamDeploymentDiagnostics = "siege-team-ai";
+                }
+                else if (deploymentHandler != null)
+                {
+                    deploymentHandler.AutoDeployTeamUsingDeploymentPlan(battleTeam);
+                    autoDeployedTeam = true;
+                    ForceUpdateDeploymentTeamUnits(battleTeam);
+                    forceUpdatedUnits = true;
+                    teamDeploymentDiagnostics = "deployment-plan";
+                }
+                else
+                {
+                    if (siegeMachinesDeployed)
+                    {
+                        ForceUpdateDeploymentTeamUnits(battleTeam);
+                        forceUpdatedUnits = true;
+                    }
+
+                    teamDeploymentDiagnostics = "deployment-handler-missing-machine-only";
+                }
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "auto-deploy-side-faulted " +
+                    ex.GetType().Name + ":" + ex.Message +
+                    " Side=" + side +
+                    " Team=" + DescribeDeploymentTeam(battleTeam) +
+                    " Lifecycle={" + lifecycleDiagnostics + "}" +
+                    " Plan={" + deploymentPlanDiagnostics + "}" +
+                    " SiegeMachines={" + siegeMachineDiagnostics + "}" +
+                    " SiegeMachineStatePublished=" + siegeMachineStatePublished +
+                    " SiegeMachineStatePublish={" + siegeMachineStatePublishDiagnostics + "}" +
+                    " TeamDeployment={" + teamDeploymentDiagnostics + "}";
+                return false;
+            }
+
+            if (!siegeMachinesDeployed)
+            {
+                diagnostics =
+                    "auto-deploy-side-siege-machines-failed " +
+                    "Side=" + side +
+                    " Team=" + DescribeDeploymentTeam(battleTeam) +
+                    " TreatSideAsPlayerSide=" + treatSideAsPlayerSide +
+                    " Lifecycle={" + lifecycleDiagnostics + "}" +
+                    " Plan={" + deploymentPlanDiagnostics + "}" +
+                    " SiegeMachines={" + siegeMachineDiagnostics + "}" +
+                    " HasSiegeDeploymentHandler=" + (siegeDeploymentHandler != null) +
+                    " HasDeploymentHandler=" + (deploymentHandler != null) +
+                    " TeamDeployment={" + teamDeploymentDiagnostics + "}" +
+                    " AutoDeployedTeam=" + autoDeployedTeam;
+                return false;
+            }
+
+            diagnostics =
+                "Side=" + side +
+                " Team=" + DescribeDeploymentTeam(battleTeam) +
+                " TreatSideAsPlayerSide=" + treatSideAsPlayerSide +
+                " Lifecycle={" + lifecycleDiagnostics + "}" +
+                " Plan={" + deploymentPlanDiagnostics + "}" +
+                " SiegeMachinesDeployed=" + siegeMachinesDeployed +
+                " SiegeMachines={" + siegeMachineDiagnostics + "}" +
+                " SiegeMachineStatePublished=" + siegeMachineStatePublished +
+                " SiegeMachineStatePublish={" + siegeMachineStatePublishDiagnostics + "}" +
+                " AutoDeployedTeam=" + autoDeployedTeam +
+                " HasSiegeDeploymentHandler=" + (siegeDeploymentHandler != null) +
+                " HasDeploymentHandler=" + (deploymentHandler != null) +
+                " TeamDeployment={" + teamDeploymentDiagnostics + "}" +
+                " ForceUpdatedUnits=" + forceUpdatedUnits;
+            return autoDeployedTeam || siegeMachinesDeployed;
+        }
+
+        public static bool TryEnsureAutoDeployedSiegeMachinesBeforeBattleStart(
+            Mission mission,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            if (!IsDeploymentRuntimeActive(mission))
+            {
+                diagnostics = "not-required-runtime-inactive";
+                return true;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!IsSiegeAssaultScenario(scenarioContext))
+            {
+                diagnostics = "not-required-not-siege-assault-with-deployment";
+                return true;
+            }
+
+            List<Team> battleTeams = CollectBattleDeploymentTeams(mission);
+            if (battleTeams.Count <= 0)
+            {
+                diagnostics = "battle-teams-missing";
+                return false;
+            }
+
+            return TryAutoDeploySiegeMachinesForTeams(
+                mission,
+                battleTeams,
+                mission.GetMissionBehavior<SiegeDeploymentHandler>(),
+                out diagnostics);
+        }
+
+        private static bool TryAutoDeploySiegeMachinesForTeams(
+            Mission mission,
+            List<Team> battleTeams,
+            SiegeDeploymentHandler siegeDeploymentHandler,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            if (battleTeams == null || battleTeams.Count <= 0)
+            {
+                diagnostics = "battle-teams-missing";
+                return false;
+            }
+
+            var details = new List<string>();
+            int attemptedCount = 0;
+            int succeededCount = 0;
+            int failedCount = 0;
+            foreach (Team battleTeam in battleTeams)
+            {
+                if (battleTeam == null || battleTeam.Side == BattleSideEnum.None)
+                    continue;
+
+                attemptedCount++;
+                bool treatSideAsPlayerSide =
+                    mission.PlayerTeam != null &&
+                    battleTeam.Side == mission.PlayerTeam.Side;
+                bool deployed = CoopSiegeMachineDeploymentController.TryAutoDeploySide(
+                    mission,
+                    battleTeam,
+                    siegeDeploymentHandler,
+                    treatSideAsPlayerSide,
+                    CoopDebugConfig.OrderOfBattleDiagnostics,
+                    out string teamDiagnostics);
+                bool statePublished = false;
+                string statePublishDiagnostics = string.Empty;
+                if (deployed)
+                {
+                    statePublished = CoopMissionNetworkBridge.TryBroadcastCommanderDeploymentSiegeMachineState(
+                        mission,
+                        battleTeam.Side,
+                        out statePublishDiagnostics,
+                        "ExactCampaignSiegeAssaultWithDeploymentRuntime.TryAutoDeploySiegeMachinesForTeams");
+                }
+
+                if (deployed)
+                    succeededCount++;
+                else
+                    failedCount++;
+
+                details.Add(
+                    DescribeDeploymentTeam(battleTeam) +
+                    ":TreatSideAsPlayerSide=" + treatSideAsPlayerSide +
+                    ":Deployed=" + deployed +
+                    ":StatePublished=" + statePublished +
+                    ":StatePublish={" + statePublishDiagnostics + "}" +
+                    ":{" + (teamDiagnostics ?? string.Empty) + "}");
+            }
+
+            diagnostics =
+                "Attempted=" + attemptedCount +
+                " Succeeded=" + succeededCount +
+                " Failed=" + failedCount +
+                " HasSiegeDeploymentHandler=" + (siegeDeploymentHandler != null) +
+                " Details=[" + string.Join("; ", details.ToArray()) + "]";
+            return attemptedCount > 0 && failedCount == 0;
+        }
+
+        private static List<Team> CollectBattleDeploymentTeams(Mission mission)
+        {
+            Team playerTeam = mission?.PlayerTeam;
+            return mission?.Teams?
+                .Where(team => IsBattleDeploymentTeam(mission, team))
+                .OrderBy(team => playerTeam != null && ReferenceEquals(team, playerTeam) ? 1 : 0)
+                .ThenBy(team => team.TeamIndex)
+                .ToList() ?? new List<Team>();
+        }
+
         private static bool TryAutoDeployDeployment(
             Mission mission,
             bool finishDeployment,
@@ -760,8 +1140,14 @@ namespace CoopSpectator.Infrastructure
 
             if (HasDeploymentLifecycleFinished(mission))
             {
-                diagnostics = "deployment-already-finished";
-                return finishDeployment;
+                bool siegeMachinesReady = TryEnsureAutoDeployedSiegeMachinesBeforeBattleStart(
+                    mission,
+                    out string alreadyFinishedSiegeMachineDiagnostics);
+                diagnostics =
+                    "deployment-already-finished" +
+                    " SiegeMachinesReady=" + siegeMachinesReady +
+                    " SiegeMachines={" + alreadyFinishedSiegeMachineDiagnostics + "}";
+                return finishDeployment && siegeMachinesReady;
             }
 
             Team playerTeam = mission.PlayerTeam;
@@ -771,11 +1157,7 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
-            List<Team> battleTeams = mission.Teams?
-                .Where(team => IsBattleDeploymentTeam(mission, team))
-                .OrderBy(team => ReferenceEquals(team, playerTeam) ? 1 : 0)
-                .ThenBy(team => team.TeamIndex)
-                .ToList() ?? new List<Team>();
+            List<Team> battleTeams = CollectBattleDeploymentTeams(mission);
             if (battleTeams.Count <= 0)
             {
                 diagnostics = "battle-teams-missing PlayerTeamSide=" + playerTeam.Side;
@@ -812,19 +1194,14 @@ namespace CoopSpectator.Infrastructure
 
             SiegeDeploymentHandler siegeDeploymentHandler = mission.GetMissionBehavior<SiegeDeploymentHandler>();
             DeploymentHandler deploymentHandler = mission.GetMissionBehavior<DeploymentHandler>();
-            if (siegeDeploymentHandler == null && deploymentHandler == null)
-            {
-                diagnostics =
-                    "deployment-handler-missing " +
-                    "Plan={" + deploymentPlanDiagnostics + "}";
-                return false;
-            }
 
             int autoDeployedTeamCount = 0;
             bool forceUpdatedUnits = false;
             bool finishedDeployment = false;
             bool playerSiegeWeaponsDeployed = false;
             bool aiSiegeWeaponsDeployed = false;
+            bool controlledSiegeMachinesDeployed = false;
+            string controlledSiegeMachineDiagnostics = string.Empty;
             string deploymentDiagnostics = string.Empty;
             List<string> autoDeployedTeams = new List<string>();
             List<string> nonFatalDeploymentFaults = new List<string>();
@@ -871,7 +1248,7 @@ namespace CoopSpectator.Infrastructure
                     finishedDeployment = finishDeployment;
                     deploymentDiagnostics = "siege-handler-auto-deployed-all-battle-teams";
                 }
-                else
+                else if (deploymentHandler != null)
                 {
                     foreach (Team battleTeam in battleTeams)
                     {
@@ -887,6 +1264,31 @@ namespace CoopSpectator.Infrastructure
                     finishedDeployment = finishDeployment;
                     deploymentDiagnostics = "deployment-handler-auto-deployed-all-battle-teams";
                 }
+                else
+                {
+                    controlledSiegeMachinesDeployed = TryAutoDeploySiegeMachinesForTeams(
+                        mission,
+                        battleTeams,
+                        siegeDeploymentHandler,
+                        out controlledSiegeMachineDiagnostics);
+                    if (!controlledSiegeMachinesDeployed)
+                    {
+                        diagnostics =
+                            "deployment-handler-missing-controlled-siege-machine-auto-deploy-failed " +
+                            "Plan={" + deploymentPlanDiagnostics + "} " +
+                            "SiegeMachines={" + controlledSiegeMachineDiagnostics + "}";
+                        return false;
+                    }
+
+                    foreach (Team battleTeam in battleTeams)
+                    {
+                        ForceUpdateDeploymentTeamUnits(battleTeam);
+                    }
+
+                    forceUpdatedUnits = true;
+                    finishedDeployment = finishDeployment && HasDeploymentLifecycleFinished(mission);
+                    deploymentDiagnostics = "deployment-handler-missing-controlled-siege-machines-only";
+                }
             }
             catch (Exception ex)
             {
@@ -895,6 +1297,7 @@ namespace CoopSpectator.Infrastructure
                     ex.GetType().Name + ":" + ex.Message +
                     " Plan={" + deploymentPlanDiagnostics + "}" +
                     " Deployment={" + deploymentDiagnostics + "}" +
+                    " ControlledSiegeMachines={" + controlledSiegeMachineDiagnostics + "}" +
                     " AutoDeployedTeams=[" + string.Join(", ", autoDeployedTeams) + "]" +
                     " NonFatalFaults=[" + string.Join("; ", nonFatalDeploymentFaults) + "]";
                 return false;
@@ -906,6 +1309,8 @@ namespace CoopSpectator.Infrastructure
                 " BattleTeams=[" + string.Join(", ", battleTeams.Select(DescribeDeploymentTeam)) + "]" +
                 " Plan={" + deploymentPlanDiagnostics + "}" +
                 " Deployment={" + deploymentDiagnostics + "}" +
+                " ControlledSiegeMachinesDeployed=" + controlledSiegeMachinesDeployed +
+                " ControlledSiegeMachines={" + controlledSiegeMachineDiagnostics + "}" +
                 " AutoDeployedTeamCount=" + autoDeployedTeamCount +
                 " AutoDeployedTeams=[" + string.Join(", ", autoDeployedTeams) + "]" +
                 " PlayerSiegeWeaponsDeployed=" + playerSiegeWeaponsDeployed +
@@ -915,7 +1320,9 @@ namespace CoopSpectator.Infrastructure
                 " FinishedDeploymentCall=" + finishedDeployment +
                 " NonFatalFaults=[" + string.Join("; ", nonFatalDeploymentFaults) + "]" +
                 " DeploymentFinished=" + deploymentFinished;
-            return finishDeployment ? deploymentFinished : autoDeployedTeamCount > 0;
+            return finishDeployment
+                ? deploymentFinished && (autoDeployedTeamCount > 0 || controlledSiegeMachinesDeployed)
+                : autoDeployedTeamCount > 0 || controlledSiegeMachinesDeployed;
         }
 
         public static bool TryPrepareDeploymentPlanContract(
@@ -1745,6 +2152,35 @@ namespace CoopSpectator.Infrastructure
             return team == null
                 ? "null"
                 : "#" + team.TeamIndex + "/" + team.Side;
+        }
+
+        private static void ForceUpdateDeploymentTeamUnits(Team team)
+        {
+            if (team == null)
+                return;
+
+            try
+            {
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (formation == null)
+                        continue;
+
+                    formation.ApplyActionOnEachUnit(agent =>
+                    {
+                        if (agent == null)
+                            return;
+
+                        agent.ForceUpdateCachedAndFormationValues(
+                            updateOnlyMovement: false,
+                            arrangementChangeAllowed: false);
+                    });
+                    formation.SetHasPendingUnitPositions(hasPendingUnitPositions: false);
+                }
+            }
+            catch
+            {
+            }
         }
 
         private static bool IsBattleDeploymentTeam(Mission mission, Team team)

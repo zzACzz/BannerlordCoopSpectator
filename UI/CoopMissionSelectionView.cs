@@ -2643,7 +2643,6 @@ namespace CoopSpectator.UI
 
         private void HandleCommanderAutoDeployRequested()
         {
-            TryApplyCommanderDeploymentOrderBridgeAutoDeploy();
             TrySendCommanderDeploymentCompletionRequest(
                 autoDeploy: true,
                 source: "CoopCommanderDeploymentUI AutoDeploy");
