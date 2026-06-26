@@ -112,7 +112,8 @@ namespace CoopSpectator.GameMode
             AppendSiegeAssaultRuntimeBehaviors(
                 list,
                 mission,
-                includeScenePreparation: true);
+                includeScenePreparation: true,
+                includeCampaignSiegeStateHandler: true);
 
             list.Add(new CoopMissionNetworkBridge());
             if (isDedicated)
@@ -188,7 +189,8 @@ namespace CoopSpectator.GameMode
             AppendSiegeAssaultRuntimeBehaviors(
                 list,
                 mission,
-                includeScenePreparation: false);
+                includeScenePreparation: true,
+                includeCampaignSiegeStateHandler: false);
             AppendRemoteClientSiegeDeploymentBridgeBehaviors(list, mission);
 
             list.Add(new MissionBehaviorDiagnostic());
@@ -293,7 +295,8 @@ namespace CoopSpectator.GameMode
         private static void AppendSiegeAssaultRuntimeBehaviors(
             List<MissionBehavior> list,
             Mission mission,
-            bool includeScenePreparation)
+            bool includeScenePreparation,
+            bool includeCampaignSiegeStateHandler)
         {
             BattleScenarioContextMessage scenarioContext = ResolveScenarioContext();
             bool isPlayerAttacker = ResolvePlayerAttackerSide();
@@ -321,18 +324,27 @@ namespace CoopSpectator.GameMode
                     "SiegeMissionPreparationHandler",
                     required: false);
 
-                AddIfMissing(
-                    list,
-                    mission,
-                    () => MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies(
-                        "SandBox.Missions.MissionLogics.CampaignSiegeStateHandler"),
-                    "CampaignSiegeStateHandler",
-                    required: false);
+                if (includeCampaignSiegeStateHandler)
+                {
+                    AddIfMissing(
+                        list,
+                        mission,
+                        () => MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies(
+                            "SandBox.Missions.MissionLogics.CampaignSiegeStateHandler"),
+                        "CampaignSiegeStateHandler",
+                        required: false);
+                }
+                else
+                {
+                    ModLogger.Info(
+                        "CoopSiegeAssaultWithDeployment: skipped CampaignSiegeStateHandler while preserving client siege scene preparation parity. " +
+                        "Scene=" + (mission?.SceneName ?? "null") + ".");
+                }
             }
             else
             {
                 ModLogger.Info(
-                    "CoopSiegeAssaultWithDeployment: skipped server-only siege scene preparation on client. " +
+                    "CoopSiegeAssaultWithDeployment: skipped siege scene preparation. " +
                     "Scene=" + (mission?.SceneName ?? "null") + ".");
             }
 
@@ -373,6 +385,21 @@ namespace CoopSpectator.GameMode
                 () => new BannerBearerLogic(),
                 "BannerBearerLogic",
                 required: false);
+            if (GameNetwork.IsServer)
+            {
+                AddIfMissing(
+                    list,
+                    mission,
+                    () => new CasualtyHandler(),
+                    "CasualtyHandler",
+                    required: true);
+                AddIfMissing(
+                    list,
+                    mission,
+                    () => new BattlePowerCalculationLogic(),
+                    "BattlePowerCalculationLogic",
+                    required: true);
+            }
 
             bool shouldMountLiveDeploymentControllers =
                 ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldMountLiveDeploymentControllers(
@@ -390,8 +417,6 @@ namespace CoopSpectator.GameMode
             BattleSideEnum playerSide = isPlayerAttacker
                 ? BattleSideEnum.Attacker
                 : BattleSideEnum.Defender;
-            TryAppendInitialNativeSpawnLogicBootstrap(list, mission, playerSide);
-            LogDeploymentControllerDependencySnapshot(list, mission, isPlayerAttacker, deploymentPolicy);
             AddIfMissing(
                 list,
                 mission,
@@ -404,6 +429,8 @@ namespace CoopSpectator.GameMode
                 () => new SiegeDeploymentMissionController(isPlayerAttacker),
                 "SiegeDeploymentMissionController",
                 required: true);
+            LogDeploymentControllerDependencySnapshot(list, mission, isPlayerAttacker, deploymentPolicy);
+            TryAppendInitialNativeSpawnLogicBootstrap(list, mission, playerSide);
         }
 
         private static void AppendRemoteClientSiegeDeploymentBridgeBehaviors(List<MissionBehavior> list, Mission mission)

@@ -238,6 +238,7 @@ namespace CoopSpectator.Patches
             public DateTime LastAttemptUtc;
             public int Attempts;
             public string DeferralReason;
+            public bool HasVerifiedLocalMissionObjectId;
         }
 
         private sealed class DeferredClientSetMissionObjectVisibilityPayload
@@ -418,6 +419,21 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSynchronizeAgentEquipment), () => PatchMissionNetworkComponentSynchronizeAgentEquipment(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSynchronizeMissionObject), () => PatchMissionNetworkComponentSynchronizeMissionObject(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetMissionObjectVisibility), () => PatchMissionNetworkComponentSetMissionObjectVisibility(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetRangedSiegeWeaponState), () => PatchMissionNetworkComponentSetRangedSiegeWeaponState(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetMissionObjectAnimationAtChannel), () => PatchMissionNetworkComponentSetMissionObjectAnimationAtChannel(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetMissionObjectAnimationChannelParameter), () => PatchMissionNetworkComponentSetMissionObjectAnimationChannelParameter(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetMissionObjectAnimationPaused), () => PatchMissionNetworkComponentSetMissionObjectAnimationPaused(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetMissionObjectVertexAnimation), () => PatchMissionNetworkComponentSetMissionObjectVertexAnimation(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetMissionObjectVertexAnimationProgress), () => PatchMissionNetworkComponentSetMissionObjectVertexAnimationProgress(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetMissionObjectImpulse), () => PatchMissionNetworkComponentSetMissionObjectImpulse(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentAddMissionObjectBodyFlags), () => PatchMissionNetworkComponentAddMissionObjectBodyFlags(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentRemoveMissionObjectBodyFlags), () => PatchMissionNetworkComponentRemoveMissionObjectBodyFlags(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentHitSynchronizeObjectHitpoints), () => PatchMissionNetworkComponentHitSynchronizeObjectHitpoints(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentHitSynchronizeObjectDestructionLevel), () => PatchMissionNetworkComponentHitSynchronizeObjectDestructionLevel(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentHitBurstAllHeavyHitParticles), () => PatchMissionNetworkComponentHitBurstAllHeavyHitParticles(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetUsableGameObjectIsDeactivated), () => PatchMissionNetworkComponentSetUsableGameObjectIsDeactivated(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetMachineTargetRotation), () => PatchMissionNetworkComponentSetMachineTargetRotation(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetSiegeMachineMovementDistance), () => PatchMissionNetworkComponentSetSiegeMachineMovementDistance(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSpawnWeaponWithNewEntity), () => PatchMissionNetworkComponentSpawnWeaponWithNewEntity(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAttachWeaponToSpawnedWeapon), () => PatchMissionNetworkComponentAttachWeaponToSpawnedWeapon(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSpawnAttachedWeaponOnSpawnedWeapon), () => PatchMissionNetworkComponentSpawnAttachedWeaponOnSpawnedWeapon(harmony));
@@ -471,6 +487,7 @@ namespace CoopSpectator.Patches
         public static void ResetRuntimeState(string source, bool preserveCommanderOrderControlState = false)
         {
             ExactCreateAgentCorridorDiagnostics.ResetRuntimeState(source);
+            SiegeMissionObjectIdBridge.Reset(source);
             lock (DeferredMountedHeroCreateAgentPayloads)
             {
                 DeferredMountedHeroCreateAgentPayloads.Clear();
@@ -800,6 +817,227 @@ namespace CoopSpectator.Patches
                 prefix: new HarmonyMethod(prefix),
                 finalizer: new HarmonyMethod(finalizer));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/finalizer applied to MissionNetworkComponent.HandleServerEventSetMissionObjectVisibility.");
+        }
+
+        private static void PatchMissionNetworkComponentSetRangedSiegeWeaponState(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetRangedSiegeWeaponState",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetRangedSiegeWeaponState_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetRangedSiegeWeaponState not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetRangedSiegeWeaponState.");
+        }
+
+        private static void PatchMissionNetworkComponentSetMissionObjectAnimationAtChannel(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetMissionObjectAnimationAtChannel",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetMissionObjectAnimationAtChannel_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetMissionObjectAnimationAtChannel not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetMissionObjectAnimationAtChannel.");
+        }
+
+        private static void PatchMissionNetworkComponentSetMissionObjectAnimationChannelParameter(Harmony harmony)
+        {
+            PatchMissionNetworkComponentExactSiegeMissionObjectIdRemap(
+                harmony,
+                "HandleServerEventSetMissionObjectAnimationChannelParameter",
+                "SetMissionObjectAnimationChannelParameter");
+        }
+
+        private static void PatchMissionNetworkComponentSetMissionObjectAnimationPaused(Harmony harmony)
+        {
+            PatchMissionNetworkComponentExactSiegeMissionObjectIdRemap(
+                harmony,
+                "HandleServerEventSetMissionObjectAnimationPaused",
+                "SetMissionObjectAnimationPaused");
+        }
+
+        private static void PatchMissionNetworkComponentSetMissionObjectVertexAnimation(Harmony harmony)
+        {
+            PatchMissionNetworkComponentExactSiegeMissionObjectIdRemap(
+                harmony,
+                "HandleServerEventSetMissionObjectVertexAnimation",
+                "SetMissionObjectVertexAnimation");
+        }
+
+        private static void PatchMissionNetworkComponentSetMissionObjectVertexAnimationProgress(Harmony harmony)
+        {
+            PatchMissionNetworkComponentExactSiegeMissionObjectIdRemap(
+                harmony,
+                "HandleServerEventSetMissionObjectVertexAnimationProgress",
+                "SetMissionObjectVertexAnimationProgress");
+        }
+
+        private static void PatchMissionNetworkComponentSetMissionObjectImpulse(Harmony harmony)
+        {
+            PatchMissionNetworkComponentExactSiegeMissionObjectIdRemap(
+                harmony,
+                "HandleServerEventSetMissionObjectImpulse",
+                "SetMissionObjectImpulse");
+        }
+
+        private static void PatchMissionNetworkComponentAddMissionObjectBodyFlags(Harmony harmony)
+        {
+            PatchMissionNetworkComponentExactSiegeMissionObjectIdRemap(
+                harmony,
+                "HandleServerEventAddMissionObjectBodyFlags",
+                "AddMissionObjectBodyFlags");
+        }
+
+        private static void PatchMissionNetworkComponentRemoveMissionObjectBodyFlags(Harmony harmony)
+        {
+            PatchMissionNetworkComponentExactSiegeMissionObjectIdRemap(
+                harmony,
+                "HandleServerEventRemoveMissionObjectBodyFlags",
+                "RemoveMissionObjectBodyFlags");
+        }
+
+        private static void PatchMissionNetworkComponentExactSiegeMissionObjectIdRemap(
+            Harmony harmony,
+            string targetMethodName,
+            string messageName)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                targetMethodName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventExactSiegeMissionObjectIdMessage_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent." + targetMethodName + " not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent." + targetMethodName + " for " + messageName + ".");
+        }
+
+        private static void PatchMissionNetworkComponentHitSynchronizeObjectHitpoints(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventHitSynchronizeObjectHitpoints",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventHitSynchronizeObjectHitpoints_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventHitSynchronizeObjectHitpoints not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventHitSynchronizeObjectHitpoints.");
+        }
+
+        private static void PatchMissionNetworkComponentHitSynchronizeObjectDestructionLevel(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventHitSynchronizeObjectDestructionLevel",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventHitSynchronizeObjectDestructionLevel_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventHitSynchronizeObjectDestructionLevel not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventHitSynchronizeObjectDestructionLevel.");
+        }
+
+        private static void PatchMissionNetworkComponentHitBurstAllHeavyHitParticles(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventHitBurstAllHeavyHitParticles",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventHitBurstAllHeavyHitParticles_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventHitBurstAllHeavyHitParticles not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventHitBurstAllHeavyHitParticles.");
+        }
+
+        private static void PatchMissionNetworkComponentSetUsableGameObjectIsDeactivated(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetUsableGameObjectIsDeactivated",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetUsableGameObjectIsDeactivated_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetUsableGameObjectIsDeactivated not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetUsableGameObjectIsDeactivated.");
+        }
+
+        private static void PatchMissionNetworkComponentSetMachineTargetRotation(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetMachineTargetRotation",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetMachineTargetRotation_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetMachineTargetRotation not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetMachineTargetRotation.");
+        }
+
+        private static void PatchMissionNetworkComponentSetSiegeMachineMovementDistance(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetSiegeMachineMovementDistance",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetSiegeMachineMovementDistance_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetSiegeMachineMovementDistance not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetSiegeMachineMovementDistance.");
         }
 
         private static void PatchMissionNetworkComponentSpawnWeaponWithNewEntity(Harmony harmony)
@@ -1537,7 +1775,7 @@ namespace CoopSpectator.Patches
                     return;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return;
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setAgentPeer.AgentIndex, canBeNull: true);
@@ -1701,7 +1939,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 bool hasMountPayload = createAgent.MountAgentIndex >= 0;
@@ -1810,7 +2048,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -1861,9 +2099,28 @@ namespace CoopSpectator.Patches
                 return true;
 
             string sceneName = mission.SceneName ?? string.Empty;
+            if (ShouldRunExactSiegeAssaultWithDeploymentMaterializationHandoff(mission))
+                return true;
+
             return
                 MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(sceneName) &&
                 SceneRuntimeClassifier.IsCampaignOrCurrentSiegeScene(sceneName);
+        }
+
+        private static bool ShouldRunAgentMaterializationHandoff(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            string sceneName = mission.SceneName ?? string.Empty;
+            return MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(sceneName) ||
+                   ShouldRunExactSiegeAssaultWithDeploymentMaterializationHandoff(mission);
+        }
+
+        private static bool ShouldRunExactSiegeAssaultWithDeploymentMaterializationHandoff(Mission mission)
+        {
+            return mission != null &&
+                   SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
         }
 
         private static bool HasAnyDeferredClientAgentBootstrapPayload(int agentIndex)
@@ -2040,11 +2297,63 @@ namespace CoopSpectator.Patches
             return totalPending;
         }
 
+        internal static int GetDeferredClientAgentMaterializationPendingCount(out string summary)
+        {
+            int mountedHeroCreateAgentCount = DeferredMountedHeroCreateAgentPayloads.Count;
+            int createAgentCount = DeferredClientCreateAgentPayloads.Count;
+            int setAgentActionSetCount = DeferredClientSetAgentActionSetPayloads.Count;
+            int synchronizeAgentEquipmentCount = DeferredClientSynchronizeAgentEquipmentPayloads.Count;
+            int attachWeaponToAgentCount = DeferredClientAttachWeaponToAgentPayloads.Count;
+            int attachWeaponToWeaponInAgentEquipmentSlotCount = DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Count;
+            int setWeaponNetworkDataCount = DeferredClientSetWeaponNetworkDataPayloads.Count;
+            int setWeaponAmmoDataCount = DeferredClientSetWeaponAmmoDataPayloads.Count;
+            int setWeaponReloadPhaseCount = DeferredClientSetWeaponReloadPhasePayloads.Count;
+            int startSwitchingWeaponUsageIndexCount = DeferredClientStartSwitchingWeaponUsageIndexPayloads.Count;
+            int weaponUsageIndexChangeCount = DeferredClientWeaponUsageIndexChangePayloads.Count;
+            int setWieldedItemIndexCount = DeferredClientSetWieldedItemIndexPayloads.Count;
+            int setAgentHealthCount = DeferredClientSetAgentHealthPayloads.Count;
+            int makeAgentDeadCount = DeferredClientMakeAgentDeadPayloads.Count;
+
+            int totalPending =
+                mountedHeroCreateAgentCount +
+                createAgentCount +
+                setAgentActionSetCount +
+                synchronizeAgentEquipmentCount +
+                attachWeaponToAgentCount +
+                attachWeaponToWeaponInAgentEquipmentSlotCount +
+                setWeaponNetworkDataCount +
+                setWeaponAmmoDataCount +
+                setWeaponReloadPhaseCount +
+                startSwitchingWeaponUsageIndexCount +
+                weaponUsageIndexChangeCount +
+                setWieldedItemIndexCount +
+                setAgentHealthCount +
+                makeAgentDeadCount;
+
+            summary =
+                "TotalPending=" + totalPending +
+                " MountedHeroCreateAgent=" + mountedHeroCreateAgentCount +
+                " CreateAgent=" + createAgentCount +
+                " SetAgentActionSet=" + setAgentActionSetCount +
+                " SynchronizeAgentEquipment=" + synchronizeAgentEquipmentCount +
+                " AttachWeaponToAgent=" + attachWeaponToAgentCount +
+                " AttachWeaponToWeaponInAgentEquipmentSlot=" + attachWeaponToWeaponInAgentEquipmentSlotCount +
+                " SetWeaponNetworkData=" + setWeaponNetworkDataCount +
+                " SetWeaponAmmoData=" + setWeaponAmmoDataCount +
+                " SetWeaponReloadPhase=" + setWeaponReloadPhaseCount +
+                " StartSwitchingWeaponUsageIndex=" + startSwitchingWeaponUsageIndexCount +
+                " WeaponUsageIndexChange=" + weaponUsageIndexChangeCount +
+                " SetWieldedItemIndex=" + setWieldedItemIndexCount +
+                " SetAgentHealth=" + setAgentHealthCount +
+                " MakeAgentDead=" + makeAgentDeadCount;
+            return totalPending;
+        }
+
         internal static void TryProcessDeferredClientCreateAgentMessages(Mission mission, string source)
         {
             if (!GameNetwork.IsClient ||
                 mission == null ||
-                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                !ShouldRunAgentMaterializationHandoff(mission))
             {
                 return;
             }
@@ -2079,7 +2388,7 @@ namespace CoopSpectator.Patches
         {
             if (!GameNetwork.IsClient ||
                 mission == null ||
-                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                !ShouldRunAgentMaterializationHandoff(mission))
             {
                 return;
             }
@@ -2453,7 +2762,8 @@ namespace CoopSpectator.Patches
 
         private static void RegisterDeferredClientSynchronizeMissionObjectPayload(
             SynchronizeMissionObject synchronizeMissionObject,
-            string deferralReason)
+            string deferralReason,
+            bool hasVerifiedLocalMissionObjectId = false)
         {
             if (synchronizeMissionObject == null)
                 return;
@@ -2471,6 +2781,9 @@ namespace CoopSpectator.Patches
                 {
                     existingPayload.Message = synchronizeMissionObject;
                     existingPayload.DeferralReason = deferralReason;
+                    existingPayload.HasVerifiedLocalMissionObjectId =
+                        existingPayload.HasVerifiedLocalMissionObjectId ||
+                        hasVerifiedLocalMissionObjectId;
                     return;
                 }
 
@@ -2482,7 +2795,8 @@ namespace CoopSpectator.Patches
                         DeferredUtc = DateTime.UtcNow,
                         LastAttemptUtc = DateTime.MinValue,
                         Attempts = 0,
-                        DeferralReason = deferralReason
+                        DeferralReason = deferralReason,
+                        HasVerifiedLocalMissionObjectId = hasVerifiedLocalMissionObjectId
                     });
             }
         }
@@ -2985,6 +3299,285 @@ namespace CoopSpectator.Patches
             return missionObjectId.Id;
         }
 
+        private static bool TryRemapExactSiegeMissionObjectIdMessage(
+            object message,
+            string missionObjectIdMemberName,
+            SiegeMissionObjectIdBridgeTarget target,
+            string messageName)
+        {
+            if (message == null || string.IsNullOrWhiteSpace(missionObjectIdMemberName))
+                return false;
+
+            Mission mission = Mission.Current;
+            if (!SiegeMissionObjectIdBridge.IsExactSiegeClientContext(mission))
+                return false;
+
+            if (!TryGetMissionObjectIdMemberValue(
+                    message,
+                    missionObjectIdMemberName,
+                    out MissionObjectId serverMissionObjectId,
+                    out string readDiagnostics))
+            {
+                TryLogExactSiegeMissionObjectIdBridgeDiagnostic(
+                    messageName,
+                    missionObjectIdMemberName,
+                    serverMissionObjectId,
+                    serverMissionObjectId,
+                    "read-failed",
+                    readDiagnostics);
+                return false;
+            }
+
+            if (!SiegeMissionObjectIdBridge.TryTranslateMissionObjectId(
+                    mission,
+                    serverMissionObjectId,
+                    target,
+                    out MissionObjectId localMissionObjectId,
+                    out string bridgeDiagnostics))
+            {
+                TryLogExactSiegeMissionObjectIdBridgeDiagnostic(
+                    messageName,
+                    missionObjectIdMemberName,
+                    serverMissionObjectId,
+                    serverMissionObjectId,
+                    "not-mapped",
+                    bridgeDiagnostics);
+                return false;
+            }
+
+            if (GetMissionObjectIdValue(localMissionObjectId) == GetMissionObjectIdValue(serverMissionObjectId))
+            {
+                TryLogExactSiegeMissionObjectIdBridgeDiagnostic(
+                    messageName,
+                    missionObjectIdMemberName,
+                    serverMissionObjectId,
+                    localMissionObjectId,
+                    "mapped-noop",
+                    "Bridge={" + bridgeDiagnostics + "}");
+                return true;
+            }
+
+            if (!TrySetMissionObjectIdMemberValue(
+                    message,
+                    missionObjectIdMemberName,
+                    localMissionObjectId,
+                    out string writeDiagnostics))
+            {
+                TryLogExactSiegeMissionObjectIdBridgeDiagnostic(
+                    messageName,
+                    missionObjectIdMemberName,
+                    serverMissionObjectId,
+                    localMissionObjectId,
+                    "write-failed",
+                    writeDiagnostics + " Bridge={" + bridgeDiagnostics + "}");
+                return false;
+            }
+
+            TryLogExactSiegeMissionObjectIdBridgeDiagnostic(
+                messageName,
+                missionObjectIdMemberName,
+                serverMissionObjectId,
+                localMissionObjectId,
+                "remapped",
+                "Bridge={" + bridgeDiagnostics + "}");
+            return true;
+        }
+
+        private static bool TryGetMissionObjectIdMemberValue(
+            object message,
+            string memberName,
+            out MissionObjectId missionObjectId,
+            out string diagnostics)
+        {
+            missionObjectId = MissionObjectId.Invalid;
+            diagnostics = string.Empty;
+            if (message == null || string.IsNullOrWhiteSpace(memberName))
+            {
+                diagnostics = "invalid-arguments";
+                return false;
+            }
+
+            Type messageType = message.GetType();
+            PropertyInfo property = messageType.GetProperty(
+                memberName,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property != null &&
+                property.PropertyType == typeof(MissionObjectId) &&
+                property.GetIndexParameters().Length == 0)
+            {
+                try
+                {
+                    missionObjectId = (MissionObjectId)property.GetValue(message, null);
+                    diagnostics = "property:" + property.Name;
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    diagnostics = "property-exception:" + ex.GetType().Name + ":" + ex.Message;
+                    return false;
+                }
+            }
+
+            FieldInfo field = TryResolveMissionObjectIdField(messageType, memberName);
+            if (field != null)
+            {
+                try
+                {
+                    missionObjectId = (MissionObjectId)field.GetValue(message);
+                    diagnostics = "field:" + field.Name;
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    diagnostics = "field-exception:" + ex.GetType().Name + ":" + ex.Message;
+                    return false;
+                }
+            }
+
+            diagnostics = "member-not-found Type=" + messageType.FullName + " Member=" + memberName;
+            return false;
+        }
+
+        private static bool TrySetMissionObjectIdMemberValue(
+            object message,
+            string memberName,
+            MissionObjectId missionObjectId,
+            out string diagnostics)
+        {
+            diagnostics = string.Empty;
+            if (message == null || string.IsNullOrWhiteSpace(memberName))
+            {
+                diagnostics = "invalid-arguments";
+                return false;
+            }
+
+            Type messageType = message.GetType();
+            PropertyInfo property = messageType.GetProperty(
+                memberName,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            MethodInfo setter = property?.GetSetMethod(nonPublic: true);
+            if (property != null &&
+                property.PropertyType == typeof(MissionObjectId) &&
+                property.GetIndexParameters().Length == 0 &&
+                setter != null)
+            {
+                try
+                {
+                    setter.Invoke(message, new object[] { missionObjectId });
+                    diagnostics = "property-setter:" + property.Name;
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    diagnostics = "property-setter-exception:" + ex.GetType().Name + ":" + ex.Message;
+                }
+            }
+
+            FieldInfo field = TryResolveMissionObjectIdField(messageType, memberName);
+            if (field != null)
+            {
+                try
+                {
+                    field.SetValue(message, missionObjectId);
+                    diagnostics = "field:" + field.Name;
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    diagnostics = AppendExactSiegeMissionObjectIdBridgeDetail(
+                        diagnostics,
+                        "field-exception:" + ex.GetType().Name + ":" + ex.Message);
+                    return false;
+                }
+            }
+
+            diagnostics = AppendExactSiegeMissionObjectIdBridgeDetail(
+                diagnostics,
+                "member-not-found Type=" + messageType.FullName + " Member=" + memberName);
+            return false;
+        }
+
+        private static FieldInfo TryResolveMissionObjectIdField(Type messageType, string memberName)
+        {
+            if (messageType == null || string.IsNullOrWhiteSpace(memberName))
+                return null;
+
+            FieldInfo field = messageType.GetField(
+                memberName,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (field != null && field.FieldType == typeof(MissionObjectId))
+                return field;
+
+            field = messageType.GetField(
+                "<" + memberName + ">k__BackingField",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            return field != null && field.FieldType == typeof(MissionObjectId)
+                ? field
+                : null;
+        }
+
+        private static string AppendExactSiegeMissionObjectIdBridgeDetail(string current, string detail)
+        {
+            if (string.IsNullOrWhiteSpace(current))
+                return detail ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(detail))
+                return current;
+
+            return current + " " + detail;
+        }
+
+        private static void TryLogExactSiegeMissionObjectIdBridgeDiagnostic(
+            string messageName,
+            string memberName,
+            MissionObjectId serverMissionObjectId,
+            MissionObjectId localMissionObjectId,
+            string stage,
+            string detail)
+        {
+            if (!ExperimentalFeatures.EnableExactSiegeMissionObjectSyncDiagnostics)
+                return;
+
+            string diagnosticKey =
+                "id-bridge|" +
+                (messageName ?? "unknown") + "|" +
+                (memberName ?? "unknown") + "|" +
+                GetMissionObjectIdValue(serverMissionObjectId) + "|" +
+                GetMissionObjectIdValue(localMissionObjectId) + "|" +
+                (stage ?? "unknown");
+
+            int remainingBudgetAfterReserve;
+            lock (ExactSiegeMissionObjectSyncDiagnosticsLock)
+            {
+                if (!LoggedExactSiegeMissionObjectSyncDiagnosticKeys.Add(diagnosticKey))
+                    return;
+
+                if (_remainingExactSiegeMissionObjectSyncDiagnosticBudget <= 0)
+                {
+                    if (!_exactSiegeMissionObjectSyncDiagnosticBudgetExhaustedLogged)
+                    {
+                        _exactSiegeMissionObjectSyncDiagnosticBudgetExhaustedLogged = true;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: exact siege mission object id bridge diagnostics budget exhausted.");
+                    }
+
+                    return;
+                }
+
+                remainingBudgetAfterReserve = --_remainingExactSiegeMissionObjectSyncDiagnosticBudget;
+            }
+
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: exact siege mission object id bridge diagnostic. " +
+                "Message=" + (messageName ?? "unknown") +
+                " Member=" + (memberName ?? "unknown") +
+                " Stage=" + (stage ?? "unknown") +
+                " ServerMissionObjectId=" + GetMissionObjectIdValue(serverMissionObjectId) +
+                " LocalMissionObjectId=" + GetMissionObjectIdValue(localMissionObjectId) +
+                " Detail=" + (detail ?? string.Empty) +
+                " RemainingBudget=" + remainingBudgetAfterReserve);
+        }
+
         private static bool IsValidMissionObjectId(MissionObjectId missionObjectId)
         {
             return GetMissionObjectIdValue(missionObjectId) != GetMissionObjectIdValue(MissionObjectId.Invalid);
@@ -2996,6 +3589,94 @@ namespace CoopSpectator.Patches
                 return null;
 
             return Mission.MissionNetworkHelper.GetMissionObjectFromMissionObjectId(missionObjectId);
+        }
+
+        private static bool ShouldSuppressUnmappedExactSiegeMissionObjectVisibility(
+            Mission mission,
+            SetMissionObjectVisibility setMissionObjectVisibility,
+            out string reason)
+        {
+            reason = string.Empty;
+            if (mission == null || setMissionObjectVisibility == null)
+            {
+                reason = "skip-null";
+                return false;
+            }
+
+            if (!SiegeMissionObjectIdBridge.IsExactSiegeClientContext(mission))
+            {
+                reason = "skip-context";
+                return false;
+            }
+
+            MissionObject localMissionObject;
+            try
+            {
+                localMissionObject = TryGetLocalMissionObject(setMissionObjectVisibility.MissionObjectId);
+            }
+            catch (Exception ex)
+            {
+                reason = "skip-lookup-exception:" + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+
+            if (localMissionObject == null)
+            {
+                reason = "skip-local-object-missing";
+                return false;
+            }
+
+            if (localMissionObject is DeploymentPoint ||
+                localMissionObject is SiegeWeapon ||
+                localMissionObject is UsableMachine)
+            {
+                reason = "skip-siege-object Actual=" + localMissionObject.GetType().FullName;
+                return false;
+            }
+
+            reason =
+                "suppress-local-id-collision MissionObjectId=" +
+                GetMissionObjectIdValue(setMissionObjectVisibility.MissionObjectId) +
+                " Visible=" + setMissionObjectVisibility.Visible +
+                " Actual=" + localMissionObject.GetType().FullName;
+            return true;
+        }
+
+        private static bool ShouldSuppressUnmappedExactSiegeSynchronizeMissionObject(
+            Mission mission,
+            SynchronizeMissionObject synchronizeMissionObject,
+            out string reason)
+        {
+            reason = string.Empty;
+            if (mission == null || synchronizeMissionObject == null)
+            {
+                reason = "skip-null";
+                return false;
+            }
+
+            if (!SiegeMissionObjectIdBridge.IsExactSiegeClientContext(mission))
+            {
+                reason = "skip-context";
+                return false;
+            }
+
+            MissionObject localMissionObject = null;
+            try
+            {
+                localMissionObject = TryGetLocalMissionObject(synchronizeMissionObject.MissionObjectId);
+            }
+            catch (Exception ex)
+            {
+                reason = "suppress-lookup-exception:" + ex.GetType().Name + ":" + ex.Message;
+                return true;
+            }
+
+            reason =
+                "suppress-unmapped-synchronize MissionObjectId=" +
+                GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
+                " RecordTypeIndex=" + synchronizeMissionObject.RecordTypeIndex +
+                " LocalActual=" + (localMissionObject?.GetType().FullName ?? "null");
+            return true;
         }
 
         private static SpawnedItemEntity TryGetLocalSpawnedItemEntity(MissionObjectId missionObjectId)
@@ -4195,6 +4876,36 @@ namespace CoopSpectator.Patches
                     nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
                 {
                     continue;
+                }
+
+                if (!deferredPayload.HasVerifiedLocalMissionObjectId)
+                {
+                    bool remappedExactSiegeMissionObjectId = TryRemapExactSiegeMissionObjectIdMessage(
+                        synchronizeMissionObject,
+                        "MissionObjectId",
+                        SiegeMissionObjectIdBridgeTarget.SynchedMissionObject,
+                        "SynchronizeMissionObject");
+                    if (remappedExactSiegeMissionObjectId)
+                    {
+                        deferredPayload.HasVerifiedLocalMissionObjectId = true;
+                    }
+                    else if (ShouldSuppressUnmappedExactSiegeSynchronizeMissionObject(
+                                 mission,
+                                 synchronizeMissionObject,
+                                 out string suppressedSynchronizeReason))
+                    {
+                        RemoveDeferredClientSynchronizeMissionObjectPayload(synchronizeMissionObject.MissionObjectId);
+                        RemoveDeferredClientSetMissionObjectVisibilityPayload(synchronizeMissionObject.MissionObjectId);
+                        TryLogExactSiegeMissionObjectSyncDiagnostic(
+                            mission,
+                            synchronizeMissionObject,
+                            "suppressed-deferred-unmapped-mission-object-id",
+                            extraDetails:
+                                suppressedSynchronizeReason +
+                                " Attempts=" + deferredPayload.Attempts +
+                                " Source=" + (source ?? "unknown"));
+                        continue;
+                    }
                 }
 
                 if (TryGetLocalMissionObject(synchronizeMissionObject.MissionObjectId) == null)
@@ -5855,7 +6566,7 @@ namespace CoopSpectator.Patches
                     return;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return;
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(createAgent.AgentIndex, canBeNull: true);
@@ -5941,7 +6652,7 @@ namespace CoopSpectator.Patches
                     return __exception;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return __exception;
 
                 string failureReason = "create-agent-handler-exception:" + __exception.GetType().Name;
@@ -6653,6 +7364,210 @@ namespace CoopSpectator.Patches
             return !element.IsEmpty && element.Item != null;
         }
 
+        private static bool TrySuppressExactSiegeHeroSurrogateSynchronizeAgentEquipmentPayload(
+            Mission mission,
+            SynchronizeAgentSpawnEquipment synchronizeAgentSpawnEquipment,
+            Agent agent,
+            out string reason)
+        {
+            reason = null;
+            if (mission == null ||
+                synchronizeAgentSpawnEquipment?.SpawnEquipment == null ||
+                agent == null ||
+                agent.IsMount ||
+                GameNetwork.IsServer ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            if (!agent.IsActive() || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
+                return false;
+
+            string entryId = null;
+            if (!CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                !CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId) &&
+                !ExactTransferContractRuntimeCache.TryGetEntryIdByRiderAgentIndex(agent.Index, out entryId))
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (!IsExactHeroEntry(entryState))
+                return false;
+
+            if (!TryBuildExactHeroExpectedSpawnEquipment(entryId, entryState, out Equipment expectedEquipment))
+                return false;
+
+            if (!HasExactHeroWeaponPayloadMismatch(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    expectedEquipment,
+                    out string mismatchReason))
+            {
+                return false;
+            }
+
+            ExactTransferContractRuntimeCache.ObserveClientEquipmentSynchronized(
+                agent.Index,
+                "battle-map handoff exact siege hero surrogate SynchronizeAgentSpawnEquipment suppressed");
+            CoopMissionSpawnLogic.ObserveClientSynchronizeAgentEquipment(
+                agent.Index,
+                "battle-map handoff exact siege hero surrogate SynchronizeAgentSpawnEquipment suppressed");
+            ExactCreateAgentCorridorDiagnostics.ObserveClientSynchronizeAgentEquipment(
+                synchronizeAgentSpawnEquipment,
+                agent,
+                "battle-map handoff exact siege hero surrogate SynchronizeAgentSpawnEquipment suppressed");
+
+            bool exactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
+                mission,
+                agent,
+                preferredEntryId: entryId,
+                source: "battle-map handoff exact siege hero surrogate SynchronizeAgentSpawnEquipment suppressed",
+                includeWeaponsForClientRefresh: true,
+                allowImmediateApply: true);
+            bool localControlledAgent = IsLocalMissionPeerControlledAgent(agent);
+            bool strictWieldApplied = false;
+            string strictWieldResult = localControlledAgent ? "(none)" : "remote-hero-no-local-wield-refresh";
+            string strictWieldIssue = "(none)";
+            if (localControlledAgent)
+            {
+                CoopMissionSpawnLogic.InvalidateStrictExactHeroLocalInitialWieldAppliedMarker(
+                    agent,
+                    entryId,
+                    "battle-map handoff exact siege hero surrogate SynchronizeAgentSpawnEquipment suppressed",
+                    mismatchReason ?? "surrogate-synchronize-agent-equipment");
+                strictWieldApplied = CoopMissionSpawnLogic.TryApplyStrictExactHeroLocalInitialWield(
+                    agent,
+                    entryId,
+                    "battle-map handoff exact siege hero surrogate SynchronizeAgentSpawnEquipment suppressed",
+                    out strictWieldResult,
+                    out strictWieldIssue);
+            }
+
+            reason =
+                (mismatchReason ?? "exact-siege-hero-surrogate-equipment-payload") +
+                "|EntryId=" + (entryId ?? "null") +
+                "|ExpectedWeapons={" + BuildEquipmentSummary(
+                    expectedEquipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3) + "}" +
+                "|PayloadWeapons={" + BuildEquipmentSummary(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3) + "}" +
+                "|ExactVisualApplied=" + exactVisualApplied +
+                "|StrictWieldApplied=" + strictWieldApplied +
+                "|StrictWieldResult=" + (strictWieldResult ?? "(none)") +
+                "|StrictWieldIssue=" + (strictWieldIssue ?? "(none)");
+            CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                agent,
+                "client-synchronize-agent-equipment-suppressed",
+                "battle-map handoff exact siege hero surrogate SynchronizeAgentSpawnEquipment suppressed",
+                reason);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                "client-synchronize-agent-equipment-suppressed-exact-siege-hero-surrogate",
+                "AgentIndex=" + agent.Index +
+                " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                " " + reason);
+            return true;
+        }
+
+        private static bool IsExactHeroEntry(RosterEntryState entryState)
+        {
+            return entryState != null &&
+                   (entryState.IsHero ||
+                    !string.IsNullOrWhiteSpace(entryState.HeroId) ||
+                    string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsLocalMissionPeerControlledAgent(Agent agent)
+        {
+            if (agent == null || GameNetwork.IsServer)
+                return false;
+
+            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            Agent controlledAgent = localMissionPeer?.ControlledAgent;
+            return controlledAgent != null && ReferenceEquals(controlledAgent, agent);
+        }
+
+        private static bool TryBuildExactHeroExpectedSpawnEquipment(
+            string entryId,
+            RosterEntryState entryState,
+            out Equipment expectedEquipment)
+        {
+            expectedEquipment = null;
+            if (entryState == null)
+                return false;
+
+            if (!string.IsNullOrWhiteSpace(entryId) &&
+                ExactTransferContractRuntimeCache.TryGetContract(entryId, out ExactTransferSpawnContract contract))
+            {
+                expectedEquipment = contract?.Equipment?.SpawnEquipment?.Clone(false);
+            }
+
+            if (expectedEquipment == null)
+            {
+                expectedEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
+                    entryState,
+                    includeWeapons: true,
+                    honorExactVisualContracts: false,
+                    includeArmorVisuals: true,
+                    includeMountVisuals: false);
+            }
+
+            return expectedEquipment != null;
+        }
+
+        private static bool HasExactHeroWeaponPayloadMismatch(
+            Equipment payloadEquipment,
+            Equipment expectedEquipment,
+            out string reason)
+        {
+            reason = null;
+            if (payloadEquipment == null || expectedEquipment == null)
+                return false;
+
+            int expectedWeaponCount = 0;
+            int payloadWeaponCount = 0;
+            var mismatches = new List<string>();
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                EquipmentElement expectedElement = expectedEquipment[slot];
+                EquipmentElement payloadElement = payloadEquipment[slot];
+                string expectedItemId = expectedElement.Item?.StringId;
+                string payloadItemId = payloadElement.Item?.StringId;
+                if (!string.IsNullOrWhiteSpace(expectedItemId))
+                    expectedWeaponCount++;
+                if (!string.IsNullOrWhiteSpace(payloadItemId))
+                    payloadWeaponCount++;
+
+                if (string.Equals(expectedItemId ?? string.Empty, payloadItemId ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (mismatches.Count < 6)
+                {
+                    mismatches.Add(
+                        slot +
+                        ":expected=" + (string.IsNullOrWhiteSpace(expectedItemId) ? "empty" : expectedItemId) +
+                        ",payload=" + (string.IsNullOrWhiteSpace(payloadItemId) ? "empty" : payloadItemId));
+                }
+            }
+
+            if (expectedWeaponCount <= 0 || mismatches.Count <= 0)
+                return false;
+
+            reason =
+                "exact-siege-hero-weapon-payload-mismatch" +
+                "|ExpectedWeaponCount=" + expectedWeaponCount +
+                "|PayloadWeaponCount=" + payloadWeaponCount +
+                "|Mismatches=[" + string.Join("; ", mismatches) + "]";
+            return true;
+        }
+
         private static bool TryBuildCanonicalMountedRangedSynchronizeWeaponOrder(
             EquipmentElement slot0,
             EquipmentElement slot1,
@@ -7287,7 +8202,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -7314,6 +8229,35 @@ namespace CoopSpectator.Patches
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: deferred client SynchronizeAgentSpawnEquipment because CreateAgent is still deferred. " +
                         "AgentIndex=" + synchronizeAgentSpawnEquipment.AgentIndex);
+                    return false;
+                }
+
+                if (agent != null &&
+                    TrySuppressExactSiegeHeroSurrogateSynchronizeAgentEquipmentPayload(
+                        mission,
+                        synchronizeAgentSpawnEquipment,
+                        agent,
+                        out string exactSiegeHeroSurrogateSyncReason))
+                {
+                    string payloadSummary = BuildEquipmentSummary(
+                        synchronizeAgentSpawnEquipment.SpawnEquipment,
+                        EquipmentIndex.Weapon0,
+                        EquipmentIndex.Weapon1,
+                        EquipmentIndex.Weapon2,
+                        EquipmentIndex.Weapon3,
+                        EquipmentIndex.Head,
+                        EquipmentIndex.Body,
+                        EquipmentIndex.Leg,
+                        EquipmentIndex.Gloves,
+                        EquipmentIndex.Cape,
+                        EquipmentIndex.Horse,
+                        EquipmentIndex.HorseHarness);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed exact siege hero surrogate SynchronizeAgentSpawnEquipment payload before native handler. " +
+                        "AgentIndex=" + agent.Index +
+                        " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                        " Reason=" + (exactSiegeHeroSurrogateSyncReason ?? "unknown") +
+                        " PayloadEquipment={" + payloadSummary + "}");
                     return false;
                 }
 
@@ -7486,6 +8430,25 @@ namespace CoopSpectator.Patches
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
                     return true;
 
+                bool remappedExactSiegeMissionObjectId = TryRemapExactSiegeMissionObjectIdMessage(
+                    synchronizeMissionObject,
+                    "MissionObjectId",
+                    SiegeMissionObjectIdBridgeTarget.SynchedMissionObject,
+                    "SynchronizeMissionObject");
+                if (!remappedExactSiegeMissionObjectId &&
+                    ShouldSuppressUnmappedExactSiegeSynchronizeMissionObject(
+                        mission,
+                        synchronizeMissionObject,
+                        out string suppressedSynchronizeReason))
+                {
+                    TryLogExactSiegeMissionObjectSyncDiagnostic(
+                        mission,
+                        synchronizeMissionObject,
+                        "suppressed-unmapped-mission-object-id",
+                        extraDetails: suppressedSynchronizeReason);
+                    return false;
+                }
+
                 if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
                 {
                     TryLogExactSiegeMissionObjectSyncDiagnostic(
@@ -7495,7 +8458,8 @@ namespace CoopSpectator.Patches
                         extraDetails: "SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown"));
                     RegisterDeferredClientSynchronizeMissionObjectPayload(
                         synchronizeMissionObject,
-                        "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
+                        "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"),
+                        remappedExactSiegeMissionObjectId);
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: deferred client SynchronizeMissionObject until current battle snapshot is applied. " +
                         "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
@@ -7515,7 +8479,8 @@ namespace CoopSpectator.Patches
                         extraDetails: "ContractReason=" + (siegeClientContractReason ?? "unknown"));
                     RegisterDeferredClientSynchronizeMissionObjectPayload(
                         synchronizeMissionObject,
-                        "siege-client-contract-not-ready:" + (siegeClientContractReason ?? "unknown"));
+                        "siege-client-contract-not-ready:" + (siegeClientContractReason ?? "unknown"),
+                        remappedExactSiegeMissionObjectId);
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: deferred client SynchronizeMissionObject until exact siege client contract is ready. " +
                         "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
@@ -7531,7 +8496,8 @@ namespace CoopSpectator.Patches
                         "deferred-spawn-weapon-pending");
                     RegisterDeferredClientSynchronizeMissionObjectPayload(
                         synchronizeMissionObject,
-                        "spawn-weapon-deferred");
+                        "spawn-weapon-deferred",
+                        remappedExactSiegeMissionObjectId);
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: deferred client SynchronizeMissionObject because SpawnWeaponWithNewEntity is still deferred. " +
                         "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId));
@@ -7546,7 +8512,8 @@ namespace CoopSpectator.Patches
                         "deferred-local-mission-object-missing");
                     RegisterDeferredClientSynchronizeMissionObjectPayload(
                         synchronizeMissionObject,
-                        "local-mission-object-missing");
+                        "local-mission-object-missing",
+                        remappedExactSiegeMissionObjectId);
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: deferred client SynchronizeMissionObject because local mission object is not materialized yet. " +
                         "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId));
@@ -7609,11 +8576,32 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
                     return true;
+
+                bool remappedExactSiegeMissionObjectId = TryRemapExactSiegeMissionObjectIdMessage(
+                    setMissionObjectVisibility,
+                    "MissionObjectId",
+                    SiegeMissionObjectIdBridgeTarget.AnyMissionObject,
+                    "SetMissionObjectVisibility");
+                if (!remappedExactSiegeMissionObjectId &&
+                    ShouldSuppressUnmappedExactSiegeMissionObjectVisibility(
+                        mission,
+                        setMissionObjectVisibility,
+                        out string suppressedVisibilityReason))
+                {
+                    TryLogExactSiegeMissionObjectIdBridgeDiagnostic(
+                        "SetMissionObjectVisibility",
+                        "MissionObjectId",
+                        setMissionObjectVisibility.MissionObjectId,
+                        setMissionObjectVisibility.MissionObjectId,
+                        "suppressed-unmapped-visibility",
+                        suppressedVisibilityReason);
+                    return false;
+                }
 
                 if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
                 {
@@ -7696,6 +8684,169 @@ namespace CoopSpectator.Patches
             }
 
             return __exception;
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventSetRangedSiegeWeaponState_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                TryRemapExactSiegeMissionObjectIdMessage(
+                    baseMessage,
+                    "RangedSiegeWeaponId",
+                    SiegeMissionObjectIdBridgeTarget.RangedSiegeWeapon,
+                    "SetRangedSiegeWeaponState");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetRangedSiegeWeaponState siege id remap failed open: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventSetMissionObjectAnimationAtChannel_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                TryRemapExactSiegeMissionObjectIdMessage(
+                    baseMessage,
+                    "MissionObjectId",
+                    SiegeMissionObjectIdBridgeTarget.AnyMissionObject,
+                    "SetMissionObjectAnimationAtChannel");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetMissionObjectAnimationAtChannel siege id remap failed open: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventExactSiegeMissionObjectIdMessage_Prefix(GameNetworkMessage baseMessage)
+        {
+            string messageName = baseMessage == null ? "UnknownMissionObjectIdMessage" : baseMessage.GetType().Name;
+            try
+            {
+                TryRemapExactSiegeMissionObjectIdMessage(
+                    baseMessage,
+                    "MissionObjectId",
+                    SiegeMissionObjectIdBridgeTarget.AnyMissionObject,
+                    messageName);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: " + messageName + " siege id remap failed open: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventHitSynchronizeObjectHitpoints_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                TryRemapExactSiegeMissionObjectIdMessage(
+                    baseMessage,
+                    "MissionObjectId",
+                    SiegeMissionObjectIdBridgeTarget.AnyMissionObject,
+                    "SyncObjectHitpoints");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SyncObjectHitpoints siege id remap failed open: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventHitSynchronizeObjectDestructionLevel_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                TryRemapExactSiegeMissionObjectIdMessage(
+                    baseMessage,
+                    "MissionObjectId",
+                    SiegeMissionObjectIdBridgeTarget.AnyMissionObject,
+                    "SyncObjectDestructionLevel");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SyncObjectDestructionLevel siege id remap failed open: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventHitBurstAllHeavyHitParticles_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                TryRemapExactSiegeMissionObjectIdMessage(
+                    baseMessage,
+                    "MissionObjectId",
+                    SiegeMissionObjectIdBridgeTarget.AnyMissionObject,
+                    "BurstAllHeavyHitParticles");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: BurstAllHeavyHitParticles siege id remap failed open: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventSetUsableGameObjectIsDeactivated_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                TryRemapExactSiegeMissionObjectIdMessage(
+                    baseMessage,
+                    "UsableGameObjectId",
+                    SiegeMissionObjectIdBridgeTarget.AnyMissionObject,
+                    "SetUsableMissionObjectIsDeactivated");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetUsableMissionObjectIsDeactivated siege id remap failed open: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventSetMachineTargetRotation_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                TryRemapExactSiegeMissionObjectIdMessage(
+                    baseMessage,
+                    "UsableMachineId",
+                    SiegeMissionObjectIdBridgeTarget.UsableMachine,
+                    "SetMachineTargetRotation");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetMachineTargetRotation siege id remap failed open: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventSetSiegeMachineMovementDistance_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                TryRemapExactSiegeMissionObjectIdMessage(
+                    baseMessage,
+                    "UsableMachineId",
+                    SiegeMissionObjectIdBridgeTarget.UsableMachine,
+                    "SetSiegeMachineMovementDistance");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetSiegeMachineMovementDistance siege id remap failed open: " + ex.Message);
+            }
+
+            return true;
         }
 
         private static void TryRemoveDeferredClientSynchronizeMissionObjectAfterDirectApply(GameNetworkMessage baseMessage)
@@ -8113,7 +9264,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -8164,7 +9315,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -8217,7 +9368,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -8268,7 +9419,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -8321,7 +9472,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -8530,7 +9681,7 @@ namespace CoopSpectator.Patches
                     return;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return;
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(synchronizeAgentSpawnEquipment.AgentIndex, canBeNull: true);
@@ -8822,7 +9973,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (ShouldUseSafeStringIdCreateAgentPathOnClient(mission) &&
@@ -8863,6 +10014,28 @@ namespace CoopSpectator.Patches
                     TrySuppressStrictExactHeroStaleOnSpawnWield(setWieldedItemIndex, agent))
                 {
                     __state = true;
+                    return false;
+                }
+
+                if (ShouldUseSafeStringIdCreateAgentPathOnClient(mission) &&
+                    TrySuppressExactSiegeHeroUnsafePostPossessionSetWieldedItemIndex(
+                        mission,
+                        agent,
+                        setWieldedItemIndex,
+                        out string exactSiegeHeroUnsafeWieldReason))
+                {
+                    __state = true;
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed exact siege hero unsafe post-possession SetWieldedItemIndex. " +
+                        "AgentIndex=" + agent.Index +
+                        " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                        " TeamSide=" + agent.Team?.Side +
+                        " PayloadWieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                        " PayloadIsLeftHand=" + setWieldedItemIndex.IsLeftHand +
+                        " PayloadIsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
+                        " PayloadIsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
+                        " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
+                        " Reason=" + (exactSiegeHeroUnsafeWieldReason ?? "unknown"));
                     return false;
                 }
 
@@ -8999,6 +10172,104 @@ namespace CoopSpectator.Patches
                 return false;
 
             suppressReason += "|PostRepair=" + (postRepairReason ?? "unsafe-incomplete-loadout");
+            return true;
+        }
+
+        private static bool TrySuppressExactSiegeHeroUnsafePostPossessionSetWieldedItemIndex(
+            Mission mission,
+            Agent agent,
+            SetWieldedItemIndex setWieldedItemIndex,
+            out string suppressReason)
+        {
+            suppressReason = null;
+            if (mission == null ||
+                agent == null ||
+                agent.IsMount ||
+                setWieldedItemIndex == null ||
+                GameNetwork.IsServer ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            if (!IsLocalMissionPeerControlledAgent(agent) ||
+                !agent.IsActive() ||
+                agent.Team == null ||
+                agent.Team.Side == BattleSideEnum.None)
+            {
+                return false;
+            }
+
+            string entryId = null;
+            if (!CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                !CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId) &&
+                !ExactTransferContractRuntimeCache.TryGetEntryIdByRiderAgentIndex(agent.Index, out entryId))
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (!IsExactHeroEntry(entryState))
+                return false;
+
+            bool unsafeRequest = false;
+            if (setWieldedItemIndex.WieldedItemIndex >= EquipmentIndex.Weapon0 &&
+                setWieldedItemIndex.WieldedItemIndex <= EquipmentIndex.Weapon3 &&
+                !HasOccupiedMissionWeaponSlot(agent.Equipment, setWieldedItemIndex.WieldedItemIndex))
+            {
+                unsafeRequest = true;
+                suppressReason = "exact-siege-hero-requested-empty-live-weapon-slot";
+            }
+            else if (setWieldedItemIndex.WieldedItemIndex == EquipmentIndex.None &&
+                     CountExpectedEntryWeaponSlots(entryState) > 0 &&
+                     CountOccupiedMissionWeaponSlots(agent.Equipment) == 0)
+            {
+                unsafeRequest = true;
+                suppressReason = "exact-siege-hero-none-wield-with-empty-live-weapons";
+            }
+
+            if (!unsafeRequest)
+                return false;
+
+            bool exactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
+                mission,
+                agent,
+                preferredEntryId: entryId,
+                source: "battle-map handoff exact siege hero unsafe post-possession wield",
+                includeWeaponsForClientRefresh: true,
+                allowImmediateApply: true);
+            CoopMissionSpawnLogic.InvalidateStrictExactHeroLocalInitialWieldAppliedMarker(
+                agent,
+                entryId,
+                "battle-map handoff exact siege hero unsafe post-possession wield",
+                suppressReason ?? "unsafe-post-possession-wield");
+            bool strictWieldApplied = CoopMissionSpawnLogic.TryApplyStrictExactHeroLocalInitialWield(
+                agent,
+                entryId,
+                "battle-map handoff exact siege hero unsafe post-possession wield",
+                out string strictWieldResult,
+                out string strictWieldIssue);
+            suppressReason =
+                (suppressReason ?? "exact-siege-hero-unsafe-post-possession-wield") +
+                "|ExactVisualApplied=" + exactVisualApplied +
+                "|StrictWieldApplied=" + strictWieldApplied +
+                "|StrictWieldResult=" + (strictWieldResult ?? "(none)") +
+                "|StrictWieldIssue=" + (strictWieldIssue ?? "(none)") +
+                "|EntryId=" + (entryId ?? "null");
+            ExactCreateAgentCorridorDiagnostics.ObserveClientSetWieldedItemIndex(
+                setWieldedItemIndex,
+                agent,
+                suppressed: true,
+                source: "battle-map handoff exact siege hero unsafe post-possession wield");
+            CoopMissionSpawnLogic.ObserveClientSetWieldedItemIndex(
+                setWieldedItemIndex.AgentIndex,
+                setWieldedItemIndex.IsWieldedOnSpawn,
+                "battle-map handoff exact siege hero unsafe post-possession wield");
+            CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                agent,
+                "client-set-wielded-item-index-suppressed",
+                "battle-map handoff exact siege hero unsafe post-possession wield",
+                suppressReason);
             return true;
         }
 
@@ -9283,7 +10554,7 @@ namespace CoopSpectator.Patches
                     return;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return;
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWieldedItemIndex.AgentIndex, canBeNull: true);
@@ -9335,7 +10606,7 @@ namespace CoopSpectator.Patches
                     return __exception;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return __exception;
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setWieldedItemIndex.AgentIndex, canBeNull: true);

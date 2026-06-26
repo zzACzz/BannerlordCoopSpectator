@@ -120,10 +120,25 @@ namespace CoopSpectator.UI
             status = FilterStatusForCurrentMission(status, currentMissionName, minStatusUpdatedUtc);
             CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot currentSelection = CoopBattleSelectionBridgeFile.ReadCurrentSelection();
             BattleRuntimeState battleState = BattleSnapshotRuntimeState.GetState();
-            bool battleDataReady = status?.BattleDataReady == true;
+            bool statusBattleDataReady = status?.BattleDataReady == true;
+            bool battleDataReady = statusBattleDataReady;
+            string exactSiegePreSelectionReadinessSummary = string.Empty;
+            if (battleDataReady &&
+                !hasLocalControlledAgent &&
+                !reconnectSelectionContractActive &&
+                !CoopMissionSpawnLogic.IsClientExactSiegePreSelectionMaterializationReady(
+                    status,
+                    currentMissionName,
+                    out exactSiegePreSelectionReadinessSummary))
+            {
+                battleDataReady = false;
+            }
+
             string battleDataLoadingProgressText = battleDataReady
                 ? string.Empty
-                : BuildBattleDataLoadingProgressText(status);
+                : statusBattleDataReady && !string.IsNullOrWhiteSpace(exactSiegePreSelectionReadinessSummary)
+                    ? BuildClientMaterializationProgressText(exactSiegePreSelectionReadinessSummary)
+                    : BuildBattleDataLoadingProgressText(status);
             string[] attackerSelectableEntryIds = battleDataReady
                 ? ResolveSelectableEntryIds(status, BattleSideEnum.Attacker)
                 : Array.Empty<string>();
@@ -1080,6 +1095,25 @@ namespace CoopSpectator.UI
                 return prefix + " - waiting for next chunk...";
 
             return prefix;
+        }
+
+        private static string BuildClientMaterializationProgressText(string readinessSummary)
+        {
+            string trimmedSummary = readinessSummary?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(trimmedSummary))
+                return "Finalizing siege materialization...";
+
+            if (trimmedSummary.StartsWith("battle-snapshot-not-applied", StringComparison.OrdinalIgnoreCase))
+                return "Battle data sync in progress";
+
+            if (trimmedSummary.StartsWith("deferred-client-agent-materialization-pending", StringComparison.OrdinalIgnoreCase) ||
+                trimmedSummary.StartsWith("pending-client-exact-visual-overlays", StringComparison.OrdinalIgnoreCase) ||
+                trimmedSummary.StartsWith("active-client-exact-visual-overlays-unresolved", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Finalizing troop visuals...";
+            }
+
+            return "Finalizing siege materialization...";
         }
 
         private static string ResolveSideBannerCode(BattleRuntimeState battleState, BattleSideEnum side)

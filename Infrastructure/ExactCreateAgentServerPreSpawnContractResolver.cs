@@ -131,9 +131,34 @@ namespace CoopSpectator.Infrastructure
                     exactTransferContract))
             {
                 ApplyDismountedSiegePreSpawnContract(exactTransferContract);
+                exactTransferValidation = ExactTransferContractValidator.Validate(exactTransferContract);
+                useContractDrivenPreSpawnPath =
+                    exactTransferContract?.SpawnPolicy?.RequirePreSpawnInjection == true &&
+                    exactTransferValidation?.IsValid == true;
                 includeMountVisuals = false;
                 if (payloadDiagnostic != null)
                     payloadDiagnostic.IncludeMountVisuals = false;
+
+                if (useContractDrivenPreSpawnPath)
+                {
+                    exactEntryCompatibilitySummary = strictHeroPath
+                        ? "ExactEntryContract=contract-driven-strict-hero"
+                        : "ExactEntryContract=contract-driven-full-army";
+                    weaponDecisionReason = includeWeapons
+                        ? (strictHeroPath
+                            ? "contract-driven strict exact hero weapon policy"
+                            : "contract-driven full-army exact weapon policy")
+                        : (strictHeroPath
+                            ? "contract-driven strict exact hero weapon policy disabled"
+                            : "contract-driven full-army exact weapon policy disabled");
+                    capeDecisionReason = includeCape
+                        ? (strictHeroPath
+                            ? "contract-driven strict exact hero cape policy"
+                            : "contract-driven full-army exact cape policy")
+                        : (strictHeroPath
+                            ? "contract-driven strict exact hero cape policy disabled"
+                            : "contract-driven full-army exact cape policy disabled");
+                }
             }
 
             if (!useContractDrivenPreSpawnPath && contractPlayerControlledOrigin)
@@ -161,21 +186,36 @@ namespace CoopSpectator.Infrastructure
                 : includeWeapons || includeCape;
             if (useDedicatedSafeStringIdExactEquipmentPath)
             {
-                bool allowMountOnlyInjection = useContractDrivenPreSpawnPath &&
-                                               !strictHeroPath &&
-                                               includeMountVisuals;
-                if (allowMountOnlyInjection)
+                bool allowExactSiegePreSpawnEquipmentInjection =
+                    ShouldAllowExactSiegePreSpawnEquipmentInjectionOnDedicated(
+                        useContractDrivenPreSpawnPath,
+                        strictHeroPath,
+                        exactTransferContract,
+                        exactTransferValidation);
+                if (allowExactSiegePreSpawnEquipmentInjection)
                 {
-                    // Dedicated create-agent remains too fragile for full exact gear,
-                    // but native mount visuals must exist at spawn time for cavalry.
-                    includeWeapons = false;
-                    includeArmorVisuals = false;
-                    includeCape = false;
-                    injectEquipment = true;
+                    injectEquipment = exactTransferContract?.SpawnPolicy?.RequirePreSpawnInjection == true &&
+                                      (includeWeapons || includeCape || includeArmorVisuals || includeMountVisuals);
                 }
                 else
                 {
-                    injectEquipment = false;
+                    bool allowMountOnlyInjection = useContractDrivenPreSpawnPath &&
+                                                   !strictHeroPath &&
+                                                   includeMountVisuals;
+                    if (allowMountOnlyInjection)
+                    {
+                        // Dedicated create-agent remains too fragile for full exact gear outside
+                        // the dedicated siege materialization corridor, but native mount visuals
+                        // must exist at spawn time for cavalry.
+                        includeWeapons = false;
+                        includeArmorVisuals = false;
+                        includeCape = false;
+                        injectEquipment = true;
+                    }
+                    else
+                    {
+                        injectEquipment = false;
+                    }
                 }
             }
 
@@ -226,8 +266,7 @@ namespace CoopSpectator.Infrastructure
             RosterEntryState entryState,
             ExactTransferSpawnContract contract)
         {
-            if (side == BattleSideEnum.None ||
-                (entryState?.IsMounted != true && contract?.Mount?.IsMounted != true))
+            if (entryState?.IsMounted != true && contract?.Mount?.IsMounted != true)
             {
                 return false;
             }
@@ -236,8 +275,32 @@ namespace CoopSpectator.Infrastructure
             if (mission == null)
                 return false;
 
-            return ExactCampaignArmyBootstrap.TryGetSpawnHorses(mission, side, out bool spawnHorses) &&
-                   !spawnHorses;
+            if (side != BattleSideEnum.None &&
+                ExactCampaignArmyBootstrap.TryGetSpawnHorses(mission, side, out bool spawnHorses))
+            {
+                return !spawnHorses;
+            }
+
+            return SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
+        }
+
+        private static bool ShouldAllowExactSiegePreSpawnEquipmentInjectionOnDedicated(
+            bool useContractDrivenPreSpawnPath,
+            bool strictHeroPath,
+            ExactTransferSpawnContract contract,
+            ExactTransferValidationResult validation)
+        {
+            if (!useContractDrivenPreSpawnPath ||
+                !strictHeroPath ||
+                contract?.SpawnPolicy?.RequirePreSpawnInjection != true ||
+                validation?.IsValid != true)
+            {
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            return mission != null &&
+                   SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
         }
 
         private static void ApplyDismountedSiegePreSpawnContract(ExactTransferSpawnContract contract)

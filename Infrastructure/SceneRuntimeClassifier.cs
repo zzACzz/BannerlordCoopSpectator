@@ -65,6 +65,25 @@ namespace CoopSpectator.Infrastructure
                 || IsExactCampaignBattleScene(sceneName);
         }
 
+        public static bool IsExactSiegeAssaultWithDeploymentScene(string sceneName)
+        {
+            if (!IsExactCampaignBattleScene(sceneName))
+                return false;
+
+            BattleScenarioContextMessage scenarioContext = null;
+            try
+            {
+                scenarioContext = BattleSnapshotRuntimeState.GetScenarioContext() ??
+                                  BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                                  BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            }
+            catch
+            {
+            }
+
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+        }
+
         private static bool IsCurrentSiegeScenarioScene(string sceneName)
         {
             if (string.IsNullOrWhiteSpace(sceneName))

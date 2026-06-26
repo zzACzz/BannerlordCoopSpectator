@@ -81,6 +81,7 @@
     <Compile Include="..\Infrastructure\SiegeAssault\CoopSiegeMachineDeploymentController.cs" Link="Infrastructure\SiegeAssault\CoopSiegeMachineDeploymentController.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultNoDeploymentRuntime.cs" Link="Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultNoDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultWithDeploymentRuntime.cs" Link="Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultWithDeploymentRuntime.cs" />
+    <Compile Include="..\Infrastructure\SiegeAssault\SiegeMissionObjectIdBridge.cs" Link="Infrastructure\SiegeAssault\SiegeMissionObjectIdBridge.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs" Link="Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />

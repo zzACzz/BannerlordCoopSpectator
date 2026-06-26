@@ -5939,6 +5939,17 @@ namespace CoopSpectator.MissionBehaviors
                     " Source=" + (source ?? "unknown"));
             }
             else if (effectiveIncludeWeaponsForRefresh &&
+                     ShouldSuppressClientTroopWeaponOverlayRefreshForExactSiege(agent, entryState, out string exactSiegeWeaponOverlayReason))
+            {
+                effectiveIncludeWeaponsForRefresh = false;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: suppressed weapon-inclusive pending client exact visual overlay for exact siege non-hero troop. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " Reason=" + (exactSiegeWeaponOverlayReason ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+            }
+            else if (effectiveIncludeWeaponsForRefresh &&
                      ShouldDowngradeClientMountedTroopWeaponOverlayRefresh(agent, entryState, out string mountedCooldownReason))
             {
                 effectiveIncludeWeaponsForRefresh = false;
@@ -6502,6 +6513,148 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        internal static bool IsClientExactSiegePreSelectionMaterializationReady(
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+            string currentMissionName,
+            out string readinessSummary)
+        {
+            readinessSummary = string.Empty;
+            if (GameNetwork.IsServer)
+            {
+                readinessSummary = "server";
+                return true;
+            }
+
+            if (status == null)
+            {
+                readinessSummary = "status-null";
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            string sceneName =
+                !string.IsNullOrWhiteSpace(currentMissionName)
+                    ? currentMissionName
+                    : !string.IsNullOrWhiteSpace(status.MissionName)
+                        ? status.MissionName
+                        : mission?.SceneName ?? string.Empty;
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(sceneName))
+            {
+                readinessSummary = "not-exact-siege";
+                return true;
+            }
+
+            if (status.HasAgent)
+            {
+                readinessSummary = "already-has-agent";
+                return true;
+            }
+
+            if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string battleSnapshotReadinessSummary))
+            {
+                readinessSummary = "battle-snapshot-not-applied " + (battleSnapshotReadinessSummary ?? "unknown");
+                return false;
+            }
+
+            if (_lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc == DateTime.MinValue)
+            {
+                readinessSummary =
+                    "authoritative-materialized-entry-snapshot-unobserved" +
+                    " ExpectedEntryCount=" + status.AuthoritativeMaterializedAgentEntryCount;
+                return false;
+            }
+
+            TimeSpan observedAge = DateTime.UtcNow - _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc;
+            if (observedAge < ClientReconnectFinalizeSettleDelay)
+            {
+                readinessSummary =
+                    "authoritative-materialized-entry-snapshot-settle-pending" +
+                    " ObservedAgeSeconds=" + observedAge.TotalSeconds.ToString("F2") +
+                    " PendingSettleSeconds=" + ClientReconnectFinalizeSettleDelay.TotalSeconds.ToString("F2") +
+                    " ObservedAgentCount=" + _clientAuthoritativeMaterializedEntryObservedAgentIndices.Count +
+                    " SnapshotEntryCount=" + _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount;
+                return false;
+            }
+
+            if (_pendingExactNativeClientVisualOverlaysByAgentIndex.Count > 0)
+            {
+                readinessSummary =
+                    "pending-client-exact-visual-overlays" +
+                    " PendingCount=" + _pendingExactNativeClientVisualOverlaysByAgentIndex.Count +
+                    " ObservedAgentCount=" + _clientAuthoritativeMaterializedEntryObservedAgentIndices.Count;
+                return false;
+            }
+
+            int deferredAgentMaterializationPendingCount =
+                BattleMapSpawnHandoffPatch.GetDeferredClientAgentMaterializationPendingCount(out string deferredAgentMaterializationSummary);
+            if (deferredAgentMaterializationPendingCount > 0)
+            {
+                readinessSummary =
+                    "deferred-client-agent-materialization-pending " +
+                    (deferredAgentMaterializationSummary ?? "unknown");
+                return false;
+            }
+
+            int activeObservedAgentCount = 0;
+            int unresolvedVisualAgentCount = 0;
+            var unresolvedSamples = new List<int>();
+            if (mission != null)
+            {
+                foreach (int agentIndex in _clientAuthoritativeMaterializedEntryObservedAgentIndices.ToArray())
+                {
+                    if (!TryGetActiveMissionAgentByIndex(mission, agentIndex, out Agent agent) ||
+                        agent == null ||
+                        agent.IsMount ||
+                        agent.Team == null ||
+                        agent.Team.Side == BattleSideEnum.None)
+                    {
+                        continue;
+                    }
+
+                    activeObservedAgentCount++;
+                    bool visualApplied = _exactNativeClientVisualOverlayAppliedAgentIndices.Contains(agentIndex);
+                    bool weaponsApplied =
+                        !_clientUseStringIdExactEquipmentPath ||
+                        (_exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.TryGetValue(agentIndex, out bool includesWeapons) &&
+                         includesWeapons);
+                    if (visualApplied && weaponsApplied)
+                        continue;
+
+                    unresolvedVisualAgentCount++;
+                    if (unresolvedSamples.Count < 6)
+                        unresolvedSamples.Add(agentIndex);
+                }
+            }
+
+            if (activeObservedAgentCount <= 0)
+            {
+                readinessSummary =
+                    "active-authoritative-materialized-agents-pending" +
+                    " ObservedAgentCount=" + _clientAuthoritativeMaterializedEntryObservedAgentIndices.Count +
+                    " SnapshotEntryCount=" + _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount;
+                return false;
+            }
+
+            if (unresolvedVisualAgentCount > 0)
+            {
+                readinessSummary =
+                    "active-client-exact-visual-overlays-unresolved" +
+                    " UnresolvedCount=" + unresolvedVisualAgentCount +
+                    " ActiveObservedAgentCount=" + activeObservedAgentCount +
+                    " Samples=[" + string.Join(",", unresolvedSamples) + "]";
+                return false;
+            }
+
+            readinessSummary =
+                "ready" +
+                " ActiveObservedAgentCount=" + activeObservedAgentCount +
+                " ObservedAgentCount=" + _clientAuthoritativeMaterializedEntryObservedAgentIndices.Count +
+                " SnapshotEntryCount=" + _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount +
+                " PendingExactVisualOverlays=" + _pendingExactNativeClientVisualOverlaysByAgentIndex.Count +
+                " DeferredClientAgentMaterializationPending=" + deferredAgentMaterializationPendingCount;
+            return true;
+        }
+
         private static bool TryGetActiveMissionAgentByIndex(Mission mission, int agentIndex, out Agent agent)
         {
             agent = null;
@@ -6611,6 +6764,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             if (!IsHeroEntryEligibleForExactPersonalPerks(entryState) &&
+                !ShouldSuppressClientTroopWeaponOverlayRefreshForExactSiege(agent, entryState, out _) &&
                 !IsClientTroopVisualRefreshWeaponSeedReady(agent, entryState, out string weaponSeedReason))
             {
                 reason = weaponSeedReason ?? "weapon-seed-pending";
@@ -6842,6 +6996,9 @@ namespace CoopSpectator.MissionBehaviors
             if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out _))
                 return false;
 
+            if (ShouldAllowExactSiegeTroopVisualOverlayDuringLiveControl())
+                return false;
+
             Agent controlledAgent = GetLocalPeerControlledAgent();
             if (controlledAgent == null || !controlledAgent.IsActive())
                 return false;
@@ -6867,6 +7024,16 @@ namespace CoopSpectator.MissionBehaviors
                 ? baseReason
                 : baseReason + " TargetAgentIndex=" + agent.Index;
             return true;
+        }
+
+        private static bool ShouldAllowExactSiegeTroopVisualOverlayDuringLiveControl()
+        {
+            if (GameNetwork.IsServer)
+                return false;
+
+            Mission mission = Mission.Current;
+            return mission != null &&
+                   SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
         }
 
         private static bool ShouldPauseClientPostPossessionExactVisualForAgent(
@@ -6921,6 +7088,31 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private static bool ShouldSuppressClientTroopWeaponOverlayRefreshForExactSiege(
+            Agent agent,
+            RosterEntryState entryState,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                agent == null ||
+                entryState == null ||
+                IsHeroEntryEligibleForExactPersonalPerks(entryState))
+            {
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            if (mission == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            reason = "exact-siege-non-hero-native-weapon-stream-owned";
+            return true;
+        }
+
         private static bool ShouldAllowClientTroopWeaponOverlayRefresh(
             Agent agent,
             RosterEntryState entryState,
@@ -6945,6 +7137,12 @@ namespace CoopSpectator.MissionBehaviors
             if (locallyControlled)
             {
                 reason = "local-controlled-live-wield-owned-by-client";
+                return false;
+            }
+
+            if (ShouldSuppressClientTroopWeaponOverlayRefreshForExactSiege(agent, entryState, out string exactSiegeWeaponOverlayReason))
+            {
+                reason = exactSiegeWeaponOverlayReason;
                 return false;
             }
 
@@ -7682,6 +7880,16 @@ namespace CoopSpectator.MissionBehaviors
                 string.Equals(lifecycle, "Respawnable", StringComparison.OrdinalIgnoreCase) ||
                 respawnSelection ||
                 status.CanRespawn;
+            if (!status.HasAgent &&
+                noSide &&
+                sideSelection &&
+                status.BattleDataReady &&
+                ShouldAllowExactSiegePreSelectionVisualFinalization(status))
+            {
+                _pendingClientExactVisualSelectionPauseSticky = false;
+                return false;
+            }
+
             bool shouldPause =
                 reconnectFinalize ||
                 (!status.HasAgent &&
@@ -7711,6 +7919,23 @@ namespace CoopSpectator.MissionBehaviors
 
             _pendingClientExactVisualSelectionPauseSticky = false;
             return false;
+        }
+
+        private static bool ShouldAllowExactSiegePreSelectionVisualFinalization(
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status)
+        {
+            string sceneName =
+                !string.IsNullOrWhiteSpace(status?.MissionName)
+                    ? status.MissionName
+                    : Mission.Current?.SceneName ?? string.Empty;
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(sceneName))
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
         }
 
         private static bool ShouldPauseClientExactVisualOverlaysForReconnectFinalize(out string reason)
@@ -9391,6 +9616,18 @@ namespace CoopSpectator.MissionBehaviors
             }
             else if (clientVisualOnly &&
                      includeWeaponsForOverlayRefresh &&
+                     ShouldSuppressClientTroopWeaponOverlayRefreshForExactSiege(agent, entryState, out string exactSiegeWeaponOverlayReason))
+            {
+                includeWeaponsForOverlayRefresh = false;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: suppressed weapon-inclusive client exact visual overlay for exact siege non-hero troop. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " Reason=" + (exactSiegeWeaponOverlayReason ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+            }
+            else if (clientVisualOnly &&
+                     includeWeaponsForOverlayRefresh &&
                      !clientHeroEntry &&
                      ShouldDowngradeClientMountedTroopWeaponOverlayRefresh(agent, entryState, out string mountedCooldownReason))
             {
@@ -9447,6 +9684,7 @@ namespace CoopSpectator.MissionBehaviors
             string clientVisualRefreshBypassReason = null;
             if (clientVisualOnly &&
                 !clientHeroEntry &&
+                includeWeaponsForOverlayRefresh &&
                 !TryPrepareClientTroopVisualRefreshSeedEquipment(
                     agent,
                     entryState,
@@ -9475,6 +9713,8 @@ namespace CoopSpectator.MissionBehaviors
                     " Source=" + (source ?? "unknown"));
                 return false;
             }
+            if (clientVisualOnly && !clientHeroEntry && !includeWeaponsForOverlayRefresh)
+                clientTroopWeaponSeedReason = "weapon-seed-skipped:client-weapon-overlay-suppressed";
             bool clientVisibleWeaponProjectionApplied = !requiresClientVisibleWeaponProjection;
             bool clientMountedVisualProjectionApplied = !requiresClientMountedVisualProjection;
             bool clientVisualRefreshAlreadySatisfied =
@@ -10069,6 +10309,16 @@ namespace CoopSpectator.MissionBehaviors
 
                 bool hasDesiredMainHand = IsUsableWeaponEquipmentIndex(overlaySpawnEquipment, desiredMainHandIndex);
                 bool hasDesiredOffHand = IsUsableWeaponEquipmentIndex(overlaySpawnEquipment, desiredOffHandIndex);
+                string offhandSuppressedReason = null;
+                if (hasDesiredMainHand &&
+                    hasDesiredOffHand &&
+                    mainNotUsableWithOneHand &&
+                    IsShieldEquipmentIndex(overlaySpawnEquipment, desiredOffHandIndex))
+                {
+                    hasDesiredOffHand = false;
+                    offhandSuppressedReason = "shield-suppressed-for-two-hand-main";
+                }
+
                 if (!hasDesiredMainHand && !hasDesiredOffHand)
                 {
                     wieldRefreshIssue = "client-live-wield-refresh-skipped:no-weapon";
@@ -10126,6 +10376,7 @@ namespace CoopSpectator.MissionBehaviors
                     " DesiredMain=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredMainHandIndex) +
                     " DesiredOff=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredOffHandIndex) +
                     " MainNotUsableWithOneHand=" + mainNotUsableWithOneHand +
+                    " OffhandSuppressed=" + (offhandSuppressedReason ?? "(none)") +
                     " PreMain=" + FormatAgentWieldedEquipmentIndex(agent, preMainHandIndex) +
                     " PreOff=" + FormatAgentWieldedEquipmentIndex(agent, preOffHandIndex) +
                     " PostMain=" + FormatAgentWieldedEquipmentIndex(agent, postMainHandIndex) +
@@ -10181,6 +10432,21 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             return !equipment[equipmentIndex].IsEmpty && equipment[equipmentIndex].Item != null;
+        }
+
+        private static bool IsShieldEquipmentIndex(Equipment equipment, EquipmentIndex equipmentIndex)
+        {
+            if (equipment == null)
+                return false;
+
+            if (equipmentIndex < EquipmentIndex.Weapon0 || equipmentIndex > EquipmentIndex.Weapon3)
+                return false;
+
+            EquipmentElement element = equipment[equipmentIndex];
+            ItemObject item = element.Item;
+            return item != null &&
+                   (item.PrimaryWeapon?.IsShield == true ||
+                    item.ItemType == ItemObject.ItemTypeEnum.Shield);
         }
 
         private static int ResolveEquipmentCurrentUsageIndex(Agent agent, Equipment overlaySpawnEquipment, EquipmentIndex equipmentIndex)
@@ -19329,6 +19595,52 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             reason = "mission-weapons-hydrated:" + hydrationSummary;
+            return true;
+        }
+
+        private static bool TryApplyExactSiegeSnapshotWeaponSeedToEquipment(
+            Equipment targetEquipment,
+            RosterEntryState entryState,
+            out string summary)
+        {
+            summary = "(none)";
+            if (targetEquipment == null || entryState == null)
+                return false;
+
+            Equipment snapshotEquipment = BuildSnapshotEquipmentForExactRuntime(
+                entryState,
+                includeWeapons: true,
+                honorExactVisualContracts: false,
+                includeArmorVisuals: false,
+                includeMountVisuals: false);
+            if (!HasAnyEquipmentWeapons(
+                    snapshotEquipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3))
+            {
+                return false;
+            }
+
+            var seededSlots = new List<string>();
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                if (targetEquipment[slot].Item != null)
+                    continue;
+
+                EquipmentElement snapshotElement = snapshotEquipment[slot];
+                if (snapshotElement.IsEmpty || snapshotElement.Item == null)
+                    continue;
+
+                targetEquipment[slot] = snapshotElement;
+                seededSlots.Add(GetEquipmentSlotLabel(slot) + "=" + snapshotElement.Item.StringId);
+            }
+
+            if (seededSlots.Count == 0)
+                return false;
+
+            summary = string.Join(", ", seededSlots);
             return true;
         }
 

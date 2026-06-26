@@ -2255,6 +2255,12 @@ namespace CoopSpectator.MissionBehaviors
                 siegeWeapon,
                 message.ClearSelection,
                 out string localApplyDiagnostics);
+            string idBridgeDiagnostics = TryRegisterCommanderDeploymentSiegeMachineIdBridge(
+                message,
+                side,
+                deploymentPoint,
+                siegeWeapon,
+                applied);
             LogCommanderDeploymentSiegeMachineStateDiagnostics(
                 applied ? "applied-detail" : "apply-failed",
                 message,
@@ -2262,8 +2268,47 @@ namespace CoopSpectator.MissionBehaviors
                 " SiegeWeapon=" + FormatSiegeWeapon(siegeWeapon) +
                 " DeploymentPointResolution=" + deploymentPointResolutionDiagnostics +
                 " SiegeWeaponResolution=" + siegeWeaponResolutionDiagnostics +
-                " LocalApply={" + localApplyDiagnostics + "}");
+                " LocalApply={" + localApplyDiagnostics + "}" +
+                " IdBridge={" + idBridgeDiagnostics + "}");
             return applied;
+        }
+
+        private static string TryRegisterCommanderDeploymentSiegeMachineIdBridge(
+            CoopCommanderDeploymentSiegeMachineStateMessage message,
+            BattleSideEnum side,
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon,
+            bool applied)
+        {
+            if (!applied)
+                return "skip-apply-failed";
+
+            if (message == null)
+                return "skip-null-message";
+
+            if (deploymentPoint == null)
+                return "skip-null-deployment-point";
+
+            string deploymentPointDiagnostics = SiegeMissionObjectIdBridge.RegisterDeploymentPointMapping(
+                message.DeploymentPointId,
+                deploymentPoint,
+                side,
+                "CoopMissionNetworkBridge.TryApplyServerCommanderDeploymentSiegeMachineState");
+
+            string siegeWeaponDiagnostics = "skip-clear-or-null";
+            if (!message.ClearSelection && siegeWeapon != null)
+            {
+                siegeWeaponDiagnostics = SiegeMissionObjectIdBridge.RegisterSiegeWeaponMapping(
+                    message.SiegeWeaponId,
+                    siegeWeapon,
+                    side,
+                    message.SiegeWeaponTypeName,
+                    "CoopMissionNetworkBridge.TryApplyServerCommanderDeploymentSiegeMachineState");
+            }
+
+            return
+                "DeploymentPoint={" + deploymentPointDiagnostics + "}" +
+                " SiegeWeapon={" + siegeWeaponDiagnostics + "}";
         }
 
         private bool TryApplyCommanderDeploymentSiegeMachineSelection(

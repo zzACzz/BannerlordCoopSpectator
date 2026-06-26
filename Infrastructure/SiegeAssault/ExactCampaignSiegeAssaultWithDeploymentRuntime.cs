@@ -447,13 +447,15 @@ namespace CoopSpectator.Infrastructure
                 return false;
 
             bool isPlayerAttacker = playerSide == BattleSideEnum.Attacker;
+            bool allowMissionBehaviorCreation = !IsMissionBehaviorMutationUnsafe(mission);
             bool shouldMountLiveDeploymentControllers =
                 ShouldMountLiveDeploymentControllers(mission, out string liveDeploymentControllerPolicy);
 
             if (!TryEnsureMissionSiegeEnginesLogicBehavior(
                     mission,
                     scenarioContext,
-                    out string siegeEnginesDiagnostics))
+                    out string siegeEnginesDiagnostics,
+                    allowMissionBehaviorCreation))
             {
                 diagnostics = "MissionSiegeEnginesLogic={" + siegeEnginesDiagnostics + "}";
                 return false;
@@ -481,7 +483,8 @@ namespace CoopSpectator.Infrastructure
                     mission.GetMissionBehavior<SiegeDeploymentHandler>(),
                     () => CreateSiegeDeploymentHandler(isPlayerAttacker),
                     "SiegeDeploymentHandler",
-                    out string deploymentHandlerDiagnostics))
+                    out string deploymentHandlerDiagnostics,
+                    allowMissionBehaviorCreation))
             {
                 diagnostics =
                     "MissionSiegeEnginesLogic={" + siegeEnginesDiagnostics + "} " +
@@ -494,7 +497,8 @@ namespace CoopSpectator.Infrastructure
                     mission.GetMissionBehavior<SiegeDeploymentMissionController>(),
                     () => new SiegeDeploymentMissionController(isPlayerAttacker),
                     "SiegeDeploymentMissionController",
-                    out string deploymentControllerDiagnostics))
+                    out string deploymentControllerDiagnostics,
+                    allowMissionBehaviorCreation))
             {
                 diagnostics =
                     "MissionSiegeEnginesLogic={" + siegeEnginesDiagnostics + "} " +
@@ -548,10 +552,12 @@ namespace CoopSpectator.Infrastructure
                 return hasSiegeEnginesLogic && preparedDeploymentPoints;
             }
 
+            bool allowMissionBehaviorCreation = !IsMissionBehaviorMutationUnsafe(mission);
             if (!TryEnsureMissionSiegeEnginesLogicBehavior(
                     mission,
                     scenarioContext,
-                    out string siegeEnginesDiagnostics))
+                    out string siegeEnginesDiagnostics,
+                    allowMissionBehaviorCreation))
             {
                 diagnostics = "MissionSiegeEnginesLogic={" + siegeEnginesDiagnostics + "}";
                 return false;
@@ -562,7 +568,8 @@ namespace CoopSpectator.Infrastructure
                 mission.GetMissionBehavior<SiegeDeploymentHandler>(),
                 () => CreateSiegeDeploymentHandler(isCommanderAttacker),
                 "SiegeDeploymentHandler",
-                out string deploymentHandlerDiagnostics);
+                out string deploymentHandlerDiagnostics,
+                allowMissionBehaviorCreation);
 
             TryPrepareClientDeploymentPointsForCommanderUi(
                 mission,
@@ -1586,7 +1593,8 @@ namespace CoopSpectator.Infrastructure
         private static bool TryEnsureMissionSiegeEnginesLogicBehavior(
             Mission mission,
             BattleScenarioContextMessage scenarioContext,
-            out string diagnostics)
+            out string diagnostics,
+            bool allowCreation = true)
         {
             diagnostics = "mission-null";
             if (mission == null)
@@ -1597,6 +1605,12 @@ namespace CoopSpectator.Infrastructure
             {
                 diagnostics = "Existing=True Created=False";
                 return true;
+            }
+
+            if (!allowCreation)
+            {
+                diagnostics = "Existing=False Created=False Reason=missing-from-initial-stack";
+                return false;
             }
 
             if (!TryCreateMissionSiegeEnginesLogicBehavior(
@@ -2315,12 +2329,28 @@ namespace CoopSpectator.Infrastructure
                 " Policy=" + (policy ?? "none");
         }
 
+        private static bool IsMissionBehaviorMutationUnsafe(Mission mission)
+        {
+            if (mission == null)
+                return true;
+
+            try
+            {
+                return mission.CurrentState == Mission.State.Initializing;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
         private static bool TryEnsureMissionBehaviorAvailable<TBehavior>(
             Mission mission,
             TBehavior existingBehavior,
             Func<TBehavior> behaviorFactory,
             string behaviorName,
-            out string diagnostics)
+            out string diagnostics,
+            bool allowCreation = true)
             where TBehavior : MissionBehavior
         {
             diagnostics = "mission-null";
@@ -2331,6 +2361,12 @@ namespace CoopSpectator.Infrastructure
             {
                 diagnostics = "Existing=True Created=False";
                 return true;
+            }
+
+            if (!allowCreation)
+            {
+                diagnostics = "Existing=False Created=False Reason=missing-from-initial-stack RuntimeType=" + behaviorName;
+                return false;
             }
 
             if (behaviorFactory == null)

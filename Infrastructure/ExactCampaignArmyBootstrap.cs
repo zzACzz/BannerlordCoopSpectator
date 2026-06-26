@@ -406,7 +406,9 @@ namespace CoopSpectator.Infrastructure
                 bool isAnySiegeAssaultSubtype = isSiegeAssaultWithDeploymentSubtype || isSiegeAssaultNoDeploymentSubtype;
                 Mission.MissionTeamAITypeEnum missionTeamAiType = ResolveMissionTeamAiType(scenarioContext);
                 bool deferMissionTeamAiActivationUntilBattleActive =
-                    ShouldDeferMissionTeamAiActivationUntilBattleActive(missionTeamAiType);
+                    ShouldDeferMissionTeamAiActivationUntilBattleActive(
+                        missionTeamAiType,
+                        scenarioContext);
                 string teamAiDiagnostics = "team-ai-not-applied";
 
                 initializationStep = "ensure-campaign-object-catalogs";
@@ -450,6 +452,7 @@ namespace CoopSpectator.Infrastructure
                             scenarioContext,
                             isSallyOutSubtype,
                             isReliefForceAttack,
+                            isSiegeAssaultWithDeploymentSubtype,
                             out siegePreparationDiagnostics))
                     {
                         reason = siegePreparationDiagnostics ?? "siege-scene-preparation-failed";
@@ -466,7 +469,32 @@ namespace CoopSpectator.Infrastructure
                 {
                     initializationStep = "ensure-siege-assault-state-handler";
                     bool requireSiegeStateHandler = !IsDedicatedServerProcess();
-                    if (!TryEnsureMissionBehaviorAvailableByTypeName(
+                    bool hasInitialSiegeStateHandler = GetMissionBehaviorByFullName(
+                        mission,
+                        "SandBox.Missions.MissionLogics.CampaignSiegeStateHandler") != null;
+                    if (isSiegeAssaultWithDeploymentSubtype)
+                    {
+                        siegeStateHandlerDiagnostics = hasInitialSiegeStateHandler
+                            ? "Existing=True Created=False RuntimeType=CampaignSiegeStateHandler"
+                            : "Existing=False Created=False Reason=missing-from-initial-stack-for-siege-with-deployment";
+                        if (!hasInitialSiegeStateHandler)
+                        {
+                            if (requireSiegeStateHandler)
+                            {
+                                reason = siegeStateHandlerDiagnostics ?? "siege-assault-state-handler-missing-from-initial-stack";
+                                return false;
+                            }
+
+                            ModLogger.Info(
+                                "ExactCampaignArmyBootstrap: continuing siege assault bootstrap without optional CampaignSiegeStateHandler on dedicated server. " +
+                                "Scene=" + (sceneName ?? "null") +
+                                " Diagnostics=" + (siegeStateHandlerDiagnostics ?? "unknown") +
+                                " Source=" + (source ?? "unknown"));
+                            siegeStateHandlerDiagnostics =
+                                "OptionalDedicatedSkip={" + (siegeStateHandlerDiagnostics ?? "unknown") + "}";
+                        }
+                    }
+                    else if (!TryEnsureMissionBehaviorAvailableByTypeName(
                             mission,
                             "SandBox.Missions.MissionLogics.CampaignSiegeStateHandler",
                             "CampaignSiegeStateHandler",
@@ -497,7 +525,8 @@ namespace CoopSpectator.Infrastructure
                 if (!TryEnsureMissionTeamAiContract(
                         mission,
                         missionTeamAiType,
-                        shouldActivateTeamAi: !deferMissionTeamAiActivationUntilBattleActive,
+                        !deferMissionTeamAiActivationUntilBattleActive,
+                        isSiegeAssaultWithDeploymentSubtype,
                         source,
                         out teamAiDiagnostics))
                 {
@@ -1120,8 +1149,12 @@ namespace CoopSpectator.Infrastructure
         }
 
         private static bool ShouldDeferMissionTeamAiActivationUntilBattleActive(
-            Mission.MissionTeamAITypeEnum missionTeamAiType)
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            BattleScenarioContextMessage scenarioContext)
         {
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                return false;
+
             return missionTeamAiType == Mission.MissionTeamAITypeEnum.Siege ||
                    missionTeamAiType == Mission.MissionTeamAITypeEnum.SallyOut;
         }
@@ -1131,6 +1164,7 @@ namespace CoopSpectator.Infrastructure
             BattleScenarioContextMessage scenarioContext,
             bool isSallyOutSubtype,
             bool isReliefForceAttack,
+            bool requireInitialStack,
             out string diagnostics)
         {
             diagnostics = "mission-null";
@@ -1142,6 +1176,12 @@ namespace CoopSpectator.Infrastructure
             {
                 diagnostics = "existing";
                 return true;
+            }
+
+            if (requireInitialStack)
+            {
+                diagnostics = "missing-from-initial-stack-for-siege-with-deployment";
+                return false;
             }
 
             float[] nativeSafeWallHitPointRatios = ResolveNativeSafeWallHitPointRatios(
@@ -1266,6 +1306,7 @@ namespace CoopSpectator.Infrastructure
             Mission mission,
             Mission.MissionTeamAITypeEnum missionTeamAiType,
             bool shouldActivateTeamAi,
+            bool requireInitialStackPrerequisites,
             string source,
             out string diagnostics)
         {
@@ -1285,6 +1326,7 @@ namespace CoopSpectator.Infrastructure
             if (!TryEnsureMissionTeamAiRuntimePrerequisites(
                     mission,
                     missionTeamAiType,
+                    requireInitialStackPrerequisites,
                     out string prerequisiteDiagnostics))
             {
                 diagnostics =
@@ -1326,6 +1368,7 @@ namespace CoopSpectator.Infrastructure
         private static bool TryEnsureMissionTeamAiRuntimePrerequisites(
             Mission mission,
             Mission.MissionTeamAITypeEnum missionTeamAiType,
+            bool requireInitialStackPrerequisites,
             out string diagnostics)
         {
             diagnostics = "not-required";
@@ -1346,7 +1389,8 @@ namespace CoopSpectator.Infrastructure
                     mission.GetMissionBehavior<CasualtyHandler>(),
                     () => new CasualtyHandler(),
                     "CasualtyHandler",
-                    out string casualtyDiagnostics))
+                    out string casualtyDiagnostics,
+                    !requireInitialStackPrerequisites))
             {
                 diagnostics = "CasualtyHandler={" + casualtyDiagnostics + "}";
                 return false;
@@ -1357,7 +1401,8 @@ namespace CoopSpectator.Infrastructure
                     mission.GetMissionBehavior<BattlePowerCalculationLogic>(),
                     () => new BattlePowerCalculationLogic(),
                     "BattlePowerCalculationLogic",
-                    out string battlePowerDiagnostics))
+                    out string battlePowerDiagnostics,
+                    !requireInitialStackPrerequisites))
             {
                 diagnostics =
                     "CasualtyHandler={" + casualtyDiagnostics + "} " +
@@ -1376,7 +1421,8 @@ namespace CoopSpectator.Infrastructure
             TBehavior existingBehavior,
             Func<TBehavior> behaviorFactory,
             string behaviorName,
-            out string diagnostics)
+            out string diagnostics,
+            bool allowCreation = true)
             where TBehavior : MissionBehavior
         {
             diagnostics = "mission-null";
@@ -1387,6 +1433,12 @@ namespace CoopSpectator.Infrastructure
             {
                 diagnostics = "Existing=True Created=False";
                 return true;
+            }
+
+            if (!allowCreation)
+            {
+                diagnostics = "Existing=False Created=False Reason=missing-from-initial-stack BehaviorName=" + behaviorName;
+                return false;
             }
 
             if (behaviorFactory == null)
@@ -1435,11 +1487,7 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
-            MissionBehavior existingBehavior = mission.MissionBehaviors?
-                .FirstOrDefault(behavior => string.Equals(
-                    behavior?.GetType().FullName,
-                    behaviorTypeFullName,
-                    StringComparison.Ordinal));
+            MissionBehavior existingBehavior = GetMissionBehaviorByFullName(mission, behaviorTypeFullName);
             if (existingBehavior != null)
             {
                 diagnostics = "Existing=True Created=False RuntimeType=" + existingBehavior.GetType().Name;
@@ -1482,6 +1530,26 @@ namespace CoopSpectator.Infrastructure
                     " BehaviorName=" + behaviorName;
                 return false;
             }
+        }
+
+        private static MissionBehavior GetMissionBehaviorByFullName(Mission mission, string behaviorTypeFullName)
+        {
+            if (mission?.MissionBehaviors == null || string.IsNullOrWhiteSpace(behaviorTypeFullName))
+                return null;
+
+            for (int i = 0; i < mission.MissionBehaviors.Count; i++)
+            {
+                MissionBehavior behavior = mission.MissionBehaviors[i];
+                if (string.Equals(
+                        behavior?.GetType().FullName,
+                        behaviorTypeFullName,
+                        StringComparison.Ordinal))
+                {
+                    return behavior;
+                }
+            }
+
+            return null;
         }
 
         private static bool IsDedicatedServerProcess()
@@ -1707,7 +1775,7 @@ namespace CoopSpectator.Infrastructure
 
             BattleScenarioContextMessage scenarioContext = ResolveScenarioContextForMission(mission);
             Mission.MissionTeamAITypeEnum missionTeamAiType = ResolveMissionTeamAiType(scenarioContext);
-            if (!ShouldDeferMissionTeamAiActivationUntilBattleActive(missionTeamAiType))
+            if (!ShouldDeferMissionTeamAiActivationUntilBattleActive(missionTeamAiType, scenarioContext))
                 return;
 
             bool shouldActivateTeamAi =
@@ -1748,6 +1816,7 @@ namespace CoopSpectator.Infrastructure
                 mission,
                 missionTeamAiType,
                 shouldActivateTeamAi,
+                false,
                 source,
                 out string diagnostics);
             LogMissionTeamAiActivationState(

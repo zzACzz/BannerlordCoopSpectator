@@ -54,8 +54,12 @@ namespace CoopSpectator.Patches
         private static bool ShouldRunOnCurrentMission()
         {
             Mission mission = Mission.Current;
-            return mission != null &&
-                   MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName);
+            if (mission == null)
+                return false;
+
+            string sceneName = mission.SceneName ?? string.Empty;
+            return MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(sceneName) ||
+                   SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(sceneName);
         }
 
         private static void Mission_SpawnAgent_Prefix(AgentBuildData agentBuildData, bool spawnFromAgentVisuals)

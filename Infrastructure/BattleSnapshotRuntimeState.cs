@@ -1281,15 +1281,21 @@ namespace CoopSpectator.Infrastructure
             Dictionary<string, List<TroopStackInfo>> troopsByEntryId = BuildSnapshotTroopLookup(snapshot);
             bool useDedicatedSafeStringIdExactEquipmentPath =
                 MissionBehaviors.CoopMissionSpawnLogic.UseDedicatedSafeStringIdExactEquipmentPathOnServer();
+            bool includeExactSiegeHeroes =
+                Mission.Current != null &&
+                SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(Mission.Current.SceneName ?? string.Empty);
             var samples = new List<string>();
 
             foreach (RosterEntryState entryState in runtimeState.EntriesById.Values
-                         .Where(entry => entry != null && !string.IsNullOrWhiteSpace(entry.EntryId) && !entry.IsHero))
+                         .Where(entry =>
+                             entry != null &&
+                             !string.IsNullOrWhiteSpace(entry.EntryId) &&
+                             (!entry.IsHero || includeExactSiegeHeroes)))
             {
                 ExactCreateAgentServerPreSpawnContractState resolvedContract =
                     ExactCreateAgentServerPreSpawnContractResolver.Resolve(
                         entryState,
-                        contractPlayerControlledOrigin: false,
+                        contractPlayerControlledOrigin: entryState.IsHero,
                         teamIndex: -1,
                         formationIndex: -1,
                         useDedicatedSafeStringIdExactEquipmentPath: useDedicatedSafeStringIdExactEquipmentPath);
