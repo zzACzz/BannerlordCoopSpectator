@@ -356,6 +356,75 @@ namespace CoopSpectator.Network.Messages
     }
 
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
+    public sealed class CoopSiegeMissionObjectIdMapMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer BattleSideCompressionInfo = new CompressionInfo.Integer(-1, 1, maximumValueGiven: true);
+
+        public CoopSiegeMissionObjectIdMapMessage(
+            BattleSideEnum objectSide,
+            MissionObjectId serverMissionObjectId,
+            string signature,
+            string objectTypeName,
+            string entityName)
+        {
+            ObjectSide = objectSide;
+            ServerMissionObjectId = serverMissionObjectId;
+            Signature = string.IsNullOrWhiteSpace(signature) ? string.Empty : signature.Trim();
+            ObjectTypeName = string.IsNullOrWhiteSpace(objectTypeName) ? string.Empty : objectTypeName.Trim();
+            EntityName = string.IsNullOrWhiteSpace(entityName) ? string.Empty : entityName.Trim();
+        }
+
+        public CoopSiegeMissionObjectIdMapMessage()
+        {
+            ObjectSide = BattleSideEnum.None;
+            ServerMissionObjectId = MissionObjectId.Invalid;
+            Signature = string.Empty;
+            ObjectTypeName = string.Empty;
+            EntityName = string.Empty;
+        }
+
+        public BattleSideEnum ObjectSide { get; private set; }
+        public MissionObjectId ServerMissionObjectId { get; private set; }
+        public string Signature { get; private set; }
+        public string ObjectTypeName { get; private set; }
+        public string EntityName { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool bufferReadValid = true;
+            ObjectSide = (BattleSideEnum)ReadIntFromPacket(BattleSideCompressionInfo, ref bufferReadValid);
+            ServerMissionObjectId = GameNetworkMessage.ReadMissionObjectIdFromPacket(ref bufferReadValid);
+            Signature = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
+            ObjectTypeName = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
+            EntityName = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
+            return bufferReadValid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket((int)ObjectSide, BattleSideCompressionInfo);
+            GameNetworkMessage.WriteMissionObjectIdToPacket(ServerMissionObjectId);
+            WriteStringToPacket(Signature ?? string.Empty);
+            WriteStringToPacket(ObjectTypeName ?? string.Empty);
+            WriteStringToPacket(EntityName ?? string.Empty);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter()
+        {
+            return MultiplayerMessageFilter.Mission;
+        }
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopSiegeMissionObjectIdMap Side=" + ObjectSide +
+                " ServerMissionObjectId=" + ServerMissionObjectId +
+                " ObjectType=" + (ObjectTypeName ?? string.Empty) +
+                " Entity=" + (EntityName ?? string.Empty) +
+                " SignatureLength=" + (Signature?.Length ?? 0);
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
     public sealed class CoopBattlePayloadChunkMessage : GameNetworkMessage
     {
         public const int MaxChunkBytes = 256;

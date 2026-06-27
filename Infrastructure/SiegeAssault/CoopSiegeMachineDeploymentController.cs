@@ -38,6 +38,8 @@ namespace CoopSpectator.Infrastructure
             typeof(SiegeWeapon).GetField("RemoveOnDeployTag", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo SiegeWeaponAddOnDeployTagField =
             typeof(SiegeWeapon).GetField("AddOnDeployTag", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo RangedSiegeWeaponSkeletonOwnerObjectsField =
+            typeof(RangedSiegeWeapon).GetField("SkeletonOwnerObjects", BindingFlags.Instance | BindingFlags.NonPublic);
 
         public static bool TryApplySelection(
             Mission mission,
@@ -1302,6 +1304,7 @@ namespace CoopSpectator.Infrastructure
             if (sourceWeapon != null)
             {
                 details.Add("WeaponStateChanged={" + InvokeSiegeWeaponDeploymentStateChanged(sourceWeapon, false) + "}");
+                details.Add("VisualTree={" + NormalizeAuthoritativeSiegeWeaponVisualTree(deploymentPoint, sourceWeapon, false) + "}");
                 details.Add("Detachments={" + DestroyDetachmentIfPresent(team, sourceWeapon) + "}");
                 details.Add("Controller={" + SyncSiegeControllerAfterUndeploy(team.Side, sourceWeapon) + "}");
             }
@@ -1330,6 +1333,7 @@ namespace CoopSpectator.Infrastructure
             details.Add("WeaponParentVisibility={" + ToggleWeaponVisibility(deploymentPoint, siegeWeapon, true) + "}");
             details.Add("ForcedUse={" + SetForcedUse(siegeWeapon) + "}");
             details.Add("WeaponStateChanged={" + InvokeSiegeWeaponDeploymentStateChanged(siegeWeapon, true) + "}");
+            details.Add("VisualTree={" + NormalizeAuthoritativeSiegeWeaponVisualTree(deploymentPoint, siegeWeapon, true) + "}");
             details.Add("Controller={" + SyncSiegeControllerAfterDeploy(team.Side, siegeWeapon) + "}");
             details.Add("Formations={" + PrepareFormationsForSiegeMachineAssignment(team) + "}");
             details.Add("TickAux={" + TickAuxForInit(siegeWeapon) + "}");
@@ -1631,6 +1635,287 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static string NormalizeLocalDeployedSiegeWeaponVisualTree(
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon,
+            bool visible)
+        {
+            if (!GameNetwork.IsClient || GameNetwork.IsServer)
+            {
+                return "Skipped=True Reason=not-remote-client" +
+                       " IsClient=" + GameNetwork.IsClient +
+                       " IsServer=" + GameNetwork.IsServer +
+                       " IsDedicatedServer=" + GameNetwork.IsDedicatedServer;
+            }
+
+            return NormalizeDeployedSiegeWeaponVisualTree(
+                deploymentPoint,
+                siegeWeapon,
+                visible,
+                setSynchedMissionObjects: false);
+        }
+
+        private static string NormalizeAuthoritativeSiegeWeaponVisualTree(
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon,
+            bool visible)
+        {
+            if (GameNetwork.IsServer)
+            {
+                return "Skipped=True Reason=server-authoritative-state-only" +
+                       " IsClient=" + GameNetwork.IsClient +
+                       " IsServer=" + GameNetwork.IsServer +
+                       " IsDedicatedServer=" + GameNetwork.IsDedicatedServer;
+            }
+
+            return NormalizeDeployedSiegeWeaponVisualTree(
+                deploymentPoint,
+                siegeWeapon,
+                visible,
+                setSynchedMissionObjects: true);
+        }
+
+        private static string NormalizeDeployedSiegeWeaponVisualTree(
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon,
+            bool visible,
+            bool setSynchedMissionObjects)
+        {
+            if (deploymentPoint == null || siegeWeapon == null)
+                return "DeploymentPoint=" + FormatDeploymentPoint(deploymentPoint) +
+                       " SiegeWeapon=" + FormatSiegeWeapon(siegeWeapon);
+
+            try
+            {
+                List<WeakGameEntity> chain = BuildSiegeWeaponEntityChain(deploymentPoint, siegeWeapon);
+                if (chain.Count <= 0)
+                    return "Visible=" + visible + " EntityChain=0";
+
+                IEnumerable<WeakGameEntity> orderedChain = visible
+                    ? chain.AsEnumerable().Reverse()
+                    : chain;
+                int entityVisibleSetCount = 0;
+                int synchedObjectSetCount = 0;
+                string activeVisualDiagnostics = string.Empty;
+                string error = string.Empty;
+                foreach (WeakGameEntity entity in orderedChain)
+                {
+                    if (!entity.IsValid)
+                        continue;
+
+                    string entityDiagnostics = SetEntityVisibility(entity, visible);
+                    if (entityDiagnostics.IndexOf("EntityVisibleSet=True", StringComparison.OrdinalIgnoreCase) >= 0)
+                        entityVisibleSetCount++;
+
+                    SynchedMissionObject synchedMissionObject = null;
+                    try
+                    {
+                        synchedMissionObject = entity.GetFirstScriptOfType<SynchedMissionObject>();
+                    }
+                    catch (Exception ex)
+                    {
+                        error = AppendError(error, "script", ex);
+                    }
+
+                    if (synchedMissionObject != null && setSynchedMissionObjects)
+                    {
+                        string synchedDiagnostics = SetSynchedVisibility(synchedMissionObject, visible);
+                        if (synchedDiagnostics.IndexOf("VisibleSet=True", StringComparison.OrdinalIgnoreCase) >= 0)
+                            synchedObjectSetCount++;
+                    }
+                }
+
+                activeVisualDiagnostics = NormalizeRangedSiegeWeaponActiveVisualParts(
+                    siegeWeapon,
+                    visible,
+                    setSynchedMissionObjects,
+                    ref entityVisibleSetCount,
+                    ref synchedObjectSetCount);
+
+                return "Visible=" + visible +
+                       " EntityChain=" + chain.Count +
+                       " EntityVisibleSet=" + entityVisibleSetCount +
+                       " SynchedObjectSet=" + synchedObjectSetCount +
+                       " SynchedObjectSync=" + setSynchedMissionObjects +
+                       " ActiveVisualParts={" + activeVisualDiagnostics + "}" +
+                       " RootVisibleIncludeParents=" + SafeIsVisibleIncludeParents(siegeWeapon) +
+                       " Error=" + (string.IsNullOrWhiteSpace(error) ? "<none>" : error);
+            }
+            catch (Exception ex)
+            {
+                return "Visible=" + visible + " Error=" + ex.GetType().Name + ":" + ex.Message;
+            }
+        }
+
+        private static List<WeakGameEntity> BuildSiegeWeaponEntityChain(
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon)
+        {
+            var result = new List<WeakGameEntity>();
+            if (deploymentPoint == null || siegeWeapon == null)
+                return result;
+
+            WeakGameEntity stopEntity;
+            try
+            {
+                stopEntity = deploymentPoint.GameEntity;
+            }
+            catch
+            {
+                stopEntity = WeakGameEntity.Invalid;
+            }
+
+            WeakGameEntity current;
+            try
+            {
+                current = siegeWeapon.GameEntity;
+            }
+            catch
+            {
+                current = WeakGameEntity.Invalid;
+            }
+
+            int depth = 0;
+            while (current.IsValid && depth < 8)
+            {
+                if (stopEntity.IsValid && AreSameEntity(current, stopEntity))
+                    break;
+
+                result.Add(current);
+
+                WeakGameEntity parent;
+                try
+                {
+                    parent = current.Parent;
+                }
+                catch
+                {
+                    break;
+                }
+
+                if (!parent.IsValid || AreSameEntity(parent, current))
+                    break;
+
+                current = parent;
+                depth++;
+            }
+
+            return result;
+        }
+
+        private static string NormalizeRangedSiegeWeaponActiveVisualParts(
+            SiegeWeapon siegeWeapon,
+            bool visible,
+            bool setSynchedMissionObjects,
+            ref int entityVisibleSetCount,
+            ref int synchedObjectSetCount)
+        {
+            if (!(siegeWeapon is RangedSiegeWeapon))
+                return "Skipped=True Reason=not-ranged";
+
+            if (RangedSiegeWeaponSkeletonOwnerObjectsField == null)
+                return "Skipped=True Reason=skeleton-owner-field-missing";
+
+            try
+            {
+                object value = RangedSiegeWeaponSkeletonOwnerObjectsField.GetValue(siegeWeapon);
+                if (!(value is SynchedMissionObject[] owners) || owners.Length <= 0)
+                    return "Owners=0";
+
+                int scannedCount = 0;
+                int visibleSetCount = 0;
+                int synchedSetCount = 0;
+                string error = string.Empty;
+                foreach (SynchedMissionObject owner in owners)
+                {
+                    if (owner == null)
+                        continue;
+
+                    scannedCount++;
+                    WeakGameEntity entity;
+                    try
+                    {
+                        entity = owner.GameEntity;
+                    }
+                    catch (Exception ex)
+                    {
+                        error = AppendError(error, "owner-entity", ex);
+                        continue;
+                    }
+
+                    if (!entity.IsValid)
+                        continue;
+
+                    string entityDiagnostics = SetEntityVisibility(entity, visible);
+                    if (entityDiagnostics.IndexOf("EntityVisibleSet=True", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        visibleSetCount++;
+                        entityVisibleSetCount++;
+                    }
+
+                    if (setSynchedMissionObjects)
+                    {
+                        string synchedDiagnostics = SetSynchedVisibility(owner, visible);
+                        if (synchedDiagnostics.IndexOf("VisibleSet=True", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            synchedSetCount++;
+                            synchedObjectSetCount++;
+                        }
+                    }
+                }
+
+                return "Owners=" + owners.Length +
+                       " Scanned=" + scannedCount +
+                       " EntityVisibleSet=" + visibleSetCount +
+                       " SynchedObjectSet=" + synchedSetCount +
+                       " Error=" + (string.IsNullOrWhiteSpace(error) ? "<none>" : error);
+            }
+            catch (Exception ex)
+            {
+                return "Error=" + ex.GetType().Name + ":" + ex.Message;
+            }
+        }
+
+        private static bool AreSameEntity(WeakGameEntity left, WeakGameEntity right)
+        {
+            try
+            {
+                return left.IsValid && right.IsValid && left.Equals(right);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string SetEntityVisibility(WeakGameEntity entity, bool visible)
+        {
+            if (!entity.IsValid)
+                return "Entity=<invalid>";
+
+            try
+            {
+                entity.SetVisibilityExcludeParents(visible);
+                return "EntityVisible=" + visible + " EntityVisibleSet=True";
+            }
+            catch (Exception ex)
+            {
+                return "EntityVisible=" + visible + " EntityVisibleSet=False Error=" + ex.GetType().Name + ":" + ex.Message;
+            }
+        }
+
+        private static bool SafeIsVisibleIncludeParents(SiegeWeapon siegeWeapon)
+        {
+            try
+            {
+                return siegeWeapon?.GameEntity.IsVisibleIncludeParents() == true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static string PrepareFormationsForSiegeMachineAssignment(Team team)
         {
             if (team == null)
@@ -1680,8 +1965,10 @@ namespace CoopSpectator.Infrastructure
 
             try
             {
-                if (team.DetachmentManager != null && team.DetachmentManager.ContainsDetachment(detachment))
-                    return "AlreadyAttached=True";
+                bool managerAttached = team.DetachmentManager != null && team.DetachmentManager.ContainsDetachment(detachment);
+                int userFormationCount = CountUserFormationsForTeam(usableMachine, team);
+                if (managerAttached && userFormationCount > 0)
+                    return "AlreadyAttached=True UserFormations=" + userFormationCount;
             }
             catch
             {
@@ -1735,8 +2022,10 @@ namespace CoopSpectator.Infrastructure
                 selectedFormation.SetControlledByAI(true, true);
                 selectedFormation.StartUsingMachine(usableMachine, true);
                 bool attached = team.DetachmentManager != null && team.DetachmentManager.ContainsDetachment(detachment);
+                int userFormationCount = CountUserFormationsForTeam(usableMachine, team);
                 return "Selected=True FormationIndex=" + selectedFormation.Index +
                        " Attached=" + attached +
+                       " UserFormations=" + userFormationCount +
                        " Scanned=" + scannedFormations +
                        " Eligible=" + eligibleFormations +
                        " DistanceSquared=" + FormatFloat(selectedDistanceSquared) +
@@ -1748,6 +2037,27 @@ namespace CoopSpectator.Infrastructure
                        " Error=" + ex.GetType().Name + ":" + ex.Message +
                        " DetachmentWeight=" + FormatFloat(detachmentWeight);
             }
+        }
+
+        private static int CountUserFormationsForTeam(UsableMachine usableMachine, Team team)
+        {
+            if (usableMachine == null || team == null || usableMachine.UserFormations == null)
+                return 0;
+
+            int count = 0;
+            try
+            {
+                foreach (Formation formation in usableMachine.UserFormations)
+                {
+                    if (formation?.Team == team)
+                        count++;
+                }
+            }
+            catch
+            {
+            }
+
+            return count;
         }
 
         private static bool IsEligibleFormationForSiegeMachine(Formation formation, IDetachment detachment)

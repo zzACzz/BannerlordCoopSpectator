@@ -270,6 +270,9 @@ namespace CoopSpectator.MissionModels
             if (attackerAgent == null || weapon == null || !attackerAgent.IsHuman)
                 return false;
 
+            if (IsBallistaProjectileWeapon(attackInformation.AttackerWeapon))
+                return false;
+
             Mission mission = attackerAgent.Mission;
             if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return false;
@@ -407,6 +410,17 @@ namespace CoopSpectator.MissionModels
         {
             return string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(skillId, "Throwing", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsBallistaProjectileWeapon(MissionWeapon weapon)
+        {
+            return IsBallistaProjectileItemId(weapon.Item?.StringId);
+        }
+
+        private static bool IsBallistaProjectileItemId(string itemId)
+        {
+            return string.Equals(itemId, "ballista_projectile", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "ballista_projectile_burning", StringComparison.OrdinalIgnoreCase);
         }
 
         private static SkillObject ResolveRelevantSkill(WeaponComponentData weapon)

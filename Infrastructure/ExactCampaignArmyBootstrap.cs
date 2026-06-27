@@ -48,6 +48,8 @@ namespace CoopSpectator.Infrastructure
         private static readonly HashSet<Team> SpawnLogicInitTemporaryNonBattleTeams = new HashSet<Team>();
         private static Mission _lastLoggedTeamAiActivationStateMission;
         private static string _lastLoggedTeamAiActivationStateKey = string.Empty;
+        private static readonly HashSet<TeamAIComponent> TeamAiDeploymentFinishedNotifications =
+            new HashSet<TeamAIComponent>();
         private static readonly FieldInfo TeamSideBackingField =
             typeof(Team).GetField("<Side>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo TeamAiBackingField =
@@ -215,6 +217,7 @@ namespace CoopSpectator.Infrastructure
             _lastRuntimeDiagnosticsSummary = string.Empty;
             _lastLoggedTeamAiActivationStateMission = null;
             _lastLoggedTeamAiActivationStateKey = string.Empty;
+            TeamAiDeploymentFinishedNotifications.Clear();
         }
 
         public static bool TryCreateInitialSiegeAssaultWithDeploymentSpawnLogic(
@@ -1864,19 +1867,34 @@ namespace CoopSpectator.Infrastructure
             if (mission == null || team == null)
                 return false;
 
-            TeamAIComponent desiredTeamAi = CreateDesiredTeamAi(mission, team, missionTeamAiType);
-            if (desiredTeamAi == null)
+            Type desiredTeamAiType = ResolveMissionTeamAiImplementationType(team, missionTeamAiType);
+            if (desiredTeamAiType == null)
             {
                 diagnostics = "team-ai-unavailable Type=" + missionTeamAiType + " Side=" + team.Side;
                 return false;
             }
 
-            string desiredTypeName = desiredTeamAi.GetType().Name;
-            string existingTypeName = team.TeamAI?.GetType().Name ?? "null";
-            bool changed = !string.Equals(existingTypeName, desiredTypeName, StringComparison.Ordinal);
+            TeamAIComponent existingTeamAi = team.TeamAI;
+            string desiredTypeName = desiredTeamAiType.Name;
+            string existingTypeName = existingTeamAi?.GetType().Name ?? "null";
+            bool changed = existingTeamAi == null || !desiredTeamAiType.IsInstanceOfType(existingTeamAi);
+            TeamAIComponent targetTeamAi = changed
+                ? CreateDesiredTeamAi(mission, team, missionTeamAiType)
+                : existingTeamAi;
+            if (targetTeamAi == null)
+            {
+                diagnostics =
+                    "team-ai-create-failed Type=" + missionTeamAiType +
+                    " Side=" + team.Side +
+                    " ExistingType=" + existingTypeName +
+                    " DesiredType=" + desiredTypeName +
+                    " Changed=" + changed;
+                return false;
+            }
+
             if (!TryPrepareMissionTeamAiTactics(
                     team,
-                    changed ? desiredTeamAi : team.TeamAI,
+                    targetTeamAi,
                     missionTeamAiType,
                     out string tacticsDiagnostics))
             {
@@ -1891,7 +1909,26 @@ namespace CoopSpectator.Infrastructure
 
             if (changed)
             {
-                team.AddTeamAI(desiredTeamAi);
+                team.AddTeamAI(targetTeamAi);
+            }
+
+            TeamAIComponent activeTeamAi = team.TeamAI ?? targetTeamAi;
+            if (!TryNotifyMissionTeamAiDeploymentFinishedIfNeeded(
+                    mission,
+                    team,
+                    activeTeamAi,
+                    missionTeamAiType,
+                    changed,
+                    out string deploymentFinishedNotificationDiagnostics))
+            {
+                diagnostics =
+                    "Side=" + team.Side +
+                    " ExistingType=" + existingTypeName +
+                    " DesiredType=" + desiredTypeName +
+                    " Changed=" + changed +
+                    " Tactics={" + tacticsDiagnostics + "}" +
+                    " DeploymentFinishedNotification={" + deploymentFinishedNotificationDiagnostics + "}";
+                return false;
             }
 
             team.QuerySystem?.Expire();
@@ -1903,8 +1940,113 @@ namespace CoopSpectator.Infrastructure
                 " DesiredType=" + desiredTypeName +
                 " Changed=" + changed +
                 " Tactics={" + tacticsDiagnostics + "}" +
+                " DeploymentFinishedNotification={" + deploymentFinishedNotificationDiagnostics + "}" +
                 " HasTeamAI=" + team.HasTeamAi;
             return team.HasTeamAi;
+        }
+
+        private static Type ResolveMissionTeamAiImplementationType(
+            Team team,
+            Mission.MissionTeamAITypeEnum missionTeamAiType)
+        {
+            if (team == null)
+                return null;
+
+            switch (missionTeamAiType)
+            {
+                case Mission.MissionTeamAITypeEnum.Siege:
+                    return team.Side == BattleSideEnum.Attacker
+                        ? typeof(TeamAISiegeAttacker)
+                        : team.Side == BattleSideEnum.Defender
+                            ? typeof(TeamAISiegeDefender)
+                            : null;
+
+                case Mission.MissionTeamAITypeEnum.SallyOut:
+                    return team.Side == BattleSideEnum.Attacker
+                        ? typeof(TeamAISallyOutDefender)
+                        : team.Side == BattleSideEnum.Defender
+                            ? typeof(TeamAISallyOutAttacker)
+                            : null;
+
+                case Mission.MissionTeamAITypeEnum.FieldBattle:
+                    return typeof(TeamAIGeneral);
+
+                default:
+                    return null;
+            }
+        }
+
+        private static bool TryNotifyMissionTeamAiDeploymentFinishedIfNeeded(
+            Mission mission,
+            Team team,
+            TeamAIComponent teamAi,
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            bool teamAiWasChanged,
+            out string diagnostics)
+        {
+            diagnostics = "not-required";
+            if (mission == null || team == null || teamAi == null)
+            {
+                diagnostics = "not-required-null-context";
+                return true;
+            }
+
+            if (missionTeamAiType != Mission.MissionTeamAITypeEnum.Siege)
+            {
+                diagnostics = "not-required Type=" + missionTeamAiType;
+                return true;
+            }
+
+            if (!teamAiWasChanged)
+            {
+                diagnostics = "not-required-existing-team-ai";
+                return true;
+            }
+
+            bool deploymentFinished;
+            try
+            {
+                deploymentFinished = mission.IsDeploymentFinished;
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "deployment-state-unavailable " +
+                    ex.GetType().Name + ":" + ex.Message;
+                return true;
+            }
+
+            if (!deploymentFinished)
+            {
+                diagnostics = "not-required-deployment-open";
+                return true;
+            }
+
+            if (TeamAiDeploymentFinishedNotifications.Contains(teamAi))
+            {
+                diagnostics =
+                    "already-notified Side=" + team.Side +
+                    " Type=" + teamAi.GetType().Name;
+                return true;
+            }
+
+            try
+            {
+                teamAi.OnDeploymentFinished();
+                TeamAiDeploymentFinishedNotifications.Add(teamAi);
+                diagnostics =
+                    "notified Side=" + team.Side +
+                    " Type=" + teamAi.GetType().Name;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "notify-failed Side=" + team.Side +
+                    " Type=" + teamAi.GetType().Name +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
         }
 
         private static TeamAIComponent CreateDesiredTeamAi(

@@ -1739,6 +1739,7 @@ namespace CoopSpectator.MissionBehaviors
                 registerer.RegisterBaseHandler<CoopBattleSnapshotManifestMessage>(HandleServerBattleSnapshotManifest);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotChunkV2Message>(HandleServerBattleSnapshotChunkV2);
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentSiegeMachineStateMessage>(HandleServerCommanderDeploymentSiegeMachineState);
+                registerer.RegisterBaseHandler<CoopSiegeMissionObjectIdMapMessage>(HandleServerSiegeMissionObjectIdMap);
                 ModLogger.Info("CoopMissionNetworkBridge: registered client payload chunk handler.");
             }
         }
@@ -2155,6 +2156,33 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private void HandleServerSiegeMissionObjectIdMap(GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopSiegeMissionObjectIdMapMessage message))
+                return;
+
+            try
+            {
+                bool applied = SiegeMissionObjectIdMapRuntime.TryApplyClientEntry(
+                    Mission,
+                    message.ObjectSide,
+                    message.ServerMissionObjectId,
+                    message.Signature,
+                    message.ObjectTypeName,
+                    out string diagnostics);
+                LogSiegeMissionObjectIdMapDiagnostics(
+                    applied ? "applied" : "ignored",
+                    message,
+                    diagnostics);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: siege mission object id map handling failed. " +
+                    "Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
         private bool TryApplyServerCommanderDeploymentSiegeMachineState(
             CoopCommanderDeploymentSiegeMachineStateMessage message)
         {
@@ -2248,13 +2276,14 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            bool applied = ExactCampaignSiegeAssaultWithDeploymentRuntime.TryApplyCommanderDeploymentSiegeMachineSelectionLocally(
+            bool applied = ExactCampaignSiegeAssaultWithDeploymentRuntime.TryApplyCommanderDeploymentSiegeMachineStateLocally(
                 Mission,
                 side,
                 deploymentPoint,
                 siegeWeapon,
                 message.ClearSelection,
                 out string localApplyDiagnostics);
+            SiegeMissionObjectIdMapRuntime.ClearClientCache(Mission);
             string idBridgeDiagnostics = TryRegisterCommanderDeploymentSiegeMachineIdBridge(
                 message,
                 side,
@@ -2663,15 +2692,97 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
+            bool idMapPublished = TryBroadcastSiegeMissionObjectIdMap(
+                side,
+                peers,
+                out string idMapDiagnostics,
+                source);
             diagnostics =
                 "Side=" + side +
                 " Points=" + deploymentPoints.Count +
                 " Peers=" + peers.Count +
                 " Sent=" + sentCount +
                 " Failed=" + failedCount +
+                " IdMapPublished=" + idMapPublished +
+                " IdMap={" + idMapDiagnostics + "}" +
                 " Source=" + (source ?? "unknown") +
                 " Details=[" + string.Join("; ", details.ToArray()) + "]";
-            return failedCount == 0 && (sentCount > 0 || peers.Count <= 0);
+            return failedCount == 0 &&
+                   idMapPublished &&
+                   (sentCount > 0 || peers.Count <= 0);
+        }
+
+        private bool TryBroadcastSiegeMissionObjectIdMap(
+            BattleSideEnum side,
+            IReadOnlyCollection<NetworkCommunicator> peers,
+            out string diagnostics,
+            string source)
+        {
+            diagnostics = "invalid-context";
+            if (!GameNetwork.IsServer || Mission == null)
+                return false;
+
+            if (peers == null || peers.Count <= 0)
+            {
+                diagnostics = "no-peers";
+                return true;
+            }
+
+            List<SiegeMissionObjectIdMapEntry> entries = SiegeMissionObjectIdMapRuntime.BuildServerEntries(
+                Mission,
+                side,
+                out string mapBuildDiagnostics);
+            int sentCount = 0;
+            int failedCount = 0;
+            var details = new List<string>();
+            foreach (NetworkCommunicator peer in peers)
+            {
+                if (peer == null)
+                    continue;
+
+                foreach (SiegeMissionObjectIdMapEntry entry in entries)
+                {
+                    if (entry == null || entry.MissionObjectId.Id < 0 || string.IsNullOrWhiteSpace(entry.Signature))
+                        continue;
+
+                    try
+                    {
+                        GameNetwork.BeginModuleEventAsServer(peer);
+                        GameNetwork.WriteMessage(new CoopSiegeMissionObjectIdMapMessage(
+                            entry.ObjectSide,
+                            entry.MissionObjectId,
+                            entry.Signature,
+                            entry.ObjectTypeName,
+                            entry.EntityName));
+                        GameNetwork.EndModuleEventAsServer();
+                        sentCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        failedCount++;
+                        if (details.Count < 8)
+                        {
+                            details.Add(
+                                "SendFailed Peer=" + (peer.UserName ?? "<null>") +
+                                " Id=" + entry.MissionObjectId +
+                                " Type=" + (entry.ObjectTypeName ?? string.Empty) +
+                                " Entity=" + (entry.EntityName ?? string.Empty) +
+                                " Error=" + ex.GetType().Name + ":" + ex.Message);
+                        }
+                    }
+                }
+            }
+
+            diagnostics =
+                "Side=" + side +
+                " Entries=" + entries.Count +
+                " Peers=" + peers.Count +
+                " Sent=" + sentCount +
+                " Failed=" + failedCount +
+                " Source=" + (source ?? "unknown") +
+                " Build={" + mapBuildDiagnostics + "}" +
+                " Details=[" + string.Join("; ", details.ToArray()) + "]";
+            return failedCount == 0;
         }
 
         private static string BuildCommanderDeploymentSiegeWeaponTypeName(SiegeWeapon siegeWeapon)
@@ -4560,6 +4671,31 @@ namespace CoopSpectator.MissionBehaviors
                     " SiegeWeaponId=" + (message == null ? "<null>" : message.SiegeWeaponId.ToString()) +
                     " SiegeWeaponType=" + (message?.SiegeWeaponTypeName ?? "<null>") +
                     " Clear=" + (message?.ClearSelection.ToString() ?? "<null>") +
+                    " Detail=" + (detail ?? string.Empty));
+            }
+            catch
+            {
+            }
+        }
+
+        private static void LogSiegeMissionObjectIdMapDiagnostics(
+            string stage,
+            CoopSiegeMissionObjectIdMapMessage message,
+            string detail)
+        {
+            if (!IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled())
+                return;
+
+            try
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: siege mission object id map diagnostics. " +
+                    "Stage=" + (stage ?? string.Empty) +
+                    " Side=" + (message?.ObjectSide.ToString() ?? "<null>") +
+                    " ServerMissionObjectId=" + (message == null ? "<null>" : message.ServerMissionObjectId.ToString()) +
+                    " ObjectType=" + (message?.ObjectTypeName ?? "<null>") +
+                    " Entity=" + (message?.EntityName ?? "<null>") +
+                    " SignatureLength=" + (message?.Signature?.Length ?? 0) +
                     " Detail=" + (detail ?? string.Empty));
             }
             catch

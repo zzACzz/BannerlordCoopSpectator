@@ -282,6 +282,9 @@ namespace CoopSpectator.MissionModels
             if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return false;
 
+            if (IsExactSiegeBallistaProjectileWeapon(mission, weapon))
+                return false;
+
             SkillObject relevantSkill = ResolveWeaponDamageRelevantSkill(weapon);
             if (relevantSkill == null)
                 return false;
@@ -299,6 +302,17 @@ namespace CoopSpectator.MissionModels
 
             updatedMultiplier = candidateMultiplier;
             return true;
+        }
+
+        private static bool IsExactSiegeBallistaProjectileWeapon(Mission mission, WeaponComponentData weapon)
+        {
+            if (mission == null || weapon == null)
+                return false;
+
+            return SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty) &&
+                weapon.WeaponClass == WeaponClass.Arrow &&
+                weapon.MissileDamage >= 1500 &&
+                weapon.MissileSpeed >= 100;
         }
 
         private void TryLogWeaponDamageOverride(

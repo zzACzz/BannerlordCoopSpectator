@@ -4184,6 +4184,342 @@ namespace CoopSpectator.MissionBehaviors
             public DateTime LastUpdatedUtc { get; set; }
         }
 
+        private static class ExactSiegeMaterializationModule
+        {
+            public static Equipment TryBuildSiegeSpawnEquipment(
+                Mission mission,
+                Team team,
+                RosterEntryState entryState)
+            {
+                if (!IsExactSiegeWithDeploymentMaterialization(mission))
+                    return null;
+
+                bool includeMountVisuals =
+                    ShouldIncludeMountVisuals(mission, team?.Side ?? BattleSideEnum.None, entryState);
+                return BuildSnapshotEquipmentForExactRuntime(
+                    entryState,
+                    includeMountVisuals: includeMountVisuals);
+            }
+
+            public static bool ShouldTreatNonHeroTroopAsDismountedForVisualRefresh(
+                Agent agent,
+                RosterEntryState entryState,
+                out string reason)
+            {
+                reason = null;
+                if (GameNetwork.IsServer ||
+                    agent == null ||
+                    entryState == null ||
+                    IsHeroEntryEligibleForExactPersonalPerks(entryState) ||
+                    !IsExactSiegeWithDeploymentMaterialization(Mission.Current))
+                {
+                    return false;
+                }
+
+                reason = "exact-siege-non-hero-materialized-foot";
+                return true;
+            }
+
+            public static bool ShouldTreatClientTroopVisualAsServerPreSpawnResolved(
+                Agent agent,
+                RosterEntryState entryState,
+                out string reason,
+                out bool includesWeapons)
+            {
+                reason = null;
+                includesWeapons = false;
+                if (GameNetwork.IsServer ||
+                    agent == null ||
+                    entryState == null ||
+                    IsHeroEntryEligibleForExactPersonalPerks(entryState) ||
+                    !IsExactSiegeWithDeploymentMaterialization(Mission.Current))
+                {
+                    return false;
+                }
+
+                bool requiresWeapons = HasAnySnapshotWeapons(entryState);
+                if (entryState.ServerCreateContractResolved &&
+                    entryState.ServerCreateInjectEquipment)
+                {
+                    if (requiresWeapons && !entryState.ServerCreatePreSpawnIncludesWeapons)
+                    {
+                        reason = "server-create-contract-missing-weapons";
+                        return false;
+                    }
+
+                    if (!entryState.ServerCreatePreSpawnIncludesArmorVisuals)
+                    {
+                        reason = "server-create-contract-missing-armor";
+                        return false;
+                    }
+
+                    if (entryState.ServerCreatePreSpawnIncludesMountVisuals)
+                    {
+                        reason = "server-create-contract-unexpected-mounted-siege-troop";
+                        return false;
+                    }
+
+                    if (requiresWeapons &&
+                        !DoClientSiegeWeaponSlotsMatchSnapshot(
+                            agent,
+                            entryState,
+                            out string weaponProjectionReason))
+                    {
+                        reason = weaponProjectionReason ?? "server-create-contract-client-weapons-not-ready";
+                        return false;
+                    }
+
+                    includesWeapons = entryState.ServerCreatePreSpawnIncludesWeapons || !requiresWeapons;
+                    reason = "server-pre-spawn-exact-siege-troop";
+                    return true;
+                }
+
+                if (ShouldTreatClientMaterializedTroopAsFieldPreSpawnResolved(
+                        agent,
+                        entryState,
+                        requiresWeapons,
+                        out reason,
+                        out includesWeapons))
+                {
+                    return true;
+                }
+
+                reason = "server-create-contract-not-injected";
+                return false;
+            }
+
+            public static int ResolveServerPreSpawnResolvedPendingOverlays(
+                Mission mission,
+                string source)
+            {
+                if (mission == null ||
+                    GameNetwork.IsServer ||
+                    _pendingExactNativeClientVisualOverlaysByAgentIndex.Count == 0 ||
+                    !IsExactSiegeWithDeploymentMaterialization(mission))
+                {
+                    return 0;
+                }
+
+                var resolvedAgentIndices = new List<int>();
+                foreach (KeyValuePair<int, PendingClientExactVisualOverlayState> pendingPair in _pendingExactNativeClientVisualOverlaysByAgentIndex)
+                {
+                    int agentIndex = pendingPair.Key;
+                    PendingClientExactVisualOverlayState pendingState = pendingPair.Value;
+                    if (pendingState == null)
+                        continue;
+
+                    if (!TryGetActiveMissionAgentByIndex(mission, agentIndex, out Agent agent) ||
+                        agent == null ||
+                        agent.IsMount ||
+                        !agent.IsHuman ||
+                        !agent.IsActive())
+                    {
+                        continue;
+                    }
+
+                    string entryId = pendingState.EntryId;
+                    if (string.IsNullOrWhiteSpace(entryId))
+                        _materializedArmyEntryIdByAgentIndex.TryGetValue(agentIndex, out entryId);
+                    if (string.IsNullOrWhiteSpace(entryId))
+                        entryId = ResolveClientExactCampaignVisualOverlayEntryId(agent);
+                    if (string.IsNullOrWhiteSpace(entryId))
+                        continue;
+
+                    RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+                    if (entryState == null || IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                        continue;
+
+                    if (!ShouldTreatClientTroopVisualAsServerPreSpawnResolved(
+                            agent,
+                            entryState,
+                            out _,
+                            out bool resolvedIncludesWeapons))
+                    {
+                        continue;
+                    }
+
+                    _materializedArmyEntryIdByAgentIndex[agentIndex] = entryId;
+                    _exactNativeClientVisualOverlayEntryIdByAgentIndex[agentIndex] = entryId;
+                    _exactNativeClientVisualOverlayAppliedAgentIndices.Add(agentIndex);
+                    _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex[agentIndex] = resolvedIncludesWeapons;
+                    resolvedAgentIndices.Add(agentIndex);
+                }
+
+                for (int i = 0; i < resolvedAgentIndices.Count; i++)
+                    _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(resolvedAgentIndices[i]);
+
+                return resolvedAgentIndices.Count;
+            }
+
+            private static bool ShouldTreatClientMaterializedTroopAsFieldPreSpawnResolved(
+                Agent agent,
+                RosterEntryState entryState,
+                bool requiresWeapons,
+                out string reason,
+                out bool includesWeapons)
+            {
+                reason = null;
+                includesWeapons = false;
+                if (agent == null || entryState == null)
+                    return false;
+
+                bool authoritativeMaterialized =
+                    _clientAuthoritativeMaterializedEntryObservedAgentIndices.Contains(agent.Index) ||
+                    (_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string materializedEntryId) &&
+                     string.Equals(materializedEntryId, entryState.EntryId, StringComparison.Ordinal));
+                if (!authoritativeMaterialized)
+                {
+                    reason = "authoritative-materialized-entry-pending";
+                    return false;
+                }
+
+                if (agent.MountAgent != null)
+                {
+                    reason = "exact-siege-materialized-troop-unexpected-live-mount";
+                    return false;
+                }
+
+                if (!IsClientTroopExactVisualInitReady(agent, entryState, out string initReason))
+                {
+                    reason = "exact-siege-materialized-field-pre-spawn-init-pending:" + (initReason ?? "unknown");
+                    return false;
+                }
+
+                if (requiresWeapons &&
+                    !DoClientSiegeWeaponSlotsMatchSnapshot(
+                        agent,
+                        entryState,
+                        out string weaponProjectionReason))
+                {
+                    reason = weaponProjectionReason ?? "exact-siege-materialized-field-pre-spawn-weapons-not-ready";
+                    return false;
+                }
+
+                includesWeapons = true;
+                reason = "authoritative-materialized-field-pre-spawn-exact-siege-troop";
+                return true;
+            }
+
+            private static bool DoClientSiegeWeaponSlotsMatchSnapshot(
+                Agent agent,
+                RosterEntryState entryState,
+                out string reason)
+            {
+                reason = null;
+                if (agent == null || entryState == null)
+                    return false;
+
+                Equipment expectedEquipment = BuildSnapshotEquipmentForExactRuntime(
+                    entryState,
+                    includeWeapons: true,
+                    honorExactVisualContracts: false,
+                    includeArmorVisuals: false,
+                    includeMountVisuals: false);
+                if (!HasAnyEquipmentWeapons(
+                        expectedEquipment,
+                        EquipmentIndex.Weapon0,
+                        EquipmentIndex.Weapon1,
+                        EquipmentIndex.Weapon2,
+                        EquipmentIndex.Weapon3))
+                {
+                    reason = "exact-siege-snapshot-weapons-unresolved";
+                    return false;
+                }
+
+                if (DoEquipmentWeaponSlotsMatchSnapshot(expectedEquipment, agent.SpawnEquipment))
+                {
+                    reason = "exact-siege-spawn-weapons-match-snapshot";
+                    return true;
+                }
+
+                if (DoMissionWeaponSlotsMatchSnapshot(expectedEquipment, agent.Equipment))
+                {
+                    reason = "exact-siege-create-agent-mission-weapons-match-snapshot";
+                    return true;
+                }
+
+                reason =
+                    "exact-siege-client-weapons-mismatch" +
+                    "|ExpectedWeapons={" + BuildExactEntryEquipmentSummary(
+                        expectedEquipment,
+                        EquipmentIndex.Weapon0,
+                        EquipmentIndex.Weapon1,
+                        EquipmentIndex.Weapon2,
+                        EquipmentIndex.Weapon3) + "}" +
+                    "|SpawnWeapons={" + BuildExactEntryEquipmentSummary(
+                        agent.SpawnEquipment,
+                        EquipmentIndex.Weapon0,
+                        EquipmentIndex.Weapon1,
+                        EquipmentIndex.Weapon2,
+                        EquipmentIndex.Weapon3) + "}" +
+                    "|MissionWeapons={" + BuildMissionEquipmentSummary(
+                        agent.Equipment,
+                        EquipmentIndex.Weapon0,
+                        EquipmentIndex.Weapon1,
+                        EquipmentIndex.Weapon2,
+                        EquipmentIndex.Weapon3) + "}";
+                return false;
+            }
+
+            private static bool DoEquipmentWeaponSlotsMatchSnapshot(Equipment expectedEquipment, Equipment actualEquipment)
+            {
+                if (expectedEquipment == null || actualEquipment == null)
+                    return false;
+
+                for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+                {
+                    string expectedItemId = expectedEquipment[slot].Item?.StringId ?? string.Empty;
+                    string actualItemId = actualEquipment[slot].Item?.StringId ?? string.Empty;
+                    if (!string.Equals(expectedItemId, actualItemId, StringComparison.OrdinalIgnoreCase))
+                        return false;
+                }
+
+                return true;
+            }
+
+            private static bool DoMissionWeaponSlotsMatchSnapshot(Equipment expectedEquipment, MissionEquipment actualEquipment)
+            {
+                if (expectedEquipment == null || actualEquipment == null)
+                    return false;
+
+                for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+                {
+                    string expectedItemId = expectedEquipment[slot].Item?.StringId ?? string.Empty;
+                    string actualItemId = actualEquipment[slot].Item?.StringId ?? string.Empty;
+                    if (!string.Equals(expectedItemId, actualItemId, StringComparison.OrdinalIgnoreCase))
+                        return false;
+                }
+
+                return true;
+            }
+
+            private static bool ShouldIncludeMountVisuals(
+                Mission mission,
+                BattleSideEnum side,
+                RosterEntryState entryState)
+            {
+                if (entryState?.IsMounted != true)
+                    return false;
+
+                if (!IsExactSiegeWithDeploymentMaterialization(mission))
+                    return true;
+
+                if (side != BattleSideEnum.None &&
+                    ExactCampaignArmyBootstrap.TryGetSpawnHorses(mission, side, out bool spawnHorses))
+                {
+                    return spawnHorses;
+                }
+
+                return false;
+            }
+
+            private static bool IsExactSiegeWithDeploymentMaterialization(Mission mission)
+            {
+                return mission != null &&
+                       SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
+            }
+        }
+
         private static readonly FormationClass[] RestrictableFormationClasses =
         {
             FormationClass.Infantry,
@@ -5877,6 +6213,22 @@ namespace CoopSpectator.MissionBehaviors
             RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
             if (entryState == null)
                 return false;
+
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState) &&
+                ShouldTreatClientExactSiegeTroopVisualAsServerPreSpawnResolved(
+                    agent,
+                    entryState,
+                    out _,
+                    out bool resolvedIncludesWeapons))
+            {
+                _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agent.Index);
+                _materializedArmyEntryIdByAgentIndex[agent.Index] = entryId;
+                _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = entryId;
+                _exactNativeClientVisualOverlayAppliedAgentIndices.Add(agent.Index);
+                _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex[agent.Index] = resolvedIncludesWeapons;
+                return false;
+            }
+
             if (ShouldPauseClientExactVisualOverlaysForReconnectFinalize(out _))
                 return false;
             if (!IsHeroEntryEligibleForExactPersonalPerks(entryState) &&
@@ -6289,6 +6641,7 @@ namespace CoopSpectator.MissionBehaviors
             int queuedCount = 0;
             int deferredInitCount = 0;
             int skippedQueueCount = 0;
+            int serverPreSpawnResolvedCount = 0;
             int reconnectFinalizeSuppressedCount = 0;
             int liveControlledSuppressedCount = 0;
             int selectionPausedCount = 0;
@@ -6357,7 +6710,18 @@ namespace CoopSpectator.MissionBehaviors
                     entryState != null &&
                     !IsHeroEntryEligibleForExactPersonalPerks(entryState))
                 {
-                    if (!IsClientTroopExactVisualInitReady(agent, entryState, out _))
+                    if (ShouldTreatClientExactSiegeTroopVisualAsServerPreSpawnResolved(
+                            agent,
+                            entryState,
+                            out _,
+                            out bool resolvedIncludesWeapons))
+                    {
+                        _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agentIndex);
+                        _exactNativeClientVisualOverlayAppliedAgentIndices.Add(agentIndex);
+                        _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex[agentIndex] = resolvedIncludesWeapons;
+                        serverPreSpawnResolvedCount++;
+                    }
+                    else if (!IsClientTroopExactVisualInitReady(agent, entryState, out _))
                     {
                         deferredInitCount++;
                     }
@@ -6409,6 +6773,7 @@ namespace CoopSpectator.MissionBehaviors
                     "EntryCount=" + appliedCount +
                     " PendingEntryUpdates=" + updatedPendingCount +
                     " QueuedTroopFinalizes=" + queuedCount +
+                    " ServerPreSpawnResolvedTroopFinalizes=" + serverPreSpawnResolvedCount +
                     " DeferredInitTroopFinalizes=" + deferredInitCount +
                     " ReconnectFinalizeSuppressedTroopFinalizes=" + reconnectFinalizeSuppressedCount +
                     " ReconnectFinalizeDroppedPendingOverlays=" + reconnectFinalizeDroppedPendingCount +
@@ -6576,6 +6941,9 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            TryResolveClientExactSiegeServerPreSpawnResolvedPendingOverlays(
+                mission,
+                "exact-siege-pre-selection-readiness");
             if (_pendingExactNativeClientVisualOverlaysByAgentIndex.Count > 0)
             {
                 readinessSummary =
@@ -6780,6 +7148,14 @@ namespace CoopSpectator.MissionBehaviors
             out string reason)
         {
             reason = null;
+            if (ExactSiegeMaterializationModule.ShouldTreatNonHeroTroopAsDismountedForVisualRefresh(
+                    agent,
+                    entryState,
+                    out reason))
+            {
+                return false;
+            }
+
             string entryId = entryState?.EntryId;
             if (!string.IsNullOrWhiteSpace(entryId))
             {
@@ -7109,8 +7485,21 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            reason = "exact-siege-non-hero-native-weapon-stream-owned";
+            reason = "exact-siege-non-hero-field-materialization-requires-pre-spawn-weapons";
             return true;
+        }
+
+        private static bool ShouldTreatClientExactSiegeTroopVisualAsServerPreSpawnResolved(
+            Agent agent,
+            RosterEntryState entryState,
+            out string reason,
+            out bool includesWeapons)
+        {
+            return ExactSiegeMaterializationModule.ShouldTreatClientTroopVisualAsServerPreSpawnResolved(
+                agent,
+                entryState,
+                out reason,
+                out includesWeapons);
         }
 
         private static bool ShouldAllowClientTroopWeaponOverlayRefresh(
@@ -7666,6 +8055,13 @@ namespace CoopSpectator.MissionBehaviors
                    string.Equals(ResolveEntryMissionSafeFallbackTroopId(entryState), currentTroopId, StringComparison.OrdinalIgnoreCase);
         }
 
+        private static int TryResolveClientExactSiegeServerPreSpawnResolvedPendingOverlays(
+            Mission mission,
+            string source)
+        {
+            return ExactSiegeMaterializationModule.ResolveServerPreSpawnResolvedPendingOverlays(mission, source);
+        }
+
         private static void TryProcessPendingClientExactCampaignVisualOverlays(Mission mission)
         {
             if (mission == null || GameNetwork.IsServer || _pendingExactNativeClientVisualOverlaysByAgentIndex.Count == 0)
@@ -7673,6 +8069,12 @@ namespace CoopSpectator.MissionBehaviors
 
             DropPendingClientExactVisualOverlaysForReconnectFinalize("pending-client-exact-visual-process");
             DropPendingClientTroopExactVisualOverlaysForLiveControl("pending-client-exact-visual-process");
+            if (_pendingExactNativeClientVisualOverlaysByAgentIndex.Count == 0)
+                return;
+
+            TryResolveClientExactSiegeServerPreSpawnResolvedPendingOverlays(
+                mission,
+                "pending-client-exact-visual-process");
             if (_pendingExactNativeClientVisualOverlaysByAgentIndex.Count == 0)
                 return;
 
@@ -8525,6 +8927,18 @@ namespace CoopSpectator.MissionBehaviors
             RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
             if (entryState == null || IsHeroEntryEligibleForExactPersonalPerks(entryState))
                 return false;
+
+            if (ShouldTreatClientExactSiegeTroopVisualAsServerPreSpawnResolved(
+                    agent,
+                    entryState,
+                    out _,
+                    out bool resolvedIncludesWeapons))
+            {
+                _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agent.Index);
+                _exactNativeClientVisualOverlayAppliedAgentIndices.Add(agent.Index);
+                _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex[agent.Index] = resolvedIncludesWeapons;
+                return true;
+            }
 
             bool effectiveIncludeWeaponsForClientRefresh = ShouldAllowClientTroopWeaponOverlayRefresh(
                 agent,
@@ -9907,6 +10321,7 @@ namespace CoopSpectator.MissionBehaviors
 
                 if (clientVisualOnly &&
                     !includeWeaponsForOverlayRefresh &&
+                    !ShouldSuppressClientTroopWeaponOverlayRefreshForExactSiege(agent, entryState, out _) &&
                     TryPreserveEquipmentWeaponSlotsFromMissionEquipment(
                         spawnEquipment,
                         agent.Equipment,
@@ -13322,7 +13737,9 @@ namespace CoopSpectator.MissionBehaviors
             {
                 var origin = new BasicBattleAgentOrigin(troop);
                 AgentBuildData buildData = new AgentBuildData(troop);
-                Equipment snapshotEquipment = BuildSnapshotEquipmentForExactRuntime(entryState);
+                Equipment snapshotEquipment =
+                    ExactSiegeMaterializationModule.TryBuildSiegeSpawnEquipment(mission, team, entryState) ??
+                    BuildSnapshotEquipmentForExactRuntime(entryState);
                 Equipment spawnEquipment = snapshotEquipment ?? troop.Equipment?.Clone(false);
                 string spawnEquipmentSource = snapshotEquipment != null ? "exact-snapshot" : "troop-clone";
                 appliedArmorOverrides = TryApplyMaterializedEquipmentOverrides(spawnEquipment, entryState, null, trackCoverage: true);
@@ -18921,15 +19338,21 @@ namespace CoopSpectator.MissionBehaviors
             var matchedScopes = new List<string>();
             if (includeWeapons)
             {
-                AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon0", expectedEquipment[EquipmentIndex.Weapon0].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon0].Item?.StringId, entryState);
-                AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon1", expectedEquipment[EquipmentIndex.Weapon1].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon1].Item?.StringId, entryState);
-                AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon2", expectedEquipment[EquipmentIndex.Weapon2].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon2].Item?.StringId, entryState);
-                AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon3", expectedEquipment[EquipmentIndex.Weapon3].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon3].Item?.StringId, entryState);
+                bool compareSpawnWeaponSlots =
+                    !ShouldUseMissionEquipmentOnlyForClientExactSiegeTroopWeapons(agent, entryState);
+                if (compareSpawnWeaponSlots)
+                {
+                    AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon0", expectedEquipment[EquipmentIndex.Weapon0].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon0].Item?.StringId, entryState);
+                    AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon1", expectedEquipment[EquipmentIndex.Weapon1].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon1].Item?.StringId, entryState);
+                    AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon2", expectedEquipment[EquipmentIndex.Weapon2].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon2].Item?.StringId, entryState);
+                    AppendRuntimeEquipmentItemMismatch(mismatches, "SpawnWeapon3", expectedEquipment[EquipmentIndex.Weapon3].Item?.StringId, agent.SpawnEquipment?[EquipmentIndex.Weapon3].Item?.StringId, entryState);
+                }
+
                 AppendRuntimeMissionEquipmentItemMismatch(mismatches, "MissionWeapon0", expectedEquipment[EquipmentIndex.Weapon0].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon0, entryState);
                 AppendRuntimeMissionEquipmentItemMismatch(mismatches, "MissionWeapon1", expectedEquipment[EquipmentIndex.Weapon1].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon1, entryState);
                 AppendRuntimeMissionEquipmentItemMismatch(mismatches, "MissionWeapon2", expectedEquipment[EquipmentIndex.Weapon2].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon2, entryState);
                 AppendRuntimeMissionEquipmentItemMismatch(mismatches, "MissionWeapon3", expectedEquipment[EquipmentIndex.Weapon3].Item?.StringId, agent.Equipment, EquipmentIndex.Weapon3, entryState);
-                matchedScopes.Add("weapons-ready");
+                matchedScopes.Add(compareSpawnWeaponSlots ? "weapons-ready" : "weapons-ready(mission-equipment)");
             }
 
             if (includeArmorVisuals)
@@ -18975,6 +19398,23 @@ namespace CoopSpectator.MissionBehaviors
                 ? string.Join(", ", matchedScopes)
                 : "no-visual-delta-requested";
             return true;
+        }
+
+        private static bool ShouldUseMissionEquipmentOnlyForClientExactSiegeTroopWeapons(
+            Agent agent,
+            RosterEntryState entryState)
+        {
+            if (GameNetwork.IsServer ||
+                agent == null ||
+                entryState == null ||
+                IsHeroEntryEligibleForExactPersonalPerks(entryState))
+            {
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            return mission != null &&
+                   SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
         }
 
         private static bool ShouldAwaitMountedHeroEquipmentSyncBeforeClientExactVisualRefresh(
@@ -19521,6 +19961,18 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState) &&
+                Mission.Current != null &&
+                SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(Mission.Current.SceneName ?? string.Empty) &&
+                TryApplyExactSiegeSnapshotWeaponSeedToEquipment(
+                    new Equipment(),
+                    entryState,
+                    out string exactSiegeSeedSummary))
+            {
+                reason = "exact-siege-snapshot-weapon-seed-ready:" + exactSiegeSeedSummary;
+                return true;
+            }
+
             if (HasAnyEquipmentWeapons(
                     agent.SpawnEquipment,
                     EquipmentIndex.Weapon0,
@@ -19560,6 +20012,18 @@ namespace CoopSpectator.MissionBehaviors
             if (!HasAnySnapshotWeapons(entryState))
             {
                 reason = "entry-has-no-snapshot-weapons";
+                return true;
+            }
+
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState) &&
+                Mission.Current != null &&
+                SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(Mission.Current.SceneName ?? string.Empty) &&
+                TryApplyExactSiegeSnapshotWeaponSeedToEquipment(
+                    preparedSeedEquipment,
+                    entryState,
+                    out string exactSiegeSeedSummary))
+            {
+                reason = "exact-siege-snapshot-weapons-seeded:" + exactSiegeSeedSummary;
                 return true;
             }
 
@@ -19626,15 +20090,24 @@ namespace CoopSpectator.MissionBehaviors
             var seededSlots = new List<string>();
             for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
             {
-                if (targetEquipment[slot].Item != null)
+                EquipmentElement snapshotElement = snapshotEquipment[slot];
+                EquipmentElement currentElement = targetEquipment[slot];
+                string snapshotItemId = snapshotElement.Item?.StringId ?? string.Empty;
+                string currentItemId = currentElement.Item?.StringId ?? string.Empty;
+                if (string.Equals(snapshotItemId, currentItemId, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                EquipmentElement snapshotElement = snapshotEquipment[slot];
                 if (snapshotElement.IsEmpty || snapshotElement.Item == null)
+                {
+                    targetEquipment[slot] = default(EquipmentElement);
+                    seededSlots.Add(GetEquipmentSlotLabel(slot) + "=empty");
                     continue;
+                }
 
                 targetEquipment[slot] = snapshotElement;
-                seededSlots.Add(GetEquipmentSlotLabel(slot) + "=" + snapshotElement.Item.StringId);
+                seededSlots.Add(
+                    GetEquipmentSlotLabel(slot) + "=" + snapshotElement.Item.StringId +
+                    (string.IsNullOrWhiteSpace(currentItemId) ? string.Empty : "(replaced:" + currentItemId + ")"));
             }
 
             if (seededSlots.Count == 0)

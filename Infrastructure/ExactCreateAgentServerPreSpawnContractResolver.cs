@@ -1,5 +1,6 @@
 using System;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 
@@ -192,7 +193,34 @@ namespace CoopSpectator.Infrastructure
                         strictHeroPath,
                         exactTransferContract,
                         exactTransferValidation);
+                bool allowExactSiegeWithDeploymentFullArmyPreSpawn =
+                    ShouldAllowExactSiegeWithDeploymentFullArmyPreSpawnEquipmentInjectionOnDedicated(
+                        useContractDrivenPreSpawnPath,
+                        exactTransferContract,
+                        exactTransferValidation);
+                if (allowExactSiegeWithDeploymentFullArmyPreSpawn)
+                {
+                    ApplyExactSiegeWithDeploymentFullArmyPreSpawnProfile(
+                        exactTransferContract,
+                        payloadDiagnostic,
+                        ref includeWeapons,
+                        ref includeArmorVisuals,
+                        ref includeCape,
+                        ref includeMountVisuals,
+                        ref canInjectBodyPropertiesAtCreateAgentTime);
+                    weaponDecisionReason = includeWeapons
+                        ? "siege-with-deployment full-army pre-spawn weapon policy"
+                        : "siege-with-deployment full-army pre-spawn weapon policy disabled";
+                    capeDecisionReason = includeCape
+                        ? "siege-with-deployment full-army pre-spawn cape policy"
+                        : "siege-with-deployment full-army pre-spawn cape policy disabled";
+                }
                 if (allowExactSiegePreSpawnEquipmentInjection)
+                {
+                    injectEquipment = exactTransferContract?.SpawnPolicy?.RequirePreSpawnInjection == true &&
+                                      (includeWeapons || includeCape || includeArmorVisuals || includeMountVisuals);
+                }
+                else if (allowExactSiegeWithDeploymentFullArmyPreSpawn)
                 {
                     injectEquipment = exactTransferContract?.SpawnPolicy?.RequirePreSpawnInjection == true &&
                                       (includeWeapons || includeCape || includeArmorVisuals || includeMountVisuals);
@@ -301,6 +329,74 @@ namespace CoopSpectator.Infrastructure
             Mission mission = Mission.Current;
             return mission != null &&
                    SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
+        }
+
+        private static bool ShouldAllowExactSiegeWithDeploymentFullArmyPreSpawnEquipmentInjectionOnDedicated(
+            bool useContractDrivenPreSpawnPath,
+            ExactTransferSpawnContract contract,
+            ExactTransferValidationResult validation)
+        {
+            if (!useContractDrivenPreSpawnPath ||
+                contract?.SpawnPolicy?.RequirePreSpawnInjection != true ||
+                validation?.IsValid != true)
+            {
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            if (mission == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                return false;
+
+            if (contract.Mount?.IsMounted == true ||
+                contract.Identity?.IsMountedExpected == true ||
+                contract.Equipment?.IncludeMountVisualsInPreSpawn == true)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void ApplyExactSiegeWithDeploymentFullArmyPreSpawnProfile(
+            ExactTransferSpawnContract contract,
+            ExactCreateAgentPayloadDiagnosticDecision payloadDiagnostic,
+            ref bool includeWeapons,
+            ref bool includeArmorVisuals,
+            ref bool includeCape,
+            ref bool includeMountVisuals,
+            ref bool includeBodyProperties)
+        {
+            includeWeapons = contract?.Equipment?.IncludeWeaponsInPreSpawn == true;
+            includeArmorVisuals = contract?.Equipment?.IncludeArmorVisualsInPreSpawn == true;
+            includeCape = contract?.Equipment?.IncludeCapeInPreSpawn == true;
+            includeMountVisuals = false;
+            includeBodyProperties = contract?.Body?.HasExactBodyProperties == true;
+
+            if (payloadDiagnostic == null)
+                return;
+
+            payloadDiagnostic.IsActive = true;
+            payloadDiagnostic.Reason = "siege-with-deployment-full-army-pre-spawn";
+            payloadDiagnostic.RequestedProfile = ExactCreateAgentPayloadDiagnosticProfile.FullExact;
+            payloadDiagnostic.Profile = ExactCreateAgentPayloadDiagnosticProfile.FullExact;
+            payloadDiagnostic.RequestedProfileClientSafe = true;
+            payloadDiagnostic.ClientCreateAgentSafe = true;
+            payloadDiagnostic.ClientCreateAgentSafeReason = "server-pre-spawn-full-army-siege-with-deployment";
+            payloadDiagnostic.IncludeWeapons = includeWeapons;
+            payloadDiagnostic.IncludeArmorVisuals = includeArmorVisuals;
+            payloadDiagnostic.IncludeCape = includeCape;
+            payloadDiagnostic.IncludeMountVisuals = false;
+            payloadDiagnostic.IncludeBodyProperties = includeBodyProperties;
         }
 
         private static void ApplyDismountedSiegePreSpawnContract(ExactTransferSpawnContract contract)

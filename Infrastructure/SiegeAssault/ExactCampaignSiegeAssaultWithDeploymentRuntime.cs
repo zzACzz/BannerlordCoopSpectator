@@ -682,19 +682,7 @@ namespace CoopSpectator.Infrastructure
 
             try
             {
-                if (mission.IsDeploymentFinished)
-                    return true;
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                return mission.Mode != MissionMode.Deployment &&
-                       mission.GetMissionBehavior<DeploymentMissionController>() == null &&
-                       mission.GetMissionBehavior<SiegeDeploymentHandler>() == null &&
-                       mission.GetMissionBehavior<SiegeDeploymentMissionController>() == null;
+                return mission.IsDeploymentFinished;
             }
             catch
             {
@@ -1252,7 +1240,7 @@ namespace CoopSpectator.Infrastructure
                     if (finishDeployment)
                         siegeDeploymentHandler.FinishDeployment();
                     forceUpdatedUnits = true;
-                    finishedDeployment = finishDeployment;
+                    finishedDeployment = finishDeployment && HasDeploymentLifecycleFinished(mission);
                     deploymentDiagnostics = "siege-handler-auto-deployed-all-battle-teams";
                 }
                 else if (deploymentHandler != null)
@@ -1268,7 +1256,7 @@ namespace CoopSpectator.Infrastructure
                     if (finishDeployment)
                         deploymentHandler.FinishDeployment();
                     forceUpdatedUnits = true;
-                    finishedDeployment = finishDeployment;
+                    finishedDeployment = finishDeployment && HasDeploymentLifecycleFinished(mission);
                     deploymentDiagnostics = "deployment-handler-auto-deployed-all-battle-teams";
                 }
                 else
@@ -1762,6 +1750,43 @@ namespace CoopSpectator.Infrastructure
             bool clearSelection,
             out string diagnostics)
         {
+            return TryApplyCommanderDeploymentSiegeMachineSelectionLocally(
+                mission,
+                commanderSide,
+                deploymentPoint,
+                siegeWeapon,
+                clearSelection,
+                prepareCommanderUi: false,
+                out diagnostics);
+        }
+
+        public static bool TryApplyCommanderDeploymentSiegeMachineStateLocally(
+            Mission mission,
+            BattleSideEnum commanderSide,
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon,
+            bool clearSelection,
+            out string diagnostics)
+        {
+            return TryApplyCommanderDeploymentSiegeMachineSelectionLocally(
+                mission,
+                commanderSide,
+                deploymentPoint,
+                siegeWeapon,
+                clearSelection,
+                prepareCommanderUi: false,
+                out diagnostics);
+        }
+
+        private static bool TryApplyCommanderDeploymentSiegeMachineSelectionLocally(
+            Mission mission,
+            BattleSideEnum commanderSide,
+            DeploymentPoint deploymentPoint,
+            SiegeWeapon siegeWeapon,
+            bool clearSelection,
+            bool prepareCommanderUi,
+            out string diagnostics)
+        {
             diagnostics = "skipped";
             if (mission == null ||
                 commanderSide == BattleSideEnum.None ||
@@ -1779,10 +1804,21 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
-            TryPrepareClientDeploymentPointsForCommanderUi(
-                mission,
-                commanderSide,
-                out string preparationDiagnostics);
+            string preparationDiagnostics;
+            if (prepareCommanderUi)
+            {
+                TryPrepareClientDeploymentPointsForCommanderUi(
+                    mission,
+                    commanderSide,
+                    out preparationDiagnostics);
+            }
+            else
+            {
+                TryRefreshClientDeploymentPointWeaponCacheForStateApply(
+                    mission,
+                    commanderSide,
+                    out preparationDiagnostics);
+            }
 
             Type selectedWeaponType = clearSelection
                 ? null
@@ -1798,6 +1834,7 @@ namespace CoopSpectator.Infrastructure
             int disbandedOtherPoints = 0;
             bool disbandedTargetPoint = false;
             bool deployedTargetPoint = false;
+            var visualDiagnostics = new List<string>();
             try
             {
                 if (!clearSelection)
@@ -1813,10 +1850,17 @@ namespace CoopSpectator.Infrastructure
                             continue;
                         }
 
-                        if (ResolveCommanderDeploymentSiegeWeaponType(otherPoint.DeployedWeapon as SiegeWeapon) == selectedWeaponType)
+                        if (ReferenceEquals(otherPoint.DeployedWeapon, siegeWeapon))
                         {
+                            SiegeWeapon movedWeapon = otherPoint.DeployedWeapon as SiegeWeapon;
                             otherPoint.Disband();
                             disbandedOtherPoints++;
+                            visualDiagnostics.Add("OtherDisband={" +
+                                                  CoopSiegeMachineDeploymentController.NormalizeLocalDeployedSiegeWeaponVisualTree(
+                                                      otherPoint,
+                                                      movedWeapon,
+                                                      false) +
+                                                  "}");
                         }
                     }
                 }
@@ -1824,8 +1868,15 @@ namespace CoopSpectator.Infrastructure
                 if (deploymentPoint.IsDeployed &&
                     (clearSelection || !ReferenceEquals(deploymentPoint.DeployedWeapon, siegeWeapon)))
                 {
+                    SiegeWeapon previousWeapon = deploymentPoint.DeployedWeapon as SiegeWeapon;
                     deploymentPoint.Disband();
                     disbandedTargetPoint = true;
+                    visualDiagnostics.Add("TargetDisband={" +
+                                          CoopSiegeMachineDeploymentController.NormalizeLocalDeployedSiegeWeaponVisualTree(
+                                              deploymentPoint,
+                                              previousWeapon,
+                                              false) +
+                                          "}");
                 }
 
                 if (!clearSelection &&
@@ -1836,13 +1887,25 @@ namespace CoopSpectator.Infrastructure
                     deployedTargetPoint = true;
                 }
 
+                if (!clearSelection && siegeWeapon != null)
+                {
+                    visualDiagnostics.Add("TargetDeploy={" +
+                                          CoopSiegeMachineDeploymentController.NormalizeLocalDeployedSiegeWeaponVisualTree(
+                                              deploymentPoint,
+                                              siegeWeapon,
+                                              true) +
+                                          "}");
+                }
+
                 diagnostics =
                     "Applied=True" +
                     " Clear=" + clearSelection +
+                    " PrepareCommanderUi=" + prepareCommanderUi +
                     " WeaponType=" + (selectedWeaponType?.Name ?? "<null>") +
                     " DisbandedOtherPoints=" + disbandedOtherPoints +
                     " DisbandedTargetPoint=" + disbandedTargetPoint +
                     " DeployedTargetPoint=" + deployedTargetPoint +
+                    " Visual={" + string.Join(" ", visualDiagnostics.ToArray()) + "}" +
                     " Preparation={" + preparationDiagnostics + "}";
                 return true;
             }
@@ -1852,11 +1915,97 @@ namespace CoopSpectator.Infrastructure
                     "Applied=False Reason=" +
                     ex.GetType().Name + ":" + ex.Message +
                     " Clear=" + clearSelection +
+                    " PrepareCommanderUi=" + prepareCommanderUi +
                     " WeaponType=" + (selectedWeaponType?.Name ?? "<null>") +
                     " DisbandedOtherPoints=" + disbandedOtherPoints +
                     " DisbandedTargetPoint=" + disbandedTargetPoint +
                     " DeployedTargetPoint=" + deployedTargetPoint +
+                    " Visual={" + string.Join(" ", visualDiagnostics.ToArray()) + "}" +
                     " Preparation={" + preparationDiagnostics + "}";
+                return false;
+            }
+        }
+
+        private static bool TryRefreshClientDeploymentPointWeaponCacheForStateApply(
+            Mission mission,
+            BattleSideEnum commanderSide,
+            out string diagnostics)
+        {
+            diagnostics = "skipped";
+            if (mission?.ActiveMissionObjects == null)
+                return false;
+
+            if (!GameNetwork.IsClient || GameNetwork.IsServer)
+            {
+                diagnostics = "skipped-non-remote-client";
+                return true;
+            }
+
+            if (DeploymentPointWeaponsField == null || DeploymentPointDetermineTypeMethod == null)
+            {
+                diagnostics =
+                    "reflection-unavailable WeaponsField=" + (DeploymentPointWeaponsField != null) +
+                    " DetermineTypeMethod=" + (DeploymentPointDetermineTypeMethod != null);
+                return false;
+            }
+
+            int pointCount = 0;
+            int pointCountForSide = 0;
+            int pointsWithWeapons = 0;
+            int weaponCount = 0;
+            int determinedPointCount = 0;
+            int failedCount = 0;
+            try
+            {
+                foreach (DeploymentPoint deploymentPoint in mission.ActiveMissionObjects.FindAllWithType<DeploymentPoint>())
+                {
+                    if (deploymentPoint == null)
+                        continue;
+
+                    pointCount++;
+                    if (commanderSide != BattleSideEnum.None && deploymentPoint.Side == commanderSide)
+                        pointCountForSide++;
+
+                    try
+                    {
+                        var weapons = deploymentPoint.GetWeaponsUnder();
+                        DeploymentPointWeaponsField.SetValue(deploymentPoint, weapons);
+                        int currentWeaponCount = weapons?.Count ?? 0;
+                        weaponCount += currentWeaponCount;
+                        if (currentWeaponCount > 0)
+                        {
+                            pointsWithWeapons++;
+                            DeploymentPointDetermineTypeMethod.Invoke(deploymentPoint, null);
+                            determinedPointCount++;
+                        }
+                    }
+                    catch
+                    {
+                        failedCount++;
+                    }
+                }
+
+                diagnostics =
+                    "RemoteClientCacheRefreshed=True" +
+                    " Points=" + pointCount +
+                    " SidePoints=" + pointCountForSide +
+                    " PointsWithWeapons=" + pointsWithWeapons +
+                    " Weapons=" + weaponCount +
+                    " DeterminedPoints=" + determinedPointCount +
+                    " Failed=" + failedCount;
+                return failedCount == 0;
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "RemoteClientCacheRefreshed=False Reason=" +
+                    ex.GetType().Name + ":" + ex.Message +
+                    " Points=" + pointCount +
+                    " SidePoints=" + pointCountForSide +
+                    " PointsWithWeapons=" + pointsWithWeapons +
+                    " Weapons=" + weaponCount +
+                    " DeterminedPoints=" + determinedPointCount +
+                    " Failed=" + failedCount;
                 return false;
             }
         }

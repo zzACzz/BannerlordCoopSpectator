@@ -147,7 +147,7 @@ namespace CoopSpectator.UI
             {
                 ClearLocalSpawnPending("lost-local-agent");
                 _overlaySuppressedUntilUtc = DateTime.MinValue;
-                ResetSelectionFlow("lost-local-agent");
+                HandleLostLocalAgentSelectionFlow();
             }
             else if (!_hadLocalControlledAgent && hasLocalControlledAgent)
             {
@@ -478,17 +478,25 @@ namespace CoopSpectator.UI
                 return CoopSelectionScreen.None;
 
             if (!snapshot.BattleDataReady)
+            {
+                if (ShouldKeepCommanderDeploymentScreenDuringTransient(snapshot))
+                    return CoopSelectionScreen.CommanderDeployment;
+
                 return IsReconnectFinalizePendingWithAssignedSide(snapshot)
                     ? CoopSelectionScreen.None
                     : CoopSelectionScreen.TeamSelection;
+            }
 
             if (snapshot.ReconnectSelectionContractActive)
                 return DetermineReconnectDesiredScreen(snapshot);
 
-            if (_requestedScreen == CoopSelectionScreen.CommanderDeployment &&
-                IsCommanderDeploymentReady(snapshot))
+            if (_requestedScreen == CoopSelectionScreen.CommanderDeployment)
             {
-                return CoopSelectionScreen.CommanderDeployment;
+                if (IsCommanderDeploymentReady(snapshot) ||
+                    ShouldKeepCommanderDeploymentScreenDuringTransient(snapshot))
+                {
+                    return CoopSelectionScreen.CommanderDeployment;
+                }
             }
 
             if (_requestedScreen == CoopSelectionScreen.ClassLoadout &&
@@ -500,6 +508,48 @@ namespace CoopSpectator.UI
             }
 
             return CoopSelectionScreen.TeamSelection;
+        }
+
+        private bool ShouldKeepCommanderDeploymentScreenDuringTransient(CoopSelectionUiSnapshot snapshot)
+        {
+            if (!EnableManualSiegeCommanderDeployment ||
+                _requestedScreen != CoopSelectionScreen.CommanderDeployment ||
+                _currentScreen != CoopSelectionScreen.CommanderDeployment ||
+                _commanderDeploymentViewModel == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(Mission?.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            if (snapshot?.HasLocalControlledAgent == true ||
+                snapshot?.Status?.HasAgent == true ||
+                snapshot?.IsBattleEnded == true)
+            {
+                return false;
+            }
+
+            string battlePhase = snapshot?.BattlePhase ?? string.Empty;
+            if (string.Equals(battlePhase, nameof(CoopBattlePhase.BattleActive), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(battlePhase, nameof(CoopBattlePhase.BattleEnded), StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            BattleSideEnum side = snapshot?.EffectiveSide ?? BattleSideEnum.None;
+            if (side == BattleSideEnum.None)
+                side = _selectedSideOverride;
+            if (side == BattleSideEnum.None)
+                return false;
+
+            string entryId = !string.IsNullOrWhiteSpace(snapshot?.SelectedEntryId)
+                ? snapshot.SelectedEntryId
+                : _selectedEntryIdOverride;
+            if (string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            RosterEntryState entryState = CoopSelectionUiHelpers.ResolveEntryState(side, entryId);
+            return entryState == null ||
+                   CoopSelectionUiHelpers.IsCommanderEntry(snapshot?.BattleState, side, entryState);
         }
 
         private bool IsNativeDeploymentUiActive()
@@ -2476,10 +2526,36 @@ namespace CoopSpectator.UI
 
             _spectatorOverlayHidden = false;
             _selectedSideOverride = side;
-            _selectedEntryIdOverride = null;
+            _selectedEntryIdOverride = ResolveInitialExactSiegeSelectedEntryId(side, hasLocalControlledAgent);
             _requestedScreen = CoopSelectionScreen.ClassLoadout;
-            CoopBattleNetworkRequestTransport.TrySelectSide(side, "CoopTeamSelectionUI Side");
+            bool sideQueued = CoopBattleNetworkRequestTransport.TrySelectSide(side, "CoopTeamSelectionUI Side");
+            if (sideQueued && !string.IsNullOrWhiteSpace(_selectedEntryIdOverride))
+            {
+                CoopBattleNetworkRequestTransport.TrySelectEntry(
+                    side,
+                    _selectedEntryIdOverride,
+                    "CoopTeamSelectionUI InitialEntry");
+            }
+
             RefreshOverlay(force: true, hasLocalControlledAgent);
+        }
+
+        private string ResolveInitialExactSiegeSelectedEntryId(BattleSideEnum side, bool hasLocalControlledAgent)
+        {
+            if (side == BattleSideEnum.None ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(Mission?.SceneName ?? string.Empty))
+            {
+                return null;
+            }
+
+            CoopSelectionUiSnapshot sideSnapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
+            if (sideSnapshot == null || sideSnapshot.EffectiveSide != side)
+                return null;
+
+            if (!string.IsNullOrWhiteSpace(sideSnapshot.SelectedEntryId))
+                return sideSnapshot.SelectedEntryId;
+
+            return sideSnapshot.EffectiveSelectableEntryIds?.FirstOrDefault(entryId => !string.IsNullOrWhiteSpace(entryId));
         }
 
         private void HandleUnitSelected(BattleSideEnum side, string entryId)
@@ -2528,6 +2604,9 @@ namespace CoopSpectator.UI
             _selectedSideOverride = BattleSideEnum.None;
             _selectedEntryIdOverride = null;
             _overlaySuppressedUntilUtc = DateTime.MinValue;
+            ReleaseOverlayInput();
+            ReleaseCurrentMovie();
+            TryDeactivateCommanderDeploymentFreeCamera(MissionScreen, "spectator-requested");
 
             if (CoopBattleNetworkRequestTransport.TrySelectSpectator("CoopTeamSelectionUI Spectator"))
             {
@@ -2783,6 +2862,51 @@ namespace CoopSpectator.UI
             _selectedEntryIdOverride = null;
             _spectatorOverlayHidden = false;
             ModLogger.Info("CoopMissionSelectionView: reset selection flow. Source=" + source);
+        }
+
+        private void HandleLostLocalAgentSelectionFlow()
+        {
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = ReadCurrentMissionEntryStatus();
+            if (ShouldKeepBattleActiveSelectionSide(status, out BattleSideEnum assignedSide))
+            {
+                _requestedScreen = CoopSelectionScreen.ClassLoadout;
+                _selectedSideOverride = assignedSide;
+                _selectedEntryIdOverride = null;
+                _spectatorOverlayHidden = false;
+                ModLogger.Info(
+                    "CoopMissionSelectionView: kept battle-active selection flow after local agent loss. " +
+                    "AssignedSide=" + assignedSide +
+                    " BattlePhase=" + (status?.BattlePhase ?? string.Empty) +
+                    " ReadinessStage=" + (status?.BattleDataReadinessStage ?? string.Empty) +
+                    " Lifecycle=" + (status?.LifecycleState ?? string.Empty) +
+                    " CanRespawn=" + (status?.CanRespawn.ToString() ?? bool.FalseString));
+                return;
+            }
+
+            ResetSelectionFlow("lost-local-agent");
+        }
+
+        private static bool ShouldKeepBattleActiveSelectionSide(
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+            out BattleSideEnum assignedSide)
+        {
+            assignedSide = CoopSelectionUiHelpers.NormalizeStatusSide(status?.AssignedSide);
+            if (status == null || assignedSide == BattleSideEnum.None)
+                return false;
+
+            string battlePhase = !string.IsNullOrWhiteSpace(status.BattlePhase)
+                ? status.BattlePhase
+                : CoopBattlePhaseBridgeFile.ReadStatus()?.Phase.ToString() ?? string.Empty;
+            bool battleActive =
+                string.Equals(battlePhase, nameof(CoopBattlePhase.BattleActive), StringComparison.OrdinalIgnoreCase);
+            if (!battleActive)
+                return false;
+
+            string readinessStage = status.BattleDataReadinessStage ?? string.Empty;
+            return status.CanRespawn ||
+                   string.Equals(readinessStage, "RespawnSelection", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(status.LifecycleState, "Respawnable", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(status.LifecycleState, "DeadAwaitingRespawn", StringComparison.OrdinalIgnoreCase);
         }
 
         private void MarkLocalSpawnPending(CoopSelectionUiSnapshot snapshot)

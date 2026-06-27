@@ -126,6 +126,7 @@ namespace CoopSpectator.UI
             if (battleDataReady &&
                 !hasLocalControlledAgent &&
                 !reconnectSelectionContractActive &&
+                ShouldRequireExactSiegePreSelectionMaterialization(status) &&
                 !CoopMissionSpawnLogic.IsClientExactSiegePreSelectionMaterializationReady(
                     status,
                     currentMissionName,
@@ -257,6 +258,28 @@ namespace CoopSpectator.UI
             snapshot.TeamRefreshKey = BuildTeamRefreshKey(snapshot);
             snapshot.ClassRefreshKey = BuildClassRefreshKey(snapshot);
             return snapshot;
+        }
+
+        private static bool ShouldRequireExactSiegePreSelectionMaterialization(
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status)
+        {
+            if (status == null)
+                return true;
+
+            string battlePhase = !string.IsNullOrWhiteSpace(status.BattlePhase)
+                ? status.BattlePhase
+                : CoopBattlePhaseBridgeFile.ReadStatus()?.Phase.ToString() ?? string.Empty;
+            if (string.Equals(battlePhase, nameof(CoopBattlePhase.BattleActive), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(battlePhase, nameof(CoopBattlePhase.BattleEnded), StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string readinessStage = status.BattleDataReadinessStage ?? string.Empty;
+            if (string.Equals(readinessStage, "RespawnSelection", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return true;
         }
 
         private static CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot FilterStatusForCurrentMission(

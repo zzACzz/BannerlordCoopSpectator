@@ -13,6 +13,8 @@ namespace CoopSpectator.Infrastructure
         AnyMissionObject,
         RangedSiegeWeapon,
         UsableMachine,
+        UsableMissionObject,
+        SiegeLadder,
         SynchedMissionObject
     }
 
@@ -21,6 +23,7 @@ namespace CoopSpectator.Infrastructure
         private const int SiegeWeaponChildIdWindow = 128;
         private static readonly object Sync = new object();
         private static readonly Dictionary<int, int> ExactMissionObjectIdMap = new Dictionary<int, int>();
+        private static readonly Dictionary<int, int> ReverseExactMissionObjectIdMap = new Dictionary<int, int>();
         private static readonly List<SiegeWeaponOffsetMapping> SiegeWeaponOffsetMappings = new List<SiegeWeaponOffsetMapping>();
 
         private sealed class SiegeWeaponOffsetMapping
@@ -38,6 +41,7 @@ namespace CoopSpectator.Infrastructure
             lock (Sync)
             {
                 ExactMissionObjectIdMap.Clear();
+                ReverseExactMissionObjectIdMap.Clear();
                 SiegeWeaponOffsetMappings.Clear();
             }
         }
@@ -79,6 +83,26 @@ namespace CoopSpectator.Infrastructure
                 registerOffset: true,
                 source: source,
                 label: "siege-weapon");
+        }
+
+        public static string RegisterMissionObjectMapping(
+            MissionObjectId serverMissionObjectId,
+            MissionObject localMissionObject,
+            BattleSideEnum side,
+            string objectTypeName,
+            string source)
+        {
+            if (localMissionObject == null)
+                return "mission-object-skip:null-local";
+
+            return RegisterExactMapping(
+                serverMissionObjectId,
+                localMissionObject.Id,
+                side,
+                objectTypeName,
+                registerOffset: false,
+                source: source,
+                label: "mission-object");
         }
 
         public static bool TryTranslateMissionObjectId(
@@ -176,6 +200,101 @@ namespace CoopSpectator.Infrastructure
             return false;
         }
 
+        public static bool TryTranslateLocalMissionObjectId(
+            Mission mission,
+            MissionObjectId localMissionObjectId,
+            SiegeMissionObjectIdBridgeTarget target,
+            out MissionObjectId serverMissionObjectId,
+            out string diagnostics)
+        {
+            serverMissionObjectId = localMissionObjectId;
+            diagnostics = string.Empty;
+
+            if (!IsExactSiegeClientContext(mission))
+            {
+                diagnostics = "skip-context";
+                return false;
+            }
+
+            int localId = localMissionObjectId.Id;
+            if (localId < 0)
+            {
+                diagnostics = "skip-invalid-local-id:" + localId;
+                return false;
+            }
+
+            if (!TryCreateValidatedLocalMissionObjectId(
+                    mission,
+                    localId,
+                    target,
+                    out MissionObjectId validatedLocalMissionObjectId,
+                    out string localValidationDiagnostics))
+            {
+                diagnostics =
+                    "local-validation-failed LocalId=" + localId +
+                    " Target=" + target +
+                    " Validation={" + localValidationDiagnostics + "}";
+                return false;
+            }
+
+            int exactServerId = -1;
+            bool hasExactMap;
+            List<SiegeWeaponOffsetMapping> offsetMappings;
+            lock (Sync)
+            {
+                hasExactMap = ReverseExactMissionObjectIdMap.TryGetValue(localId, out exactServerId);
+                offsetMappings = SiegeWeaponOffsetMappings
+                    .OrderByDescending(candidate => candidate.RegisteredUtc)
+                    .ToList();
+            }
+
+            if (hasExactMap && exactServerId >= 0)
+            {
+                serverMissionObjectId = new MissionObjectId(exactServerId, validatedLocalMissionObjectId.CreatedAtRuntime);
+                diagnostics =
+                    "exact-reverse-map LocalId=" + localId +
+                    " ServerId=" + exactServerId +
+                    " Target=" + target +
+                    " Validation={" + localValidationDiagnostics + "}";
+                return true;
+            }
+
+            foreach (SiegeWeaponOffsetMapping mapping in offsetMappings)
+            {
+                if (mapping == null || mapping.Offset == 0)
+                    continue;
+
+                if (Math.Abs(localId - mapping.LocalWeaponId) > SiegeWeaponChildIdWindow)
+                    continue;
+
+                int candidateServerId = localId - mapping.Offset;
+                if (candidateServerId == localId || candidateServerId < 0)
+                    continue;
+
+                serverMissionObjectId = new MissionObjectId(candidateServerId, validatedLocalMissionObjectId.CreatedAtRuntime);
+                diagnostics =
+                    "offset-reverse-map LocalId=" + localId +
+                    " ServerId=" + candidateServerId +
+                    " Offset=" + mapping.Offset +
+                    " AnchorServerWeaponId=" + mapping.ServerWeaponId +
+                    " AnchorLocalWeaponId=" + mapping.LocalWeaponId +
+                    " Side=" + mapping.Side +
+                    " WeaponType=" + (mapping.WeaponTypeName ?? string.Empty) +
+                    " Target=" + target +
+                    " Validation={" + localValidationDiagnostics + "}";
+                return true;
+            }
+
+            diagnostics =
+                "not-mapped LocalId=" + localId +
+                " HasExactMap=" + hasExactMap +
+                " ExactMap=" + exactServerId +
+                " OffsetCount=" + offsetMappings.Count +
+                " Target=" + target +
+                " Validation={" + localValidationDiagnostics + "}";
+            return false;
+        }
+
         public static bool IsExactSiegeClientContext(Mission mission)
         {
             if (mission == null || !GameNetwork.IsClient || GameNetwork.IsServer)
@@ -221,6 +340,7 @@ namespace CoopSpectator.Infrastructure
             lock (Sync)
             {
                 ExactMissionObjectIdMap[serverId] = localId;
+                ReverseExactMissionObjectIdMap[localId] = serverId;
 
                 if (registerOffset && offset != 0)
                 {
@@ -293,6 +413,24 @@ namespace CoopSpectator.Infrastructure
                 diagnostics =
                     "type-mismatch Actual=" + missionObject.GetType().FullName +
                     " Expected=" + typeof(UsableMachine).FullName;
+                return false;
+            }
+
+            if (target == SiegeMissionObjectIdBridgeTarget.UsableMissionObject &&
+                !(missionObject is UsableMissionObject))
+            {
+                diagnostics =
+                    "type-mismatch Actual=" + missionObject.GetType().FullName +
+                    " Expected=" + typeof(UsableMissionObject).FullName;
+                return false;
+            }
+
+            if (target == SiegeMissionObjectIdBridgeTarget.SiegeLadder &&
+                !(missionObject is SiegeLadder))
+            {
+                diagnostics =
+                    "type-mismatch Actual=" + missionObject.GetType().FullName +
+                    " Expected=" + typeof(SiegeLadder).FullName;
                 return false;
             }
 

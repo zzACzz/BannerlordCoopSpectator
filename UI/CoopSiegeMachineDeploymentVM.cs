@@ -243,12 +243,11 @@ namespace CoopSpectator.UI
                 return;
             }
 
-            Type selectedWeaponType = ResolveWeaponType(siegeWeapon);
-            if (selectedWeaponType != null)
+            if (siegeWeapon != null)
             {
                 List<DeploymentPoint> pointsToClear = _localSelections
                     .Where(pair => !ReferenceEquals(pair.Key, deploymentPoint) &&
-                                   ResolveWeaponType(pair.Value) == selectedWeaponType)
+                                   ReferenceEquals(pair.Value, siegeWeapon))
                     .Select(pair => pair.Key)
                     .ToList();
                 foreach (DeploymentPoint pointToClear in pointsToClear)
