@@ -4130,6 +4130,7 @@ namespace CoopSpectator.MissionBehaviors
             public string ResolutionState { get; set; }
             public string ResolutionSource { get; set; }
             public bool AuthoritativeMaterializedEntryObserved { get; set; }
+            public bool AuthoritativeExistingAgentObserved { get; set; }
             public bool CreateAgentPayloadObserved { get; set; }
             public bool CreateAgentPostfixObserved { get; set; }
             public bool EquipmentSyncObserved { get; set; }
@@ -6138,6 +6139,10 @@ namespace CoopSpectator.MissionBehaviors
                 mission,
                 CoopBattlePhaseRuntimeState.GetPhase(),
                 phaseSource + " exact-team-ai-gate");
+            ExactCampaignArmyBootstrap.TryRepairSiegeAssaultWithDeploymentTeamAiLifecycle(
+                mission,
+                CoopBattlePhaseRuntimeState.GetPhase(),
+                phaseSource + " siege-team-ai-lifecycle");
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "phase-tick", "warmup-fallback-before", phaseSource);
             TryApplyNativeBattleMapWarmupFallback(mission, phaseSource);
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "phase-tick", "warmup-fallback-after", phaseSource);
@@ -6545,6 +6550,7 @@ namespace CoopSpectator.MissionBehaviors
                 "ClientInitState={PayloadObserved=" + state.CreateAgentPayloadObserved +
                 ",PostfixObserved=" + state.CreateAgentPostfixObserved +
                 ",AuthoritativeMaterializedObserved=" + state.AuthoritativeMaterializedEntryObserved +
+                ",AuthoritativeExistingAgentObserved=" + state.AuthoritativeExistingAgentObserved +
                 ",EquipmentSyncObserved=" + state.EquipmentSyncObserved +
                 ",OnSpawnWieldEventCount=" + state.OnSpawnWieldEventCount +
                 ",ObservedAgeMs=" + (int)Math.Round(observedAgeSeconds * 1000d) +
@@ -6568,6 +6574,12 @@ namespace CoopSpectator.MissionBehaviors
             if (state.EquipmentSyncObserved)
             {
                 signalReason = "equipment-sync-observed";
+                return true;
+            }
+
+            if (state.AuthoritativeExistingAgentObserved)
+            {
+                signalReason = "authoritative-existing-agent-observed";
                 return true;
             }
 
@@ -6622,6 +6634,27 @@ namespace CoopSpectator.MissionBehaviors
                 mappings,
                 snapshot.EntryCount,
                 source ?? snapshot.Source ?? "unknown");
+        }
+
+        internal static void ObserveClientAuthoritativeMaterializedAgentEntry(
+            int agentIndex,
+            string entryId,
+            string source)
+        {
+            if (GameNetwork.IsServer ||
+                agentIndex < 0 ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                return;
+            }
+
+            ApplyClientAuthoritativeMaterializedAgentEntrySnapshot(
+                new Dictionary<int, string>
+                {
+                    [agentIndex] = entryId
+                },
+                1,
+                source ?? "client authoritative materialized agent entry");
         }
 
         private static void ApplyClientAuthoritativeMaterializedAgentEntrySnapshot(
@@ -6683,8 +6716,9 @@ namespace CoopSpectator.MissionBehaviors
                         _materializedArmySideByAgentIndex[agentIndex] = BattleSideEnum.Defender;
                 }
 
-                if (TryGetClientCreateAgentExactVisualState(agentIndex, out ClientCreateAgentExactVisualRuntimeState state) &&
-                    state != null)
+                ClientCreateAgentExactVisualRuntimeState state =
+                    GetOrCreateClientCreateAgentExactVisualState(agentIndex);
+                if (state != null)
                 {
                     state.EntryId = entryId;
                     state.ResolutionState = "authoritative-materialized-agent-snapshot";
@@ -6710,6 +6744,12 @@ namespace CoopSpectator.MissionBehaviors
                     entryState != null &&
                     !IsHeroEntryEligibleForExactPersonalPerks(entryState))
                 {
+                    MarkClientCreateAgentStateFromAuthoritativeExistingAgent(
+                        agent,
+                        entryState,
+                        state,
+                        source ?? "authoritative materialized agent snapshot");
+
                     if (ShouldTreatClientExactSiegeTroopVisualAsServerPreSpawnResolved(
                             agent,
                             entryState,
@@ -6744,6 +6784,11 @@ namespace CoopSpectator.MissionBehaviors
                     else
                     {
                         double delaySeconds = 0.18d + Math.Min(1.40d, queuedCount * 0.03d);
+                        bool forceExactSiegeWeaponRefresh =
+                            ShouldAllowClientExactSiegeTroopWeaponRefreshAfterAuthoritativeMaterialization(
+                                agent,
+                                entryState,
+                                out _);
                         bool queued = TryQueueClientExactCampaignVisualOverlay(
                             mission,
                             agent,
@@ -6751,7 +6796,7 @@ namespace CoopSpectator.MissionBehaviors
                             (source ?? "authoritative materialized agent snapshot") + " delayed troop finalize",
                             delaySeconds,
                             force: true,
-                            includeWeaponsForRefresh: _clientUseStringIdExactEquipmentPath);
+                            includeWeaponsForRefresh: _clientUseStringIdExactEquipmentPath || forceExactSiegeWeaponRefresh);
                         if (queued)
                         {
                             queuedCount++;
@@ -7064,13 +7109,15 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (!state.CreateAgentPayloadObserved)
+            if (!state.CreateAgentPayloadObserved &&
+                !state.AuthoritativeExistingAgentObserved)
             {
                 reason = "create-agent-payload-pending";
                 return false;
             }
 
-            if (!state.CreateAgentPostfixObserved)
+            if (!state.CreateAgentPostfixObserved &&
+                !state.AuthoritativeExistingAgentObserved)
             {
                 reason = "create-agent-postfix-pending";
                 return false;
@@ -7140,6 +7187,39 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return true;
+        }
+
+        private static void MarkClientCreateAgentStateFromAuthoritativeExistingAgent(
+            Agent agent,
+            RosterEntryState entryState,
+            ClientCreateAgentExactVisualRuntimeState state,
+            string source)
+        {
+            if (GameNetwork.IsServer ||
+                agent == null ||
+                state == null ||
+                entryState == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                IsHeroEntryEligibleForExactPersonalPerks(entryState))
+            {
+                return;
+            }
+
+            Mission mission = Mission.Current;
+            if (mission == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return;
+            }
+
+            state.EntryId = entryState.EntryId;
+            state.ResolutionState = "authoritative-existing-agent-snapshot";
+            state.ResolutionSource = source ?? "authoritative existing agent";
+            state.AuthoritativeMaterializedEntryObserved = true;
+            state.AuthoritativeExistingAgentObserved = true;
+            state.LastObservedUtc = DateTime.UtcNow;
         }
 
         private static bool IsClientTroopEffectivelyMountedForVisualRefresh(
@@ -7485,7 +7565,76 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (ShouldAllowClientExactSiegeTroopWeaponRefreshAfterAuthoritativeMaterialization(
+                    agent,
+                    entryState,
+                    out _))
+            {
+                return false;
+            }
+
             reason = "exact-siege-non-hero-field-materialization-requires-pre-spawn-weapons";
+            return true;
+        }
+
+        private static bool ShouldAllowClientExactSiegeTroopWeaponRefreshAfterAuthoritativeMaterialization(
+            Agent agent,
+            RosterEntryState entryState,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                agent == null ||
+                entryState == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                IsHeroEntryEligibleForExactPersonalPerks(entryState))
+            {
+                reason = "agent-or-entry-not-eligible";
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            if (mission == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                reason = "not-exact-siege";
+                return false;
+            }
+
+            if (agent.MissionPeer != null || IsLocalPeerControlledAgent(agent))
+            {
+                reason = "peer-controlled-agent";
+                return false;
+            }
+
+            if (agent.MountAgent != null)
+            {
+                reason = "live-mount-present";
+                return false;
+            }
+
+            if (!HasAnySnapshotWeapons(entryState))
+            {
+                reason = "snapshot-has-no-weapons";
+                return false;
+            }
+
+            if (!_clientAuthoritativeMaterializedEntryObservedAgentIndices.Contains(agent.Index))
+            {
+                reason = "authoritative-materialized-agent-unobserved";
+                return false;
+            }
+
+            if (!_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string trackedEntryId) ||
+                !string.Equals(trackedEntryId, entryState.EntryId, StringComparison.Ordinal))
+            {
+                reason = "authoritative-entry-mismatch";
+                return false;
+            }
+
+            reason = "exact-siege-authoritative-existing-agent";
             return true;
         }
 
@@ -7533,6 +7682,15 @@ namespace CoopSpectator.MissionBehaviors
             {
                 reason = exactSiegeWeaponOverlayReason;
                 return false;
+            }
+
+            if (ShouldAllowClientExactSiegeTroopWeaponRefreshAfterAuthoritativeMaterialization(
+                    agent,
+                    entryState,
+                    out string exactSiegeAuthoritativeWeaponRefreshReason))
+            {
+                reason = exactSiegeAuthoritativeWeaponRefreshReason;
+                return true;
             }
 
             if (!peerControlled && !_clientUseStringIdExactEquipmentPath)
@@ -9105,13 +9263,24 @@ namespace CoopSpectator.MissionBehaviors
                 source + " exact-native-bootstrap-reinforcements");
 
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            bool useMaterializedSiegeReinforcements = ShouldUseMaterializedSiegeReinforcements(mission);
             bool shouldEnableReinforcements =
+                !useMaterializedSiegeReinforcements &&
                 currentPhase >= CoopBattlePhase.BattleActive &&
                 currentPhase < CoopBattlePhase.BattleEnded;
             ExactCampaignArmyBootstrap.TrySyncReinforcementState(
                 mission,
                 shouldEnableReinforcements,
                 source + " exact-native-bootstrap");
+            if (useMaterializedSiegeReinforcements &&
+                currentPhase >= CoopBattlePhase.BattleActive &&
+                currentPhase < CoopBattlePhase.BattleEnded)
+            {
+                ExactCampaignArmyBootstrap.TrySuppressNativeReinforcementSpawnersForMaterializedSiege(
+                    mission,
+                    source + " exact-native-bootstrap");
+            }
+
             ExactCampaignArmyBootstrap.TryLogRuntimeDiagnostics(
                 mission,
                 source + " exact-native-bootstrap");
@@ -11068,6 +11237,23 @@ namespace CoopSpectator.MissionBehaviors
             return ExactCampaignArmyBootstrap.IsActive(mission);
         }
 
+        private static bool ShouldUseMaterializedSiegeReinforcements(Mission mission)
+        {
+            if (mission == null ||
+                !GameNetwork.IsServer ||
+                !ExactCampaignArmyBootstrap.IsSiegeAssaultWithDeploymentActive(mission) ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+        }
+
         private static void LogExactSceneNativeBootstrapDeferred(Mission mission, string reason, string source)
         {
             DateTime nowUtc = DateTime.UtcNow;
@@ -11551,6 +11737,7 @@ namespace CoopSpectator.MissionBehaviors
             int defenderReserve;
             string reserveSource;
             if (IsUsingNativeExactCampaignArmyBootstrap(mission) &&
+                !ShouldUseMaterializedSiegeReinforcements(mission) &&
                 ExactCampaignArmyBootstrap.TryGetRemainingTroopCounts(
                     mission,
                     out attackerReserve,
@@ -12055,15 +12242,32 @@ namespace CoopSpectator.MissionBehaviors
 
         private static void TrySpawnMaterializedBattlefieldReinforcements(Mission mission, string source)
         {
-            if (mission == null || !GameNetwork.IsServer || !_hasMaterializedBattlefieldArmies)
+            if (mission == null || !GameNetwork.IsServer)
                 return;
 
-            if (IsUsingNativeExactCampaignArmyBootstrap(mission))
+            bool useMaterializedSiegeReinforcements = ShouldUseMaterializedSiegeReinforcements(mission);
+            if (!_hasMaterializedBattlefieldArmies && !useMaterializedSiegeReinforcements)
+                return;
+
+            if (IsUsingNativeExactCampaignArmyBootstrap(mission) && !useMaterializedSiegeReinforcements)
                 return;
 
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
             if (currentPhase < CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
                 return;
+
+            if (useMaterializedSiegeReinforcements &&
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
+            {
+                return;
+            }
+
+            if (useMaterializedSiegeReinforcements &&
+                (!HasTrackedBattlefieldEntryStateForSide(mission, BattleSideEnum.Attacker) ||
+                 !HasTrackedBattlefieldEntryStateForSide(mission, BattleSideEnum.Defender)))
+            {
+                return;
+            }
 
             DateTime nowUtc = DateTime.UtcNow;
             if (nowUtc < _nextMaterializedArmyReinforcementPulseUtc)
@@ -12075,6 +12279,11 @@ namespace CoopSpectator.MissionBehaviors
             Team defenderTeam = mission.Teams?.Defender;
             if (attackerTeam == null || defenderTeam == null)
                 return;
+
+            if (useMaterializedSiegeReinforcements)
+                SynchronizeMaterializedBattleResultActiveCountsFromLiveAgents(
+                    mission,
+                    (source ?? "unknown") + " materialized-siege-reinforcement-active-sync");
 
             int attackerSpawned = SpawnMaterializedReinforcementWaveForSide(mission, attackerTeam, BattleSideEnum.Attacker, source);
             int defenderSpawned = SpawnMaterializedReinforcementWaveForSide(mission, defenderTeam, BattleSideEnum.Defender, source);
@@ -12093,6 +12302,7 @@ namespace CoopSpectator.MissionBehaviors
                 " DefenderSpawned=" + defenderSpawned +
                 " PulsedAgents=" + pulsedAgents +
                 " BattleSizeBudget=" + GetConfiguredBattleSizeBudget() +
+                " SiegeMaterializedReinforcements=" + useMaterializedSiegeReinforcements +
                 " Source=" + (source ?? "unknown"));
         }
 
@@ -13350,9 +13560,23 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             formationClass = formationClass.FallbackClass();
+            if (ShouldUseDismountedSiegeProjection(mission, side))
+                formationClass = DismountSiegeFormationClass(formationClass);
+
             int formationIndex = (int)formationClass;
             if (formationIndex < 0 || formationIndex >= (int)FormationClass.NumberOfRegularFormations)
                 return FormationClass.Infantry;
+
+            return formationClass;
+        }
+
+        private static FormationClass DismountSiegeFormationClass(FormationClass formationClass)
+        {
+            if (formationClass == FormationClass.Cavalry)
+                return FormationClass.Infantry;
+
+            if (formationClass == FormationClass.HorseArcher)
+                return FormationClass.Ranged;
 
             return formationClass;
         }
@@ -13563,6 +13787,23 @@ namespace CoopSpectator.MissionBehaviors
             spawnDirection = side == BattleSideEnum.Attacker ? new Vec2(1f, 0f) : new Vec2(-1f, 0f);
             spawnFrameSource = "direct-fallback";
 
+            bool useMaterializedSiegeReinforcements =
+                isReinforcement &&
+                ShouldUseMaterializedSiegeReinforcements(mission);
+            if (useMaterializedSiegeReinforcements &&
+                TryResolveRepairedMaterializedSpawnFrame(
+                    mission,
+                    team,
+                    formationClass,
+                    isReinforcement: true,
+                    out spawnPosition,
+                    out spawnDirection,
+                    out _))
+            {
+                spawnFrameSource = "siege-reinforcement-plan";
+                return;
+            }
+
             string repairSource = (isReinforcement ? "reinforcement" : "initial") + "-formation-frame-repair:" + troop.StringId;
             if (TryRepairMaterializedDeploymentPlan(mission, team, side, repairSource))
             {
@@ -13583,6 +13824,16 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopMissionSpawnLogic: repaired deployment plan did not yield a safe materialized spawn frame for " +
                     troop.StringId +
                     ": " + (repairedSpawnDiagnostics ?? "unknown"));
+            }
+
+            if (useMaterializedSiegeReinforcements)
+            {
+                GetDirectSpawnFrame(mission, team, out Vec3 siegeFallbackSpawnPosition, out Vec2 siegeFallbackSpawnDirection);
+                spawnPosition = siegeFallbackSpawnPosition;
+                if (siegeFallbackSpawnDirection.LengthSquared > 0.001f)
+                    spawnDirection = siegeFallbackSpawnDirection;
+                spawnFrameSource = "siege-direct-fallback";
+                return;
             }
 
             try
@@ -15366,6 +15617,59 @@ namespace CoopSpectator.MissionBehaviors
                 " Summary=[" + BuildBattleResultEntryAuditSummary(snapshot) + "].");
         }
 
+        private static void SynchronizeMaterializedBattleResultActiveCountsFromLiveAgents(Mission mission, string source)
+        {
+            if (mission?.AllAgents == null || _materializedBattleResultEntriesByEntryId.Count == 0)
+                return;
+
+            var activeCountsByEntryId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < mission.AllAgents.Count; i++)
+            {
+                Agent agent = mission.AllAgents[i];
+                if (agent == null || !agent.IsActive() || agent.IsMount)
+                    continue;
+
+                if (!TryRefreshMaterializedAgentIdentityCache(
+                        agent,
+                        out string entryId,
+                        out BattleSideEnum side,
+                        out bool requiresRegistration,
+                        source))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(entryId))
+                    continue;
+
+                if (requiresRegistration)
+                {
+                    RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+                    if (entryState != null)
+                        RegisterMaterializedBattleResultEntry(agent, entryState, side);
+                }
+
+                if (!_materializedBattleResultEntriesByEntryId.ContainsKey(entryId))
+                    continue;
+
+                activeCountsByEntryId[entryId] =
+                    activeCountsByEntryId.TryGetValue(entryId, out int activeCount)
+                        ? activeCount + 1
+                        : 1;
+            }
+
+            foreach (KeyValuePair<string, MaterializedBattleResultEntryRuntimeState> pair in _materializedBattleResultEntriesByEntryId)
+            {
+                MaterializedBattleResultEntryRuntimeState runtimeState = pair.Value;
+                if (runtimeState == null)
+                    continue;
+
+                runtimeState.ActiveCount = activeCountsByEntryId.TryGetValue(pair.Key, out int activeCount)
+                    ? Math.Max(0, activeCount)
+                    : 0;
+            }
+        }
+
         private static void ReconcileMaterializedBattleResultStateFromMission(Mission mission, string source)
         {
             if (mission == null || _materializedBattleResultEntriesByEntryId.Count == 0)
@@ -15483,6 +15787,12 @@ namespace CoopSpectator.MissionBehaviors
                 removedTotal++;
             }
 
+            int finalActiveTotal = 0;
+            int finalRemovedTotal = 0;
+            int finalKilledTotal = 0;
+            int finalUnconsciousTotal = 0;
+            int finalRoutedTotal = 0;
+            int finalOtherRemovedTotal = 0;
             foreach (KeyValuePair<string, MaterializedBattleResultEntryRuntimeState> pair in _materializedBattleResultEntriesByEntryId)
             {
                 string entryId = pair.Key;
@@ -15493,43 +15803,63 @@ namespace CoopSpectator.MissionBehaviors
                 if (!countsByEntryId.TryGetValue(entryId, out MaterializedBattleResultReconciledCounts counts))
                     counts = new MaterializedBattleResultReconciledCounts();
 
+                int activeCount = Math.Max(0, counts.ActiveCount);
+                int killedCount = Math.Max(Math.Max(0, runtimeState.KilledCount), Math.Max(0, counts.KilledCount));
+                int unconsciousCount = Math.Max(Math.Max(0, runtimeState.UnconsciousCount), Math.Max(0, counts.UnconsciousCount));
+                int routedCount = Math.Max(Math.Max(0, runtimeState.RoutedCount), Math.Max(0, counts.RoutedCount));
+                int otherRemovedCount = Math.Max(Math.Max(0, runtimeState.OtherRemovedCount), Math.Max(0, counts.OtherRemovedCount));
+                int preservedRemovedCount = Math.Max(0, runtimeState.RemovedCount);
+                int classifiedRemovedCount =
+                    killedCount +
+                    unconsciousCount +
+                    routedCount +
+                    otherRemovedCount;
+                if (preservedRemovedCount > classifiedRemovedCount)
+                    otherRemovedCount += preservedRemovedCount - classifiedRemovedCount;
+
                 int accountedCount =
-                    counts.ActiveCount +
-                    counts.KilledCount +
-                    counts.UnconsciousCount +
-                    counts.RoutedCount +
-                    counts.OtherRemovedCount;
-                int missingCount = Math.Max(0, runtimeState.MaterializedSpawnCount - accountedCount);
+                    activeCount +
+                    killedCount +
+                    unconsciousCount +
+                    routedCount +
+                    otherRemovedCount;
+                int expectedCount = Math.Max(runtimeState.MaterializedSpawnCount, accountedCount);
+                int missingCount = Math.Max(0, expectedCount - accountedCount);
                 if (missingCount > 0)
                 {
-                    counts.OtherRemovedCount += missingCount;
-                    removedTotal += missingCount;
-                    otherRemovedTotal += missingCount;
+                    otherRemovedCount += missingCount;
                 }
 
-                runtimeState.ActiveCount = counts.ActiveCount;
-                runtimeState.KilledCount = counts.KilledCount;
-                runtimeState.UnconsciousCount = counts.UnconsciousCount;
-                runtimeState.RoutedCount = counts.RoutedCount;
-                runtimeState.OtherRemovedCount = counts.OtherRemovedCount;
+                runtimeState.ActiveCount = activeCount;
+                runtimeState.KilledCount = killedCount;
+                runtimeState.UnconsciousCount = unconsciousCount;
+                runtimeState.RoutedCount = routedCount;
+                runtimeState.OtherRemovedCount = otherRemovedCount;
                 runtimeState.RemovedCount =
-                    counts.KilledCount +
-                    counts.UnconsciousCount +
-                    counts.RoutedCount +
-                    counts.OtherRemovedCount;
+                    killedCount +
+                    unconsciousCount +
+                    routedCount +
+                    otherRemovedCount;
                 runtimeState.DamageTaken = Math.Max(runtimeState.DamageTaken, Math.Max(0f, counts.ObservedDamageTaken));
+
+                finalActiveTotal += runtimeState.ActiveCount;
+                finalRemovedTotal += runtimeState.RemovedCount;
+                finalKilledTotal += runtimeState.KilledCount;
+                finalUnconsciousTotal += runtimeState.UnconsciousCount;
+                finalRoutedTotal += runtimeState.RoutedCount;
+                finalOtherRemovedTotal += runtimeState.OtherRemovedCount;
             }
 
             ModLogger.Info(
                 "CoopMissionSpawnLogic: reconciled battle result state from mission. " +
                 "Entries=" + _materializedBattleResultEntriesByEntryId.Count +
                 " TrackedAgents=" + trackedAgents +
-                " Active=" + activeTotal +
-                " Removed=" + removedTotal +
-                " Killed=" + killedTotal +
-                " Unconscious=" + unconsciousTotal +
-                " Routed=" + routedTotal +
-                " OtherRemoved=" + otherRemovedTotal +
+                " Active=" + finalActiveTotal +
+                " Removed=" + finalRemovedTotal +
+                " Killed=" + finalKilledTotal +
+                " Unconscious=" + finalUnconsciousTotal +
+                " Routed=" + finalRoutedTotal +
+                " OtherRemoved=" + finalOtherRemovedTotal +
                 " ExactOriginFallbackAgents=" + exactOriginFallbackAgents +
                 " RawScoreHitCalls=" + _materializedBattleResultRawOnScoreHitCount +
                 " RawAgentRemovedCalls=" + _materializedBattleResultRawOnAgentRemovedCount +

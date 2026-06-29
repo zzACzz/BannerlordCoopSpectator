@@ -43,6 +43,7 @@ namespace CoopSpectator.Patches
         private static string _lastDedicatedManualOnTickStepKey;
         private static string _lastDedicatedSiegeWarmupAfterStartSuppressionKey;
         private static string _lastDedicatedSiegeWarmupPreDisplaySuppressionKey;
+        private static string _lastDedicatedSiegeWarmupSpawningTickSuppressionKey;
         private static string _lastDedicatedSiegeTimerStartSuppressionKey;
         private static string _lastDedicatedSiegeTeamTickSuppressionKey;
         private static string _lastAfterStartPostfixObservationKey;
@@ -317,6 +318,12 @@ namespace CoopSpectator.Patches
                 "TaleWorlds.MountAndBlade.MultiplayerWarmupComponent",
                 "OnPreDisplayMissionTick",
                 nameof(MultiplayerWarmupComponent_OnPreDisplayMissionTick_Prefix),
+                typeof(float)) ? 1 : 0;
+            patchedCount += TryPatchMethod(
+                harmony,
+                "TaleWorlds.MountAndBlade.WarmupSpawningBehavior",
+                "OnTick",
+                nameof(WarmupSpawningBehavior_OnTick_Prefix),
                 typeof(float)) ? 1 : 0;
 
             Type networkPeerType = AccessTools.TypeByName("TaleWorlds.MountAndBlade.NetworkCommunicator");
@@ -994,6 +1001,21 @@ namespace CoopSpectator.Patches
             return !ShouldSuppressNativeBattleShell(__instance, "MultiplayerWarmupComponent.OnPreDisplayMissionTick");
         }
 
+        private static bool WarmupSpawningBehavior_OnTick_Prefix(object __instance, float dt)
+        {
+            try
+            {
+                if (ShouldSuppressDedicatedSiegeWarmupSpawningTickAfterBattleEnd(__instance, dt))
+                    return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleShellSuppressionPatch: WarmupSpawningBehavior.OnTick guard failed open: " + ex.Message);
+            }
+
+            return true;
+        }
+
         private static bool MultiplayerWarmupComponent_HandleNewClientAfterSynchronized_Prefix(object __instance, object networkPeer)
         {
             return !ShouldSuppressNativeBattleShell(__instance, "MultiplayerWarmupComponent.HandleNewClientAfterSynchronized");
@@ -1124,6 +1146,48 @@ namespace CoopSpectator.Patches
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+        }
+
+        private static bool ShouldSuppressDedicatedSiegeWarmupSpawningTickAfterBattleEnd(object instance, float dt)
+        {
+            Mission mission = (instance as MissionBehavior)?.Mission ?? Mission.Current;
+            if (!GameNetwork.IsServer || mission == null || !IsDedicatedServerProcess())
+                return false;
+
+            if (!IsCoopBattleMapRuntime(mission) ||
+                mission.GetMissionBehavior<MissionMultiplayerCoopSiegeAssaultWithDeployment>() == null)
+            {
+                return false;
+            }
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase < CoopBattlePhase.BattleEnded)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                return false;
+
+            string key =
+                (mission.SceneName ?? "unknown") + "|" +
+                SafeMissionModeName(mission) + "|" +
+                mission.CurrentState + "|" +
+                currentPhase;
+            if (!string.Equals(_lastDedicatedSiegeWarmupSpawningTickSuppressionKey, key, StringComparison.Ordinal))
+            {
+                _lastDedicatedSiegeWarmupSpawningTickSuppressionKey = key;
+                ModLogger.Info(
+                    "BattleShellSuppressionPatch: suppressed dedicated siege replay WarmupSpawningBehavior.OnTick after battle end. " +
+                    "Scene=" + (mission.SceneName ?? "unknown") +
+                    " Mode=" + SafeMissionModeName(mission) +
+                    " MissionState=" + mission.CurrentState +
+                    " BattlePhase=" + currentPhase +
+                    " Dt=" + dt.ToString("0.0000") + ".");
+            }
+
+            return true;
         }
 
         private static bool ShouldSuppressDedicatedSiegeWarmupPreDisplay(object instance, float dt)

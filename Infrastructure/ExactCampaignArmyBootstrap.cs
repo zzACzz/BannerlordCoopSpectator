@@ -50,10 +50,22 @@ namespace CoopSpectator.Infrastructure
         private static string _lastLoggedTeamAiActivationStateKey = string.Empty;
         private static readonly HashSet<TeamAIComponent> TeamAiDeploymentFinishedNotifications =
             new HashSet<TeamAIComponent>();
+        private static readonly HashSet<Mission> SiegeAssaultTeamAiLifecycleTacticRepairs =
+            new HashSet<Mission>();
         private static readonly FieldInfo TeamSideBackingField =
             typeof(Team).GetField("<Side>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo TeamAiBackingField =
             typeof(Team).GetField("<TeamAI>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly Type TeamAiSiegeComponentRuntimeType =
+            ResolveRuntimeType("TaleWorlds.MountAndBlade.TeamAISiegeComponent", "TaleWorlds.MountAndBlade");
+        private static readonly Type SiegeLaneRuntimeType =
+            ResolveRuntimeType("TaleWorlds.MountAndBlade.SiegeLane", "TaleWorlds.MountAndBlade");
+        private static readonly FieldInfo TeamAiSiegeComponentSiegeLanesField =
+            TeamAiSiegeComponentRuntimeType?.GetField("SiegeLanes", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly PropertyInfo TeamAiSiegeComponentSiegeLanesProperty =
+            TeamAiSiegeComponentRuntimeType?.GetProperty("SiegeLanes", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly FieldInfo SiegeLaneQuerySystemField =
+            SiegeLaneRuntimeType?.GetField("_siegeQuerySystem", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo DefaultMissionDeploymentPlanTeamDeploymentPlansField =
             typeof(DefaultMissionDeploymentPlan).GetField("_teamDeploymentPlans", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly PropertyInfo MissionInitializerRecordProperty =
@@ -125,6 +137,13 @@ namespace CoopSpectator.Infrastructure
                 spawnHorses = false;
                 return false;
             }
+        }
+
+        public static bool IsSiegeAssaultWithDeploymentActive(Mission mission)
+        {
+            return mission != null &&
+                   ReferenceEquals(_activeMission, mission) &&
+                   _activeMode == ActiveBootstrapMode.SiegeAssaultWithDeployment;
         }
 
         private static bool UsesSpawnLogicRuntimeMode(ActiveBootstrapMode mode)
@@ -218,6 +237,7 @@ namespace CoopSpectator.Infrastructure
             _lastLoggedTeamAiActivationStateMission = null;
             _lastLoggedTeamAiActivationStateKey = string.Empty;
             TeamAiDeploymentFinishedNotifications.Clear();
+            SiegeAssaultTeamAiLifecycleTacticRepairs.Clear();
         }
 
         public static bool TryCreateInitialSiegeAssaultWithDeploymentSpawnLogic(
@@ -1338,6 +1358,15 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
+            if (missionTeamAiType == Mission.MissionTeamAITypeEnum.Siege &&
+                IsSiegeAssaultWithDeploymentScenario(mission))
+            {
+                return TryEnsureSiegeAssaultWithDeploymentMissionTeamAiContract(
+                    mission,
+                    source,
+                    out diagnostics);
+            }
+
             Team firstTeam;
             Team secondTeam;
             string firstLabel;
@@ -1366,6 +1395,89 @@ namespace CoopSpectator.Infrastructure
                 " " + secondLabel + "={" + secondDiagnostics + "}" +
                 " Source=" + (source ?? "unknown");
             return firstReady && secondReady;
+        }
+
+        private static bool IsSiegeAssaultWithDeploymentScenario(Mission mission)
+        {
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(
+                ResolveScenarioContextForMission(mission));
+        }
+
+        private static bool TryEnsureSiegeAssaultWithDeploymentMissionTeamAiContract(
+            Mission mission,
+            string source,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            Team firstTeam;
+            Team secondTeam;
+            string firstLabel;
+            string secondLabel;
+            ResolveMissionTeamAiInitializationOrder(
+                mission,
+                Mission.MissionTeamAITypeEnum.Siege,
+                out firstTeam,
+                out secondTeam,
+                out firstLabel,
+                out secondLabel);
+
+            bool firstInstanceReady = TryEnsureMissionTeamAiInstanceForTeamSafely(
+                mission,
+                firstTeam,
+                Mission.MissionTeamAITypeEnum.Siege,
+                firstLabel,
+                out TeamAIComponent firstTeamAi,
+                out bool firstChanged,
+                out string firstInstanceDiagnostics);
+            bool secondInstanceReady = TryEnsureMissionTeamAiInstanceForTeamSafely(
+                mission,
+                secondTeam,
+                Mission.MissionTeamAITypeEnum.Siege,
+                secondLabel,
+                out TeamAIComponent secondTeamAi,
+                out bool secondChanged,
+                out string secondInstanceDiagnostics);
+
+            bool firstContractReady = false;
+            string firstContractDiagnostics = "skipped-instance-not-ready";
+            if (firstInstanceReady)
+            {
+                firstContractReady = TryFinalizeMissionTeamAiForTeamSafely(
+                    mission,
+                    firstTeam,
+                    firstTeamAi,
+                    Mission.MissionTeamAITypeEnum.Siege,
+                    firstChanged,
+                    firstLabel,
+                    out firstContractDiagnostics);
+            }
+
+            bool secondContractReady = false;
+            string secondContractDiagnostics = "skipped-instance-not-ready";
+            if (secondInstanceReady)
+            {
+                secondContractReady = TryFinalizeMissionTeamAiForTeamSafely(
+                    mission,
+                    secondTeam,
+                    secondTeamAi,
+                    Mission.MissionTeamAITypeEnum.Siege,
+                    secondChanged,
+                    secondLabel,
+                    out secondContractDiagnostics);
+            }
+
+            diagnostics =
+                "TeamAIType=Siege TwoPhase=True" +
+                " " + firstLabel + "={Instance={" + firstInstanceDiagnostics + "} Contract={" + firstContractDiagnostics + "}}" +
+                " " + secondLabel + "={Instance={" + secondInstanceDiagnostics + "} Contract={" + secondContractDiagnostics + "}}" +
+                " Source=" + (source ?? "unknown");
+            return firstInstanceReady &&
+                   secondInstanceReady &&
+                   firstContractReady &&
+                   secondContractReady;
         }
 
         private static bool TryEnsureMissionTeamAiRuntimePrerequisites(
@@ -1863,6 +1975,110 @@ namespace CoopSpectator.Infrastructure
             Mission.MissionTeamAITypeEnum missionTeamAiType,
             out string diagnostics)
         {
+            if (!TryEnsureMissionTeamAiInstanceForTeam(
+                    mission,
+                    team,
+                    missionTeamAiType,
+                    out TeamAIComponent activeTeamAi,
+                    out bool changed,
+                    out string instanceDiagnostics))
+            {
+                diagnostics = instanceDiagnostics;
+                return false;
+            }
+
+            if (!TryFinalizeMissionTeamAiForTeam(
+                    mission,
+                    team,
+                    activeTeamAi,
+                    missionTeamAiType,
+                    changed,
+                    out string contractDiagnostics))
+            {
+                diagnostics =
+                    instanceDiagnostics +
+                    " Contract={" + contractDiagnostics + "}";
+                return false;
+            }
+
+            diagnostics =
+                instanceDiagnostics +
+                " Contract={" + contractDiagnostics + "}";
+            return true;
+        }
+
+        private static bool TryEnsureMissionTeamAiInstanceForTeamSafely(
+            Mission mission,
+            Team team,
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            string label,
+            out TeamAIComponent activeTeamAi,
+            out bool changed,
+            out string diagnostics)
+        {
+            try
+            {
+                return TryEnsureMissionTeamAiInstanceForTeam(
+                    mission,
+                    team,
+                    missionTeamAiType,
+                    out activeTeamAi,
+                    out changed,
+                    out diagnostics);
+            }
+            catch (Exception ex)
+            {
+                activeTeamAi = null;
+                changed = false;
+                diagnostics =
+                    "exception Label=" + (label ?? "unknown") +
+                    " Side=" + (team?.Side.ToString() ?? "null") +
+                    " Type=" + missionTeamAiType +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        private static bool TryFinalizeMissionTeamAiForTeamSafely(
+            Mission mission,
+            Team team,
+            TeamAIComponent activeTeamAi,
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            bool teamAiWasChanged,
+            string label,
+            out string diagnostics)
+        {
+            try
+            {
+                return TryFinalizeMissionTeamAiForTeam(
+                    mission,
+                    team,
+                    activeTeamAi,
+                    missionTeamAiType,
+                    teamAiWasChanged,
+                    out diagnostics);
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "exception Label=" + (label ?? "unknown") +
+                    " Side=" + (team?.Side.ToString() ?? "null") +
+                    " Type=" + missionTeamAiType +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        private static bool TryEnsureMissionTeamAiInstanceForTeam(
+            Mission mission,
+            Team team,
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            out TeamAIComponent activeTeamAi,
+            out bool changed,
+            out string diagnostics)
+        {
+            activeTeamAi = null;
+            changed = false;
             diagnostics = "team-null";
             if (mission == null || team == null)
                 return false;
@@ -1877,7 +2093,7 @@ namespace CoopSpectator.Infrastructure
             TeamAIComponent existingTeamAi = team.TeamAI;
             string desiredTypeName = desiredTeamAiType.Name;
             string existingTypeName = existingTeamAi?.GetType().Name ?? "null";
-            bool changed = existingTeamAi == null || !desiredTeamAiType.IsInstanceOfType(existingTeamAi);
+            changed = existingTeamAi == null || !desiredTeamAiType.IsInstanceOfType(existingTeamAi);
             TeamAIComponent targetTeamAi = changed
                 ? CreateDesiredTeamAi(mission, team, missionTeamAiType)
                 : existingTeamAi;
@@ -1892,40 +2108,53 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
+            if (changed)
+                team.AddTeamAI(targetTeamAi);
+
+            activeTeamAi = team.TeamAI ?? targetTeamAi;
+            diagnostics =
+                "Side=" + team.Side +
+                " ExistingType=" + existingTypeName +
+                " DesiredType=" + desiredTypeName +
+                " Changed=" + changed +
+                " HasTeamAI=" + team.HasTeamAi;
+            return team.HasTeamAi && activeTeamAi != null;
+        }
+
+        private static bool TryFinalizeMissionTeamAiForTeam(
+            Mission mission,
+            Team team,
+            TeamAIComponent activeTeamAi,
+            Mission.MissionTeamAITypeEnum missionTeamAiType,
+            bool teamAiWasChanged,
+            out string diagnostics)
+        {
+            diagnostics = "team-ai-null";
+            if (mission == null || team == null || activeTeamAi == null)
+                return false;
+
             if (!TryPrepareMissionTeamAiTactics(
                     team,
-                    targetTeamAi,
+                    activeTeamAi,
                     missionTeamAiType,
                     out string tacticsDiagnostics))
             {
                 diagnostics =
                     "Side=" + team.Side +
-                    " ExistingType=" + existingTypeName +
-                    " DesiredType=" + desiredTypeName +
-                    " Changed=" + changed +
                     " Tactics={" + tacticsDiagnostics + "}";
                 return false;
             }
 
-            if (changed)
-            {
-                team.AddTeamAI(targetTeamAi);
-            }
-
-            TeamAIComponent activeTeamAi = team.TeamAI ?? targetTeamAi;
             if (!TryNotifyMissionTeamAiDeploymentFinishedIfNeeded(
                     mission,
                     team,
                     activeTeamAi,
                     missionTeamAiType,
-                    changed,
+                    teamAiWasChanged,
                     out string deploymentFinishedNotificationDiagnostics))
             {
                 diagnostics =
                     "Side=" + team.Side +
-                    " ExistingType=" + existingTypeName +
-                    " DesiredType=" + desiredTypeName +
-                    " Changed=" + changed +
                     " Tactics={" + tacticsDiagnostics + "}" +
                     " DeploymentFinishedNotification={" + deploymentFinishedNotificationDiagnostics + "}";
                 return false;
@@ -1936,9 +2165,6 @@ namespace CoopSpectator.Infrastructure
 
             diagnostics =
                 "Side=" + team.Side +
-                " ExistingType=" + existingTypeName +
-                " DesiredType=" + desiredTypeName +
-                " Changed=" + changed +
                 " Tactics={" + tacticsDiagnostics + "}" +
                 " DeploymentFinishedNotification={" + deploymentFinishedNotificationDiagnostics + "}" +
                 " HasTeamAI=" + team.HasTeamAi;
@@ -2047,6 +2273,219 @@ namespace CoopSpectator.Infrastructure
                     " Error=" + ex.GetType().Name + ":" + ex.Message;
                 return false;
             }
+        }
+
+        public static void TryRepairSiegeAssaultWithDeploymentTeamAiLifecycle(
+            Mission mission,
+            CoopBattlePhase currentPhase,
+            string source)
+        {
+            if (mission == null ||
+                !IsSiegeAssaultWithDeploymentScenario(mission) ||
+                currentPhase < CoopBattlePhase.BattleActive ||
+                currentPhase >= CoopBattlePhase.BattleEnded)
+            {
+                return;
+            }
+
+            if (!(mission.AttackerTeam?.TeamAI is TeamAISiegeAttacker) ||
+                !(mission.DefenderTeam?.TeamAI is TeamAISiegeDefender))
+            {
+                return;
+            }
+
+            bool lanesReadBefore = TryGetSiegeLaneQuerySystemReadiness(
+                out bool lanesReadyBefore,
+                out int laneCountBefore,
+                out int missingQuerySystemCountBefore,
+                out string laneDiagnosticsBefore);
+            bool laneQuerySystemNeedsRepair = lanesReadBefore && !lanesReadyBefore;
+            bool tacticsAlreadyRebuilt = SiegeAssaultTeamAiLifecycleTacticRepairs.Contains(mission);
+            if (tacticsAlreadyRebuilt && !laneQuerySystemNeedsRepair)
+            {
+                return;
+            }
+
+            bool attackerNotified = true;
+            bool defenderNotified = true;
+            string attackerNotificationDiagnostics = "not-required-lanes-ready-or-unavailable";
+            string defenderNotificationDiagnostics = "not-required-lanes-ready-or-unavailable";
+            if (laneQuerySystemNeedsRepair)
+            {
+                attackerNotified = TryNotifyExistingMissionTeamAiDeploymentFinished(
+                    mission.AttackerTeam,
+                    out attackerNotificationDiagnostics);
+                defenderNotified = TryNotifyExistingMissionTeamAiDeploymentFinished(
+                    mission.DefenderTeam,
+                    out defenderNotificationDiagnostics);
+            }
+
+            bool attackerTacticsRebuilt = TryPrepareMissionTeamAiTactics(
+                mission.AttackerTeam,
+                mission.AttackerTeam.TeamAI,
+                Mission.MissionTeamAITypeEnum.Siege,
+                out string attackerTacticsDiagnostics);
+            bool defenderTacticsRebuilt = TryPrepareMissionTeamAiTactics(
+                mission.DefenderTeam,
+                mission.DefenderTeam.TeamAI,
+                Mission.MissionTeamAITypeEnum.Siege,
+                out string defenderTacticsDiagnostics);
+            if (attackerTacticsRebuilt)
+            {
+                mission.AttackerTeam.QuerySystem?.Expire();
+                mission.AttackerTeam.ResetTactic();
+            }
+
+            if (defenderTacticsRebuilt)
+            {
+                mission.DefenderTeam.QuerySystem?.Expire();
+                mission.DefenderTeam.ResetTactic();
+            }
+
+            SiegeAssaultTeamAiLifecycleTacticRepairs.Add(mission);
+
+            TryGetSiegeLaneQuerySystemReadiness(
+                out bool lanesReadyAfter,
+                out int laneCountAfter,
+                out int missingQuerySystemCountAfter,
+                out string laneDiagnosticsAfter);
+
+            ModLogger.Info(
+                "ExactCampaignArmyBootstrap: repaired siege assault deployment team AI lifecycle. " +
+                "Scene=" + (mission.SceneName ?? "null") +
+                " Phase=" + currentPhase +
+                " TacticsAlreadyRebuilt=" + tacticsAlreadyRebuilt +
+                " LaneQuerySystemNeedsRepair=" + laneQuerySystemNeedsRepair +
+                " LanesBefore={Readable=" + lanesReadBefore +
+                " Ready=" + lanesReadyBefore +
+                " Count=" + laneCountBefore +
+                " MissingQuerySystems=" + missingQuerySystemCountBefore +
+                " Diagnostics=" + laneDiagnosticsBefore + "}" +
+                " LanesAfter={Ready=" + lanesReadyAfter +
+                " Count=" + laneCountAfter +
+                " MissingQuerySystems=" + missingQuerySystemCountAfter +
+                " Diagnostics=" + laneDiagnosticsAfter + "}" +
+                " AttackerNotification={" + attackerNotificationDiagnostics + "}" +
+                " DefenderNotification={" + defenderNotificationDiagnostics + "}" +
+                " AttackerTactics={" + attackerTacticsDiagnostics + "}" +
+                " DefenderTactics={" + defenderTacticsDiagnostics + "}" +
+                " AttackerSuccess=" + attackerNotified +
+                " DefenderSuccess=" + defenderNotified +
+                " AttackerTacticsRebuilt=" + attackerTacticsRebuilt +
+                " DefenderTacticsRebuilt=" + defenderTacticsRebuilt +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        private static bool TryNotifyExistingMissionTeamAiDeploymentFinished(
+            Team team,
+            out string diagnostics)
+        {
+            diagnostics = "team-null";
+            if (team == null)
+                return false;
+
+            TeamAIComponent teamAi = team.TeamAI;
+            if (teamAi == null)
+            {
+                diagnostics = "team-ai-null Side=" + team.Side;
+                return false;
+            }
+
+            if (TeamAiDeploymentFinishedNotifications.Contains(teamAi))
+            {
+                diagnostics =
+                    "already-notified Side=" + team.Side +
+                    " Type=" + teamAi.GetType().Name;
+                return true;
+            }
+
+            try
+            {
+                teamAi.OnDeploymentFinished();
+                TeamAiDeploymentFinishedNotifications.Add(teamAi);
+                diagnostics =
+                    "notified Side=" + team.Side +
+                    " Type=" + teamAi.GetType().Name;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "notify-failed Side=" + team.Side +
+                    " Type=" + teamAi.GetType().Name +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        private static bool TryGetSiegeLaneQuerySystemReadiness(
+            out bool lanesReady,
+            out int laneCount,
+            out int missingQuerySystemCount,
+            out string diagnostics)
+        {
+            lanesReady = false;
+            laneCount = 0;
+            missingQuerySystemCount = 0;
+            diagnostics = "reflection-unavailable";
+
+            if (SiegeLaneQuerySystemField == null)
+            {
+                diagnostics = "siege-lane-query-system-field-missing";
+                return false;
+            }
+
+            object siegeLanes = null;
+            try
+            {
+                if (TeamAiSiegeComponentSiegeLanesProperty != null)
+                    siegeLanes = TeamAiSiegeComponentSiegeLanesProperty.GetValue(null, null);
+                else if (TeamAiSiegeComponentSiegeLanesField != null)
+                    siegeLanes = TeamAiSiegeComponentSiegeLanesField.GetValue(null);
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "siege-lanes-read-failed " +
+                    ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+
+            var enumerable = siegeLanes as System.Collections.IEnumerable;
+            if (enumerable == null)
+            {
+                diagnostics = "siege-lanes-unavailable";
+                return false;
+            }
+
+            foreach (object lane in enumerable)
+            {
+                if (lane == null)
+                    continue;
+
+                laneCount++;
+                object querySystem = null;
+                try
+                {
+                    querySystem = SiegeLaneQuerySystemField.GetValue(lane);
+                }
+                catch (Exception ex)
+                {
+                    diagnostics =
+                        "siege-lane-query-system-read-failed " +
+                        ex.GetType().Name + ":" + ex.Message;
+                    return false;
+                }
+
+                if (querySystem == null)
+                    missingQuerySystemCount++;
+            }
+
+            lanesReady = laneCount > 0 && missingQuerySystemCount == 0;
+            diagnostics =
+                "LaneCount=" + laneCount +
+                " MissingQuerySystems=" + missingQuerySystemCount;
+            return true;
         }
 
         private static TeamAIComponent CreateDesiredTeamAi(
@@ -2837,6 +3276,66 @@ namespace CoopSpectator.Infrastructure
                 " PlayerSide=" + _activePlayerSide +
                 " Source=" + (source ?? "unknown"));
             TryLogRuntimeDiagnostics(mission, source + " gate-change", force: true);
+        }
+
+        public static void TrySuppressNativeReinforcementSpawnersForMaterializedSiege(Mission mission, string source)
+        {
+            if (!IsActive(mission) ||
+                !ReferenceEquals(_activeMission, mission) ||
+                _activeMode != ActiveBootstrapMode.SiegeAssaultWithDeployment ||
+                _activeSpawnLogic == null)
+            {
+                return;
+            }
+
+            bool defenderWasEnabled = false;
+            bool attackerWasEnabled = false;
+            try
+            {
+                defenderWasEnabled = _activeSpawnLogic.IsSideSpawnEnabled(BattleSideEnum.Defender);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                attackerWasEnabled = _activeSpawnLogic.IsSideSpawnEnabled(BattleSideEnum.Attacker);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                _activeSpawnLogic.SetReinforcementsSpawnEnabled(false);
+                _activeSpawnLogic.StopSpawner(BattleSideEnum.Defender);
+                _activeSpawnLogic.StopSpawner(BattleSideEnum.Attacker);
+                _reinforcementsEnabled = false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "ExactCampaignArmyBootstrap: failed to suppress native siege reinforcement spawners. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " Mode=" + _activeMode +
+                    " PlayerSide=" + _activePlayerSide +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+                return;
+            }
+
+            if (!defenderWasEnabled && !attackerWasEnabled)
+                return;
+
+            ModLogger.Info(
+                "ExactCampaignArmyBootstrap: suppressed native siege reinforcement spawners for materialized siege runtime. " +
+                "Scene=" + (mission.SceneName ?? "null") +
+                " DefenderWasEnabled=" + defenderWasEnabled +
+                " AttackerWasEnabled=" + attackerWasEnabled +
+                " Mode=" + _activeMode +
+                " PlayerSide=" + _activePlayerSide +
+                " Source=" + (source ?? "unknown"));
         }
 
         public static void TryMaintainMissionPlayerTeamContract(Mission mission, string source)

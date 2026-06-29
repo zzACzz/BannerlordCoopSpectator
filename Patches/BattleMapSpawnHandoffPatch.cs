@@ -2161,6 +2161,17 @@ namespace CoopSpectator.Patches
                             "battle-map handoff CreateAgent prefix");
                         return false;
                     }
+
+                    if (TryHandleExactSiegeTroopCreateAgentViaSnapshot(
+                            mission,
+                            createAgent))
+                    {
+                        ExactCreateAgentCorridorDiagnostics.ObserveClientCreateAgentBypass(
+                            createAgent,
+                            "exact-siege-troop-snapshot-adapter",
+                            "battle-map handoff CreateAgent prefix");
+                        return false;
+                    }
                 }
                 else if (mountedHeroPayloadCandidate)
                 {
@@ -5850,6 +5861,20 @@ namespace CoopSpectator.Patches
                         setWeaponAmmoData,
                         out string exactSiegeUnsafeReason))
                 {
+                    if (IsPermanentExactSiegeClientWeaponAmmoNativeUnsafeReason(exactSiegeUnsafeReason))
+                    {
+                        RemoveDeferredClientSetWeaponAmmoDataPayload(
+                            setWeaponAmmoData.AgentIndex,
+                            setWeaponAmmoData);
+                        LogSuppressedExactSiegeUnsafeWeaponState(
+                            nameof(SetWeaponAmmoData),
+                            setWeaponAmmoData.AgentIndex,
+                            setWeaponAmmoData.WeaponEquipmentIndex,
+                            exactSiegeUnsafeReason,
+                            source);
+                        continue;
+                    }
+
                     deferredPayload.LastAttemptUtc = nowUtc;
                     deferredPayload.Attempts++;
                     LogDeferredExactSiegeUnsafeWeaponAmmoData(
@@ -6054,6 +6079,12 @@ namespace CoopSpectator.Patches
             }
 
             return true;
+        }
+
+        private static bool IsPermanentExactSiegeClientWeaponAmmoNativeUnsafeReason(string reason)
+        {
+            return !string.IsNullOrWhiteSpace(reason) &&
+                   reason.StartsWith("ammo-slot-invalid:", StringComparison.Ordinal);
         }
 
         private static bool DoesWeaponUsageRequireSeparateAmmo(ItemObject weaponItem, WeaponComponentData weaponUsage)
@@ -7969,6 +8000,236 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool TryHandleExactSiegeTroopCreateAgentViaSnapshot(
+            Mission mission,
+            CreateAgent createAgent)
+        {
+            if (mission == null ||
+                createAgent == null ||
+                GameNetwork.IsServer ||
+                createAgent.IsPlayerAgent ||
+                createAgent.Peer != null ||
+                createAgent.MountAgentIndex >= 0 ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            if (!TryResolveExactSiegeTroopCreateAgentEntry(
+                    mission,
+                    createAgent,
+                    out string entryId,
+                    out RosterEntryState entryState,
+                    out string resolutionState,
+                    out string payloadComparisonSummary))
+            {
+                return false;
+            }
+
+            BasicCharacterObject character =
+                BattleSnapshotRuntimeState.TryResolveCharacterObject(entryId) ??
+                createAgent.Character;
+            if (character == null)
+                return false;
+
+            Team teamFromTeamIndex = ResolveCreateAgentMissionTeam(mission, createAgent.TeamIndex);
+            if (teamFromTeamIndex == null)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: exact siege troop CreateAgent adapter skipped because mission team was unavailable. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " TeamIndex=" + createAgent.TeamIndex +
+                    " EntryId=" + (entryId ?? "null") +
+                    " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null"));
+                return false;
+            }
+
+            Formation formation = ResolveCreateAgentFormationForProjection(
+                mission,
+                teamFromTeamIndex,
+                createAgent,
+                character);
+            Banner banner = ResolveStrictExactHeroCreateAgentBanner(teamFromTeamIndex, formation);
+            Equipment createTimeSpawnEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
+                entryState,
+                includeWeapons: true,
+                honorExactVisualContracts: false,
+                includeArmorVisuals: true,
+                includeMountVisuals: false);
+            if (createTimeSpawnEquipment == null)
+                return false;
+
+            createTimeSpawnEquipment[EquipmentIndex.Horse] = default;
+            createTimeSpawnEquipment[EquipmentIndex.HorseHarness] = default;
+            MissionEquipment createTimeMissionEquipment = new MissionEquipment(createTimeSpawnEquipment, banner);
+
+            Vec2 initialDirection = createAgent.Direction;
+            if (initialDirection.LengthSquared <= 0.001f)
+                initialDirection = teamFromTeamIndex.Side == BattleSideEnum.Attacker
+                    ? new Vec2(1f, 0f)
+                    : new Vec2(-1f, 0f);
+
+            TaleWorlds.Localization.TextObject originalTroopName = null;
+            bool hasTemporaryNameOverride =
+                CoopMissionSpawnLogic.TryApplyEntryNameToSpawnCharacter(character, entryState, out originalTroopName);
+            try
+            {
+                AgentBuildData buildData = new AgentBuildData(character)
+                    .Monster(createAgent.Monster)
+                    .TroopOrigin(new BasicBattleAgentOrigin(character))
+                    .Controller(AgentControllerType.AI)
+                    .Equipment(createTimeSpawnEquipment)
+                    .EquipmentSeed(createAgent.BodyPropertiesSeed)
+                    .InitialPosition(createAgent.Position)
+                    .InitialDirection(initialDirection.Normalized())
+                    .MissionEquipment(createTimeMissionEquipment)
+                    .Team(teamFromTeamIndex)
+                    .Index(createAgent.AgentIndex)
+                    .MountIndex(-1)
+                    .IsFemale(createAgent.IsFemale)
+                    .ClothingColor1(createAgent.ClothingColor1)
+                    .ClothingColor2(createAgent.ClothingColor2)
+                    .BodyProperties(createAgent.BodyPropertiesValue);
+                if (formation != null)
+                    buildData.Formation(formation);
+                if (banner != null)
+                    buildData.Banner(banner);
+
+                Agent agent = mission.SpawnAgent(buildData);
+                if (agent == null)
+                {
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: exact siege troop CreateAgent adapter returned null agent. " +
+                        "AgentIndex=" + createAgent.AgentIndex +
+                        " EntryId=" + (entryId ?? "null"));
+                    return false;
+                }
+
+                CoopMissionSpawnLogic.TryApplyEntryIdentityToAgent(agent, entryState);
+                CoopMissionSpawnLogic.ObserveClientAuthoritativeMaterializedAgentEntry(
+                    agent.Index,
+                    entryId,
+                    "battle-map exact siege troop CreateAgent adapter");
+                CoopMissionSpawnLogic.ObserveClientCreateAgentPostfix(
+                    agent,
+                    "battle-map exact siege troop CreateAgent adapter");
+                ExactTransferContractRuntimeCache.ObserveClientMaterialized(
+                    agent.Index,
+                    agent,
+                    "battle-map exact siege troop CreateAgent adapter");
+
+                string payloadSummary =
+                    "EntryId=" + (entryId ?? "null") +
+                    " ResolutionState=" + (resolutionState ?? "null") +
+                    " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                    " SnapshotCharacter=" + (character.StringId ?? "null") +
+                    " MountAgentIndex=" + createAgent.MountAgentIndex +
+                    " FormationIndex=" + createAgent.FormationIndex +
+                    " PayloadCompare=" + (payloadComparisonSummary ?? "null") +
+                    " ExactWeapons={" + BuildEquipmentSummary(
+                        createTimeSpawnEquipment,
+                        EquipmentIndex.Weapon0,
+                        EquipmentIndex.Weapon1,
+                        EquipmentIndex.Weapon2,
+                        EquipmentIndex.Weapon3) + "}" +
+                    " ExactMount={" + BuildEquipmentSummary(
+                        createTimeSpawnEquipment,
+                        EquipmentIndex.Horse,
+                        EquipmentIndex.HorseHarness) + "}";
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: handled exact siege troop CreateAgent via snapshot adapter. " +
+                    "AgentIndex=" + agent.Index +
+                    " TeamSide=" + agent.Team?.Side +
+                    " " + payloadSummary);
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-create-agent-exact-siege-troop-snapshot-adapter",
+                    "AgentIndex=" + agent.Index +
+                    " " + payloadSummary +
+                    " Source=battle-map exact siege troop CreateAgent adapter");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: exact siege troop CreateAgent adapter failed. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " EntryId=" + (entryId ?? "null") +
+                    " ResolutionState=" + (resolutionState ?? "null") +
+                    " Message=" + ex.Message);
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-create-agent-exact-siege-troop-snapshot-adapter-failed",
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " EntryId=" + (entryId ?? "null") +
+                    " ResolutionState=" + (resolutionState ?? "null") +
+                    " Message=" + ex.Message +
+                    " Source=battle-map exact siege troop CreateAgent adapter");
+                return false;
+            }
+            finally
+            {
+                CoopMissionSpawnLogic.RestoreSpawnCharacterName(character, hasTemporaryNameOverride, originalTroopName);
+            }
+        }
+
+        private static bool TryResolveExactSiegeTroopCreateAgentEntry(
+            Mission mission,
+            CreateAgent createAgent,
+            out string entryId,
+            out RosterEntryState entryState,
+            out string resolutionState,
+            out string payloadComparisonSummary)
+        {
+            entryId = null;
+            entryState = null;
+            resolutionState = null;
+            payloadComparisonSummary = null;
+
+            if (mission == null ||
+                createAgent == null ||
+                createAgent.MountAgentIndex >= 0 ||
+                createAgent.Character == null)
+            {
+                return false;
+            }
+
+            if (!ExactCreateAgentCorridorDiagnostics.TryResolveClientCreateAgentPayloadEntryId(
+                    createAgent,
+                    out entryId,
+                    out resolutionState,
+                    out payloadComparisonSummary))
+            {
+                return false;
+            }
+
+            if (!IsExactSiegeTroopCreateAgentResolutionAllowed(resolutionState) ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                return false;
+            }
+
+            entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (entryState == null || IsExactHeroEntry(entryState))
+                return false;
+
+            if (entryState.IsMounted &&
+                !ShouldUseDismountedSiegeCreateAgentFormation(
+                    mission,
+                    ResolveCreateAgentMissionTeam(mission, createAgent.TeamIndex),
+                    createAgent.Character))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsExactSiegeTroopCreateAgentResolutionAllowed(string resolutionState)
+        {
+            return string.Equals(resolutionState, "resolved-strong", StringComparison.Ordinal) ||
+                   string.Equals(resolutionState, "resolved-layout", StringComparison.Ordinal) ||
+                   string.Equals(resolutionState, "resolved-character", StringComparison.Ordinal);
+        }
+
         private static bool TryHandleMountedHeroCreateAgentViaPayloadAdapter(
             Mission mission,
             CreateAgent createAgent,
@@ -8976,6 +9237,8 @@ namespace CoopSpectator.Patches
                 {
                     formationClass = character?.DefaultFormationClass.FallbackClass() ?? FormationClass.Infantry;
                 }
+
+                formationClass = DismountSiegeCreateAgentFormationClass(formationClass);
             }
 
             int formationIndex = (int)formationClass;
@@ -9011,6 +9274,17 @@ namespace CoopSpectator.Patches
             {
                 return true;
             }
+        }
+
+        private static FormationClass DismountSiegeCreateAgentFormationClass(FormationClass formationClass)
+        {
+            if (formationClass == FormationClass.Cavalry)
+                return FormationClass.Infantry;
+
+            if (formationClass == FormationClass.HorseArcher)
+                return FormationClass.Ranged;
+
+            return formationClass;
         }
 
         private static BattleSideEnum ResolveCreateAgentPayloadBattleSideForPatch(int teamIndex)
@@ -10639,6 +10913,20 @@ namespace CoopSpectator.Patches
                         setWeaponAmmoData,
                         out string exactSiegeUnsafeReason))
                 {
+                    if (IsPermanentExactSiegeClientWeaponAmmoNativeUnsafeReason(exactSiegeUnsafeReason))
+                    {
+                        RemoveDeferredClientSetWeaponAmmoDataPayload(
+                            setWeaponAmmoData.AgentIndex,
+                            setWeaponAmmoData);
+                        LogSuppressedExactSiegeUnsafeWeaponState(
+                            nameof(SetWeaponAmmoData),
+                            setWeaponAmmoData.AgentIndex,
+                            setWeaponAmmoData.WeaponEquipmentIndex,
+                            exactSiegeUnsafeReason,
+                            "prefix");
+                        return false;
+                    }
+
                     RegisterDeferredClientSetWeaponAmmoDataPayload(
                         setWeaponAmmoData,
                         "exact-siege-native-weapon-slot-not-ready:" + (exactSiegeUnsafeReason ?? "unknown"));
@@ -11508,6 +11796,53 @@ namespace CoopSpectator.Patches
                         "client-set-wielded-item-index-suppressed",
                         "battle-map handoff SetWieldedItemIndex incomplete-loadout guard",
                         incompleteLoadoutPayloadSummary);
+                    return false;
+                }
+
+                if (ShouldUseSafeStringIdCreateAgentPathOnClient(mission) &&
+                    !IsExactSiegeClientWeaponUsageIndexNativeSafe(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.WieldedItemIndex,
+                        setWieldedItemIndex.MainHandCurrentUsageIndex,
+                        out string unsafeUsageIndexReason))
+                {
+                    __state = true;
+                    string unsafeUsagePayloadSummary =
+                        "PayloadWieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                        " PayloadIsLeftHand=" + setWieldedItemIndex.IsLeftHand +
+                        " PayloadIsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
+                        " PayloadIsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
+                        " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
+                        " SuppressedReason=" + (unsafeUsageIndexReason ?? "unsafe-usage-index");
+
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed unsafe client SetWieldedItemIndex because exact siege weapon usage index is not native-safe. " +
+                        "AgentIndex=" + agent.Index +
+                        " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                        " TeamSide=" + agent.Team?.Side +
+                        " MissionWeapons={" + BuildMissionEquipmentWeaponSummary(agent.Equipment) + "}" +
+                        " SpawnWeapons={" + BuildEquipmentSummary(
+                            agent.SpawnEquipment,
+                            EquipmentIndex.Weapon0,
+                            EquipmentIndex.Weapon1,
+                            EquipmentIndex.Weapon2,
+                            EquipmentIndex.Weapon3) + "} " +
+                        unsafeUsagePayloadSummary);
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientSetWieldedItemIndex(
+                        setWieldedItemIndex,
+                        agent,
+                        suppressed: true,
+                        source: "battle-map handoff SetWieldedItemIndex usage-index guard");
+                    CoopMissionSpawnLogic.ObserveClientSetWieldedItemIndex(
+                        setWieldedItemIndex.AgentIndex,
+                        setWieldedItemIndex.IsWieldedOnSpawn,
+                        "battle-map handoff SetWieldedItemIndex usage-index guard");
+                    CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                        agent,
+                        "client-set-wielded-item-index-suppressed",
+                        "battle-map handoff SetWieldedItemIndex usage-index guard",
+                        unsafeUsagePayloadSummary);
                     return false;
                 }
 
