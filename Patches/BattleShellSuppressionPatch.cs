@@ -46,6 +46,7 @@ namespace CoopSpectator.Patches
         private static string _lastDedicatedSiegeWarmupSpawningTickSuppressionKey;
         private static string _lastDedicatedSiegeTimerStartSuppressionKey;
         private static string _lastDedicatedSiegeTeamTickSuppressionKey;
+        private static string _lastDedicatedSiegeScoreStatsSuppressionKey;
         private static string _lastAfterStartPostfixObservationKey;
         private static string _lastSiegeStartupPassThroughLogKey;
         private static string _lastSiegeLobbyEarlyStartDiagnosticsKey;
@@ -246,6 +247,13 @@ namespace CoopSpectator.Patches
                 "TaleWorlds.MountAndBlade.DedicatedCustomServer.MissionCustomGameServerComponent",
                 "AfterStart",
                 nameof(MissionCustomGameServerComponent_AfterStart_Postfix)) ? 1 : 0;
+            patchedCount += TryPatchMethod(
+                harmony,
+                "TaleWorlds.MountAndBlade.DedicatedCustomServer.MissionCustomGameServerComponent",
+                "AddScoresToStats",
+                nameof(MissionCustomGameServerComponent_AddScoresToStats_Prefix),
+                typeof(MultiplayerGameType),
+                typeof(IEnumerable<MissionPeer>)) ? 1 : 0;
             patchedCount += TryPatchMethod(
                 harmony,
                 "TaleWorlds.MountAndBlade.MissionScoreboardComponent",
@@ -807,6 +815,20 @@ namespace CoopSpectator.Patches
             LogAfterStartPostfixObservation((__instance as MissionBehavior)?.Mission ?? Mission.Current, "MissionCustomGameServerComponent.AfterStart completed");
         }
 
+        private static bool MissionCustomGameServerComponent_AddScoresToStats_Prefix(object __instance, MultiplayerGameType __0, IEnumerable<MissionPeer> __1)
+        {
+            try
+            {
+                Mission mission = (__instance as MissionBehavior)?.Mission ?? Mission.Current;
+                return !ShouldSuppressDedicatedSiegeScoreStatsWrite(__0, mission, __1);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleShellSuppressionPatch: dedicated siege score stats guard failed open: " + ex.Message);
+                return true;
+            }
+        }
+
         private static void MissionScoreboardComponent_AfterStart_Prefix(object __instance)
         {
             LogOfficialBattleStartupObservation((__instance as MissionBehavior)?.Mission ?? Mission.Current, "MissionScoreboardComponent.AfterStart");
@@ -1188,6 +1210,77 @@ namespace CoopSpectator.Patches
             }
 
             return true;
+        }
+
+        private static bool ShouldSuppressDedicatedSiegeScoreStatsWrite(
+            MultiplayerGameType gameType,
+            Mission mission,
+            IEnumerable<MissionPeer> peers)
+        {
+            if (!GameNetwork.IsServer || mission == null || !IsDedicatedServerProcess())
+                return false;
+
+            if (gameType != MultiplayerGameType.Siege)
+                return false;
+
+            if (!IsCoopBattleMapRuntime(mission) ||
+                mission.GetMissionBehavior<MissionMultiplayerCoopSiegeAssaultWithDeployment>() == null)
+            {
+                return false;
+            }
+
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                return false;
+
+            string key =
+                (mission.SceneName ?? "unknown") + "|" +
+                SafeMissionModeName(mission) + "|" +
+                mission.CurrentState + "|" +
+                CoopBattlePhaseRuntimeState.GetPhase() + "|" +
+                gameType;
+            if (!string.Equals(_lastDedicatedSiegeScoreStatsSuppressionKey, key, StringComparison.Ordinal))
+            {
+                _lastDedicatedSiegeScoreStatsSuppressionKey = key;
+                ModLogger.Info(
+                    "BattleShellSuppressionPatch: suppressed dedicated siege replay score stats write during end transition. " +
+                    "Scene=" + (mission.SceneName ?? "unknown") +
+                    " Mode=" + SafeMissionModeName(mission) +
+                    " MissionState=" + mission.CurrentState +
+                    " BattlePhase=" + CoopBattlePhaseRuntimeState.GetPhase() +
+                    " GameType=" + gameType +
+                    " PeerCount=" + SafeCountMissionPeers(peers) +
+                    " Reason=official CustomGameType can remain Battle while coop siege mission ends as Siege.");
+            }
+
+            return true;
+        }
+
+        private static int SafeCountMissionPeers(IEnumerable<MissionPeer> peers)
+        {
+            if (peers == null)
+                return 0;
+
+            try
+            {
+                int count = 0;
+                foreach (MissionPeer peer in peers)
+                {
+                    if (peer != null)
+                        count++;
+                }
+
+                return count;
+            }
+            catch
+            {
+                return -1;
+            }
         }
 
         private static bool ShouldSuppressDedicatedSiegeWarmupPreDisplay(object instance, float dt)

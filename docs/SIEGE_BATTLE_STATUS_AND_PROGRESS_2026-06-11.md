@@ -1,8 +1,85 @@
 # Стан розробки Siege Battle
 
-Оновлено: 2026-06-25.
+Оновлено: 2026-06-29.
 
 Це living status document (живий документ стану), який треба продовжувати вести в нових чатах під час розробки режиму облоги в `BannerlordCoopSpectator3`.
+
+## Актуальний зріз на 2026-06-29
+
+Останній checkpoint commit (контрольна фіксація стану) перед поточним локальним етапом:
+
+- `b10fa55 Checkpoint siege materialized agents and engines`.
+
+Після цього commit (фіксації) є uncommitted local changes (локальні зміни без фіксації) у `C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs`, які покращують materialized siege reinforcement spawn (матеріалізоване створення підкріплень облоги): для облоги використовується повний battle-side roster (повний список бійців сторони бою), normal wave budget (нормальний бюджет хвилі) і розкладка агентів по ширині/глибині з урахуванням native deployment plan (рідного плану розстановки).
+
+### Підтверджено логами після останнього прогону
+
+Логи останнього прогону:
+
+- `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_20668.txt` - dedicated server log (журнал виділеного сервера);
+- `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_17724.txt` - campaign host log (журнал хоста кампанії);
+- `C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_3468.txt` - client log (журнал клієнта);
+- `C:\ProgramData\Mount and Blade II Bannerlord\crashes\2026-06-29_02.25.21\watchdog_log_20668.txt` - crash watchdog log (журнал наглядача падіння);
+- `C:\ProgramData\Mount and Blade II Bannerlord\crashes\2026-06-29_02.25.21\dump.dmp` - crash dump (дамп аварії).
+
+Підтверджений стан:
+
+- Бій дійшов до authoritative battle completion (авторитетного завершення бою) на сервері: `AttackerActive=109`, `DefenderActive=0`, `WinnerSide=Attacker`.
+- Сервер записав `battle_result.json` о `05:25:06.220`, `Entries=430`.
+- Campaign host (хост кампанії) підхопив результат: є `prepared authoritative encounter result bridge` (підготовлений міст результату бою), `Requested local mission exit` (запит локального виходу з місії) і `consumed battle_result writeback audit` (аудит застосованого запису результату назад у кампанію).
+- Writeback (запис результатів назад у кампанію) не є лише частковим з точки зору ключового результату: застосовано перемогу атакуючих, втрати, XP (досвід), reward projection (проєкцію нагороди) і reward apply (застосування нагороди). Лог містить `TroopsAdjusted=17`, `TroopXp=19080`, `HeroSkillXp=308493`, `Gold=500`, `Morale=63.56`, `Renown=126.12`.
+- У writeback audit (аудиті запису результатів назад) лишились `UnresolvedAggregates=8` і `UnresolvedEvents=1182`; це не зупинило застосування результату, але є окремим ризиком для точності aftermath (післябойових наслідків).
+- Materialized reinforcement runtime (runtime матеріалізованих підкріплень) більше не виглядає головним blocker (блокером): останній прогін не завис на кількох оборонцях, а дійшов до знищення оборони. Рядки `DefenderSpawned=1..5` у `materialized reinforcement wave spawned` не треба читати як повну хвилю по 1-5 бійців; у тих самих рядках часто є `PulsedAgents=43`, тобто система дозаповнювала втрати до активного ліміту оборони.
+- Native exact bootstrap (рідний точний запуск армії) усе ще показує `ReinforcementsEnabled=False`; для siege replay (відтворення облоги) підкріплення зараз веде наш materialized runtime (runtime матеріалізованих агентів), а не native reinforcement controller (рідний контролер підкріплень).
+- Dedicated server (виділений сервер) мав сильні FPS drops (просідання кадрів на секунду) у фінальній частині бою: приблизно 17-43 FPS, особливо перед завершенням.
+- Client log (журнал клієнта) містить повторні `Exception in handler of SetStonePileAmmo` (помилки обробника синхронізації боєзапасу каменемета). Це не є підтвердженою причиною останнього падіння, але залишається симптомом для окремого дослідження siege engine ammo sync (синхронізації боєзапасу облогових машин).
+
+### Остання зафіксована межа падіння
+
+Падіння сервера сталося не під час active battle (активного бою), а після `BattleEnded` (стану завершеної битви), коли результат уже був записаний і кампанія вже почала/встигла його застосувати.
+
+Критична послідовність у `rgl_log_20668.txt`:
+
+- `05:25:06.127` - `CoopBattlePhaseRuntimeState` переходить у `BattleEnded`.
+- `05:25:06.220` - `CoopBattleResultBridgeFile` записує результат бою.
+- `05:25:06.491` - `Multiplayer game mission ending`.
+- `05:25:06.492` - multiplayer state (стан мультиплеєру) відправлено клієнтам як `Ending`.
+- `05:25:08..20` - повторюється `deferred risky battle-map startup runtime` (відкладений ризиковий runtime старту бойової карти) вже після завершення бою.
+- `05:25:21.797` - `EndGameAsServer called`.
+- `05:25:21.800` - `I called EndMission`.
+- `05:25:21.805` - `I called EndMissionInternal`.
+- Після цього `watchdog_log_20668.txt` фіксує native access violation (нативну помилку доступу до пам'яті) `0xC0000005` на dedicated server (виділеному сервері).
+
+Поточна інтерпретація: root cause (коренева причина) наступного blocker (блокера), ймовірно, в end transition cleanup path (шляху очищення під час завершення місії), а не в materialized reinforcement spawn (матеріалізованому створенні підкріплень). Особливо підозрілий перехід у `BattleShellSuppressionPatch`: після `BattleEnded` він дозволяє native battle shell path (нативний шлях бойової оболонки) замість придушення, і саме після цього сервер заходить у `EndMissionInternal`.
+
+### Текст для нового вікна
+
+```text
+Продовжуємо в C:\dev\projects\BannerlordCoopSpectator3.
+
+Актуальний стан siege replay (відтворення облоги) після останнього прогону:
+- materialized siege reinforcement spawn (матеріалізоване створення підкріплень облоги) візуально став кращим;
+- бій дійшов до завершення, оборонці були знищені;
+- dedicated server (виділений сервер) записав battle_result.json з WinnerSide=Attacker і Entries=430;
+- campaign host (хост кампанії) застосував результат через consumed battle_result writeback audit;
+- падіння сервера сталося вже після BattleEnded, під час EndGameAsServer / EndMission / EndMissionInternal.
+
+Головна наступна задача:
+дослідити і виправити native crash (нативне падіння) на end transition (переході завершення місії) для siege replay (відтворення облоги), не змішуючи це з field battle (польовою битвою) і village battle (битвою в селі).
+
+Починати з:
+- C:\dev\projects\BannerlordCoopSpectator3\Patches\BattleShellSuppressionPatch.cs - логіка allow native battle shell path for end transition (дозвіл нативного шляху бойової оболонки під час завершення);
+- C:\dev\projects\BannerlordCoopSpectator3\Mission\CoopMissionBehaviors.cs - TryCompleteBattleIfResolved, OnEndMission, deferred risky battle-map startup runtime after BattleEnded (відкладений ризиковий runtime після завершення);
+- C:\dev\projects\BannerlordCoopSpectator3\Campaign\BattleDetector.cs - SendEndMission після campaign writeback (запису результату назад у кампанію);
+- перевірити, чи не треба для siege після запису battle_result.json робити controlled dedicated shutdown (кероване завершення виділеного сервера) без повторного небезпечного native EndMissionInternal path (нативного шляху EndMissionInternal).
+
+Логи:
+- C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_20668.txt
+- C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_17724.txt
+- C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_3468.txt
+- C:\ProgramData\Mount and Blade II Bannerlord\crashes\2026-06-29_02.25.21\watchdog_log_20668.txt
+- C:\ProgramData\Mount and Blade II Bannerlord\crashes\2026-06-29_02.25.21\dump.dmp
+```
 
 ## Актуальний зріз на 2026-06-25
 

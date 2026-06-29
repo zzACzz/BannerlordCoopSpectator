@@ -3792,6 +3792,9 @@ namespace CoopSpectator.MissionBehaviors
         private const int InitialMaterializedArmySpawnPulseBudgetPerSide = 1;
         private const double InitialMaterializedArmyPulseIntervalSeconds = 0.35d;
         private const double MaterializedArmyReinforcementPulseIntervalSeconds = 0.75d;
+        private const float MaterializedSiegeReinforcementLateralSpacing = 1.8f;
+        private const float MaterializedSiegeReinforcementDepthSpacing = 2.2f;
+        private const int MaterializedSiegeReinforcementFallbackColumns = 12;
         private const string FallbackMissionAttackerCultureId = "empire";
         private const string FallbackMissionDefenderCultureId = "vlandia";
         private static readonly string[] ImportedEquipmentProbeIds =
@@ -11747,8 +11750,8 @@ namespace CoopSpectator.MissionBehaviors
             }
             else
             {
-                attackerReserve = CountMaterializedUnspawnedReserveForSide(BattleSideEnum.Attacker);
-                defenderReserve = CountMaterializedUnspawnedReserveForSide(BattleSideEnum.Defender);
+                attackerReserve = CountMaterializedUnspawnedReserveForSide(mission, BattleSideEnum.Attacker);
+                defenderReserve = CountMaterializedUnspawnedReserveForSide(mission, BattleSideEnum.Defender);
                 reserveSource = "materialized-runtime";
             }
 
@@ -12311,7 +12314,10 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || team == null || side == BattleSideEnum.None)
                 return 0;
 
-            IReadOnlyList<RosterEntryState> entryStates = GetAutomatedMaterializableEntryStatesSnapshot(side);
+            bool useMaterializedSiegeReinforcements = ShouldUseMaterializedSiegeReinforcements(mission);
+            IReadOnlyList<RosterEntryState> entryStates = GetAutomatedMaterializableEntryStatesSnapshot(
+                side,
+                preferFullBattleSideRoster: useMaterializedSiegeReinforcements);
             if (entryStates == null || entryStates.Count == 0)
                 return 0;
 
@@ -12338,7 +12344,13 @@ namespace CoopSpectator.MissionBehaviors
                 activeForSide += activeCount;
 
                 int totalRemainingCount = Math.Max(0, availableCount - spawnedCount);
-                int concurrentRemainingCapacity = Math.Max(0, Math.Min(availableCount, GetMaterializedAgentsPerEntryCap(side, entryStates.Count)) - activeCount);
+                int concurrentRemainingCapacity = GetMaterializedReinforcementConcurrentCapacity(
+                    mission,
+                    side,
+                    entryStates.Count,
+                    availableCount,
+                    activeCount,
+                    totalRemainingCount);
                 if (totalRemainingCount <= 0 || concurrentRemainingCapacity <= 0)
                     continue;
 
@@ -12368,6 +12380,11 @@ namespace CoopSpectator.MissionBehaviors
             if (remainingSideNeed <= 0)
                 return 0;
 
+            if (useMaterializedSiegeReinforcements)
+                remainingSideNeed = Math.Min(
+                    remainingSideNeed,
+                    GetMaterializedSiegeReinforcementWaveBudget(sideCap, remainingSideNeed));
+
             int spawnedCountForSide = 0;
             var queuedByEntryId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
@@ -12387,7 +12404,10 @@ namespace CoopSpectator.MissionBehaviors
                     candidate.Troop,
                     candidate.EntryState,
                     seedCount,
-                    activeForSide + spawnedCountForSide,
+                    GetMaterializedReinforcementPlacementOffset(
+                        useMaterializedSiegeReinforcements,
+                        activeForSide,
+                        spawnedCountForSide),
                     source + " reinforcement character=" + candidate.ResolvedTroopSource + " pass=seed",
                     isReinforcement: true);
                 if (spawned <= 0)
@@ -12414,7 +12434,10 @@ namespace CoopSpectator.MissionBehaviors
                     candidate.Troop,
                     candidate.EntryState,
                     fillCount,
-                    activeForSide + spawnedCountForSide,
+                    GetMaterializedReinforcementPlacementOffset(
+                        useMaterializedSiegeReinforcements,
+                        activeForSide,
+                        spawnedCountForSide),
                     source + " reinforcement character=" + candidate.ResolvedTroopSource + " pass=fill",
                     isReinforcement: true);
                 if (spawned <= 0)
@@ -12457,6 +12480,44 @@ namespace CoopSpectator.MissionBehaviors
                 : 0;
         }
 
+        private static int GetMaterializedReinforcementConcurrentCapacity(
+            Mission mission,
+            BattleSideEnum side,
+            int requestedEntryCount,
+            int availableCount,
+            int activeCount,
+            int totalRemainingCount)
+        {
+            if (availableCount <= 0 || totalRemainingCount <= 0)
+                return 0;
+
+            if (ShouldUseMaterializedSiegeReinforcements(mission))
+                return Math.Max(0, Math.Min(totalRemainingCount, availableCount - activeCount));
+
+            return Math.Max(
+                0,
+                Math.Min(availableCount, GetMaterializedAgentsPerEntryCap(side, requestedEntryCount)) - activeCount);
+        }
+
+        private static int GetMaterializedSiegeReinforcementWaveBudget(int sideCap, int remainingSideNeed)
+        {
+            if (sideCap <= 0 || remainingSideNeed <= 0)
+                return 0;
+
+            int nativeLikeBatchSize = Math.Max(1, sideCap / 2);
+            return Math.Min(remainingSideNeed, nativeLikeBatchSize);
+        }
+
+        private static int GetMaterializedReinforcementPlacementOffset(
+            bool useMaterializedSiegeReinforcements,
+            int activeForSide,
+            int spawnedCountForSide)
+        {
+            return useMaterializedSiegeReinforcements
+                ? Math.Max(0, spawnedCountForSide)
+                : Math.Max(0, activeForSide + spawnedCountForSide);
+        }
+
         private static int TryActivateBattleActiveReinforcementAi(Team team)
         {
             if (team == null || team.Side == BattleSideEnum.None || ReferenceEquals(team, team.Mission?.SpectatorTeam))
@@ -12483,13 +12544,15 @@ namespace CoopSpectator.MissionBehaviors
             return pulsedAgentCount;
         }
 
-        private static int CountMaterializedUnspawnedReserveForSide(BattleSideEnum side)
+        private static int CountMaterializedUnspawnedReserveForSide(Mission mission, BattleSideEnum side)
         {
             if (side == BattleSideEnum.None)
                 return 0;
 
             int reserveCount = 0;
-            IReadOnlyList<RosterEntryState> entryStates = GetAutomatedMaterializableEntryStatesSnapshot(side);
+            IReadOnlyList<RosterEntryState> entryStates = GetAutomatedMaterializableEntryStatesSnapshot(
+                side,
+                preferFullBattleSideRoster: ShouldUseMaterializedSiegeReinforcements(mission));
             foreach (RosterEntryState entryState in entryStates)
             {
                 if (entryState == null)
@@ -12559,7 +12622,16 @@ namespace CoopSpectator.MissionBehaviors
 
         private static IReadOnlyList<RosterEntryState> GetAutomatedMaterializableEntryStatesSnapshot(BattleSideEnum side)
         {
-            IReadOnlyList<RosterEntryState> entryStates = GetAllowedControlEntryStatesSnapshot(side);
+            return GetAutomatedMaterializableEntryStatesSnapshot(side, preferFullBattleSideRoster: false);
+        }
+
+        private static IReadOnlyList<RosterEntryState> GetAutomatedMaterializableEntryStatesSnapshot(
+            BattleSideEnum side,
+            bool preferFullBattleSideRoster)
+        {
+            IReadOnlyList<RosterEntryState> entryStates = GetMaterializedArmySourceEntryStatesSnapshot(
+                side,
+                preferFullBattleSideRoster);
             if (entryStates == null || entryStates.Count == 0)
                 return Array.Empty<RosterEntryState>();
 
@@ -12603,6 +12675,23 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return Array.Empty<RosterEntryState>();
+        }
+
+        private static IReadOnlyList<RosterEntryState> GetMaterializedArmySourceEntryStatesSnapshot(
+            BattleSideEnum side,
+            bool preferFullBattleSideRoster)
+        {
+            if (side == BattleSideEnum.None)
+                return Array.Empty<RosterEntryState>();
+
+            if (preferFullBattleSideRoster)
+            {
+                BattleSideState sideState = BattleSnapshotRuntimeState.GetSideState(side.ToString());
+                if (sideState?.Entries != null && sideState.Entries.Count > 0)
+                    return sideState.Entries.Where(entry => entry != null).ToArray();
+            }
+
+            return GetAllowedControlEntryStatesSnapshot(side);
         }
 
         private static string GetAutomatedMaterializedSpawnEntrySkipReason(RosterEntryState entryState)
@@ -13692,7 +13781,9 @@ namespace CoopSpectator.MissionBehaviors
                 isReinforcement,
                 out Vec3 formationSpawnPosition,
                 out Vec2 formationDirection,
-                out string spawnFrameSource);
+                out string spawnFrameSource,
+                out float formationPlannedWidth,
+                out float formationPlannedDepth);
 
             if (formationDirection.LengthSquared < 0.001f)
                 formationDirection = side == BattleSideEnum.Attacker ? new Vec2(1f, 0f) : new Vec2(-1f, 0f);
@@ -13721,10 +13812,25 @@ namespace CoopSpectator.MissionBehaviors
             for (int i = 0; i < spawnCount; i++)
             {
                 int absoluteIndex = sideOffset + spawnedCount;
-                int column = absoluteIndex % 4;
-                int row = absoluteIndex / 4;
-                float lateralOffset = (column - 1.5f) * 1.8f;
-                float depthOffset = row * 2.2f * (side == BattleSideEnum.Attacker ? -1f : 1f);
+                bool useSiegeReinforcementSpread =
+                    isReinforcement &&
+                    ShouldUseMaterializedSiegeReinforcements(mission);
+                int placementCount = useSiegeReinforcementSpread
+                    ? Math.Max(spawnCount + Math.Max(0, sideOffset), spawnCount)
+                    : 0;
+                int columnCount = useSiegeReinforcementSpread
+                    ? GetMaterializedSiegeReinforcementColumnCount(formationPlannedWidth, placementCount)
+                    : 4;
+                int column = absoluteIndex % columnCount;
+                int row = absoluteIndex / columnCount;
+                float lateralSpacing = useSiegeReinforcementSpread
+                    ? MaterializedSiegeReinforcementLateralSpacing
+                    : 1.8f;
+                float depthSpacing = useSiegeReinforcementSpread
+                    ? GetMaterializedSiegeReinforcementDepthSpacing(formationPlannedDepth)
+                    : 2.2f;
+                float lateralOffset = (column - ((columnCount - 1) * 0.5f)) * lateralSpacing;
+                float depthOffset = row * depthSpacing * (side == BattleSideEnum.Attacker ? -1f : 1f);
                 Vec3 spawnPosition = basePosition + right * lateralOffset + forward * depthOffset;
 
                 string appliedArmorOverrides;
@@ -13772,6 +13878,27 @@ namespace CoopSpectator.MissionBehaviors
             return spawnedCount;
         }
 
+        private static int GetMaterializedSiegeReinforcementColumnCount(float plannedWidth, int placementCount)
+        {
+            int safePlacementCount = Math.Max(1, placementCount);
+            int plannedColumns = plannedWidth > MaterializedSiegeReinforcementLateralSpacing
+                ? (int)Math.Floor(plannedWidth / MaterializedSiegeReinforcementLateralSpacing)
+                : MaterializedSiegeReinforcementFallbackColumns;
+
+            plannedColumns = Math.Max(1, plannedColumns);
+            return Math.Max(1, Math.Min(safePlacementCount, plannedColumns));
+        }
+
+        private static float GetMaterializedSiegeReinforcementDepthSpacing(float plannedDepth)
+        {
+            if (plannedDepth <= 0f)
+                return MaterializedSiegeReinforcementDepthSpacing;
+
+            return Math.Max(
+                1.25f,
+                Math.Min(MaterializedSiegeReinforcementDepthSpacing, plannedDepth / 4f));
+        }
+
         private static void ResolveMaterializedArmySpawnFrame(
             Mission mission,
             Team team,
@@ -13781,11 +13908,15 @@ namespace CoopSpectator.MissionBehaviors
             bool isReinforcement,
             out Vec3 spawnPosition,
             out Vec2 spawnDirection,
-            out string spawnFrameSource)
+            out string spawnFrameSource,
+            out float plannedWidth,
+            out float plannedDepth)
         {
             spawnPosition = new Vec3(0f, 0f, 0f);
             spawnDirection = side == BattleSideEnum.Attacker ? new Vec2(1f, 0f) : new Vec2(-1f, 0f);
             spawnFrameSource = "direct-fallback";
+            plannedWidth = 0f;
+            plannedDepth = 0f;
 
             bool useMaterializedSiegeReinforcements =
                 isReinforcement &&
@@ -13798,7 +13929,9 @@ namespace CoopSpectator.MissionBehaviors
                     isReinforcement: true,
                     out spawnPosition,
                     out spawnDirection,
-                    out _))
+                    out _,
+                    out plannedWidth,
+                    out plannedDepth))
             {
                 spawnFrameSource = "siege-reinforcement-plan";
                 return;
@@ -13814,7 +13947,9 @@ namespace CoopSpectator.MissionBehaviors
                     isReinforcement,
                     out spawnPosition,
                     out spawnDirection,
-                    out string repairedSpawnDiagnostics))
+                    out string repairedSpawnDiagnostics,
+                    out plannedWidth,
+                    out plannedDepth))
                 {
                     spawnFrameSource = isReinforcement ? "formation-reinforcement-repaired" : "formation-repaired";
                     return;
@@ -13873,11 +14008,15 @@ namespace CoopSpectator.MissionBehaviors
             bool isReinforcement,
             out Vec3 spawnPosition,
             out Vec2 spawnDirection,
-            out string diagnostics)
+            out string diagnostics,
+            out float plannedWidth,
+            out float plannedDepth)
         {
             spawnPosition = new Vec3(0f, 0f, 0f);
             spawnDirection = Vec2.Invalid;
             diagnostics = null;
+            plannedWidth = 0f;
+            plannedDepth = 0f;
 
             if (mission == null || team == null)
             {
@@ -13944,6 +14083,11 @@ namespace CoopSpectator.MissionBehaviors
                     isReinforcement,
                     "repaired-frame-success");
                 spawnPosition = frame.origin;
+                if (formationPlan.HasDimensions)
+                {
+                    plannedWidth = Math.Max(0f, formationPlan.PlannedWidth);
+                    plannedDepth = Math.Max(0f, formationPlan.PlannedDepth);
+                }
 
                 Vec2 direction = formationPlan.GetDirection();
                 if (direction.LengthSquared <= 0.001f)

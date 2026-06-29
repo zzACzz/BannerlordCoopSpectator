@@ -121,6 +121,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public bool IsHero { get; set; }
             public int SnapshotCount { get; set; }
             public int SnapshotWoundedCount { get; set; }
+            public int ActiveCount { get; set; }
             public int RemovedCount { get; set; }
             public int KilledCount { get; set; }
             public int UnconsciousCount { get; set; }
@@ -132,13 +133,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             public int DesiredCount => IsHero
                 ? Math.Max(0, SnapshotCount)
-                : Math.Max(0, SnapshotCount - Math.Max(0, KilledCount + OtherRemovedCount));
+                : Math.Max(0, SnapshotCount - Math.Max(0, KilledCount));
 
             public int DesiredWoundedCount => IsHero
                 ? Math.Max(0, SnapshotWoundedCount)
                 : Math.Max(0, Math.Min(DesiredCount, SnapshotWoundedCount + Math.Max(0, UnconsciousCount)));
 
-            public bool HeroShouldBeWounded => IsHero && (KilledCount > 0 || UnconsciousCount > 0 || OtherRemovedCount > 0);
+            public bool HeroShouldBeWounded => IsHero && ActiveCount <= 0 && (KilledCount > 0 || UnconsciousCount > 0);
         }
 
         private sealed class BattleResultWritebackSummary
@@ -754,6 +755,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             Dictionary<string, BattleResultCharacterAggregate> aggregates = BuildBattleResultCharacterAggregates(result);
             summary.Aggregates = aggregates.Count;
+            bool useNonFatalPlayerClanHeroWounds = IsCurrentSiegeReplayWritebackContext(result);
 
             foreach (BattleResultCharacterAggregate aggregate in aggregates.Values
                          .OrderBy(group => group.PartyId, StringComparer.OrdinalIgnoreCase)
@@ -779,7 +781,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     partyState,
                     aggregate,
                     summary,
-                    skipMainPartyHeroHitPointWriteback && partyState.IsMainParty);
+                    skipMainPartyHeroHitPointWriteback && partyState.IsMainParty,
+                    useNonFatalPlayerClanHeroWounds && partyState.IsMainParty);
             }
 
             TryApplyCombatXpWriteback(result, encounterParties, summary);
@@ -790,6 +793,28 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             TryApplyMainPartyPrisonerLootWriteback(encounterParties, summary);
             TryApplyMainPartyItemLootWriteback(encounterParties, summary);
             return summary;
+        }
+
+        private static bool IsCurrentSiegeReplayWritebackContext(CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        {
+            if (result?.IsSynthetic == true)
+                return false;
+
+            try
+            {
+                MapEvent battle = TryGetCurrentMapEventSafe();
+                Settlement encounterSettlement =
+                    PlayerEncounter.EncounterSettlement ??
+                    battle?.MapEventSettlement ??
+                    MobileParty.MainParty?.CurrentSettlement;
+                string missionScene = Mission.Current?.SceneName ?? result?.MapScene ?? string.Empty;
+
+                return !string.IsNullOrWhiteSpace(ResolveSiegeSubtype(battle, encounterSettlement, missionScene));
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static Dictionary<string, EncounterPartyWritebackState> ResolveEncounterPartyWritebackStates()
@@ -889,6 +914,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                 aggregate.SnapshotCount += Math.Max(0, entry.SnapshotCount);
                 aggregate.SnapshotWoundedCount += Math.Max(0, entry.SnapshotWoundedCount);
+                aggregate.ActiveCount += Math.Max(0, entry.ActiveCount);
                 aggregate.RemovedCount += Math.Max(0, entry.RemovedCount);
                 aggregate.KilledCount += Math.Max(0, entry.KilledCount);
                 aggregate.UnconsciousCount += Math.Max(0, entry.UnconsciousCount);
@@ -916,7 +942,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             EncounterPartyWritebackState partyState,
             BattleResultCharacterAggregate aggregate,
             BattleResultWritebackSummary summary,
-            bool skipHeroHitPointsWriteback = false)
+            bool skipHeroHitPointsWriteback = false,
+            bool useNonFatalPlayerClanHeroWounds = false)
         {
             if (partyState?.MemberRoster == null || aggregate == null)
                 return;
@@ -941,11 +968,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             if (aggregate.IsHero)
             {
-                if (aggregate.HeroShouldBeWounded && TryApplyHeroWoundWriteback(rosterHero, summary))
+                if (aggregate.HeroShouldBeWounded &&
+                    TryApplyHeroWoundWriteback(
+                        rosterHero,
+                        summary,
+                        useNonFatalPlayerClanHeroWounds,
+                        out string heroWoundSample))
                 {
-                    AddWritebackSample(
-                        summary.AdjustedSamples,
-                        "HeroWounded:" + (rosterHero?.StringId ?? aggregate.HeroId ?? rosterCharacter?.StringId ?? "hero"));
+                    AddWritebackSample(summary.AdjustedSamples, heroWoundSample);
                 }
                 else if (!skipHeroHitPointsWriteback &&
                          TryApplyHeroHitPointsWriteback(rosterHero, aggregate, summary, out string heroHitPointSample))
@@ -1048,15 +1078,28 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return false;
         }
 
-        private static bool TryApplyHeroWoundWriteback(Hero hero, BattleResultWritebackSummary summary)
+        private static bool TryApplyHeroWoundWriteback(
+            Hero hero,
+            BattleResultWritebackSummary summary,
+            bool useNonFatalPlayerClanHeroWounds,
+            out string adjustedSample)
         {
+            adjustedSample = null;
             if (hero == null || !hero.IsAlive || hero.IsWounded)
                 return false;
 
             try
             {
-                hero.MakeWounded(hero, KillCharacterAction.KillCharacterActionDetail.WoundedInBattle);
+                bool useNonFatalWound = useNonFatalPlayerClanHeroWounds && IsPlayerClanHeroForSiegeWriteback(hero);
+                hero.MakeWounded(
+                    useNonFatalWound ? null : hero,
+                    useNonFatalWound
+                        ? KillCharacterAction.KillCharacterActionDetail.None
+                        : KillCharacterAction.KillCharacterActionDetail.WoundedInBattle);
                 summary.HeroWoundsApplied++;
+                adjustedSample =
+                    (useNonFatalWound ? "HeroWoundedNoDeathMark:" : "HeroWounded:") +
+                    (hero.StringId ?? "hero");
                 return true;
             }
             catch (Exception ex)
@@ -1064,6 +1107,18 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 AddWritebackSample(summary.UnresolvedSamples, "HeroWoundFailed:" + (hero.StringId ?? "hero") + "/" + ex.Message);
                 return false;
             }
+        }
+
+        private static bool IsPlayerClanHeroForSiegeWriteback(Hero hero)
+        {
+            if (hero == null)
+                return false;
+
+            if (hero == Hero.MainHero || hero.IsHumanPlayerCharacter || hero.IsPlayerCompanion)
+                return true;
+
+            Clan playerClan = Clan.PlayerClan;
+            return playerClan != null && hero.Clan == playerClan;
         }
 
         private static bool TryApplyHeroHitPointsWriteback(
@@ -1268,7 +1323,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                          item != null &&
                          !string.Equals(item.PartyId, partyId, StringComparison.OrdinalIgnoreCase)))
             {
-                int casualtyCount = Math.Max(0, enemyEntry.KilledCount + enemyEntry.UnconsciousCount + enemyEntry.OtherRemovedCount);
+                int casualtyCount = Math.Max(0, enemyEntry.KilledCount + enemyEntry.UnconsciousCount);
                 if (casualtyCount <= 0)
                     continue;
 
@@ -3257,13 +3312,18 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     return;
 
                 var summary = new BattleResultWritebackSummary();
+                bool useNonFatalPlayerClanHeroWounds = IsCurrentSiegeReplayWritebackContext(result);
                 foreach (BattleResultCharacterAggregate aggregate in aggregates.Values
                              .Where(item => item != null && string.Equals(item.PartyId, mainPartyId, StringComparison.OrdinalIgnoreCase))
                              .OrderBy(item => item.HeroId, StringComparer.OrdinalIgnoreCase)
                              .ThenBy(item => item.OriginalCharacterId, StringComparer.OrdinalIgnoreCase)
                              .ThenBy(item => item.CharacterId, StringComparer.OrdinalIgnoreCase))
                 {
-                    TryApplyAggregateToPartyRoster(mainPartyState, aggregate, summary);
+                    TryApplyAggregateToPartyRoster(
+                        mainPartyState,
+                        aggregate,
+                        summary,
+                        useNonFatalPlayerClanHeroWounds: useNonFatalPlayerClanHeroWounds);
                     if (aggregate.IsHero &&
                         TryResolvePartyRosterCharacter(
                             mainPartyState.MemberRoster,
