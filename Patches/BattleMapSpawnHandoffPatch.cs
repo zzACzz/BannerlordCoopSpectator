@@ -36,6 +36,12 @@ namespace CoopSpectator.Patches
         private static readonly object ExactSiegeMissionObjectSyncDiagnosticsLock = new object();
         private static readonly HashSet<string> LoggedExactSiegeMissionObjectSyncDiagnosticKeys = new HashSet<string>();
         private const int ExactSiegeMissionObjectSyncDiagnosticBudget = 64;
+        private static readonly HashSet<string> LoggedProjectileLaunchDiagnosticKeys = new HashSet<string>();
+        private const int ProjectileLaunchDiagnosticBudget = 64;
+        private static readonly HashSet<string> LoggedClientProjectileVisualGraceKeys = new HashSet<string>();
+        private const int ClientProjectileVisualGraceDiagnosticBudget = 64;
+        private const string ClientThrownProjectileVisualGraceDeferralReasonPrefix = "player-thrown-projectile-visual-grace";
+        private static int _clientProjectileVisualGraceReplayDepth;
         private static MethodInfo _missionNetworkComponentHandleServerEventCreateAgentMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSetAgentActionSetMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSynchronizeAgentEquipmentMethod;
@@ -181,6 +187,7 @@ namespace CoopSpectator.Patches
         private static readonly TimeSpan LocalFollowEchoSuppressionWindow = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan DeferredClientSiegeMissionObjectReplayDelay = TimeSpan.FromMilliseconds(750);
         private static readonly TimeSpan DeferredClientSiegeMissingMissionObjectDropDelay = TimeSpan.FromSeconds(8);
+        private static readonly TimeSpan ClientThrownProjectileBecomeInvisibleVisualGrace = TimeSpan.FromMilliseconds(650);
         private static DateTime _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
         private static int _localFollowEchoSuppressionAgentIndex = -1;
 
@@ -380,6 +387,7 @@ namespace CoopSpectator.Patches
             public HandleMissileCollisionReaction Message;
             public DateTime DeferredUtc;
             public DateTime LastAttemptUtc;
+            public DateTime HoldUntilUtc;
             public int Attempts;
             public string DeferralReason;
         }
@@ -609,6 +617,8 @@ namespace CoopSpectator.Patches
             _nextDeferredClientSetAgentHealthSequence = 0;
             _nextDeferredClientMakeAgentDeadSequence = 0;
             _unsafeImmediateClientAgentBaselineMaterializationDepth = 0;
+            _clientProjectileVisualGraceReplayDepth = 0;
+            LoggedClientProjectileVisualGraceKeys.Clear();
             _lastSuppressedFollowSwitchKey = null;
             _lastArmedLocalFollowSuppressionWindowKey = null;
             _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
@@ -3372,7 +3382,8 @@ namespace CoopSpectator.Patches
 
         private static void RegisterDeferredClientHandleMissileCollisionReactionPayload(
             HandleMissileCollisionReaction handleMissileCollisionReaction,
-            string deferralReason)
+            string deferralReason,
+            DateTime holdUntilUtc = default(DateTime))
         {
             if (handleMissileCollisionReaction == null)
                 return;
@@ -3388,6 +3399,7 @@ namespace CoopSpectator.Patches
                 {
                     existingPayload.Message = handleMissileCollisionReaction;
                     existingPayload.DeferralReason = deferralReason;
+                    existingPayload.HoldUntilUtc = holdUntilUtc;
                     return;
                 }
 
@@ -3398,6 +3410,7 @@ namespace CoopSpectator.Patches
                         Message = handleMissileCollisionReaction,
                         DeferredUtc = DateTime.UtcNow,
                         LastAttemptUtc = DateTime.MinValue,
+                        HoldUntilUtc = holdUntilUtc,
                         Attempts = 0,
                         DeferralReason = deferralReason
                     });
@@ -4051,6 +4064,333 @@ namespace CoopSpectator.Patches
                 " Entity=" + entityName;
         }
 
+        private static void TryTraceClientProjectileLaunchDiagnostics(Mission mission, CreateMissile createMissile, Agent shooterAgent)
+        {
+            if (!ExperimentalFeatures.EnableExactCreateAgentCorridorDiagnostics ||
+                mission == null ||
+                createMissile == null ||
+                shooterAgent == null ||
+                shooterAgent.IsMount)
+            {
+                return;
+            }
+
+            try
+            {
+                MissionWeapon launchWeapon = ResolveCreateMissileWeapon(createMissile, shooterAgent);
+                if (!IsThrownProjectileLaunchWeapon(launchWeapon))
+                    return;
+
+                if (!IsControlledHeroProjectileLaunchDiagnosticsTarget(shooterAgent, out string entryId, out RosterEntryState entryState, out string targetReason))
+                    return;
+
+                string key =
+                    "client|" +
+                    createMissile.MissileIndex + "|" +
+                    shooterAgent.Index + "|" +
+                    createMissile.WeaponIndex + "|" +
+                    (launchWeapon.Item?.StringId ?? "null") + "|" +
+                    FormatVec3(createMissile.Position) + "|" +
+                    FormatFloat(createMissile.Speed);
+                if (LoggedProjectileLaunchDiagnosticKeys.Count >= ProjectileLaunchDiagnosticBudget ||
+                    !LoggedProjectileLaunchDiagnosticKeys.Add(key))
+                {
+                    return;
+                }
+
+                string details = BuildProjectileLaunchDiagnosticDetails(
+                    "client-create-missile",
+                    mission,
+                    shooterAgent,
+                    entryId,
+                    entryState,
+                    targetReason,
+                    createMissile.MissileIndex,
+                    createMissile.WeaponIndex,
+                    launchWeapon,
+                    createMissile.Position,
+                    createMissile.Direction,
+                    createMissile.Speed,
+                    createMissile.Orientation,
+                    createMissile.HasRigidBody,
+                    createMissile.IsPrimaryWeaponShot,
+                    createMissile.MissionObjectToIgnoreId);
+
+                ModLogger.Info("BattleMapSpawnHandoffPatch: projectile launch diagnostics. " + details);
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent("projectile-launch-client-create-missile", details);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: projectile launch diagnostics failed open: " + ex.Message);
+            }
+        }
+
+        private static MissionWeapon ResolveCreateMissileWeapon(CreateMissile createMissile, Agent shooterAgent)
+        {
+            if (createMissile != null &&
+                createMissile.WeaponIndex != EquipmentIndex.None &&
+                shooterAgent?.Equipment != null)
+            {
+                try
+                {
+                    return shooterAgent.Equipment[createMissile.WeaponIndex];
+                }
+                catch
+                {
+                }
+            }
+
+            return createMissile?.Weapon ?? MissionWeapon.Invalid;
+        }
+
+        private static bool IsControlledHeroProjectileLaunchDiagnosticsTarget(
+            Agent agent,
+            out string entryId,
+            out RosterEntryState entryState,
+            out string reason)
+        {
+            entryId = null;
+            entryState = null;
+            reason = "not-controlled-hero";
+
+            if (agent == null || agent.IsMount)
+                return false;
+
+            bool localControlled = IsLocalMissionPeerControlledAgent(agent) ||
+                                   ReferenceEquals(Agent.Main, agent) ||
+                                   ReferenceEquals(Mission.Current?.MainAgent, agent);
+            bool resolvedEntry =
+                CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) ||
+                CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId);
+            if (resolvedEntry)
+                entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+
+            bool heroEntry = IsProjectileLaunchHeroEntry(entryState);
+            if (!localControlled && !heroEntry)
+                return false;
+
+            reason =
+                (localControlled ? "local-controlled" : "remote-or-server-observed") +
+                "|HeroEntry=" + heroEntry +
+                "|EntryResolved=" + resolvedEntry;
+            return true;
+        }
+
+        private static bool IsProjectileLaunchHeroEntry(RosterEntryState entryState)
+        {
+            return entryState != null &&
+                   (entryState.IsHero ||
+                    !string.IsNullOrWhiteSpace(entryState.HeroId) ||
+                    string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsThrownProjectileLaunchWeapon(MissionWeapon weapon)
+        {
+            try
+            {
+                if (weapon.IsEmpty)
+                    return false;
+
+                ItemObject item = weapon.Item;
+                if (item?.ItemType == ItemObject.ItemTypeEnum.Thrown)
+                    return true;
+
+                WeaponComponentData usage = weapon.CurrentUsageItem ?? item?.PrimaryWeapon;
+                if (usage == null)
+                    return false;
+
+                return usage.RelevantSkill == DefaultSkills.Throwing ||
+                       usage.WeaponClass == WeaponClass.Javelin ||
+                       usage.WeaponClass == WeaponClass.ThrowingAxe ||
+                       usage.WeaponClass == WeaponClass.ThrowingKnife ||
+                       usage.WeaponClass == WeaponClass.Stone ||
+                       usage.WeaponClass == WeaponClass.SlingStone;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string BuildProjectileLaunchDiagnosticDetails(
+            string stage,
+            Mission mission,
+            Agent shooterAgent,
+            string entryId,
+            RosterEntryState entryState,
+            string targetReason,
+            int missileIndex,
+            EquipmentIndex weaponIndex,
+            MissionWeapon launchWeapon,
+            Vec3 position,
+            Vec3 direction,
+            float speed,
+            Mat3 orientation,
+            bool hasRigidBody,
+            bool isPrimaryWeaponShot,
+            MissionObjectId missionObjectToIgnoreId)
+        {
+            Vec3 agentPosition = shooterAgent?.Position ?? Vec3.Zero;
+            Vec3 offset = position - agentPosition;
+            Vec3 lookDirection = ResolveAgentLookDirection(shooterAgent);
+            Vec3 normalizedDirection = NormalizeVec3(direction);
+            float offsetLookDot = DotSafe(offset, lookDirection);
+            float directionLookDot = DotSafe(normalizedDirection, lookDirection);
+            float offsetLength = SafeLength(offset);
+            bool startsBehindLook = offsetLookDot < -0.10f;
+
+            EquipmentIndex primaryWieldedIndex = EquipmentIndex.None;
+            EquipmentIndex offhandWieldedIndex = EquipmentIndex.None;
+            string missionWeapons = "(unavailable)";
+            string spawnWeapons = "(unavailable)";
+            string currentWeaponOffset = "(unavailable)";
+            try
+            {
+                primaryWieldedIndex = shooterAgent.GetPrimaryWieldedItemIndex();
+                offhandWieldedIndex = shooterAgent.GetOffhandWieldedItemIndex();
+                missionWeapons = BuildMissionEquipmentWeaponSummary(shooterAgent.Equipment);
+                spawnWeapons = BuildEquipmentSummary(
+                    shooterAgent.SpawnEquipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3);
+                currentWeaponOffset = FormatVec3(shooterAgent.GetCurWeaponOffset());
+            }
+            catch
+            {
+            }
+
+            WeaponComponentData usage = null;
+            try
+            {
+                usage = launchWeapon.CurrentUsageItem ?? launchWeapon.Item?.PrimaryWeapon;
+            }
+            catch
+            {
+            }
+
+            return
+                "Stage=" + stage +
+                " Scene=" + (mission?.SceneName ?? "null") +
+                " MissileIndex=" + missileIndex +
+                " AgentIndex=" + (shooterAgent?.Index ?? -1) +
+                " EntryId=" + (entryId ?? "null") +
+                " TargetReason=" + (targetReason ?? "unknown") +
+                " EntryHero=" + (entryState?.IsHero ?? false) +
+                " OriginalCharacterId=" + (entryState?.OriginalCharacterId ?? "null") +
+                " HeroId=" + (entryState?.HeroId ?? "null") +
+                " CharacterId=" + (shooterAgent?.Character?.StringId ?? "null") +
+                " Controller=" + (shooterAgent?.Controller.ToString() ?? "null") +
+                " HasMount=" + (shooterAgent?.HasMount ?? false) +
+                " MountAgentIndex=" + (shooterAgent?.MountAgent?.Index ?? -1) +
+                " WeaponIndex=" + weaponIndex +
+                " PrimaryWieldedIndex=" + primaryWieldedIndex +
+                " OffhandWieldedIndex=" + offhandWieldedIndex +
+                " LaunchItem=" + (launchWeapon.Item?.StringId ?? "null") +
+                " LaunchItemType=" + (launchWeapon.Item?.ItemType.ToString() ?? "null") +
+                " LaunchUsage=" + (usage?.WeaponClass.ToString() ?? "null") +
+                " LaunchRelevantSkill=" + (usage?.RelevantSkill?.StringId ?? "null") +
+                " HasRigidBody=" + hasRigidBody +
+                " IsPrimaryWeaponShot=" + isPrimaryWeaponShot +
+                " MissionObjectToIgnoreId=" + GetMissionObjectIdValue(missionObjectToIgnoreId) +
+                " AgentPosition=" + FormatVec3(agentPosition) +
+                " AgentLook=" + FormatVec3(lookDirection) +
+                " MissilePosition=" + FormatVec3(position) +
+                " MissileDirection=" + FormatVec3(normalizedDirection) +
+                " MissileSpeed=" + FormatFloat(speed) +
+                " Offset=" + FormatVec3(offset) +
+                " OffsetLength=" + FormatFloat(offsetLength) +
+                " OffsetLookDot=" + FormatFloat(offsetLookDot) +
+                " DirectionLookDot=" + FormatFloat(directionLookDot) +
+                " StartsBehindLook=" + startsBehindLook +
+                " OrientationF=" + FormatVec3(orientation.f) +
+                " CurWeaponOffset=" + currentWeaponOffset +
+                " MissionWeapons={" + missionWeapons + "}" +
+                " SpawnWeapons={" + spawnWeapons + "}";
+        }
+
+        private static Vec3 ResolveAgentLookDirection(Agent agent)
+        {
+            if (agent == null)
+                return Vec3.Forward;
+
+            try
+            {
+                Vec3 look = agent.LookDirection;
+                if (look.LengthSquared > 0.0001f)
+                    return NormalizeVec3(look);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                Vec3 frameForward = agent.Frame.rotation.f;
+                if (frameForward.LengthSquared > 0.0001f)
+                    return NormalizeVec3(frameForward);
+            }
+            catch
+            {
+            }
+
+            return Vec3.Forward;
+        }
+
+        private static Vec3 NormalizeVec3(Vec3 value)
+        {
+            try
+            {
+                if (value.LengthSquared <= 0.0001f)
+                    return Vec3.Zero;
+
+                value.Normalize();
+                return value;
+            }
+            catch
+            {
+                return Vec3.Zero;
+            }
+        }
+
+        private static float DotSafe(Vec3 left, Vec3 right)
+        {
+            try
+            {
+                return Vec3.DotProduct(left, right);
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float SafeLength(Vec3 value)
+        {
+            try
+            {
+                return value.Length;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static string FormatVec3(Vec3 value)
+        {
+            return "(" +
+                   FormatFloat(value.x) + "," +
+                   FormatFloat(value.y) + "," +
+                   FormatFloat(value.z) + ")";
+        }
+
+        private static string FormatFloat(float value)
+        {
+            return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         private static bool MissionHasLocalMissile(int missileIndex)
         {
             if (missileIndex < 0)
@@ -4071,6 +4411,172 @@ namespace CoopSpectator.Patches
             }
 
             return false;
+        }
+
+        private static bool TryDeferClientThrownProjectileBecomeInvisibleForVisualGrace(
+            Mission mission,
+            HandleMissileCollisionReaction handleMissileCollisionReaction)
+        {
+            if (_clientProjectileVisualGraceReplayDepth > 0 ||
+                mission == null ||
+                handleMissileCollisionReaction == null ||
+                handleMissileCollisionReaction.CollisionReaction != Mission.MissileCollisionReaction.BecomeInvisible ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!TryResolveMissionMissileItem(
+                        mission,
+                        handleMissileCollisionReaction.MissileIndex,
+                        out ItemObject missileItem) ||
+                    !IsClientThrownProjectileVisualGraceItem(missileItem))
+                {
+                    return false;
+                }
+
+                Agent attackerAgent = handleMissileCollisionReaction.AttackerAgentIndex >= 0
+                    ? Mission.MissionNetworkHelper.GetAgentFromIndex(
+                        handleMissileCollisionReaction.AttackerAgentIndex,
+                        canBeNull: true)
+                    : null;
+                if (!IsLocalProjectileVisualGraceAttacker(attackerAgent))
+                    return false;
+
+                if (!TryResolveUnsafeClientProjectileVisualGraceCollisionReason(
+                        handleMissileCollisionReaction,
+                        out string collisionReason))
+                {
+                    return false;
+                }
+
+                DateTime holdUntilUtc = DateTime.UtcNow + ClientThrownProjectileBecomeInvisibleVisualGrace;
+                RegisterDeferredClientHandleMissileCollisionReactionPayload(
+                    handleMissileCollisionReaction,
+                    ClientThrownProjectileVisualGraceDeferralReasonPrefix + ":" + collisionReason,
+                    holdUntilUtc);
+
+                string logKey =
+                    handleMissileCollisionReaction.MissileIndex + "|" +
+                    handleMissileCollisionReaction.AttackerAgentIndex + "|" +
+                    handleMissileCollisionReaction.AttachedAgentIndex + "|" +
+                    (missileItem?.StringId ?? "null") + "|" +
+                    collisionReason;
+                if (LoggedClientProjectileVisualGraceKeys.Count < ClientProjectileVisualGraceDiagnosticBudget &&
+                    LoggedClientProjectileVisualGraceKeys.Add(logKey))
+                {
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred client thrown projectile BecomeInvisible for visual grace. " +
+                        "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
+                        " MissileItem=" + (missileItem?.StringId ?? "null") +
+                        " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
+                        " AttachedAgentIndex=" + handleMissileCollisionReaction.AttachedAgentIndex +
+                        " AttachedToShield=" + handleMissileCollisionReaction.AttachedToShield +
+                        " AttachedBoneIndex=" + handleMissileCollisionReaction.AttachedBoneIndex +
+                        " CollisionReason=" + collisionReason +
+                        " HoldMilliseconds=" + (int)ClientThrownProjectileBecomeInvisibleVisualGrace.TotalMilliseconds);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: client thrown projectile visual grace failed open: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool IsDeferredClientThrownProjectileVisualGracePayload(
+            DeferredClientHandleMissileCollisionReactionPayload deferredPayload)
+        {
+            return deferredPayload?.DeferralReason != null &&
+                   deferredPayload.DeferralReason.StartsWith(
+                       ClientThrownProjectileVisualGraceDeferralReasonPrefix,
+                       StringComparison.Ordinal);
+        }
+
+        private static bool IsLocalProjectileVisualGraceAttacker(Agent attackerAgent)
+        {
+            if (attackerAgent == null || attackerAgent.IsMount)
+                return false;
+
+            return IsLocalMissionPeerControlledAgent(attackerAgent) ||
+                   ReferenceEquals(Agent.Main, attackerAgent) ||
+                   ReferenceEquals(Mission.Current?.MainAgent, attackerAgent);
+        }
+
+        private static bool TryResolveUnsafeClientProjectileVisualGraceCollisionReason(
+            HandleMissileCollisionReaction handleMissileCollisionReaction,
+            out string reason)
+        {
+            reason = "unknown";
+            if (handleMissileCollisionReaction == null)
+                return false;
+
+            if (handleMissileCollisionReaction.AttachedAgentIndex < 0)
+            {
+                reason = "no-attached-agent";
+                return true;
+            }
+
+            Agent attachedAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(
+                handleMissileCollisionReaction.AttachedAgentIndex,
+                canBeNull: true);
+            if (attachedAgent == null)
+            {
+                reason = "attached-agent-missing";
+                return true;
+            }
+
+            bool attachedAgentActive;
+            bool attachedAgentIsMount;
+            try
+            {
+                attachedAgentActive = attachedAgent.IsActive();
+                attachedAgentIsMount = attachedAgent.IsMount;
+            }
+            catch
+            {
+                reason = "attached-agent-state-unavailable";
+                return true;
+            }
+
+            if (!attachedAgentActive)
+            {
+                reason = "attached-agent-inactive";
+                return true;
+            }
+
+            if (attachedAgentIsMount)
+            {
+                reason = "attached-agent-is-mount";
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsClientThrownProjectileVisualGraceItem(ItemObject item)
+        {
+            if (item == null || IsBallistaProjectileItem(item))
+                return false;
+
+            try
+            {
+                WeaponComponentData usage = item.PrimaryWeapon;
+                if (usage == null)
+                    return false;
+
+                return usage.WeaponClass == WeaponClass.Javelin ||
+                       usage.WeaponClass == WeaponClass.ThrowingAxe ||
+                       usage.WeaponClass == WeaponClass.ThrowingKnife;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool ShouldUseServerExactBattleProjectileStickSuppression(Mission mission)
@@ -4125,6 +4631,94 @@ namespace CoopSpectator.Patches
             }
 
             return false;
+        }
+
+        private static bool IsTroopProjectileStickItem(ItemObject item)
+        {
+            if (item == null || IsBallistaProjectileItem(item))
+                return false;
+
+            try
+            {
+                switch (item.ItemType)
+                {
+                    case ItemObject.ItemTypeEnum.Arrows:
+                    case ItemObject.ItemTypeEnum.Bolts:
+                    case ItemObject.ItemTypeEnum.Thrown:
+                        return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private static bool ShouldAllowExactSiegeTroopProjectileStickBroadcast(
+            Mission mission,
+            ItemObject missileItem,
+            Agent attachedAgent,
+            bool attachedToShield,
+            sbyte attachedBoneIndex,
+            out string reason)
+        {
+            reason = "unknown";
+
+            if (mission == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                reason = "not-exact-siege";
+                return false;
+            }
+
+            if (!IsTroopProjectileStickItem(missileItem))
+            {
+                reason = IsBallistaProjectileItem(missileItem)
+                    ? "siege-engine-projectile"
+                    : "non-troop-projectile";
+                return false;
+            }
+
+            if (attachedAgent == null)
+            {
+                reason = "no-attached-agent";
+                return false;
+            }
+
+            bool attachedAgentActive;
+            bool attachedAgentIsMount;
+            try
+            {
+                attachedAgentActive = attachedAgent.IsActive();
+                attachedAgentIsMount = attachedAgent.IsMount;
+            }
+            catch
+            {
+                reason = "attached-agent-state-unavailable";
+                return false;
+            }
+
+            if (!attachedAgentActive)
+            {
+                reason = "attached-agent-inactive";
+                return false;
+            }
+
+            if (attachedAgentIsMount)
+            {
+                reason = "attached-agent-is-mount";
+                return false;
+            }
+
+            if (!attachedToShield && attachedBoneIndex < 0)
+            {
+                reason = "invalid-attached-bone";
+                return false;
+            }
+
+            reason = "exact-siege-troop-projectile";
+            return true;
         }
 
         private static bool IsShieldItem(ItemObject item)
@@ -4330,6 +4924,17 @@ namespace CoopSpectator.Patches
                     return true;
                 }
 
+                if (ShouldAllowExactSiegeTroopProjectileStickBroadcast(
+                        __instance,
+                        missileItem,
+                        attachedAgent,
+                        attachedToShield,
+                        attachedBoneIndex,
+                        out string suppressionReason))
+                {
+                    return true;
+                }
+
                 collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
 
                 string logKey =
@@ -4353,6 +4958,7 @@ namespace CoopSpectator.Patches
                         " RiderAgent=" + (attachedAgent?.RiderAgent?.Index ?? -1) +
                         " AttachedToShield=" + attachedToShield +
                         " AttachedBoneIndex=" + attachedBoneIndex +
+                        " SuppressionReason=" + (suppressionReason ?? "unknown") +
                         " ForcedSpawnIndex=" + forcedSpawnIndex);
                 }
 
@@ -6835,13 +7441,33 @@ namespace CoopSpectator.Patches
                     continue;
                 }
 
+                if (deferredPayload.HoldUntilUtc != DateTime.MinValue &&
+                    nowUtc < deferredPayload.HoldUntilUtc)
+                {
+                    continue;
+                }
+
                 if (HasDeferredClientCreateMissilePayload(
                         handleMissileCollisionReaction.MissileIndex,
                         handleMissileCollisionReaction.AttackerAgentIndex))
                     continue;
 
                 if (!MissionHasLocalMissile(handleMissileCollisionReaction.MissileIndex))
+                {
+                    if (IsDeferredClientThrownProjectileVisualGracePayload(deferredPayload) &&
+                        deferredPayload.HoldUntilUtc != DateTime.MinValue &&
+                        nowUtc >= deferredPayload.HoldUntilUtc)
+                    {
+                        RemoveDeferredClientHandleMissileCollisionReactionPayload(handleMissileCollisionReaction);
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: dropped deferred client thrown projectile visual grace because local missile is gone. " +
+                            "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
+                            " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
+                            " AttachedAgentIndex=" + handleMissileCollisionReaction.AttachedAgentIndex +
+                            " Source=" + (source ?? "unknown"));
+                    }
                     continue;
+                }
 
                 if (handleMissileCollisionReaction.AttackerAgentIndex >= 0)
                 {
@@ -6857,24 +7483,44 @@ namespace CoopSpectator.Patches
                     Agent attachedAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(
                         handleMissileCollisionReaction.AttachedAgentIndex,
                         canBeNull: true);
-                    if (attachedAgent == null || !attachedAgent.IsActive())
+                    if (!IsDeferredClientThrownProjectileVisualGracePayload(deferredPayload) &&
+                        (attachedAgent == null || !attachedAgent.IsActive()))
+                    {
                         continue;
+                    }
                 }
 
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
+                bool visualGraceReplay = IsDeferredClientThrownProjectileVisualGracePayload(deferredPayload);
                 try
                 {
-                    _missionNetworkComponentHandleServerEventHandleMissileCollisionReactionMethod.Invoke(
-                        missionNetworkComponent,
-                        new object[] { handleMissileCollisionReaction });
-                    RemoveDeferredClientHandleMissileCollisionReactionPayload(handleMissileCollisionReaction);
+                    if (visualGraceReplay)
+                        _clientProjectileVisualGraceReplayDepth++;
+                    try
+                    {
+                        _missionNetworkComponentHandleServerEventHandleMissileCollisionReactionMethod.Invoke(
+                            missionNetworkComponent,
+                            new object[] { handleMissileCollisionReaction });
+                    }
+                    finally
+                    {
+                        if (visualGraceReplay)
+                            _clientProjectileVisualGraceReplayDepth--;
+                    }
+                    bool transitionedToVisualGrace =
+                        !visualGraceReplay &&
+                        IsDeferredClientThrownProjectileVisualGracePayload(deferredPayload);
+                    if (!transitionedToVisualGrace)
+                        RemoveDeferredClientHandleMissileCollisionReactionPayload(handleMissileCollisionReaction);
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: replayed deferred client HandleMissileCollisionReaction after battle snapshot apply. " +
                         "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
                         " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
                         " AttachedAgentIndex=" + handleMissileCollisionReaction.AttachedAgentIndex +
                         " Attempts=" + deferredPayload.Attempts +
+                        " VisualGraceReplay=" + visualGraceReplay +
+                        " TransitionedToVisualGrace=" + transitionedToVisualGrace +
                         " Source=" + (source ?? "unknown"));
                 }
                 catch (Exception ex)
@@ -11243,6 +11889,8 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                TryTraceClientProjectileLaunchDiagnostics(mission, createMissile, shooterAgent);
+
                 return true;
             }
             catch (Exception ex)
@@ -11305,6 +11953,13 @@ namespace CoopSpectator.Patches
                         "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
                         " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
                         " AttachedAgentIndex=" + handleMissileCollisionReaction.AttachedAgentIndex);
+                    return false;
+                }
+
+                if (TryDeferClientThrownProjectileBecomeInvisibleForVisualGrace(
+                        mission,
+                        handleMissileCollisionReaction))
+                {
                     return false;
                 }
 

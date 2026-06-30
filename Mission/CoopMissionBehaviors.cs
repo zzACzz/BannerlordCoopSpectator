@@ -3700,6 +3700,8 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<int, int> _battlePhaseHeldFormationUnitCounts = new Dictionary<int, int>();
         private static readonly HashSet<string> _loggedAutomatedMaterializedEntrySkipIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> _loggedSuppressedMaterializedEquipmentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> _projectileLaunchDiagnosticKeys = new HashSet<string>(StringComparer.Ordinal);
+        private const int ProjectileLaunchDiagnosticBudget = 64;
         private static Mission _lastBattlePhaseAiHoldMission;
         private static Mission _lastMaterializedArmyMission;
         private static Mission _lastClientBattleSnapshotRefreshMission;
@@ -5295,6 +5297,357 @@ namespace CoopSpectator.MissionBehaviors
                 hitDistance,
                 shotDifficulty);
             base.OnScoreHit(affectedAgent, affectorAgent, attackerWeapon, isBlocked, isSiegeEngineHit, blow, collisionData, authoritativeDamagedHp, hitDistance, shotDifficulty);
+        }
+
+        public override void OnAgentShootMissile(
+            Agent shooterAgent,
+            EquipmentIndex weaponIndex,
+            Vec3 position,
+            Vec3 velocity,
+            Mat3 orientation,
+            bool hasRigidBody,
+            int forcedMissileIndex)
+        {
+            base.OnAgentShootMissile(
+                shooterAgent,
+                weaponIndex,
+                position,
+                velocity,
+                orientation,
+                hasRigidBody,
+                forcedMissileIndex);
+
+            TryTraceServerProjectileLaunchDiagnostics(
+                shooterAgent,
+                weaponIndex,
+                position,
+                velocity,
+                orientation,
+                hasRigidBody,
+                forcedMissileIndex);
+        }
+
+        private static void TryTraceServerProjectileLaunchDiagnostics(
+            Agent shooterAgent,
+            EquipmentIndex weaponIndex,
+            Vec3 position,
+            Vec3 velocity,
+            Mat3 orientation,
+            bool hasRigidBody,
+            int forcedMissileIndex)
+        {
+            if (!ExperimentalFeatures.EnableExactCreateAgentCorridorDiagnostics ||
+                !GameNetwork.IsServerOrRecorder ||
+                shooterAgent == null ||
+                shooterAgent.IsMount)
+            {
+                return;
+            }
+
+            try
+            {
+                MissionWeapon launchWeapon = ResolveAgentMissionWeapon(shooterAgent, weaponIndex);
+                if (!IsThrownProjectileLaunchWeapon(launchWeapon))
+                    return;
+
+                if (!IsServerProjectileLaunchDiagnosticsTarget(shooterAgent, out string entryId, out RosterEntryState entryState, out string targetReason))
+                    return;
+
+                string key =
+                    "server|" +
+                    forcedMissileIndex + "|" +
+                    shooterAgent.Index + "|" +
+                    weaponIndex + "|" +
+                    (launchWeapon.Item?.StringId ?? "null") + "|" +
+                    FormatProjectileLaunchVec3(position) + "|" +
+                    FormatProjectileLaunchFloat(SafeLength(velocity));
+                if (_projectileLaunchDiagnosticKeys.Count >= ProjectileLaunchDiagnosticBudget ||
+                    !_projectileLaunchDiagnosticKeys.Add(key))
+                {
+                    return;
+                }
+
+                string details = BuildServerProjectileLaunchDiagnosticDetails(
+                    shooterAgent,
+                    entryId,
+                    entryState,
+                    targetReason,
+                    weaponIndex,
+                    launchWeapon,
+                    position,
+                    velocity,
+                    orientation,
+                    hasRigidBody,
+                    forcedMissileIndex);
+
+                ModLogger.Info("CoopMissionSpawnLogic: projectile launch diagnostics. " + details);
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent("projectile-launch-server-on-agent-shoot", details);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSpawnLogic: projectile launch diagnostics failed open: " + ex.Message);
+            }
+        }
+
+        private static MissionWeapon ResolveAgentMissionWeapon(Agent agent, EquipmentIndex weaponIndex)
+        {
+            if (agent?.Equipment != null && weaponIndex != EquipmentIndex.None)
+            {
+                try
+                {
+                    return agent.Equipment[weaponIndex];
+                }
+                catch
+                {
+                }
+            }
+
+            return MissionWeapon.Invalid;
+        }
+
+        private static bool IsServerProjectileLaunchDiagnosticsTarget(
+            Agent agent,
+            out string entryId,
+            out RosterEntryState entryState,
+            out string reason)
+        {
+            entryId = null;
+            entryState = null;
+            reason = "not-controlled-hero";
+
+            if (agent == null || agent.IsMount)
+                return false;
+
+            bool controlled = agent.MissionPeer != null || agent.Controller == AgentControllerType.Player;
+            bool resolvedEntry =
+                TryResolveAuthoritativeTrackedEntryId(agent, out entryId) ||
+                TryResolveSelectableEntryId(agent, out entryId);
+            if (resolvedEntry)
+                entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+
+            bool heroEntry = IsProjectileLaunchHeroEntry(entryState);
+            if (!controlled && !heroEntry)
+                return false;
+
+            reason =
+                (controlled ? "controlled" : "observed-hero-entry") +
+                "|HeroEntry=" + heroEntry +
+                "|EntryResolved=" + resolvedEntry;
+            return true;
+        }
+
+        private static bool IsProjectileLaunchHeroEntry(RosterEntryState entryState)
+        {
+            return entryState != null &&
+                   (entryState.IsHero ||
+                    !string.IsNullOrWhiteSpace(entryState.HeroId) ||
+                    string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsThrownProjectileLaunchWeapon(MissionWeapon weapon)
+        {
+            try
+            {
+                if (weapon.IsEmpty)
+                    return false;
+
+                ItemObject item = weapon.Item;
+                if (item?.ItemType == ItemObject.ItemTypeEnum.Thrown)
+                    return true;
+
+                WeaponComponentData usage = weapon.CurrentUsageItem ?? item?.PrimaryWeapon;
+                if (usage == null)
+                    return false;
+
+                return usage.RelevantSkill == DefaultSkills.Throwing ||
+                       usage.WeaponClass == WeaponClass.Javelin ||
+                       usage.WeaponClass == WeaponClass.ThrowingAxe ||
+                       usage.WeaponClass == WeaponClass.ThrowingKnife ||
+                       usage.WeaponClass == WeaponClass.Stone ||
+                       usage.WeaponClass == WeaponClass.SlingStone;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string BuildServerProjectileLaunchDiagnosticDetails(
+            Agent shooterAgent,
+            string entryId,
+            RosterEntryState entryState,
+            string targetReason,
+            EquipmentIndex weaponIndex,
+            MissionWeapon launchWeapon,
+            Vec3 position,
+            Vec3 velocity,
+            Mat3 orientation,
+            bool hasRigidBody,
+            int forcedMissileIndex)
+        {
+            Vec3 agentPosition = shooterAgent?.Position ?? Vec3.Zero;
+            Vec3 offset = position - agentPosition;
+            Vec3 lookDirection = ResolveAgentLookDirection(shooterAgent);
+            Vec3 normalizedDirection = NormalizeVec3(velocity);
+            float speed = SafeLength(velocity);
+            float offsetLookDot = DotSafe(offset, lookDirection);
+            float directionLookDot = DotSafe(normalizedDirection, lookDirection);
+            float offsetLength = SafeLength(offset);
+            bool startsBehindLook = offsetLookDot < -0.10f;
+
+            EquipmentIndex primaryWieldedIndex = EquipmentIndex.None;
+            EquipmentIndex offhandWieldedIndex = EquipmentIndex.None;
+            string missionWeapons = "(unavailable)";
+            string spawnWeapons = "(unavailable)";
+            string currentWeaponOffset = "(unavailable)";
+            try
+            {
+                primaryWieldedIndex = shooterAgent.GetPrimaryWieldedItemIndex();
+                offhandWieldedIndex = shooterAgent.GetOffhandWieldedItemIndex();
+                missionWeapons = BuildMissionEquipmentSummary(
+                    shooterAgent.Equipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3);
+                spawnWeapons = BuildExactEntryEquipmentSummary(
+                    shooterAgent.SpawnEquipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3);
+                currentWeaponOffset = FormatProjectileLaunchVec3(shooterAgent.GetCurWeaponOffset());
+            }
+            catch
+            {
+            }
+
+            WeaponComponentData usage = null;
+            try
+            {
+                usage = launchWeapon.CurrentUsageItem ?? launchWeapon.Item?.PrimaryWeapon;
+            }
+            catch
+            {
+            }
+
+            return
+                "Stage=server-on-agent-shoot" +
+                " Scene=" + (Mission.Current?.SceneName ?? "null") +
+                " ForcedMissileIndex=" + forcedMissileIndex +
+                " AgentIndex=" + (shooterAgent?.Index ?? -1) +
+                " EntryId=" + (entryId ?? "null") +
+                " TargetReason=" + (targetReason ?? "unknown") +
+                " EntryHero=" + (entryState?.IsHero ?? false) +
+                " OriginalCharacterId=" + (entryState?.OriginalCharacterId ?? "null") +
+                " HeroId=" + (entryState?.HeroId ?? "null") +
+                " CharacterId=" + (shooterAgent?.Character?.StringId ?? "null") +
+                " Controller=" + (shooterAgent?.Controller.ToString() ?? "null") +
+                " HasMount=" + (shooterAgent?.HasMount ?? false) +
+                " MountAgentIndex=" + (shooterAgent?.MountAgent?.Index ?? -1) +
+                " WeaponIndex=" + weaponIndex +
+                " PrimaryWieldedIndex=" + primaryWieldedIndex +
+                " OffhandWieldedIndex=" + offhandWieldedIndex +
+                " LaunchItem=" + (launchWeapon.Item?.StringId ?? "null") +
+                " LaunchItemType=" + (launchWeapon.Item?.ItemType.ToString() ?? "null") +
+                " LaunchUsage=" + (usage?.WeaponClass.ToString() ?? "null") +
+                " LaunchRelevantSkill=" + (usage?.RelevantSkill?.StringId ?? "null") +
+                " HasRigidBody=" + hasRigidBody +
+                " AgentPosition=" + FormatProjectileLaunchVec3(agentPosition) +
+                " AgentLook=" + FormatProjectileLaunchVec3(lookDirection) +
+                " MissilePosition=" + FormatProjectileLaunchVec3(position) +
+                " MissileDirection=" + FormatProjectileLaunchVec3(normalizedDirection) +
+                " MissileSpeed=" + FormatProjectileLaunchFloat(speed) +
+                " Offset=" + FormatProjectileLaunchVec3(offset) +
+                " OffsetLength=" + FormatProjectileLaunchFloat(offsetLength) +
+                " OffsetLookDot=" + FormatProjectileLaunchFloat(offsetLookDot) +
+                " DirectionLookDot=" + FormatProjectileLaunchFloat(directionLookDot) +
+                " StartsBehindLook=" + startsBehindLook +
+                " OrientationF=" + FormatProjectileLaunchVec3(orientation.f) +
+                " CurWeaponOffset=" + currentWeaponOffset +
+                " MissionWeapons={" + missionWeapons + "}" +
+                " SpawnWeapons={" + spawnWeapons + "}";
+        }
+
+        private static Vec3 ResolveAgentLookDirection(Agent agent)
+        {
+            if (agent == null)
+                return Vec3.Forward;
+
+            try
+            {
+                Vec3 look = agent.LookDirection;
+                if (look.LengthSquared > 0.0001f)
+                    return NormalizeVec3(look);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                Vec3 frameForward = agent.Frame.rotation.f;
+                if (frameForward.LengthSquared > 0.0001f)
+                    return NormalizeVec3(frameForward);
+            }
+            catch
+            {
+            }
+
+            return Vec3.Forward;
+        }
+
+        private static Vec3 NormalizeVec3(Vec3 value)
+        {
+            try
+            {
+                if (value.LengthSquared <= 0.0001f)
+                    return Vec3.Zero;
+
+                value.Normalize();
+                return value;
+            }
+            catch
+            {
+                return Vec3.Zero;
+            }
+        }
+
+        private static float DotSafe(Vec3 left, Vec3 right)
+        {
+            try
+            {
+                return Vec3.DotProduct(left, right);
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float SafeLength(Vec3 value)
+        {
+            try
+            {
+                return value.Length;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static string FormatProjectileLaunchVec3(Vec3 value)
+        {
+            return "(" +
+                   FormatProjectileLaunchFloat(value.x) + "," +
+                   FormatProjectileLaunchFloat(value.y) + "," +
+                   FormatProjectileLaunchFloat(value.z) + ")";
+        }
+
+        private static string FormatProjectileLaunchFloat(float value)
+        {
+            return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         public override void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, AgentState agentState, KillingBlow blow)
