@@ -10648,6 +10648,16 @@ namespace CoopSpectator.Patches
                 }
 
                 if (agent != null &&
+                    CoopMissionSpawnLogic.ShouldClearDismountedSiegeSynchronizeAgentMountVisuals(
+                        mission,
+                        agent,
+                        synchronizeAgentSpawnEquipment.SpawnEquipment))
+                {
+                    synchronizeAgentSpawnEquipment.SpawnEquipment[EquipmentIndex.Horse] = default(EquipmentElement);
+                    synchronizeAgentSpawnEquipment.SpawnEquipment[EquipmentIndex.HorseHarness] = default(EquipmentElement);
+                }
+
+                if (agent != null &&
                     TrySuppressExactSiegeHeroSurrogateSynchronizeAgentEquipmentPayload(
                         mission,
                         synchronizeAgentSpawnEquipment,

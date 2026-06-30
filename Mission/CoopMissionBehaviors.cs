@@ -4499,7 +4499,7 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
-            private static bool ShouldIncludeMountVisuals(
+            public static bool ShouldIncludeMountVisuals(
                 Mission mission,
                 BattleSideEnum side,
                 RosterEntryState entryState)
@@ -14023,7 +14023,7 @@ namespace CoopSpectator.MissionBehaviors
             return formationClass;
         }
 
-        private static bool ShouldUseDismountedSiegeProjection(Mission mission, BattleSideEnum side)
+        public static bool ShouldUseDismountedSiegeProjection(Mission mission, BattleSideEnum side)
         {
             if (mission == null || side == BattleSideEnum.None)
                 return false;
@@ -14032,20 +14032,89 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            bool isSiegeAssaultScenario =
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+            bool isActiveSiegeDeployment =
+                ExactCampaignArmyBootstrap.IsSiegeAssaultWithDeploymentActive(mission);
+            bool isMissionSiegeBattle = false;
+            try
+            {
+                isMissionSiegeBattle = mission.IsSiegeBattle;
+            }
+            catch
+            {
+                isMissionSiegeBattle = true;
+            }
+
+            if (!isSiegeAssaultScenario &&
+                !isActiveSiegeDeployment &&
+                !isMissionSiegeBattle)
+            {
                 return false;
+            }
 
             if (ExactCampaignArmyBootstrap.TryGetSpawnHorses(mission, side, out bool spawnHorses))
                 return !spawnHorses;
 
+            return isMissionSiegeBattle;
+        }
+
+        public static bool ShouldClearDismountedSiegeSynchronizeAgentMountVisuals(
+            Mission mission,
+            Agent agent,
+            Equipment spawnEquipment)
+        {
+            if (mission == null ||
+                agent == null ||
+                spawnEquipment == null ||
+                agent.IsMount ||
+                !agent.IsActive() ||
+                agent.Team == null ||
+                agent.Team.Side == BattleSideEnum.None ||
+                agent.MountAgent != null ||
+                agent.MissionPeer != null ||
+                agent.Character?.IsHero == true)
+            {
+                return false;
+            }
+
+            if (!ShouldUseDismountedSiegeProjection(mission, agent.Team.Side))
+                return false;
+
+            return spawnEquipment[EquipmentIndex.Horse].Item != null ||
+                   spawnEquipment[EquipmentIndex.HorseHarness].Item != null;
+        }
+
+        private static bool ShouldIncludeMaterializedSpawnMountVisuals(
+            Mission mission,
+            Team team,
+            BasicCharacterObject troop,
+            RosterEntryState entryState)
+        {
+            BattleSideEnum side = team?.Side ?? BattleSideEnum.None;
+            if (ShouldUseDismountedSiegeProjection(mission, side))
+                return false;
+
+            if (entryState != null)
+                return ExactSiegeMaterializationModule.ShouldIncludeMountVisuals(mission, side, entryState);
+
             try
             {
-                return mission.IsSiegeBattle;
+                return troop?.HasMount() == true;
             }
             catch
             {
-                return true;
+                return false;
             }
+        }
+
+        private static void ClearMaterializedSpawnMountVisualSlots(Equipment spawnEquipment)
+        {
+            if (spawnEquipment == null)
+                return;
+
+            spawnEquipment[EquipmentIndex.Horse] = default(EquipmentElement);
+            spawnEquipment[EquipmentIndex.HorseHarness] = default(EquipmentElement);
         }
 
         private static string BuildMaterializedDeploymentCountSummary(
@@ -14485,12 +14554,25 @@ namespace CoopSpectator.MissionBehaviors
             {
                 var origin = new BasicBattleAgentOrigin(troop);
                 AgentBuildData buildData = new AgentBuildData(troop);
+                bool forceDismountedSiegeProjection = ShouldUseDismountedSiegeProjection(mission, team.Side);
+                bool includeMountVisuals = ShouldIncludeMaterializedSpawnMountVisuals(
+                    mission,
+                    team,
+                    troop,
+                    entryState);
                 Equipment snapshotEquipment =
                     ExactSiegeMaterializationModule.TryBuildSiegeSpawnEquipment(mission, team, entryState) ??
-                    BuildSnapshotEquipmentForExactRuntime(entryState);
+                    BuildSnapshotEquipmentForExactRuntime(entryState, includeMountVisuals: includeMountVisuals);
                 Equipment spawnEquipment = snapshotEquipment ?? troop.Equipment?.Clone(false);
                 string spawnEquipmentSource = snapshotEquipment != null ? "exact-snapshot" : "troop-clone";
-                appliedArmorOverrides = TryApplyMaterializedEquipmentOverrides(spawnEquipment, entryState, null, trackCoverage: true);
+                if (forceDismountedSiegeProjection)
+                    ClearMaterializedSpawnMountVisualSlots(spawnEquipment);
+                appliedArmorOverrides = TryApplyMaterializedEquipmentOverrides(
+                    spawnEquipment,
+                    entryState,
+                    null,
+                    trackCoverage: true,
+                    includeMountVisuals: includeMountVisuals);
                 TextObject originalTroopName = null;
                 bool hasTemporaryNameOverride =
                     TryApplyEntryNameToSpawnCharacter(troop, entryState, out originalTroopName);
