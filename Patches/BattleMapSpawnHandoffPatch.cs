@@ -41,6 +41,7 @@ namespace CoopSpectator.Patches
         private static readonly HashSet<string> LoggedClientProjectileVisualGraceKeys = new HashSet<string>();
         private const int ClientProjectileVisualGraceDiagnosticBudget = 64;
         private const string ClientThrownProjectileVisualGraceDeferralReasonPrefix = "player-thrown-projectile-visual-grace";
+        private const string ClientSiegeEngineProjectileVisualGraceDeferralReasonPrefix = "siege-engine-projectile-visual-grace";
         private static int _clientProjectileVisualGraceReplayDepth;
         private static MethodInfo _missionNetworkComponentHandleServerEventCreateAgentMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSetAgentActionSetMethod;
@@ -68,6 +69,7 @@ namespace CoopSpectator.Patches
         private static string _lastArmedLocalFollowSuppressionWindowKey;
         private static string _lastSuppressedWeaponDropKey;
         private static string _lastSuppressedServerProjectileStickKey;
+        private static string _lastSuppressedServerSiegeEngineProjectileNativeDropKey;
         private static string _lastSuppressedServerCorpseAttachedWeaponKey;
         private static string _lastSuppressedServerSpawnedWeaponAttachmentKey;
 #if COOPSPECTATOR_DEDICATED
@@ -188,6 +190,7 @@ namespace CoopSpectator.Patches
         private static readonly TimeSpan DeferredClientSiegeMissionObjectReplayDelay = TimeSpan.FromMilliseconds(750);
         private static readonly TimeSpan DeferredClientSiegeMissingMissionObjectDropDelay = TimeSpan.FromSeconds(8);
         private static readonly TimeSpan ClientThrownProjectileBecomeInvisibleVisualGrace = TimeSpan.FromMilliseconds(650);
+        private static readonly TimeSpan ClientSiegeEngineProjectileVisualGraceMaxAge = TimeSpan.FromMilliseconds(2500);
         private static DateTime _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
         private static int _localFollowEchoSuppressionAgentIndex = -1;
 
@@ -390,6 +393,7 @@ namespace CoopSpectator.Patches
             public DateTime HoldUntilUtc;
             public int Attempts;
             public string DeferralReason;
+            public string MissileItemId;
         }
 
         private sealed class DeferredClientSetWieldedItemIndexPayload
@@ -3383,11 +3387,14 @@ namespace CoopSpectator.Patches
         private static void RegisterDeferredClientHandleMissileCollisionReactionPayload(
             HandleMissileCollisionReaction handleMissileCollisionReaction,
             string deferralReason,
-            DateTime holdUntilUtc = default(DateTime))
+            DateTime holdUntilUtc = default(DateTime),
+            string missileItemId = null)
         {
             if (handleMissileCollisionReaction == null)
                 return;
 
+            DateTime nowUtc = DateTime.UtcNow;
+            string normalizedMissileItemId = NormalizeMissileItemId(missileItemId);
             lock (DeferredClientHandleMissileCollisionReactionPayloads)
             {
                 DeferredClientHandleMissileCollisionReactionPayload existingPayload =
@@ -3400,6 +3407,8 @@ namespace CoopSpectator.Patches
                     existingPayload.Message = handleMissileCollisionReaction;
                     existingPayload.DeferralReason = deferralReason;
                     existingPayload.HoldUntilUtc = holdUntilUtc;
+                    existingPayload.DeferredUtc = nowUtc;
+                    existingPayload.MissileItemId = normalizedMissileItemId;
                     return;
                 }
 
@@ -3408,11 +3417,12 @@ namespace CoopSpectator.Patches
                     {
                         Sequence = ++_nextDeferredClientHandleMissileCollisionReactionSequence,
                         Message = handleMissileCollisionReaction,
-                        DeferredUtc = DateTime.UtcNow,
+                        DeferredUtc = nowUtc,
                         LastAttemptUtc = DateTime.MinValue,
                         HoldUntilUtc = holdUntilUtc,
                         Attempts = 0,
-                        DeferralReason = deferralReason
+                        DeferralReason = deferralReason,
+                        MissileItemId = normalizedMissileItemId
                     });
             }
         }
@@ -4456,7 +4466,8 @@ namespace CoopSpectator.Patches
                 RegisterDeferredClientHandleMissileCollisionReactionPayload(
                     handleMissileCollisionReaction,
                     ClientThrownProjectileVisualGraceDeferralReasonPrefix + ":" + collisionReason,
-                    holdUntilUtc);
+                    holdUntilUtc,
+                    missileItem?.StringId);
 
                 string logKey =
                     handleMissileCollisionReaction.MissileIndex + "|" +
@@ -4495,6 +4506,71 @@ namespace CoopSpectator.Patches
                    deferredPayload.DeferralReason.StartsWith(
                        ClientThrownProjectileVisualGraceDeferralReasonPrefix,
                        StringComparison.Ordinal);
+        }
+
+        private static bool IsDeferredClientSiegeEngineProjectileVisualGracePayload(
+            DeferredClientHandleMissileCollisionReactionPayload deferredPayload)
+        {
+            return deferredPayload?.DeferralReason != null &&
+                   deferredPayload.DeferralReason.StartsWith(
+                       ClientSiegeEngineProjectileVisualGraceDeferralReasonPrefix,
+                       StringComparison.Ordinal);
+        }
+
+        private static bool IsDeferredClientProjectileVisualGracePayload(
+            DeferredClientHandleMissileCollisionReactionPayload deferredPayload)
+        {
+            return IsDeferredClientThrownProjectileVisualGracePayload(deferredPayload) ||
+                   IsDeferredClientSiegeEngineProjectileVisualGracePayload(deferredPayload);
+        }
+
+        private static string GetDeferredClientProjectileVisualGraceKind(
+            DeferredClientHandleMissileCollisionReactionPayload deferredPayload)
+        {
+            if (IsDeferredClientSiegeEngineProjectileVisualGracePayload(deferredPayload))
+                return "siege-engine projectile";
+
+            if (IsDeferredClientThrownProjectileVisualGracePayload(deferredPayload))
+                return "thrown projectile";
+
+            return "projectile";
+        }
+
+        private static string NormalizeMissileItemId(string itemId)
+        {
+            return string.IsNullOrWhiteSpace(itemId)
+                ? null
+                : itemId.Trim();
+        }
+
+        private static bool ShouldDropDeferredClientProjectileVisualGracePayloadBeforeReplay(
+            Mission mission,
+            DeferredClientHandleMissileCollisionReactionPayload deferredPayload,
+            DateTime nowUtc)
+        {
+            if (!IsDeferredClientProjectileVisualGracePayload(deferredPayload))
+                return false;
+
+            if (IsDeferredClientSiegeEngineProjectileVisualGracePayload(deferredPayload) &&
+                deferredPayload.DeferredUtc != DateTime.MinValue &&
+                nowUtc - deferredPayload.DeferredUtc > ClientSiegeEngineProjectileVisualGraceMaxAge)
+            {
+                return true;
+            }
+
+            string expectedItemId = NormalizeMissileItemId(deferredPayload.MissileItemId);
+            if (expectedItemId == null)
+                return false;
+
+            HandleMissileCollisionReaction message = deferredPayload.Message;
+            if (message == null)
+                return true;
+
+            if (!TryResolveMissionMissileItem(mission, message.MissileIndex, out ItemObject currentMissileItem))
+                return true;
+
+            string currentItemId = NormalizeMissileItemId(currentMissileItem?.StringId);
+            return !string.Equals(expectedItemId, currentItemId, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsLocalProjectileVisualGraceAttacker(Agent attackerAgent)
@@ -4579,6 +4655,139 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool TryDeferClientSiegeEngineProjectileUnsafeCollisionForVisualGrace(
+            Mission mission,
+            HandleMissileCollisionReaction handleMissileCollisionReaction)
+        {
+            if (_clientProjectileVisualGraceReplayDepth > 0 ||
+                mission == null ||
+                handleMissileCollisionReaction == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            Mission.MissileCollisionReaction originalReaction = handleMissileCollisionReaction.CollisionReaction;
+            if (originalReaction != Mission.MissileCollisionReaction.BecomeInvisible &&
+                originalReaction != Mission.MissileCollisionReaction.Stick &&
+                originalReaction != Mission.MissileCollisionReaction.BounceBack &&
+                originalReaction != Mission.MissileCollisionReaction.PassThrough)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!TryResolveMissionMissileItem(
+                        mission,
+                        handleMissileCollisionReaction.MissileIndex,
+                        out ItemObject missileItem) ||
+                    !IsSiegeEngineProjectileItem(missileItem))
+                {
+                    return false;
+                }
+
+                if (originalReaction == Mission.MissileCollisionReaction.PassThrough &&
+                    !IsBallistaProjectileItem(missileItem))
+                {
+                    return false;
+                }
+
+                string collisionReason = ResolveClientSiegeEngineProjectileVisualGraceCollisionReason(
+                    handleMissileCollisionReaction,
+                    missileItem,
+                    originalReaction);
+                HandleMissileCollisionReaction deferredMessage =
+                    originalReaction == Mission.MissileCollisionReaction.BecomeInvisible
+                        ? handleMissileCollisionReaction
+                        : CreateBecomeInvisibleMissileCollisionReaction(handleMissileCollisionReaction);
+                TimeSpan visualGrace = ResolveClientSiegeEngineProjectileBecomeInvisibleVisualGrace(missileItem);
+                DateTime holdUntilUtc = DateTime.UtcNow + visualGrace;
+                RemoveDeferredClientSiegeEngineProjectileVisualGracePayloads(
+                    handleMissileCollisionReaction.MissileIndex);
+                RegisterDeferredClientHandleMissileCollisionReactionPayload(
+                    deferredMessage,
+                    ClientSiegeEngineProjectileVisualGraceDeferralReasonPrefix + ":" + collisionReason,
+                    holdUntilUtc,
+                    missileItem?.StringId);
+
+                if (ExperimentalFeatures.EnableExactCreateAgentCorridorDiagnostics)
+                {
+                    string logKey =
+                        handleMissileCollisionReaction.MissileIndex + "|" +
+                        handleMissileCollisionReaction.AttackerAgentIndex + "|" +
+                        handleMissileCollisionReaction.AttachedAgentIndex + "|" +
+                        (missileItem?.StringId ?? "null") + "|" +
+                        originalReaction + "|" +
+                        collisionReason;
+                    if (LoggedClientProjectileVisualGraceKeys.Count < ClientProjectileVisualGraceDiagnosticBudget &&
+                        LoggedClientProjectileVisualGraceKeys.Add(logKey))
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred client siege-engine projectile collision for visual grace. " +
+                            "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
+                            " MissileItem=" + (missileItem?.StringId ?? "null") +
+                            " OriginalReaction=" + originalReaction +
+                            " DeferredReaction=" + deferredMessage.CollisionReaction +
+                            " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
+                            " AttachedAgentIndex=" + handleMissileCollisionReaction.AttachedAgentIndex +
+                            " AttachedToShield=" + handleMissileCollisionReaction.AttachedToShield +
+                            " AttachedBoneIndex=" + handleMissileCollisionReaction.AttachedBoneIndex +
+                            " CollisionReason=" + collisionReason +
+                            " HoldMilliseconds=" + (int)visualGrace.TotalMilliseconds);
+                    }
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: client siege-engine projectile visual grace failed open: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static HandleMissileCollisionReaction CreateBecomeInvisibleMissileCollisionReaction(
+            HandleMissileCollisionReaction source)
+        {
+            return new HandleMissileCollisionReaction(
+                source.MissileIndex,
+                Mission.MissileCollisionReaction.BecomeInvisible,
+                MatrixFrame.Identity,
+                isAttachedFrameLocal: false,
+                source.AttackerAgentIndex,
+                source.AttachedAgentIndex,
+                source.AttachedToShield,
+                source.AttachedBoneIndex,
+                source.AttachedMissionObjectId,
+                Vec3.Zero,
+                Vec3.Zero,
+                forcedSpawnIndex: 0);
+        }
+
+        private static string ResolveClientSiegeEngineProjectileVisualGraceCollisionReason(
+            HandleMissileCollisionReaction handleMissileCollisionReaction,
+            ItemObject missileItem,
+            Mission.MissileCollisionReaction originalReaction)
+        {
+            string itemId = missileItem?.StringId ?? "unknown";
+            switch (originalReaction)
+            {
+                case Mission.MissileCollisionReaction.Stick:
+                    return "native-stick-drop-risk:" + itemId;
+                case Mission.MissileCollisionReaction.BounceBack:
+                    return "native-bounceback-drop-risk:" + itemId;
+                case Mission.MissileCollisionReaction.PassThrough:
+                    return "ballista-pass-through-visibility-guard:" + itemId;
+                case Mission.MissileCollisionReaction.BecomeInvisible:
+                    if (handleMissileCollisionReaction.AttachedAgentIndex < 0)
+                        return "server-downgraded-no-attached-agent:" + itemId;
+                    return "server-downgraded:" + itemId;
+                default:
+                    return "unknown:" + itemId;
+            }
+        }
+
         private static bool ShouldUseServerExactBattleProjectileStickSuppression(Mission mission)
         {
             if (!GameNetwork.IsServer || mission == null)
@@ -4608,13 +4817,56 @@ namespace CoopSpectator.Patches
                 string.Equals(itemId, "ballista_projectile_burning", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsSiegeEngineProjectileItem(ItemObject item)
+        {
+            return IsSiegeEngineProjectileItemId(item?.StringId);
+        }
+
+        private static bool IsSiegeEngineProjectileItemId(string itemId)
+        {
+            return IsBallistaProjectileItemId(itemId) ||
+                   string.Equals(itemId, "boulder_projectile", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "pot_projectile", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "grapeshot_projectile", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "grapeshot_fire_projectile", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "boulder", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "pot", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "grapeshot_stack", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "grapeshot_fire_stack", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static TimeSpan ResolveClientSiegeEngineProjectileBecomeInvisibleVisualGrace(ItemObject item)
+        {
+            string itemId = item?.StringId;
+            if (string.Equals(itemId, "grapeshot_projectile", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(itemId, "grapeshot_fire_projectile", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(itemId, "grapeshot_stack", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(itemId, "grapeshot_fire_stack", StringComparison.OrdinalIgnoreCase))
+            {
+                return TimeSpan.FromMilliseconds(300);
+            }
+
+            if (IsBallistaProjectileItemId(itemId))
+                return TimeSpan.FromMilliseconds(650);
+
+            if (string.Equals(itemId, "boulder_projectile", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(itemId, "pot_projectile", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(itemId, "boulder", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(itemId, "pot", StringComparison.OrdinalIgnoreCase))
+            {
+                return TimeSpan.FromMilliseconds(850);
+            }
+
+            return TimeSpan.FromMilliseconds(650);
+        }
+
         private static bool IsSuppressibleServerProjectileStickItem(ItemObject item)
         {
             if (item == null)
                 return false;
 
-            if (IsBallistaProjectileItem(item))
-                return true;
+            if (IsSiegeEngineProjectileItem(item))
+                return false;
 
             try
             {
@@ -4635,7 +4887,7 @@ namespace CoopSpectator.Patches
 
         private static bool IsTroopProjectileStickItem(ItemObject item)
         {
-            if (item == null || IsBallistaProjectileItem(item))
+            if (item == null || IsSiegeEngineProjectileItem(item))
                 return false;
 
             try
@@ -4653,6 +4905,37 @@ namespace CoopSpectator.Patches
             }
 
             return false;
+        }
+
+        private static bool IsExactSiegeWeaponUsageRangedCompatible(ItemObject item, WeaponComponentData usage)
+        {
+            if (usage == null)
+                return false;
+
+            if (usage.IsRangedWeapon)
+                return true;
+
+            if (usage.RelevantSkill == DefaultSkills.Throwing)
+                return true;
+
+            switch (usage.WeaponClass)
+            {
+                case WeaponClass.Javelin:
+                case WeaponClass.ThrowingAxe:
+                case WeaponClass.ThrowingKnife:
+                case WeaponClass.Stone:
+                case WeaponClass.SlingStone:
+                    return true;
+            }
+
+            try
+            {
+                return item?.ItemType == ItemObject.ItemTypeEnum.Thrown;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool ShouldAllowExactSiegeTroopProjectileStickBroadcast(
@@ -4682,8 +4965,8 @@ namespace CoopSpectator.Patches
 
             if (attachedAgent == null)
             {
-                reason = "no-attached-agent";
-                return false;
+                reason = "world-or-mission-object-stick";
+                return true;
             }
 
             bool attachedAgentActive;
@@ -4885,6 +5168,73 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool ShouldSuppressExactSiegeEngineProjectileNativeDropBroadcast(
+            Mission mission,
+            Mission.MissileCollisionReaction collisionReaction,
+            ItemObject missileItem,
+            out string reason)
+        {
+            reason = "unknown";
+
+            if (mission == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                reason = "not-exact-siege";
+                return false;
+            }
+
+            if (!IsSiegeEngineProjectileItem(missileItem))
+            {
+                reason = "non-siege-engine-projectile";
+                return false;
+            }
+
+            reason = "native-siege-engine-projectile-reaction-allowed:" + collisionReaction;
+            return false;
+        }
+
+        private static void TryLogSuppressedServerSiegeEngineProjectileNativeDrop(
+            int missileIndex,
+            ItemObject missileItem,
+            Mission.MissileCollisionReaction originalReaction,
+            Agent attackerAgent,
+            Agent attachedAgent,
+            bool attachedToShield,
+            sbyte attachedBoneIndex,
+            MissionObject attachedMissionObject,
+            int forcedSpawnIndex,
+            string suppressionReason)
+        {
+            if (!ExperimentalFeatures.EnableExactCreateAgentCorridorDiagnostics)
+                return;
+
+            string logKey =
+                missileIndex + "|" +
+                (missileItem?.StringId ?? "null") + "|" +
+                originalReaction + "|" +
+                (attachedAgent?.Index ?? -1) + "|" +
+                attachedToShield + "|" +
+                attachedBoneIndex + "|" +
+                GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid);
+            if (string.Equals(_lastSuppressedServerSiegeEngineProjectileNativeDropKey, logKey, StringComparison.Ordinal))
+                return;
+
+            _lastSuppressedServerSiegeEngineProjectileNativeDropKey = logKey;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: suppressed server siege-engine projectile native drop reaction and downgraded to BecomeInvisible. " +
+                "MissileIndex=" + missileIndex +
+                " MissileItem=" + (missileItem?.StringId ?? "null") +
+                " OriginalReaction=" + originalReaction +
+                " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
+                " AttachedAgent=" + (attachedAgent?.Index ?? -1) +
+                " AttachedAgentIsMount=" + (attachedAgent?.IsMount ?? false) +
+                " AttachedToShield=" + attachedToShield +
+                " AttachedBoneIndex=" + attachedBoneIndex +
+                " AttachedMissionObjectId=" + GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid) +
+                " SuppressionReason=" + (suppressionReason ?? "unknown") +
+                " ForcedSpawnIndex=" + forcedSpawnIndex);
+        }
+
         private static bool Mission_HandleMissileCollisionReaction_ServerPrefix(
             Mission __instance,
             int missileIndex,
@@ -4905,12 +5255,26 @@ namespace CoopSpectator.Patches
 
                 bool hasMissileItem = TryResolveMissionMissileItem(__instance, missileIndex, out ItemObject missileItem);
 
-                if (collisionReaction == Mission.MissileCollisionReaction.PassThrough &&
-                    ShouldUseExactSiegeBallistaProjectileGuard(__instance) &&
-                    hasMissileItem &&
-                    IsBallistaProjectileItem(missileItem))
+                Mission.MissileCollisionReaction originalCollisionReaction = collisionReaction;
+                if (hasMissileItem &&
+                    ShouldSuppressExactSiegeEngineProjectileNativeDropBroadcast(
+                        __instance,
+                        collisionReaction,
+                        missileItem,
+                        out string siegeEngineSuppressionReason))
                 {
                     collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
+                    TryLogSuppressedServerSiegeEngineProjectileNativeDrop(
+                        missileIndex,
+                        missileItem,
+                        originalCollisionReaction,
+                        attackerAgent,
+                        attachedAgent,
+                        attachedToShield,
+                        attachedBoneIndex,
+                        attachedMissionObject,
+                        forcedSpawnIndex,
+                        siegeEngineSuppressionReason);
                     return true;
                 }
 
@@ -6611,7 +6975,7 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (!primaryWeapon.IsRangedWeapon)
+            if (!IsExactSiegeWeaponUsageRangedCompatible(weaponItem, primaryWeapon))
             {
                 reason = "mission-weapon-not-ranged:" + weaponItem.StringId;
                 return false;
@@ -6624,7 +6988,7 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (!currentUsageWeapon.IsRangedWeapon)
+            if (!IsExactSiegeWeaponUsageRangedCompatible(weaponItem, currentUsageWeapon))
             {
                 reason = "mission-weapon-current-usage-not-ranged:" + weaponItem.StringId;
                 return false;
@@ -6962,7 +7326,7 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (!primaryWeapon.IsRangedWeapon)
+            if (!IsExactSiegeWeaponUsageRangedCompatible(weaponItem, primaryWeapon))
             {
                 reason = "mission-weapon-not-ranged:" + weaponItem.StringId;
                 return false;
@@ -7454,18 +7818,29 @@ namespace CoopSpectator.Patches
 
                 if (!MissionHasLocalMissile(handleMissileCollisionReaction.MissileIndex))
                 {
-                    if (IsDeferredClientThrownProjectileVisualGracePayload(deferredPayload) &&
+                    if (IsDeferredClientProjectileVisualGracePayload(deferredPayload) &&
                         deferredPayload.HoldUntilUtc != DateTime.MinValue &&
                         nowUtc >= deferredPayload.HoldUntilUtc)
                     {
                         RemoveDeferredClientHandleMissileCollisionReactionPayload(handleMissileCollisionReaction);
                         ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: dropped deferred client thrown projectile visual grace because local missile is gone. " +
+                            "BattleMapSpawnHandoffPatch: dropped deferred client " +
+                            GetDeferredClientProjectileVisualGraceKind(deferredPayload) +
+                            " visual grace because local missile is gone. " +
                             "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
                             " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
                             " AttachedAgentIndex=" + handleMissileCollisionReaction.AttachedAgentIndex +
                             " Source=" + (source ?? "unknown"));
                     }
+                    continue;
+                }
+
+                if (ShouldDropDeferredClientProjectileVisualGracePayloadBeforeReplay(
+                        mission,
+                        deferredPayload,
+                        nowUtc))
+                {
+                    RemoveDeferredClientHandleMissileCollisionReactionPayload(handleMissileCollisionReaction);
                     continue;
                 }
 
@@ -7483,7 +7858,7 @@ namespace CoopSpectator.Patches
                     Agent attachedAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(
                         handleMissileCollisionReaction.AttachedAgentIndex,
                         canBeNull: true);
-                    if (!IsDeferredClientThrownProjectileVisualGracePayload(deferredPayload) &&
+                    if (!IsDeferredClientProjectileVisualGracePayload(deferredPayload) &&
                         (attachedAgent == null || !attachedAgent.IsActive()))
                     {
                         continue;
@@ -7492,7 +7867,7 @@ namespace CoopSpectator.Patches
 
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
-                bool visualGraceReplay = IsDeferredClientThrownProjectileVisualGracePayload(deferredPayload);
+                bool visualGraceReplay = IsDeferredClientProjectileVisualGracePayload(deferredPayload);
                 try
                 {
                     if (visualGraceReplay)
@@ -7510,7 +7885,7 @@ namespace CoopSpectator.Patches
                     }
                     bool transitionedToVisualGrace =
                         !visualGraceReplay &&
-                        IsDeferredClientThrownProjectileVisualGracePayload(deferredPayload);
+                        IsDeferredClientProjectileVisualGracePayload(deferredPayload);
                     if (!transitionedToVisualGrace)
                         RemoveDeferredClientHandleMissileCollisionReactionPayload(handleMissileCollisionReaction);
                     ModLogger.Info(
@@ -8226,6 +8601,20 @@ namespace CoopSpectator.Patches
                     AreDeferredClientHandleMissileCollisionReactionMessagesEquivalent(
                         candidate?.Message,
                         referenceMessage));
+            }
+        }
+
+        private static void RemoveDeferredClientSiegeEngineProjectileVisualGracePayloads(int missileIndex)
+        {
+            if (missileIndex < 0)
+                return;
+
+            lock (DeferredClientHandleMissileCollisionReactionPayloads)
+            {
+                DeferredClientHandleMissileCollisionReactionPayloads.RemoveAll(candidate =>
+                    candidate?.Message != null &&
+                    candidate.Message.MissileIndex == missileIndex &&
+                    IsDeferredClientSiegeEngineProjectileVisualGracePayload(candidate));
             }
         }
 
@@ -11953,43 +12342,6 @@ namespace CoopSpectator.Patches
                         "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
                         " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
                         " AttachedAgentIndex=" + handleMissileCollisionReaction.AttachedAgentIndex);
-                    return false;
-                }
-
-                if (TryDeferClientThrownProjectileBecomeInvisibleForVisualGrace(
-                        mission,
-                        handleMissileCollisionReaction))
-                {
-                    return false;
-                }
-
-                if (handleMissileCollisionReaction.CollisionReaction == Mission.MissileCollisionReaction.PassThrough &&
-                    ShouldUseExactSiegeBallistaProjectileGuard(mission) &&
-                    TryResolveMissionMissileItem(mission, handleMissileCollisionReaction.MissileIndex, out ItemObject missileItem) &&
-                    IsBallistaProjectileItem(missileItem))
-                {
-                    Agent attackerAgent = handleMissileCollisionReaction.AttackerAgentIndex >= 0
-                        ? Mission.MissionNetworkHelper.GetAgentFromIndex(handleMissileCollisionReaction.AttackerAgentIndex, canBeNull: true)
-                        : null;
-                    Agent attachedAgent = handleMissileCollisionReaction.AttachedAgentIndex >= 0
-                        ? Mission.MissionNetworkHelper.GetAgentFromIndex(handleMissileCollisionReaction.AttachedAgentIndex, canBeNull: true)
-                        : null;
-                    MissionObject attachedMissionObject = Mission.MissionNetworkHelper.GetMissionObjectFromMissionObjectId(
-                        handleMissileCollisionReaction.AttachedMissionObjectId);
-
-                    mission.HandleMissileCollisionReaction(
-                        handleMissileCollisionReaction.MissileIndex,
-                        Mission.MissileCollisionReaction.BecomeInvisible,
-                        handleMissileCollisionReaction.AttachLocalFrame,
-                        handleMissileCollisionReaction.IsAttachedFrameLocal,
-                        attackerAgent,
-                        attachedAgent,
-                        handleMissileCollisionReaction.AttachedToShield,
-                        handleMissileCollisionReaction.AttachedBoneIndex,
-                        attachedMissionObject,
-                        handleMissileCollisionReaction.BounceBackVelocity,
-                        handleMissileCollisionReaction.BounceBackAngularVelocity,
-                        handleMissileCollisionReaction.ForcedSpawnIndex);
                     return false;
                 }
 
