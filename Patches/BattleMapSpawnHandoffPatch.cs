@@ -102,6 +102,8 @@ namespace CoopSpectator.Patches
         private static string _lastExactCommanderOrderBarMovieBindingKey;
         private static string _lastForcedExactCommanderTroopSelectionInputsKey;
         private static string _lastExactCommanderOrderItemExecutionKey;
+        private static string _lastExactCommanderTwoPositionOrderBridgeKey;
+        private static string _lastRegisteredActiveExactCommanderMissionOrderVmKey;
         private static string _lastDeferredExactSiegeUnsafeWeaponAmmoDataKey;
         private static string _lastDeferredExactSiegeUnsafeWeaponReloadPhaseKey;
         private static string _lastSuppressedExactSiegeUnsafeWeaponStateKey;
@@ -484,6 +486,7 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent), () => PatchMissionNetworkComponentSpawnWeaponAsDropFromAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAssignFormationToPlayer), () => PatchMissionNetworkComponentAssignFormationToPlayer(harmony));
             TryApplyPatchStep(nameof(PatchOrderControllerSelectAllFormations), () => PatchOrderControllerSelectAllFormations(harmony));
+            TryApplyPatchStep(nameof(PatchOrderControllerSetOrderWithTwoPositions), () => PatchOrderControllerSetOrderWithTwoPositions(harmony));
             TryApplyPatchStep(nameof(PatchOrderTroopPlacerMissionScreenTick), () => PatchOrderTroopPlacerMissionScreenTick(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSelectAllFormations), () => PatchMissionNetworkComponentSelectAllFormations(harmony));
             TryApplyPatchStep(nameof(PatchMissionMultiplayerGameModeFlagDominationClientBotsControlledChanged), () => PatchMissionMultiplayerGameModeFlagDominationClientBotsControlledChanged(harmony));
@@ -661,6 +664,8 @@ namespace CoopSpectator.Patches
             _lastExactCommanderOrderBarMovieBindingKey = null;
             _lastForcedExactCommanderTroopSelectionInputsKey = null;
             _lastExactCommanderOrderItemExecutionKey = null;
+            _lastExactCommanderTwoPositionOrderBridgeKey = null;
+            _lastRegisteredActiveExactCommanderMissionOrderVmKey = null;
             _lastDeferredExactSiegeUnsafeWeaponAmmoDataKey = null;
             lock (ExactSiegeMissionObjectSyncDiagnosticsLock)
             {
@@ -678,6 +683,40 @@ namespace CoopSpectator.Patches
                 "BattleMapSpawnHandoffPatch: reset runtime state. " +
                 "Source=" + (source ?? "unknown") +
                 " PreserveCommanderOrderControlState=" + preserveCommanderOrderControlState);
+        }
+
+        internal static void RegisterActiveExactCommanderMissionOrderVm(object missionOrderVm, string source)
+        {
+            if (missionOrderVm == null)
+                return;
+
+            _activeExactCommanderMissionOrderVm = missionOrderVm;
+            string logKey =
+                RuntimeHelpers.GetHashCode(missionOrderVm) + "|" +
+                (source ?? "unknown");
+            if (string.Equals(_lastRegisteredActiveExactCommanderMissionOrderVmKey, logKey, StringComparison.Ordinal))
+                return;
+
+            _lastRegisteredActiveExactCommanderMissionOrderVmKey = logKey;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: registered active exact commander MissionOrderVM. " +
+                "Source=" + (source ?? "unknown") +
+                " VmHash=" + RuntimeHelpers.GetHashCode(missionOrderVm));
+        }
+
+        internal static void ClearActiveExactCommanderMissionOrderVm(object missionOrderVm, string source)
+        {
+            if (_activeExactCommanderMissionOrderVm == null)
+                return;
+
+            if (missionOrderVm != null && !ReferenceEquals(_activeExactCommanderMissionOrderVm, missionOrderVm))
+                return;
+
+            _activeExactCommanderMissionOrderVm = null;
+            _lastRegisteredActiveExactCommanderMissionOrderVmKey = null;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: cleared active exact commander MissionOrderVM. " +
+                "Source=" + (source ?? "unknown"));
         }
 
         private static void PatchMissionPeerFollowedAgent(Harmony harmony)
@@ -1906,6 +1945,27 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to OrderController.SelectAllFormations(Agent,bool).");
+        }
+
+        private static void PatchOrderControllerSetOrderWithTwoPositions(Harmony harmony)
+        {
+            MethodInfo target = typeof(OrderController).GetMethod(
+                "SetOrderWithTwoPositions",
+                BindingFlags.Instance | BindingFlags.Public,
+                binder: null,
+                types: new[] { typeof(OrderType), typeof(WorldPosition), typeof(WorldPosition) },
+                modifiers: null);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(OrderController_SetOrderWithTwoPositions_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: OrderController.SetOrderWithTwoPositions not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to OrderController.SetOrderWithTwoPositions.");
         }
 
         private static bool MissionPeer_FollowedAgent_Prefix(MissionPeer __instance, Agent value)
@@ -13667,7 +13727,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                TryPromoteLocalExactCommanderFromOrderUiTick();
+                TryPromoteLocalExactCommanderFromClientOrderTick("multiplayer-order-ui");
                 if (TrySuppressNonCommanderOrderUi(__instance))
                     return;
 
@@ -13682,7 +13742,7 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void TryPromoteLocalExactCommanderFromOrderUiTick()
+        private static void TryPromoteLocalExactCommanderFromClientOrderTick(string source)
         {
             if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
                 return;
@@ -13710,7 +13770,8 @@ namespace CoopSpectator.Patches
 
             _lastPromotedLocalCommanderGeneralKey = logKey;
             ModLogger.Info(
-                "BattleMapSpawnHandoffPatch: promoted local exact-scene commander to general control during order UI tick fallback. " +
+                "BattleMapSpawnHandoffPatch: promoted local exact-scene commander to general control during client order tick fallback. " +
+                "Source=" + (source ?? "unknown") + " " +
                 logDetails);
         }
 
@@ -13784,6 +13845,10 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                TryTickLocalExactSiegeCommanderControlFromOrderTroopPlacer(
+                    __instance,
+                    "OrderTroopPlacer.OnMissionScreenTick");
+
                 if (!ShouldSuppressOrderTroopPlacerTick(__instance, out string logKey, out string logDetails))
                     return true;
 
@@ -13802,6 +13867,26 @@ namespace CoopSpectator.Patches
                 ModLogger.Info("BattleMapSpawnHandoffPatch: OrderTroopPlacer.OnMissionScreenTick prefix failed open: " + ex.Message);
                 return true;
             }
+        }
+
+        private static void TryTickLocalExactSiegeCommanderControlFromOrderTroopPlacer(object orderTroopPlacer, string source)
+        {
+            Mission mission = (orderTroopPlacer as MissionBehavior)?.Mission ?? Mission.Current;
+            if (!ShouldRunLocalExactSiegeCommanderControlFromOrderTroopPlacer(mission))
+                return;
+
+            TryPromoteLocalExactCommanderFromClientOrderTick(source);
+            TryFinalizePendingLocalCommanderOrderControlWithoutOrderUi(source);
+            TryMaintainLocalCommanderOrderControlWithoutOrderUi(source);
+        }
+
+        private static bool ShouldRunLocalExactSiegeCommanderControlFromOrderTroopPlacer(Mission mission)
+        {
+            return GameNetwork.IsClient &&
+                   GameNetwork.IsSessionActive &&
+                   mission != null &&
+                   MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) &&
+                   SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
         }
 
         private static bool MissionNetworkComponent_HandleClientEventSelectAllFormations_Prefix(
@@ -13860,6 +13945,297 @@ namespace CoopSpectator.Patches
                 ModLogger.Info("BattleMapSpawnHandoffPatch: OrderController.SelectAllFormations prefix failed open: " + ex.Message);
                 return true;
             }
+        }
+
+        private static bool OrderController_SetOrderWithTwoPositions_Prefix(
+            OrderController __instance,
+            OrderType orderType,
+            WorldPosition position1,
+            WorldPosition position2)
+        {
+            try
+            {
+                if (!TryResolveExactSiegeCommanderTwoPositionOrderBridge(
+                        __instance,
+                        orderType,
+                        out Mission mission,
+                        out Team team,
+                        out NetworkCommunicator myPeer,
+                        out MissionPeer myMissionPeer,
+                        out Agent controlledAgent,
+                        out Agent mainAgent,
+                        out string controlledEntryId))
+                {
+                    return true;
+                }
+
+                OrderController agentOrderController = team.GetOrderControllerOf(mainAgent);
+                ApplyLocalExactCommanderOrderOwnershipState(
+                    mission,
+                    myMissionPeer,
+                    team,
+                    controlledAgent,
+                    mainAgent,
+                    __instance,
+                    agentOrderController,
+                    out int formationsWithUnits,
+                    out int ownedFormationsWithUnits);
+                TryDisableExactCommanderClientFormationUpdatesAfterSetOrder(
+                    myPeer,
+                    mission,
+                    team,
+                    mainAgent,
+                    __instance,
+                    agentOrderController,
+                    controlledEntryId);
+                TrySelectAllLocalCommanderFormationsIfNeeded(
+                    myPeer,
+                    team,
+                    mainAgent,
+                    __instance,
+                    formationsWithUnits,
+                    "two-position-order-bridge",
+                    out int selectedFormationCount);
+
+                SendExactCommanderTwoPositionOrderAsClient(orderType, position1, position2);
+                int shadowFormationCount = TryApplyExactCommanderTwoPositionOrderShadow(
+                    __instance,
+                    orderType,
+                    position1,
+                    position2);
+                LogExactCommanderTwoPositionOrderBridge(
+                    mission,
+                    team,
+                    myPeer,
+                    mainAgent,
+                    orderType,
+                    position1,
+                    position2,
+                    controlledEntryId,
+                    ownedFormationsWithUnits,
+                    formationsWithUnits,
+                    selectedFormationCount,
+                    shadowFormationCount);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: exact siege commander two-position order bridge failed closed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool TryResolveExactSiegeCommanderTwoPositionOrderBridge(
+            OrderController orderController,
+            OrderType orderType,
+            out Mission mission,
+            out Team team,
+            out NetworkCommunicator myPeer,
+            out MissionPeer myMissionPeer,
+            out Agent controlledAgent,
+            out Agent mainAgent,
+            out string controlledEntryId)
+        {
+            mission = null;
+            team = null;
+            myPeer = null;
+            myMissionPeer = null;
+            controlledAgent = null;
+            mainAgent = null;
+            controlledEntryId = null;
+
+            if (orderController == null ||
+                (orderType != OrderType.MoveToLineSegment &&
+                 orderType != OrderType.MoveToLineSegmentWithHorizontalLayout))
+            {
+                return false;
+            }
+
+            mission = Mission.Current;
+            if (!ShouldRunLocalExactSiegeCommanderControlFromOrderTroopPlacer(mission))
+                return false;
+
+            myPeer = GameNetwork.MyPeer;
+            if (myPeer == null || myPeer.IsServerPeer)
+                return false;
+
+            myMissionPeer = myPeer.GetComponent<MissionPeer>();
+            controlledAgent = myMissionPeer?.ControlledAgent;
+            mainAgent = Agent.Main;
+            team = myMissionPeer?.Team ?? controlledAgent?.Team ?? orderController.Team ?? mission.PlayerTeam;
+            if (myMissionPeer == null ||
+                controlledAgent == null ||
+                !controlledAgent.IsActive() ||
+                mainAgent == null ||
+                !mainAgent.IsActive() ||
+                mainAgent.Index != controlledAgent.Index ||
+                team == null ||
+                !ReferenceEquals(orderController, team.PlayerOrderController))
+            {
+                return false;
+            }
+
+            controlledEntryId = ResolveControlledEntryId(
+                myMissionPeer,
+                controlledAgent,
+                mission,
+                bridgeTroopOrEntryId: null,
+                out _);
+            bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
+            if (!isExactCommander &&
+                string.IsNullOrWhiteSpace(controlledEntryId) &&
+                TryBypassNonCommanderSuppressionFromEstablishedLocalCommanderState(
+                    context: "TwoPositionOrderBridge",
+                    myPeer,
+                    myMissionPeer,
+                    team,
+                    controlledAgent,
+                    mainAgent,
+                    mission))
+            {
+                isExactCommander = true;
+            }
+
+            if (!isExactCommander)
+                return false;
+
+            bool hasEstablishedCommanderControl =
+                team.IsPlayerGeneral &&
+                team.GeneralAgent != null &&
+                team.GeneralAgent.Index == mainAgent.Index &&
+                orderController.Owner != null &&
+                orderController.Owner.Index == mainAgent.Index;
+            if (!hasEstablishedCommanderControl)
+                return false;
+
+            if (!ReferenceEquals(mission.PlayerTeam, team))
+                mission.PlayerTeam = team;
+
+            return true;
+        }
+
+        private static void SendExactCommanderTwoPositionOrderAsClient(
+            OrderType orderType,
+            WorldPosition position1,
+            WorldPosition position2)
+        {
+            bool began = false;
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                began = true;
+                GameNetwork.WriteMessage(
+                    new NetworkMessages.FromClient.ApplyOrderWithTwoPositions(
+                        orderType,
+                        position1.GetGroundVec3(),
+                        position2.GetGroundVec3()));
+            }
+            finally
+            {
+                if (began)
+                    GameNetwork.EndModuleEventAsClient();
+            }
+        }
+
+        private static int TryApplyExactCommanderTwoPositionOrderShadow(
+            OrderController orderController,
+            OrderType orderType,
+            WorldPosition position1,
+            WorldPosition position2)
+        {
+            if (orderController?.SelectedFormations == null)
+                return 0;
+
+            List<Formation> selectedFormations = orderController.SelectedFormations
+                .Where(formation =>
+                    formation != null &&
+                    formation.CountOfUnitsWithoutDetachedOnes > 0)
+                .ToList();
+            if (selectedFormations.Count <= 0)
+                return 0;
+
+            Vec3 ground1 = position1.GetGroundVec3();
+            Vec3 ground2 = position2.GetGroundVec3();
+            Vec2 direction = ground2.AsVec2 - ground1.AsVec2;
+            float width = direction.Length;
+            if (!direction.IsValid || direction.LengthSquared < 0.0001f)
+                direction = Vec2.Forward;
+            else
+                direction = direction.Normalized();
+
+            int appliedCount = 0;
+            foreach (Formation formation in selectedFormations)
+            {
+                try
+                {
+                    formation.SetPositioning(position1, direction);
+                    if (orderType == OrderType.MoveToLineSegment ||
+                        orderType == OrderType.MoveToLineSegmentWithHorizontalLayout)
+                    {
+                        formation.SetMovementOrder(MovementOrder.MovementOrderMove(position1));
+                    }
+
+                    if (width > 0.1f)
+                        formation.SetFormOrder(FormOrder.FormOrderCustom(width), updateDesiredFileCount: true);
+
+                    formation.ApplyActionOnEachUnit(
+                        agent => agent.ForceUpdateCachedAndFormationValues(
+                            updateOnlyMovement: true,
+                            arrangementChangeAllowed: false));
+                    formation.SetHasPendingUnitPositions(hasPendingUnitPositions: false);
+                    appliedCount++;
+                }
+                catch
+                {
+                }
+            }
+
+            return appliedCount;
+        }
+
+        private static void LogExactCommanderTwoPositionOrderBridge(
+            Mission mission,
+            Team team,
+            NetworkCommunicator myPeer,
+            Agent mainAgent,
+            OrderType orderType,
+            WorldPosition position1,
+            WorldPosition position2,
+            string controlledEntryId,
+            int ownedFormationsWithUnits,
+            int formationsWithUnits,
+            int selectedFormationCount,
+            int shadowFormationCount)
+        {
+            string logKey =
+                (myPeer?.Index.ToString() ?? "null") + "|" +
+                (team?.TeamIndex.ToString() ?? "null") + "|" +
+                (mainAgent?.Index.ToString() ?? "null") + "|" +
+                orderType + "|" +
+                selectedFormationCount + "|" +
+                shadowFormationCount + "|" +
+                (mission?.SceneName ?? "null");
+            if (string.Equals(_lastExactCommanderTwoPositionOrderBridgeKey, logKey, StringComparison.Ordinal))
+                return;
+
+            _lastExactCommanderTwoPositionOrderBridgeKey = logKey;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: bridged exact siege commander client two-position order through network-only safe path. " +
+                "Peer=" + (myPeer?.UserName ?? myPeer?.Index.ToString() ?? "null") +
+                " TeamIndex=" + (team?.TeamIndex.ToString() ?? "null") +
+                " Side=" + (team?.Side.ToString() ?? "null") +
+                " AgentMainIndex=" + (mainAgent?.Index.ToString() ?? "null") +
+                " OrderType=" + orderType +
+                " ControlledEntryId=" + (controlledEntryId ?? "null") +
+                " OwnedFormationsWithUnits=" + ownedFormationsWithUnits +
+                " FormationsWithUnits=" + formationsWithUnits +
+                " SelectedFormationCount=" + selectedFormationCount +
+                " ShadowFormationCount=" + shadowFormationCount +
+                " Position1=" + position1.GetGroundVec3() +
+                " Position2=" + position2.GetGroundVec3() +
+                " Mission=" + (mission?.SceneName ?? "null"));
         }
 
         private static bool TrySuppressNonCommanderOrderUi(object orderUiHandler)
@@ -15115,6 +15491,17 @@ namespace CoopSpectator.Patches
             if (selectorAgent != null && !ReferenceEquals(selectorAgent, controlledAgent))
                 return false;
 
+            bool shouldAllowEstablishedExactSiegeCommanderSelection =
+                ShouldRunLocalExactSiegeCommanderControlFromOrderTroopPlacer(mission) &&
+                team.IsPlayerGeneral &&
+                ReferenceEquals(team.GeneralAgent, controlledAgent) &&
+                mainAgent != null &&
+                mainAgent.IsActive() &&
+                mainAgent.Index == controlledAgent.Index &&
+                ReferenceEquals(orderController.Owner, mainAgent);
+            if (shouldAllowEstablishedExactSiegeCommanderSelection)
+                return false;
+
             bool hasSpawnState = CoopBattleSpawnRuntimeState.TryGetState(myMissionPeer, out PeerSpawnRuntimeState spawnState);
             bool hasLifecycleState = CoopBattlePeerLifecycleRuntimeState.TryGetState(myMissionPeer, out PeerLifecycleRuntimeState lifecycleState);
             bool hasControlledFormation = myMissionPeer.ControlledFormation != null;
@@ -15384,7 +15771,11 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (botTotalCount <= 1 && botAliveCount <= 0)
+            bool hasClientControlledBots = botTotalCount > 1 || botAliveCount > 0;
+            bool allowExactSiegeCommanderIdentityFallback =
+                !hasClientControlledBots &&
+                ShouldRunLocalExactSiegeCommanderControlFromOrderTroopPlacer(mission);
+            if (!hasClientControlledBots && !allowExactSiegeCommanderIdentityFallback)
                 return false;
 
             Formation priorControlledFormation = myMissionPeer.ControlledFormation ?? controlledAgent.Formation;
@@ -15501,6 +15892,326 @@ namespace CoopSpectator.Patches
                 " FormationCount=" + team.FormationsIncludingEmpty.Count +
                 " Mission=" + (mission.SceneName ?? "null");
             return true;
+        }
+
+        private static void TryFinalizePendingLocalCommanderOrderControlWithoutOrderUi(string source)
+        {
+            PendingLocalCommanderOrderControlFinalization pending = _pendingLocalCommanderOrderControlFinalization;
+            if (pending == null)
+                return;
+
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+            {
+                _pendingLocalCommanderOrderControlFinalization = null;
+                return;
+            }
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            if (myPeer == null || myPeer.IsServerPeer || myPeer.Index != pending.PeerIndex)
+                return;
+
+            MissionPeer myMissionPeer = myPeer.GetComponent<MissionPeer>();
+            Agent controlledAgent = myMissionPeer?.ControlledAgent;
+            Mission mission = Mission.Current ?? controlledAgent?.Mission;
+            Team team = myMissionPeer?.Team ?? controlledAgent?.Team;
+            if (myMissionPeer == null ||
+                controlledAgent == null ||
+                !controlledAgent.IsActive() ||
+                mission == null ||
+                team == null ||
+                !ShouldRunLocalExactSiegeCommanderControlFromOrderTroopPlacer(mission))
+            {
+                return;
+            }
+
+            pending.Attempts++;
+            if (controlledAgent.Index != pending.AgentIndex || team.TeamIndex != pending.TeamIndex)
+            {
+                if (DateTime.UtcNow - pending.QueuedUtc > TimeSpan.FromSeconds(5))
+                    _pendingLocalCommanderOrderControlFinalization = null;
+
+                return;
+            }
+
+            Agent mainAgent = Agent.Main;
+            if (mainAgent == null || !mainAgent.IsActive() || mainAgent.Index != controlledAgent.Index)
+                return;
+
+            OrderController playerOrderController = team.PlayerOrderController;
+            if (playerOrderController == null)
+                return;
+
+            OrderController agentOrderController = team.GetOrderControllerOf(mainAgent);
+            ApplyLocalExactCommanderOrderOwnershipState(
+                mission,
+                myMissionPeer,
+                team,
+                controlledAgent,
+                mainAgent,
+                playerOrderController,
+                agentOrderController,
+                out int formationsWithUnits,
+                out int ownedFormationsWithUnits);
+            TryDisableExactCommanderClientFormationUpdatesAfterSetOrder(
+                myPeer,
+                mission,
+                team,
+                mainAgent,
+                playerOrderController,
+                agentOrderController,
+                pending.EntryId);
+
+            bool autoSelectAllInvoked = TrySelectAllLocalCommanderFormationsIfNeeded(
+                myPeer,
+                team,
+                mainAgent,
+                playerOrderController,
+                formationsWithUnits,
+                source,
+                out int selectedFormationCount);
+
+            string logKey =
+                "no-ui-finalize|" +
+                myPeer.Index + "|" +
+                team.TeamIndex + "|" +
+                controlledAgent.Index + "|" +
+                mainAgent.Index + "|" +
+                ownedFormationsWithUnits + "|" +
+                formationsWithUnits + "|" +
+                selectedFormationCount + "|" +
+                autoSelectAllInvoked + "|" +
+                pending.EntryId + "|" +
+                (source ?? "unknown");
+            if (!string.Equals(_lastFinalizedLocalCommanderOrderControlKey, logKey, StringComparison.Ordinal))
+            {
+                _lastFinalizedLocalCommanderOrderControlKey = logKey;
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: finalized local exact-scene commander order control after Agent.Main attach without order UI data source. " +
+                    "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
+                    " TeamIndex=" + team.TeamIndex +
+                    " Side=" + team.Side +
+                    " EntryId=" + (pending.EntryId ?? "null") +
+                    " ControlledAgentIndex=" + controlledAgent.Index +
+                    " AgentMainIndex=" + mainAgent.Index +
+                    " MissionPlayerTeamIndex=" + (mission.PlayerTeam?.TeamIndex.ToString() ?? "null") +
+                    " PlayerOrderOwnerIndex=" + (playerOrderController.Owner?.Index.ToString() ?? "null") +
+                    " AgentOrderOwnerIndex=" + (agentOrderController?.Owner?.Index.ToString() ?? "null") +
+                    " TeamIsPlayerGeneral=" + team.IsPlayerGeneral +
+                    " ControlledFormationIndex=" + (myMissionPeer.ControlledFormation?.FormationIndex.ToString() ?? "null") +
+                    " OwnedFormationsWithUnits=" + ownedFormationsWithUnits +
+                    " FormationsWithUnits=" + formationsWithUnits +
+                    " SelectedFormationCount=" + selectedFormationCount +
+                    " AutoSelectAllInvoked=" + autoSelectAllInvoked +
+                    " Attempts=" + pending.Attempts +
+                    " Source=" + (source ?? "unknown") +
+                    " Mission=" + (mission.SceneName ?? "null"));
+            }
+
+            _pendingLocalCommanderOrderControlFinalization = null;
+        }
+
+        private static void TryMaintainLocalCommanderOrderControlWithoutOrderUi(string source)
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return;
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            if (myPeer == null || myPeer.IsServerPeer)
+                return;
+
+            MissionPeer myMissionPeer = myPeer.GetComponent<MissionPeer>();
+            Agent controlledAgent = myMissionPeer?.ControlledAgent;
+            Agent mainAgent = Agent.Main;
+            Mission mission = Mission.Current ?? controlledAgent?.Mission ?? mainAgent?.Mission;
+            Team team = myMissionPeer?.Team ?? controlledAgent?.Team ?? mainAgent?.Team;
+            if (myMissionPeer == null ||
+                controlledAgent == null ||
+                !controlledAgent.IsActive() ||
+                mainAgent == null ||
+                !mainAgent.IsActive() ||
+                mainAgent.Index != controlledAgent.Index ||
+                mission == null ||
+                team == null ||
+                !ShouldRunLocalExactSiegeCommanderControlFromOrderTroopPlacer(mission) ||
+                !team.IsPlayerGeneral ||
+                !ReferenceEquals(team.GeneralAgent, controlledAgent))
+            {
+                return;
+            }
+
+            OrderController playerOrderController = team.PlayerOrderController;
+            if (playerOrderController == null)
+                return;
+
+            OrderController agentOrderController = team.GetOrderControllerOf(mainAgent);
+            ApplyLocalExactCommanderOrderOwnershipState(
+                mission,
+                myMissionPeer,
+                team,
+                controlledAgent,
+                mainAgent,
+                playerOrderController,
+                agentOrderController,
+                out int formationsWithUnits,
+                out int ownedFormationsWithUnits);
+            TryDisableExactCommanderClientFormationUpdatesAfterSetOrder(
+                myPeer,
+                mission,
+                team,
+                mainAgent,
+                playerOrderController,
+                agentOrderController,
+                entryId: null);
+
+            bool autoSelectAllInvoked = TrySelectAllLocalCommanderFormationsIfNeeded(
+                myPeer,
+                team,
+                mainAgent,
+                playerOrderController,
+                formationsWithUnits,
+                source,
+                out int selectedFormationCount);
+
+            string logKey =
+                "no-ui-maintain|" +
+                myPeer.Index + "|" +
+                team.TeamIndex + "|" +
+                mainAgent.Index + "|" +
+                formationsWithUnits + "|" +
+                ownedFormationsWithUnits + "|" +
+                selectedFormationCount + "|" +
+                autoSelectAllInvoked + "|" +
+                (source ?? "unknown");
+            if (string.Equals(_lastMaintainedLocalCommanderOrderControlKey, logKey, StringComparison.Ordinal))
+                return;
+
+            _lastMaintainedLocalCommanderOrderControlKey = logKey;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: maintained local exact-scene commander order control without order UI data source. " +
+                "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
+                " TeamIndex=" + team.TeamIndex +
+                " Side=" + team.Side +
+                " ControlledAgentIndex=" + controlledAgent.Index +
+                " AgentMainIndex=" + mainAgent.Index +
+                " MissionPlayerTeamIndex=" + (mission.PlayerTeam?.TeamIndex.ToString() ?? "null") +
+                " PlayerOrderOwnerIndex=" + (playerOrderController.Owner?.Index.ToString() ?? "null") +
+                " AgentOrderOwnerIndex=" + (agentOrderController?.Owner?.Index.ToString() ?? "null") +
+                " FormationsWithUnits=" + formationsWithUnits +
+                " OwnedFormationsWithUnits=" + ownedFormationsWithUnits +
+                " SelectedFormationCount=" + selectedFormationCount +
+                " AutoSelectAllInvoked=" + autoSelectAllInvoked +
+                " Source=" + (source ?? "unknown") +
+                " Mission=" + (mission.SceneName ?? "null"));
+        }
+
+        private static void ApplyLocalExactCommanderOrderOwnershipState(
+            Mission mission,
+            MissionPeer missionPeer,
+            Team team,
+            Agent controlledAgent,
+            Agent mainAgent,
+            OrderController playerOrderController,
+            OrderController agentOrderController,
+            out int formationsWithUnits,
+            out int ownedFormationsWithUnits)
+        {
+            formationsWithUnits = 0;
+            ownedFormationsWithUnits = 0;
+            if (mission == null ||
+                missionPeer == null ||
+                team == null ||
+                controlledAgent == null ||
+                mainAgent == null ||
+                playerOrderController == null)
+            {
+                return;
+            }
+
+            if (!ReferenceEquals(mission.PlayerTeam, team))
+                mission.PlayerTeam = team;
+
+            team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
+            controlledAgent.SetCanLeadFormationsRemotely(value: true);
+            if (!ReferenceEquals(team.GeneralAgent, controlledAgent))
+                team.GeneralAgent = controlledAgent;
+
+            if (!ReferenceEquals(playerOrderController.Owner, mainAgent))
+                playerOrderController.Owner = mainAgent;
+            if (agentOrderController != null && !ReferenceEquals(agentOrderController.Owner, mainAgent))
+                agentOrderController.Owner = mainAgent;
+
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null || !ReferenceEquals(formation.Team, team))
+                    continue;
+
+                TrySetInstanceMemberValue(formation, "PlayerOwner", mainAgent);
+                bool isOwnedFormation = formation.CountOfUnits > 0;
+                TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
+                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
+                if (formation.CountOfUnits <= 0)
+                    continue;
+
+                formationsWithUnits++;
+                Agent formationPlayerOwner = TryGetInstanceMemberValue(formation, "PlayerOwner") as Agent;
+                if (formationPlayerOwner != null && formationPlayerOwner.Index == mainAgent.Index)
+                    ownedFormationsWithUnits++;
+            }
+
+            Formation commanderFormation = controlledAgent.Formation;
+            if (commanderFormation != null && ReferenceEquals(commanderFormation.Team, team))
+                commanderFormation.Captain = controlledAgent;
+
+            missionPeer.ControlledFormation = null;
+        }
+
+        private static bool TrySelectAllLocalCommanderFormationsIfNeeded(
+            NetworkCommunicator myPeer,
+            Team team,
+            Agent mainAgent,
+            OrderController playerOrderController,
+            int formationsWithUnits,
+            string source,
+            out int selectedFormationCount)
+        {
+            selectedFormationCount = playerOrderController?.SelectedFormations?.Count ?? 0;
+            if (myPeer == null ||
+                team == null ||
+                mainAgent == null ||
+                playerOrderController == null ||
+                formationsWithUnits <= 1 ||
+                selectedFormationCount > 0)
+            {
+                return false;
+            }
+
+            string autoSelectKey =
+                "no-ui|" +
+                myPeer.Index + "|" +
+                team.TeamIndex + "|" +
+                mainAgent.Index + "|" +
+                formationsWithUnits + "|" +
+                (source ?? "unknown");
+            if (string.Equals(_lastAutoSelectedAllLocalCommanderFormationsKey, autoSelectKey, StringComparison.Ordinal))
+                return false;
+
+            bool autoSelectAllInvoked;
+            try
+            {
+                playerOrderController.ClearSelectedFormations();
+                playerOrderController.SelectAllFormations(uiFeedback: false);
+                autoSelectAllInvoked = true;
+            }
+            catch
+            {
+                autoSelectAllInvoked = false;
+            }
+
+            selectedFormationCount = playerOrderController.SelectedFormations?.Count ?? selectedFormationCount;
+            if (autoSelectAllInvoked)
+                _lastAutoSelectedAllLocalCommanderFormationsKey = autoSelectKey;
+
+            return autoSelectAllInvoked;
         }
 
         private static void TryFinalizePendingLocalCommanderOrderControl(object orderUiHandler)

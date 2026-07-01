@@ -3,9 +3,11 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
+using CoopSpectator.Patches;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.Engine.GauntletUI;
@@ -56,18 +58,22 @@ namespace CoopSpectator.UI
         private static string _activeCameraPreviewEntryId = string.Empty;
         private static bool _commanderDeploymentOrderOfBattleActive;
         private static bool _commanderDeploymentPlacementInputActive;
+        private static bool _commanderBattleOrderActive;
         private float _commanderDeploymentBoundaryRefreshTimer;
 
         private GauntletLayer _gauntletLayer;
         private GauntletMovieIdentifier _movie;
         private GauntletMovieIdentifier _commanderDeploymentOrderMovie;
+        private GauntletMovieIdentifier _commanderBattleOrderMovie;
         private GauntletMovieIdentifier _commanderSiegeMachineDeploymentMovie;
         private ViewModel _viewModel;
         private OrderOfBattleVM _commanderDeploymentViewModel;
         private MissionOrderVM _commanderDeploymentOrderVm;
+        private MissionOrderVM _commanderBattleOrderVm;
         private CoopSiegeMachineDeploymentVM _commanderSiegeMachineDeploymentVm;
         private SpriteCategory _commanderDeploymentOrderOfBattleSpriteCategory;
         private SpriteCategory _commanderDeploymentOrderSpriteCategory;
+        private SpriteCategory _commanderBattleOrderSpriteCategory;
         private object _commanderDeploymentOrderTroopPlacer;
         private Action _commanderDeploymentOnUnitDeployedHandler;
         private bool _commanderDeploymentOrderVmInitialized;
@@ -77,6 +83,9 @@ namespace CoopSpectator.UI
         private float _commanderDeploymentFreeCameraPitch;
         private CoopCommanderDeploymentVisualOrderProvider _commanderDeploymentVisualOrderProvider;
         private bool _commanderDeploymentVisualOrderProviderRegistered;
+        private bool _commanderBattleOrderVmInitialized;
+        private MissionFormationTargetSelectionHandler _commanderBattleFormationTargetHandler;
+        private MBReadOnlyList<Formation> _commanderBattleFocusedFormationsCache;
         private ICoopSelectionScreenViewModel _screenViewModel;
         private CoopSelectionScreen _currentScreen;
         private CoopSelectionScreen _requestedScreen = CoopSelectionScreen.TeamSelection;
@@ -105,6 +114,9 @@ namespace CoopSpectator.UI
         private string _lastReconnectSelectionContractLogKey = string.Empty;
         private DateTime _missionScreenInitializedUtc = DateTime.MinValue;
         private string _lastIgnoredEntryStatusLogKey = string.Empty;
+        private string _lastCommanderBattleOrderBridgeContextKey = string.Empty;
+        private string _lastCommanderBattleOrderEmptySetGuardKey = string.Empty;
+        private string _lastCommanderBattleOrderVisualAuditKey = string.Empty;
 
         public override void OnBehaviorInitialize()
         {
@@ -129,7 +141,12 @@ namespace CoopSpectator.UI
             _reconnectSelectionContractActive = false;
             _lastReconnectSelectionContractLogKey = string.Empty;
             _lastIgnoredEntryStatusLogKey = string.Empty;
+            _lastCommanderBattleOrderBridgeContextKey = string.Empty;
+            _lastCommanderBattleOrderEmptySetGuardKey = string.Empty;
+            _lastCommanderBattleOrderVisualAuditKey = string.Empty;
+            _commanderBattleFocusedFormationsCache = null;
             _commanderDeploymentPlacementInputActive = false;
+            _commanderBattleOrderActive = false;
             ClearLocalSpawnPending("mission-screen-initialize");
             ResetSelectionFlow("mission-screen-initialize");
             ModLogger.Info("CoopMissionSelectionView: OnMissionScreenInitialize, coop selection shell init deferred.");
@@ -174,6 +191,8 @@ namespace CoopSpectator.UI
                 return;
             }
 
+            TryTickCommanderBattleOrderBridge();
+
             _refreshTimer -= dt;
             if (_refreshTimer > 0f)
                 return;
@@ -187,6 +206,7 @@ namespace CoopSpectator.UI
             try
             {
                 ReleaseOverlayInput();
+                ReleaseCommanderBattleOrderBridge("mission-screen-finalize");
                 ReleaseCurrentMovie();
                 CoopSiegeDeploymentBoundaryRuntime.TryRemoveVisibleDeploymentBoundaryMarkers(
                     Mission,
@@ -195,6 +215,7 @@ namespace CoopSpectator.UI
                 TryDeactivateCommanderDeploymentFreeCamera(MissionScreen, "mission-screen-finalize");
                 _commanderDeploymentOrderOfBattleActive = false;
                 _commanderDeploymentPlacementInputActive = false;
+                _commanderBattleOrderActive = false;
 
                 if (_gauntletLayer != null)
                 {
@@ -210,6 +231,8 @@ namespace CoopSpectator.UI
             _currentScreen = CoopSelectionScreen.None;
             _reconnectSelectionContractActive = false;
             _lastReconnectSelectionContractLogKey = string.Empty;
+            _lastCommanderBattleOrderBridgeContextKey = string.Empty;
+            _lastCommanderBattleOrderEmptySetGuardKey = string.Empty;
             base.OnMissionScreenFinalize();
         }
 
@@ -217,6 +240,9 @@ namespace CoopSpectator.UI
         {
             if (GameNetwork.IsClient && ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
             {
+                if (TryCloseCommanderBattleOrderMenu("escape"))
+                    return true;
+
                 if (_currentScreen == CoopSelectionScreen.CommanderDeployment)
                 {
                     TryDeactivateNativeCommanderDeploymentPlacement(MissionScreen);
@@ -1829,7 +1855,1059 @@ namespace CoopSpectator.UI
 
             _commanderDeploymentOrderVm = null;
             _commanderDeploymentOrderVmInitialized = false;
-            ReleaseCommanderDeploymentVisualOrderProvider();
+            if (_commanderBattleOrderVm == null && !_commanderBattleOrderActive)
+                ReleaseCommanderDeploymentVisualOrderProvider();
+        }
+
+        private void TryTickCommanderBattleOrderBridge()
+        {
+            if (!TryResolveCommanderBattleOrderContext(
+                    out Mission mission,
+                    out Team team,
+                    out Agent mainAgent,
+                    out string controlledEntryId,
+                    out string commanderEntryId,
+                    out string unavailableReason))
+            {
+                if (_commanderBattleOrderVm != null)
+                    ReleaseCommanderBattleOrderBridge(unavailableReason ?? "context-lost");
+
+                return;
+            }
+
+            if (!TryEnsureCommanderBattleOrderBridge(mission, team, mainAgent, controlledEntryId, commanderEntryId))
+                return;
+
+            TryUpdateCommanderBattleOrderVmUnchecked();
+            TryTickCommanderBattleOrderHotkeys();
+        }
+
+        private bool TryResolveCommanderBattleOrderContext(
+            out Mission mission,
+            out Team team,
+            out Agent mainAgent,
+            out string controlledEntryId,
+            out string commanderEntryId,
+            out string unavailableReason)
+        {
+            mission = null;
+            team = null;
+            mainAgent = null;
+            controlledEntryId = null;
+            commanderEntryId = null;
+            unavailableReason = null;
+
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+            {
+                unavailableReason = "network-inactive";
+                return false;
+            }
+
+            if (_currentScreen != CoopSelectionScreen.None)
+            {
+                unavailableReason = "selection-screen-active";
+                return false;
+            }
+
+            mission = Mission;
+            if (mission == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                unavailableReason = "not-exact-siege";
+                return false;
+            }
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            if (myPeer == null || myPeer.IsServerPeer)
+            {
+                unavailableReason = "peer-unavailable";
+                return false;
+            }
+
+            MissionPeer missionPeer = myPeer.GetComponent<MissionPeer>();
+            Agent controlledAgent = missionPeer?.ControlledAgent;
+            mainAgent = Agent.Main;
+            if (mainAgent == null || !mainAgent.IsActive())
+            {
+                unavailableReason = "main-agent-missing";
+                return false;
+            }
+
+            if (controlledAgent != null &&
+                controlledAgent.IsActive() &&
+                !IsSameAgent(controlledAgent, mainAgent))
+            {
+                unavailableReason = "controlled-agent-mismatch";
+                return false;
+            }
+
+            team = missionPeer?.Team ?? mainAgent.Team ?? mission.PlayerTeam;
+            if (team == null || team.Side == BattleSideEnum.None)
+            {
+                unavailableReason = "team-unavailable";
+                return false;
+            }
+
+            OrderController orderController = team.PlayerOrderController;
+            if (orderController == null)
+            {
+                unavailableReason = "order-controller-missing";
+                return false;
+            }
+
+            controlledEntryId = ResolveCommanderBattleControlledEntryId(missionPeer, mainAgent);
+            bool isExactCommanderEntry = IsCommanderBattleEntryForTeam(team, controlledEntryId, out commanderEntryId);
+            bool hasEstablishedCommanderControl =
+                team.IsPlayerGeneral &&
+                IsSameAgent(team.GeneralAgent, mainAgent) &&
+                IsSameAgent(orderController.Owner, mainAgent);
+            if (!isExactCommanderEntry && !hasEstablishedCommanderControl)
+            {
+                unavailableReason = "not-local-commander";
+                return false;
+            }
+
+            if (!hasEstablishedCommanderControl)
+            {
+                unavailableReason = "commander-control-pending";
+                return false;
+            }
+
+            if (!ReferenceEquals(mission.PlayerTeam, team))
+                mission.PlayerTeam = team;
+
+            return true;
+        }
+
+        private static string ResolveCommanderBattleControlledEntryId(MissionPeer missionPeer, Agent mainAgent)
+        {
+            if (mainAgent != null &&
+                CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(mainAgent, out string entryId) &&
+                !string.IsNullOrWhiteSpace(entryId))
+            {
+                return entryId.Trim();
+            }
+
+            if (missionPeer != null &&
+                CoopBattleSpawnRuntimeState.TryGetState(missionPeer, out PeerSpawnRuntimeState spawnState) &&
+                !string.IsNullOrWhiteSpace(spawnState.EntryId))
+            {
+                return spawnState.EntryId.Trim();
+            }
+
+            if (CoopMissionSpawnLogic.TryResolveLocalSelectedEntryIdForBattleMapCommander(out entryId) &&
+                !string.IsNullOrWhiteSpace(entryId))
+            {
+                return entryId.Trim();
+            }
+
+            CoopBattleSelectionBridgeFile.SelectionBridgeSnapshot selectionBridge =
+                CoopBattleSelectionBridgeFile.ReadCurrentSelection();
+            if (LooksLikeCommanderBattleEntryId(selectionBridge?.TroopOrEntryId))
+                return selectionBridge.TroopOrEntryId.Trim();
+
+            return null;
+        }
+
+        private static bool IsCommanderBattleEntryForTeam(Team team, string entryId, out string commanderEntryId)
+        {
+            commanderEntryId = null;
+            if (team == null || team.Side == BattleSideEnum.None)
+                return false;
+
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(runtimeState, team.Side);
+            if (commanderEntry == null || string.IsNullOrWhiteSpace(commanderEntry.EntryId))
+                return false;
+
+            commanderEntryId = commanderEntry.EntryId;
+            return !string.IsNullOrWhiteSpace(entryId) &&
+                   string.Equals(commanderEntry.EntryId, entryId.Trim(), StringComparison.Ordinal);
+        }
+
+        private static bool LooksLikeCommanderBattleEntryId(string value)
+        {
+            return !string.IsNullOrWhiteSpace(value) &&
+                   value.IndexOf('|') >= 0;
+        }
+
+        private static bool IsSameAgent(Agent left, Agent right)
+        {
+            return left != null &&
+                   right != null &&
+                   (ReferenceEquals(left, right) || left.Index == right.Index);
+        }
+
+        private bool TryEnsureCommanderBattleOrderBridge(
+            Mission mission,
+            Team team,
+            Agent mainAgent,
+            string controlledEntryId,
+            string commanderEntryId)
+        {
+            if (_commanderBattleOrderVm != null && _commanderBattleOrderVmInitialized)
+                return true;
+
+            if (_gauntletLayer == null || mission == null || team == null || mainAgent == null)
+                return false;
+
+            OrderController orderController = team.PlayerOrderController;
+            if (orderController == null)
+                return false;
+
+            ReleaseCommanderBattleOrderBridge("recreate");
+
+            try
+            {
+                EnsureCommanderBattleOrderSpriteCategoryLoaded();
+                TrySetLayerActiveState(_gauntletLayer, true);
+                _gauntletLayer.IsFocusLayer = false;
+                TryLoseScreenManagerFocus(_gauntletLayer);
+                TryInvokeLayerFocusCallback(_gauntletLayer, "HandleLoseFocus");
+                _commanderBattleOrderActive = true;
+                TryEnsureCommanderDeploymentVisualOrderProviderRegistered();
+
+                _commanderBattleOrderVm = new MissionOrderVM(orderController, isDeployment: false, isMultiplayer: false);
+                _commanderBattleOrderVm.IsDeployment = false;
+                _commanderBattleOrderVm.SetCallbacks(CreateCommanderBattleOrderCallbacks());
+                _commanderBattleOrderVm.InputRestrictions = _gauntletLayer.InputRestrictions;
+                Camera missionCamera = ResolveMissionScreenCombatCamera();
+                if (missionCamera != null)
+                    _commanderBattleOrderVm.SetDeploymentParemeters(missionCamera, new List<DeploymentPoint>());
+
+                TryAttachCommanderBattleFormationTargetHandler(mission);
+                TryApplyCommanderBattleFocusedFormationsToVm();
+                TryRegisterMissionOrderHotKeys(_commanderBattleOrderVm);
+                _commanderBattleOrderVm.AfterInitialize();
+                _commanderBattleOrderVm.UpdateCanUseShortcuts(true);
+                TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm.TroopController, "UpdateTroops");
+                _commanderBattleOrderVmInitialized = true;
+                BattleMapSpawnHandoffPatch.RegisterActiveExactCommanderMissionOrderVm(
+                    _commanderBattleOrderVm,
+                    "commander-battle-order-active");
+                TryEnsureCommanderBattleOrderMovie();
+
+                string logKey =
+                    team.TeamIndex + "|" +
+                    mainAgent.Index + "|" +
+                    (controlledEntryId ?? "null") + "|" +
+                    (commanderEntryId ?? "null");
+                if (!string.Equals(_lastCommanderBattleOrderBridgeContextKey, logKey, StringComparison.Ordinal))
+                {
+                    _lastCommanderBattleOrderBridgeContextKey = logKey;
+                    ModLogger.Info(
+                        "CoopMissionSelectionView: prepared safe commander battle-time MissionOrderVM bridge. " +
+                        "TeamIndex=" + team.TeamIndex +
+                        " Side=" + team.Side +
+                        " AgentMainIndex=" + mainAgent.Index +
+                        " OrderOwnerIndex=" + (orderController.Owner?.Index.ToString() ?? "null") +
+                        " ControlledEntryId=" + (controlledEntryId ?? "null") +
+                        " CommanderEntryId=" + (commanderEntryId ?? "null") +
+                        " Mission=" + (mission.SceneName ?? "null"));
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: failed to prepare commander battle-time MissionOrderVM bridge: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                ReleaseCommanderBattleOrderBridge("create-failed");
+                return false;
+            }
+        }
+
+        private bool TryEnsureCommanderBattleOrderMovie()
+        {
+            if (_commanderBattleOrderMovie != null)
+                return true;
+
+            if (_gauntletLayer == null || _commanderBattleOrderVm == null)
+                return false;
+
+            try
+            {
+                _commanderBattleOrderMovie = _gauntletLayer.LoadMovie(
+                    CommanderDeploymentOrderMovieName,
+                    _commanderBattleOrderVm);
+                ModLogger.Info("CoopMissionSelectionView: loaded safe commander battle-time OrderRadial bridge.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: failed to load commander battle-time OrderRadial bridge: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                _commanderBattleOrderMovie = null;
+                return false;
+            }
+        }
+
+        private void ReleaseCommanderBattleOrderBridge(string source)
+        {
+            MissionOrderVM releasedVm = _commanderBattleOrderVm;
+            SyncCommanderBattleMissionOrderMenuState(false, "release-" + (source ?? "unknown"));
+            BattleMapSpawnHandoffPatch.ClearActiveExactCommanderMissionOrderVm(
+                releasedVm,
+                "commander-battle-order-bridge-release:" + (source ?? "unknown"));
+            ReleaseCommanderBattleFormationTargetHandler();
+            ReleaseCommanderBattleOrderMovie();
+            TryDeactivateNativeCommanderBattlePlacement(MissionScreen);
+
+            if (releasedVm != null)
+            {
+                try
+                {
+                    releasedVm.OnFinalize();
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionSelectionView: commander battle-time MissionOrderVM bridge finalize failed. " +
+                        "Source=" + (source ?? "unknown") +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message);
+                }
+            }
+
+            _commanderBattleOrderVm = null;
+            _commanderBattleOrderVmInitialized = false;
+            _commanderBattleOrderActive = false;
+            ReleaseCommanderBattleOrderSpriteCategory();
+            if (_commanderDeploymentOrderVm == null && _commanderDeploymentViewModel == null)
+            {
+                ReleaseCommanderDeploymentVisualOrderProvider();
+                ReleaseCommanderDeploymentSpriteCategory();
+            }
+        }
+
+        private void ReleaseCommanderBattleOrderMovie()
+        {
+            if (_commanderBattleOrderMovie == null)
+                return;
+
+            try
+            {
+                _gauntletLayer?.ReleaseMovie(_commanderBattleOrderMovie);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: commander battle-time OrderRadial movie release failed: " + ex.Message);
+            }
+            finally
+            {
+                _commanderBattleOrderMovie = null;
+            }
+        }
+
+        private void TryAttachCommanderBattleFormationTargetHandler(Mission mission)
+        {
+            if (_commanderBattleFormationTargetHandler != null || mission == null)
+                return;
+
+            try
+            {
+                MissionFormationTargetSelectionHandler handler =
+                    mission.GetMissionBehavior<MissionFormationTargetSelectionHandler>();
+                if (handler == null)
+                    return;
+
+                handler.OnFormationFocused += OnCommanderBattleFormationFocused;
+                _commanderBattleFormationTargetHandler = handler;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander battle formation target handler attach failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private void ReleaseCommanderBattleFormationTargetHandler()
+        {
+            if (_commanderBattleFormationTargetHandler == null)
+            {
+                _commanderBattleFocusedFormationsCache = null;
+                return;
+            }
+
+            try
+            {
+                _commanderBattleFormationTargetHandler.OnFormationFocused -= OnCommanderBattleFormationFocused;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander battle formation target handler release failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+            }
+            finally
+            {
+                _commanderBattleFormationTargetHandler = null;
+                _commanderBattleFocusedFormationsCache = null;
+            }
+        }
+
+        private void OnCommanderBattleFormationFocused(MBReadOnlyList<Formation> focusedFormations)
+        {
+            _commanderBattleFocusedFormationsCache = focusedFormations;
+            TryApplyCommanderBattleFocusedFormationsToVm();
+        }
+
+        private void TryApplyCommanderBattleFocusedFormationsToVm()
+        {
+            if (_commanderBattleOrderVm == null || _commanderBattleFocusedFormationsCache == null)
+                return;
+
+            try
+            {
+                _commanderBattleOrderVm.SetFocusedFormations(_commanderBattleFocusedFormationsCache);
+            }
+            catch
+            {
+            }
+        }
+
+        private Formation ResolveCommanderBattleFocusedFormation()
+        {
+            if (_commanderBattleFocusedFormationsCache == null)
+                return null;
+
+            for (int i = 0; i < _commanderBattleFocusedFormationsCache.Count; i++)
+            {
+                Formation formation = _commanderBattleFocusedFormationsCache[i];
+                if (formation != null && formation.CountOfUnits > 0)
+                    return formation;
+            }
+
+            return null;
+        }
+
+        private void SyncCommanderBattleMissionOrderMenuState(bool isOpen, string source)
+        {
+            Mission mission = Mission;
+            if (mission == null)
+                return;
+
+            if (!isOpen &&
+                _commanderDeploymentOrderVm != null &&
+                TryGetInstanceBool(_commanderDeploymentOrderVm, "IsToggleOrderShown"))
+            {
+                return;
+            }
+
+            mission.IsOrderMenuOpen = isOpen;
+        }
+
+        private void LogCommanderBattleOrderVisualAudit(string source)
+        {
+            Mission mission = Mission;
+            OrderController orderController = mission?.PlayerTeam?.PlayerOrderController;
+            object orderTroopPlacer = ResolveNativeCommanderOrderTroopPlacer();
+            object orderFlag =
+                TryGetInstancePropertyValue(orderTroopPlacer, "OrderFlag") ??
+                TryGetInstancePropertyValue(MissionScreen, "OrderFlag");
+            object troopList = TryGetInstanceMemberValue(_commanderBattleOrderVm?.TroopController, "TroopList");
+            int focusedFormationCount = _commanderBattleFocusedFormationsCache?.Count ?? 0;
+            int troopListCount = TryGetCollectionCount(troopList);
+            int selectableTroopCount = CountCommanderBattleTroopItemsWithBool(troopList, "IsSelectable");
+            int selectedTroopCount = CountCommanderBattleTroopItemsWithBool(troopList, "IsSelected");
+            int showSelectionInputsCount = CountCommanderBattleTroopItemsWithBool(troopList, "ShowSelectionInputs");
+            bool hasFormationTargetHandler = _commanderBattleFormationTargetHandler != null ||
+                                             mission?.GetMissionBehavior<MissionFormationTargetSelectionHandler>() != null;
+            bool hasFormationMarker = HasMissionBehaviorNamed(
+                mission,
+                "MissionFormationMarkerUIHandler",
+                "MissionGauntletFormationMarker");
+            string key =
+                (source ?? "unknown") + "|" +
+                (mission?.SceneName ?? "null") + "|" +
+                (mission?.IsOrderMenuOpen.ToString() ?? "null") + "|" +
+                hasFormationTargetHandler + "|" +
+                hasFormationMarker + "|" +
+                (orderTroopPlacer != null) + "|" +
+                (orderFlag != null) + "|" +
+                focusedFormationCount + "|" +
+                troopListCount + "|" +
+                selectableTroopCount + "|" +
+                selectedTroopCount + "|" +
+                showSelectionInputsCount + "|" +
+                (_commanderBattleOrderSpriteCategory != null) + "|" +
+                (orderController?.SelectedFormations?.Count.ToString() ?? "null");
+            if (string.Equals(_lastCommanderBattleOrderVisualAuditKey, key, StringComparison.Ordinal))
+                return;
+
+            _lastCommanderBattleOrderVisualAuditKey = key;
+            ModLogger.Info(
+                "CoopMissionSelectionView: commander battle-time order visual audit. " +
+                "Source=" + (source ?? "unknown") +
+                " IsOrderMenuOpen=" + (mission?.IsOrderMenuOpen.ToString() ?? "null") +
+                " HasFormationTargetHandler=" + hasFormationTargetHandler +
+                " HasFormationMarker=" + hasFormationMarker +
+                " HasOrderTroopPlacer=" + (orderTroopPlacer != null) +
+                " HasOrderFlag=" + (orderFlag != null) +
+                " FocusedFormationCount=" + focusedFormationCount +
+                " TroopListCount=" + troopListCount +
+                " SelectableTroopCount=" + selectableTroopCount +
+                " SelectedTroopCount=" + selectedTroopCount +
+                " ShowSelectionInputsCount=" + showSelectionInputsCount +
+                " HasOrderSpriteCategory=" + (_commanderBattleOrderSpriteCategory != null) +
+                " SelectedFormationCount=" + (orderController?.SelectedFormations?.Count.ToString() ?? "null") +
+                " Mission=" + (mission?.SceneName ?? "null"));
+        }
+
+        private static int CountCommanderBattleTroopItemsWithBool(object troopList, string propertyName)
+        {
+            if (troopList == null || string.IsNullOrWhiteSpace(propertyName))
+                return 0;
+
+            int count = 0;
+            if (troopList is IEnumerable enumerable)
+            {
+                foreach (object item in enumerable)
+                {
+                    if (TryGetInstanceBool(item, propertyName))
+                        count++;
+                }
+            }
+
+            return count;
+        }
+
+        private static bool HasMissionBehaviorNamed(Mission mission, params string[] typeNames)
+        {
+            if (mission?.MissionBehaviors == null || typeNames == null || typeNames.Length == 0)
+                return false;
+
+            for (int i = 0; i < mission.MissionBehaviors.Count; i++)
+            {
+                Type behaviorType = mission.MissionBehaviors[i]?.GetType();
+                if (behaviorType == null)
+                    continue;
+
+                for (int j = 0; j < typeNames.Length; j++)
+                {
+                    string expected = typeNames[j];
+                    if (string.IsNullOrWhiteSpace(expected))
+                        continue;
+
+                    if (string.Equals(behaviorType.Name, expected, StringComparison.Ordinal) ||
+                        string.Equals(behaviorType.FullName, expected, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryCloseCommanderBattleOrderMenu(string source)
+        {
+            if (_commanderBattleOrderVm == null ||
+                !TryGetInstanceBool(_commanderBattleOrderVm, "IsToggleOrderShown"))
+            {
+                return false;
+            }
+
+            bool? closeResult = TryInvokeBoolMethod(_commanderBattleOrderVm, "TryCloseToggleOrder", false);
+            TryDeactivateNativeCommanderBattlePlacement(MissionScreen);
+            SyncCommanderBattleMissionOrderMenuState(
+                TryGetInstanceBool(_commanderBattleOrderVm, "IsToggleOrderShown"),
+                "close-" + (source ?? "unknown"));
+            if (closeResult != true)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander battle-time order close fallback. " +
+                    "Source=" + (source ?? "unknown") +
+                    " CloseResult=" + (closeResult.HasValue ? closeResult.Value.ToString() : "null"));
+            }
+
+            return true;
+        }
+
+        private bool HasCommanderBattleVisualOrderSets()
+        {
+            return GetCommanderBattleOrderSetCount() > 0;
+        }
+
+        private int GetCommanderBattleOrderSetCount()
+        {
+            return TryGetCollectionCount(TryGetInstanceMemberValue(_commanderBattleOrderVm, "OrderSets"));
+        }
+
+        private void LogCommanderBattleEmptyOrderSetGuard(string source, Mission mission, OrderController orderController)
+        {
+            int selectedFormationCount = orderController?.SelectedFormations?.Count ?? -1;
+            int troopListCount = TryGetCollectionCount(TryGetInstanceMemberValue(_commanderBattleOrderVm?.TroopController, "TroopList"));
+            string sceneName = mission?.SceneName ?? "null";
+            string logKey =
+                (source ?? "unknown") + "|" +
+                sceneName + "|" +
+                selectedFormationCount + "|" +
+                troopListCount;
+
+            if (string.Equals(_lastCommanderBattleOrderEmptySetGuardKey, logKey, StringComparison.Ordinal))
+                return;
+
+            _lastCommanderBattleOrderEmptySetGuardKey = logKey;
+            ModLogger.Info(
+                "CoopMissionSelectionView: suppressed commander battle-time order menu because no visual order sets were available. " +
+                "Source=" + (source ?? "unknown") +
+                " Scene=" + sceneName +
+                " SelectedFormationCount=" + selectedFormationCount +
+                " TroopListCount=" + troopListCount +
+                " IsToggleOrderShown=" + TryGetInstanceBool(_commanderBattleOrderVm, "IsToggleOrderShown") +
+                " IsTroopListShown=" + TryGetInstanceBool(_commanderBattleOrderVm, "IsTroopListShown"));
+        }
+
+        private MissionOrderCallbacks CreateCommanderBattleOrderCallbacks()
+        {
+            return new MissionOrderCallbacks
+            {
+                RefreshVisuals = RefreshCommanderBattleOrderVisuals,
+                OnActivateToggleOrder = ActivateCommanderBattleToggleOrder,
+                OnDeactivateToggleOrder = DeactivateCommanderBattleToggleOrder,
+                OnTransferTroopsFinished = OnCommanderBattleTransferTroopsFinished,
+                OnBeforeOrder = OnBeforeCommanderBattleOrder,
+                ToggleMissionInputs = ToggleCommanderBattleMissionInputs,
+                SetSuspendTroopPlacer = SetCommanderBattleTroopPlacerSuspended,
+                GetVisualOrderExecutionParameters = GetCommanderBattleVisualOrderExecutionParameters
+            };
+        }
+
+        private void RefreshCommanderBattleOrderVisuals()
+        {
+            TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm?.TroopController, "UpdateTroops");
+        }
+
+        private void ActivateCommanderBattleToggleOrder()
+        {
+            if (HasCommanderBattleVisualOrderSets())
+                TryActivateNativeCommanderBattlePlacement(MissionScreen);
+        }
+
+        private void DeactivateCommanderBattleToggleOrder()
+        {
+            TryDeactivateNativeCommanderBattlePlacement(MissionScreen);
+        }
+
+        private void OnCommanderBattleTransferTroopsFinished()
+        {
+            TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm?.TroopController, "UpdateTroops");
+        }
+
+        private void OnBeforeCommanderBattleOrder()
+        {
+            if (HasCommanderBattleVisualOrderSets())
+                TryActivateNativeCommanderBattlePlacement(MissionScreen);
+        }
+
+        private void ToggleCommanderBattleMissionInputs(bool isLocked)
+        {
+            ScreenBase missionScreen = MissionScreen;
+            if (missionScreen == null)
+                return;
+
+            TryInvokeInstanceMethod(missionScreen, "SetCameraLockState", isLocked);
+            TrySetInstanceProperty(missionScreen, "LockCameraMovement", isLocked);
+        }
+
+        private void SetCommanderBattleTroopPlacerSuspended(bool isSuspended)
+        {
+            if (isSuspended)
+                TryDeactivateNativeCommanderBattlePlacement(MissionScreen);
+            else if (HasCommanderBattleVisualOrderSets())
+                TryActivateNativeCommanderBattlePlacement(MissionScreen);
+        }
+
+        private VisualOrderExecutionParameters GetCommanderBattleVisualOrderExecutionParameters()
+        {
+            OrderController orderController = Mission?.PlayerTeam?.PlayerOrderController;
+            Agent agent = Agent.Main ?? orderController?.Owner;
+            Formation formation = ResolveCommanderBattleFocusedFormation();
+            WorldPosition? orderPosition = null;
+            Mission mission = Mission;
+            if (mission?.Scene != null && MissionScreen != null)
+            {
+                try
+                {
+                    Vec3 orderFlagPosition = MissionScreen.GetOrderFlagPosition();
+                    orderPosition = new WorldPosition(mission.Scene, UIntPtr.Zero, orderFlagPosition, hasValidZ: false);
+                }
+                catch
+                {
+                    orderPosition = null;
+                }
+            }
+
+            return new VisualOrderExecutionParameters(agent, formation, orderPosition);
+        }
+
+        private void TryUpdateCommanderBattleOrderVmUnchecked()
+        {
+            if (_commanderBattleOrderVm == null)
+                return;
+
+            try
+            {
+                BattleMapSpawnHandoffPatch.RegisterActiveExactCommanderMissionOrderVm(
+                    _commanderBattleOrderVm,
+                    "commander-battle-order-active");
+                TryAttachCommanderBattleFormationTargetHandler(Mission);
+                bool isToggleOrderShown = TryGetInstanceBool(_commanderBattleOrderVm, "IsToggleOrderShown");
+                SyncCommanderBattleMissionOrderMenuState(isToggleOrderShown, "update");
+                if (!isToggleOrderShown)
+                {
+                    _commanderBattleOrderVm.Update();
+                    return;
+                }
+
+                TryApplyCommanderBattleFocusedFormationsToVm();
+                TryUpdateCommanderBattleFormationSelectionInputs();
+                TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm.TroopController, "IntervalUpdate");
+                TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm.TroopController, "Update");
+                TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm.TroopController, "RefreshTroopFormationTargetVisuals");
+                TrySetInstanceProperty(
+                    _commanderBattleOrderVm,
+                    "UseAlternativeFormationLayout",
+                    TaleWorlds.InputSystem.Input.IsGamepadActive);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander battle-time order update failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                ReleaseCommanderBattleOrderBridge("update-failed");
+            }
+        }
+
+        private void TryTickCommanderBattleOrderHotkeys()
+        {
+            if (_commanderBattleOrderVm == null ||
+                !_commanderBattleOrderVmInitialized)
+            {
+                return;
+            }
+
+            if (Input.IsKeyPressed(InputKey.BackSpace))
+            {
+                TrySetLayerActiveState(_gauntletLayer, true);
+                TryEnsureCommanderBattleOrderMovie();
+                if (TryGetInstanceBool(_commanderBattleOrderVm, "IsToggleOrderShown"))
+                    _commanderBattleOrderVm.ViewOrders();
+                else
+                    TryOpenCommanderBattleOrderMenuUnchecked();
+                return;
+            }
+
+            int formationHotkeyIndex = GetPressedCommanderBattleFormationHotkeyIndex();
+            if (formationHotkeyIndex >= 0)
+            {
+                TryHandleCommanderBattleFormationHotkey(formationHotkeyIndex);
+                return;
+            }
+
+            int orderHotkeyIndex = GetPressedCommanderDeploymentOrderHotkeyIndex();
+            if (orderHotkeyIndex < 0)
+                return;
+
+            TryHandleCommanderBattleOrderHotkey(orderHotkeyIndex);
+        }
+
+        private bool TryHandleCommanderBattleFormationHotkey(int formationHotkeyIndex)
+        {
+            if (formationHotkeyIndex < 0 || _commanderBattleOrderVm == null)
+                return false;
+
+            TrySetLayerActiveState(_gauntletLayer, true);
+            TryEnsureCommanderBattleOrderMovie();
+
+            try
+            {
+                bool handled = TryInvokeInstanceMethodSuccessfully(
+                    _commanderBattleOrderVm.TroopController,
+                    "OnSelectFormationWithIndex",
+                    formationHotkeyIndex);
+                if (!handled)
+                {
+                    handled = TryInvokeInstanceMethodSuccessfully(
+                        _commanderBattleOrderVm,
+                        "OnTroopFormationSelected",
+                        formationHotkeyIndex);
+                }
+
+                if (!handled)
+                    return false;
+
+                _commanderBattleOrderVm.UpdateCanUseShortcuts(true);
+                TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm, "SetActiveOrders");
+                TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm.TroopController, "UpdateTroops");
+                TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm.TroopController, "RefreshTroopFormationTargetVisuals");
+                TryUpdateCommanderBattleFormationSelectionInputs();
+                SyncCommanderBattleMissionOrderMenuState(
+                    TryGetInstanceBool(_commanderBattleOrderVm, "IsToggleOrderShown"),
+                    "formation-hotkey");
+                LogCommanderBattleOrderVisualAudit("formation-hotkey");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander battle-time formation hotkey failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
+        }
+
+        private void TryUpdateCommanderBattleFormationSelectionInputs()
+        {
+            object troopList = TryGetInstanceMemberValue(_commanderBattleOrderVm?.TroopController, "TroopList");
+            if (troopList == null)
+                return;
+
+            bool isGamepadActive = TaleWorlds.InputSystem.Input.IsGamepadActive;
+            try
+            {
+                if (troopList is IEnumerable enumerable)
+                {
+                    foreach (object troopItem in enumerable)
+                    {
+                        if (troopItem == null)
+                            continue;
+
+                        TryInvokeInstanceMethodSuccessfully(troopItem, "UpdateSelectionKeyInfo");
+                        bool isSelectable = TryGetInstanceBool(troopItem, "IsSelectable");
+                        if (isGamepadActive)
+                        {
+                            TrySetInstanceProperty(
+                                troopItem,
+                                "ShowSelectionInputs",
+                                TryGetInstanceBool(troopItem, "IsSelectionHighlightActive") && isSelectable);
+                        }
+                        else
+                        {
+                            TrySetInstanceProperty(troopItem, "IsSelectionHighlightActive", false);
+                            TrySetInstanceProperty(troopItem, "ShowSelectionInputs", isSelectable);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander battle-time formation selection input sync failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private bool TryHandleCommanderBattleOrderHotkey(int orderHotkeyIndex)
+        {
+            if (orderHotkeyIndex < 0 || _commanderBattleOrderVm == null)
+                return false;
+
+            TrySetLayerActiveState(_gauntletLayer, true);
+            TryEnsureCommanderBattleOrderMovie();
+
+            try
+            {
+                object selectedOrderSet = TryGetInstanceMemberValue(_commanderBattleOrderVm, "SelectedOrderSet");
+                if (selectedOrderSet != null)
+                    return TryExecuteCommanderBattleSelectedOrderSetHotkey(selectedOrderSet, orderHotkeyIndex);
+
+                bool openInvoked = TryOpenCommanderBattleOrderMenuUnchecked();
+                if (!openInvoked)
+                    return false;
+
+                object orderSets = TryGetInstanceMemberValue(_commanderBattleOrderVm, "OrderSets");
+                if (orderHotkeyIndex == 8 && OrderSetCollectionContainsReturnOnlySet(orderSets))
+                {
+                    bool? closeResult = TryInvokeBoolMethod(_commanderBattleOrderVm, "TryCloseToggleOrder", false);
+                    return closeResult == true;
+                }
+
+                object orderSetAtIndex = TryInvokeInstanceMethodWithResult(
+                    _commanderBattleOrderVm,
+                    "GetOrderSetAtIndex",
+                    orderHotkeyIndex);
+                if (orderSetAtIndex == null || IsReturnOnlyOrderSet(orderSetAtIndex))
+                    return false;
+
+                return TrySelectCommanderBattleOrderSetUnchecked(orderSetAtIndex);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander battle-time order hotkey failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TryOpenCommanderBattleOrderMenuUnchecked()
+        {
+            if (_commanderBattleOrderVm == null)
+                return false;
+
+            if (TryGetInstanceBool(_commanderBattleOrderVm, "IsToggleOrderShown"))
+                return true;
+
+            Mission mission = Mission;
+            OrderController orderController = mission?.PlayerTeam?.PlayerOrderController;
+            if (mission == null || orderController == null)
+                return false;
+
+            try
+            {
+                TryAttachCommanderBattleFormationTargetHandler(mission);
+                TrySetLayerActiveState(_gauntletLayer, true);
+                if (orderController.SelectedFormations == null || orderController.SelectedFormations.Count == 0)
+                    orderController.SelectAllFormations();
+
+                _commanderBattleOrderVm.UpdateCanUseShortcuts(true);
+                _commanderBattleOrderVm.OpenToggleOrder(fromHold: false, displayMessage: true);
+                TryApplyCommanderBattleFocusedFormationsToVm();
+                TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm.TroopController, "UpdateTroops");
+
+                bool isShown = TryGetInstanceBool(_commanderBattleOrderVm, "IsToggleOrderShown");
+                SyncCommanderBattleMissionOrderMenuState(isShown, "open-toggle-order");
+                if (!isShown || GetCommanderBattleOrderSetCount() <= 0)
+                {
+                    TryInvokeBoolMethod(_commanderBattleOrderVm, "TryCloseToggleOrder", false);
+                    SyncCommanderBattleMissionOrderMenuState(false, "open-toggle-order-empty");
+                    TryDeactivateNativeCommanderBattlePlacement(MissionScreen);
+                    LogCommanderBattleEmptyOrderSetGuard("open-toggle-order", mission, orderController);
+                    return false;
+                }
+
+                TryActivateNativeCommanderBattlePlacement(MissionScreen);
+                LogCommanderBattleOrderVisualAudit("open-toggle-order");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander battle-time order open failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TrySelectCommanderBattleOrderSetUnchecked(object orderSet)
+        {
+            if (orderSet == null || _commanderBattleOrderVm == null)
+                return false;
+
+            try
+            {
+                bool? selectResult = TryInvokeBoolMethod(_commanderBattleOrderVm, "TrySelectOrderSet", orderSet);
+                bool handled = selectResult == true;
+                if (!handled)
+                {
+                    VisualOrderExecutionParameters executionParameters = GetCommanderBattleVisualOrderExecutionParameters();
+                    handled = TryInvokeInstanceMethodSuccessfully(orderSet, "ExecuteAction", executionParameters);
+                }
+
+                if (!handled)
+                    return false;
+
+                _commanderBattleOrderVm.UpdateCanUseShortcuts(true);
+                TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm, "SetActiveOrders");
+                TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm.TroopController, "UpdateTroops");
+                SyncCommanderBattleMissionOrderMenuState(
+                    TryGetInstanceBool(_commanderBattleOrderVm, "IsToggleOrderShown"),
+                    "select-order-set");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: commander battle-time order set select failed: " +
+                    ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TryExecuteCommanderBattleSelectedOrderSetHotkey(object selectedOrderSet, int orderHotkeyIndex)
+        {
+            object orders = TryGetInstanceMemberValue(selectedOrderSet, "Orders");
+            int selectedOrderCount = TryGetCollectionCount(orders);
+            if (selectedOrderCount <= 0)
+                return false;
+
+            if (orderHotkeyIndex == 8 && OrderItemCollectionContainsReturnVisualOrder(orders))
+                return TryInvokeInstanceMethodSuccessfully(selectedOrderSet, "ExecuteDeSelect");
+
+            if (orderHotkeyIndex >= selectedOrderCount)
+                return false;
+
+            object orderItem = TryGetCollectionItem(orders, orderHotkeyIndex);
+            object visualOrder = TryGetInstanceMemberValue(orderItem, "Order");
+            if (IsReturnVisualOrderInstance(visualOrder))
+                return TryInvokeInstanceMethodSuccessfully(selectedOrderSet, "ExecuteDeSelect");
+
+            VisualOrderExecutionParameters executionParameters = GetCommanderBattleVisualOrderExecutionParameters();
+            if (orderItem == null ||
+                !TryInvokeInstanceMethodSuccessfully(orderItem, "ExecuteAction", executionParameters))
+            {
+                return false;
+            }
+
+            TryInvokeInstanceMethodSuccessfully(selectedOrderSet, "ExecuteDeSelect");
+            if (!TryGetInstanceBool(_commanderBattleOrderVm, "IsHolding"))
+                TryInvokeBoolMethod(_commanderBattleOrderVm, "TryCloseToggleOrder", false);
+
+            TryInvokeInstanceMethodSuccessfully(_commanderBattleOrderVm.TroopController, "UpdateTroops");
+            SyncCommanderBattleMissionOrderMenuState(
+                TryGetInstanceBool(_commanderBattleOrderVm, "IsToggleOrderShown"),
+                "execute-selected-order");
+            return true;
+        }
+
+        private bool TryActivateNativeCommanderBattlePlacement(ScreenBase missionScreen)
+        {
+            object orderTroopPlacer = ResolveNativeCommanderOrderTroopPlacer();
+            if (orderTroopPlacer == null)
+                return false;
+
+            try
+            {
+                TrySetInstanceProperty(orderTroopPlacer, "SuspendTroopPlacer", false);
+                TryInvokeInstanceMethod(orderTroopPlacer, "RestrictOrdersToDeploymentBoundaries", false);
+                object orderFlag = TryGetInstancePropertyValue(orderTroopPlacer, "OrderFlag");
+                if (missionScreen != null && orderFlag != null)
+                {
+                    TrySetInstanceProperty(missionScreen, "OrderFlag", orderFlag);
+                    TryInvokeInstanceMethod(missionScreen, "SetOrderFlagVisibility", true);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: native commander battle placement bridge failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private void TryDeactivateNativeCommanderBattlePlacement(ScreenBase missionScreen)
+        {
+            object orderTroopPlacer = ResolveNativeCommanderOrderTroopPlacer();
+            if (orderTroopPlacer == null)
+                return;
+
+            try
+            {
+                TryInvokeInstanceMethod(orderTroopPlacer, "RestrictOrdersToDeploymentBoundaries", false);
+                TrySetInstanceProperty(orderTroopPlacer, "SuspendTroopPlacer", true);
+                if (missionScreen != null)
+                    TryInvokeInstanceMethod(missionScreen, "SetOrderFlagVisibility", false);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: native commander battle placement bridge release failed: " + ex.Message);
+            }
         }
 
         private void RefreshCommanderDeploymentOrderVisuals()
@@ -2012,28 +3090,47 @@ namespace CoopSpectator.UI
         {
             _commanderDeploymentOrderOfBattleSpriteCategory = TryLoadCommanderDeploymentSpriteCategory(
                 _commanderDeploymentOrderOfBattleSpriteCategory,
-                "ui_order_of_battle");
+                "ui_order_of_battle",
+                "commander-deployment");
             _commanderDeploymentOrderSpriteCategory = TryLoadCommanderDeploymentSpriteCategory(
                 _commanderDeploymentOrderSpriteCategory,
-                "ui_order");
+                "ui_order",
+                "commander-deployment");
+        }
+
+        private void EnsureCommanderBattleOrderSpriteCategoryLoaded()
+        {
+            _commanderBattleOrderSpriteCategory = TryLoadCommanderDeploymentSpriteCategory(
+                _commanderBattleOrderSpriteCategory,
+                "ui_order",
+                "commander-battle-order");
         }
 
         private static SpriteCategory TryLoadCommanderDeploymentSpriteCategory(
             SpriteCategory currentCategory,
-            string categoryName)
+            string categoryName,
+            string source)
         {
             if (currentCategory != null)
                 return currentCategory;
 
             try
             {
-                return UIResourceManager.LoadSpriteCategory(categoryName);
+                SpriteCategory category = UIResourceManager.LoadSpriteCategory(categoryName);
+                ModLogger.Info(
+                    "CoopMissionSelectionView: sprite category load. " +
+                    "Source=" + (source ?? "unknown") +
+                    " Category=" + (categoryName ?? "null") +
+                    " Loaded=" + (category != null));
+                return category;
             }
             catch (Exception ex)
             {
                 ModLogger.Info(
                     "CoopMissionSelectionView: failed to load commander deployment sprite category " +
-                    categoryName + ": " + ex.Message);
+                    categoryName +
+                    " Source=" + (source ?? "unknown") +
+                    ": " + ex.Message);
                 return null;
             }
         }
@@ -2045,6 +3142,13 @@ namespace CoopSpectator.UI
                 "ui_order_of_battle");
             _commanderDeploymentOrderSpriteCategory = ReleaseCommanderDeploymentSpriteCategory(
                 _commanderDeploymentOrderSpriteCategory,
+                "ui_order");
+        }
+
+        private void ReleaseCommanderBattleOrderSpriteCategory()
+        {
+            _commanderBattleOrderSpriteCategory = ReleaseCommanderDeploymentSpriteCategory(
+                _commanderBattleOrderSpriteCategory,
                 "ui_order");
         }
 
@@ -3603,6 +4707,59 @@ namespace CoopSpectator.UI
             return -1;
         }
 
+        private static int GetPressedCommanderBattleFormationHotkeyIndex()
+        {
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.D1) ||
+                TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.Numpad1))
+            {
+                return 0;
+            }
+
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.D2) ||
+                TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.Numpad2))
+            {
+                return 1;
+            }
+
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.D3) ||
+                TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.Numpad3))
+            {
+                return 2;
+            }
+
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.D4) ||
+                TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.Numpad4))
+            {
+                return 3;
+            }
+
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.D5) ||
+                TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.Numpad5))
+            {
+                return 4;
+            }
+
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.D6) ||
+                TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.Numpad6))
+            {
+                return 5;
+            }
+
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.D7) ||
+                TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.Numpad7))
+            {
+                return 6;
+            }
+
+            if (TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.D8) ||
+                TaleWorlds.InputSystem.Input.IsKeyPressed(InputKey.Numpad8))
+            {
+                return 7;
+            }
+
+            return -1;
+        }
+
         private void UpdateOverlayInputState(bool shouldCaptureInput)
         {
             if (_gauntletLayer == null)
@@ -3728,6 +4885,7 @@ namespace CoopSpectator.UI
             try
             {
                 ReleaseOverlayInput();
+                ReleaseCommanderBattleOrderBridge("cleanup-layer-state");
                 ReleaseCurrentMovie();
 
                 if (_gauntletLayer != null)
@@ -3930,6 +5088,21 @@ namespace CoopSpectator.UI
                 return false;
 
             return true;
+        }
+
+        internal static bool IsCommanderBattleOrderActive()
+        {
+            if (!_commanderBattleOrderActive)
+                return false;
+
+            Mission mission = Mission.Current;
+            if (mission == null)
+                return false;
+
+            return GameNetwork.IsClient &&
+                   GameNetwork.IsSessionActive &&
+                   MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) &&
+                   SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
         }
 
         internal static bool ShouldSuppressLocalPreviewFollowedAgentEcho(MissionPeer missionPeer, Agent followedAgent)
@@ -4605,7 +5778,8 @@ namespace CoopSpectator.UI
                 if (mission?.PlayerTeam?.PlayerOrderController == null)
                     return false;
 
-                return CoopMissionSelectionView.IsCommanderDeploymentOrderOfBattleActive();
+                return CoopMissionSelectionView.IsCommanderDeploymentOrderOfBattleActive() ||
+                       CoopMissionSelectionView.IsCommanderBattleOrderActive();
             }
 
             public override MBReadOnlyList<VisualOrderSet> GetOrders()
