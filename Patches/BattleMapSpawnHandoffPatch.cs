@@ -6922,6 +6922,7 @@ namespace CoopSpectator.Patches
                     _missionNetworkComponentHandleServerEventSetWeaponAmmoDataMethod.Invoke(
                         missionNetworkComponent,
                         new object[] { setWeaponAmmoData });
+
                     RemoveDeferredClientSetWeaponAmmoDataPayload(
                         setWeaponAmmoData.AgentIndex,
                         setWeaponAmmoData);
@@ -7411,6 +7412,7 @@ namespace CoopSpectator.Patches
                 agent.Team == null ||
                 agent.Team.Side == BattleSideEnum.None ||
                 agent.MissionPeer != null ||
+                IsLocalMissionPeerControlledAgent(agent) ||
                 weaponEquipmentIndex < EquipmentIndex.Weapon0 ||
                 weaponEquipmentIndex > EquipmentIndex.Weapon3)
             {
@@ -7484,7 +7486,8 @@ namespace CoopSpectator.Patches
                 !agent.IsActive() ||
                 agent.Team == null ||
                 agent.Team.Side == BattleSideEnum.None ||
-                agent.MissionPeer != null)
+                agent.MissionPeer != null ||
+                IsLocalMissionPeerControlledAgent(agent))
             {
                 return false;
             }

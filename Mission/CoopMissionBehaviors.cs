@@ -1077,7 +1077,7 @@ namespace CoopSpectator.MissionBehaviors
             try
             {
                 mission.MainAgent = controlledAgent;
-                if (ReferenceEquals(mission.MainAgentServer, controlledAgent))
+                if (!ReferenceEquals(mission.MainAgentServer, controlledAgent))
                     mission.MainAgentServer = controlledAgent;
 
                 ModLogger.Info(
@@ -3700,6 +3700,7 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<int, int> _battlePhaseHeldFormationUnitCounts = new Dictionary<int, int>();
         private static readonly HashSet<string> _loggedAutomatedMaterializedEntrySkipIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> _loggedSuppressedMaterializedEquipmentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> _loggedManualMaterializedSiegeRespawnRejectKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _projectileLaunchDiagnosticKeys = new HashSet<string>(StringComparer.Ordinal);
         private const int ProjectileLaunchDiagnosticBudget = 64;
         private static Mission _lastBattlePhaseAiHoldMission;
@@ -4556,6 +4557,7 @@ namespace CoopSpectator.MissionBehaviors
             _battlePhaseHeldFormationUnitCounts.Clear();
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
+            _loggedManualMaterializedSiegeRespawnRejectKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
             _lastMaterializedArmyMission = null;
             _lastClientBattleSnapshotRefreshMission = null;
@@ -5724,6 +5726,7 @@ namespace CoopSpectator.MissionBehaviors
             _battlePhaseHeldFormationUnitCounts.Clear();
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
+            _loggedManualMaterializedSiegeRespawnRejectKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
             _lastAppliedBattlePhaseAiHold = null;
             _lastAppliedFormationHoldPhase = null;
@@ -6186,6 +6189,7 @@ namespace CoopSpectator.MissionBehaviors
             _exactNativeClientVisualOverlayQueueSnapshotKey = string.Empty;
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
+            _loggedManualMaterializedSiegeRespawnRejectKeys.Clear();
             _battlePhaseHeldFormationKeys.Clear();
             _battlePhaseHeldFormationUnitCounts.Clear();
             _lastBattlePhaseAiHoldMission = null;
@@ -6641,14 +6645,31 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             bool effectiveIncludeWeaponsForRefresh = includeWeaponsForRefresh;
+            bool allowLocalControlledExactSiegeTroopWeaponRefresh =
+                ShouldAllowLocalControlledExactSiegeTroopWeaponOverlayRefresh(
+                    agent,
+                    entryState,
+                    out string localControlledExactSiegeWeaponRefreshReason);
             if (effectiveIncludeWeaponsForRefresh &&
-                IsLocalPeerControlledAgent(agent))
+                IsLocalPeerControlledAgent(agent) &&
+                !allowLocalControlledExactSiegeTroopWeaponRefresh)
             {
                 effectiveIncludeWeaponsForRefresh = false;
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: suppressed weapon-inclusive pending client exact visual overlay for locally controlled agent. " +
                     "AgentIndex=" + agent.Index +
                     " EntryId=" + entryId +
+                    " Reason=" + (localControlledExactSiegeWeaponRefreshReason ?? "local-controlled-live-wield-owned-by-client") +
+                    " Source=" + (source ?? "unknown"));
+            }
+            else if (effectiveIncludeWeaponsForRefresh &&
+                     allowLocalControlledExactSiegeTroopWeaponRefresh)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: allowed weapon-inclusive pending client exact visual overlay for local exact siege possessed troop repair. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " Reason=" + (localControlledExactSiegeWeaponRefreshReason ?? "local-controlled-exact-siege-possession-repair") +
                     " Source=" + (source ?? "unknown"));
             }
             else if (effectiveIncludeWeaponsForRefresh &&
@@ -7921,19 +7942,11 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (ShouldAllowClientExactSiegeTroopWeaponRefreshAfterAuthoritativeMaterialization(
-                    agent,
-                    entryState,
-                    out _))
-            {
-                return false;
-            }
-
-            reason = "exact-siege-non-hero-field-materialization-requires-pre-spawn-weapons";
+            reason = "exact-siege-non-hero-materialized-weapons-owned-by-create-agent";
             return true;
         }
 
-        private static bool ShouldAllowClientExactSiegeTroopWeaponRefreshAfterAuthoritativeMaterialization(
+        private static bool ShouldAllowLocalControlledExactSiegeTroopWeaponOverlayRefresh(
             Agent agent,
             RosterEntryState entryState,
             out string reason)
@@ -7945,9 +7958,9 @@ namespace CoopSpectator.MissionBehaviors
                 agent.IsMount ||
                 !agent.IsHuman ||
                 !agent.IsActive() ||
-                IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                IsHeroEntryEligibleForExactPersonalPerks(entryState) ||
+                !IsLocalPeerControlledAgent(agent))
             {
-                reason = "agent-or-entry-not-eligible";
                 return false;
             }
 
@@ -7955,43 +7968,65 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null ||
                 !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
             {
-                reason = "not-exact-siege";
-                return false;
-            }
-
-            if (agent.MissionPeer != null || IsLocalPeerControlledAgent(agent))
-            {
-                reason = "peer-controlled-agent";
-                return false;
-            }
-
-            if (agent.MountAgent != null)
-            {
-                reason = "live-mount-present";
                 return false;
             }
 
             if (!HasAnySnapshotWeapons(entryState))
             {
-                reason = "snapshot-has-no-weapons";
+                reason = "local-controlled-exact-siege-snapshot-has-no-weapons";
                 return false;
             }
 
-            if (!_clientAuthoritativeMaterializedEntryObservedAgentIndices.Contains(agent.Index))
+            if (HasAnyMissionWeapons(
+                    agent.Equipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3))
             {
-                reason = "authoritative-materialized-agent-unobserved";
+                reason = "local-controlled-exact-siege-live-weapons-owned-by-materialized-agent";
                 return false;
             }
 
-            if (!_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string trackedEntryId) ||
-                !string.Equals(trackedEntryId, entryState.EntryId, StringComparison.Ordinal))
+            if (!TryResolveAuthoritativeTrackedEntryId(agent, out string trackedEntryId) &&
+                !TryResolveSelectableEntryId(agent, out trackedEntryId))
             {
-                reason = "authoritative-entry-mismatch";
+                reason = "local-controlled-exact-siege-entry-unresolved";
                 return false;
             }
 
-            reason = "exact-siege-authoritative-existing-agent";
+            if (!string.Equals(trackedEntryId, entryState.EntryId, StringComparison.Ordinal))
+            {
+                reason =
+                    "local-controlled-exact-siege-entry-mismatch" +
+                    "|Tracked=" + (trackedEntryId ?? "null") +
+                    "|Requested=" + (entryState.EntryId ?? "null");
+                return false;
+            }
+
+            if (IsClientExactVisualRefreshAlreadySatisfied(
+                    agent,
+                    entryState,
+                    includeWeapons: true,
+                    includeArmorVisuals: false,
+                    includeMountVisuals: false,
+                    out string satisfiedReason))
+            {
+                reason = "local-controlled-exact-siege-weapons-already-satisfied:" + (satisfiedReason ?? "ready");
+                return false;
+            }
+
+            reason = "local-controlled-exact-siege-possession-weapon-mismatch:" + (satisfiedReason ?? "unknown");
             return true;
+        }
+
+        private static bool ShouldAllowClientExactSiegeTroopWeaponRefreshAfterAuthoritativeMaterialization(
+            Agent agent,
+            RosterEntryState entryState,
+            out string reason)
+        {
+            reason = "exact-siege-materialized-weapons-owned-by-create-agent";
+            return false;
         }
 
         private static bool ShouldTreatClientExactSiegeTroopVisualAsServerPreSpawnResolved(
@@ -8030,6 +8065,15 @@ namespace CoopSpectator.MissionBehaviors
             bool peerControlled = agent.MissionPeer != null || locallyControlled;
             if (locallyControlled)
             {
+                if (ShouldAllowLocalControlledExactSiegeTroopWeaponOverlayRefresh(
+                        agent,
+                        entryState,
+                        out string localControlledExactSiegeWeaponRefreshReason))
+                {
+                    reason = localControlledExactSiegeWeaponRefreshReason;
+                    return true;
+                }
+
                 reason = "local-controlled-live-wield-owned-by-client";
                 return false;
             }
@@ -10542,15 +10586,35 @@ namespace CoopSpectator.MissionBehaviors
                 clientVisualOnly
                     ? includeWeaponsForClientRefresh
                     : !preSpawnExactLoadoutInjected;
+            string localControlledExactSiegeWeaponRefreshReason = null;
+            bool allowLocalControlledExactSiegeTroopWeaponRefresh =
+                clientVisualOnly &&
+                ShouldAllowLocalControlledExactSiegeTroopWeaponOverlayRefresh(
+                    agent,
+                    entryState,
+                    out localControlledExactSiegeWeaponRefreshReason);
             if (clientVisualOnly &&
                 includeWeaponsForOverlayRefresh &&
-                IsLocalPeerControlledAgent(agent))
+                IsLocalPeerControlledAgent(agent) &&
+                !allowLocalControlledExactSiegeTroopWeaponRefresh)
             {
                 includeWeaponsForOverlayRefresh = false;
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: suppressed weapon-inclusive client exact visual overlay for locally controlled agent. " +
                     "AgentIndex=" + agent.Index +
                     " EntryId=" + entryId +
+                    " Reason=" + (localControlledExactSiegeWeaponRefreshReason ?? "local-controlled-live-wield-owned-by-client") +
+                    " Source=" + (source ?? "unknown"));
+            }
+            else if (clientVisualOnly &&
+                     includeWeaponsForOverlayRefresh &&
+                     allowLocalControlledExactSiegeTroopWeaponRefresh)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: allowed weapon-inclusive client exact visual overlay for local exact siege possessed troop repair. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + entryId +
+                    " Reason=" + (localControlledExactSiegeWeaponRefreshReason ?? "local-controlled-exact-siege-possession-repair") +
                     " Source=" + (source ?? "unknown"));
             }
             else if (clientVisualOnly &&
@@ -10767,7 +10831,8 @@ namespace CoopSpectator.MissionBehaviors
                                 entryId,
                                 source,
                                 out string appliedLiveWieldRefresh,
-                                out string liveWieldRefreshIssue))
+                                out string liveWieldRefreshIssue,
+                                allowLocalPeerControlledAgent: allowLocalControlledExactSiegeTroopWeaponRefresh))
                         {
                             if (!string.IsNullOrWhiteSpace(appliedLiveWieldRefresh) &&
                                 !string.Equals(appliedLiveWieldRefresh, "(none)", StringComparison.Ordinal))
@@ -10846,7 +10911,6 @@ namespace CoopSpectator.MissionBehaviors
 
                 if (clientVisualOnly &&
                     !includeWeaponsForOverlayRefresh &&
-                    !ShouldSuppressClientTroopWeaponOverlayRefreshForExactSiege(agent, entryState, out _) &&
                     TryPreserveEquipmentWeaponSlotsFromMissionEquipment(
                         spawnEquipment,
                         agent.Equipment,
@@ -11042,7 +11106,8 @@ namespace CoopSpectator.MissionBehaviors
                                 entryId,
                                 source,
                                 out string appliedLiveWieldRefresh,
-                                out string liveWieldRefreshIssue))
+                                out string liveWieldRefreshIssue,
+                                allowLocalPeerControlledAgent: allowLocalControlledExactSiegeTroopWeaponRefresh))
                         {
                             if (!string.IsNullOrWhiteSpace(appliedLiveWieldRefresh) &&
                                 !string.Equals(appliedLiveWieldRefresh, "(none)", StringComparison.Ordinal))
@@ -12406,6 +12471,7 @@ namespace CoopSpectator.MissionBehaviors
                 _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = 0;
                 _loggedAutomatedMaterializedEntrySkipIds.Clear();
                 _loggedSuppressedMaterializedEquipmentKeys.Clear();
+                _loggedManualMaterializedSiegeRespawnRejectKeys.Clear();
                 MaterializedEquipmentResolutionSourceCounts.Clear();
                 MaterializedEquipmentMissCounts.Clear();
                 MaterializedEquipmentNormalizedFallbackCounts.Clear();
@@ -20870,18 +20936,6 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
-            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState) &&
-                Mission.Current != null &&
-                SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(Mission.Current.SceneName ?? string.Empty) &&
-                TryApplyExactSiegeSnapshotWeaponSeedToEquipment(
-                    new Equipment(),
-                    entryState,
-                    out string exactSiegeSeedSummary))
-            {
-                reason = "exact-siege-snapshot-weapon-seed-ready:" + exactSiegeSeedSummary;
-                return true;
-            }
-
             if (HasAnyEquipmentWeapons(
                     agent.SpawnEquipment,
                     EquipmentIndex.Weapon0,
@@ -20924,18 +20978,6 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
-            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState) &&
-                Mission.Current != null &&
-                SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(Mission.Current.SceneName ?? string.Empty) &&
-                TryApplyExactSiegeSnapshotWeaponSeedToEquipment(
-                    preparedSeedEquipment,
-                    entryState,
-                    out string exactSiegeSeedSummary))
-            {
-                reason = "exact-siege-snapshot-weapons-seeded:" + exactSiegeSeedSummary;
-                return true;
-            }
-
             if (HasAnyEquipmentWeapons(
                     preparedSeedEquipment,
                     EquipmentIndex.Weapon0,
@@ -20968,61 +21010,6 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             reason = "mission-weapons-hydrated:" + hydrationSummary;
-            return true;
-        }
-
-        private static bool TryApplyExactSiegeSnapshotWeaponSeedToEquipment(
-            Equipment targetEquipment,
-            RosterEntryState entryState,
-            out string summary)
-        {
-            summary = "(none)";
-            if (targetEquipment == null || entryState == null)
-                return false;
-
-            Equipment snapshotEquipment = BuildSnapshotEquipmentForExactRuntime(
-                entryState,
-                includeWeapons: true,
-                honorExactVisualContracts: false,
-                includeArmorVisuals: false,
-                includeMountVisuals: false);
-            if (!HasAnyEquipmentWeapons(
-                    snapshotEquipment,
-                    EquipmentIndex.Weapon0,
-                    EquipmentIndex.Weapon1,
-                    EquipmentIndex.Weapon2,
-                    EquipmentIndex.Weapon3))
-            {
-                return false;
-            }
-
-            var seededSlots = new List<string>();
-            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
-            {
-                EquipmentElement snapshotElement = snapshotEquipment[slot];
-                EquipmentElement currentElement = targetEquipment[slot];
-                string snapshotItemId = snapshotElement.Item?.StringId ?? string.Empty;
-                string currentItemId = currentElement.Item?.StringId ?? string.Empty;
-                if (string.Equals(snapshotItemId, currentItemId, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (snapshotElement.IsEmpty || snapshotElement.Item == null)
-                {
-                    targetEquipment[slot] = default(EquipmentElement);
-                    seededSlots.Add(GetEquipmentSlotLabel(slot) + "=empty");
-                    continue;
-                }
-
-                targetEquipment[slot] = snapshotElement;
-                seededSlots.Add(
-                    GetEquipmentSlotLabel(slot) + "=" + snapshotElement.Item.StringId +
-                    (string.IsNullOrWhiteSpace(currentItemId) ? string.Empty : "(replaced:" + currentItemId + ")"));
-            }
-
-            if (seededSlots.Count == 0)
-                return false;
-
-            summary = string.Join(", ", seededSlots);
             return true;
         }
 
@@ -23314,9 +23301,26 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            string possessionStage = "start";
+            bool useManualSiegeRespawnPossession = false;
+            string manualRespawnReason = string.Empty;
             try
             {
+                possessionStage = "resolve-target-entry";
                 RosterEntryState targetEntryState = ResolveMaterializedEntryStateForPossessedAgent(targetAgent, pendingRequest);
+                possessionStage = "manual-siege-respawn-gate";
+                useManualSiegeRespawnPossession =
+                    ShouldUseManualMaterializedSiegeRespawnPossession(
+                        mission,
+                        missionPeer,
+                        peer,
+                        targetAgent,
+                        pendingRequest,
+                        out manualRespawnReason);
+                if (!useManualSiegeRespawnPossession)
+                    LogManualMaterializedSiegeRespawnRejectedIfNeeded(peer, targetAgent, pendingRequest, manualRespawnReason, source);
+
+                possessionStage = "resolve-peer-team";
                 BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " replace-bot team");
                 Team authoritativeTeam = ResolveAuthoritativeMissionTeam(mission, missionPeer, authoritativeSide);
                 Team peerTeam = authoritativeTeam ?? missionPeer.Team ?? targetAgent.Team;
@@ -23333,6 +23337,7 @@ namespace CoopSpectator.MissionBehaviors
                     return false;
                 }
 
+                possessionStage = "apply-peer-team";
                 if (!ReferenceEquals(missionPeer.Team, peerTeam))
                 {
                     SetServerMemberValue(missionPeer, "Team", peerTeam);
@@ -23342,12 +23347,21 @@ namespace CoopSpectator.MissionBehaviors
                         SetServerMemberValue(missionPeer, "<Team>k__BackingField", peerTeam);
                 }
 
+                possessionStage = "broadcast-peer-team";
+                string peerTeamBroadcastState = TryBroadcastPeerTeamForMaterializedPossession(
+                    missionPeer,
+                    peer,
+                    peerTeam,
+                    source + " replace-bot team");
+
+                possessionStage = "align-target-team";
                 if (peerTeam != null && !ReferenceEquals(targetAgent.Team, peerTeam))
                 {
                     targetAgent.SetTeam(peerTeam, false);
                     targetAgent.ForceUpdateCachedAndFormationValues(true, false);
                 }
 
+                possessionStage = "count-formation-ai";
                 int activeAiUnitsInFormation = 0;
                 targetFormation.ApplyActionOnEachUnit(agent =>
                 {
@@ -23358,6 +23372,30 @@ namespace CoopSpectator.MissionBehaviors
                 });
                 activeAiUnitsInFormation = Math.Max(activeAiUnitsInFormation, 1);
 
+                if (useManualSiegeRespawnPossession)
+                {
+                    int expectedBotsAlive = Math.Max(missionPeer.BotsUnderControlAlive, activeAiUnitsInFormation);
+                    int expectedBotsTotal = Math.Max(missionPeer.BotsUnderControlTotal, activeAiUnitsInFormation);
+                    possessionStage = "manual-siege-respawn-bind";
+                    return TryBindMaterializedBotWithPlayerForSiegeRespawn(
+                        mission,
+                        gameMode,
+                        missionPeer,
+                        peer,
+                        targetAgent,
+                        pendingRequest,
+                        targetEntryState,
+                        peerTeam,
+                        targetFormation,
+                        activeAiUnitsInFormation,
+                        expectedBotsAlive,
+                        expectedBotsTotal,
+                        peerTeamBroadcastState,
+                        manualRespawnReason,
+                        source + " replace-bot manual-respawn");
+                }
+
+                possessionStage = "preclaim-formation";
                 missionPeer.ControlledFormation = targetFormation;
                 ApplyBotsUnderControlCounts(
                     missionPeer,
@@ -23370,7 +23408,10 @@ namespace CoopSpectator.MissionBehaviors
                 missionPeer.FollowedAgent = targetAgent;
                 missionPeer.SpawnCountThisRound = Math.Max(missionPeer.SpawnCountThisRound, 1);
 
+                possessionStage = "ensure-vanilla-gold-floor";
                 TryEnsureVanillaSpawnGoldFloor(gameMode, peer, missionPeer, source + " replace-bot");
+
+                possessionStage = "native-replace-bot";
                 Agent replacedAgent = mission.ReplaceBotWithPlayer(targetAgent, missionPeer);
                 if (replacedAgent == null)
                 {
@@ -23385,6 +23426,10 @@ namespace CoopSpectator.MissionBehaviors
 
                 if (!ReferenceEquals(missionPeer.ControlledAgent, replacedAgent))
                     missionPeer.ControlledAgent = replacedAgent;
+                if (!ReferenceEquals(peer.ControlledAgent, replacedAgent))
+                    peer.ControlledAgent = replacedAgent;
+                if (!ReferenceEquals(replacedAgent.MissionPeer, missionPeer))
+                    replacedAgent.MissionPeer = missionPeer;
                 if (peer.VirtualPlayer != null)
                 {
                     GameNetwork.BeginModuleEventAsServer(peer.VirtualPlayer);
@@ -23430,6 +23475,7 @@ namespace CoopSpectator.MissionBehaviors
                     " ClaimedBotsTotal=" + claimedBotsTotal +
                     " PendingTroopId=" + (pendingRequest.TroopId ?? "null") +
                     " PendingEntryId=" + (pendingRequest.EntryId ?? "null") +
+                    " " + peerTeamBroadcastState +
                     " " + commanderControlState +
                     " " + formationOwnershipState +
                     " " + reappliedAgentState +
@@ -23452,6 +23498,346 @@ namespace CoopSpectator.MissionBehaviors
             {
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: materialized army replace-bot failed (" + source + "): " +
+                    ex.GetType().Name +
+                    ": " +
+                    ex.Message +
+                    " Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " AgentIndex=" + targetAgent.Index +
+                    " Stage=" + possessionStage +
+                    " ManualSiegeRespawn=" + useManualSiegeRespawnPossession +
+                    " ManualReason={" + (manualRespawnReason ?? "null") + "}" +
+                    " TargetTeamNull=" + (targetAgent.Team == null) +
+                    " MissionPeerTeamNull=" + (missionPeer.Team == null) +
+                    " MissionPeerControlledAgentNull=" + (missionPeer.ControlledAgent == null) +
+                    " PeerControlledAgentNull=" + (peer.ControlledAgent == null) +
+                    " ControlledFormationNull=" + (missionPeer.ControlledFormation == null));
+                return false;
+            }
+        }
+
+        private static bool ShouldUseManualMaterializedSiegeRespawnPossession(
+            Mission mission,
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            Agent targetAgent,
+            CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest,
+            out string reason)
+        {
+            reason = string.Empty;
+            if (mission == null || missionPeer == null || peer == null || targetAgent == null)
+            {
+                reason = "missing-state";
+                return false;
+            }
+
+            if (!GameNetwork.IsServer)
+            {
+                reason = "not-server";
+                return false;
+            }
+
+            bool activeSiegeAssaultWithDeployment = ExactCampaignArmyBootstrap.IsSiegeAssaultWithDeploymentActive(mission);
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            bool scenarioSiegeAssaultWithDeployment =
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+            bool sceneSiegeAssaultWithDeployment = false;
+            try
+            {
+                sceneSiegeAssaultWithDeployment =
+                    SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
+            }
+            catch
+            {
+                sceneSiegeAssaultWithDeployment = false;
+            }
+
+            if (!activeSiegeAssaultWithDeployment &&
+                (!sceneSiegeAssaultWithDeployment || !scenarioSiegeAssaultWithDeployment))
+            {
+                reason =
+                    "not-exact-siege-assault" +
+                    " ActiveBootstrap=" + activeSiegeAssaultWithDeployment +
+                    " SceneSiege=" + sceneSiegeAssaultWithDeployment +
+                    " ScenarioSiege=" + scenarioSiegeAssaultWithDeployment;
+                return false;
+            }
+
+            bool trackedMaterializedTarget =
+                _materializedArmySideByAgentIndex.TryGetValue(targetAgent.Index, out BattleSideEnum trackedSide);
+            bool nativeMaterializedTarget =
+                ExactCampaignArmyBootstrap.TryGetSide(targetAgent, out BattleSideEnum nativeSide);
+            bool entryMappedTarget =
+                _materializedArmyEntryIdByAgentIndex.ContainsKey(targetAgent.Index) ||
+                ExactCampaignArmyBootstrap.TryGetEntryId(targetAgent, out _);
+            if (!trackedMaterializedTarget && !nativeMaterializedTarget && !entryMappedTarget)
+            {
+                reason = "target-not-materialized";
+                return false;
+            }
+
+            BattleSideEnum targetSide =
+                trackedMaterializedTarget && trackedSide != BattleSideEnum.None
+                    ? trackedSide
+                    : nativeMaterializedTarget
+                        ? nativeSide
+                        : (targetAgent.Team?.Side ?? BattleSideEnum.None);
+            if (pendingRequest.Side != BattleSideEnum.None &&
+                targetSide != BattleSideEnum.None &&
+                pendingRequest.Side != targetSide)
+            {
+                reason =
+                    "target-side-mismatch" +
+                    " PendingSide=" + pendingRequest.Side +
+                    " TargetSide=" + targetSide;
+                return false;
+            }
+
+            if (!CoopBattlePeerLifecycleRuntimeState.TryGetState(missionPeer, out PeerLifecycleRuntimeState lifecycleState) ||
+                lifecycleState.DeathCount <= 0)
+            {
+                reason = "not-repeat-life";
+                return false;
+            }
+
+            if (pendingRequest.PeerIndex != peer.Index)
+            {
+                reason = "pending-peer-mismatch";
+                return false;
+            }
+
+            Agent missionPeerControlledAgent = missionPeer.ControlledAgent;
+            Agent peerControlledAgent = peer.ControlledAgent;
+            bool missionPeerControlsDifferentActiveAgent =
+                missionPeerControlledAgent != null &&
+                !ReferenceEquals(missionPeerControlledAgent, targetAgent) &&
+                missionPeerControlledAgent.IsActive();
+            bool peerControlsDifferentActiveAgent =
+                peerControlledAgent != null &&
+                !ReferenceEquals(peerControlledAgent, targetAgent) &&
+                peerControlledAgent.IsActive();
+            if (missionPeerControlsDifferentActiveAgent || peerControlsDifferentActiveAgent)
+            {
+                reason = "peer-already-controls-active-agent";
+                return false;
+            }
+
+            if (targetAgent.MissionPeer != null &&
+                !ReferenceEquals(targetAgent.MissionPeer, missionPeer))
+            {
+                reason = "target-already-bound";
+                return false;
+            }
+
+            reason =
+                "exact-siege-repeat-life" +
+                " Deaths=" + lifecycleState.DeathCount +
+                " Lifecycle=" + lifecycleState.Status +
+                " ActiveBootstrap=" + activeSiegeAssaultWithDeployment +
+                " SceneSiege=" + sceneSiegeAssaultWithDeployment +
+                " ScenarioSiege=" + scenarioSiegeAssaultWithDeployment +
+                " TargetMaterialized=" + (trackedMaterializedTarget ? "tracked" : nativeMaterializedTarget ? "native" : "entry");
+            return true;
+        }
+
+        private static void LogManualMaterializedSiegeRespawnRejectedIfNeeded(
+            NetworkCommunicator peer,
+            Agent targetAgent,
+            CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest,
+            string reason,
+            string source)
+        {
+            if (string.IsNullOrWhiteSpace(reason))
+                return;
+
+            if (string.Equals(reason, "missing-state", StringComparison.Ordinal) ||
+                string.Equals(reason, "not-server", StringComparison.Ordinal) ||
+                string.Equals(reason, "not-repeat-life", StringComparison.Ordinal) ||
+                reason.StartsWith("not-exact-siege-assault", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (pendingRequest.PeerIndex < 0 ||
+                (string.IsNullOrWhiteSpace(pendingRequest.EntryId) &&
+                 string.IsNullOrWhiteSpace(pendingRequest.TroopId)))
+            {
+                return;
+            }
+
+            string key =
+                (peer?.Index ?? pendingRequest.PeerIndex).ToString() +
+                "|" +
+                (targetAgent?.Index ?? -1) +
+                "|" +
+                (pendingRequest.EntryId ?? string.Empty) +
+                "|" +
+                (pendingRequest.TroopId ?? string.Empty) +
+                "|" +
+                reason;
+            if (!_loggedManualMaterializedSiegeRespawnRejectKeys.Add(key))
+                return;
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: manual materialized siege respawn path rejected. " +
+                "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? pendingRequest.PeerIndex.ToString()) +
+                " AgentIndex=" + (targetAgent?.Index.ToString() ?? "null") +
+                " PendingTroopId=" + (pendingRequest.TroopId ?? "null") +
+                " PendingEntryId=" + (pendingRequest.EntryId ?? "null") +
+                " Reason={" + reason + "}" +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        private static bool TryBindMaterializedBotWithPlayerForSiegeRespawn(
+            Mission mission,
+            MissionMultiplayerGameModeBase gameMode,
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            Agent targetAgent,
+            CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest,
+            RosterEntryState targetEntryState,
+            Team peerTeam,
+            Formation targetFormation,
+            int activeAiUnitsInFormation,
+            int claimedBotsAlive,
+            int claimedBotsTotal,
+            string peerTeamBroadcastState,
+            string manualRespawnReason,
+            string source)
+        {
+            if (mission == null || missionPeer == null || peer == null || targetAgent == null || !targetAgent.IsActive())
+                return false;
+
+            try
+            {
+                bool clearedStaleControlledAgent = false;
+                Agent staleControlledAgent = missionPeer.ControlledAgent;
+                if (staleControlledAgent != null &&
+                    !ReferenceEquals(staleControlledAgent, targetAgent) &&
+                    !staleControlledAgent.IsActive())
+                {
+                    missionPeer.ControlledAgent = null;
+                    if (ReferenceEquals(missionPeer.FollowedAgent, staleControlledAgent))
+                        missionPeer.FollowedAgent = null;
+                    if (ReferenceEquals(peer.ControlledAgent, staleControlledAgent))
+                        peer.ControlledAgent = null;
+                    clearedStaleControlledAgent = true;
+                }
+
+                staleControlledAgent = peer.ControlledAgent;
+                if (staleControlledAgent != null &&
+                    !ReferenceEquals(staleControlledAgent, targetAgent) &&
+                    !staleControlledAgent.IsActive())
+                {
+                    peer.ControlledAgent = null;
+                    if (ReferenceEquals(missionPeer.ControlledAgent, staleControlledAgent))
+                        missionPeer.ControlledAgent = null;
+                    if (ReferenceEquals(missionPeer.FollowedAgent, staleControlledAgent))
+                        missionPeer.FollowedAgent = null;
+                    clearedStaleControlledAgent = true;
+                }
+
+                if (peer.IsConnectionActive && !peer.IsServerPeer)
+                {
+                    GameNetwork.BeginModuleEventAsServer(peer);
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.ReplaceBotWithPlayer(
+                        peer,
+                        targetAgent.Index,
+                        targetAgent.Health,
+                        targetAgent.MountAgent?.Health ?? -1f));
+                    GameNetwork.EndModuleEventAsServer();
+                }
+
+                targetAgent.SetOwningAgentMissionPeer(null);
+                if (!ReferenceEquals(targetAgent.MissionPeer, missionPeer))
+                    targetAgent.MissionPeer = missionPeer;
+                if (!ReferenceEquals(missionPeer.ControlledAgent, targetAgent))
+                    missionPeer.ControlledAgent = targetAgent;
+                if (!ReferenceEquals(peer.ControlledAgent, targetAgent))
+                    peer.ControlledAgent = targetAgent;
+                targetAgent.Formation = missionPeer.ControlledFormation ?? targetFormation;
+
+                AgentFlag agentFlags = targetAgent.GetAgentFlags();
+                if (!agentFlags.HasAnyFlag(AgentFlag.CanRide))
+                    targetAgent.SetAgentFlags(agentFlags | AgentFlag.CanRide);
+
+                if (peer.VirtualPlayer != null)
+                {
+                    GameNetwork.BeginModuleEventAsServer(peer.VirtualPlayer);
+                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetAgentOwningMissionPeer(targetAgent.Index, peer.VirtualPlayer));
+                    GameNetwork.EndModuleEventAsServer();
+                }
+
+                missionPeer.FollowedAgent = targetAgent;
+                missionPeer.WantsToSpawnAsBot = false;
+                string reappliedAgentState = ReapplyMaterializedAgentStateAfterReplaceBot(
+                    targetAgent,
+                    targetEntryState,
+                    preserveExistingMaterializedSiegeAgentState: true);
+
+                string commanderControlState = TryPromoteExactCampaignCommanderPeerToGeneralControl(
+                    mission,
+                    missionPeer,
+                    peer,
+                    targetAgent,
+                    pendingRequest,
+                    source + " commander-control");
+                string formationOwnershipState = NormalizeMaterializedPeerFormationOwnershipAfterReplaceBot(
+                    missionPeer,
+                    peer,
+                    targetFormation,
+                    targetAgent,
+                    commanderControlState,
+                    source + " formation-ownership",
+                    resetFormationPlayerState: false);
+
+                TryApplyVanillaSpawnGoldDeduction(gameMode, peer, missionPeer, source);
+                bool removedPendingVisuals = TryRemovePendingAgentVisuals(mission, missionPeer);
+                ExpireMissionPeerVanillaSpawnVisuals(missionPeer);
+                if (IsSceneAwareBattleMapRuntime(mission) &&
+                    SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
+                {
+                    _exactScenePostPossessionMaterializationResumeUtc =
+                        DateTime.UtcNow.AddSeconds(ExactScenePostPossessionMaterializationDelaySeconds);
+                }
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: materialized siege respawn manual bind succeeded. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " AgentIndex=" + targetAgent.Index +
+                    " Formation=" + (targetFormation?.FormationIndex.ToString() ?? "null") +
+                    " ActiveAiUnitsInFormation=" + activeAiUnitsInFormation +
+                    " ClaimedBotsAlive=" + claimedBotsAlive +
+                    " ClaimedBotsTotal=" + claimedBotsTotal +
+                    " PendingTroopId=" + (pendingRequest.TroopId ?? "null") +
+                    " PendingEntryId=" + (pendingRequest.EntryId ?? "null") +
+                    " " + (peerTeamBroadcastState ?? "PeerTeamBroadcast=(unknown)") +
+                    " " + commanderControlState +
+                    " " + formationOwnershipState +
+                    " " + reappliedAgentState +
+                    " RemovedPendingVisuals=" + removedPendingVisuals +
+                    " ClearedStaleControlledAgent=" + clearedStaleControlledAgent +
+                    " Reason={" + (manualRespawnReason ?? "unknown") + "}" +
+                    " Source=" + (source ?? "unknown"));
+                TraceMaterializedReplaceBotSuccess(
+                    peer,
+                    targetAgent,
+                    targetAgent,
+                    peerTeam ?? targetAgent.Team,
+                    targetFormation,
+                    targetEntryState,
+                    commanderControlState,
+                    formationOwnershipState,
+                    reappliedAgentState,
+                    source + " manual-respawn");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: materialized siege respawn manual bind failed (" + source + "): " +
                     ex.GetType().Name +
                     ": " +
                     ex.Message +
@@ -23627,7 +24013,8 @@ namespace CoopSpectator.MissionBehaviors
             Formation controlledFormation,
             Agent controlledAgent,
             string commanderControlState,
-            string source)
+            string source,
+            bool resetFormationPlayerState = true)
         {
             if (missionPeer == null)
                 return "FormationOwnership=(none)";
@@ -23638,11 +24025,13 @@ namespace CoopSpectator.MissionBehaviors
             if (commanderOwnsFormation)
                 return "FormationOwnership=general";
 
-            bool resetFormationPlayerState = TryResetMaterializedFormationPlayerState(
-                missionPeer,
-                controlledFormation,
-                controlledAgent,
-                source + " non-commander");
+            bool resetFormationPlayerStateApplied =
+                resetFormationPlayerState &&
+                TryResetMaterializedFormationPlayerState(
+                    missionPeer,
+                    controlledFormation,
+                    controlledAgent,
+                    source + " non-commander");
 
             missionPeer.ControlledFormation = null;
             ApplyBotsUnderControlCounts(
@@ -23677,7 +24066,8 @@ namespace CoopSpectator.MissionBehaviors
                 "CoopMissionSpawnLogic: cleared non-commander formation ownership after replace-bot. " +
                 "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
                 " Formation=" + (controlledFormation?.FormationIndex.ToString() ?? "null") +
-                " ResetFormationPlayerState=" + resetFormationPlayerState +
+                " ResetFormationPlayerState=" + resetFormationPlayerStateApplied +
+                " ResetFormationPlayerStateSkipped=" + (!resetFormationPlayerState) +
                 " Source=" + (source ?? "unknown"));
             return "FormationOwnership=none";
         }
@@ -23722,10 +24112,20 @@ namespace CoopSpectator.MissionBehaviors
 
         private static string ReapplyMaterializedAgentStateAfterReplaceBot(
             Agent replacedAgent,
-            RosterEntryState entryState)
+            RosterEntryState entryState,
+            bool preserveExistingMaterializedSiegeAgentState = false)
         {
             if (replacedAgent == null)
                 return "ReappliedState=(none)";
+
+            if (preserveExistingMaterializedSiegeAgentState &&
+                ShouldPreserveMaterializedSiegeAgentStateAfterReplaceBot(
+                    replacedAgent,
+                    entryState,
+                    out string preservedState))
+            {
+                return preservedState;
+            }
 
             string appliedEquipment = "(none)";
             string equipmentMisses = "(none)";
@@ -23839,6 +24239,31 @@ namespace CoopSpectator.MissionBehaviors
                 " ReapplyMisses=" + equipmentMisses +
                 " ReapplyWield=" + reapplyWield +
                 " " + appliedCombatProfile;
+        }
+
+        private static bool ShouldPreserveMaterializedSiegeAgentStateAfterReplaceBot(
+            Agent replacedAgent,
+            RosterEntryState entryState,
+            out string preservedState)
+        {
+            preservedState = null;
+            if (replacedAgent == null || !GameNetwork.IsServer)
+                return false;
+
+            Mission mission = Mission.Current ?? replacedAgent.Mission;
+            if (mission == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            TryApplyEntryIdentityToAgent(replacedAgent, entryState);
+            preservedState =
+                "ReappliedEquipment=preserved-existing-materialized-agent" +
+                " ReapplyMisses=(none)" +
+                " ReapplyWield=skipped-preserve-existing-materialized-agent" +
+                " CombatProfile=preserved-existing-materialized-agent";
+            return true;
         }
 
         private static Equipment BuildSnapshotEquipmentForReplaceBot(
@@ -24199,6 +24624,60 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     ModLogger.Info("CoopMissionSpawnLogic: rebroadcast authoritative peer team failed: " + ex.Message);
                 }
+            }
+        }
+
+        private static string TryBroadcastPeerTeamForMaterializedPossession(
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            Team authoritativeTeam,
+            string source)
+        {
+            if (!GameNetwork.IsServer || missionPeer == null || peer == null || authoritativeTeam == null)
+                return "PeerTeamBroadcast=skipped";
+
+            try
+            {
+                Team previousTeam = missionPeer.Team;
+                if (!ReferenceEquals(previousTeam, authoritativeTeam))
+                {
+                    SetServerMemberValue(missionPeer, "Team", authoritativeTeam);
+                    if (!ReferenceEquals(GetServerMemberValue(missionPeer, "Team"), authoritativeTeam))
+                        SetServerMemberValue(missionPeer, "_team", authoritativeTeam);
+                    if (!ReferenceEquals(GetServerMemberValue(missionPeer, "Team"), authoritativeTeam))
+                        SetServerMemberValue(missionPeer, "<Team>k__BackingField", authoritativeTeam);
+                }
+
+                Team appliedTeam = GetServerMemberValue(missionPeer, "Team") as Team;
+                if (!ReferenceEquals(appliedTeam, authoritativeTeam))
+                    appliedTeam = GetServerMemberValue(missionPeer, "_team") as Team;
+                if (!ReferenceEquals(appliedTeam, authoritativeTeam))
+                    return "PeerTeamBroadcast=team-apply-failed";
+
+                int authoritativeTeamIndex = authoritativeTeam.TeamIndex;
+                _lastBridgedPeerTeamIndexByPeer[peer.Index] = authoritativeTeamIndex;
+
+                GameNetwork.BeginBroadcastModuleEvent();
+                GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetPeerTeam(peer, authoritativeTeamIndex));
+                GameNetwork.EndBroadcastModuleEvent(GameNetwork.EventBroadcastFlags.None);
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rebroadcast peer team for materialized possession. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " PreviousTeamIndex=" + (previousTeam?.TeamIndex ?? -1) +
+                    " AppliedTeamIndex=" + authoritativeTeamIndex +
+                    " AppliedSide=" + authoritativeTeam.Side +
+                    " Source=" + (source ?? "unknown"));
+                return "PeerTeamBroadcast=sent TeamIndex=" + authoritativeTeamIndex;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: materialized possession peer team rebroadcast failed. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+                return "PeerTeamBroadcast=failed:" + ex.GetType().Name;
             }
         }
 
@@ -31179,7 +31658,7 @@ namespace CoopSpectator.MissionBehaviors
             MissionPeer missionPeer,
             string source)
         {
-            if (gameMode == null || peer == null || missionPeer == null || missionPeer.Culture == null)
+            if (gameMode == null || peer == null || missionPeer == null || missionPeer.Culture == null || missionPeer.Representative == null)
                 return;
 
             int selectedTroopIndex = missionPeer.SelectedTroopIndex;
@@ -31238,18 +31717,31 @@ namespace CoopSpectator.MissionBehaviors
             if (troopCasualCost <= 0)
                 return;
 
-            int currentGold = gameMode.GetCurrentGoldForPeer(missionPeer);
-            int appliedGold = Math.Max(0, currentGold - troopCasualCost);
-            gameMode.ChangeCurrentGoldForPeer(missionPeer, appliedGold);
-            ModLogger.Info(
-                "CoopMissionSpawnLogic: applied vanilla spawn gold deduction after materialized replace-bot. " +
-                "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
-                " SelectedTroopIndex=" + selectedTroopIndex +
-                " HeroClass=" + (selectedClass?.HeroCharacter?.StringId ?? "null") +
-                " PreviousGold=" + currentGold +
-                " TroopCasualCost=" + troopCasualCost +
-                " AppliedGold=" + appliedGold +
-                " Source=" + source);
+            try
+            {
+                int currentGold = gameMode.GetCurrentGoldForPeer(missionPeer);
+                int appliedGold = Math.Max(0, currentGold - troopCasualCost);
+                gameMode.ChangeCurrentGoldForPeer(missionPeer, appliedGold);
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: applied vanilla spawn gold deduction after materialized replace-bot. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " SelectedTroopIndex=" + selectedTroopIndex +
+                    " HeroClass=" + (selectedClass?.HeroCharacter?.StringId ?? "null") +
+                    " PreviousGold=" + currentGold +
+                    " TroopCasualCost=" + troopCasualCost +
+                    " AppliedGold=" + appliedGold +
+                    " Source=" + source);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: skipped vanilla spawn gold deduction after materialized replace-bot. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " SelectedTroopIndex=" + selectedTroopIndex +
+                    " HeroClass=" + (selectedClass?.HeroCharacter?.StringId ?? "null") +
+                    " Source=" + source +
+                    " Error=" + ex.GetType().Name + ": " + ex.Message);
+            }
         }
 
         private static void ApplySelectedTroopIndexBridge(MissionPeer missionPeer, NetworkCommunicator peer, int preferredTroopIndex)

@@ -3184,6 +3184,20 @@ namespace CoopSpectator.Infrastructure
             KillingBlow killingBlow)
         {
             Mission mission = affectedAgent?.Mission ?? affectorAgent?.Mission ?? _activeMission;
+            if (IsSiegeAssaultWithDeploymentActive(mission) &&
+                affectedAgent != null &&
+                CoopSiegeMachineDeploymentController.TryReleaseAgentFromSiegeMachineBeforeRemoval(
+                    mission,
+                    affectedAgent,
+                    "mission-onbefore-agent-removed",
+                    out string siegeMachineReleaseDiagnostics))
+            {
+                ModLogger.Info(
+                    "ExactCampaignArmyBootstrap: processed removed agent siege machine cleanup before native removal. " +
+                    "Scene=" + (mission?.SceneName ?? "null") +
+                    " " + siegeMachineReleaseDiagnostics);
+            }
+
             TrySyncAgentOriginRemoval(
                 mission,
                 affectedAgent,

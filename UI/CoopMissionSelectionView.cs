@@ -4067,8 +4067,7 @@ namespace CoopSpectator.UI
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = snapshot?.Status;
             string lifecycle = status?.LifecycleState ?? snapshot?.Lifecycle ?? string.Empty;
             if (string.Equals(lifecycle, "AwaitingSelection", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(lifecycle, "NoSide", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(lifecycle, "DeadAwaitingRespawn", StringComparison.OrdinalIgnoreCase))
+                string.Equals(lifecycle, "NoSide", StringComparison.OrdinalIgnoreCase))
             {
                 ClearLocalSpawnPending("server-returned-to-selection");
                 return false;
@@ -4096,6 +4095,21 @@ namespace CoopSpectator.UI
             bool pendingEntryStillSelectable =
                 !string.IsNullOrWhiteSpace(_localSpawnPendingEntryId) &&
                 (snapshot?.EffectiveSelectableEntryIds?.Contains(_localSpawnPendingEntryId, StringComparer.OrdinalIgnoreCase) ?? false);
+            if (string.Equals(lifecycle, "DeadAwaitingRespawn", StringComparison.OrdinalIgnoreCase) &&
+                !status.HasAgent)
+            {
+                if (pendingEntryStillSelectable && !pendingTimedOut)
+                {
+                    TryResendPendingSpawnRequestsIfStale(status, lifecycle, pendingTimedOut);
+                    return true;
+                }
+
+                ClearLocalSpawnPending(pendingEntryStillSelectable
+                    ? "dead-awaiting-respawn-timeout"
+                    : "dead-awaiting-respawn-entry-no-longer-selectable");
+                return false;
+            }
+
             if (hasExplicitPendingRequestForEntry ||
                 string.Equals(lifecycle, "Waiting", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(lifecycle, "SpawnQueued", StringComparison.OrdinalIgnoreCase) ||
@@ -4107,8 +4121,11 @@ namespace CoopSpectator.UI
 
             if (status.CanRespawn && !status.HasAgent)
             {
-                if (pendingEntryStillSelectable && DateTime.UtcNow < _overlaySuppressedUntilUtc)
+                if (pendingEntryStillSelectable && !pendingTimedOut)
+                {
+                    TryResendPendingSpawnRequestsIfStale(status, lifecycle, pendingTimedOut);
                     return true;
+                }
 
                 ClearLocalSpawnPending(pendingEntryStillSelectable
                     ? "server-ready-for-new-selection"

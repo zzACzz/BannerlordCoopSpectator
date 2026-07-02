@@ -2383,6 +2383,195 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static bool TryReleaseAgentFromSiegeMachineBeforeRemoval(
+            Mission mission,
+            Agent agent,
+            string source,
+            out string diagnostics)
+        {
+            diagnostics = "NotReleased=True";
+            if (mission == null || agent == null || agent.IsMount)
+                return false;
+
+            int activeMissionObjectCount = 0;
+            int usableMachineCount = 0;
+            int standingPointCount = 0;
+            int userAgentMatches = 0;
+            int movingAgentMatches = 0;
+            int defendingAgentMatches = 0;
+            int nativeStopCount = 0;
+            int fallbackUseStoppedCount = 0;
+            int fallbackMoveStoppedCount = 0;
+            int fallbackDefendStoppedCount = 0;
+            int fallbackDefendRemovedCount = 0;
+            int duplicateMachineCount = 0;
+            string error = string.Empty;
+            var visitedMachines = new HashSet<UsableMachine>();
+
+            try
+            {
+                if (mission.ActiveMissionObjects == null)
+                {
+                    diagnostics = "ActiveMissionObjects=<null>";
+                    return false;
+                }
+
+                foreach (MissionObject activeMissionObject in mission.ActiveMissionObjects)
+                {
+                    if (activeMissionObject == null)
+                        continue;
+
+                    activeMissionObjectCount++;
+                    UsableMachine usableMachine = activeMissionObject as UsableMachine;
+                    if (usableMachine == null)
+                    {
+                        try
+                        {
+                            if (activeMissionObject.GameEntity.IsValid)
+                                usableMachine = activeMissionObject.GameEntity.GetFirstScriptOfType<UsableMachine>();
+                        }
+                        catch (Exception ex)
+                        {
+                            error = AppendError(error, "resolve-machine", ex);
+                        }
+                    }
+
+                    if (usableMachine == null)
+                        continue;
+
+                    if (!visitedMachines.Add(usableMachine))
+                    {
+                        duplicateMachineCount++;
+                        continue;
+                    }
+
+                    usableMachineCount++;
+                    try
+                    {
+                        foreach (StandingPoint standingPoint in usableMachine.StandingPoints)
+                        {
+                            if (standingPoint == null)
+                                continue;
+
+                            standingPointCount++;
+                            int defendingMatchesBeforeStop = CountDefendingAgentReferences(standingPoint, agent);
+                            bool userAgentMatch = ReferenceEquals(standingPoint.UserAgent, agent);
+                            bool movingAgentMatch = ReferenceEquals(standingPoint.MovingAgent, agent);
+                            bool hasAnyMatch = userAgentMatch || movingAgentMatch || defendingMatchesBeforeStop > 0;
+                            if (!hasAnyMatch)
+                                continue;
+
+                            if (userAgentMatch)
+                                userAgentMatches++;
+                            if (movingAgentMatch)
+                                movingAgentMatches++;
+                            defendingAgentMatches += defendingMatchesBeforeStop;
+
+                            TryNativeStopAgentBeforeRemoval(
+                                agent,
+                                ref nativeStopCount,
+                                ref error);
+
+                            if (userAgentMatch && ReferenceEquals(standingPoint.UserAgent, agent))
+                            {
+                                try
+                                {
+                                    standingPoint.OnUseStopped(agent, isSuccessful: false, preferenceIndex: -1);
+                                    fallbackUseStoppedCount++;
+                                }
+                                catch (Exception ex)
+                                {
+                                    error = AppendError(error, "fallback-use-stopped", ex);
+                                }
+                            }
+
+                            if (movingAgentMatch && ReferenceEquals(standingPoint.MovingAgent, agent))
+                            {
+                                try
+                                {
+                                    standingPoint.OnMoveToStopped(agent);
+                                    fallbackMoveStoppedCount++;
+                                }
+                                catch (Exception ex)
+                                {
+                                    error = AppendError(error, "fallback-move-stopped", ex);
+                                }
+                            }
+
+                            while (CountDefendingAgentReferences(standingPoint, agent) > 0)
+                            {
+                                bool removedByFallback = false;
+                                try
+                                {
+                                    standingPoint.OnAIDefendEnd(agent);
+                                    fallbackDefendStoppedCount++;
+                                    removedByFallback = true;
+                                }
+                                catch (Exception ex)
+                                {
+                                    error = AppendError(error, "fallback-defend-stopped", ex);
+                                }
+
+                                if (CountDefendingAgentReferences(standingPoint, agent) <= 0)
+                                    break;
+
+                                try
+                                {
+                                    standingPoint.RemoveDefendingAgent(agent);
+                                    fallbackDefendRemovedCount++;
+                                    removedByFallback = true;
+                                }
+                                catch (Exception ex)
+                                {
+                                    error = AppendError(error, "fallback-defend-remove", ex);
+                                }
+
+                                if (!removedByFallback)
+                                    break;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        error = AppendError(error, "standing-point-scan", ex);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                error = AppendError(error, "machine-scan", ex);
+            }
+
+            bool matched = userAgentMatches > 0 ||
+                           movingAgentMatches > 0 ||
+                           defendingAgentMatches > 0;
+            bool released = nativeStopCount > 0 ||
+                            fallbackUseStoppedCount > 0 ||
+                            fallbackMoveStoppedCount > 0 ||
+                            fallbackDefendStoppedCount > 0 ||
+                            fallbackDefendRemovedCount > 0;
+
+            diagnostics =
+                "Released=" + released +
+                " Matched=" + matched +
+                " Source=" + (source ?? "unknown") +
+                " AgentIndex=" + agent.Index +
+                " ActiveMissionObjects=" + activeMissionObjectCount +
+                " UsableMachines=" + usableMachineCount +
+                " DuplicateMachines=" + duplicateMachineCount +
+                " StandingPoints=" + standingPointCount +
+                " UserAgentMatches=" + userAgentMatches +
+                " MovingAgentMatches=" + movingAgentMatches +
+                " DefendingAgentMatches=" + defendingAgentMatches +
+                " NativeStops=" + nativeStopCount +
+                " FallbackUseStopped=" + fallbackUseStoppedCount +
+                " FallbackMoveStopped=" + fallbackMoveStoppedCount +
+                " FallbackDefendStopped=" + fallbackDefendStoppedCount +
+                " FallbackDefendRemoved=" + fallbackDefendRemovedCount +
+                " Error=" + (string.IsNullOrWhiteSpace(error) ? "<none>" : error);
+            return matched;
+        }
+
         private static string ReleaseAgentsFromSiegeMachineBeforeDisband(Team team, SiegeWeapon siegeWeapon)
         {
             if (team == null || siegeWeapon == null)
@@ -2544,6 +2733,51 @@ namespace CoopSpectator.Infrastructure
 
             agentsToRelease.Add(agent);
             return 1;
+        }
+
+        private static int CountDefendingAgentReferences(StandingPoint standingPoint, Agent agent)
+        {
+            if (standingPoint?.DefendingAgents == null || agent == null)
+                return 0;
+
+            int count = 0;
+            for (int i = standingPoint.DefendingAgents.Count - 1; i >= 0; i--)
+            {
+                if (ReferenceEquals(standingPoint.DefendingAgents[i], agent))
+                    count++;
+            }
+
+            return count;
+        }
+
+        private static void TryNativeStopAgentBeforeRemoval(
+            Agent agent,
+            ref int nativeStopCount,
+            ref string error)
+        {
+            if (agent == null)
+                return;
+
+            try
+            {
+                if (!agent.IsActive())
+                    return;
+
+                if (!agent.IsUsingGameObject && agent.HumanAIComponent == null)
+                    return;
+
+                agent.StopUsingGameObjectMT(
+                    isSuccessful: false,
+                    flags: Agent.StopUsingGameObjectFlags.None);
+                nativeStopCount++;
+            }
+            catch (Exception ex)
+            {
+                error = AppendError(
+                    error,
+                    "native-stop-agent-" + (agent.Index >= 0 ? agent.Index.ToString() : "unknown"),
+                    ex);
+            }
         }
 
         private static string SyncSiegeControllerAfterDeploy(
