@@ -75,6 +75,13 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableSiegeReplayInitialNativeSpawnLogicBootstrap = true;
 
         /// <summary>
+        /// Siege replay materialization reset: use the same bot-first
+        /// materialized-army flow as field battles, while keeping the siege
+        /// deployment plan and forcing cavalry entries onto foot.
+        /// </summary>
+        public const bool EnableSiegeReplayFieldMaterializedArmyRuntime = true;
+
+        /// <summary>
         /// Exact SiegeMissionWithDeployment scene initializer profile: mirror the
         /// native campaign siege initializer fields that affect scene material
         /// and campaign-mode object setup, while keeping map-patch repair out of

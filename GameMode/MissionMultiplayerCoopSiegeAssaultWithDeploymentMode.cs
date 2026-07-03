@@ -521,6 +521,14 @@ namespace CoopSpectator.GameMode
             if (!GameNetwork.IsServer || list == null || mission == null)
                 return;
 
+            if (ShouldUseFieldMaterializedArmyRuntime(mission))
+            {
+                ModLogger.Info(
+                    "CoopSiegeAssaultWithDeployment: retaining initial native spawn logic bootstrap as a dependency-only contract for field materialized siege runtime. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " PlayerSide=" + playerSide);
+            }
+
             if (!ExperimentalFeatures.EnableSiegeReplayInitialNativeSpawnLogicBootstrap)
                 return;
 
@@ -604,6 +612,11 @@ namespace CoopSpectator.GameMode
             return BattleSnapshotRuntimeState.GetScenarioContext()
                    ?? BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext
                    ?? BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+        }
+
+        private static bool ShouldUseFieldMaterializedArmyRuntime(Mission mission)
+        {
+            return CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission);
         }
 
         private static bool ResolvePlayerAttackerSide()
@@ -737,6 +750,14 @@ namespace CoopSpectator.GameMode
 
                 if (!SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(mission.SceneName ?? string.Empty))
                     return;
+
+                if (ShouldUseFieldMaterializedArmyRuntime(mission))
+                {
+                    ModLogger.Info(
+                        "CoopSiegeAssaultWithDeployment: initializing native spawn contract bootstrap as dependency-only for field materialized siege runtime. " +
+                        "Scene=" + (mission.SceneName ?? "null") +
+                        " PlayerSide=" + _playerSide + ".");
+                }
 
                 if (!ExactCampaignArmyBootstrap.TryInitialize(
                         mission,

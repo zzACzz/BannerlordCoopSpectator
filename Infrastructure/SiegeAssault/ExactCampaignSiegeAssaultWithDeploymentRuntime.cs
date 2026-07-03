@@ -1512,13 +1512,21 @@ namespace CoopSpectator.Infrastructure
             {
                 bool shouldMountLiveDeploymentControllers =
                     ShouldMountLiveDeploymentControllers(mission, out string liveDeploymentControllerPolicy);
+                bool useFieldMaterializedSiegeRuntime =
+                    ExperimentalFeatures.EnableSiegeReplayFieldMaterializedArmyRuntime &&
+                    mission != null &&
+                    SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
+                int effectiveDefenderTotal = useFieldMaterializedSiegeRuntime ? 0 : defenderTotal;
+                int effectiveAttackerTotal = useFieldMaterializedSiegeRuntime ? 0 : attackerTotal;
+                int effectiveDefenderInitial = useFieldMaterializedSiegeRuntime ? 0 : defenderInitial;
+                int effectiveAttackerInitial = useFieldMaterializedSiegeRuntime ? 0 : attackerInitial;
                 spawnLogic.SetSpawnHorses(BattleSideEnum.Defender, false);
                 spawnLogic.SetSpawnHorses(BattleSideEnum.Attacker, false);
                 spawnLogic.InitWithSinglePhase(
-                    defenderTotal,
-                    attackerTotal,
-                    defenderInitial,
-                    attackerInitial,
+                    effectiveDefenderTotal,
+                    effectiveAttackerTotal,
+                    effectiveDefenderInitial,
+                    effectiveAttackerInitial,
                     spawnDefenders: false,
                     spawnAttackers: false,
                     in spawnSettings);
@@ -1526,7 +1534,9 @@ namespace CoopSpectator.Infrastructure
                 diagnostics =
                     "SpawnHorses={Defender=False Attacker=False} " +
                     "SinglePhaseInitialized=True " +
-                    "SpawnMode=NativeWithDeploymentFalseFalse " +
+                    "SpawnMode=" + (useFieldMaterializedSiegeRuntime ? "FieldMaterializedDependencyOnlyZeroPhase" : "NativeWithDeploymentFalseFalse") + " " +
+                    "FieldMaterializedSiegeRuntime=" + useFieldMaterializedSiegeRuntime +
+                    " " +
                     "LiveDeploymentControllers=" + (shouldMountLiveDeploymentControllers ? "Enabled" : "Suppressed") +
                     " LiveDeploymentControllerPolicy=" + liveDeploymentControllerPolicy +
                     " " +
@@ -1535,7 +1545,11 @@ namespace CoopSpectator.Infrastructure
                     "DefenderTotal=" + defenderTotal +
                     " AttackerTotal=" + attackerTotal +
                     " DefenderInitial=" + defenderInitial +
-                    " AttackerInitial=" + attackerInitial;
+                    " AttackerInitial=" + attackerInitial +
+                    " EffectiveDefenderTotal=" + effectiveDefenderTotal +
+                    " EffectiveAttackerTotal=" + effectiveAttackerTotal +
+                    " EffectiveDefenderInitial=" + effectiveDefenderInitial +
+                    " EffectiveAttackerInitial=" + effectiveAttackerInitial;
                 return true;
             }
             catch (Exception ex)

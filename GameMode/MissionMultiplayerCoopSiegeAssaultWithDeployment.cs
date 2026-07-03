@@ -1,5 +1,6 @@
 using System;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.MissionBehaviors;
 using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.GameMode
@@ -61,15 +62,32 @@ namespace CoopSpectator.GameMode
         {
             base.OnMissionTick(dt);
 
-            if (!GameNetwork.IsServer || _hasLoggedFirstServerTick)
+            if (!GameNetwork.IsServer)
                 return;
 
-            _hasLoggedFirstServerTick = true;
-            ModLogger.Info(
-                "CoopSiegeAssaultWithDeployment server: first mission tick entered. " +
-                "Scene=" + (Mission?.SceneName ?? "null") +
-                " Mode=" + (Mission?.Mode.ToString() ?? "null") +
-                " MissionType=" + GetMissionType());
+            if (!_hasLoggedFirstServerTick)
+            {
+                _hasLoggedFirstServerTick = true;
+                ModLogger.Info(
+                    "CoopSiegeAssaultWithDeployment server: first mission tick entered. " +
+                    "Scene=" + (Mission?.SceneName ?? "null") +
+                    " Mode=" + (Mission?.Mode.ToString() ?? "null") +
+                    " MissionType=" + GetMissionType());
+            }
+
+            try
+            {
+                CoopMissionSpawnLogic.RunCoopBattleSpawnOwnerTick(
+                    Mission,
+                    "CoopSiegeAssaultWithDeployment.OnMissionTick");
+                CoopMissionSpawnLogic.RunCoopBattlePhaseOwnerTick(
+                    Mission,
+                    "CoopSiegeAssaultWithDeployment.OnMissionTick");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error("CoopSiegeAssaultWithDeployment server: phase owner tick failed.", ex);
+            }
         }
     }
 }
