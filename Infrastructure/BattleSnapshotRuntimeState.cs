@@ -99,6 +99,7 @@ namespace CoopSpectator.Infrastructure
         public string PartyId { get; set; }
         public string CharacterId { get; set; }
         public string OriginalCharacterId { get; set; }
+        public string CampaignFormationClass { get; set; }
         public string SpawnTemplateId { get; set; }
         public string TroopName { get; set; }
         public string CultureId { get; set; }
@@ -133,12 +134,20 @@ namespace CoopSpectator.Infrastructure
         public List<string> PerkIds { get; set; } = new List<string>();
         public string CombatItem0Id { get; set; }
         public int? CombatItem0Amount { get; set; }
+        public string CombatItem0CraftedWeaponKey { get; set; }
+        public string CombatItem0ModifierId { get; set; }
         public string CombatItem1Id { get; set; }
         public int? CombatItem1Amount { get; set; }
+        public string CombatItem1CraftedWeaponKey { get; set; }
+        public string CombatItem1ModifierId { get; set; }
         public string CombatItem2Id { get; set; }
         public int? CombatItem2Amount { get; set; }
+        public string CombatItem2CraftedWeaponKey { get; set; }
+        public string CombatItem2ModifierId { get; set; }
         public string CombatItem3Id { get; set; }
         public int? CombatItem3Amount { get; set; }
+        public string CombatItem3CraftedWeaponKey { get; set; }
+        public string CombatItem3ModifierId { get; set; }
         public string CombatHeadId { get; set; }
         public string CombatBodyId { get; set; }
         public string CombatLegId { get; set; }
@@ -225,6 +234,7 @@ namespace CoopSpectator.Infrastructure
         public string PartyId { get; set; }
         public string CharacterId { get; set; }
         public string OriginalCharacterId { get; set; }
+        public string CampaignFormationClass { get; set; }
         public string SpawnTemplateId { get; set; }
         public string TroopName { get; set; }
         public string CultureId { get; set; }
@@ -259,12 +269,20 @@ namespace CoopSpectator.Infrastructure
         public List<string> PerkIds { get; set; } = new List<string>();
         public string CombatItem0Id { get; set; }
         public int? CombatItem0Amount { get; set; }
+        public string CombatItem0CraftedWeaponKey { get; set; }
+        public string CombatItem0ModifierId { get; set; }
         public string CombatItem1Id { get; set; }
         public int? CombatItem1Amount { get; set; }
+        public string CombatItem1CraftedWeaponKey { get; set; }
+        public string CombatItem1ModifierId { get; set; }
         public string CombatItem2Id { get; set; }
         public int? CombatItem2Amount { get; set; }
+        public string CombatItem2CraftedWeaponKey { get; set; }
+        public string CombatItem2ModifierId { get; set; }
         public string CombatItem3Id { get; set; }
         public int? CombatItem3Amount { get; set; }
+        public string CombatItem3CraftedWeaponKey { get; set; }
+        public string CombatItem3ModifierId { get; set; }
         public string CombatHeadId { get; set; }
         public string CombatBodyId { get; set; }
         public string CombatLegId { get; set; }
@@ -1058,6 +1076,7 @@ namespace CoopSpectator.Infrastructure
                 EntryId = entryState.EntryId,
                 CharacterId = entryState.CharacterId,
                 OriginalCharacterId = entryState.OriginalCharacterId,
+                CampaignFormationClass = entryState.CampaignFormationClass,
                 SpawnTemplateId = entryState.SpawnTemplateId,
                 CultureId = entryState.CultureId,
                 IsHero = entryState.IsHero,
@@ -1636,6 +1655,7 @@ namespace CoopSpectator.Infrastructure
                         PartyId = entryProjection.PartyId,
                         CharacterId = entryProjection.CharacterId,
                         OriginalCharacterId = entryProjection.OriginalCharacterId,
+                        CampaignFormationClass = entryProjection.CampaignFormationClass,
                         SpawnTemplateId = entryProjection.SpawnTemplateId,
                         TroopName = entryProjection.TroopName,
                         CultureId = entryProjection.CultureId,
@@ -1670,12 +1690,20 @@ namespace CoopSpectator.Infrastructure
                         PerkIds = entryProjection.PerkIds != null ? new List<string>(entryProjection.PerkIds) : new List<string>(),
                         CombatItem0Id = entryProjection.CombatItem0Id,
                         CombatItem0Amount = entryProjection.CombatItem0Amount,
+                        CombatItem0CraftedWeaponKey = entryProjection.CombatItem0CraftedWeaponKey,
+                        CombatItem0ModifierId = entryProjection.CombatItem0ModifierId,
                         CombatItem1Id = entryProjection.CombatItem1Id,
                         CombatItem1Amount = entryProjection.CombatItem1Amount,
+                        CombatItem1CraftedWeaponKey = entryProjection.CombatItem1CraftedWeaponKey,
+                        CombatItem1ModifierId = entryProjection.CombatItem1ModifierId,
                         CombatItem2Id = entryProjection.CombatItem2Id,
                         CombatItem2Amount = entryProjection.CombatItem2Amount,
+                        CombatItem2CraftedWeaponKey = entryProjection.CombatItem2CraftedWeaponKey,
+                        CombatItem2ModifierId = entryProjection.CombatItem2ModifierId,
                         CombatItem3Id = entryProjection.CombatItem3Id,
                         CombatItem3Amount = entryProjection.CombatItem3Amount,
+                        CombatItem3CraftedWeaponKey = entryProjection.CombatItem3CraftedWeaponKey,
+                        CombatItem3ModifierId = entryProjection.CombatItem3ModifierId,
                         CombatHeadId = entryProjection.CombatHeadId,
                         CombatBodyId = entryProjection.CombatBodyId,
                         CombatLegId = entryProjection.CombatLegId,
@@ -1742,6 +1770,7 @@ namespace CoopSpectator.Infrastructure
                 PartyId = string.IsNullOrWhiteSpace(troop.PartyId) ? fallbackPartyId : troop.PartyId,
                 CharacterId = spawnTemplateId,
                 OriginalCharacterId = ResolveOriginalCharacterId(troop),
+                CampaignFormationClass = troop.CampaignFormationClass,
                 SpawnTemplateId = spawnTemplateId,
                 TroopName = troop.TroopName,
                 CultureId = troop.CultureId,
@@ -1776,12 +1805,20 @@ namespace CoopSpectator.Infrastructure
                 PerkIds = troop.PerkIds != null ? new List<string>(troop.PerkIds) : new List<string>(),
                 CombatItem0Id = troop.CombatItem0Id,
                 CombatItem0Amount = troop.CombatItem0Amount,
+                CombatItem0CraftedWeaponKey = troop.CombatItem0CraftedWeaponKey,
+                CombatItem0ModifierId = troop.CombatItem0ModifierId,
                 CombatItem1Id = troop.CombatItem1Id,
                 CombatItem1Amount = troop.CombatItem1Amount,
+                CombatItem1CraftedWeaponKey = troop.CombatItem1CraftedWeaponKey,
+                CombatItem1ModifierId = troop.CombatItem1ModifierId,
                 CombatItem2Id = troop.CombatItem2Id,
                 CombatItem2Amount = troop.CombatItem2Amount,
+                CombatItem2CraftedWeaponKey = troop.CombatItem2CraftedWeaponKey,
+                CombatItem2ModifierId = troop.CombatItem2ModifierId,
                 CombatItem3Id = troop.CombatItem3Id,
                 CombatItem3Amount = troop.CombatItem3Amount,
+                CombatItem3CraftedWeaponKey = troop.CombatItem3CraftedWeaponKey,
+                CombatItem3ModifierId = troop.CombatItem3ModifierId,
                 CombatHeadId = troop.CombatHeadId,
                 CombatBodyId = troop.CombatBodyId,
                 CombatLegId = troop.CombatLegId,

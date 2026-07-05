@@ -50,7 +50,29 @@ namespace CoopSpectator.Network.Messages
         public string PlayerSide { get; set; }
         public float PlayerTroopsReceivedDamageMultiplier { get; set; } = 1f;
         public BattleScenarioContextMessage ScenarioContext { get; set; }
+        public List<CraftedWeaponSnapshotMessage> CraftedWeapons { get; set; } = new List<CraftedWeaponSnapshotMessage>();
         public List<BattleSideSnapshotMessage> Sides { get; set; } = new List<BattleSideSnapshotMessage>();
+    }
+
+    public sealed class CraftedWeaponSnapshotMessage
+    {
+        public string Key { get; set; }
+        public string OriginalItemId { get; set; }
+        public string MirrorItemId { get; set; }
+        public string Name { get; set; }
+        public string CraftingTemplateId { get; set; }
+        public string CultureId { get; set; }
+        public string ModifierGroupId { get; set; }
+        public string WeaponDesignHash { get; set; }
+        public bool IsCraftedByPlayer { get; set; }
+        public List<CraftedWeaponPieceSnapshotMessage> Pieces { get; set; } = new List<CraftedWeaponPieceSnapshotMessage>();
+    }
+
+    public sealed class CraftedWeaponPieceSnapshotMessage
+    {
+        public string PieceId { get; set; }
+        public string PieceType { get; set; }
+        public int ScalePercentage { get; set; } = 100;
     }
 
     public sealed class BattleScenarioContextMessage
@@ -230,6 +252,7 @@ namespace CoopSpectator.Network.Messages
         public string PartyId { get; set; }
         public string CharacterId { get; set; }
         public string OriginalCharacterId { get; set; }
+        public string CampaignFormationClass { get; set; }
         public string SpawnTemplateId { get; set; }
         public string TroopName { get; set; }
         public string CultureId { get; set; }
@@ -262,12 +285,20 @@ namespace CoopSpectator.Network.Messages
         public List<string> PerkIds { get; set; } = new List<string>();
         public string CombatItem0Id { get; set; }
         public int? CombatItem0Amount { get; set; }
+        public string CombatItem0CraftedWeaponKey { get; set; }
+        public string CombatItem0ModifierId { get; set; }
         public string CombatItem1Id { get; set; }
         public int? CombatItem1Amount { get; set; }
+        public string CombatItem1CraftedWeaponKey { get; set; }
+        public string CombatItem1ModifierId { get; set; }
         public string CombatItem2Id { get; set; }
         public int? CombatItem2Amount { get; set; }
+        public string CombatItem2CraftedWeaponKey { get; set; }
+        public string CombatItem2ModifierId { get; set; }
         public string CombatItem3Id { get; set; }
         public int? CombatItem3Amount { get; set; }
+        public string CombatItem3CraftedWeaponKey { get; set; }
+        public string CombatItem3ModifierId { get; set; }
         public string CombatHeadId { get; set; }
         public string CombatBodyId { get; set; }
         public string CombatLegId { get; set; }

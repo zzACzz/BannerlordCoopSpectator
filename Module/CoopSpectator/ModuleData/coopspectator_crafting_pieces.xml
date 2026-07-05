@@ -2633,4 +2633,4491 @@
 	<CraftingPiece id="sturgian_pommel_10" name="{=GqwD99cu}Embellished Pommel" tier="3" piece_type="Pommel" mesh="sturgian_pommel_10" culture="Culture.sturgia" length="4.57" weight="0.18"><Materials><Material id="Iron3" count="1" /></Materials></CraftingPiece>
 	<CraftingPiece id="spear_handle_26" name="{=ELpWa0K5}Cured Oaken Pike Shaft" tier="5" piece_type="Handle" mesh="spear_handle_26" length="280" weight="1.6"><BuildData piece_offset="22.9" /><Materials><Material id="Wood" count="3" /></Materials></CraftingPiece>
 	<CraftingPiece id="blacksmith_hammer_tip_1" name="{=X1FY4VYe}Smith Hammer Head" tier="1" piece_type="Blade" mesh="blacksmith_hammer_tip" length="7.18" weight="1" full_scale="true" excluded_item_usage_features="thrust"><BuildData piece_offset="-10" /><BladeData stack_amount="3" physics_material="wood_weapon" body_name="bo_mace_a"><Swing damage_type="Blunt" damage_factor="1.215" /></BladeData><Flags><Flag name="Civilian" type="ItemFlags" /><Flag name="Stealth" type="ItemFlags" /></Flags><Materials><Material id="Iron2" count="2" /></Materials></CraftingPiece>
+	<!-- Supplemental Native crafting pieces required by campaign mirror CraftedItem static loading. -->
+	<CraftingPiece
+		id="wood_blade_2"
+		name="{=fuIxmJ2g}Heavy Wooden Blade"
+		tier="1"
+		piece_type="Blade"
+		mesh="wood_blade_1"
+		culture="Culture.empire"
+		length="87.2"
+		weight="0.7"
+		is_hidden="true"
+		CraftingCost="75">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_sword_one_handed">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="0.9" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="1.6" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="NoBlood" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_blade_1_blunt"
+		name="{=dNk7UZVD}Fullered Narrow Blunt Arming Sword Blade"
+		tier="2"
+		piece_type="Blade"
+		mesh="vlandian_blade_1"
+		culture="Culture.vlandia"
+		length="94"
+		weight="0.98"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="vlandian_blade_1_scabbard_2">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="2.07" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.8" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_blade_3"
+		name="{=mak3naEe}Wide Fullered Broad Two Hander Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="vlandian_blade_3"
+		culture="Culture.vlandia"
+		length="99.4"
+		weight="1.35">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="vlandian_blade_2_scabbard_2">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.2" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.1" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="4" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_blade_4_blunt"
+		name="{=pnS90zg8}Flat Ridged Blunt Spatha Blade"
+		tier="2"
+		piece_type="Blade"
+		mesh="empire_blade_4"
+		culture="Culture.empire"
+		length="91.4"
+		weight="0.94"
+		is_hidden="true">
+		<BuildData
+			previous_piece_offset="0" />
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="empire_blade_4_scabbard_4">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="2.25" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.7" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_blade_7"
+		name="{=dafrn0mR}Thamaskene Steel Spatha Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="empire_blade_7"
+		culture="Culture.vlandia"
+		length="99"
+		weight="0.99">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="empire_blade_7_scabbard_7">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.4" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.9" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="4" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_blade_3_blunt"
+		name="{=NkV2CAmL}Iron Blunt Scimitar Blade"
+		tier="2"
+		piece_type="Blade"
+		mesh="aserai_blade_3"
+		culture="Culture.aserai"
+		length="93.2"
+		weight="0.96"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="aserai_blade_3blunt_scabbard_3">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="1.62" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.592" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_blade_4_blunt"
+		name="{=5l0PBFAe}Iron Flyssa Blunt Blade"
+		tier="2"
+		piece_type="Blade"
+		mesh="aserai_blade_4"
+		culture="Culture.aserai"
+		length="104"
+		weight="1.07"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="aserai_blade_4_scabbard_4">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="1.89" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.79" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_blade_5"
+		name="{=pX4nTZOI}Fine Steel Broad Kaskara"
+		tier="4"
+		piece_type="Blade"
+		mesh="aserai_blade_5"
+		culture="Culture.battania"
+		length="109"
+		weight="1.1">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="aserai_blade_5_scabbard_5">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.4" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.9" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron5"
+				count="5" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_blade_11"
+		name="{=aTnuOUCC}Thamaskene Steel Kaskara Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="aserai_blade_11"
+		culture="Culture.aserai"
+		length="102.4"
+		weight="1.02">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="aserai_blade_11_scabbard_2">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.8" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.1" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="4" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_blade_2"
+		name="{=C2hTDlWq}Heavy Saber Blade"
+		tier="4"
+		piece_type="Blade"
+		mesh="khuzait_blade_2"
+		culture="Culture.khuzait"
+		length="95"
+		weight="0.96">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="khuzait_blade_2_scabbard_2">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.4" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.8" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron5"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_blade_7_blunt"
+		name="{=lz8rSkzE}Thick Blunt Saber Blade"
+		tier="2"
+		piece_type="Blade"
+		mesh="khuzait_blade_7"
+		culture="Culture.khuzait"
+		length="82.5"
+		weight="0.85"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="1.89" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.79" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_blade_1_blunt"
+		name="{=AlIRh9mz}Tapered Blunt Northern Blade"
+		tier="2"
+		piece_type="Blade"
+		mesh="sturgian_blade_1"
+		culture="Culture.sturgia"
+		length="73.7"
+		weight="0.76"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="sturgian_blade_1_scabbard_1">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="1.89" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.79" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_blade_8"
+		name="{=QIo60ZKh}Fullered Long Warsword Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="sturgian_blade_8"
+		culture="Culture.sturgia"
+		length="87.3"
+		weight="0.87">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="sturgian_blade_8_scabbard_2">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.0" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.0" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_blade_3_blunt"
+		name="{=HbCb0T6W}Blunt Broadsword Blade"
+		tier="3"
+		piece_type="Blade"
+		mesh="battania_blade_3"
+		culture="Culture.battania"
+		length="80.8"
+		weight="1.3"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="battania_blade_3_scabbard_3">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="2.43" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="3.15" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_blade_5"
+		name="{=swb45HVS}Mountain Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="battania_blade_5"
+		culture="Culture.battania"
+		length="80.8"
+		weight="0.81">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="battania_blade_5_scabbard_5">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.1" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.1" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_blade_3_iron_blunt"
+		name="{=oXXWEUYY}Iron Blunt Broadsword Blade"
+		tier="2"
+		piece_type="Blade"
+		mesh="battania_blade_3_iron"
+		culture="Culture.battania"
+		length="80.8"
+		weight="1.5"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="battania_blade_3_scabbard_3">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="1.98" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.79" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_noble_blade_4"
+		name="{=UKWwPPkx}Arming Sword Blade With Golden Petals Imprint"
+		tier="5"
+		piece_type="Blade"
+		mesh="vlandian_noble_blade_4"
+		culture="Culture.vlandia"
+		length="68"
+		weight="0.8">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="vlandian_noble_blade_4_scabbard_4">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.0" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.2" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_noble_blade_1"
+		name="{=bki9u9FW}Arming Sword Blade With Golden Circle Imprint"
+		tier="5"
+		piece_type="Blade"
+		mesh="vlandian_noble_blade_1"
+		culture="Culture.vlandia"
+		length="74.3"
+		weight="0.9">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="vlandian_noble_blade_1_scabbard_1">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.0" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.1" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_noble_blade_1"
+		name="{=PqoJ1ZeB}Decorated Saber Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="khuzait_noble_blade_1"
+		culture="Culture.khuzait"
+		length="89.5"
+		weight="1.0">
+		<BuildData
+			previous_piece_offset="0" />
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="khuzait_noble_blade_1_scabbard_1">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.5" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.2" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_noble_blade_3"
+		name="{=vx2VIbmb}Decorated Long Warsword Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="sturgian_noble_blade_3"
+		culture="Culture.sturgia"
+		length="73.5"
+		weight="0.9">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="sturgian_noble_blade_3_scabbard_3">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.7" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="2.8" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_noble_blade_1"
+		name="{=5Xoa1EFa}Engraved Backsword Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="battania_noble_blade_1"
+		culture="Culture.battania"
+		length="96"
+		weight="1.0">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="battania_noble_blade_1_scabbard_3">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.8" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="5.0" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="BonusAgainstShield" />
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_blade_3_fine_steel"
+		name="{=finesteelbladecraftingpiece}Highland Fine Steel Blade"
+		tier="4"
+		piece_type="Blade"
+		mesh="battania_blade_3_fine_steel"
+		culture="Culture.battania"
+		length="80.8"
+		weight="1.0">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="battania_blade_3_scabbard_3">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.5" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.8" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron5"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="cleaver_blade_5"
+		name="{=2mo4gsuh}War Razor Blade"
+		tier="4"
+		piece_type="Blade"
+		mesh="cleaver_blade_5"
+		culture="Culture.vlandia"
+		length="103.4"
+		weight="1.2">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.6" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.9" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron5"
+				count="4" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="cleaver_blade_2"
+		name="{=YkWqmDEK}Broad Falchion Blade Head"
+		tier="3"
+		piece_type="Blade"
+		mesh="cleaver_blade_2"
+		culture="Culture.aserai"
+		length="101"
+		weight="1.5">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.1" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.7" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="4" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_noble_blade_4"
+		name="{=HwCYBWq2}Sharp Tipped Spatha Blade"
+		tier="4"
+		piece_type="Blade"
+		mesh="empire_noble_blade_4"
+		culture="Culture.empire"
+		length="95.8"
+		weight="1.2">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="empire_noble_blade_4_scabbard_4">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.1" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.7" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron5"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_noble_blade_1"
+		name="{=VbpiYB68}Decorated Wide Fullered Short Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="sturgian_noble_blade_1"
+		culture="Culture.sturgia"
+		length="61.4"
+		weight="0.9">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="sturgian_noble_blade_1_scabbard_1">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.0" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.0" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_noble_blade_4"
+		name="{=blaVlvm2}Decorated Short Warsword Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="sturgian_noble_blade_4"
+		culture="Culture.sturgia"
+		length="74"
+		weight="0.7">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="sturgian_noble_blade_4_scabbard_4">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="1.5" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="2.5" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_noble_blade_2"
+		name="{=O2kPKeuK}Arming Sword Blade With Gold Engraving"
+		tier="5"
+		piece_type="Blade"
+		mesh="vlandian_noble_blade_2"
+		culture="Culture.vlandia"
+		length="74.5"
+		weight="1.0">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="vlandian_noble_blade_2_scabbard_2">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.2" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.0" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_noble_blade_3"
+		name="{=RdVX1jC0}Engraved Kaskara Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="aserai_noble_blade_3"
+		culture="Culture.aserai"
+		length="71.1"
+		weight="0.9">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="aserai_noble_blade_3_scabbard_3">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.6" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.2" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_noble_blade_4"
+		name="{=xYgJN0Ja}Decorated Scimitar Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="aserai_noble_blade_4"
+		culture="Culture.aserai"
+		length="87.4"
+		weight="1.0">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_sword_one_handed"
+			holster_mesh="aserai_noble_blade_4_scabbard_4">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.2" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.3" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron6"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_guard_7"
+		name="{=yFm0f44p}Pointed Western Guard"
+		tier="3"
+		piece_type="Guard"
+		mesh="vlandian_guard_7"
+		culture="Culture.vlandia"
+		length="3.63"
+		weight="0.20">
+		<BuildData
+			next_piece_offset="2"
+			previous_piece_offset="0.1" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_guard_8"
+		name="{=az6t2tOm}Ridged Western Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="vlandian_guard_8"
+		culture="Culture.vlandia"
+		length="2.12"
+		weight="0.15">
+		<BuildData
+			next_piece_offset="0.6"
+			previous_piece_offset="0.1" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_guard_5"
+		name="{=hvCj5TID}Pointed Crescent Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="empire_guard_5"
+		culture="Culture.empire"
+		length="7.56"
+		weight="0.10">
+		<BuildData
+			next_piece_offset="1.7" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_guard_2"
+		name="{=JbP7zdes}Cusped Southern Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="aserai_guard_2"
+		culture="Culture.aserai"
+		length="11.9"
+		weight="0.141">
+		<BuildData
+			next_piece_offset="8"
+			previous_piece_offset="2.5" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_guard_7"
+		name="{=euI3vluL}Broad Saber Guard"
+		tier="4"
+		piece_type="Guard"
+		mesh="khuzait_guard_7"
+		culture="Culture.khuzait"
+		length="1.83"
+		weight="0.20">
+		<BuildData
+			next_piece_offset="1"
+			previous_piece_offset="0.1" />
+		<StatContributions
+			armor_bonus="3" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_guard_4"
+		name="{=RB3oxhaV}Long-Armed Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="sturgian_guard_4"
+		culture="Culture.sturgia"
+		length="7.67"
+		weight="0.18">
+		<BuildData
+			next_piece_offset="6.75"
+			previous_piece_offset="0.1" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_guard_9"
+		name="{=61A1VUw8}Knobbed Bronze Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="battania_guard_9"
+		culture="Culture.battania"
+		length="4.78"
+		weight="0.097">
+		<BuildData
+			next_piece_offset="1.2" />
+		<StatContributions
+			armor_bonus="3" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_noble_guard_3"
+		name="{=OPfm5y7W}Golden Knightly Lionheads Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="vlandian_noble_guard_3"
+		culture="Culture.vlandia"
+		length="2.45"
+		weight="0.15">
+		<BuildData
+			next_piece_offset="0.4"
+			previous_piece_offset="0.2" />
+		<StatContributions
+			armor_bonus="4" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_noble_guard_1"
+		name="{=6Da4uzZO}Engraved Wide Knightly Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="vlandian_noble_guard_1"
+		culture="Culture.vlandia"
+		length="2.75"
+		weight="0.15">
+		<BuildData
+			next_piece_offset="0.8"
+			previous_piece_offset="0.1" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_noble_guard_4"
+		name="{=a4qSDsmb}Imperial Golden Great Sword Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="empire_noble_guard_4"
+		culture="Culture.empire"
+		length="7.73"
+		weight="0.20">
+		<BuildData
+			next_piece_offset="5" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_noble_guard_2"
+		name="{=DiAHIRxm}Engraved Saber Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="khuzait_noble_guard_2"
+		culture="Culture.khuzait"
+		length="2.72"
+		weight="0.24">
+		<BuildData
+			next_piece_offset="0.8" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_noble_guard_1"
+		name="{=L4PDF4MY}Warsword Guard With Golden Engravings"
+		tier="5"
+		piece_type="Guard"
+		mesh="sturgian_noble_guard_1"
+		culture="Culture.sturgia"
+		length="2.36"
+		weight="0.20">
+		<BuildData
+			next_piece_offset="0.2"
+			previous_piece_offset="0.2" />
+		<StatContributions
+			armor_bonus="2" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_guard_5"
+		name="{=DLvSnz8U}Etched Highland Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="battania_guard_5"
+		culture="Culture.battania"
+		length="5.65"
+		weight="0.298">
+		<BuildData
+			next_piece_offset="0"
+			previous_piece_offset="0" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_guard_1"
+		name="{=PsKP5j6A}Knobbed Guard"
+		tier="3"
+		piece_type="Guard"
+		mesh="vlandian_guard_1"
+		culture="Culture.vlandia"
+		length="4.17"
+		weight="0.2">
+		<BuildData
+			next_piece_offset="2"
+			previous_piece_offset="0" />
+		<StatContributions
+			armor_bonus="4" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_noble_guard_3"
+		name="{=fd6Lnv1l}Golden Gladius Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="empire_noble_guard_3"
+		culture="Culture.empire"
+		length="7.47"
+		weight="0.20">
+		<BuildData
+			next_piece_offset="3"
+			previous_piece_offset="0.3" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_noble_guard_3"
+		name="{=3uUaFQ9Y}Hammer Shaped Guard With Engravings"
+		tier="3"
+		piece_type="Guard"
+		mesh="sturgian_noble_guard_3"
+		culture="Culture.sturgia"
+		length="4.67"
+		weight="0.20">
+		<BuildData
+			next_piece_offset="0.9"
+			previous_piece_offset="0" />
+		<StatContributions
+			armor_bonus="3" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_noble_guard_4"
+		name="{=4z3U5ubo}Golden Warsword Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="sturgian_noble_guard_4"
+		culture="Culture.sturgia"
+		length="3.78"
+		weight="0.20">
+		<BuildData
+			next_piece_offset="0.5"
+			previous_piece_offset="0.1" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_noble_guard_3"
+		name="{=wXUjru6o}Knobbed Wide Saber Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="khuzait_noble_guard_3"
+		culture="Culture.khuzait"
+		length="4.51"
+		weight="0.24">
+		<BuildData
+			next_piece_offset="2"
+			previous_piece_offset="1" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_noble_guard_1"
+		name="{=0LJtoZtW}Engraved Hooked Scimitar Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="aserai_noble_guard_1"
+		culture="Culture.aserai"
+		length="11"
+		weight="0.219">
+		<BuildData
+			next_piece_offset="4"
+			previous_piece_offset="2.6" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_noble_guard_3"
+		name="{=6ZW9fOUJ}Golden Kaskara Guard"
+		tier="5"
+		piece_type="Guard"
+		mesh="aserai_noble_guard_3"
+		culture="Culture.aserai"
+		length="3.3"
+		weight="0.219">
+		<BuildData
+			next_piece_offset="0.8"
+			previous_piece_offset="0.7" />
+		<StatContributions
+			armor_bonus="5" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_grip_20"
+		name="{=tq5XGebt}Bronze Bound Fine Leather Covered Two Handed Sword Grip"
+		tier="4"
+		piece_type="Handle"
+		mesh="vlandian_grip_20"
+		culture="Culture.vlandia"
+		length="19.8"
+		weight="0.2">
+		<BuildData
+			piece_offset="-4.5"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_grip_8"
+		name="{=lLZfWq7i}Bottleneck Desert Grip"
+		tier="5"
+		piece_type="Handle"
+		mesh="aserai_grip_8"
+		culture="Culture.aserai"
+		length="15"
+		weight="0.120"
+		item_holster_pos_shift="0,0,-0.14">
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_grip_8"
+		name="{=Num2tkFb}Plated Long Grip"
+		tier="4"
+		piece_type="Handle"
+		mesh="khuzait_grip_8"
+		culture="Culture.khuzait"
+		length="20.4"
+		weight="0.180">
+		<BuildData
+			piece_offset="-2.44"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_grip_36"
+		name="{=ZKsIpbg6}Half Leather Covered Wire Bound Two Handed Grip"
+		tier="5"
+		piece_type="Handle"
+		mesh="sturgian_grip_36"
+		culture="Culture.sturgia"
+		length="19.9"
+		weight="0.30"
+		item_holster_pos_shift="0,0,-0.122">
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_grip_8"
+		name="{=gZzEkk5t}Highland Fine Leather Two Handed Grip"
+		tier="3"
+		piece_type="Handle"
+		mesh="battania_grip_8"
+		culture="Culture.battania"
+		length="25"
+		weight="0.225"
+		item_holster_pos_shift="0,0,-0.1">
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_grip_4"
+		name="{=eBxzZ1SW}Jewelled Reinforced One Handed Grip"
+		tier="5"
+		piece_type="Handle"
+		mesh="battania_grip_4"
+		culture="Culture.battania"
+		length="19.2"
+		weight="0.225"
+		item_holster_pos_shift="0,0,-0.03">
+		<BuildData
+			piece_offset="-1.88"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_grip_6"
+		name="{=saYgR9C6}High Quality Highland Two Handed Grip"
+		tier="2"
+		piece_type="Handle"
+		mesh="battania_grip_6"
+		culture="Culture.battania"
+		length="25.5"
+		weight="0.1">
+		<BuildData
+			piece_offset="-0.22"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron2"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_noble_grip_3"
+		name="{=3VoW9qZs}Gold Bound Arming Sword Grip"
+		tier="5"
+		piece_type="Handle"
+		mesh="vlandian_noble_grip_3"
+		culture="Culture.vlandia"
+		length="17.5"
+		weight="0.2"
+		item_holster_pos_shift="0,0,-0.05">
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_noble_grip_4"
+		name="{=TKQl9boE}Golden Decorated Fine Arming Sword Grip"
+		tier="5"
+		piece_type="Handle"
+		mesh="vlandian_noble_grip_4"
+		culture="Culture.vlandia"
+		length="15"
+		weight="0.2">
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_noble_grip_2"
+		name="{=bEbyObu7}Jeweled Golden One Handed Grip"
+		tier="5"
+		piece_type="Handle"
+		mesh="empire_noble_grip_2"
+		culture="Culture.empire"
+		length="15"
+		weight="0.10"
+		item_holster_pos_shift="0,0,-0.1">
+		<BuildData
+			piece_offset="0"
+			next_piece_offset="0"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_grip_16"
+		name="{=lmxaWsmn}Wrapped Leather Long Two Handed Grip"
+		tier="3"
+		piece_type="Handle"
+		mesh="vlandian_grip_16"
+		culture="Culture.vlandia"
+		length="28.5"
+		weight="0.1">
+		<BuildData
+			piece_offset="-0.09"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_grip_7"
+		name="{=aVBGVt7N}Tapered Horn Grip"
+		tier="4"
+		piece_type="Handle"
+		mesh="vlandian_grip_7"
+		culture="Culture.vlandia"
+		length="30.3"
+		weight="0.2"
+		item_holster_pos_shift="0,0,-0.02">
+		<BuildData
+			piece_offset="-6.75"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron2"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_grip_17"
+		name="{=MJRzaazz}Steel Bound Plated Two Handed Grip"
+		tier="4"
+		piece_type="Handle"
+		mesh="khuzait_grip_17"
+		culture="Culture.khuzait"
+		length="25.1"
+		weight="0.230">
+		<BuildData
+			piece_offset="-5"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="cleaver_grip_7"
+		name="{=IWrTsX3V}Red Leather One Handed Grip"
+		tier="4"
+		piece_type="Handle"
+		mesh="cleaver_grip_7"
+		culture="Culture.aserai"
+		length="25"
+		weight="0.13">
+		<BuildData
+			piece_offset="-5"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_grip_14"
+		name="{=uLqEw8LB}Studded Imperial Long Grip"
+		tier="3"
+		piece_type="Handle"
+		mesh="empire_grip_14"
+		culture="Culture.empire"
+		length="28.1"
+		weight="0.12">
+		<BuildData
+			piece_offset="0"
+			next_piece_offset="0"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_noble_grip_4"
+		name="{=bQkJSHCt}Bronze Two Handed Grip With Silver Spiral"
+		tier="5"
+		piece_type="Handle"
+		mesh="empire_noble_grip_4"
+		culture="Culture.sturgia"
+		length="25"
+		weight="0.10"
+		item_holster_pos_shift="0,0,-0.14">
+		<BuildData
+			piece_offset="0"
+			next_piece_offset="0"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_grip_1"
+		name="{=wVcrqv4p}Wooden Grip"
+		tier="2"
+		piece_type="Handle"
+		mesh="sturgian_grip_1"
+		culture="Culture.sturgia"
+		length="15"
+		weight="0.1">
+		<BuildData
+			piece_offset="0"
+			next_piece_offset="0"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron1"
+				count="1" />
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_grip_33"
+		name="{=Gewh8Bzr}Bound Fur Two Handed Grip"
+		tier="1"
+		piece_type="Handle"
+		mesh="sturgian_grip_33"
+		culture="Culture.sturgia"
+		length="25"
+		weight="0.20">
+		<BuildData
+			piece_offset="-6.7"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron2"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_grip_35"
+		name="{=tRJC72Qh}Leather Crossed One Handed"
+		tier="3"
+		piece_type="Handle"
+		mesh="sturgian_grip_35"
+		culture="Culture.sturgia"
+		length="15"
+		weight="0.30">
+		<BuildData
+			piece_offset="-1"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_noble_grip_3"
+		name="{=ueCf3sde}Leather Wrapped Thin One Handed Grip"
+		tier="3"
+		piece_type="Handle"
+		mesh="sturgian_noble_grip_3"
+		culture="Culture.sturgia"
+		length="15"
+		weight="0.270">
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_noble_grip_4"
+		name="{=9T2KA9sk}Gold Bound Decorated Steel Grip"
+		tier="5"
+		piece_type="Handle"
+		mesh="sturgian_noble_grip_4"
+		culture="Culture.sturgia"
+		length="15.7"
+		weight="0.270">
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_grip_6"
+		name="{=Aw7Veoaa}Iron Bound Rough Leater Angular Grip"
+		tier="3"
+		piece_type="Handle"
+		mesh="khuzait_grip_6"
+		culture="Culture.khuzait"
+		length="18.8"
+		weight="0.150">
+		<BuildData
+			piece_offset="-1.98"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_noble_grip_1"
+		name="{=Ft5A2Eb4}Eastern Leather Covered Reinforced Two Handed Grip"
+		tier="4"
+		piece_type="Handle"
+		mesh="khuzait_noble_grip_1"
+		culture="Culture.khuzait"
+		length="25.1"
+		weight="0.200"
+		item_holster_pos_shift="0,0,-0.1">
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_grip_1"
+		name="{=8OaZSfaZ}Split Rough Leather Arming Sword Grip"
+		tier="2"
+		piece_type="Handle"
+		mesh="vlandian_grip_1"
+		culture="Culture.vlandia"
+		length="15"
+		weight="0.1"
+		item_holster_pos_shift="0,0,0.1">
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron2"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_grip_8"
+		name="{=aVBGVt7N}Tapered Horn Grip"
+		tier="5"
+		piece_type="Handle"
+		mesh="vlandian_grip_8"
+		culture="Culture.vlandia"
+		length="33.2"
+		weight="0.21"
+		item_holster_pos_shift="0,0,-0.02">
+		<BuildData
+			piece_offset="-6.75"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_grip_12"
+		name="{=vJtBlaeS}Leather Wrapped Extra Long Two Handed Sword Grip"
+		tier="4"
+		piece_type="Handle"
+		mesh="vlandian_grip_12"
+		culture="Culture.vlandia"
+		length="26.7"
+		weight="0.20"
+		item_holster_pos_shift="0,0,-0.03">
+		<BuildData
+			piece_offset="-5.31"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_grip_24"
+		name="{=g60SQjOR}Leather Wrapped Horn Longsword Grip"
+		tier="3"
+		piece_type="Handle"
+		mesh="vlandian_grip_24"
+		culture="Culture.vlandia"
+		length="17.1"
+		weight="0.2">
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_grip_3"
+		name="{=p2aqirUu}Fine Leather Flyssa Grip"
+		tier="4"
+		piece_type="Handle"
+		mesh="aserai_grip_3"
+		culture="Culture.aserai"
+		length="15.4"
+		weight="0.135">
+		<BuildData
+			piece_offset="-0.41"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_grip_4"
+		name="{=xVHbBpb9}Segmented Steel Scimitar Grip"
+		tier="4"
+		piece_type="Handle"
+		mesh="aserai_grip_4"
+		culture="Culture.aserai"
+		length="14.6"
+		weight="0.105">
+		<BuildData
+			piece_offset="-0.14"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_grip_10"
+		name="{=bCCYhnbY}Green Leather Grip"
+		tier="3"
+		piece_type="Handle"
+		mesh="aserai_grip_10"
+		culture="Culture.aserai"
+		length="30.8"
+		weight="0.225"
+		item_holster_pos_shift="0,0,-0.02">
+		<BuildData
+			piece_offset="-6.75"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_grip_20"
+		name="{=xbazdytG}Steel Bound Southern Two Handed Grip"
+		tier="4"
+		piece_type="Handle"
+		mesh="aserai_grip_20"
+		culture="Culture.aserai"
+		length="25.8"
+		weight="0.135">
+		<BuildData
+			piece_offset="-0.03"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_noble_grip_2"
+		name="{=uIciSK8t}Decorated Round Southern Noble Grip"
+		tier="5"
+		piece_type="Handle"
+		mesh="aserai_noble_grip_2"
+		culture="Culture.aserai"
+		length="15"
+		weight="0.225">
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_noble_grip_3"
+		name="{=jupH2NfE}Gold Inlaid Angular Bastard Sword Grip"
+		tier="5"
+		piece_type="Handle"
+		mesh="aserai_noble_grip_3"
+		culture="Culture.aserai"
+		length="17"
+		weight="0.225"
+		item_holster_pos_shift="0,0,-0.17">
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="wood_grip_2"
+		name="{=SaPaeTr4}Wooden Two Handed Grip "
+		tier="1"
+		piece_type="Handle"
+		mesh="wood_grip_2"
+		length="25"
+		weight="0.045"
+		CraftingCost="75">
+		<!--WOOD-->
+		<BuildData
+			piece_offset="0"
+			previous_piece_offset="0"
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_pommel_9"
+		name="{=ugQrq53t}Fan Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="vlandian_pommel_9"
+		culture="Culture.vlandia"
+		length="5.33"
+		weight="0.2">
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_pommel_3"
+		name="{=tLa3nYAQ}Faceted Chalice Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="empire_pommel_3"
+		culture="Culture.empire"
+		length="6.4"
+		weight="0.18">
+		<BuildData
+			next_piece_offset="0.4" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_pommel_8"
+		name="{=dbmuyJcf}Southern Faceted Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="aserai_pommel_8"
+		culture="Culture.aserai"
+		length="7.33"
+		weight="0.151">
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_pommel_12"
+		name="{=fHKHwvsW}Bronze Banded Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="sturgian_pommel_12"
+		culture="Culture.sturgia"
+		length="5.17"
+		weight="0.17">
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_pommel_8"
+		name="{=BKHKQ15N}Turqouise Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="battania_pommel_8"
+		culture="Culture.battania"
+		length="3.52"
+		weight="0.14">
+		<BuildData
+			next_piece_offset="0.22" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_noble_pommel_4"
+		name="{=gTMThdRJ}Lordly Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="vlandian_noble_pommel_4"
+		culture="Culture.vlandia"
+		length="6"
+		weight="0.15">
+		<BuildData
+			next_piece_offset="0.2" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_noble_pommel_1"
+		name="{=HuYwPEmh}Ornamental Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="vlandian_noble_pommel_1"
+		culture="Culture.vlandia"
+		length="7.66"
+		weight="0.15">
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_noble_pommel_4"
+		name="{=GI6XD77j}Imperial Decorated Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="empire_noble_pommel_4"
+		culture="Culture.empire"
+		length="7.04"
+		weight="0.2"
+		appearance="0.9">
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_noble_pommel_2"
+		name="{=26KZ6S7F}Eastern Decorated Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="khuzait_noble_pommel_2"
+		culture="Culture.khuzait"
+		length="4.39"
+		weight="0.26">
+		<BuildData
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_noble_pommel_4"
+		name="{=usVYZYYD}Northern Lordly Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="sturgian_noble_pommel_4"
+		culture="Culture.sturgia"
+		length="5.33"
+		weight="0.17">
+		<BuildData
+			next_piece_offset="0.1" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_pommel_5"
+		name="{=OW7w3Mth}Fian's Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="battania_pommel_5"
+		culture="Culture.battania"
+		length="10"
+		weight="0.450">
+		<BuildData
+			next_piece_offset="0.3" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_pommel_4"
+		name="{=nZ5e678J}Simple Wheel Pommel"
+		tier="3"
+		piece_type="Pommel"
+		mesh="vlandian_pommel_4"
+		culture="Culture.vlandia"
+		length="7.15"
+		weight="0.16">
+		<BuildData
+			next_piece_offset="0.2" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_pommel_6"
+		name="{=Ibaju3oe}Eaglehead Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="empire_pommel_6"
+		culture="Culture.empire"
+		length="5.5"
+		weight="0.2"
+		appearance="0.9">
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_noble_pommel_1"
+		name="{=kbh6i0M7}Fine Gladius Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="empire_noble_pommel_1"
+		culture="Culture.empire"
+		length="6.94"
+		weight="0.2"
+		appearance="0.9">
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="empire_noble_pommel_2"
+		name="{=PUAi75mb}Imperial Ring Pommel"
+		tier="4"
+		piece_type="Pommel"
+		mesh="empire_noble_pommel_2"
+		culture="Culture.empire"
+		length="6.5"
+		weight="0.2"
+		appearance="0.9">
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_pommel_5"
+		name="{=38vt2VVz}Broad Pommel"
+		tier="2"
+		piece_type="Pommel"
+		mesh="sturgian_pommel_5"
+		culture="Culture.sturgia"
+		length="2.08"
+		weight="0.12">
+		<BuildData
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron1"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_pommel_9"
+		name="{=HmsEarnz}Teardrop Pommel"
+		tier="3"
+		piece_type="Pommel"
+		mesh="sturgian_pommel_9"
+		culture="Culture.sturgia"
+		length="4.83"
+		weight="0.2">
+		<BuildData
+			next_piece_offset="0.1" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_noble_pommel_1"
+		name="{=Ao7c1VrC}Northern Triangular Pommel"
+		tier="3"
+		piece_type="Pommel"
+		mesh="sturgian_noble_pommel_1"
+		culture="Culture.sturgia"
+		length="4.03"
+		weight="0.17">
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_noble_pommel_2"
+		name="{=LDRnfLRh}Decorated Northern Pommel"
+		tier="4"
+		piece_type="Pommel"
+		mesh="sturgian_noble_pommel_2"
+		culture="Culture.sturgia"
+		length="4.47"
+		weight="0.17">
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_pommel_5"
+		name="{=BQ3hMy9D}Horsehead Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="khuzait_pommel_5"
+		culture="Culture.khuzait"
+		length="7.3"
+		weight="0.2">
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_noble_pommel_3"
+		name="{=zoQhOBku}Round Spiked Pommel"
+		tier="4"
+		piece_type="Pommel"
+		mesh="khuzait_noble_pommel_3"
+		culture="Culture.khuzait"
+		length="5.26"
+		weight="0.26">
+		<BuildData
+			next_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_pommel_2"
+		name="{=8gW1o7iH}Western Lobed Pommel"
+		tier="4"
+		piece_type="Pommel"
+		mesh="vlandian_pommel_2"
+		culture="Culture.vlandia"
+		length="7.49"
+		weight="0.17">
+		<BuildData
+			next_piece_offset="0.1" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_pommel_5"
+		name="{=zIbAD527}Wedge Pommel"
+		tier="2"
+		piece_type="Pommel"
+		mesh="vlandian_pommel_5"
+		culture="Culture.vlandia"
+		length="4.19"
+		weight="0.14">
+		<BuildData
+			next_piece_offset="0.2" />
+		<Materials>
+			<Material
+				id="Iron2"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="vlandian_noble_pommel_3"
+		name="{=Udo97SZC}Western Decorated Pommel"
+		tier="4"
+		piece_type="Pommel"
+		mesh="vlandian_noble_pommel_3"
+		culture="Culture.vlandia"
+		length="4.6"
+		weight="0.15">
+		<BuildData
+			next_piece_offset="0.1" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_pommel_4"
+		name="{=GyOxvJpB}Globe Pommel"
+		tier="1"
+		piece_type="Pommel"
+		mesh="aserai_pommel_4"
+		culture="Culture.empire"
+		length="8.3"
+		weight="0.4">
+		<BuildData
+			next_piece_offset="0.3" />
+		<Materials>
+			<Material
+				id="Iron2"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="aserai_noble_pommel_3"
+		name="{=emryrbYV}Braided Pommel"
+		tier="5"
+		piece_type="Pommel"
+		mesh="aserai_noble_pommel_3"
+		culture="Culture.aserai"
+		length="6.68"
+		weight="0.284">
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="dagger_blade_1"
+		name="{=gXUXjtuL}Kama Blade"
+		tier="3"
+		piece_type="Blade"
+		mesh="dagger_blade_1"
+		length="39"
+		weight="0.205"
+		is_default="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_knife_a"
+			holster_mesh="dagger_blade_1_scabbard_1">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.5" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="2.4" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="dagger_blade_3"
+		name="{=aBnaaaHv}Long Seax Blade"
+		tier="3"
+		piece_type="Blade"
+		mesh="dagger_blade_3"
+		length="47"
+		weight="0.15">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_knife_a"
+			holster_mesh="dagger_blade_3_scabbard_1">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.9" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="2" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="dagger_blade_3_blunt"
+		name="{=27Oaoras}Long Blunt Seax Blade"
+		tier="3"
+		piece_type="Blade"
+		mesh="dagger_blade_3"
+		length="47"
+		weight="0.15"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_knife_a"
+			holster_mesh="dagger_blade_3_scabbard_1">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="2.16" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="3.15" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="dagger_blade_6"
+		name="{=f0syWNR7}Poniard Blade"
+		tier="3"
+		piece_type="Blade"
+		mesh="dagger_blade_6"
+		length="44.7"
+		weight="0.27">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_knife_a"
+			holster_mesh="dagger_blade_6_scabbard_2">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="3.7" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="2.2" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="dagger_blade_7"
+		name="{=KNisROi1}Broad Skaen Blade"
+		tier="4"
+		piece_type="Blade"
+		mesh="dagger_blade_7"
+		length="40.1"
+		weight="0.325">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_knife_a"
+			holster_mesh="dagger_blade_7_scabbard_1">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="4.25" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="3" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="dagger_blade_9"
+		name="{=SgJH5KtP}Sica Blade"
+		tier="3"
+		piece_type="Blade"
+		mesh="dagger_blade_9"
+		length="43"
+		weight="0.475">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_knife_a"
+			holster_mesh="dagger_blade_9_scabbard_1">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="1.9" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.1" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="dagger_blade_13"
+		name="{=5o5DaSHZ}Broad Dagger Blade"
+		tier="2"
+		piece_type="Blade"
+		mesh="dagger_blade_13"
+		length="28.2"
+		weight="0.250">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_knife_a"
+			holster_mesh="throwing_dagger_quiver_1"
+			holster_mesh_length="35.8">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.4" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="2.75" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="dagger_blade_13_blunt"
+		name="{=GFBFgA7R}Broad Blunt Dagger Blade"
+		tier="2"
+		piece_type="Blade"
+		mesh="dagger_blade_13"
+		length="28.2"
+		weight="0.475"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="metal_weapon"
+			body_name="bo_knife_a"
+			holster_mesh="throwing_dagger_quiver_1"
+			holster_mesh_length="35.8">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="2.16" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="3.15" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+			<Flag
+				name="Stealth"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_dagger_guard_1"
+		name="{=mQCQF6TL}Narrow Northern Dagger Guard"
+		tier="1"
+		piece_type="Guard"
+		mesh="sturgian_dagger_guard_1"
+		culture="Culture.battania"
+		length="1.2"
+		weight="0.097">
+		<BuildData
+			next_piece_offset="0" />
+		<StatContributions
+			armor_bonus="0" />
+		<Materials>
+			<Material
+				id="Iron2"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_dagger_guard_5"
+		name="{=EbucFMZq}Broad Concave Dagger Guard"
+		tier="2"
+		piece_type="Guard"
+		mesh="sturgian_dagger_guard_5"
+		culture="Culture.battania"
+		length="1.87"
+		weight="0.097">
+		<BuildData
+			next_piece_offset="1.5"
+			previous_piece_offset="0.1" />
+		<StatContributions
+			armor_bonus="2" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="sturgian_dagger_guard_8"
+		name="{=mQCQF6TL}Narrow Northern Dagger Guard"
+		tier="2"
+		piece_type="Guard"
+		mesh="sturgian_dagger_guard_8"
+		culture="Culture.battania"
+		length="1.01"
+		weight="0.097">
+		<BuildData
+			next_piece_offset="0"
+			previous_piece_offset="0.1" />
+		<StatContributions
+			armor_bonus="1" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="khuzait_dagger_guard_6"
+		name="{=xb6e2YaV}Eastern Simple Oval Dagger Guard"
+		tier="2"
+		piece_type="Guard"
+		mesh="khuzait_dagger_guard_6"
+		culture="Culture.battania"
+		length="0.72"
+		weight="0.097">
+		<BuildData
+			next_piece_offset="0.15"
+			previous_piece_offset="0.2" />
+		<StatContributions
+			armor_bonus="1" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_dagger_guard_1"
+		name="{=OHl66gsX}Bronze Bollocks Dagger Guard"
+		tier="2"
+		piece_type="Guard"
+		mesh="battania_dagger_guard_1"
+		culture="Culture.battania"
+		length="5.88"
+		weight="0.097">
+		<BuildData
+			next_piece_offset="0.1"
+			previous_piece_offset="0.2" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="battania_dagger_guard_9"
+		name="{=l1YxVZil}Knobbed Bronze Dagger Guard"
+		tier="3"
+		piece_type="Guard"
+		mesh="battania_dagger_guard_9"
+		culture="Culture.battania"
+		length="3.72"
+		weight="0.097">
+		<BuildData
+			next_piece_offset="1.2" />
+		<StatContributions
+			armor_bonus="3" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_36_head"
+		name="{=cEU66ABf}Northern Battle Axe Blade"
+		tier="3"
+		piece_type="Blade"
+		mesh="axe_craft_36_head"
+		distance_to_next_piece="10.4"
+		distance_to_previous_piece="10.4"
+		weight="0.632">
+		<BuildData
+			piece_offset="-16" />
+		<BladeData
+			stack_amount="3"
+			blade_length="15.764"
+			blade_width="16"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.6" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron2"
+				count="3" />
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_27_head"
+		name="{=g2r3QKOB}Southern Small Axe Head"
+		tier="2"
+		piece_type="Blade"
+		mesh="axe_craft_27_head"
+		distance_to_next_piece="8.38"
+		distance_to_previous_piece="8.38"
+		weight="0.634">
+		<BuildData
+			piece_offset="-13" />
+		<BladeData
+			stack_amount="3"
+			blade_length="16.562"
+			blade_width="13.626"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.2" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron2"
+				count="4" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_20_head_blunt"
+		name="{=nsjbWcmp}Narrow Blunt Sparth Blade"
+		tier="2"
+		piece_type="Blade"
+		mesh="axe_craft_20_head"
+		distance_to_next_piece="3.63"
+		distance_to_previous_piece="5.93"
+		weight="0.625"
+		is_hidden="true">
+		<BuildData
+			piece_offset="-10.5" />
+		<BladeData
+			stack_amount="3"
+			blade_length="9.683"
+			blade_width="18.004"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.88" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron2"
+				count="4" />
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_30_head"
+		name="{=IZw8FnwW}Large Ascia Head"
+		tier="2"
+		piece_type="Blade"
+		mesh="axe_craft_30_head"
+		distance_to_next_piece="5.04"
+		distance_to_previous_piece="6.14"
+		weight="0.688">
+		<BuildData
+			piece_offset="-11" />
+		<BladeData
+			stack_amount="3"
+			blade_length="8.442"
+			blade_width="19.527"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.2" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron2"
+				count="4" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_30_head_blunt"
+		name="{=M9ACQeD6}Large Blunt Ascia Head"
+		tier="2"
+		piece_type="Blade"
+		mesh="axe_craft_30_head"
+		distance_to_next_piece="5.04"
+		distance_to_previous_piece="6.14"
+		weight="0.688"
+		is_hidden="true">
+		<BuildData
+			piece_offset="-11" />
+		<BladeData
+			stack_amount="3"
+			blade_length="8.442"
+			blade_width="19.527"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.88" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron2"
+				count="4" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_9_head"
+		name="{=8S6ZYPFD}Round Bitted Fine Steel Hatchet Head"
+		tier="5"
+		piece_type="Blade"
+		mesh="axe_craft_9_head"
+		distance_to_next_piece="4.63"
+		distance_to_previous_piece="7.24"
+		weight="0.666">
+		<BuildData
+			piece_offset="-12" />
+		<BladeData
+			stack_amount="3"
+			blade_length="11.538"
+			blade_width="26.876"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.0" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="3" />
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_8_head"
+		name="{=WkTkxQfw}Rectangular Bit Blade"
+		tier="5"
+		piece_type="Blade"
+		mesh="axe_craft_8_head"
+		distance_to_next_piece="11.1"
+		distance_to_previous_piece="11.6"
+		weight="0.751">
+		<BuildData
+			piece_offset="-16" />
+		<BladeData
+			stack_amount="3"
+			blade_length="22.332"
+			blade_width="23.205"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.0" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="3" />
+			<Material
+				id="Iron5"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_29_head"
+		name="{=iFhr5nGq}Imperial Axe Head"
+		tier="3"
+		piece_type="Blade"
+		mesh="axe_craft_29_head"
+		distance_to_next_piece="6.59"
+		distance_to_previous_piece="6.57"
+		weight="0.719">
+		<BuildData
+			piece_offset="-15" />
+		<BladeData
+			stack_amount="3"
+			blade_length="9.105"
+			blade_width="23.082"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.6" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="4" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_12_head"
+		name="{=cK6D7cyn}Large Franziska Head"
+		tier="3"
+		piece_type="Blade"
+		mesh="axe_craft_12_head"
+		distance_to_next_piece="5.04"
+		distance_to_previous_piece="6.51"
+		weight="0.595">
+		<BuildData
+			piece_offset="-10.5" />
+		<BladeData
+			stack_amount="3"
+			blade_length="11.622"
+			blade_width="23.945"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.5" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_19_head"
+		name="{=ZxZ7AJ1r}Southern Battle Axe Blade"
+		tier="4"
+		piece_type="Blade"
+		mesh="axe_craft_19_head"
+		distance_to_next_piece="11.2"
+		distance_to_previous_piece="11.8"
+		weight="0.9">
+		<BuildData
+			piece_offset="-20" />
+		<BladeData
+			stack_amount="3"
+			blade_length="22.539"
+			blade_width="16.706"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.8" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+			<Material
+				id="Iron3"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_17_head"
+		name="{=R62maL2H}Bill Head"
+		tier="4"
+		piece_type="Blade"
+		mesh="axe_craft_17_head"
+		distance_to_next_piece="21.3"
+		distance_to_previous_piece="23.7"
+		weight="1.132">
+		<BuildData
+			piece_offset="-30" />
+		<BladeData
+			stack_amount="3"
+			blade_length="33.887"
+			blade_width="22.47"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.3" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_14_head"
+		name="{=ALO9gw69}Square Bit Two Handed Axe Head"
+		tier="2"
+		piece_type="Blade"
+		mesh="axe_craft_14_head"
+		distance_to_next_piece="3.73"
+		distance_to_previous_piece="10.9"
+		weight="0.8816">
+		<BuildData
+			piece_offset="-16" />
+		<BladeData
+			stack_amount="3"
+			blade_length="13.923"
+			blade_width="21.94"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="2.5" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron2"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_14_head_blunt"
+		name="{=Wn4GjoXY}Square Bit Blunt Two Handed Axe Head"
+		tier="2"
+		piece_type="Blade"
+		mesh="axe_craft_14_head"
+		distance_to_next_piece="3.73"
+		distance_to_previous_piece="10.9"
+		weight="0.8816"
+		is_hidden="true">
+		<BuildData
+			piece_offset="-16" />
+		<BladeData
+			stack_amount="3"
+			blade_length="13.923"
+			blade_width="21.94"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.25" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron2"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_3_head"
+		name="{=gSdybwMN}Large Drilled Norse Bearded Head"
+		tier="3"
+		piece_type="Blade"
+		mesh="axe_craft_3_head"
+		distance_to_next_piece="13.1"
+		distance_to_previous_piece="10.4"
+		weight="0.6">
+		<BuildData
+			piece_offset="-16" />
+		<BladeData
+			stack_amount="3"
+			blade_length="23.005"
+			blade_width="22.407"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.0" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="3" />
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_34_head"
+		name="{=a0erBuF1}Hooked Axe Head"
+		tier="4"
+		piece_type="Blade"
+		mesh="axe_craft_34_head"
+		distance_to_next_piece="8.84"
+		distance_to_previous_piece="14.5"
+		weight="1.0">
+		<BuildData
+			piece_offset="-23" />
+		<BladeData
+			stack_amount="3"
+			blade_length="20.281"
+			blade_width="19.8"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.3" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+			<Material
+				id="Iron3"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_13_head_blunt"
+		name="{=yrdrYLA9}Blunt Throwing Axe Head"
+		tier="4"
+		piece_type="Blade"
+		mesh="axe_craft_13_head"
+		distance_to_next_piece="1.77"
+		distance_to_previous_piece="7.07"
+		weight="0.481"
+		is_hidden="true">
+		<BuildData
+			piece_offset="-10" />
+		<BladeData
+			stack_amount="3"
+			blade_length="8.707"
+			blade_width="16.898"
+			physics_material="metal_weapon"
+			body_name="bo_axe_longer_b"
+			holster_mesh="throwing_axe_quiver_1">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.79" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="3" />
+		</Materials>
+		<Flags>
+			<Flag
+				name="CanBePickedUpFromCorpse"
+				type="ItemFlags" />
+			<Flag
+				name="BonusAgainstShield" />
+		</Flags>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_15_handle"
+		name="{=KyKh5jCE}Bamboo Handle"
+		tier="2"
+		piece_type="Handle"
+		mesh="axe_craft_15_handle"
+		length="80.4"
+		weight="0.329">
+		<BuildData
+			piece_offset="22"
+			next_piece_offset="0"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_24_handle"
+		name="{=SraI0yxb}Hardened Long Oaken Handle"
+		tier="5"
+		piece_type="Handle"
+		mesh="axe_craft_24_handle"
+		length="110"
+		weight="0.296"
+		item_holster_pos_shift="0,0,-0.1">
+		<BuildData
+			piece_offset="21"
+			next_piece_offset="0"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_16_handle"
+		name="{=47UEgMpD}Oaken Handle With Pointy End"
+		tier="5"
+		piece_type="Handle"
+		mesh="axe_craft_16_handle"
+		length="105.5"
+		weight="0.387"
+		item_holster_pos_shift="0,0,-0.05">
+		<BuildData
+			piece_offset="32"
+			next_piece_offset="12"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_30_handle"
+		name="{=KeTioaJE}Leather Wrapped Mahogany Great Axe Handle"
+		tier="2"
+		piece_type="Handle"
+		mesh="axe_craft_30_handle"
+		length="130"
+		weight="0.516">
+		<BuildData
+			piece_offset="35"
+			next_piece_offset="0"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_31_handle"
+		name="{=J3ADekEw}Oaken Great Axe Shaft"
+		tier="4"
+		piece_type="Handle"
+		mesh="axe_craft_31_handle"
+		length="140"
+		weight="0.516">
+		<BuildData
+			piece_offset="20"
+			next_piece_offset="0.1"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_17_handle"
+		name="{=3aXHbrFV}Long Bamboo Handle With Metal Tip"
+		tier="4"
+		piece_type="Handle"
+		mesh="axe_craft_17_handle"
+		length="91.4"
+		weight="0.314">
+		<BuildData
+			piece_offset="27"
+			next_piece_offset="7"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_18_handle"
+		name="{=pXxv7YJv}Long Mahogany Handle With Leather Wrapping"
+		tier="3"
+		piece_type="Handle"
+		mesh="axe_craft_18_handle"
+		length="100"
+		weight="0.361"
+		item_holster_pos_shift="0,0,-0.15">
+		<BuildData
+			piece_offset="31"
+			next_piece_offset="0"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="axe_craft_27_handle"
+		name="{=qYxzdFAa}Long Oaken Handle With Leather Wraps"
+		tier="3"
+		piece_type="Handle"
+		mesh="axe_craft_27_handle"
+		length="104.5"
+		weight="0.616">
+		<BuildData
+			piece_offset="20"
+			next_piece_offset="0"
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_20"
+		name="{=uwG8iwBc}Long Grassland Spear"
+		tier="3"
+		piece_type="Blade"
+		mesh="spear_blade_20"
+		length="46"
+		weight="0.3592"
+		excluded_item_usage_features="swing">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.1" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_20_blunt"
+		name="{=NRhAqB5a}Long Grassland Blunt Spear"
+		tier="3"
+		piece_type="Blade"
+		mesh="spear_blade_20"
+		length="46"
+		weight="0.3592"
+		excluded_item_usage_features="swing"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="1.89" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_32"
+		name="{=SVBYn9KW}Iron Fork"
+		tier="1"
+		piece_type="Blade"
+		mesh="spear_blade_32"
+		length="32.8"
+		weight="0.7176"
+		excluded_item_usage_features="swing">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="1.5" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron1"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_33"
+		name="{=R62maL2H}Bill Head"
+		tier="2"
+		piece_type="Blade"
+		mesh="spear_blade_33"
+		length="35.5"
+		weight="0.4296"
+		excluded_item_usage_features="shield:thrust">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="2.8" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanHook" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron2"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_33_blunt"
+		name="{=EjJl6bA4}Blunt Bill Head"
+		tier="2"
+		piece_type="Blade"
+		mesh="spear_blade_33"
+		length="35.5"
+		weight="0.4296"
+		excluded_item_usage_features="shield:thrust"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.52" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanHook" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron2"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_6"
+		name="{=S75vUGzK}Fine Steel Hewing Spear Head"
+		tier="5"
+		piece_type="Blade"
+		mesh="spear_blade_6"
+		length="86.4"
+		weight="0.4"
+		excluded_item_usage_features="swing">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.6" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_35_blunt"
+		name="{=c6aNuaDP}Jagged Blunt Spear Head"
+		tier="3"
+		piece_type="Blade"
+		mesh="spear_blade_35"
+		length="41.2"
+		weight="0.3256"
+		excluded_item_usage_features="swing"
+		is_hidden="true">
+		<BladeData
+			stack_amount="4"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b"
+			holster_mesh="throwing_spear_quiver_5_1"
+			holster_body_name="bo_throwing_spear_quiver_5_1"
+			holster_mesh_length="96.7">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="1.8" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_15_blunt"
+		name="{=hbv5aCRX}Short Simple Blunt Spear Head"
+		tier="2"
+		piece_type="Blade"
+		mesh="spear_blade_15"
+		length="23.2"
+		weight="0.2136"
+		excluded_item_usage_features="swing"
+		is_hidden="true">
+		<BladeData
+			stack_amount="4"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b"
+			holster_mesh="throwing_spear_quiver_1_1"
+			holster_body_name="bo_throwing_spear_quiver_1_1"
+			holster_mesh_length="68.9">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="1.53" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron2"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_18"
+		name="{=qSV6C2tp}Swordstaff Head"
+		tier="5"
+		piece_type="Blade"
+		mesh="spear_blade_18"
+		length="70.4"
+		weight="0.9096">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.8" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.6" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_19_blunt"
+		name="{=TqXFwLYL}Blunt Glaive Head"
+		tier="4"
+		piece_type="Blade"
+		mesh="spear_blade_19"
+		length="43.7"
+		weight="0.4408"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="1.53" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="3.42" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_24"
+		name="{=bjQ8J71a}Long Glaive Head"
+		tier="5"
+		piece_type="Blade"
+		mesh="spear_blade_24"
+		length="68"
+		weight="0.5">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.5" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.9" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron5"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_43"
+		name="{=wait0O6m}Warrazor Head"
+		tier="4"
+		piece_type="Blade"
+		mesh="spear_blade_43"
+		length="64.4"
+		weight="0.43"
+		excluded_item_usage_features="">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.6" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.1" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_44"
+		name="{=PmPxx2gK}Bent Razor Head"
+		tier="4"
+		piece_type="Blade"
+		mesh="spear_blade_44"
+		length="80"
+		weight="0.43"
+		excluded_item_usage_features="shield:thrust">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Swing
+				damage_type="Cut"
+				damage_factor="4.1" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="CanHook" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_23"
+		name="{=OryiZr9d}Kontarion"
+		tier="3"
+		piece_type="Blade"
+		mesh="spear_blade_23"
+		length="45.7"
+		weight="0.352"
+		excluded_item_usage_features="swing">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.0" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_23_blunt"
+		name="{=pAqWQWJs}Blunt Kontarion"
+		tier="3"
+		piece_type="Blade"
+		mesh="spear_blade_23"
+		length="45.7"
+		weight="0.352"
+		excluded_item_usage_features="swing"
+		is_hidden="true">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="1.8" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_7_blunt"
+		name="{=n55UtbGg}Sparring Menavlion Head"
+		tier="4"
+		piece_type="Blade"
+		mesh="spear_blade_7"
+		length="53"
+		weight="0.3656">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="1.53" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.7" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_29"
+		name="{=ZgCUNieQ}Fork Head"
+		tier="1"
+		piece_type="Blade"
+		mesh="spear_blade_29"
+		length="42.3"
+		weight="0.272"
+		excluded_item_usage_features="swing">
+		<!--WOOD-->
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="1.5" />
+		</BladeData>
+		<Flags>
+			<Flag
+				name="Civilian"
+				type="ItemFlags" />
+		</Flags>
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_26"
+		name="{=Y0gbKTgZ}Sturgian Military Fork Head"
+		tier="2"
+		piece_type="Blade"
+		mesh="spear_blade_26"
+		length="29.8"
+		weight="0.4584"
+		excluded_item_usage_features="swing">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="1.8" />
+		</BladeData>
+		<Flags></Flags>
+		<Materials>
+			<Material
+				id="Iron2"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_25"
+		name="{=mrTkURKV}Notched Fork Head"
+		tier="3"
+		piece_type="Blade"
+		mesh="spear_blade_25"
+		length="42.6"
+		weight="0.6504"
+		excluded_item_usage_features="swing">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="2.2" />
+		</BladeData>
+		<Flags></Flags>
+		<Materials>
+			<Material
+				id="Iron3"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_22"
+		name="{=3ged5Ozt}Exceptional Eastern Glaive"
+		tier="4"
+		piece_type="Blade"
+		mesh="spear_blade_22"
+		length="89"
+		weight="0.8456">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Pierce"
+				damage_factor="1.7" />
+			<Swing
+				damage_type="Cut"
+				damage_factor="3.8" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron5"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_blade_34"
+		name="{=V9Kbq6vj}Blunt Practice Tip"
+		tier="1"
+		piece_type="Blade"
+		mesh="spear_blade_34"
+		length="18.3"
+		weight="0.4776">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_spear_b">
+			<Thrust
+				damage_type="Blunt"
+				damage_factor="1.44" />
+			<Swing
+				damage_type="Blunt"
+				damage_factor="1.8" />
+		</BladeData>
+		<Materials>
+			<Material
+				id="Iron2"
+				count="2" />
+		</Materials>
+		<Flags>
+			<Flag
+				name="NoBlood" />
+		</Flags>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_guard_13"
+		name="{=mSplbvgI}Double Hooks"
+		tier="5"
+		piece_type="Guard"
+		mesh="spear_guard_13"
+		culture="Culture.empire"
+		length="11.3"
+		weight="0">
+		<Materials>
+			<Material
+				id="Iron5"
+				count="1" />
+		</Materials>
+		<Flags>
+			<Flag
+				name="CanDismount" />
+		</Flags>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_handle_4"
+		name="{=LSOXMCAW}Pine Shaft"
+		tier="4"
+		piece_type="Handle"
+		mesh="spear_handle_4"
+		length="190"
+		weight="1.4"
+		excluded_item_usage_features="long"
+		item_holster_pos_shift="0,0,0.10"
+		CraftingCost="100">
+		<BuildData
+			piece_offset="19.4" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_handle_13"
+		name="{=pocRP9dq}Long Ash Staff"
+		tier="3"
+		piece_type="Handle"
+		mesh="spear_handle_13"
+		length="228"
+		weight="1.6"
+		CraftingCost="110">
+		<BuildData
+			piece_offset="22.9" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_pommel_2"
+		name="{=OphcYYyN}Riveted Fine Steel Spear Pommel"
+		tier="2"
+		piece_type="Pommel"
+		mesh="spear_pommel_2"
+		culture="Culture.empire"
+		length="3.82"
+		weight="0">
+		<Materials>
+			<Material
+				id="Iron4"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="spear_pommel_8"
+		name="{=4MZvoVyI}Round Butt Riveted Spear Pommel"
+		tier="3"
+		piece_type="Pommel"
+		mesh="spear_pommel_8"
+		culture="Culture.empire"
+		length="3.86"
+		weight="0">
+		<Materials>
+			<Material
+				id="Iron3"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_head_2"
+		name="{=cag70E1F}Pernach Head"
+		tier="5"
+		piece_type="Blade"
+		mesh="mace_head_2"
+		length="17"
+		weight="0.9"
+		full_scale="true"
+		excluded_item_usage_features="thrust">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_mace_a">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="3.06" />
+		</BladeData>
+		<BuildData
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_head_13"
+		name="{=3Q3FFqu0}Light Royal Mace Head"
+		tier="5"
+		piece_type="Blade"
+		mesh="mace_head_13"
+		length="9.2"
+		weight="1.0"
+		full_scale="true"
+		excluded_item_usage_features="thrust">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_mace_a">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="3.15" />
+		</BladeData>
+		<BuildData
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_head_7"
+		name="{=IR8UeIRp}Cataphracts Mace Head"
+		tier="5"
+		piece_type="Blade"
+		mesh="mace_head_7"
+		length="22"
+		weight="1.0"
+		full_scale="true"
+		excluded_item_usage_features="thrust">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_mace_a">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="3.24" />
+		</BladeData>
+		<BuildData
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_head_37"
+		name="{=AlRRkKut}Heavy Morning Star Head"
+		tier="5"
+		piece_type="Blade"
+		mesh="mace_head_37"
+		length="17"
+		weight="0.85"
+		full_scale="true"
+		excluded_item_usage_features="thrust">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_mace_a">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.00" />
+		</BladeData>
+		<BuildData
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron6"
+				count="3" />
+		</Materials>
+		<Flags>
+			<Flag
+				name="CanKnockDown" />
+		</Flags>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_head_38"
+		name="{=CeeJmlSq}Heavy Shishpar Head"
+		tier="4"
+		piece_type="Blade"
+		mesh="mace_head_38"
+		length="15.2"
+		weight="1.3"
+		full_scale="true"
+		excluded_item_usage_features="thrust">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_mace_a">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="1.95" />
+		</BladeData>
+		<BuildData
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="3" />
+		</Materials>
+		<Flags>
+			<Flag
+				name="CanKnockDown" />
+		</Flags>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_head_4"
+		name="{=Zc2Mb991}Shestopyor Head"
+		tier="3"
+		piece_type="Blade"
+		mesh="mace_head_4"
+		length="16.6"
+		weight="1.0"
+		full_scale="true"
+		excluded_item_usage_features="thrust">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_mace_a">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.61" />
+		</BladeData>
+		<BuildData
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron2"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_head_12"
+		name="{=I9yrLqPc}Eastern Flanged Steel Mace Head"
+		tier="5"
+		piece_type="Blade"
+		mesh="mace_head_12"
+		length="20"
+		weight="1.0"
+		full_scale="true"
+		excluded_item_usage_features="thrust">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_mace_a">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="3.06" />
+		</BladeData>
+		<BuildData
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_head_21"
+		name="{=ntIEIQ0N}Light Shishpar Head"
+		tier="4"
+		piece_type="Blade"
+		mesh="mace_head_21"
+		length="6.5"
+		weight="0.572"
+		full_scale="true"
+		excluded_item_usage_features="thrust">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_mace_a">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.97" />
+		</BladeData>
+		<BuildData
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron3"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_head_26"
+		name="{=o2kFafbu}Eastern Steel Mace Head"
+		tier="4"
+		piece_type="Blade"
+		mesh="mace_head_26"
+		length="21.4"
+		weight="0.658"
+		full_scale="true"
+		excluded_item_usage_features="thrust">
+		<BladeData
+			stack_amount="3"
+			physics_material="wood_weapon"
+			body_name="bo_mace_a">
+			<Swing
+				damage_type="Blunt"
+				damage_factor="2.97" />
+		</BladeData>
+		<BuildData
+			previous_piece_offset="0" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_handle_13"
+		name="{=AGfMPOWB}Angular Fine Steel Mace Handle"
+		tier="5"
+		piece_type="Handle"
+		mesh="mace_handle_13"
+		length="65"
+		weight="1.100"
+		item_holster_pos_shift="0,0,0.05">
+		<BuildData
+			piece_offset="13.7" />
+		<Materials>
+			<Material
+				id="Iron5"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_handle_15"
+		name="{=NmkDgmWW}Steel Horsemans Mace Handle"
+		tier="5"
+		piece_type="Handle"
+		mesh="mace_handle_15"
+		length="80"
+		weight="1.100"
+		item_holster_pos_shift="0,0,-0.1">
+		<BuildData
+			piece_offset="13.7" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="3" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_handle_20"
+		name="{=NehOioZp}Iron Reinforced Two Handed Mace Handle"
+		tier="4"
+		piece_type="Handle"
+		mesh="mace_handle_20"
+		length="133"
+		weight="0.540"
+		item_holster_pos_shift="0,0,-0.05"
+		CraftingCost="75">
+		<BuildData
+			piece_offset="19.3"
+			next_piece_offset="2" />
+		<Materials>
+			<Material
+				id="Iron4"
+				count="2" />
+			<Material
+				id="Wood"
+				count="2" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_handle_11"
+		name="{=JCYmlrKF}Steel Reinforced Mace Handle"
+		tier="4"
+		piece_type="Handle"
+		mesh="mace_handle_11"
+		length="78"
+		weight="1.100"
+		item_holster_pos_shift="0,0,-0.05">
+		<BuildData
+			piece_offset="17" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+			<Material
+				id="Iron3"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
+	<CraftingPiece
+		id="mace_handle_14"
+		name="{=57DBqJd1}Leather Wrapped Thick Mace Handle"
+		tier="2"
+		piece_type="Handle"
+		mesh="mace_handle_14"
+		length="45"
+		weight="1.100"
+		item_holster_pos_shift="0,0,0.1">
+		<BuildData
+			piece_offset="13.7" />
+		<Materials>
+			<Material
+				id="Wood"
+				count="1" />
+		</Materials>
+	</CraftingPiece>
 </CraftingPieces>

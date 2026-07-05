@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Items>
 	<Item multiplayer_item="true" id="aserai_archer_armor" name="{=2cSOn9qb}Gambeson over Mail Armor" lod_atlas_index="1" subtype="body_armor" mesh="aserai_archer_armor" culture="Culture.aserai" weight="11.0" difficulty="0" appearance="2" Type="BodyArmor">
 		<ItemComponent>
@@ -2861,4 +2861,12 @@
 		</ItemComponent>
 		<Flags ForceAttachOffHandPrimaryItemBone="true" />
 	</Item>
+	<CraftedItem id="mp_coop_test_bastard_sword" name="{=!}Coop Test Bastard Sword" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
+		<Pieces>
+			<Piece id="aserai_blade_7" Type="Blade" scale_factor="100" />
+			<Piece id="aserai_guard_9" Type="Guard" scale_factor="100" />
+			<Piece id="aserai_grip_24" Type="Handle" scale_factor="100" />
+			<Piece id="aserai_noble_pommel_1" Type="Pommel" scale_factor="100" />
+		</Pieces>
+	</CraftedItem>
 </Items>

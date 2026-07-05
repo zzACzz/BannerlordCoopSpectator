@@ -79,6 +79,13 @@ namespace CoopSpectator.Patches
             if (entryState == null)
                 return;
 
+            if (CoopTestBattleOptions.IsCampaignMirrorSnapshot(BattleSnapshotRuntimeState.GetCurrent()))
+            {
+                EquipmentInjectedByEntryId[exactOrigin.EntryId] =
+                    agentBuildData?.AgentOverridenSpawnEquipment != null;
+                return;
+            }
+
             bool isPlayerControlledOrigin = ((IAgentOriginBase)exactOrigin).IsUnderPlayersCommand;
             bool contractPlayerControlledOrigin =
                 isPlayerControlledOrigin &&

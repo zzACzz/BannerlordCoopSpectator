@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 7;
+        private const int SchemaVersion = 9;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -65,6 +65,8 @@ namespace CoopSpectator.Infrastructure
                         schemaVersion != 4 &&
                         schemaVersion != 5 &&
                         schemaVersion != 6 &&
+                        schemaVersion != 7 &&
+                        schemaVersion != 8 &&
                         schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
@@ -108,6 +110,7 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, snapshot.PlayerSide);
             writer.Write(snapshot.PlayerTroopsReceivedDamageMultiplier);
             WriteBattleScenarioContext(writer, snapshot.ScenarioContext);
+            WriteList(writer, snapshot.CraftedWeapons, WriteCraftedWeaponSnapshot);
             WriteList(writer, snapshot.Sides, WriteBattleSide);
         }
 
@@ -135,7 +138,58 @@ namespace CoopSpectator.Infrastructure
                 PlayerSide = ReadString(reader),
                 PlayerTroopsReceivedDamageMultiplier = schemaVersion >= 2 ? reader.ReadSingle() : 1f,
                 ScenarioContext = schemaVersion >= 4 ? ReadBattleScenarioContext(reader, schemaVersion) : null,
+                CraftedWeapons = schemaVersion >= 9
+                    ? ReadList(reader, ReadCraftedWeaponSnapshot) ?? new List<CraftedWeaponSnapshotMessage>()
+                    : new List<CraftedWeaponSnapshotMessage>(),
                 Sides = ReadList(reader, itemReader => ReadBattleSide(itemReader, schemaVersion)) ?? new List<BattleSideSnapshotMessage>()
+            };
+        }
+
+        private static void WriteCraftedWeaponSnapshot(BinaryWriter writer, CraftedWeaponSnapshotMessage craftedWeapon)
+        {
+            WriteString(writer, craftedWeapon?.Key);
+            WriteString(writer, craftedWeapon?.OriginalItemId);
+            WriteString(writer, craftedWeapon?.MirrorItemId);
+            WriteString(writer, craftedWeapon?.Name);
+            WriteString(writer, craftedWeapon?.CraftingTemplateId);
+            WriteString(writer, craftedWeapon?.CultureId);
+            WriteString(writer, craftedWeapon?.ModifierGroupId);
+            WriteString(writer, craftedWeapon?.WeaponDesignHash);
+            writer.Write(craftedWeapon?.IsCraftedByPlayer ?? false);
+            WriteList(writer, craftedWeapon?.Pieces, WriteCraftedWeaponPieceSnapshot);
+        }
+
+        private static CraftedWeaponSnapshotMessage ReadCraftedWeaponSnapshot(BinaryReader reader)
+        {
+            return new CraftedWeaponSnapshotMessage
+            {
+                Key = ReadString(reader),
+                OriginalItemId = ReadString(reader),
+                MirrorItemId = ReadString(reader),
+                Name = ReadString(reader),
+                CraftingTemplateId = ReadString(reader),
+                CultureId = ReadString(reader),
+                ModifierGroupId = ReadString(reader),
+                WeaponDesignHash = ReadString(reader),
+                IsCraftedByPlayer = reader.ReadBoolean(),
+                Pieces = ReadList(reader, ReadCraftedWeaponPieceSnapshot) ?? new List<CraftedWeaponPieceSnapshotMessage>()
+            };
+        }
+
+        private static void WriteCraftedWeaponPieceSnapshot(BinaryWriter writer, CraftedWeaponPieceSnapshotMessage piece)
+        {
+            WriteString(writer, piece?.PieceId);
+            WriteString(writer, piece?.PieceType);
+            writer.Write(piece?.ScalePercentage ?? 100);
+        }
+
+        private static CraftedWeaponPieceSnapshotMessage ReadCraftedWeaponPieceSnapshot(BinaryReader reader)
+        {
+            return new CraftedWeaponPieceSnapshotMessage
+            {
+                PieceId = ReadString(reader),
+                PieceType = ReadString(reader),
+                ScalePercentage = reader.ReadInt32()
             };
         }
 
@@ -290,8 +344,8 @@ namespace CoopSpectator.Infrastructure
                 IsPlayerSide = reader.ReadBoolean(),
                 TotalManCount = reader.ReadInt32(),
                 MissionReadyEntryOrder = ReadList(reader, ReadString) ?? new List<string>(),
-                Parties = ReadList(reader, ReadBattleParty) ?? new List<BattlePartySnapshotMessage>(),
-                Troops = ReadList(reader, ReadTroopStack) ?? new List<TroopStackInfo>()
+                Parties = ReadList(reader, itemReader => ReadBattleParty(itemReader, schemaVersion)) ?? new List<BattlePartySnapshotMessage>(),
+                Troops = ReadList(reader, itemReader => ReadTroopStack(itemReader, schemaVersion)) ?? new List<TroopStackInfo>()
             };
         }
 
@@ -305,7 +359,7 @@ namespace CoopSpectator.Infrastructure
             WriteList(writer, party?.Troops, WriteTroopStack);
         }
 
-        private static BattlePartySnapshotMessage ReadBattleParty(BinaryReader reader)
+        private static BattlePartySnapshotMessage ReadBattleParty(BinaryReader reader, int schemaVersion)
         {
             return new BattlePartySnapshotMessage
             {
@@ -314,7 +368,7 @@ namespace CoopSpectator.Infrastructure
                 IsMainParty = reader.ReadBoolean(),
                 TotalManCount = reader.ReadInt32(),
                 Modifiers = ReadBattlePartyModifier(reader) ?? new BattlePartyModifierSnapshotMessage(),
-                Troops = ReadList(reader, ReadTroopStack) ?? new List<TroopStackInfo>()
+                Troops = ReadList(reader, itemReader => ReadTroopStack(itemReader, schemaVersion)) ?? new List<TroopStackInfo>()
             };
         }
 
@@ -440,11 +494,20 @@ namespace CoopSpectator.Infrastructure
             writer.Write(troop?.IsHero ?? false);
             writer.Write(troop?.Count ?? 0);
             writer.Write(troop?.WoundedCount ?? 0);
+            WriteString(writer, troop?.CampaignFormationClass);
+            WriteString(writer, troop?.CombatItem0CraftedWeaponKey);
+            WriteString(writer, troop?.CombatItem0ModifierId);
+            WriteString(writer, troop?.CombatItem1CraftedWeaponKey);
+            WriteString(writer, troop?.CombatItem1ModifierId);
+            WriteString(writer, troop?.CombatItem2CraftedWeaponKey);
+            WriteString(writer, troop?.CombatItem2ModifierId);
+            WriteString(writer, troop?.CombatItem3CraftedWeaponKey);
+            WriteString(writer, troop?.CombatItem3ModifierId);
         }
 
-        private static TroopStackInfo ReadTroopStack(BinaryReader reader)
+        private static TroopStackInfo ReadTroopStack(BinaryReader reader, int schemaVersion)
         {
-            return new TroopStackInfo
+            var troop = new TroopStackInfo
             {
                 EntryId = ReadString(reader),
                 SideId = ReadString(reader),
@@ -510,6 +573,23 @@ namespace CoopSpectator.Infrastructure
                 Count = reader.ReadInt32(),
                 WoundedCount = reader.ReadInt32()
             };
+
+            if (schemaVersion >= 8)
+                troop.CampaignFormationClass = ReadString(reader);
+
+            if (schemaVersion >= 9)
+            {
+                troop.CombatItem0CraftedWeaponKey = ReadString(reader);
+                troop.CombatItem0ModifierId = ReadString(reader);
+                troop.CombatItem1CraftedWeaponKey = ReadString(reader);
+                troop.CombatItem1ModifierId = ReadString(reader);
+                troop.CombatItem2CraftedWeaponKey = ReadString(reader);
+                troop.CombatItem2ModifierId = ReadString(reader);
+                troop.CombatItem3CraftedWeaponKey = ReadString(reader);
+                troop.CombatItem3ModifierId = ReadString(reader);
+            }
+
+            return troop;
         }
 
         private static void WriteNullableInt32(BinaryWriter writer, int? value)

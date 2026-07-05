@@ -64,6 +64,10 @@ namespace CoopSpectator.Patches
         private static MethodInfo _missionNetworkComponentHandleServerEventSetWieldedItemIndexMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSetAgentHealthMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventMakeAgentDeadMethod;
+        private static readonly object FiveModeWeaponUsageProtocolLock = new object();
+        private static CompressionInfo.Integer _defaultWeaponUsageIndexCompressionInfo;
+        private static bool _defaultWeaponUsageIndexCompressionInfoCaptured;
+        private static bool _fiveModeWeaponUsageProtocolApplied;
 
         private static string _lastSuppressedFollowSwitchKey;
         private static string _lastArmedLocalFollowSuppressionWindowKey;
@@ -430,6 +434,7 @@ namespace CoopSpectator.Patches
 
         public static void Apply(Harmony harmony)
         {
+            TryApplyPatchStep(nameof(PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol), () => PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol(harmony));
             TryApplyPatchStep(nameof(PatchMissionPeerFollowedAgent), () => PatchMissionPeerFollowedAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateAgent), () => PatchMissionNetworkComponentCreateAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentActionSet), () => PatchMissionNetworkComponentSetAgentActionSet(harmony));
@@ -717,6 +722,70 @@ namespace CoopSpectator.Patches
             ModLogger.Info(
                 "BattleMapSpawnHandoffPatch: cleared active exact commander MissionOrderVM. " +
                 "Source=" + (source ?? "unknown"));
+        }
+
+        private static void PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol(Harmony harmony)
+        {
+            MethodInfo target = AccessTools.Method(
+                typeof(BattleSnapshotRuntimeState),
+                nameof(BattleSnapshotRuntimeState.SetCurrent));
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(BattleSnapshotRuntimeState_SetCurrent_FiveModeWeaponUsageProtocol_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: BattleSnapshotRuntimeState.SetCurrent not found for five-mode weapon usage protocol. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to BattleSnapshotRuntimeState.SetCurrent for five-mode weapon usage protocol.");
+        }
+
+        private static void BattleSnapshotRuntimeState_SetCurrent_FiveModeWeaponUsageProtocol_Postfix(
+            BattleSnapshotMessage snapshot,
+            string source)
+        {
+            try
+            {
+                bool enableFiveModeProtocol = CoopTestBattleOptions.IsFiveModeWeaponUsageProtocolSnapshot(snapshot);
+                TrySetFiveModeWeaponUsageProtocolApplied(
+                    enableFiveModeProtocol,
+                    "BattleSnapshotRuntimeState.SetCurrent:" + (source ?? "unknown") +
+                    ":BattleType=" + (snapshot?.BattleType ?? "null"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: five-mode weapon usage protocol snapshot postfix failed open: " + ex.Message);
+            }
+        }
+
+        private static void TrySetFiveModeWeaponUsageProtocolApplied(bool enabled, string source)
+        {
+            lock (FiveModeWeaponUsageProtocolLock)
+            {
+                if (!_defaultWeaponUsageIndexCompressionInfoCaptured)
+                {
+                    _defaultWeaponUsageIndexCompressionInfo = CompressionMission.WeaponUsageIndexCompressionInfo;
+                    _defaultWeaponUsageIndexCompressionInfoCaptured = true;
+                }
+
+                if (_fiveModeWeaponUsageProtocolApplied == enabled)
+                    return;
+
+                CompressionMission.WeaponUsageIndexCompressionInfo = enabled
+                    ? new CompressionInfo.Integer(0, 4, true)
+                    : _defaultWeaponUsageIndexCompressionInfo;
+                _fiveModeWeaponUsageProtocolApplied = enabled;
+
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: " +
+                    (enabled
+                        ? "enabled experimental five-mode weapon usage protocol."
+                        : "restored default weapon usage protocol.") +
+                    " Source=" + (source ?? "unknown") +
+                    " ActiveRange=" + (enabled ? "0..4" : "default"));
+            }
         }
 
         private static void PatchMissionPeerFollowedAgent(Harmony harmony)
@@ -7186,6 +7255,9 @@ namespace CoopSpectator.Patches
                 return true;
             }
 
+            if (CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission))
+                return true;
+
             if (setWeaponAmmoData == null)
                 return true;
 
@@ -7464,6 +7536,9 @@ namespace CoopSpectator.Patches
                 return true;
             }
 
+            if (CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission))
+                return true;
+
             if (weaponEquipmentIndex < EquipmentIndex.Weapon0 ||
                 weaponEquipmentIndex > EquipmentIndex.Weapon3)
             {
@@ -7540,6 +7615,9 @@ namespace CoopSpectator.Patches
             {
                 return true;
             }
+
+            if (CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission))
+                return true;
 
             if (weaponEquipmentIndex < EquipmentIndex.Weapon0 ||
                 weaponEquipmentIndex > EquipmentIndex.Weapon3)
@@ -7640,6 +7718,9 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
+            if (CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission))
+                return false;
+
             string entryId = null;
             if (!CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
                 !CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId) &&
@@ -7712,6 +7793,9 @@ namespace CoopSpectator.Patches
             {
                 return false;
             }
+
+            if (CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission))
+                return false;
 
             EquipmentIndex weaponEquipmentIndex = setWeaponAmmoData.WeaponEquipmentIndex;
             if (weaponEquipmentIndex < EquipmentIndex.Weapon0 ||
@@ -13477,6 +13561,9 @@ namespace CoopSpectator.Patches
             {
                 return false;
             }
+
+            if (CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission))
+                return false;
 
             Equipment expectedEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
                 entryState,

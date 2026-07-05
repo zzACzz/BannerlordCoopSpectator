@@ -136,17 +136,17 @@ namespace CoopSpectator.Infrastructure
             equipment.IncludeMountVisualsInPreSpawn =
                 entryState.IsMounted && (buildMode == BuildMode.Diagnostic || isRuntimeExactSupported);
 
-            AddSlot(equipment, EquipmentIndex.Weapon0, "Item0", entryState.CombatItem0Id, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem0Id));
-            AddSlot(equipment, EquipmentIndex.Weapon1, "Item1", entryState.CombatItem1Id, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem1Id));
-            AddSlot(equipment, EquipmentIndex.Weapon2, "Item2", entryState.CombatItem2Id, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem2Id));
-            AddSlot(equipment, EquipmentIndex.Weapon3, "Item3", entryState.CombatItem3Id, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem3Id));
-            AddSlot(equipment, EquipmentIndex.Head, "Head", entryState.CombatHeadId, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatHeadId));
-            AddSlot(equipment, EquipmentIndex.Body, "Body", entryState.CombatBodyId, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatBodyId));
-            AddSlot(equipment, EquipmentIndex.Leg, "Leg", entryState.CombatLegId, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatLegId));
-            AddSlot(equipment, EquipmentIndex.Gloves, "Gloves", entryState.CombatGlovesId, mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatGlovesId));
-            AddSlot(equipment, EquipmentIndex.Cape, "Cape", entryState.CombatCapeId, mustExistAtCreateAgentTime: false, canBeLateSynchronized: true);
-            AddSlot(equipment, EquipmentIndex.Horse, "Horse", entryState.CombatHorseId, mustExistAtCreateAgentTime: entryState.IsMounted, canBeLateSynchronized: false, isMountedCritical: entryState.IsMounted);
-            AddSlot(equipment, EquipmentIndex.HorseHarness, "HorseHarness", entryState.CombatHorseHarnessId, mustExistAtCreateAgentTime: entryState.IsMounted && !string.IsNullOrWhiteSpace(entryState.CombatHorseHarnessId), canBeLateSynchronized: false, isMountedCritical: entryState.IsMounted);
+            AddSlot(equipment, EquipmentIndex.Weapon0, "Item0", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Weapon0, entryState.CombatItem0Id), mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem0Id));
+            AddSlot(equipment, EquipmentIndex.Weapon1, "Item1", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Weapon1, entryState.CombatItem1Id), mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem1Id));
+            AddSlot(equipment, EquipmentIndex.Weapon2, "Item2", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Weapon2, entryState.CombatItem2Id), mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem2Id));
+            AddSlot(equipment, EquipmentIndex.Weapon3, "Item3", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Weapon3, entryState.CombatItem3Id), mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatItem3Id));
+            AddSlot(equipment, EquipmentIndex.Head, "Head", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Head, entryState.CombatHeadId), mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatHeadId));
+            AddSlot(equipment, EquipmentIndex.Body, "Body", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Body, entryState.CombatBodyId), mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatBodyId));
+            AddSlot(equipment, EquipmentIndex.Leg, "Leg", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Leg, entryState.CombatLegId), mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatLegId));
+            AddSlot(equipment, EquipmentIndex.Gloves, "Gloves", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Gloves, entryState.CombatGlovesId), mustExistAtCreateAgentTime: !string.IsNullOrWhiteSpace(entryState.CombatGlovesId));
+            AddSlot(equipment, EquipmentIndex.Cape, "Cape", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Cape, entryState.CombatCapeId), mustExistAtCreateAgentTime: false, canBeLateSynchronized: true);
+            AddSlot(equipment, EquipmentIndex.Horse, "Horse", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Horse, entryState.CombatHorseId), mustExistAtCreateAgentTime: entryState.IsMounted, canBeLateSynchronized: false, isMountedCritical: entryState.IsMounted);
+            AddSlot(equipment, EquipmentIndex.HorseHarness, "HorseHarness", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.HorseHarness, entryState.CombatHorseHarnessId), mustExistAtCreateAgentTime: entryState.IsMounted && !string.IsNullOrWhiteSpace(entryState.CombatHorseHarnessId), canBeLateSynchronized: false, isMountedCritical: entryState.IsMounted);
 
             NormalizeStrictHeroWeaponLayout(equipment, entryState, isStrictHeroEntry || isRuntimeExactSupported);
         }
@@ -490,6 +490,15 @@ namespace CoopSpectator.Infrastructure
             {
                 return null;
             }
+        }
+
+        private static string ResolveCreateTimeSlotItemId(
+            Equipment spawnEquipment,
+            EquipmentIndex slot,
+            string fallbackItemId)
+        {
+            ItemObject item = spawnEquipment?[slot].Item;
+            return item?.StringId ?? fallbackItemId;
         }
 
         private static List<MountedWeaponSlotState> BuildCanonicalMountedWeaponLayout(

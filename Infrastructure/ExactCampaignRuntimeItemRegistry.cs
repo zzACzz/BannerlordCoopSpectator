@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Xml;
+using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.Localization;
@@ -51,11 +53,21 @@ namespace CoopSpectator.Infrastructure
             new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> LoadedExactItemIds =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, string> MirrorItemIdsByOriginalId =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> LoadedMirrorItemIds =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, string> CraftedMirrorItemIdsByKey =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> LoadedCraftedMirrorItemIds =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private static bool _indexBuilt;
         private static string _indexSummary = "not-built";
         private static bool _craftingSupportLoaded;
         private static string _craftingSupportSummary = "not-loaded";
+        private const string MirrorItemIdPrefix = "cs_mirror_";
+        private const string CraftedMirrorItemIdPrefix = "cs_crafted_";
 
         internal static void EnsureCraftingSupportLoadedForBootstrap(string source)
         {
@@ -169,6 +181,12 @@ namespace CoopSpectator.Infrastructure
                         string.Join(", ", unresolvedSummary.OrderBy(entry => entry, StringComparer.Ordinal)) +
                         "].");
                 }
+
+                if (CoopTestBattleOptions.IsCampaignMirrorHeroesSnapshot(runtimeState.Snapshot))
+                    EnsureCraftedMirrorItemsLoadedFromSnapshotLocked(objectManager, runtimeState.Snapshot, source);
+
+                if (CoopTestBattleOptions.IsCampaignMirrorSnapshot(runtimeState.Snapshot))
+                    EnsureMirrorItemsLoadedFromStateLocked(objectManager, runtimeState, source);
             }
         }
 
@@ -181,6 +199,698 @@ namespace CoopSpectator.Infrastructure
                     "Reason=" + (reason ?? "unknown") +
                     " LoadedExactItems=" + LoadedExactItemIds.Count);
             }
+        }
+
+        public static bool TryEnsureMirrorItem(
+            string originalItemId,
+            string source,
+            out string mirrorItemId,
+            out string failureSummary)
+        {
+            mirrorItemId = null;
+            failureSummary = null;
+            if (string.IsNullOrWhiteSpace(originalItemId))
+                return false;
+
+            MBObjectManager objectManager = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
+            if (objectManager == null)
+            {
+                failureSummary = originalItemId + "=object-manager-null";
+                return false;
+            }
+
+            lock (Sync)
+            {
+                EnsureIndexBuilt();
+                return TryEnsureMirrorItemLocked(
+                    objectManager,
+                    originalItemId,
+                    source,
+                    out mirrorItemId,
+                    out failureSummary);
+            }
+        }
+
+        public static bool TryResolveMirrorItemId(string originalItemId, out string mirrorItemId)
+        {
+            mirrorItemId = null;
+            if (string.IsNullOrWhiteSpace(originalItemId))
+                return false;
+
+            MBObjectManager objectManager = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
+            if (objectManager == null)
+                return false;
+
+            lock (Sync)
+            {
+                if (!MirrorItemIdsByOriginalId.TryGetValue(originalItemId, out string mappedMirrorItemId) ||
+                    string.IsNullOrWhiteSpace(mappedMirrorItemId))
+                {
+                    return false;
+                }
+
+                if (TryResolveItem(objectManager, mappedMirrorItemId) == null)
+                    return false;
+
+                mirrorItemId = mappedMirrorItemId;
+                return true;
+            }
+        }
+
+        public static bool TryResolvePreloadedMirrorItem(
+            string originalItemId,
+            out string mirrorItemId,
+            out string failureSummary)
+        {
+            mirrorItemId = null;
+            failureSummary = null;
+            if (string.IsNullOrWhiteSpace(originalItemId))
+            {
+                failureSummary = "null=invalid-static-mirror-input";
+                return false;
+            }
+
+            MBObjectManager objectManager = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
+            if (objectManager == null)
+            {
+                failureSummary = originalItemId + "=object-manager-null";
+                return false;
+            }
+
+            lock (Sync)
+            {
+                return TryResolvePreloadedMirrorItemLocked(
+                    objectManager,
+                    originalItemId,
+                    out mirrorItemId,
+                    out failureSummary);
+            }
+        }
+
+        public static bool TryResolveCraftedMirrorItem(
+            string craftedWeaponKey,
+            out string mirrorItemId,
+            out string failureSummary)
+        {
+            mirrorItemId = null;
+            failureSummary = null;
+            if (string.IsNullOrWhiteSpace(craftedWeaponKey))
+            {
+                failureSummary = "null=invalid-crafted-mirror-input";
+                return false;
+            }
+
+            MBObjectManager objectManager = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
+            if (objectManager == null)
+            {
+                failureSummary = craftedWeaponKey + "=object-manager-null";
+                return false;
+            }
+
+            lock (Sync)
+            {
+                string trimmedKey = craftedWeaponKey.Trim();
+                if (!CraftedMirrorItemIdsByKey.TryGetValue(trimmedKey, out string mappedMirrorItemId) ||
+                    string.IsNullOrWhiteSpace(mappedMirrorItemId))
+                {
+                    failureSummary = trimmedKey + "=crafted-mirror-not-preloaded";
+                    return false;
+                }
+
+                if (TryResolveItem(objectManager, mappedMirrorItemId) == null)
+                {
+                    failureSummary = trimmedKey + "=" + mappedMirrorItemId + "=crafted-mirror-unresolved";
+                    return false;
+                }
+
+                mirrorItemId = mappedMirrorItemId;
+                return true;
+            }
+        }
+
+        public static bool TryResolveItemModifier(
+            string modifierId,
+            out ItemModifier itemModifier,
+            out string failureSummary)
+        {
+            itemModifier = null;
+            failureSummary = null;
+            if (string.IsNullOrWhiteSpace(modifierId))
+                return true;
+
+            MBObjectManager objectManager = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
+            if (objectManager == null)
+            {
+                failureSummary = modifierId + "=object-manager-null";
+                return false;
+            }
+
+            lock (Sync)
+            {
+                EnsureCraftingSupportLoaded(objectManager);
+                itemModifier = TryResolveObject<ItemModifier>(objectManager, modifierId.Trim());
+                if (itemModifier != null)
+                    return true;
+
+                failureSummary = modifierId + "=item-modifier-unresolved";
+                return false;
+            }
+        }
+
+        private static void EnsureCraftedMirrorItemsLoadedFromSnapshotLocked(
+            MBObjectManager objectManager,
+            BattleSnapshotMessage snapshot,
+            string source)
+        {
+            if (objectManager == null || snapshot?.CraftedWeapons == null || snapshot.CraftedWeapons.Count == 0)
+                return;
+
+            EnsureCraftingSupportLoaded(objectManager);
+
+            List<CraftedWeaponSnapshotMessage> requestedCraftedWeapons = snapshot.CraftedWeapons
+                .Where(craftedWeapon => craftedWeapon != null && !string.IsNullOrWhiteSpace(craftedWeapon.Key))
+                .GroupBy(craftedWeapon => craftedWeapon.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(craftedWeapon => craftedWeapon.Key, StringComparer.Ordinal)
+                .ToList();
+            if (requestedCraftedWeapons.Count == 0)
+                return;
+
+            int itemCountBefore = TryGetItemCount(objectManager);
+            var craftedItemsKnownBefore = new HashSet<string>(LoadedCraftedMirrorItemIds, StringComparer.OrdinalIgnoreCase);
+            var resolvedThisPass = new List<string>();
+            var unresolvedThisPass = new List<string>();
+            foreach (CraftedWeaponSnapshotMessage craftedWeapon in requestedCraftedWeapons)
+            {
+                if (TryEnsureCraftedMirrorItemLocked(
+                        objectManager,
+                        craftedWeapon,
+                        source,
+                        out string mirrorItemId,
+                        out string failureSummary))
+                {
+                    if (!craftedItemsKnownBefore.Contains(mirrorItemId))
+                        resolvedThisPass.Add(craftedWeapon.Key + "=" + mirrorItemId);
+                    LoadedCraftedMirrorItemIds.Add(mirrorItemId);
+                }
+                else if (!string.IsNullOrWhiteSpace(failureSummary))
+                {
+                    unresolvedThisPass.Add(failureSummary);
+                }
+            }
+
+            int itemCountAfter = TryGetItemCount(objectManager);
+            ModLogger.Info(
+                "ExactCampaignRuntimeItemRegistry: checked crafted campaign mirror item availability. " +
+                "Source=" + (source ?? "unknown") +
+                " Requested=" + requestedCraftedWeapons.Count +
+                " MirroredTotal=" + CraftedMirrorItemIdsByKey.Count +
+                " ResolvedThisPass=" + resolvedThisPass.Count +
+                " Unresolved=" + unresolvedThisPass.Count +
+                " ItemCountBefore=" + itemCountBefore +
+                " ItemCountAfter=" + itemCountAfter +
+                " CraftingSupport={" + _craftingSupportSummary + "}");
+
+            if (resolvedThisPass.Count > 0)
+            {
+                ModLogger.Info(
+                    "ExactCampaignRuntimeItemRegistry: crafted campaign mirror item mappings resolved = [" +
+                    string.Join(", ", resolvedThisPass.OrderBy(entry => entry, StringComparer.Ordinal).Take(40)) +
+                    (resolvedThisPass.Count > 40 ? ", ..." : string.Empty) +
+                    "].");
+            }
+
+            if (unresolvedThisPass.Count > 0)
+            {
+                ModLogger.Info(
+                    "ExactCampaignRuntimeItemRegistry: unresolved crafted campaign mirror item ids = [" +
+                    string.Join(", ", unresolvedThisPass.OrderBy(entry => entry, StringComparer.Ordinal).Take(40)) +
+                    (unresolvedThisPass.Count > 40 ? ", ..." : string.Empty) +
+                    "].");
+            }
+        }
+
+        private static bool TryEnsureCraftedMirrorItemLocked(
+            MBObjectManager objectManager,
+            CraftedWeaponSnapshotMessage craftedWeapon,
+            string source,
+            out string mirrorItemId,
+            out string failureSummary)
+        {
+            mirrorItemId = null;
+            failureSummary = null;
+            if (objectManager == null || craftedWeapon == null || string.IsNullOrWhiteSpace(craftedWeapon.Key))
+            {
+                failureSummary = "invalid-crafted-mirror-input";
+                return false;
+            }
+
+            string craftedKey = craftedWeapon.Key.Trim();
+            string generatedMirrorItemId = !string.IsNullOrWhiteSpace(craftedWeapon.MirrorItemId)
+                ? craftedWeapon.MirrorItemId.Trim()
+                : BuildCraftedMirrorItemId(craftedKey);
+
+            if (CraftedMirrorItemIdsByKey.TryGetValue(craftedKey, out string existingMirrorItemId) &&
+                !string.IsNullOrWhiteSpace(existingMirrorItemId) &&
+                TryResolveItem(objectManager, existingMirrorItemId) != null)
+            {
+                mirrorItemId = existingMirrorItemId;
+                LoadedCraftedMirrorItemIds.Add(existingMirrorItemId);
+                return true;
+            }
+
+            ItemObject alreadyRegisteredMirror = TryResolveItem(objectManager, generatedMirrorItemId);
+            if (alreadyRegisteredMirror != null)
+            {
+                CraftedMirrorItemIdsByKey[craftedKey] = generatedMirrorItemId;
+                LoadedCraftedMirrorItemIds.Add(generatedMirrorItemId);
+                mirrorItemId = generatedMirrorItemId;
+                return true;
+            }
+
+            if (string.IsNullOrWhiteSpace(craftedWeapon.CraftingTemplateId))
+            {
+                failureSummary = craftedKey + "=crafting-template-missing";
+                return false;
+            }
+
+            CraftingTemplate craftingTemplate = TryResolveObject<CraftingTemplate>(objectManager, craftedWeapon.CraftingTemplateId);
+            if (craftingTemplate == null)
+            {
+                failureSummary = craftedKey + "=crafting-template-unresolved:" + craftedWeapon.CraftingTemplateId;
+                return false;
+            }
+
+            ItemModifierGroup itemModifierGroup = null;
+            if (!string.IsNullOrWhiteSpace(craftedWeapon.ModifierGroupId))
+            {
+                itemModifierGroup = TryResolveObject<ItemModifierGroup>(objectManager, craftedWeapon.ModifierGroupId);
+                if (itemModifierGroup == null)
+                {
+                    failureSummary = craftedKey + "=crafted-modifier-group-unresolved:" + craftedWeapon.ModifierGroupId;
+                    return false;
+                }
+            }
+            else
+            {
+                itemModifierGroup = craftingTemplate.ItemModifierGroup;
+            }
+
+            WeaponDesignElement[] usedPieces = BuildCraftedWeaponDesignElements(
+                objectManager,
+                craftingTemplate,
+                craftedWeapon,
+                out string pieceFailure);
+            if (usedPieces == null)
+            {
+                failureSummary = craftedKey + "=" + (pieceFailure ?? "crafted-piece-build-failed");
+                return false;
+            }
+
+            string weaponDescriptionCanonicalizationSummary =
+                CanonicalizeCraftingTemplateWeaponDescriptionAvailablePieces(objectManager, craftingTemplate, usedPieces);
+
+            ItemObject createdItem = null;
+            try
+            {
+                createdItem = objectManager.CreateObject<ItemObject>(generatedMirrorItemId);
+                TryMarkItemObjectAsMultiplayerItem(createdItem);
+                if (craftedWeapon.IsCraftedByPlayer)
+                    TryMarkItemObjectAsPlayerCrafted(ref createdItem);
+
+                ItemObject generatedItem = Crafting.CreatePreCraftedWeaponOnDeserialize(
+                    createdItem,
+                    usedPieces,
+                    craftedWeapon.CraftingTemplateId,
+                    CreateCraftedWeaponName(craftedWeapon, generatedMirrorItemId),
+                    itemModifierGroup);
+
+                if (generatedItem?.WeaponComponent == null)
+                {
+                    objectManager.UnregisterObject(createdItem);
+                    failureSummary =
+                        craftedKey + "=" + generatedMirrorItemId +
+                        "=crafted-generation-returned-no-weapon-component" +
+                        BuildCraftedGenerationCompatibilitySuffix(objectManager, craftingTemplate, usedPieces) +
+                        "/compat:canonicalization=" + weaponDescriptionCanonicalizationSummary;
+                    return false;
+                }
+
+                ApplyCraftedItemMetadata(objectManager, generatedItem, craftedWeapon);
+                CraftedMirrorItemIdsByKey[craftedKey] = generatedMirrorItemId;
+                LoadedCraftedMirrorItemIds.Add(generatedMirrorItemId);
+                mirrorItemId = generatedMirrorItemId;
+                ModLogger.Info(
+                    "ExactCampaignRuntimeItemRegistry: registered crafted campaign mirror item. " +
+                    "Key=" + craftedKey +
+                    " Original=" + (craftedWeapon.OriginalItemId ?? "null") +
+                    " Mirror=" + generatedMirrorItemId +
+                    " Template=" + craftedWeapon.CraftingTemplateId +
+                    " ModifierGroup=" + (craftedWeapon.ModifierGroupId ?? "(template-default)") +
+                    " Pieces=" + (craftedWeapon.Pieces?.Count ?? 0) +
+                    " Canonicalization=" + weaponDescriptionCanonicalizationSummary +
+                    " Source=" + (source ?? "unknown"));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (createdItem != null)
+                {
+                    try
+                    {
+                        objectManager.UnregisterObject(createdItem);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                failureSummary = craftedKey + "=" + generatedMirrorItemId + "=crafted-mirror-failed:" + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        private static void EnsureMirrorItemsLoadedFromStateLocked(
+            MBObjectManager objectManager,
+            BattleRuntimeState runtimeState,
+            string source)
+        {
+            if (objectManager == null || runtimeState == null)
+                return;
+
+            List<string> requestedItemIds = CollectBattleEquipmentItemIds(runtimeState)
+                .Where(itemId => !string.IsNullOrWhiteSpace(itemId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(itemId => itemId, StringComparer.Ordinal)
+                .ToList();
+            if (requestedItemIds.Count == 0)
+                return;
+
+            int itemCountBefore = TryGetItemCount(objectManager);
+            var mirrorItemsKnownBefore = new HashSet<string>(LoadedMirrorItemIds, StringComparer.OrdinalIgnoreCase);
+            var resolvedThisPass = new List<string>();
+            var unresolvedThisPass = new List<string>();
+            foreach (string itemId in requestedItemIds)
+            {
+                if (TryResolvePreloadedMirrorItemLocked(
+                        objectManager,
+                        itemId,
+                        out string mirrorItemId,
+                        out string failureSummary))
+                {
+                    if (!mirrorItemsKnownBefore.Contains(mirrorItemId))
+                        resolvedThisPass.Add(itemId + "=" + mirrorItemId);
+                    LoadedMirrorItemIds.Add(mirrorItemId);
+                }
+                else if (!string.IsNullOrWhiteSpace(failureSummary))
+                {
+                    unresolvedThisPass.Add(failureSummary);
+                }
+            }
+
+            int itemCountAfter = TryGetItemCount(objectManager);
+            ModLogger.Info(
+                "ExactCampaignRuntimeItemRegistry: checked static campaign mirror item availability. " +
+                "Source=" + (source ?? "unknown") +
+                " Requested=" + requestedItemIds.Count +
+                " MirroredTotal=" + MirrorItemIdsByOriginalId.Count +
+                " ResolvedThisPass=" + resolvedThisPass.Count +
+                " Unresolved=" + unresolvedThisPass.Count +
+                " ItemCountBefore=" + itemCountBefore +
+                " ItemCountAfter=" + itemCountAfter +
+                " IndexSummary={" + _indexSummary + "}");
+
+            if (resolvedThisPass.Count > 0)
+            {
+                ModLogger.Info(
+                    "ExactCampaignRuntimeItemRegistry: static campaign mirror item mappings resolved = [" +
+                    string.Join(", ", resolvedThisPass.OrderBy(entry => entry, StringComparer.Ordinal).Take(80)) +
+                    (resolvedThisPass.Count > 80 ? ", ..." : string.Empty) +
+                    "].");
+            }
+
+            if (unresolvedThisPass.Count > 0)
+            {
+                ModLogger.Info(
+                    "ExactCampaignRuntimeItemRegistry: unresolved campaign mirror item ids = [" +
+                    string.Join(", ", unresolvedThisPass.OrderBy(entry => entry, StringComparer.Ordinal).Take(80)) +
+                    (unresolvedThisPass.Count > 80 ? ", ..." : string.Empty) +
+                    "].");
+            }
+        }
+
+        private static bool TryResolvePreloadedMirrorItemLocked(
+            MBObjectManager objectManager,
+            string originalItemId,
+            out string mirrorItemId,
+            out string failureSummary)
+        {
+            mirrorItemId = null;
+            failureSummary = null;
+            if (objectManager == null || string.IsNullOrWhiteSpace(originalItemId))
+            {
+                failureSummary = (originalItemId ?? "null") + "=invalid-static-mirror-input";
+                return false;
+            }
+
+            string trimmedOriginalItemId = originalItemId.Trim();
+            if (MirrorItemIdsByOriginalId.TryGetValue(trimmedOriginalItemId, out string existingMirrorItemId) &&
+                !string.IsNullOrWhiteSpace(existingMirrorItemId) &&
+                TryResolveItem(objectManager, existingMirrorItemId) != null)
+            {
+                mirrorItemId = existingMirrorItemId;
+                LoadedMirrorItemIds.Add(existingMirrorItemId);
+                return true;
+            }
+
+            string generatedMirrorItemId = BuildMirrorItemId(trimmedOriginalItemId);
+            ItemObject preloadedMirrorItem = TryResolveItem(objectManager, generatedMirrorItemId);
+            if (preloadedMirrorItem == null)
+            {
+                failureSummary = trimmedOriginalItemId + "=" + generatedMirrorItemId + "=static-mirror-missing";
+                return false;
+            }
+
+            MirrorItemIdsByOriginalId[trimmedOriginalItemId] = generatedMirrorItemId;
+            LoadedMirrorItemIds.Add(generatedMirrorItemId);
+            mirrorItemId = generatedMirrorItemId;
+            return true;
+        }
+
+        private static bool TryEnsureMirrorItemLocked(
+            MBObjectManager objectManager,
+            string originalItemId,
+            string source,
+            out string mirrorItemId,
+            out string failureSummary)
+        {
+            mirrorItemId = null;
+            failureSummary = null;
+            if (objectManager == null || string.IsNullOrWhiteSpace(originalItemId))
+            {
+                failureSummary = (originalItemId ?? "null") + "=invalid-mirror-input";
+                return false;
+            }
+
+            string trimmedOriginalItemId = originalItemId.Trim();
+            if (MirrorItemIdsByOriginalId.TryGetValue(trimmedOriginalItemId, out string existingMirrorItemId) &&
+                !string.IsNullOrWhiteSpace(existingMirrorItemId) &&
+                TryResolveItem(objectManager, existingMirrorItemId) != null)
+            {
+                mirrorItemId = existingMirrorItemId;
+                LoadedMirrorItemIds.Add(existingMirrorItemId);
+                return true;
+            }
+
+            string generatedMirrorItemId = BuildMirrorItemId(trimmedOriginalItemId);
+            ItemObject alreadyRegisteredMirror = TryResolveItem(objectManager, generatedMirrorItemId);
+            if (alreadyRegisteredMirror != null)
+            {
+                MirrorItemIdsByOriginalId[trimmedOriginalItemId] = generatedMirrorItemId;
+                LoadedMirrorItemIds.Add(generatedMirrorItemId);
+                mirrorItemId = generatedMirrorItemId;
+                return true;
+            }
+
+            if (!DefinitionsById.TryGetValue(trimmedOriginalItemId, out ExactItemDefinition definition))
+            {
+                failureSummary = trimmedOriginalItemId + "=definition-missing";
+                return false;
+            }
+
+            XmlDocument sourceDocument = GetOrLoadXmlDocument(definition.XmlPath);
+            if (sourceDocument?.DocumentElement == null)
+            {
+                failureSummary = trimmedOriginalItemId + "=source-document-missing";
+                return false;
+            }
+
+            XmlNode sourceNode = FindItemNodeById(sourceDocument, trimmedOriginalItemId);
+            if (sourceNode == null)
+            {
+                failureSummary = trimmedOriginalItemId + "=node-missing@" + Path.GetFileName(definition.XmlPath);
+                return false;
+            }
+
+            XmlNode mirrorNode = sourceNode.CloneNode(deep: true);
+            SetXmlAttribute(mirrorNode, "id", generatedMirrorItemId);
+            if (string.Equals(mirrorNode.Name, "Item", StringComparison.Ordinal) ||
+                string.Equals(mirrorNode.Name, "CraftedItem", StringComparison.Ordinal))
+            {
+                SetXmlAttribute(mirrorNode, "multiplayer_item", "true");
+            }
+
+            CraftedItemDependencySet craftedDependencies = null;
+            bool isCraftedItemNode = string.Equals(mirrorNode.Name, "CraftedItem", StringComparison.Ordinal);
+            if (isCraftedItemNode)
+            {
+                EnsureCraftingSupportLoaded(objectManager);
+                craftedDependencies = TryCollectCraftedItemDependencies(mirrorNode);
+            }
+
+            try
+            {
+                XmlDocument singleItemDocument = BuildSingleItemDocument(mirrorNode);
+                objectManager.LoadXml(singleItemDocument);
+            }
+            catch (Exception ex)
+            {
+                failureSummary =
+                    trimmedOriginalItemId + "=" + generatedMirrorItemId +
+                    "=mirror-load-failed@" + Path.GetFileName(definition.XmlPath) +
+                    ":" + ex.GetType().Name +
+                    BuildCraftedDependencyStatusSuffix(objectManager, craftedDependencies);
+                return false;
+            }
+
+            ItemObject mirrorItem = TryResolveItem(objectManager, generatedMirrorItemId);
+            bool manualCraftedFallbackUsed = false;
+            string manualSummary = null;
+            string manualFailure = null;
+            if (mirrorItem == null && isCraftedItemNode)
+            {
+                var mirrorDefinition = new ExactItemDefinition
+                {
+                    ItemId = generatedMirrorItemId,
+                    NodeName = definition.NodeName,
+                    XmlPath = definition.XmlPath,
+                    ModuleId = definition.ModuleId
+                };
+                if (TryRegisterCraftedItemManually(
+                        objectManager,
+                        mirrorDefinition,
+                        mirrorNode,
+                        craftedDependencies,
+                        out manualSummary,
+                        out manualFailure))
+                {
+                    mirrorItem = TryResolveItem(objectManager, generatedMirrorItemId);
+                    manualCraftedFallbackUsed = mirrorItem != null;
+                }
+            }
+
+            if (mirrorItem == null)
+            {
+                failureSummary =
+                    trimmedOriginalItemId + "=" + generatedMirrorItemId +
+                    "=mirror-not-registered@" + Path.GetFileName(definition.XmlPath) +
+                    "/node:" + definition.NodeName +
+                    (!string.IsNullOrWhiteSpace(manualFailure) ? "/manual:" + manualFailure : string.Empty) +
+                    BuildCraftedDependencyStatusSuffix(objectManager, craftedDependencies);
+                return false;
+            }
+
+            MirrorItemIdsByOriginalId[trimmedOriginalItemId] = generatedMirrorItemId;
+            LoadedMirrorItemIds.Add(generatedMirrorItemId);
+            mirrorItemId = generatedMirrorItemId;
+            ModLogger.Info(
+                "ExactCampaignRuntimeItemRegistry: registered campaign mirror item. " +
+                "Original=" + trimmedOriginalItemId +
+                " Mirror=" + generatedMirrorItemId +
+                " Node=" + definition.NodeName +
+                " Module=" + definition.ModuleId +
+                " File=" + Path.GetFileName(definition.XmlPath) +
+                " ManualCraftedFallback=" + manualCraftedFallbackUsed +
+                " ManualSummary=" + (manualSummary ?? "none") +
+                " Source=" + (source ?? "unknown"));
+            return true;
+        }
+
+        private static string BuildMirrorItemId(string originalItemId)
+        {
+            string normalized = NormalizeMirrorIdToken(originalItemId);
+            if (string.IsNullOrWhiteSpace(normalized))
+                normalized = "unknown";
+
+            return MirrorItemIdPrefix + normalized + "_" + ComputeStableMirrorHash(originalItemId);
+        }
+
+        private static string BuildCraftedMirrorItemId(string craftedWeaponKey)
+        {
+            string normalized = NormalizeMirrorIdToken(craftedWeaponKey);
+            if (string.IsNullOrWhiteSpace(normalized))
+                normalized = "unknown";
+
+            return CraftedMirrorItemIdPrefix + normalized + "_" + ComputeStableMirrorHash(craftedWeaponKey);
+        }
+
+        private static string NormalizeMirrorIdToken(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var builder = new StringBuilder(value.Length);
+            foreach (char character in value.Trim())
+            {
+                if ((character >= 'a' && character <= 'z') ||
+                    (character >= 'A' && character <= 'Z') ||
+                    (character >= '0' && character <= '9') ||
+                    character == '_')
+                {
+                    builder.Append(char.ToLowerInvariant(character));
+                }
+                else
+                {
+                    builder.Append('_');
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        private static string ComputeStableMirrorHash(string value)
+        {
+            unchecked
+            {
+                uint hash = 2166136261u;
+                string normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+                for (int i = 0; i < normalized.Length; i++)
+                {
+                    hash ^= normalized[i];
+                    hash *= 16777619u;
+                }
+
+                return hash.ToString("x8", System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+
+        private static void SetXmlAttribute(XmlNode node, string attributeName, string value)
+        {
+            if (node?.Attributes == null ||
+                node.OwnerDocument == null ||
+                string.IsNullOrWhiteSpace(attributeName))
+            {
+                return;
+            }
+
+            XmlAttribute attribute = node.Attributes[attributeName];
+            if (attribute == null)
+            {
+                attribute = node.OwnerDocument.CreateAttribute(attributeName);
+                node.Attributes.Append(attribute);
+            }
+
+            attribute.Value = value ?? string.Empty;
         }
 
         private static void EnsureIndexBuilt()
@@ -473,6 +1183,7 @@ namespace CoopSpectator.Infrastructure
             try
             {
                 createdItem = objectManager.CreateObject<ItemObject>(definition.ItemId);
+                TryMarkItemObjectAsMultiplayerItem(createdItem);
                 TextObject craftedWeaponName = CreateCraftedWeaponName(sourceNode, definition.ItemId);
                 ItemObject generatedItem = Crafting.CreatePreCraftedWeaponOnDeserialize(
                     createdItem,
@@ -890,6 +1601,60 @@ namespace CoopSpectator.Infrastructure
             return usedPieces;
         }
 
+        private static WeaponDesignElement[] BuildCraftedWeaponDesignElements(
+            MBObjectManager objectManager,
+            CraftingTemplate craftingTemplate,
+            CraftedWeaponSnapshotMessage craftedWeapon,
+            out string failureSummary)
+        {
+            failureSummary = null;
+            if (objectManager == null || craftedWeapon?.Pieces == null || craftedWeapon.Pieces.Count == 0)
+            {
+                failureSummary = "crafted-snapshot-pieces-missing";
+                return null;
+            }
+
+            var usedPieces = new WeaponDesignElement[4];
+            foreach (CraftedWeaponPieceSnapshotMessage pieceSnapshot in craftedWeapon.Pieces)
+            {
+                if (pieceSnapshot == null ||
+                    string.IsNullOrWhiteSpace(pieceSnapshot.PieceId) ||
+                    string.IsNullOrWhiteSpace(pieceSnapshot.PieceType))
+                {
+                    failureSummary = "crafted-snapshot-piece-attr-missing";
+                    return null;
+                }
+
+                CraftingPiece craftingPiece = TryResolveCraftingPieceForTemplate(objectManager, craftingTemplate, pieceSnapshot.PieceId);
+                if (craftingPiece == null)
+                {
+                    failureSummary = "crafted-snapshot-piece-unresolved:" + pieceSnapshot.PieceId;
+                    return null;
+                }
+
+                if (!Enum.TryParse(pieceSnapshot.PieceType, out CraftingPiece.PieceTypes pieceType))
+                {
+                    failureSummary = "crafted-snapshot-piece-type-unresolved:" + pieceSnapshot.PieceType;
+                    return null;
+                }
+
+                int pieceTypeIndex = (int)pieceType;
+                if (pieceTypeIndex < 0 || pieceTypeIndex >= usedPieces.Length)
+                {
+                    failureSummary = "crafted-snapshot-piece-type-out-of-range:" + pieceSnapshot.PieceType;
+                    return null;
+                }
+
+                WeaponDesignElement designElement = WeaponDesignElement.CreateUsablePiece(craftingPiece);
+                if (pieceSnapshot.ScalePercentage > 0)
+                    designElement.SetScale(pieceSnapshot.ScalePercentage);
+
+                usedPieces[pieceTypeIndex] = designElement;
+            }
+
+            return usedPieces;
+        }
+
         private static CraftingPiece TryResolveCraftingPieceForTemplate(
             MBObjectManager objectManager,
             CraftingTemplate craftingTemplate,
@@ -920,6 +1685,19 @@ namespace CoopSpectator.Infrastructure
             return new TextObject("{=!}" + (fallbackId ?? "crafted_weapon"));
         }
 
+        private static TextObject CreateCraftedWeaponName(CraftedWeaponSnapshotMessage craftedWeapon, string fallbackId)
+        {
+            string rawName = craftedWeapon?.Name;
+            if (!string.IsNullOrWhiteSpace(rawName))
+            {
+                return rawName.StartsWith("{=", StringComparison.Ordinal)
+                    ? new TextObject(rawName)
+                    : new TextObject("{=!}" + rawName);
+            }
+
+            return new TextObject("{=!}" + (fallbackId ?? "crafted_weapon"));
+        }
+
         private static void ApplyCraftedItemMetadata(
             MBObjectManager objectManager,
             ItemObject itemObject,
@@ -927,6 +1705,8 @@ namespace CoopSpectator.Infrastructure
         {
             if (objectManager == null || itemObject == null || sourceNode?.Attributes == null)
                 return;
+
+            TryMarkItemObjectAsMultiplayerItem(itemObject);
 
             try
             {
@@ -972,6 +1752,96 @@ namespace CoopSpectator.Infrastructure
             {
                 MethodInfo determineCategory = typeof(ItemObject).GetMethod("DetermineItemCategoryForItem", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 determineCategory?.Invoke(itemObject, Array.Empty<object>());
+            }
+            catch
+            {
+            }
+        }
+
+        private static void ApplyCraftedItemMetadata(
+            MBObjectManager objectManager,
+            ItemObject itemObject,
+            CraftedWeaponSnapshotMessage craftedWeapon)
+        {
+            if (objectManager == null || itemObject == null || craftedWeapon == null)
+                return;
+
+            TryMarkItemObjectAsMultiplayerItem(itemObject);
+
+            try
+            {
+                BasicCultureObject culture = TryResolveObject<BasicCultureObject>(objectManager, craftedWeapon.CultureId);
+                if (culture != null)
+                    SetPropertyValue(itemObject, "Culture", culture);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                MethodInfo calculateEffectiveness = typeof(ItemObject).GetMethod("CalculateEffectiveness", BindingFlags.Instance | BindingFlags.NonPublic);
+                if (calculateEffectiveness != null)
+                {
+                    object effectiveness = calculateEffectiveness.Invoke(itemObject, Array.Empty<object>());
+                    if (effectiveness is float effectivenessValue)
+                        SetPropertyValue(itemObject, "Effectiveness", effectivenessValue);
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                MethodInfo determineValue = typeof(ItemObject).GetMethod("DetermineValue", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                determineValue?.Invoke(itemObject, Array.Empty<object>());
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                MethodInfo determineCategory = typeof(ItemObject).GetMethod("DetermineItemCategoryForItem", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                determineCategory?.Invoke(itemObject, Array.Empty<object>());
+            }
+            catch
+            {
+            }
+        }
+
+        private static void TryMarkItemObjectAsMultiplayerItem(ItemObject itemObject)
+        {
+            if (itemObject == null)
+                return;
+
+            try
+            {
+                SetPropertyValue(itemObject, "MultiplayerItem", true);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void TryMarkItemObjectAsPlayerCrafted(ref ItemObject itemObject)
+        {
+            if (itemObject == null)
+                return;
+
+            try
+            {
+                MethodInfo initAsPlayerCraftedItem = typeof(ItemObject).GetMethod(
+                    "InitAsPlayerCraftedItem",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (initAsPlayerCraftedItem == null)
+                    return;
+
+                object[] arguments = { itemObject };
+                initAsPlayerCraftedItem.Invoke(null, arguments);
+                if (arguments[0] is ItemObject updatedItemObject)
+                    itemObject = updatedItemObject;
             }
             catch
             {

@@ -6059,6 +6059,13 @@ namespace CoopSpectator.MissionBehaviors
             if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive)
                 return;
 
+            if (TryForceResendBattleSnapshotBootstrapV2(
+                    peer,
+                    "CoopMissionNetworkBridge.TryHandleBattleSnapshotBootstrapRequest"))
+            {
+                return;
+            }
+
             if (TryPrimePreSynchronizedBattleSnapshotBootstrap(
                     peer,
                     "CoopMissionNetworkBridge.TryHandleBattleSnapshotBootstrapRequest"))
@@ -6106,6 +6113,62 @@ namespace CoopSpectator.MissionBehaviors
                 "Peer=" + (peer.UserName ?? "null") +
                 " TransmissionId=" + transportState.TransmissionId +
                 " ChunkCount=" + transportState.ChunkCount);
+        }
+
+        private bool TryForceResendBattleSnapshotBootstrapV2(NetworkCommunicator peer, string source)
+        {
+            if (!UseBattleSnapshotTransportV2 ||
+                !GameNetwork.IsServer ||
+                Mission == null ||
+                !IsBattleSnapshotBootstrapEligiblePeer(peer, allowUnsynchronizedPeer: true))
+            {
+                return false;
+            }
+
+            BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            if (!TryGetBattleSnapshotTransmissionPayloadDescriptorV2(
+                    snapshot,
+                    out byte[] payloadBytes,
+                    out int logicalByteCount,
+                    out string comparisonKey,
+                    out string payloadHash,
+                    out CoopBattleSnapshotCompressionKind compressionKind,
+                    out CoopBattleSnapshotPayloadEncoding payloadEncoding))
+            {
+                return false;
+            }
+
+            BattleSnapshotTransportState transportState = GetOrCreateBattleSnapshotTransportState(
+                peer,
+                payloadBytes,
+                logicalByteCount,
+                comparisonKey,
+                payloadHash,
+                compressionKind,
+                payloadEncoding,
+                allowUnsynchronizedPeer: true);
+            if (transportState == null)
+                return false;
+
+            if (transportState.IsCompleted)
+                return true;
+
+            SendBattleSnapshotManifest(peer, transportState);
+
+            int maxBootstrapChunks = Math.Max(BattleSnapshotInitialWindowChunks, BattleSnapshotMaxInflightChunksPerPeer);
+            int chunksResent = Math.Min(transportState.ChunkCount, maxBootstrapChunks);
+            for (int chunkIndex = 0; chunkIndex < chunksResent; chunkIndex++)
+                SendBattleSnapshotChunkV2(peer, transportState, chunkIndex);
+
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: force-resent V2 battle snapshot bootstrap after explicit client request. " +
+                "Peer=" + (peer.UserName ?? "null") +
+                " TransmissionId=" + transportState.TransmissionId +
+                " ChunksResent=" + chunksResent +
+                " ChunkCount=" + transportState.ChunkCount +
+                " IsSynchronized=" + peer.IsSynchronized +
+                " Source=" + (source ?? "unknown"));
+            return true;
         }
 
         private void TryArmActiveBattleReconnectFinalizeGate(

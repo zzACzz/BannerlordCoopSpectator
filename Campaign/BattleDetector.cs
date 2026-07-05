@@ -60,6 +60,15 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private static readonly Dictionary<string, object> CachedDefaultSkillObjects = new Dictionary<string, object>(StringComparer.Ordinal);
         private static readonly Dictionary<string, object> CachedDefaultCharacterAttributeObjects = new Dictionary<string, object>(StringComparer.Ordinal);
         private static List<object> _cachedPerkObjects;
+        private static List<CoopTestBattleMultiplayerSeed> _cachedCoopTestBattleXmlSeeds;
+        private static bool _cachedCoopTestBattleXmlSeedsLoaded;
+        private static readonly object CoopTestBattleXmlSeedCacheLock = new object();
+        private static Dictionary<string, string> _cachedCoopTestBattleXmlItemCraftingTemplates;
+        private static bool _cachedCoopTestBattleXmlItemCraftingTemplatesLoaded;
+        private static readonly object CoopTestBattleXmlItemTemplateCacheLock = new object();
+        private const string CoopRoleMatrixStreamTestBastardSwordId = "mp_coop_test_bastard_sword";
+        private const int CoopRoleMatrixStreamLogicalMatrixCount = 14640;
+        private static string _lastRoleMatrixStreamMissingRoleLogKey = string.Empty;
 
         private enum SyntheticRosterMode
         {
@@ -332,6 +341,32 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 default:
                     return "OFF";
             }
+        }
+
+        public static bool IsCoopTestBattleEnabled()
+        {
+            return CoopTestBattleOptions.Enabled;
+        }
+
+        public static string SetCoopTestBattleEnabled(bool enabled)
+        {
+            CoopTestBattleOptions.SetEnabled(enabled);
+            if (enabled)
+                _syntheticRosterMode = SyntheticRosterMode.None;
+
+            string summary = enabled
+                ? BuildCoopTestBattlePreviewSummary()
+                : "disabled";
+            ModLogger.Info(
+                "BattleDetector: coop test battle " +
+                (enabled ? "enabled" : "disabled") +
+                ". Summary=" + summary + ".");
+            return summary;
+        }
+
+        public static string GetCoopTestBattleStatusSummary()
+        {
+            return CoopTestBattleOptions.GetStatusSummary();
         }
 
         public void Tick() // Метод, який треба викликати кожен кадр з головного потоку (наприклад з SubModule.OnApplicationTick)
@@ -3716,7 +3751,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " HasDefender=" + hasDefender +
                 " Troops=" + (payload?.Troops?.Count ?? 0);
 
-            bool ready = sides.Count >= 2 && populatedSideCount >= 2 && hasAttacker && hasDefender;
+            bool isCampaignMirrorHeroesSnapshot = CoopTestBattleOptions.IsCampaignMirrorHeroesSnapshot(snapshot);
+            bool ready = isCampaignMirrorHeroesSnapshot
+                ? sides.Count >= 2 && populatedSideCount >= 1 && (payload?.Troops?.Count ?? 0) > 0
+                : sides.Count >= 2 && populatedSideCount >= 2 && hasAttacker && hasDefender;
             if (!ready && DateTime.UtcNow >= _nextBattleStartWaitLogUtc)
             {
                 _nextBattleStartWaitLogUtc = DateTime.UtcNow.AddSeconds(2);
@@ -3769,6 +3807,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             message.MultiplayerScene = multiplayerSceneResolution?.RuntimeScene ?? string.Empty;
             message.MultiplayerGameType = multiplayerSceneResolution?.RuntimeGameType ?? string.Empty;
             message.MultiplayerSceneResolverSource = multiplayerSceneResolution?.Source ?? string.Empty;
+            bool useCoopTestBattle = CoopTestBattleOptions.Enabled;
+            if (useCoopTestBattle)
+            {
+                scenarioContext = BuildCoopTestBattleScenarioContext(scenarioContext);
+                message.MultiplayerScene = CoopTestBattleOptions.RuntimeScene;
+                message.MultiplayerGameType = CoopTestBattleOptions.RuntimeGameType;
+                message.MultiplayerSceneResolverSource = CoopTestBattleOptions.BuildScenarioSource();
+            }
 
             // 2) Map position (campaign world) // Пояснюємо блок
             float x = 0f; // Дефолтне значення X
@@ -3794,7 +3840,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             // 4) Extended battle snapshot (best-effort) // Пояснюємо блок
             message.Snapshot =
-                _syntheticRosterMode == SyntheticRosterMode.AllCampaignTroops
+                useCoopTestBattle
+                    ? BuildCoopTestBattleSnapshot(message.MapScene, message.PlayerSide)
+                    : _syntheticRosterMode == SyntheticRosterMode.AllCampaignTroops
                     ? BuildSyntheticAllCampaignTroopsSnapshot(message.MapScene, message.PlayerSide)
                     : _syntheticRosterMode == SyntheticRosterMode.LiveHeroes
                         ? BuildSyntheticLiveHeroesSnapshot(message.MapScene, message.PlayerSide)
@@ -3924,6 +3972,18 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     Source = "scenario-context-exception"
                 };
             }
+        }
+
+        private static BattleScenarioContextMessage BuildCoopTestBattleScenarioContext(BattleScenarioContextMessage original)
+        {
+            return new BattleScenarioContextMessage
+            {
+                CampaignBattleType = original?.CampaignBattleType ?? string.Empty,
+                ScenarioKind = CoopTestBattleOptions.GetCurrentBattleType(),
+                IsSiegeBattle = false,
+                Source = CoopTestBattleOptions.BuildScenarioSource(),
+                SiegeContext = null
+            };
         }
 
         private static MapEvent TryGetCurrentMapEventSafe()
@@ -4335,6 +4395,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         PartyId = partyId,
                         CharacterId = spawnTemplateId,
                         OriginalCharacterId = originalCharacterId,
+                        CampaignFormationClass = TryGetCampaignFormationClassName(character),
                         SpawnTemplateId = spawnTemplateId,
                         TroopName = character.Name?.ToString() ?? originalCharacterId,
                         CultureId = CanonicalizeSnapshotCultureId(TryGetCultureId(character)),
@@ -4348,6 +4409,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         WoundedCount = 0
                     };
                     ApplyCombatEquipmentSnapshot(troop, character);
+                    NormalizeMountedFlagFromCombatHorse(troop);
                     ApplyCombatProfileSnapshot(troop, character);
                     partySnapshot.Troops.Add(troop);
                     targetSide.Troops.Add(troop);
@@ -4382,6 +4444,136 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " AttackerEntries=" + attackerSide.Troops.Count +
                 " DefenderEntries=" + defenderSide.Troops.Count + ".");
             LogSnapshotMappings("synthetic-all-campaign-troops", snapshot);
+            return snapshot;
+        }
+
+        private static BattleSnapshotMessage BuildCoopTestBattleSnapshot(string mapScene, string playerSideText)
+        {
+            CoopTestBattleOptions.RosterMode rosterMode = CoopTestBattleOptions.CurrentRosterMode;
+            BattleSnapshotMessage snapshot =
+                rosterMode == CoopTestBattleOptions.RosterMode.MatrixOnly ||
+                rosterMode == CoopTestBattleOptions.RosterMode.FiveModeMatrix ||
+                rosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStream ||
+                rosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStreamMounted
+                    ? CreateEmptyCoopTestBattleSnapshot(mapScene, playerSideText)
+                    : rosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorHeroes
+                        ? BuildCoopTestBattleCampaignMirrorHeroesSnapshot(mapScene, playerSideText)
+                    : BuildSyntheticAllCampaignTroopsSnapshot(mapScene, playerSideText);
+            if (snapshot == null)
+                return null;
+
+            snapshot.BattleId = CoopTestBattleOptions.BattleId;
+            snapshot.BattleType = CoopTestBattleOptions.GetCurrentBattleType();
+            snapshot.MapScene = mapScene;
+            snapshot.PlayerSide = playerSideText;
+
+            int baseRosterEntries = TryGetSnapshotTotalManCount(snapshot);
+            int weaponSlotMatrixEntries =
+                rosterMode == CoopTestBattleOptions.RosterMode.AllCampaignTroops
+                    ? 0
+                    : rosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorAll
+                        ? 0
+                    : rosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorHeroes
+                        ? 0
+                    : rosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStream ||
+                      rosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStreamMounted
+                        ? AppendCoopTestBattleRoleMatrixStreamControlEntries(snapshot)
+                        : AppendCoopTestBattleWeaponSlotMatrix(snapshot);
+            ModLogger.Info(
+                "BattleDetector: using coop test battle snapshot. " +
+                "RosterMode=" + CoopTestBattleOptions.FormatRosterMode(rosterMode) +
+                " " +
+                "RuntimeScene=" + CoopTestBattleOptions.RuntimeScene +
+                " RuntimeGameType=" + CoopTestBattleOptions.RuntimeGameType +
+                " BaseRosterEntries=" + baseRosterEntries +
+                " WeaponSlotMatrixEntries=" + weaponSlotMatrixEntries +
+                " Sides=" + (snapshot.Sides?.Count ?? 0) + ".");
+            LogSnapshotMappings("coop-test-battle", snapshot);
+            return snapshot;
+        }
+
+        private static BattleSnapshotMessage BuildCoopTestBattleCampaignMirrorHeroesSnapshot(string mapScene, string playerSideText)
+        {
+            BattleSnapshotMessage snapshot = CreateEmptyCoopTestBattleSnapshot(mapScene, playerSideText);
+            if (snapshot == null || snapshot.Sides == null || snapshot.Sides.Count == 0)
+                return snapshot;
+
+            List<Hero> playerHeroes = CollectSyntheticPlayerHeroes();
+            if (playerHeroes.Count == 0)
+            {
+                ModLogger.Info("BattleDetector: coop test battle campaign mirror heroes snapshot has no eligible player heroes.");
+                return snapshot;
+            }
+
+            BattleSideSnapshotMessage heroSide = ResolveCoopTestBattlePlayerSideSnapshot(snapshot, playerSideText) ??
+                                                snapshot.Sides.FirstOrDefault();
+            if (heroSide == null)
+                return snapshot;
+
+            var rosterCharacters = playerHeroes
+                .Select(hero => (object)hero.CharacterObject)
+                .Where(character => character != null)
+                .ToList();
+
+            AddSyntheticHeroParty(
+                heroSide,
+                "campaign_mirror_player_heroes",
+                "Campaign mirror player heroes",
+                playerHeroes,
+                rosterCharacters,
+                snapshot);
+
+            foreach (BattleSideSnapshotMessage side in snapshot.Sides.Where(side => side != null))
+            {
+                side.TotalManCount = side.Troops?.Count ?? 0;
+                ApplyResolvedSideAppearance(side, null, "coop-test-campaign-mirror-heroes");
+                CanonicalizeSnapshotSideCulture(side);
+            }
+
+            ModLogger.Info(
+                "BattleDetector: using coop test battle campaign mirror heroes snapshot. " +
+                "HeroSide=" + (heroSide.SideText ?? heroSide.SideId ?? "unknown") +
+                " Heroes=" + playerHeroes.Count +
+                " CraftedWeapons=" + (snapshot.CraftedWeapons?.Count ?? 0) + ".");
+            return snapshot;
+        }
+
+        private static BattleSideSnapshotMessage ResolveCoopTestBattlePlayerSideSnapshot(
+            BattleSnapshotMessage snapshot,
+            string playerSideText)
+        {
+            if (snapshot?.Sides == null || snapshot.Sides.Count == 0)
+                return null;
+
+            string normalized = (playerSideText ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                BattleSideSnapshotMessage bySideText = snapshot.Sides.FirstOrDefault(side =>
+                    side != null &&
+                    (string.Equals(side.SideText, normalized, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(side.SideId, normalized, StringComparison.OrdinalIgnoreCase)));
+                if (bySideText != null)
+                    return bySideText;
+            }
+
+            return snapshot.Sides.FirstOrDefault(side => side?.IsPlayerSide == true) ??
+                   snapshot.Sides.FirstOrDefault(side => side != null);
+        }
+
+        private static BattleSnapshotMessage CreateEmptyCoopTestBattleSnapshot(string mapScene, string playerSideText)
+        {
+            var snapshot = new BattleSnapshotMessage
+            {
+                BattleId = CoopTestBattleOptions.BattleId,
+                BattleType = CoopTestBattleOptions.GetCurrentBattleType(),
+                MapScene = mapScene,
+                PlayerSide = playerSideText
+            };
+
+            bool attackerIsPlayerSide = string.Equals(playerSideText, nameof(BattleSideEnum.Attacker), StringComparison.OrdinalIgnoreCase);
+            bool defenderIsPlayerSide = string.Equals(playerSideText, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase);
+            EnsureCoopTestBattleSide(snapshot, BattleSideEnum.Attacker, "attacker", attackerIsPlayerSide);
+            EnsureCoopTestBattleSide(snapshot, BattleSideEnum.Defender, "defender", defenderIsPlayerSide);
             return snapshot;
         }
 
@@ -4449,7 +4641,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             string partyId,
             string partyName,
             List<Hero> heroes,
-            List<object> rosterCharacters)
+            List<object> rosterCharacters,
+            BattleSnapshotMessage snapshot = null)
         {
             if (targetSide == null || heroes == null || heroes.Count == 0)
                 return;
@@ -4476,6 +4669,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     PartyId = partyId,
                     CharacterId = spawnTemplateId,
                     OriginalCharacterId = originalCharacterId,
+                    CampaignFormationClass = TryGetCampaignFormationClassName(character),
                     SpawnTemplateId = spawnTemplateId,
                     TroopName = character.Name?.ToString() ?? originalCharacterId,
                     CultureId = CanonicalizeSnapshotCultureId(TryGetCultureId(character)),
@@ -4488,7 +4682,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     Count = 1,
                     WoundedCount = 0
                 };
-                ApplyCombatEquipmentSnapshot(troop, character);
+                ApplyCombatEquipmentSnapshot(troop, character, snapshot);
                 ApplyCombatProfileSnapshot(troop, character);
                 ApplyHeroIdentitySnapshot(troop, character);
                 partySnapshot.Troops.Add(troop);
@@ -4610,7 +4804,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (character == null || string.IsNullOrWhiteSpace(character.StringId))
                 return false;
 
-            if (character.IsHero)
+            if (character.IsHero ||
+                TryGetBoolProperty(character, "IsHero") ||
+                TryGetBoolProperty(character, "IsTemplate") ||
+                TryGetBoolProperty(character, "IsObsolete"))
                 return false;
 
             string id = character.StringId;
@@ -4620,16 +4817,477 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 id.IndexOf("template", StringComparison.OrdinalIgnoreCase) >= 0)
                 return false;
 
-            if (TryResolvePrimaryCombatEquipment(character) == null)
+            object primaryEquipment = TryResolvePrimaryCombatEquipment(character);
+            if (primaryEquipment == null)
                 return false;
 
             int tier = TryGetIntProperty(character, "Tier");
             bool isMounted = TryGetBoolProperty(character, "IsMounted");
+            if (isMounted && string.IsNullOrWhiteSpace(TryGetEquipmentSlotItemId(primaryEquipment, EquipmentIndex.Horse)))
+                return false;
+
             bool isRanged = TryGetCharacterIsRanged(character);
             bool hasShield = TryGetCharacterHasShield(character);
             bool hasThrown = TryGetCharacterHasThrown(character);
 
             return tier > 0 || isMounted || isRanged || hasShield || hasThrown;
+        }
+
+        private static List<BasicCharacterObject> CollectCoopTestBattleMultiplayerCharacters()
+        {
+            var results = new List<BasicCharacterObject>();
+            var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                IEnumerable<MultiplayerClassDivisions.MPHeroClass> heroClasses = MultiplayerClassDivisions.GetMPHeroClasses();
+                if (heroClasses != null)
+                {
+                    foreach (MultiplayerClassDivisions.MPHeroClass heroClass in heroClasses)
+                    {
+                        if (heroClass == null)
+                            continue;
+
+                        TryAddCoopTestBattleMultiplayerCharacter(results, seenIds, heroClass.HeroCharacter, allowClassResolvedCharacter: true);
+                        TryAddCoopTestBattleMultiplayerCharacter(results, seenIds, heroClass.TroopCharacter, allowClassResolvedCharacter: true);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to collect coop test battle MP class roster: " + ex.Message);
+            }
+
+            if (results.Count == 0)
+            {
+                try
+                {
+                    MethodInfo getObjectTypeList = typeof(MBObjectManager).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                        .FirstOrDefault(method =>
+                            string.Equals(method.Name, "GetObjectTypeList", StringComparison.Ordinal) &&
+                            method.IsGenericMethodDefinition &&
+                            method.GetParameters().Length == 0);
+                    if (getObjectTypeList != null && MBObjectManager.Instance != null)
+                    {
+                        object objectList = getObjectTypeList.MakeGenericMethod(typeof(BasicCharacterObject)).Invoke(MBObjectManager.Instance, null);
+                        if (objectList is System.Collections.IEnumerable enumerable)
+                        {
+                            foreach (object item in enumerable)
+                                TryAddCoopTestBattleMultiplayerCharacter(results, seenIds, item as BasicCharacterObject, allowClassResolvedCharacter: false);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("BattleDetector: failed to collect coop test battle MP object roster: " + ex.Message);
+                }
+            }
+
+            return results
+                .OrderBy(character => TryGetCultureId(character) ?? "neutral_culture", StringComparer.OrdinalIgnoreCase)
+                .ThenBy(character => TryGetBoolProperty(character, "IsMounted"))
+                .ThenBy(character => TryGetIntProperty(character, "Tier"))
+                .ThenBy(character => character.StringId, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static void TryAddCoopTestBattleMultiplayerCharacter(
+            List<BasicCharacterObject> results,
+            HashSet<string> seenIds,
+            BasicCharacterObject character,
+            bool allowClassResolvedCharacter)
+        {
+            if (results == null || seenIds == null)
+                return;
+
+            if (!IsCoopTestBattleMultiplayerCharacterCandidate(character, allowClassResolvedCharacter))
+                return;
+
+            if (!seenIds.Add(character.StringId))
+                return;
+
+            results.Add(character);
+        }
+
+        private static bool IsCoopTestBattleMultiplayerCharacterCandidate(
+            BasicCharacterObject character,
+            bool allowClassResolvedCharacter)
+        {
+            if (character == null || string.IsNullOrWhiteSpace(character.StringId))
+                return false;
+
+            string id = character.StringId;
+            if (id.StartsWith("dummy_", StringComparison.OrdinalIgnoreCase) ||
+                id.IndexOf("template", StringComparison.OrdinalIgnoreCase) >= 0)
+                return false;
+
+            if (!allowClassResolvedCharacter && !IsCoopTestBattleMultiplayerId(id))
+                return false;
+
+            return TryResolvePrimaryCombatEquipment(character) != null;
+        }
+
+        private static bool IsCoopTestBattleMultiplayerId(string id)
+        {
+            return !string.IsNullOrWhiteSpace(id) &&
+                   (id.StartsWith("mp_", StringComparison.OrdinalIgnoreCase) ||
+                    id.StartsWith("multiplayer_", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static List<CoopTestBattleMultiplayerSeed> CollectCoopTestBattleXmlMultiplayerSeeds()
+        {
+            lock (CoopTestBattleXmlSeedCacheLock)
+            {
+                if (_cachedCoopTestBattleXmlSeedsLoaded)
+                    return new List<CoopTestBattleMultiplayerSeed>(_cachedCoopTestBattleXmlSeeds ?? new List<CoopTestBattleMultiplayerSeed>());
+
+                var seedsById = new Dictionary<string, CoopTestBattleMultiplayerSeed>(StringComparer.OrdinalIgnoreCase);
+                foreach (string xmlPath in ResolveCoopTestBattleMultiplayerCharacterXmlPaths())
+                    LoadCoopTestBattleMultiplayerCharacterXml(xmlPath, seedsById);
+
+                _cachedCoopTestBattleXmlSeeds = seedsById.Values
+                    .OrderBy(seed => seed.CultureId ?? "empire", StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(seed => seed.IsMounted)
+                    .ThenBy(seed => seed.Tier)
+                    .ThenBy(seed => seed.CharacterId, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                _cachedCoopTestBattleXmlSeedsLoaded = true;
+
+                ModLogger.Info(
+                    "BattleDetector: coop test battle XML seed cache loaded. " +
+                    "Seeds=" + _cachedCoopTestBattleXmlSeeds.Count + ".");
+                return new List<CoopTestBattleMultiplayerSeed>(_cachedCoopTestBattleXmlSeeds);
+            }
+        }
+
+        private static IEnumerable<string> ResolveCoopTestBattleMultiplayerCharacterXmlPaths()
+        {
+            string coopCharacters = ModulePathHelper.GetModuleDataFilePath("coopspectator_mpcharacters.xml");
+            if (!string.IsNullOrWhiteSpace(coopCharacters))
+                yield return coopCharacters;
+
+            string nativeCharacters = ModulePathHelper.GetSiblingModuleDataFilePath("Native", "mpcharacters.xml");
+            if (!string.IsNullOrWhiteSpace(nativeCharacters))
+                yield return nativeCharacters;
+        }
+
+        private static IEnumerable<string> ResolveCoopTestBattleMultiplayerClassDivisionXmlPaths()
+        {
+            string coopClasses = ModulePathHelper.GetModuleDataFilePath("coopspectator_mpclassdivisions.xml");
+            if (!string.IsNullOrWhiteSpace(coopClasses))
+                yield return coopClasses;
+
+            string nativeClasses = ModulePathHelper.GetSiblingModuleDataFilePath("Native", "mpclassdivisions.xml");
+            if (!string.IsNullOrWhiteSpace(nativeClasses))
+                yield return nativeClasses;
+        }
+
+        private static IEnumerable<string> ResolveCoopTestBattleMultiplayerItemXmlPaths()
+        {
+            string coopExactItems = ModulePathHelper.GetModuleDataFilePath("coopspectator_items.xml");
+            if (!string.IsNullOrWhiteSpace(coopExactItems))
+                yield return coopExactItems;
+
+            string coopMpItems = ModulePathHelper.GetModuleDataFilePath("coopspectator_mpitems.xml");
+            if (!string.IsNullOrWhiteSpace(coopMpItems))
+                yield return coopMpItems;
+
+            string nativeItems = ModulePathHelper.GetSiblingModuleDataFilePath("Native", "mpitems.xml");
+            if (!string.IsNullOrWhiteSpace(nativeItems))
+                yield return nativeItems;
+        }
+
+        private static void LoadCoopTestBattleMultiplayerCharacterXml(
+            string xmlPath,
+            Dictionary<string, CoopTestBattleMultiplayerSeed> seedsById)
+        {
+            if (string.IsNullOrWhiteSpace(xmlPath) || seedsById == null || !System.IO.File.Exists(xmlPath))
+                return;
+
+            try
+            {
+                var document = new System.Xml.XmlDocument();
+                document.Load(xmlPath);
+                System.Xml.XmlNodeList characterNodes = document.SelectNodes("//NPCCharacter");
+                if (characterNodes == null)
+                    return;
+
+                int loaded = 0;
+                foreach (System.Xml.XmlNode characterNode in characterNodes)
+                {
+                    CoopTestBattleMultiplayerSeed seed = BuildCoopTestBattleXmlSeed(characterNode, xmlPath);
+                    if (seed == null || string.IsNullOrWhiteSpace(seed.CharacterId))
+                        continue;
+
+                    if (!seedsById.ContainsKey(seed.CharacterId))
+                    {
+                        seedsById.Add(seed.CharacterId, seed);
+                        loaded++;
+                    }
+                }
+
+                ModLogger.Info(
+                    "BattleDetector: loaded coop test battle XML character seeds. " +
+                    "Path=" + xmlPath +
+                    " Loaded=" + loaded + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to load coop test battle XML characters from " + xmlPath + ": " + ex.Message);
+            }
+        }
+
+        private static CoopTestBattleMultiplayerSeed BuildCoopTestBattleXmlSeed(
+            System.Xml.XmlNode characterNode,
+            string source)
+        {
+            if (characterNode == null)
+                return null;
+
+            string characterId = TryGetXmlAttribute(characterNode, "id");
+            if (!IsCoopTestBattleMultiplayerId(characterId))
+                return null;
+
+            var seed = new CoopTestBattleMultiplayerSeed
+            {
+                CharacterId = characterId,
+                TroopName = StripLocalizedTextId(TryGetXmlAttribute(characterNode, "name")) ?? characterId,
+                CultureId = CanonicalizeSnapshotCultureId(NormalizeXmlObjectId(TryGetXmlAttribute(characterNode, "culture"))),
+                Tier = Math.Max(1, TryParseXmlInt(TryGetXmlAttribute(characterNode, "level"))),
+                Source = source
+            };
+
+            string defaultGroup = TryGetXmlAttribute(characterNode, "default_group") ?? string.Empty;
+            if (defaultGroup.IndexOf("Cavalry", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                defaultGroup.IndexOf("HorseArcher", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                seed.IsMounted = true;
+            }
+
+            if (defaultGroup.IndexOf("Ranged", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                defaultGroup.IndexOf("HorseArcher", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                seed.IsRanged = true;
+            }
+
+            ApplyCoopTestBattleXmlSkills(seed, characterNode);
+            System.Xml.XmlNodeList equipmentRosters = characterNode.SelectNodes(".//EquipmentRoster");
+            if (equipmentRosters != null)
+            {
+                foreach (System.Xml.XmlNode equipmentRoster in equipmentRosters)
+                {
+                    CombatEquipmentVariantSnapshot variant = BuildCoopTestBattleXmlEquipmentVariant(equipmentRoster);
+                    if (variant == null)
+                        continue;
+
+                    seed.EquipmentVariants.Add(variant);
+                    if (seed.ArmorSeed == null)
+                        seed.ArmorSeed = variant;
+
+                    ApplyCoopTestBattleXmlEquipmentFlags(seed, variant);
+                }
+            }
+
+            if (seed.EquipmentVariants.Count == 0)
+                return null;
+
+            if (seed.SkillAthletics <= 0)
+                seed.SkillAthletics = seed.IsMounted ? 50 : 80;
+
+            return seed;
+        }
+
+        private static void ApplyCoopTestBattleXmlSkills(
+            CoopTestBattleMultiplayerSeed seed,
+            System.Xml.XmlNode characterNode)
+        {
+            if (seed == null || characterNode == null)
+                return;
+
+            System.Xml.XmlNodeList skillNodes = characterNode.SelectNodes(".//skills/skill");
+            if (skillNodes == null)
+                return;
+
+            foreach (System.Xml.XmlNode skillNode in skillNodes)
+            {
+                string skillId = TryGetXmlAttribute(skillNode, "id");
+                int value = TryParseXmlInt(TryGetXmlAttribute(skillNode, "value"));
+                if (value <= 0 || string.IsNullOrWhiteSpace(skillId))
+                    continue;
+
+                switch (skillId.Trim().ToLowerInvariant())
+                {
+                    case "onehanded":
+                        seed.SkillOneHanded = value;
+                        break;
+                    case "twohanded":
+                        seed.SkillTwoHanded = value;
+                        break;
+                    case "polearm":
+                        seed.SkillPolearm = value;
+                        break;
+                    case "bow":
+                        seed.SkillBow = value;
+                        break;
+                    case "crossbow":
+                        seed.SkillCrossbow = value;
+                        break;
+                    case "throwing":
+                        seed.SkillThrowing = value;
+                        break;
+                    case "riding":
+                        seed.SkillRiding = value;
+                        break;
+                    case "athletics":
+                        seed.SkillAthletics = value;
+                        break;
+                }
+            }
+        }
+
+        private static CombatEquipmentVariantSnapshot BuildCoopTestBattleXmlEquipmentVariant(System.Xml.XmlNode equipmentRoster)
+        {
+            if (equipmentRoster == null)
+                return null;
+
+            var variant = new CombatEquipmentVariantSnapshot();
+            bool hasAnyItem = false;
+            System.Xml.XmlNodeList equipmentNodes = equipmentRoster.SelectNodes(".//equipment");
+            if (equipmentNodes == null)
+                return null;
+
+            foreach (System.Xml.XmlNode equipmentNode in equipmentNodes)
+            {
+                string slot = TryGetXmlAttribute(equipmentNode, "slot");
+                string itemId = NormalizeXmlObjectId(TryGetXmlAttribute(equipmentNode, "id"));
+                if (string.IsNullOrWhiteSpace(itemId))
+                    itemId = NormalizeXmlObjectId(TryGetXmlAttribute(equipmentNode, "item"));
+                if (string.IsNullOrWhiteSpace(slot) || string.IsNullOrWhiteSpace(itemId))
+                    continue;
+
+                hasAnyItem = true;
+                switch (slot.Trim().ToLowerInvariant())
+                {
+                    case "item0":
+                    case "weapon0":
+                        variant.CombatItem0Id = itemId;
+                        break;
+                    case "item1":
+                    case "weapon1":
+                        variant.CombatItem1Id = itemId;
+                        break;
+                    case "item2":
+                    case "weapon2":
+                        variant.CombatItem2Id = itemId;
+                        break;
+                    case "item3":
+                    case "weapon3":
+                        variant.CombatItem3Id = itemId;
+                        break;
+                    case "head":
+                        variant.CombatHeadId = itemId;
+                        break;
+                    case "body":
+                        variant.CombatBodyId = itemId;
+                        break;
+                    case "leg":
+                        variant.CombatLegId = itemId;
+                        break;
+                    case "gloves":
+                        variant.CombatGlovesId = itemId;
+                        break;
+                    case "cape":
+                        variant.CombatCapeId = itemId;
+                        break;
+                    case "horse":
+                        variant.CombatHorseId = itemId;
+                        break;
+                    case "horseharness":
+                        variant.CombatHorseHarnessId = itemId;
+                        break;
+                }
+            }
+
+            return hasAnyItem ? variant : null;
+        }
+
+        private static void ApplyCoopTestBattleXmlEquipmentFlags(
+            CoopTestBattleMultiplayerSeed seed,
+            CombatEquipmentVariantSnapshot variant)
+        {
+            if (seed == null || variant == null)
+                return;
+
+            if (!string.IsNullOrWhiteSpace(variant.CombatHorseId))
+                seed.IsMounted = true;
+
+            foreach (string itemId in EnumerateWeaponSlotItemIds(variant))
+            {
+                if (IsRangedWeaponSlotItem(itemId))
+                    seed.IsRanged = true;
+                if (IsShieldWeaponSlotItem(itemId))
+                    seed.HasShield = true;
+                if (IsThrownWeaponSlotItem(itemId))
+                    seed.HasThrown = true;
+            }
+        }
+
+        private static IEnumerable<string> EnumerateWeaponSlotItemIds(CombatEquipmentVariantSnapshot variant)
+        {
+            if (variant == null)
+                yield break;
+
+            if (!string.IsNullOrWhiteSpace(variant.CombatItem0Id))
+                yield return variant.CombatItem0Id;
+            if (!string.IsNullOrWhiteSpace(variant.CombatItem1Id))
+                yield return variant.CombatItem1Id;
+            if (!string.IsNullOrWhiteSpace(variant.CombatItem2Id))
+                yield return variant.CombatItem2Id;
+            if (!string.IsNullOrWhiteSpace(variant.CombatItem3Id))
+                yield return variant.CombatItem3Id;
+        }
+
+        private static string TryGetXmlAttribute(System.Xml.XmlNode node, string attributeName)
+        {
+            return string.IsNullOrWhiteSpace(attributeName)
+                ? null
+                : node?.Attributes?[attributeName]?.Value;
+        }
+
+        private static int TryParseXmlInt(string value)
+        {
+            return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)
+                ? parsed
+                : 0;
+        }
+
+        private static string NormalizeXmlObjectId(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            string normalized = value.Trim();
+            int dotIndex = normalized.IndexOf('.');
+            if (dotIndex >= 0 && dotIndex + 1 < normalized.Length)
+                normalized = normalized.Substring(dotIndex + 1);
+
+            return normalized;
+        }
+
+        private static string StripLocalizedTextId(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return value;
+
+            string trimmed = value.Trim();
+            if (trimmed.StartsWith("{=", StringComparison.Ordinal))
+            {
+                int endIndex = trimmed.IndexOf('}');
+                if (endIndex >= 0 && endIndex + 1 < trimmed.Length)
+                    return trimmed.Substring(endIndex + 1);
+            }
+
+            return trimmed;
         }
 
         private static string BuildSyntheticAllCampaignTroopsPreviewSummary()
@@ -4645,6 +5303,1726 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             return "eligible=" + characters.Count + " cultures=[" +
                    string.Join(", ", byCulture.Select(pair => pair.Key + "=" + pair.Value)) + "]";
+        }
+
+        private static string BuildCoopTestBattlePreviewSummary()
+        {
+            List<BasicCharacterObject> characters = CollectCoopTestBattleMultiplayerCharacters();
+            List<CoopTestBattleMultiplayerSeed> xmlSeeds = characters.Count == 0
+                ? CollectCoopTestBattleXmlMultiplayerSeeds()
+                : new List<CoopTestBattleMultiplayerSeed>();
+            WeaponSlotMatrixPalette palette = characters.Count > 0
+                ? BuildCoopTestBattleMultiplayerWeaponSlotMatrixPalette(characters)
+                : BuildCoopTestBattleXmlWeaponSlotMatrixPalette(xmlSeeds);
+            int matrixLayouts = CoopTestBattleOptions.IncludeWeaponSlotMatrix
+                ? (CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorAll
+                    ? CollectSyntheticAllCampaignTroops().Count
+                    : CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStream ||
+                      CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStreamMounted
+                    ? BuildRoleMatrixStreamLayouts(palette, limit: 0).Count
+                    : CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.FiveModeMatrix
+                        ? BuildFiveModeWeaponSlotMatrixLayouts(palette, CoopTestBattleOptions.WeaponSlotMatrixLimit).Count
+                        : BuildWeaponSlotMatrixLayouts(palette, CoopTestBattleOptions.WeaponSlotMatrixLimit).Count)
+                : 0;
+            int unsafeMatrices = CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStream
+                ? CoopRoleMatrixStreamBridgeFile.ReadUnsafeMatrixIds().Count
+                : 0;
+            return "enabled=" + CoopTestBattleOptions.Enabled +
+                   " rosterMode=" + CoopTestBattleOptions.FormatRosterMode(CoopTestBattleOptions.CurrentRosterMode) +
+                   " mpCharacters=" + characters.Count +
+                   " xmlSeeds=" + xmlSeeds.Count +
+                   " weaponSlotMatrix=" + matrixLayouts +
+                   " roleMatrixUnsafe=" + unsafeMatrices +
+                   " " + CoopTestBattleOptions.GetStatusSummary();
+        }
+
+        private static int AppendCoopTestBattleWeaponSlotMatrix(BattleSnapshotMessage snapshot)
+        {
+            if (snapshot == null || !CoopTestBattleOptions.IncludeWeaponSlotMatrix)
+                return 0;
+
+            List<BasicCharacterObject> characters = CollectCoopTestBattleMultiplayerCharacters();
+            if (characters.Count == 0)
+            {
+                List<CoopTestBattleMultiplayerSeed> xmlSeeds = CollectCoopTestBattleXmlMultiplayerSeeds();
+                if (xmlSeeds.Count == 0)
+                {
+                    ModLogger.Info("BattleDetector: coop test battle weapon-slot matrix skipped because no MP characters or XML seeds were found.");
+                    return 0;
+                }
+
+                return AppendCoopTestBattleWeaponSlotMatrixFromXmlSeeds(snapshot, xmlSeeds);
+            }
+
+            WeaponSlotMatrixPalette palette = BuildCoopTestBattleMultiplayerWeaponSlotMatrixPalette(characters);
+            List<WeaponSlotMatrixLayout> layouts =
+                CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.FiveModeMatrix
+                    ? BuildFiveModeWeaponSlotMatrixLayouts(palette, CoopTestBattleOptions.WeaponSlotMatrixLimit)
+                    : BuildWeaponSlotMatrixLayouts(palette, CoopTestBattleOptions.WeaponSlotMatrixLimit);
+            if (layouts.Count == 0)
+            {
+                ModLogger.Info("BattleDetector: coop test battle weapon-slot matrix skipped because palette was incomplete.");
+                return 0;
+            }
+
+            BasicCharacterObject baseCharacter =
+                characters.FirstOrDefault(character => character != null && !TryGetBoolProperty(character, "IsMounted")) ??
+                characters.FirstOrDefault();
+            if (baseCharacter == null)
+                return 0;
+
+            string baseOriginalCharacterId = baseCharacter.StringId;
+            string baseSpawnTemplateId = baseCharacter.StringId;
+            BattleSideSnapshotMessage attackerSide = EnsureCoopTestBattleSide(snapshot, BattleSideEnum.Attacker, "attacker", playerSide: false);
+            BattleSideSnapshotMessage defenderSide = EnsureCoopTestBattleSide(snapshot, BattleSideEnum.Defender, "defender", playerSide: false);
+            int added = 0;
+            for (int i = 0; i < layouts.Count; i++)
+            {
+                WeaponSlotMatrixLayout layout = layouts[i];
+                BattleSideSnapshotMessage targetSide = i % 2 == 0 ? attackerSide : defenderSide;
+                if (targetSide == null)
+                    continue;
+
+                string partyId = "coop_test_" + targetSide.SideId + "_weapon_slot_matrix";
+                BattlePartySnapshotMessage party = EnsureCoopTestBattleParty(
+                    targetSide,
+                    partyId,
+                    "Coop Test Weapon Slot Matrix");
+                if (party == null)
+                    continue;
+
+                TroopStackInfo troop = BuildCoopTestBattleWeaponSlotMatrixTroop(
+                    layout,
+                    targetSide,
+                    partyId,
+                    baseCharacter,
+                    baseOriginalCharacterId,
+                    baseSpawnTemplateId,
+                    palette,
+                    i);
+                party.Troops.Add(troop);
+                targetSide.Troops.Add(troop);
+                targetSide.MissionReadyEntryOrder.Add(troop.EntryId);
+                party.TotalManCount++;
+                targetSide.TotalManCount++;
+                added++;
+            }
+
+            return added;
+        }
+
+        private static int AppendCoopTestBattleWeaponSlotMatrixFromXmlSeeds(
+            BattleSnapshotMessage snapshot,
+            List<CoopTestBattleMultiplayerSeed> seeds)
+        {
+            if (snapshot == null || seeds == null || seeds.Count == 0)
+                return 0;
+
+            WeaponSlotMatrixPalette palette = BuildCoopTestBattleXmlWeaponSlotMatrixPalette(seeds);
+            List<WeaponSlotMatrixLayout> layouts =
+                CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.FiveModeMatrix
+                    ? BuildFiveModeWeaponSlotMatrixLayouts(palette, CoopTestBattleOptions.WeaponSlotMatrixLimit)
+                    : BuildWeaponSlotMatrixLayouts(palette, CoopTestBattleOptions.WeaponSlotMatrixLimit);
+            if (layouts.Count == 0)
+            {
+                ModLogger.Info("BattleDetector: coop test battle XML weapon-slot matrix skipped because palette was incomplete. XmlSeeds=" + seeds.Count + ".");
+                return 0;
+            }
+
+            CoopTestBattleMultiplayerSeed baseSeed =
+                seeds.FirstOrDefault(seed => seed != null && !seed.IsMounted) ??
+                seeds.FirstOrDefault(seed => seed != null);
+            if (baseSeed == null || string.IsNullOrWhiteSpace(baseSeed.CharacterId))
+                return 0;
+
+            BattleSideSnapshotMessage attackerSide = EnsureCoopTestBattleSide(snapshot, BattleSideEnum.Attacker, "attacker", playerSide: false);
+            BattleSideSnapshotMessage defenderSide = EnsureCoopTestBattleSide(snapshot, BattleSideEnum.Defender, "defender", playerSide: false);
+            int added = 0;
+            for (int i = 0; i < layouts.Count; i++)
+            {
+                WeaponSlotMatrixLayout layout = layouts[i];
+                BattleSideSnapshotMessage targetSide = i % 2 == 0 ? attackerSide : defenderSide;
+                if (targetSide == null)
+                    continue;
+
+                string partyId = "coop_test_" + targetSide.SideId + "_weapon_slot_matrix";
+                BattlePartySnapshotMessage party = EnsureCoopTestBattleParty(
+                    targetSide,
+                    partyId,
+                    "Coop Test Weapon Slot Matrix");
+                if (party == null)
+                    continue;
+
+                TroopStackInfo troop = BuildCoopTestBattleWeaponSlotMatrixTroop(
+                    layout,
+                    targetSide,
+                    partyId,
+                    baseSeed,
+                    palette,
+                    i);
+                party.Troops.Add(troop);
+                targetSide.Troops.Add(troop);
+                targetSide.MissionReadyEntryOrder.Add(troop.EntryId);
+                party.TotalManCount++;
+                targetSide.TotalManCount++;
+                added++;
+            }
+
+            ModLogger.Info(
+                "BattleDetector: coop test battle weapon-slot matrix built from XML seeds. " +
+                "XmlSeeds=" + seeds.Count +
+                " MatrixEntries=" + added +
+                " BaseSeed=" + baseSeed.CharacterId + ".");
+            return added;
+        }
+
+        private static int AppendCoopTestBattleRoleMatrixStreamControlEntries(BattleSnapshotMessage snapshot)
+        {
+            if (snapshot == null)
+                return 0;
+
+            List<BasicCharacterObject> characters = CollectCoopTestBattleMultiplayerCharacters();
+            List<CoopTestBattleMultiplayerSeed> xmlSeeds = characters.Count == 0
+                ? CollectCoopTestBattleXmlMultiplayerSeeds()
+                : new List<CoopTestBattleMultiplayerSeed>();
+            bool mountedStream = CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStreamMounted;
+            BasicCharacterObject baseCharacter = mountedStream
+                ? characters.FirstOrDefault(character => character != null && IsMountedCharacter(character)) ??
+                  characters.FirstOrDefault(character => character != null)
+                : characters.FirstOrDefault(character => character != null && !IsMountedCharacter(character)) ??
+                  characters.FirstOrDefault(character => character != null);
+            CoopTestBattleMultiplayerSeed baseSeed = mountedStream
+                ? xmlSeeds.FirstOrDefault(seed => seed != null && seed.IsMounted) ??
+                  xmlSeeds.FirstOrDefault(seed => seed != null)
+                : xmlSeeds.FirstOrDefault(seed => seed != null && !seed.IsMounted) ??
+                  xmlSeeds.FirstOrDefault(seed => seed != null);
+            if (baseCharacter == null && baseSeed == null)
+            {
+                ModLogger.Info("BattleDetector: role-matrix stream control roster skipped because no MP character or XML seed was found.");
+                return 0;
+            }
+
+            BattleSideSnapshotMessage attackerSide = EnsureCoopTestBattleSide(snapshot, BattleSideEnum.Attacker, "attacker", playerSide: false);
+            BattleSideSnapshotMessage defenderSide = EnsureCoopTestBattleSide(snapshot, BattleSideEnum.Defender, "defender", playerSide: false);
+            int added = 0;
+            added += AppendCoopTestBattleRoleMatrixStreamControlEntry(attackerSide, baseCharacter, baseSeed);
+            added += AppendCoopTestBattleRoleMatrixStreamControlEntry(defenderSide, baseCharacter, baseSeed);
+            ModLogger.Info(
+                "BattleDetector: role-matrix stream control roster built. " +
+                "ControlEntries=" + added +
+                " LogicalMatrices=" + CoopRoleMatrixStreamLogicalMatrixCount +
+                " Mounted=" + mountedStream +
+                " ActiveLimit=" + CoopTestBattleOptions.RoleMatrixStreamActiveLimit +
+                " WaveLifetime=" + CoopTestBattleOptions.RoleMatrixStreamWaveLifetimeSeconds.ToString("0.###", CultureInfo.InvariantCulture) + ".");
+            return added;
+        }
+
+        private static int AppendCoopTestBattleRoleMatrixStreamControlEntry(
+            BattleSideSnapshotMessage side,
+            BasicCharacterObject baseCharacter,
+            CoopTestBattleMultiplayerSeed baseSeed)
+        {
+            if (side == null || (baseCharacter == null && baseSeed == null))
+                return 0;
+
+            string partyId = "coop_test_" + side.SideId + "_role_matrix_stream_control";
+            BattlePartySnapshotMessage party = EnsureCoopTestBattleParty(
+                side,
+                partyId,
+                "Coop Test Role Matrix Stream Control");
+            if (party == null)
+                return 0;
+
+            TroopStackInfo troop;
+            if (baseCharacter != null)
+            {
+                string baseCharacterId = baseCharacter.StringId;
+                troop = new TroopStackInfo
+                {
+                    EntryId = (side.SideId ?? "side") + "|" + partyId + "|role_matrix_stream_control",
+                    SideId = side.SideId,
+                    PartyId = partyId,
+                    CharacterId = baseCharacterId,
+                    OriginalCharacterId = baseCharacterId,
+                    SpawnTemplateId = baseCharacterId,
+                    TroopName = "Coop Role Matrix Control",
+                    CultureId = !string.IsNullOrWhiteSpace(side.CultureId)
+                        ? side.CultureId
+                        : CanonicalizeSnapshotCultureId(TryGetCultureId(baseCharacter)),
+                    Tier = Math.Max(1, TryGetIntProperty(baseCharacter, "Tier")),
+                    IsMounted = IsMountedCharacter(baseCharacter),
+                    IsRanged = TryGetCharacterIsRanged(baseCharacter),
+                    HasShield = TryGetCharacterHasShield(baseCharacter),
+                    HasThrown = TryGetCharacterHasThrown(baseCharacter),
+                    IsHero = false,
+                    Count = 1,
+                    WoundedCount = 0
+                };
+                ApplyCombatEquipmentSnapshot(troop, baseCharacter);
+                ApplyCombatProfileSnapshot(troop, baseCharacter);
+            }
+            else
+            {
+                string seedCharacterId = baseSeed.CharacterId ?? "mp_coop_light_infantry_empire_troop";
+                troop = new TroopStackInfo
+                {
+                    EntryId = (side.SideId ?? "side") + "|" + partyId + "|role_matrix_stream_control",
+                    SideId = side.SideId,
+                    PartyId = partyId,
+                    CharacterId = seedCharacterId,
+                    OriginalCharacterId = seedCharacterId,
+                    SpawnTemplateId = seedCharacterId,
+                    TroopName = "Coop Role Matrix Control",
+                    CultureId = !string.IsNullOrWhiteSpace(side.CultureId)
+                        ? side.CultureId
+                        : CanonicalizeSnapshotCultureId(baseSeed.CultureId),
+                    Tier = Math.Max(1, baseSeed.Tier),
+                    IsMounted = baseSeed.IsMounted,
+                    IsRanged = baseSeed.IsRanged,
+                    HasShield = baseSeed.HasShield,
+                    HasThrown = baseSeed.HasThrown,
+                    IsHero = false,
+                    Count = 1,
+                    WoundedCount = 0
+                };
+                if (baseSeed.ArmorSeed != null)
+                    ApplyCombatEquipmentSnapshot(troop, baseSeed.ArmorSeed);
+                ApplyCoopTestBattleXmlSeedCombatProfile(troop, baseSeed);
+            }
+
+            party.Troops.Add(troop);
+            side.Troops.Add(troop);
+            side.MissionReadyEntryOrder.Add(troop.EntryId);
+            party.TotalManCount++;
+            side.TotalManCount++;
+            return 1;
+        }
+
+        private static BattleSideSnapshotMessage EnsureCoopTestBattleSide(
+            BattleSnapshotMessage snapshot,
+            BattleSideEnum side,
+            string sideId,
+            bool playerSide)
+        {
+            if (snapshot?.Sides == null)
+                return null;
+
+            BattleSideSnapshotMessage existing = snapshot.Sides.FirstOrDefault(candidate =>
+                candidate != null &&
+                (string.Equals(candidate.SideText, side.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(candidate.SideId, sideId, StringComparison.OrdinalIgnoreCase)));
+            if (existing != null)
+                return existing;
+
+            var created = new BattleSideSnapshotMessage
+            {
+                SideId = sideId,
+                SideText = side.ToString(),
+                IsPlayerSide = playerSide
+            };
+            ApplyResolvedSideAppearance(created, null, "coop-test-battle");
+            CanonicalizeSnapshotSideCulture(created);
+            snapshot.Sides.Add(created);
+            return created;
+        }
+
+        private static BattlePartySnapshotMessage EnsureCoopTestBattleParty(
+            BattleSideSnapshotMessage side,
+            string partyId,
+            string partyName)
+        {
+            if (side == null || string.IsNullOrWhiteSpace(partyId))
+                return null;
+
+            BattlePartySnapshotMessage existing = side.Parties.FirstOrDefault(candidate =>
+                candidate != null &&
+                string.Equals(candidate.PartyId, partyId, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+                return existing;
+
+            var created = new BattlePartySnapshotMessage
+            {
+                PartyId = partyId,
+                PartyName = partyName,
+                IsMainParty = false
+            };
+            side.Parties.Add(created);
+            return created;
+        }
+
+        private static TroopStackInfo BuildCoopTestBattleWeaponSlotMatrixTroop(
+            WeaponSlotMatrixLayout layout,
+            BattleSideSnapshotMessage side,
+            string partyId,
+            BasicCharacterObject baseCharacter,
+            string baseOriginalCharacterId,
+            string baseSpawnTemplateId,
+            WeaponSlotMatrixPalette palette,
+            int layoutIndex)
+        {
+            var troop = new TroopStackInfo
+            {
+                EntryId = (side?.SideId ?? "side") + "|" + partyId + "|weapon_slot_matrix|" + (layoutIndex + 1) + "|" + NormalizeHeroIdentityToken(layout?.Name ?? "layout"),
+                SideId = side?.SideId,
+                PartyId = partyId,
+                CharacterId = baseSpawnTemplateId,
+                OriginalCharacterId = baseOriginalCharacterId,
+                SpawnTemplateId = baseSpawnTemplateId,
+                TroopName = "Coop Test " + (layout?.Name ?? "weapon_slot_matrix"),
+                CultureId = side != null && !string.IsNullOrWhiteSpace(side.CultureId)
+                    ? side.CultureId
+                    : CanonicalizeSnapshotCultureId(TryGetCultureId(baseCharacter)),
+                Tier = TryGetIntProperty(baseCharacter, "Tier"),
+                IsMounted = layout?.IsMounted == true,
+                IsRanged = layout?.IsRanged == true,
+                HasShield = layout?.HasShield == true,
+                HasThrown = layout?.HasThrown == true,
+                IsHero = false,
+                Count = 1,
+                WoundedCount = 0
+            };
+
+            if (palette?.ArmorSeed != null)
+                ApplyCombatEquipmentSnapshot(troop, palette.ArmorSeed);
+            else
+                ApplyCombatEquipmentSnapshot(troop, baseCharacter);
+
+            string[] itemIds = layout?.ItemIds ?? new string[4];
+            troop.CombatItem0Id = itemIds.Length > 0 ? itemIds[0] : null;
+            troop.CombatItem1Id = itemIds.Length > 1 ? itemIds[1] : null;
+            troop.CombatItem2Id = itemIds.Length > 2 ? itemIds[2] : null;
+            troop.CombatItem3Id = itemIds.Length > 3 ? itemIds[3] : null;
+            if (layout?.IsMounted == true)
+            {
+                troop.CombatHorseId = palette?.HorseId;
+                troop.CombatHorseHarnessId = palette?.HorseHarnessId;
+            }
+            else
+            {
+                troop.CombatHorseId = null;
+                troop.CombatHorseHarnessId = null;
+            }
+
+            ApplyCombatProfileSnapshot(troop, baseCharacter);
+            return troop;
+        }
+
+        private static TroopStackInfo BuildCoopTestBattleWeaponSlotMatrixTroop(
+            WeaponSlotMatrixLayout layout,
+            BattleSideSnapshotMessage side,
+            string partyId,
+            CoopTestBattleMultiplayerSeed seed,
+            WeaponSlotMatrixPalette palette,
+            int layoutIndex)
+        {
+            string seedCharacterId = seed?.CharacterId ?? "mp_coop_light_infantry_empire_troop";
+            var troop = new TroopStackInfo
+            {
+                EntryId = (side?.SideId ?? "side") + "|" + partyId + "|weapon_slot_matrix|" + (layoutIndex + 1) + "|" + NormalizeHeroIdentityToken(layout?.Name ?? "layout"),
+                SideId = side?.SideId,
+                PartyId = partyId,
+                CharacterId = seedCharacterId,
+                OriginalCharacterId = seedCharacterId,
+                SpawnTemplateId = seedCharacterId,
+                TroopName = "Coop Test " + (layout?.Name ?? "weapon_slot_matrix"),
+                CultureId = side != null && !string.IsNullOrWhiteSpace(side.CultureId)
+                    ? side.CultureId
+                    : CanonicalizeSnapshotCultureId(seed?.CultureId),
+                Tier = Math.Max(1, seed?.Tier ?? 1),
+                IsMounted = layout?.IsMounted == true,
+                IsRanged = layout?.IsRanged == true,
+                HasShield = layout?.HasShield == true,
+                HasThrown = layout?.HasThrown == true,
+                IsHero = false,
+                Count = 1,
+                WoundedCount = 0
+            };
+
+            if (palette?.ArmorSeed != null)
+                ApplyCombatEquipmentSnapshot(troop, palette.ArmorSeed);
+            else if (seed?.ArmorSeed != null)
+                ApplyCombatEquipmentSnapshot(troop, seed.ArmorSeed);
+
+            string[] itemIds = layout?.ItemIds ?? new string[4];
+            troop.CombatItem0Id = itemIds.Length > 0 ? itemIds[0] : null;
+            troop.CombatItem1Id = itemIds.Length > 1 ? itemIds[1] : null;
+            troop.CombatItem2Id = itemIds.Length > 2 ? itemIds[2] : null;
+            troop.CombatItem3Id = itemIds.Length > 3 ? itemIds[3] : null;
+            if (layout?.IsMounted == true)
+            {
+                troop.CombatHorseId = palette?.HorseId;
+                troop.CombatHorseHarnessId = palette?.HorseHarnessId;
+            }
+            else
+            {
+                troop.CombatHorseId = null;
+                troop.CombatHorseHarnessId = null;
+            }
+
+            ApplyCoopTestBattleXmlSeedCombatProfile(troop, seed);
+            return troop;
+        }
+
+        private static void ApplyCoopTestBattleXmlSeedCombatProfile(
+            TroopStackInfo troop,
+            CoopTestBattleMultiplayerSeed seed)
+        {
+            if (troop == null)
+                return;
+
+            troop.SkillOneHanded = Math.Max(0, seed?.SkillOneHanded ?? 80);
+            troop.SkillTwoHanded = Math.Max(0, seed?.SkillTwoHanded ?? 60);
+            troop.SkillPolearm = Math.Max(0, seed?.SkillPolearm ?? 80);
+            troop.SkillBow = Math.Max(0, seed?.SkillBow ?? 40);
+            troop.SkillCrossbow = Math.Max(0, seed?.SkillCrossbow ?? 40);
+            troop.SkillThrowing = Math.Max(0, seed?.SkillThrowing ?? 50);
+            troop.SkillRiding = Math.Max(0, seed?.SkillRiding ?? (troop.IsMounted ? 120 : 40));
+            troop.SkillAthletics = Math.Max(0, seed?.SkillAthletics ?? 80);
+            BackfillDerivedCombatAttributes(troop);
+            troop.BaseHitPoints = 100;
+            troop.PerkIds = new List<string>();
+        }
+
+        private static WeaponSlotMatrixPalette BuildWeaponSlotMatrixPalette(List<BasicCharacterObject> characters)
+        {
+            var palette = new WeaponSlotMatrixPalette();
+            if (characters == null)
+                return palette;
+
+            foreach (BasicCharacterObject character in characters)
+            {
+                if (character == null)
+                    continue;
+
+                foreach (object equipment in EnumerateCharacterEquipments(character))
+                {
+                    if (equipment == null)
+                        continue;
+
+                    if (palette.ArmorSeed == null && !TryGetBoolProperty(equipment, "IsCivilian"))
+                        palette.ArmorSeed = BuildCombatEquipmentVariantSnapshot(equipment);
+
+                    TrySetPaletteHorseItems(palette, equipment);
+                    for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+                    {
+                        string itemId = TryGetEquipmentSlotItemId(equipment, slot);
+                        TrySetPaletteWeaponItem(palette, itemId);
+                    }
+                }
+            }
+
+            return palette;
+        }
+
+        private static WeaponSlotMatrixPalette BuildCoopTestBattleMultiplayerWeaponSlotMatrixPalette(List<BasicCharacterObject> characters)
+        {
+            WeaponSlotMatrixPalette palette = BuildWeaponSlotMatrixPalette(characters);
+            TryFillWeaponSlotMatrixPaletteFromMultiplayerItems(palette);
+            EnsureCoopTestBattleFallbackPaletteItems(palette);
+            return palette;
+        }
+
+        private static WeaponSlotMatrixPalette BuildCoopTestBattleXmlWeaponSlotMatrixPalette(List<CoopTestBattleMultiplayerSeed> seeds)
+        {
+            var palette = new WeaponSlotMatrixPalette();
+            if (seeds != null)
+            {
+                foreach (CoopTestBattleMultiplayerSeed seed in seeds)
+                {
+                    if (seed == null)
+                        continue;
+
+                    foreach (CombatEquipmentVariantSnapshot variant in seed.EquipmentVariants ?? new List<CombatEquipmentVariantSnapshot>())
+                        TryAddCoopTestBattleXmlEquipmentVariantToPalette(palette, variant);
+                }
+            }
+
+            TryFillWeaponSlotMatrixPaletteFromXmlClassDivisions(palette);
+            TryFillWeaponSlotMatrixPaletteFromMultiplayerItems(palette);
+            EnsureCoopTestBattleFallbackPaletteItems(palette);
+            return palette;
+        }
+
+        private static void TryAddCoopTestBattleXmlEquipmentVariantToPalette(
+            WeaponSlotMatrixPalette palette,
+            CombatEquipmentVariantSnapshot variant)
+        {
+            if (palette == null || variant == null)
+                return;
+
+            if (palette.ArmorSeed == null)
+                palette.ArmorSeed = variant;
+
+            if (string.IsNullOrWhiteSpace(palette.HorseId))
+                palette.HorseId = variant.CombatHorseId;
+
+            if (string.IsNullOrWhiteSpace(palette.HorseHarnessId))
+                palette.HorseHarnessId = variant.CombatHorseHarnessId;
+
+            foreach (string itemId in EnumerateWeaponSlotItemIds(variant))
+                TrySetPaletteWeaponItem(palette, itemId);
+        }
+
+        private static void TryFillWeaponSlotMatrixPaletteFromXmlClassDivisions(WeaponSlotMatrixPalette palette)
+        {
+            if (palette == null)
+                return;
+
+            foreach (string xmlPath in ResolveCoopTestBattleMultiplayerClassDivisionXmlPaths())
+            {
+                if (string.IsNullOrWhiteSpace(xmlPath) || !System.IO.File.Exists(xmlPath))
+                    continue;
+
+                try
+                {
+                    var document = new System.Xml.XmlDocument();
+                    document.Load(xmlPath);
+                    System.Xml.XmlNodeList itemNodes = document.SelectNodes("//*[@item]");
+                    if (itemNodes == null)
+                        continue;
+
+                    int scanned = 0;
+                    foreach (System.Xml.XmlNode itemNode in itemNodes)
+                    {
+                        string itemId = NormalizeXmlObjectId(TryGetXmlAttribute(itemNode, "item"));
+                        if (string.IsNullOrWhiteSpace(itemId) || !IsCoopTestBattleMultiplayerId(itemId))
+                            continue;
+
+                        string slot = TryGetXmlAttribute(itemNode, "slot") ?? string.Empty;
+                        if (slot.Equals("Horse", StringComparison.OrdinalIgnoreCase))
+                        {
+                            palette.HorseId = SetIfEmpty(palette.HorseId, itemId);
+                        }
+                        else if (slot.Equals("HorseHarness", StringComparison.OrdinalIgnoreCase))
+                        {
+                            palette.HorseHarnessId = SetIfEmpty(palette.HorseHarnessId, itemId);
+                        }
+                        else
+                        {
+                            TrySetPaletteWeaponItem(palette, itemId);
+                        }
+
+                        scanned++;
+                    }
+
+                    ModLogger.Info(
+                        "BattleDetector: scanned coop test battle MP class XML items. " +
+                        "Path=" + xmlPath +
+                        " Items=" + scanned + ".");
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("BattleDetector: failed to scan MP class XML items from " + xmlPath + ": " + ex.Message);
+                }
+            }
+        }
+
+        private static void TryFillWeaponSlotMatrixPaletteFromMultiplayerItems(WeaponSlotMatrixPalette palette)
+        {
+            if (palette == null || MBObjectManager.Instance == null)
+                return;
+
+            try
+            {
+                MethodInfo getObjectTypeList = typeof(MBObjectManager).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(method =>
+                        string.Equals(method.Name, "GetObjectTypeList", StringComparison.Ordinal) &&
+                        method.IsGenericMethodDefinition &&
+                        method.GetParameters().Length == 0);
+                if (getObjectTypeList == null)
+                    return;
+
+                object objectList = getObjectTypeList.MakeGenericMethod(typeof(ItemObject)).Invoke(MBObjectManager.Instance, null);
+                if (!(objectList is System.Collections.IEnumerable enumerable))
+                    return;
+
+                foreach (object itemObject in enumerable)
+                {
+                    if (!(itemObject is ItemObject item) || !IsCoopTestBattleMultiplayerId(item.StringId))
+                        continue;
+
+                    TrySetPaletteWeaponItem(palette, item.StringId);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to scan MP items for coop test battle weapon-slot matrix: " + ex.Message);
+            }
+        }
+
+        private static void EnsureCoopTestBattleFallbackPaletteItems(WeaponSlotMatrixPalette palette)
+        {
+            if (palette == null)
+                return;
+
+            if (string.IsNullOrWhiteSpace(palette.BastardId) &&
+                IsCoopTestBattleXmlItemIdAvailable(CoopRoleMatrixStreamTestBastardSwordId))
+            {
+                palette.BastardId = CoopRoleMatrixStreamTestBastardSwordId;
+            }
+        }
+
+        private static bool IsCoopTestBattleXmlItemIdAvailable(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return false;
+
+            if (TryResolveItemObject(itemId) != null)
+                return true;
+
+            string normalizedItemId = NormalizeXmlObjectId(itemId) ?? itemId.Trim();
+            foreach (string xmlPath in ResolveCoopTestBattleMultiplayerItemXmlPaths())
+            {
+                if (string.IsNullOrWhiteSpace(xmlPath) || !System.IO.File.Exists(xmlPath))
+                    continue;
+
+                try
+                {
+                    var document = new System.Xml.XmlDocument();
+                    document.Load(xmlPath);
+                    System.Xml.XmlNode node = document.SelectSingleNode("//*[@id='" + normalizedItemId + "']");
+                    if (node != null)
+                        return true;
+                }
+                catch
+                {
+                }
+            }
+
+            return false;
+        }
+
+        private static void TrySetPaletteHorseItems(WeaponSlotMatrixPalette palette, object equipment)
+        {
+            if (palette == null || equipment == null)
+                return;
+
+            if (string.IsNullOrWhiteSpace(palette.HorseId))
+                palette.HorseId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Horse);
+
+            if (string.IsNullOrWhiteSpace(palette.HorseHarnessId))
+                palette.HorseHarnessId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.HorseHarness);
+        }
+
+        private static bool IsMountedCharacter(BasicCharacterObject character)
+        {
+            if (character == null)
+                return false;
+
+            foreach (object equipment in EnumerateCharacterEquipments(character))
+            {
+                if (!string.IsNullOrWhiteSpace(TryGetEquipmentSlotItemId(equipment, EquipmentIndex.Horse)))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static void TrySetPaletteWeaponItem(WeaponSlotMatrixPalette palette, string itemId)
+        {
+            if (palette == null || string.IsNullOrWhiteSpace(itemId))
+                return;
+
+            ItemObject item = TryResolveItemObject(itemId);
+            if (TryAddPaletteFiveModeWeaponItem(palette, item, itemId))
+                return;
+
+            WeaponComponentData primaryWeapon = item?.PrimaryWeapon;
+            string weaponClass = primaryWeapon?.WeaponClass.ToString() ?? string.Empty;
+            if (primaryWeapon != null && primaryWeapon.IsShield)
+            {
+                palette.ShieldId = SetIfEmpty(palette.ShieldId, itemId);
+                return;
+            }
+
+            if (weaponClass.IndexOf("Arrow", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                palette.ArrowId = SetIfEmpty(palette.ArrowId, itemId);
+                return;
+            }
+
+            if (weaponClass.IndexOf("Bolt", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                palette.BoltId = SetIfEmpty(palette.BoltId, itemId);
+                return;
+            }
+
+            if (weaponClass.IndexOf("Crossbow", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                palette.CrossbowId = SetIfEmpty(palette.CrossbowId, itemId);
+                return;
+            }
+
+            if (weaponClass.IndexOf("Bow", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                palette.BowId = SetIfEmpty(palette.BowId, itemId);
+                return;
+            }
+
+            if (weaponClass.IndexOf("Javelin", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                weaponClass.IndexOf("Throwing", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                weaponClass.IndexOf("Stone", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                palette.ThrowingId = SetIfEmpty(palette.ThrowingId, itemId);
+                return;
+            }
+
+            if (IsBastardSwordItem(item, itemId))
+            {
+                palette.BastardId = SetIfEmpty(palette.BastardId, itemId);
+                return;
+            }
+
+            if (weaponClass.IndexOf("Polearm", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                weaponClass.IndexOf("Spear", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                weaponClass.IndexOf("Pike", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                palette.PolearmId = SetIfEmpty(palette.PolearmId, itemId);
+                return;
+            }
+
+            if (weaponClass.IndexOf("TwoHanded", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                palette.TwoHandedId = SetIfEmpty(palette.TwoHandedId, itemId);
+                return;
+            }
+
+            if (primaryWeapon != null)
+            {
+                palette.OneHandedId = SetIfEmpty(palette.OneHandedId, itemId);
+                return;
+            }
+
+            TrySetPaletteWeaponItemFromIdHeuristics(palette, itemId);
+        }
+
+        private static bool TryAddPaletteFiveModeWeaponItem(
+            WeaponSlotMatrixPalette palette,
+            ItemObject item,
+            string itemId)
+        {
+            if (palette == null || string.IsNullOrWhiteSpace(itemId))
+                return false;
+
+            int usageCount = TryGetWeaponUsageCount(item);
+            string craftingTemplate = TryGetCoopTestBattleXmlItemCraftingTemplate(itemId);
+            if (usageCount <= 4 && !IsFiveModeWeaponCraftingTemplate(craftingTemplate))
+                return false;
+
+            if (!palette.FiveModeWeaponIds.Any(existing => string.Equals(existing, itemId, StringComparison.OrdinalIgnoreCase)))
+                palette.FiveModeWeaponIds.Add(itemId);
+
+            return true;
+        }
+
+        private static bool IsFiveModeWeaponCraftingTemplate(string craftingTemplate)
+        {
+            return string.Equals(craftingTemplate, "TwoHandedPolearm", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string TryGetCoopTestBattleXmlItemCraftingTemplate(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return null;
+
+            Dictionary<string, string> templates = GetCoopTestBattleXmlItemCraftingTemplates();
+            if (templates == null || templates.Count == 0)
+                return null;
+
+            string normalizedItemId = NormalizeXmlObjectId(itemId);
+            if (string.IsNullOrWhiteSpace(normalizedItemId))
+                normalizedItemId = itemId.Trim();
+
+            return templates.TryGetValue(normalizedItemId, out string craftingTemplate)
+                ? craftingTemplate
+                : null;
+        }
+
+        private static Dictionary<string, string> GetCoopTestBattleXmlItemCraftingTemplates()
+        {
+            lock (CoopTestBattleXmlItemTemplateCacheLock)
+            {
+                if (_cachedCoopTestBattleXmlItemCraftingTemplatesLoaded)
+                    return _cachedCoopTestBattleXmlItemCraftingTemplates;
+
+                var templates = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string xmlPath in ResolveCoopTestBattleMultiplayerItemXmlPaths())
+                    LoadCoopTestBattleMultiplayerItemCraftingTemplatesXml(xmlPath, templates);
+
+                _cachedCoopTestBattleXmlItemCraftingTemplates = templates;
+                _cachedCoopTestBattleXmlItemCraftingTemplatesLoaded = true;
+
+                List<string> fiveModeSamples = templates
+                    .Where(pair => IsFiveModeWeaponCraftingTemplate(pair.Value))
+                    .Select(pair => pair.Key)
+                    .OrderBy(itemId => itemId, StringComparer.OrdinalIgnoreCase)
+                    .Take(12)
+                    .ToList();
+                ModLogger.Info(
+                    "BattleDetector: coop test battle XML item crafting-template cache loaded. " +
+                    "Items=" + templates.Count +
+                    " FiveModeTemplateItems=" + templates.Count(pair => IsFiveModeWeaponCraftingTemplate(pair.Value)) +
+                    " Sample=[" + string.Join(", ", fiveModeSamples) + "].");
+
+                return _cachedCoopTestBattleXmlItemCraftingTemplates;
+            }
+        }
+
+        private static void LoadCoopTestBattleMultiplayerItemCraftingTemplatesXml(
+            string xmlPath,
+            Dictionary<string, string> templates)
+        {
+            if (string.IsNullOrWhiteSpace(xmlPath) || templates == null || !System.IO.File.Exists(xmlPath))
+                return;
+
+            try
+            {
+                var document = new System.Xml.XmlDocument();
+                document.Load(xmlPath);
+                System.Xml.XmlNodeList itemNodes = document.SelectNodes("//*[@crafting_template]");
+                if (itemNodes == null)
+                    return;
+
+                int scanned = 0;
+                int accepted = 0;
+                foreach (System.Xml.XmlNode itemNode in itemNodes)
+                {
+                    string itemId = NormalizeXmlObjectId(TryGetXmlAttribute(itemNode, "id"));
+                    string craftingTemplate = NormalizeXmlObjectId(TryGetXmlAttribute(itemNode, "crafting_template"));
+                    if (string.IsNullOrWhiteSpace(itemId) ||
+                        string.IsNullOrWhiteSpace(craftingTemplate) ||
+                        !IsCoopTestBattleMultiplayerId(itemId))
+                    {
+                        scanned++;
+                        continue;
+                    }
+
+                    templates[itemId] = craftingTemplate;
+                    scanned++;
+                    accepted++;
+                }
+
+                ModLogger.Info(
+                    "BattleDetector: scanned coop test battle MP item crafting templates. " +
+                    "Path=" + xmlPath +
+                    " Items=" + scanned +
+                    " Accepted=" + accepted + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to scan MP item crafting templates from " + xmlPath + ": " + ex.Message);
+            }
+        }
+
+        private static int TryGetWeaponUsageCount(ItemObject item)
+        {
+            try
+            {
+                return item?.Weapons?.Count ?? 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static bool IsBastardSwordItem(ItemObject item, string itemId)
+        {
+            if (ContainsAnyOrdinal(itemId, "bastard", "long_sword", "longsword"))
+                return true;
+
+            bool hasOneHandedSword = false;
+            bool hasTwoHandedSword = false;
+            try
+            {
+                if (item?.Weapons != null)
+                {
+                    foreach (WeaponComponentData weapon in item.Weapons)
+                    {
+                        string weaponClass = weapon?.WeaponClass.ToString() ?? string.Empty;
+                        if (weaponClass.IndexOf("OneHanded", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                            weaponClass.IndexOf("Sword", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            hasOneHandedSword = true;
+                        }
+
+                        if (weaponClass.IndexOf("TwoHanded", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                            weaponClass.IndexOf("Sword", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            hasTwoHandedSword = true;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            return hasOneHandedSword && hasTwoHandedSword;
+        }
+
+        private static bool TrySetPaletteWeaponItemFromIdHeuristics(WeaponSlotMatrixPalette palette, string itemId)
+        {
+            if (palette == null || string.IsNullOrWhiteSpace(itemId))
+                return false;
+
+            string normalized = itemId.Trim().ToLowerInvariant();
+            if (ContainsAnyOrdinal(normalized, "bastard", "long_sword", "longsword"))
+            {
+                palette.BastardId = SetIfEmpty(palette.BastardId, itemId);
+                return true;
+            }
+
+            if (ContainsAnyOrdinal(normalized, "shield", "buckler", "targe"))
+            {
+                palette.ShieldId = SetIfEmpty(palette.ShieldId, itemId);
+                return true;
+            }
+
+            if (ContainsAnyOrdinal(normalized, "arrow", "arrows"))
+            {
+                palette.ArrowId = SetIfEmpty(palette.ArrowId, itemId);
+                return true;
+            }
+
+            if (ContainsAnyOrdinal(normalized, "bolt", "bolts"))
+            {
+                palette.BoltId = SetIfEmpty(palette.BoltId, itemId);
+                return true;
+            }
+
+            if (ContainsAnyOrdinal(normalized, "crossbow"))
+            {
+                palette.CrossbowId = SetIfEmpty(palette.CrossbowId, itemId);
+                return true;
+            }
+
+            if (ContainsAnyOrdinal(normalized, "bow"))
+            {
+                palette.BowId = SetIfEmpty(palette.BowId, itemId);
+                return true;
+            }
+
+            if (LooksLikeThrownWeaponItemId(normalized))
+            {
+                palette.ThrowingId = SetIfEmpty(palette.ThrowingId, itemId);
+                return true;
+            }
+
+            if (LooksLikePolearmWeaponItemId(normalized))
+            {
+                palette.PolearmId = SetIfEmpty(palette.PolearmId, itemId);
+                return true;
+            }
+
+            if (LooksLikeTwoHandedWeaponItemId(normalized))
+            {
+                palette.TwoHandedId = SetIfEmpty(palette.TwoHandedId, itemId);
+                return true;
+            }
+
+            if (LooksLikeOneHandedWeaponItemId(normalized))
+            {
+                palette.OneHandedId = SetIfEmpty(palette.OneHandedId, itemId);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool ContainsAnyOrdinal(string value, params string[] tokens)
+        {
+            if (string.IsNullOrWhiteSpace(value) || tokens == null)
+                return false;
+
+            foreach (string token in tokens)
+            {
+                if (!string.IsNullOrWhiteSpace(token) &&
+                    value.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool LooksLikeThrownWeaponItemId(string normalizedItemId)
+        {
+            return ContainsAnyOrdinal(
+                normalizedItemId,
+                "javelin",
+                "jarid",
+                "throwing",
+                "pilum",
+                "dart",
+                "stone");
+        }
+
+        private static bool LooksLikePolearmWeaponItemId(string normalizedItemId)
+        {
+            return ContainsAnyOrdinal(
+                normalizedItemId,
+                "spear",
+                "polearm",
+                "pike",
+                "lance",
+                "kontos",
+                "menavlion",
+                "voulge",
+                "glaive",
+                "pitchfork",
+                "scythe");
+        }
+
+        private static bool LooksLikeTwoHandedWeaponItemId(string normalizedItemId)
+        {
+            return ContainsAnyOrdinal(
+                normalizedItemId,
+                "two_handed",
+                "twohanded",
+                "_2h",
+                "2h_",
+                "great_sword",
+                "greatsword",
+                "falx",
+                "rhomphaia",
+                "bardiche",
+                "maul");
+        }
+
+        private static bool LooksLikeOneHandedWeaponItemId(string normalizedItemId)
+        {
+            return ContainsAnyOrdinal(
+                normalizedItemId,
+                "sword",
+                "spatha",
+                "sabre",
+                "axe",
+                "mace",
+                "hammer",
+                "pick",
+                "knife",
+                "dagger",
+                "sickle");
+        }
+
+        private static string SetIfEmpty(string target, string value)
+        {
+            return string.IsNullOrWhiteSpace(target) && !string.IsNullOrWhiteSpace(value)
+                ? value
+                : target;
+        }
+
+        private static ItemObject TryResolveItemObject(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId) || MBObjectManager.Instance == null)
+                return null;
+
+            try
+            {
+                return MBObjectManager.Instance.GetObject<ItemObject>(itemId);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static List<WeaponSlotMatrixLayout> BuildFiveModeWeaponSlotMatrixLayouts(
+            WeaponSlotMatrixPalette palette,
+            int limit)
+        {
+            var layouts = new List<WeaponSlotMatrixLayout>();
+            if (palette == null || limit <= 0)
+                return layouts;
+
+            List<string> fiveModeWeaponIds = palette.FiveModeWeaponIds
+                .Where(itemId => !string.IsNullOrWhiteSpace(itemId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(itemId => itemId, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (fiveModeWeaponIds.Count == 0)
+            {
+                ModLogger.Info("BattleDetector: coop test battle five-mode weapon-slot matrix skipped because no MP weapon with more than four usages was found.");
+                return layouts;
+            }
+
+            var signatures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (string fiveModeWeaponId in fiveModeWeaponIds)
+                AddWeaponSlotPermutations(
+                    layouts,
+                    signatures,
+                    limit,
+                    "five_mode_" + NormalizeHeroIdentityToken(fiveModeWeaponId),
+                    false,
+                    fiveModeWeaponId);
+
+            foreach (string fiveModeWeaponId in fiveModeWeaponIds)
+                AddWeaponSlotPermutations(
+                    layouts,
+                    signatures,
+                    limit,
+                    "five_mode_pair_" + NormalizeHeroIdentityToken(fiveModeWeaponId),
+                    false,
+                    fiveModeWeaponId,
+                    fiveModeWeaponId);
+
+            foreach (string fiveModeWeaponId in fiveModeWeaponIds)
+                AddWeaponSlotPermutations(
+                    layouts,
+                    signatures,
+                    limit,
+                    "five_mode_quad_" + NormalizeHeroIdentityToken(fiveModeWeaponId),
+                    false,
+                    fiveModeWeaponId,
+                    fiveModeWeaponId,
+                    fiveModeWeaponId,
+                    fiveModeWeaponId);
+
+            foreach (string fiveModeWeaponId in fiveModeWeaponIds)
+            {
+                string token = NormalizeHeroIdentityToken(fiveModeWeaponId);
+                AddWeaponSlotPermutations(layouts, signatures, limit, "five_mode_shield_" + token, false, fiveModeWeaponId, palette.ShieldId);
+                AddWeaponSlotPermutations(layouts, signatures, limit, "five_mode_one_handed_" + token, false, fiveModeWeaponId, palette.OneHandedId);
+                AddWeaponSlotPermutations(layouts, signatures, limit, "five_mode_one_handed_shield_" + token, false, fiveModeWeaponId, palette.OneHandedId, palette.ShieldId);
+                AddWeaponSlotPermutations(layouts, signatures, limit, "five_mode_throwing_" + token, false, fiveModeWeaponId, palette.ThrowingId);
+                AddWeaponSlotPermutations(layouts, signatures, limit, "five_mode_bow_arrow_" + token, false, fiveModeWeaponId, palette.BowId, palette.ArrowId);
+                AddWeaponSlotPermutations(layouts, signatures, limit, "five_mode_crossbow_bolt_" + token, false, fiveModeWeaponId, palette.CrossbowId, palette.BoltId);
+            }
+
+            string sample = string.Join(
+                ", ",
+                fiveModeWeaponIds
+                    .Take(12)
+                    .Select(itemId => itemId + ":" + TryGetWeaponUsageCount(TryResolveItemObject(itemId))));
+            ModLogger.Info(
+                "BattleDetector: built coop test battle five-mode weapon-slot matrix. " +
+                "FiveModeWeapons=" + fiveModeWeaponIds.Count +
+                " Layouts=" + layouts.Count +
+                " Limit=" + limit +
+                " FiveModeWeaponUsageProtocol=" + (CoopTestBattleOptions.FiveModeWeaponUsageProtocolEnabled ? "ON" : "OFF") +
+                " Sample=[" + sample + "].");
+
+            return layouts;
+        }
+
+        public static IReadOnlyList<CoopRoleMatrixStreamEntryDefinition> BuildCoopRoleMatrixStreamDefinitions()
+        {
+            List<BasicCharacterObject> characters = CollectCoopTestBattleMultiplayerCharacters();
+            List<CoopTestBattleMultiplayerSeed> xmlSeeds = characters.Count == 0
+                ? CollectCoopTestBattleXmlMultiplayerSeeds()
+                : new List<CoopTestBattleMultiplayerSeed>();
+            WeaponSlotMatrixPalette palette = characters.Count > 0
+                ? BuildCoopTestBattleMultiplayerWeaponSlotMatrixPalette(characters)
+                : BuildCoopTestBattleXmlWeaponSlotMatrixPalette(xmlSeeds);
+
+            List<WeaponSlotMatrixLayout> layouts = BuildRoleMatrixStreamLayouts(palette, limit: 0);
+            if (layouts.Count == 0)
+            {
+                ModLogger.Info(
+                    "BattleDetector: role-matrix stream definitions empty. " +
+                    "MpCharacters=" + characters.Count +
+                    " XmlSeeds=" + xmlSeeds.Count + ".");
+                return Array.Empty<CoopRoleMatrixStreamEntryDefinition>();
+            }
+
+            BasicCharacterObject baseCharacter = characters.FirstOrDefault(character => character != null && !IsMountedCharacter(character)) ??
+                                                 characters.FirstOrDefault(character => character != null);
+            CoopTestBattleMultiplayerSeed baseSeed =
+                xmlSeeds.FirstOrDefault(seed => seed != null && !seed.IsMounted) ??
+                xmlSeeds.FirstOrDefault(seed => seed != null);
+
+            var definitions = new List<CoopRoleMatrixStreamEntryDefinition>(layouts.Count);
+            BattleSideSnapshotMessage templateSide = new BattleSideSnapshotMessage
+            {
+                SideId = "attacker",
+                SideText = nameof(BattleSideEnum.Attacker)
+            };
+            CanonicalizeSnapshotSideCulture(templateSide);
+
+            const string templatePartyId = "coop_test_attacker_role_matrix_stream_template";
+            for (int i = 0; i < layouts.Count; i++)
+            {
+                WeaponSlotMatrixLayout layout = layouts[i];
+                TroopStackInfo templateTroop = null;
+                if (baseCharacter != null)
+                {
+                    string baseCharacterId = baseCharacter.StringId;
+                    templateTroop = BuildCoopTestBattleWeaponSlotMatrixTroop(
+                        layout,
+                        templateSide,
+                        templatePartyId,
+                        baseCharacter,
+                        baseCharacterId,
+                        baseCharacterId,
+                        palette,
+                        i);
+                }
+                else if (baseSeed != null)
+                {
+                    templateTroop = BuildCoopTestBattleWeaponSlotMatrixTroop(
+                        layout,
+                        templateSide,
+                        templatePartyId,
+                        baseSeed,
+                        palette,
+                        i);
+                }
+
+                if (templateTroop == null)
+                    continue;
+
+                definitions.Add(new CoopRoleMatrixStreamEntryDefinition
+                {
+                    MatrixId = layout.MatrixId,
+                    MatrixIndex = layout.MatrixIndex,
+                    Name = layout.Name,
+                    RoleIds = layout.RoleIds != null ? (string[])layout.RoleIds.Clone() : new string[4],
+                    ItemIds = layout.ItemIds != null ? (string[])layout.ItemIds.Clone() : new string[4],
+                    IsMounted = layout.IsMounted,
+                    IsRanged = layout.IsRanged,
+                    HasShield = layout.HasShield,
+                    HasThrown = layout.HasThrown,
+                    TemplateTroop = templateTroop
+                });
+            }
+
+            ModLogger.Info(
+                "BattleDetector: built role-matrix stream definitions. " +
+                "Definitions=" + definitions.Count +
+                " LogicalMatrices=" + CoopRoleMatrixStreamLogicalMatrixCount +
+                " MpCharacters=" + characters.Count +
+                " XmlSeeds=" + xmlSeeds.Count +
+                " BastardId=" + (palette?.BastardId ?? "missing") + ".");
+            return definitions;
+        }
+
+        public static RosterEntryState BuildCoopRoleMatrixStreamEntryState(
+            CoopRoleMatrixStreamEntryDefinition definition,
+            BattleSideEnum side)
+        {
+            if (definition?.TemplateTroop == null)
+                return null;
+
+            TroopStackInfo troop = definition.TemplateTroop;
+            string sideId = side == BattleSideEnum.Defender ? "defender" : "attacker";
+            string partyId = "coop_test_" + sideId + "_role_matrix_stream";
+            string entryId = sideId + "|" + partyId + "|role_matrix_stream|" + (definition.MatrixId ?? "M00000");
+            return new RosterEntryState
+            {
+                EntryId = entryId,
+                SideId = sideId,
+                PartyId = partyId,
+                CharacterId = troop.CharacterId,
+                OriginalCharacterId = troop.OriginalCharacterId,
+                SpawnTemplateId = troop.SpawnTemplateId,
+                TroopName = "Coop Matrix " + (definition.MatrixId ?? "M00000") + " " + (definition.SlotSummary ?? string.Empty),
+                CultureId = troop.CultureId,
+                HeroId = troop.HeroId,
+                HeroRole = troop.HeroRole,
+                HeroOccupationId = troop.HeroOccupationId,
+                HeroClanId = troop.HeroClanId,
+                HeroTemplateId = troop.HeroTemplateId,
+                HeroBodyProperties = troop.HeroBodyProperties,
+                HeroLevel = troop.HeroLevel,
+                HeroAge = troop.HeroAge,
+                HeroIsFemale = troop.HeroIsFemale,
+                Count = 1,
+                WoundedCount = 0,
+                IsHero = false,
+                IsMounted = definition.IsMounted,
+                IsRanged = definition.IsRanged,
+                HasShield = definition.HasShield,
+                HasThrown = definition.HasThrown,
+                AttributeVigor = troop.AttributeVigor,
+                AttributeControl = troop.AttributeControl,
+                AttributeEndurance = troop.AttributeEndurance,
+                SkillOneHanded = troop.SkillOneHanded,
+                SkillTwoHanded = troop.SkillTwoHanded,
+                SkillPolearm = troop.SkillPolearm,
+                SkillBow = troop.SkillBow,
+                SkillCrossbow = troop.SkillCrossbow,
+                SkillThrowing = troop.SkillThrowing,
+                SkillRiding = troop.SkillRiding,
+                SkillAthletics = troop.SkillAthletics,
+                BaseHitPoints = troop.BaseHitPoints,
+                PerkIds = troop.PerkIds != null ? new List<string>(troop.PerkIds) : new List<string>(),
+                CombatItem0Id = definition.ItemIds != null && definition.ItemIds.Length > 0 ? definition.ItemIds[0] : null,
+                CombatItem0Amount = troop.CombatItem0Amount,
+                CombatItem1Id = definition.ItemIds != null && definition.ItemIds.Length > 1 ? definition.ItemIds[1] : null,
+                CombatItem1Amount = troop.CombatItem1Amount,
+                CombatItem2Id = definition.ItemIds != null && definition.ItemIds.Length > 2 ? definition.ItemIds[2] : null,
+                CombatItem2Amount = troop.CombatItem2Amount,
+                CombatItem3Id = definition.ItemIds != null && definition.ItemIds.Length > 3 ? definition.ItemIds[3] : null,
+                CombatItem3Amount = troop.CombatItem3Amount,
+                CombatHeadId = troop.CombatHeadId,
+                CombatBodyId = troop.CombatBodyId,
+                CombatLegId = troop.CombatLegId,
+                CombatGlovesId = troop.CombatGlovesId,
+                CombatCapeId = troop.CombatCapeId,
+                CombatHorseId = definition.IsMounted ? troop.CombatHorseId : null,
+                CombatHorseHarnessId = definition.IsMounted ? troop.CombatHorseHarnessId : null,
+                ServerCreateContractResolved = troop.ServerCreateContractResolved,
+                ServerCreateUseStringIdExactEquipmentPath = troop.ServerCreateUseStringIdExactEquipmentPath,
+                ServerCreateInjectEquipment = troop.ServerCreateInjectEquipment,
+                ServerCreatePreSpawnIncludesWeapons = troop.ServerCreatePreSpawnIncludesWeapons,
+                ServerCreatePreSpawnIncludesArmorVisuals = troop.ServerCreatePreSpawnIncludesArmorVisuals,
+                ServerCreatePreSpawnIncludesCapeVisual = troop.ServerCreatePreSpawnIncludesCapeVisual,
+                ServerCreatePreSpawnIncludesMountVisuals = troop.ServerCreatePreSpawnIncludesMountVisuals,
+                ServerCreatePayloadDiagnosticActive = troop.ServerCreatePayloadDiagnosticActive,
+                ServerCreateRequestedProfile = troop.ServerCreateRequestedProfile,
+                ServerCreateEffectiveProfile = troop.ServerCreateEffectiveProfile,
+                Tier = troop.Tier
+            };
+        }
+
+        public static int GetCoopRoleMatrixStreamLogicalMatrixCount()
+        {
+            return CoopRoleMatrixStreamLogicalMatrixCount;
+        }
+
+        private static List<WeaponSlotMatrixLayout> BuildRoleMatrixStreamLayouts(
+            WeaponSlotMatrixPalette palette,
+            int limit)
+        {
+            var layouts = new List<WeaponSlotMatrixLayout>();
+            if (palette == null)
+                return layouts;
+
+            int effectiveLimit = limit > 0 ? limit : int.MaxValue;
+            var missingRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            RoleMatrixSlotRole[] roles =
+            {
+                RoleMatrixSlotRole.Empty,
+                RoleMatrixSlotRole.Bow,
+                RoleMatrixSlotRole.Crossbow,
+                RoleMatrixSlotRole.Bolt,
+                RoleMatrixSlotRole.Arrow,
+                RoleMatrixSlotRole.Throwing,
+                RoleMatrixSlotRole.Shield,
+                RoleMatrixSlotRole.OneHanded,
+                RoleMatrixSlotRole.Bastard,
+                RoleMatrixSlotRole.TwoHanded,
+                RoleMatrixSlotRole.Polearm
+            };
+
+            int logicalIndex = 0;
+            for (int slot0 = 0; slot0 < roles.Length && layouts.Count < effectiveLimit; slot0++)
+            {
+                for (int slot1 = 0; slot1 < roles.Length && layouts.Count < effectiveLimit; slot1++)
+                {
+                    for (int slot2 = 0; slot2 < roles.Length && layouts.Count < effectiveLimit; slot2++)
+                    {
+                        for (int slot3 = 0; slot3 < roles.Length && layouts.Count < effectiveLimit; slot3++)
+                        {
+                            RoleMatrixSlotRole[] roleSlots =
+                            {
+                                roles[slot0],
+                                roles[slot1],
+                                roles[slot2],
+                                roles[slot3]
+                            };
+                            if (roleSlots.All(role => role == RoleMatrixSlotRole.Empty))
+                                continue;
+
+                            logicalIndex++;
+                            if (!TryBuildRoleMatrixStreamLayout(palette, roleSlots, logicalIndex, out WeaponSlotMatrixLayout layout, missingRoles))
+                                continue;
+
+                            layouts.Add(layout);
+                        }
+                    }
+                }
+            }
+
+            if (missingRoles.Count > 0)
+            {
+                string missingKey = string.Join(",", missingRoles.OrderBy(role => role, StringComparer.OrdinalIgnoreCase));
+                if (!string.Equals(_lastRoleMatrixStreamMissingRoleLogKey, missingKey, StringComparison.Ordinal))
+                {
+                    _lastRoleMatrixStreamMissingRoleLogKey = missingKey;
+                    ModLogger.Info(
+                        "BattleDetector: role-matrix stream skipped layouts because palette roles are missing. " +
+                        "MissingRoles=[" + missingKey + "]" +
+                        " Built=" + layouts.Count +
+                        " LogicalMatrices=" + CoopRoleMatrixStreamLogicalMatrixCount + ".");
+                }
+            }
+
+            return layouts;
+        }
+
+        private static bool TryBuildRoleMatrixStreamLayout(
+            WeaponSlotMatrixPalette palette,
+            RoleMatrixSlotRole[] roleSlots,
+            int logicalIndex,
+            out WeaponSlotMatrixLayout layout,
+            HashSet<string> missingRoles)
+        {
+            layout = null;
+            if (palette == null || roleSlots == null || roleSlots.Length != 4)
+                return false;
+
+            var itemIds = new string[4];
+            var roleIds = new string[4];
+            for (int i = 0; i < roleSlots.Length; i++)
+            {
+                RoleMatrixSlotRole role = roleSlots[i];
+                roleIds[i] = FormatRoleMatrixSlotRole(role);
+                string itemId = ResolveRoleMatrixSlotItemId(palette, role);
+                if (role != RoleMatrixSlotRole.Empty && string.IsNullOrWhiteSpace(itemId))
+                {
+                    missingRoles?.Add(roleIds[i]);
+                    return false;
+                }
+
+                itemIds[i] = itemId;
+            }
+
+            layout = new WeaponSlotMatrixLayout
+            {
+                MatrixId = "M" + logicalIndex.ToString("00000", CultureInfo.InvariantCulture),
+                MatrixIndex = logicalIndex,
+                Name = "role_matrix_" + string.Join("_", roleIds),
+                RoleIds = roleIds,
+                ItemIds = itemIds,
+                IsMounted = false,
+                IsRanged = roleSlots.Any(role =>
+                    role == RoleMatrixSlotRole.Bow ||
+                    role == RoleMatrixSlotRole.Crossbow ||
+                    role == RoleMatrixSlotRole.Throwing),
+                HasShield = roleSlots.Any(role => role == RoleMatrixSlotRole.Shield),
+                HasThrown = roleSlots.Any(role => role == RoleMatrixSlotRole.Throwing)
+            };
+            return true;
+        }
+
+        private static string ResolveRoleMatrixSlotItemId(WeaponSlotMatrixPalette palette, RoleMatrixSlotRole role)
+        {
+            if (palette == null)
+                return null;
+
+            switch (role)
+            {
+                case RoleMatrixSlotRole.Bow:
+                    return palette.BowId;
+                case RoleMatrixSlotRole.Crossbow:
+                    return palette.CrossbowId;
+                case RoleMatrixSlotRole.Bolt:
+                    return palette.BoltId;
+                case RoleMatrixSlotRole.Arrow:
+                    return palette.ArrowId;
+                case RoleMatrixSlotRole.Throwing:
+                    return palette.ThrowingId;
+                case RoleMatrixSlotRole.Shield:
+                    return palette.ShieldId;
+                case RoleMatrixSlotRole.OneHanded:
+                    return palette.OneHandedId;
+                case RoleMatrixSlotRole.Bastard:
+                    return palette.BastardId;
+                case RoleMatrixSlotRole.TwoHanded:
+                    return palette.TwoHandedId;
+                case RoleMatrixSlotRole.Polearm:
+                    return palette.PolearmId;
+                default:
+                    return null;
+            }
+        }
+
+        private static string FormatRoleMatrixSlotRole(RoleMatrixSlotRole role)
+        {
+            switch (role)
+            {
+                case RoleMatrixSlotRole.Bow:
+                    return "bow";
+                case RoleMatrixSlotRole.Crossbow:
+                    return "crossbow";
+                case RoleMatrixSlotRole.Bolt:
+                    return "bolt";
+                case RoleMatrixSlotRole.Arrow:
+                    return "arrow";
+                case RoleMatrixSlotRole.Throwing:
+                    return "throwing";
+                case RoleMatrixSlotRole.Shield:
+                    return "shield";
+                case RoleMatrixSlotRole.OneHanded:
+                    return "one_handed";
+                case RoleMatrixSlotRole.Bastard:
+                    return "bastard";
+                case RoleMatrixSlotRole.TwoHanded:
+                    return "two_handed";
+                case RoleMatrixSlotRole.Polearm:
+                    return "polearm";
+                default:
+                    return "empty";
+            }
+        }
+
+        private static List<WeaponSlotMatrixLayout> BuildWeaponSlotMatrixLayouts(
+            WeaponSlotMatrixPalette palette,
+            int limit)
+        {
+            var layouts = new List<WeaponSlotMatrixLayout>();
+            if (palette == null || limit <= 0)
+                return layouts;
+
+            var signatures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "one_handed", false, palette.OneHandedId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "two_handed", false, palette.TwoHandedId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "polearm", false, palette.PolearmId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "throwing", false, palette.ThrowingId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "one_handed_shield", false, palette.OneHandedId, palette.ShieldId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "polearm_shield", false, palette.PolearmId, palette.ShieldId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "bow_arrow", false, palette.BowId, palette.ArrowId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "crossbow_bolt", false, palette.CrossbowId, palette.BoltId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "throwing_shield", false, palette.ThrowingId, palette.ShieldId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "one_handed_shield_bow_arrow", false, palette.OneHandedId, palette.ShieldId, palette.BowId, palette.ArrowId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "polearm_shield_bow_arrow", false, palette.PolearmId, palette.ShieldId, palette.BowId, palette.ArrowId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "one_handed_shield_crossbow_bolt", false, palette.OneHandedId, palette.ShieldId, palette.CrossbowId, palette.BoltId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "polearm_shield_crossbow_bolt", false, palette.PolearmId, palette.ShieldId, palette.CrossbowId, palette.BoltId);
+            AddWeaponSlotPermutations(layouts, signatures, limit, "one_handed_shield_throwing", false, palette.OneHandedId, palette.ShieldId, palette.ThrowingId);
+
+            if (!string.IsNullOrWhiteSpace(palette.HorseId))
+            {
+                int currentCount = layouts.Count;
+                for (int i = 0; i < currentCount && layouts.Count < limit; i++)
+                {
+                    WeaponSlotMatrixLayout source = layouts[i];
+                    AddWeaponSlotLayout(
+                        layouts,
+                        signatures,
+                        limit,
+                        source.Name + "_mounted",
+                        source.ItemIds,
+                        mounted: true);
+                }
+            }
+
+            return layouts;
+        }
+
+        private static void AddWeaponSlotPermutations(
+            List<WeaponSlotMatrixLayout> layouts,
+            HashSet<string> signatures,
+            int limit,
+            string name,
+            bool mounted,
+            params string[] itemIds)
+        {
+            if (layouts == null || signatures == null || layouts.Count >= limit || itemIds == null)
+                return;
+
+            string[] compactItems = itemIds.Where(itemId => !string.IsNullOrWhiteSpace(itemId)).ToArray();
+            if (compactItems.Length == 0 || compactItems.Length > 4)
+                return;
+
+            var slots = new string[4];
+            var usedSlots = new bool[4];
+            AddWeaponSlotPermutationsRecursive(layouts, signatures, limit, name, mounted, compactItems, 0, slots, usedSlots);
+        }
+
+        private static void AddWeaponSlotPermutationsRecursive(
+            List<WeaponSlotMatrixLayout> layouts,
+            HashSet<string> signatures,
+            int limit,
+            string name,
+            bool mounted,
+            string[] itemIds,
+            int itemIndex,
+            string[] slots,
+            bool[] usedSlots)
+        {
+            if (layouts.Count >= limit)
+                return;
+
+            if (itemIndex >= itemIds.Length)
+            {
+                AddWeaponSlotLayout(layouts, signatures, limit, name, slots, mounted);
+                return;
+            }
+
+            for (int slotIndex = 0; slotIndex < 4; slotIndex++)
+            {
+                if (usedSlots[slotIndex])
+                    continue;
+
+                usedSlots[slotIndex] = true;
+                slots[slotIndex] = itemIds[itemIndex];
+                AddWeaponSlotPermutationsRecursive(layouts, signatures, limit, name, mounted, itemIds, itemIndex + 1, slots, usedSlots);
+                slots[slotIndex] = null;
+                usedSlots[slotIndex] = false;
+            }
+        }
+
+        private static void AddWeaponSlotLayout(
+            List<WeaponSlotMatrixLayout> layouts,
+            HashSet<string> signatures,
+            int limit,
+            string name,
+            string[] itemIds,
+            bool mounted)
+        {
+            if (layouts == null || signatures == null || layouts.Count >= limit)
+                return;
+
+            string[] clone = new string[4];
+            for (int i = 0; i < clone.Length && itemIds != null && i < itemIds.Length; i++)
+                clone[i] = itemIds[i];
+
+            string signature = (mounted ? "mounted|" : "foot|") + string.Join("|", clone.Select(itemId => itemId ?? string.Empty));
+            if (!signatures.Add(signature))
+                return;
+
+            layouts.Add(new WeaponSlotMatrixLayout
+            {
+                Name = name + "_" + (layouts.Count + 1),
+                ItemIds = clone,
+                IsMounted = mounted,
+                IsRanged = clone.Any(IsRangedWeaponSlotItem),
+                HasShield = clone.Any(IsShieldWeaponSlotItem),
+                HasThrown = clone.Any(IsThrownWeaponSlotItem)
+            });
+        }
+
+        private static bool IsRangedWeaponSlotItem(string itemId)
+        {
+            ItemObject item = TryResolveItemObject(itemId);
+            string weaponClass = item?.PrimaryWeapon?.WeaponClass.ToString() ?? string.Empty;
+            return weaponClass.IndexOf("Bow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   weaponClass.IndexOf("Crossbow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   weaponClass.IndexOf("Javelin", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   weaponClass.IndexOf("Throwing", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   weaponClass.IndexOf("Stone", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   LooksLikeRangedWeaponItemId(itemId);
+        }
+
+        private static bool IsShieldWeaponSlotItem(string itemId)
+        {
+            return TryResolveItemObject(itemId)?.PrimaryWeapon?.IsShield == true ||
+                   ContainsAnyOrdinal(itemId, "shield", "buckler", "targe");
+        }
+
+        private static bool IsThrownWeaponSlotItem(string itemId)
+        {
+            ItemObject item = TryResolveItemObject(itemId);
+            string weaponClass = item?.PrimaryWeapon?.WeaponClass.ToString() ?? string.Empty;
+            return weaponClass.IndexOf("Javelin", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   weaponClass.IndexOf("Throwing", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   weaponClass.IndexOf("Stone", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   LooksLikeThrownWeaponItemId(itemId);
+        }
+
+        private static bool LooksLikeRangedWeaponItemId(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return false;
+
+            string normalized = itemId.Trim().ToLowerInvariant();
+            return ContainsAnyOrdinal(normalized, "bow", "crossbow", "arrow", "bolt") ||
+                   LooksLikeThrownWeaponItemId(normalized);
         }
 
         private static string TryGetMapSceneNameSafe() // Best-effort: намагаємось отримати назву сцени карти кампанії
@@ -5677,12 +8055,20 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public int SampledCount { get; set; }
             public string CombatItem0Id { get; set; }
             public int? CombatItem0Amount { get; set; }
+            public string CombatItem0CraftedWeaponKey { get; set; }
+            public string CombatItem0ModifierId { get; set; }
             public string CombatItem1Id { get; set; }
             public int? CombatItem1Amount { get; set; }
+            public string CombatItem1CraftedWeaponKey { get; set; }
+            public string CombatItem1ModifierId { get; set; }
             public string CombatItem2Id { get; set; }
             public int? CombatItem2Amount { get; set; }
+            public string CombatItem2CraftedWeaponKey { get; set; }
+            public string CombatItem2ModifierId { get; set; }
             public string CombatItem3Id { get; set; }
             public int? CombatItem3Amount { get; set; }
+            public string CombatItem3CraftedWeaponKey { get; set; }
+            public string CombatItem3ModifierId { get; set; }
             public string CombatHeadId { get; set; }
             public string CombatBodyId { get; set; }
             public string CombatLegId { get; set; }
@@ -5690,6 +8076,97 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public string CombatCapeId { get; set; }
             public string CombatHorseId { get; set; }
             public string CombatHorseHarnessId { get; set; }
+        }
+
+        public sealed class CoopRoleMatrixStreamEntryDefinition
+        {
+            public string MatrixId { get; set; }
+            public int MatrixIndex { get; set; }
+            public string Name { get; set; }
+            public string[] RoleIds { get; set; } = new string[4];
+            public string[] ItemIds { get; set; } = new string[4];
+            public bool IsMounted { get; set; }
+            public bool IsRanged { get; set; }
+            public bool HasShield { get; set; }
+            public bool HasThrown { get; set; }
+            public TroopStackInfo TemplateTroop { get; set; }
+
+            public string SlotSummary
+            {
+                get
+                {
+                    return string.Join("/", RoleIds ?? Array.Empty<string>());
+                }
+            }
+        }
+
+        private enum RoleMatrixSlotRole
+        {
+            Empty = 0,
+            Bow = 1,
+            Crossbow = 2,
+            Bolt = 3,
+            Arrow = 4,
+            Throwing = 5,
+            Shield = 6,
+            OneHanded = 7,
+            Bastard = 8,
+            TwoHanded = 9,
+            Polearm = 10
+        }
+
+        private sealed class WeaponSlotMatrixPalette
+        {
+            public string OneHandedId { get; set; }
+            public string BastardId { get; set; }
+            public string TwoHandedId { get; set; }
+            public string PolearmId { get; set; }
+            public string ShieldId { get; set; }
+            public string BowId { get; set; }
+            public string ArrowId { get; set; }
+            public string CrossbowId { get; set; }
+            public string BoltId { get; set; }
+            public string ThrowingId { get; set; }
+            public string HorseId { get; set; }
+            public string HorseHarnessId { get; set; }
+            public List<string> FiveModeWeaponIds { get; } = new List<string>();
+            public CombatEquipmentVariantSnapshot ArmorSeed { get; set; }
+        }
+
+        private sealed class WeaponSlotMatrixLayout
+        {
+            public string MatrixId { get; set; }
+            public int MatrixIndex { get; set; }
+            public string Name { get; set; }
+            public string[] RoleIds { get; set; } = new string[4];
+            public string[] ItemIds { get; set; } = new string[4];
+            public bool IsMounted { get; set; }
+            public bool IsRanged { get; set; }
+            public bool HasShield { get; set; }
+            public bool HasThrown { get; set; }
+        }
+
+        private sealed class CoopTestBattleMultiplayerSeed
+        {
+            public string CharacterId { get; set; }
+            public string TroopName { get; set; }
+            public string CultureId { get; set; }
+            public int Tier { get; set; }
+            public bool IsMounted { get; set; }
+            public bool IsRanged { get; set; }
+            public bool HasShield { get; set; }
+            public bool HasThrown { get; set; }
+            public int SkillOneHanded { get; set; }
+            public int SkillTwoHanded { get; set; }
+            public int SkillPolearm { get; set; }
+            public int SkillBow { get; set; }
+            public int SkillCrossbow { get; set; }
+            public int SkillThrowing { get; set; }
+            public int SkillRiding { get; set; }
+            public int SkillAthletics { get; set; }
+            public CombatEquipmentVariantSnapshot ArmorSeed { get; set; }
+            public List<CombatEquipmentVariantSnapshot> EquipmentVariants { get; set; } = new List<CombatEquipmentVariantSnapshot>();
+            public string Source { get; set; }
         }
 
         private static List<TroopStackInfo> BuildTroopStacksForCharacterVariants(
@@ -5741,6 +8218,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     PartyId = partyId,
                     CharacterId = spawnTemplateId,
                     OriginalCharacterId = originalCharacterId,
+                    CampaignFormationClass = TryGetCampaignFormationClassName(characterObject),
                     SpawnTemplateId = spawnTemplateId,
                     CultureId = CanonicalizeSnapshotCultureId(TryGetCultureId(characterObject)),
                     HasShield = TryGetCharacterHasShield(characterObject),
@@ -5892,7 +8370,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return variants;
         }
 
-        private static CombatEquipmentVariantSnapshot BuildCombatEquipmentVariantSnapshot(object equipment)
+        private static CombatEquipmentVariantSnapshot BuildCombatEquipmentVariantSnapshot(object equipment, BattleSnapshotMessage snapshot = null)
         {
             if (equipment == null)
                 return null;
@@ -5916,16 +8394,64 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 CombatHorseHarnessId = TryGetEquipmentSlotItemId(equipment, EquipmentIndex.HorseHarness)
             };
 
+            ApplyCraftedWeaponSlotSnapshot(
+                snapshot,
+                equipment,
+                EquipmentIndex.Weapon0,
+                variant.CombatItem0Id,
+                out string combatItem0CraftedWeaponKey,
+                out string combatItem0ModifierId);
+            variant.CombatItem0CraftedWeaponKey = combatItem0CraftedWeaponKey;
+            variant.CombatItem0ModifierId = combatItem0ModifierId;
+
+            ApplyCraftedWeaponSlotSnapshot(
+                snapshot,
+                equipment,
+                EquipmentIndex.Weapon1,
+                variant.CombatItem1Id,
+                out string combatItem1CraftedWeaponKey,
+                out string combatItem1ModifierId);
+            variant.CombatItem1CraftedWeaponKey = combatItem1CraftedWeaponKey;
+            variant.CombatItem1ModifierId = combatItem1ModifierId;
+
+            ApplyCraftedWeaponSlotSnapshot(
+                snapshot,
+                equipment,
+                EquipmentIndex.Weapon2,
+                variant.CombatItem2Id,
+                out string combatItem2CraftedWeaponKey,
+                out string combatItem2ModifierId);
+            variant.CombatItem2CraftedWeaponKey = combatItem2CraftedWeaponKey;
+            variant.CombatItem2ModifierId = combatItem2ModifierId;
+
+            ApplyCraftedWeaponSlotSnapshot(
+                snapshot,
+                equipment,
+                EquipmentIndex.Weapon3,
+                variant.CombatItem3Id,
+                out string combatItem3CraftedWeaponKey,
+                out string combatItem3ModifierId);
+            variant.CombatItem3CraftedWeaponKey = combatItem3CraftedWeaponKey;
+            variant.CombatItem3ModifierId = combatItem3ModifierId;
+
             variant.Signature = string.Join("|", new[]
             {
                 variant.CombatItem0Id ?? string.Empty,
                 variant.CombatItem0Amount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                variant.CombatItem0CraftedWeaponKey ?? string.Empty,
+                variant.CombatItem0ModifierId ?? string.Empty,
                 variant.CombatItem1Id ?? string.Empty,
                 variant.CombatItem1Amount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                variant.CombatItem1CraftedWeaponKey ?? string.Empty,
+                variant.CombatItem1ModifierId ?? string.Empty,
                 variant.CombatItem2Id ?? string.Empty,
                 variant.CombatItem2Amount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                variant.CombatItem2CraftedWeaponKey ?? string.Empty,
+                variant.CombatItem2ModifierId ?? string.Empty,
                 variant.CombatItem3Id ?? string.Empty,
                 variant.CombatItem3Amount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                variant.CombatItem3CraftedWeaponKey ?? string.Empty,
+                variant.CombatItem3ModifierId ?? string.Empty,
                 variant.CombatHeadId ?? string.Empty,
                 variant.CombatBodyId ?? string.Empty,
                 variant.CombatLegId ?? string.Empty,
@@ -8090,7 +10616,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return new string(normalized.ToArray()).Trim('_');
         }
 
-        private static void ApplyCombatEquipmentSnapshot(TroopStackInfo troop, object characterObject)
+        private static void ApplyCombatEquipmentSnapshot(TroopStackInfo troop, object characterObject, BattleSnapshotMessage snapshot = null)
         {
             if (troop == null || characterObject == null)
                 return;
@@ -8099,7 +10625,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (equipment == null)
                 return;
 
-            ApplyCombatEquipmentSnapshot(troop, BuildCombatEquipmentVariantSnapshot(equipment));
+            ApplyCombatEquipmentSnapshot(troop, BuildCombatEquipmentVariantSnapshot(equipment, snapshot));
         }
 
         private static void ApplyCombatEquipmentSnapshot(TroopStackInfo troop, CombatEquipmentVariantSnapshot equipment)
@@ -8109,12 +10635,20 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             troop.CombatItem0Id = equipment.CombatItem0Id;
             troop.CombatItem0Amount = equipment.CombatItem0Amount;
+            troop.CombatItem0CraftedWeaponKey = equipment.CombatItem0CraftedWeaponKey;
+            troop.CombatItem0ModifierId = equipment.CombatItem0ModifierId;
             troop.CombatItem1Id = equipment.CombatItem1Id;
             troop.CombatItem1Amount = equipment.CombatItem1Amount;
+            troop.CombatItem1CraftedWeaponKey = equipment.CombatItem1CraftedWeaponKey;
+            troop.CombatItem1ModifierId = equipment.CombatItem1ModifierId;
             troop.CombatItem2Id = equipment.CombatItem2Id;
             troop.CombatItem2Amount = equipment.CombatItem2Amount;
+            troop.CombatItem2CraftedWeaponKey = equipment.CombatItem2CraftedWeaponKey;
+            troop.CombatItem2ModifierId = equipment.CombatItem2ModifierId;
             troop.CombatItem3Id = equipment.CombatItem3Id;
             troop.CombatItem3Amount = equipment.CombatItem3Amount;
+            troop.CombatItem3CraftedWeaponKey = equipment.CombatItem3CraftedWeaponKey;
+            troop.CombatItem3ModifierId = equipment.CombatItem3ModifierId;
             troop.CombatHeadId = equipment.CombatHeadId;
             troop.CombatBodyId = equipment.CombatBodyId;
             troop.CombatLegId = equipment.CombatLegId;
@@ -8122,6 +10656,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             troop.CombatCapeId = equipment.CombatCapeId;
             troop.CombatHorseId = equipment.CombatHorseId;
             troop.CombatHorseHarnessId = equipment.CombatHorseHarnessId;
+        }
+
+        private static void NormalizeMountedFlagFromCombatHorse(TroopStackInfo troop)
+        {
+            if (troop == null)
+                return;
+
+            troop.IsMounted = !string.IsNullOrWhiteSpace(troop.CombatHorseId);
         }
 
         private static object TryResolvePrimaryCombatEquipment(object instance)
@@ -8355,6 +10897,271 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return null;
         }
 
+        private static void ApplyCraftedWeaponSlotSnapshot(
+            BattleSnapshotMessage snapshot,
+            object equipment,
+            EquipmentIndex slot,
+            string itemId,
+            out string craftedWeaponKey,
+            out string modifierId)
+        {
+            craftedWeaponKey = null;
+            modifierId = null;
+
+            object equipmentElement = TryGetEquipmentSlotElement(equipment, slot);
+            modifierId = TryGetEquipmentElementItemModifierId(equipmentElement);
+            if (snapshot == null || string.IsNullOrWhiteSpace(itemId))
+                return;
+
+            ItemObject itemObject = TryGetEquipmentElementItemObject(equipmentElement);
+            if (itemObject == null || !TryGetBoolProperty(itemObject, "IsCraftedByPlayer"))
+                return;
+
+            object weaponDesign = TryGetPropertyValue(itemObject, "WeaponDesign");
+            if (weaponDesign == null)
+                return;
+
+            CraftedWeaponSnapshotMessage craftedWeapon = TryBuildCraftedWeaponSnapshot(itemObject, itemId, weaponDesign);
+            if (craftedWeapon == null || string.IsNullOrWhiteSpace(craftedWeapon.Key))
+                return;
+
+            if (snapshot.CraftedWeapons == null)
+                snapshot.CraftedWeapons = new List<CraftedWeaponSnapshotMessage>();
+
+            bool alreadyCaptured = snapshot.CraftedWeapons.Any(existing =>
+                existing != null &&
+                string.Equals(existing.Key, craftedWeapon.Key, StringComparison.OrdinalIgnoreCase));
+            if (!alreadyCaptured)
+                snapshot.CraftedWeapons.Add(craftedWeapon);
+
+            craftedWeaponKey = craftedWeapon.Key;
+        }
+
+        private static object TryGetEquipmentSlotElement(object equipment, EquipmentIndex slot)
+        {
+            if (equipment == null)
+                return null;
+
+            try
+            {
+                MethodInfo getEquipmentFromSlot = equipment.GetType().GetMethod(
+                    "GetEquipmentFromSlot",
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(EquipmentIndex) },
+                    null);
+
+                if (getEquipmentFromSlot != null)
+                    return getEquipmentFromSlot.Invoke(equipment, new object[] { slot });
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                MethodInfo getEquipmentElement = equipment.GetType().GetMethod(
+                    "GetEquipmentElement",
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(EquipmentIndex) },
+                    null);
+
+                if (getEquipmentElement != null)
+                    return getEquipmentElement.Invoke(equipment, new object[] { slot });
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                PropertyInfo indexer = equipment.GetType()
+                    .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(property =>
+                    {
+                        ParameterInfo[] parameters = property.GetIndexParameters();
+                        return parameters.Length == 1 && parameters[0].ParameterType == typeof(EquipmentIndex);
+                    });
+
+                if (indexer != null)
+                    return indexer.GetValue(equipment, new object[] { slot });
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static ItemObject TryGetEquipmentElementItemObject(object equipmentElement)
+        {
+            if (equipmentElement == null)
+                return null;
+
+            return TryGetPropertyValue(equipmentElement, "Item") as ItemObject ??
+                   TryGetPropertyValue(equipmentElement, "ItemObject") as ItemObject;
+        }
+
+        private static string TryGetEquipmentElementItemModifierId(object equipmentElement)
+        {
+            if (equipmentElement == null)
+                return null;
+
+            object itemModifier =
+                TryGetPropertyValue(equipmentElement, "ItemModifier") ??
+                TryGetPropertyValue(equipmentElement, "Modifier");
+            return TryGetStringId(itemModifier);
+        }
+
+        private static CraftedWeaponSnapshotMessage TryBuildCraftedWeaponSnapshot(
+            ItemObject itemObject,
+            string itemId,
+            object weaponDesign)
+        {
+            if (itemObject == null || weaponDesign == null)
+                return null;
+
+            string craftingTemplateId =
+                TryGetStringId(TryGetPropertyValue(weaponDesign, "Template")) ??
+                TryGetStringId(TryGetPropertyValue(weaponDesign, "CraftingTemplate"));
+            if (string.IsNullOrWhiteSpace(craftingTemplateId))
+                return null;
+
+            List<CraftedWeaponPieceSnapshotMessage> pieces = BuildCraftedWeaponPiecesSnapshot(weaponDesign);
+            if (pieces.Count == 0)
+                return null;
+
+            string modifierGroupId = TryGetCraftedWeaponModifierGroupId(itemObject, weaponDesign);
+            string cultureId = TryGetCultureId(itemObject);
+            string name =
+                TryGetPropertyValue(itemObject, "Name")?.ToString() ??
+                TryGetPropertyValue(weaponDesign, "WeaponName")?.ToString() ??
+                TryGetPropertyValue(weaponDesign, "CraftedWeaponName")?.ToString() ??
+                itemId;
+            string weaponDesignHash =
+                TryGetPropertyValue(weaponDesign, "HashedCode")?.ToString() ??
+                TryGetPropertyValue(weaponDesign, "Hash")?.ToString() ??
+                TryGetPropertyValue(itemObject, "StringId")?.ToString();
+
+            var stableParts = new List<string>
+            {
+                itemId ?? string.Empty,
+                craftingTemplateId ?? string.Empty,
+                modifierGroupId ?? string.Empty,
+                cultureId ?? string.Empty,
+                name ?? string.Empty,
+                weaponDesignHash ?? string.Empty
+            };
+            foreach (CraftedWeaponPieceSnapshotMessage piece in pieces
+                         .OrderBy(piece => piece.PieceType, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(piece => piece.PieceId, StringComparer.OrdinalIgnoreCase))
+            {
+                stableParts.Add((piece.PieceType ?? string.Empty) + ":" +
+                                (piece.PieceId ?? string.Empty) + ":" +
+                                piece.ScalePercentage.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            string stableHash = ComputeStableCraftedWeaponHash(string.Join("|", stableParts));
+            return new CraftedWeaponSnapshotMessage
+            {
+                Key = "cw_" + stableHash,
+                OriginalItemId = itemId,
+                MirrorItemId = "cs_crafted_" + stableHash,
+                Name = name,
+                CraftingTemplateId = craftingTemplateId,
+                CultureId = cultureId,
+                ModifierGroupId = modifierGroupId,
+                WeaponDesignHash = weaponDesignHash,
+                IsCraftedByPlayer = TryGetBoolProperty(itemObject, "IsCraftedByPlayer"),
+                Pieces = pieces
+            };
+        }
+
+        private static List<CraftedWeaponPieceSnapshotMessage> BuildCraftedWeaponPiecesSnapshot(object weaponDesign)
+        {
+            var pieces = new List<CraftedWeaponPieceSnapshotMessage>();
+            object usedPiecesObject =
+                TryGetPropertyValue(weaponDesign, "UsedPieces") ??
+                TryGetPropertyValue(weaponDesign, "Pieces") ??
+                TryGetPropertyValue(weaponDesign, "WeaponDesignElements");
+            if (!(usedPiecesObject is IEnumerable usedPieces))
+                return pieces;
+
+            foreach (object designElement in usedPieces)
+            {
+                object craftingPiece = TryGetPropertyValue(designElement, "CraftingPiece");
+                string pieceId = TryGetStringId(craftingPiece);
+                if (string.IsNullOrWhiteSpace(pieceId))
+                    continue;
+
+                string pieceType =
+                    TryGetPropertyValue(craftingPiece, "PieceType")?.ToString() ??
+                    TryGetPropertyValue(designElement, "PieceType")?.ToString();
+                if (string.IsNullOrWhiteSpace(pieceType))
+                    continue;
+
+                pieces.Add(new CraftedWeaponPieceSnapshotMessage
+                {
+                    PieceId = pieceId,
+                    PieceType = pieceType,
+                    ScalePercentage = TryGetWeaponDesignElementScalePercentage(designElement)
+                });
+            }
+
+            return pieces;
+        }
+
+        private static int TryGetWeaponDesignElementScalePercentage(object designElement)
+        {
+            if (designElement == null)
+                return 100;
+
+            foreach (string propertyName in new[] { "ScalePercentage", "ScaleFactor", "Scale" })
+            {
+                int value = TryConvertToInt(TryGetPropertyValue(designElement, propertyName));
+                if (value > 0)
+                    return value;
+            }
+
+            int methodValue = TryConvertToInt(TryInvokeMethod(designElement, "GetScalePercentage"));
+            return methodValue > 0 ? methodValue : 100;
+        }
+
+        private static string TryGetCraftedWeaponModifierGroupId(ItemObject itemObject, object weaponDesign)
+        {
+            foreach (object carrier in new[]
+                     {
+                         TryGetPropertyValue(itemObject, "ItemComponent"),
+                         TryGetPropertyValue(itemObject, "WeaponComponent"),
+                         weaponDesign
+                     })
+            {
+                string modifierGroupId =
+                    TryGetStringId(TryGetPropertyValue(carrier, "ItemModifierGroup")) ??
+                    TryGetStringId(TryGetPropertyValue(carrier, "ModifierGroup"));
+                if (!string.IsNullOrWhiteSpace(modifierGroupId))
+                    return modifierGroupId;
+            }
+
+            return null;
+        }
+
+        private static string ComputeStableCraftedWeaponHash(string value)
+        {
+            unchecked
+            {
+                ulong hash = 1469598103934665603UL;
+                foreach (char character in value ?? string.Empty)
+                {
+                    hash ^= char.ToLowerInvariant(character);
+                    hash *= 1099511628211UL;
+                }
+
+                return hash.ToString("x16", System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+
         private static string FormatCombatEquipmentSummary(TroopStackInfo troop)
         {
             if (troop == null)
@@ -8483,6 +11290,27 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return basicCharacter.IsRanged;
 
             return TryGetBoolProperty(instance, "IsRanged");
+        }
+
+        private static string TryGetCampaignFormationClassName(object instance)
+        {
+            if (instance == null)
+                return null;
+
+            try
+            {
+                if (instance is BasicCharacterObject basicCharacter)
+                    return basicCharacter.DefaultFormationClass.ToString();
+
+                object value =
+                    TryGetPropertyValue(instance, "DefaultFormationClass") ??
+                    TryGetPropertyValue(instance, "FormationClass");
+                return value?.ToString();
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static bool TryGetCharacterHasShield(object instance)

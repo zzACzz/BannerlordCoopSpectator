@@ -3721,6 +3721,36 @@ namespace CoopSpectator.MissionBehaviors
         private static bool? _lastAppliedBattlePhaseAiHold;
         private static CoopBattlePhase? _lastAppliedFormationHoldPhase;
         private static bool _hasMaterializedBattlefieldArmies;
+        private const int RoleMatrixStreamKillBatchPerTick = 24;
+        private const double RoleMatrixStreamAiPulseIntervalSeconds = 1.0d;
+        private static readonly HashSet<string> CampaignMirrorWeaponPrioritySuspectCharacterIds =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "battanian_wildling",
+                "desert_bandits_boss",
+                "imperial_legionary",
+                "sturgian_spearman",
+                "vlandian_voulgier",
+                "khuzait_spear_infantry",
+                "khuzait_darkhan"
+            };
+        private static Mission _roleMatrixStreamMission;
+        private static List<RoleMatrixStreamEntryDefinition> _roleMatrixStreamDefinitions =
+            new List<RoleMatrixStreamEntryDefinition>();
+        private static readonly Dictionary<int, RoleMatrixStreamActiveAgentState> _roleMatrixStreamActiveAgentsByIndex =
+            new Dictionary<int, RoleMatrixStreamActiveAgentState>();
+        private static readonly Queue<int> _roleMatrixStreamKillQueue = new Queue<int>();
+        private static int _roleMatrixStreamCursor;
+        private static int _roleMatrixStreamWave;
+        private static int _roleMatrixStreamTotalMatrixCount;
+        private static int _roleMatrixStreamSkippedUnsafeCount;
+        private static bool _roleMatrixStreamKillingWave;
+        private static bool _roleMatrixStreamFinished;
+        private static bool _roleMatrixStreamSpectatorAutoStartRequested;
+        private static bool _roleMatrixStreamBattleStartedFromSpectator;
+        private static DateTime _roleMatrixStreamWaveStartedUtc = DateTime.MinValue;
+        private static DateTime _nextRoleMatrixStreamLogUtc = DateTime.MinValue;
+        private static DateTime _nextRoleMatrixStreamAiPulseUtc = DateTime.MinValue;
         private static bool _hasLoggedImportedEquipmentAvailabilityDiagnostics;
         private static bool _hasLoggedHeroEquipmentResolutionAudit;
         private static bool _hasLoggedMaterializedEquipmentCoverageSummary;
@@ -3752,6 +3782,127 @@ namespace CoopSpectator.MissionBehaviors
             public string EntryId;
             public BattleSideEnum Side;
             public string Source;
+        }
+
+        private sealed class RoleMatrixStreamActiveAgentState
+        {
+            public int AgentIndex;
+            public Agent Agent;
+            public int MountAgentIndex = -1;
+            public Agent MountAgent;
+            public string MatrixId;
+            public string EntryId;
+            public string SlotSummary;
+            public BattleSideEnum Side;
+            public DateTime SpawnedUtc;
+            public string PriorityProfile;
+            public string FirstWeaponSignature;
+            public string LastWeaponSignature;
+            public string LastMainRole;
+            public string LastMainItemId;
+            public bool SawRangedOrThrown;
+            public bool SawMeleeAfterRangedOrThrown;
+            public int WeaponChangeCount;
+            public int ProjectileLaunchCount;
+            public int ThrownProjectileLaunchCount;
+            public int RangedProjectileLaunchCount;
+            public bool PrioritySummaryLogged;
+            public bool PrioritySuspect;
+            public bool PriorityControl;
+            public string PriorityPairId;
+            public List<string> WeaponTransitionSamples = new List<string>();
+        }
+
+        private sealed class RoleMatrixStreamWeaponPriorityWieldSnapshot
+        {
+            public string Signature;
+            public string MainIndex;
+            public string MainItemId;
+            public string MainRole;
+            public string OffhandIndex;
+            public string OffhandItemId;
+            public string OffhandRole;
+        }
+
+        private sealed class RoleMatrixStreamEntryDefinition
+        {
+            public string MatrixId;
+            public int MatrixIndex;
+            public string Name;
+            public string[] RoleIds = new string[4];
+            public string[] ItemIds = new string[4];
+            public string HorseId;
+            public string HorseHarnessId;
+            public bool IsMounted;
+            public bool IsRanged;
+            public bool HasShield;
+            public bool HasThrown;
+            public RosterEntryState TemplateEntry;
+            public RosterEntryState CampaignMirrorEntry;
+            public string PriorityProfile;
+            public bool PrioritySuspect;
+            public bool PriorityControl;
+            public string PriorityPairId;
+
+            public string SlotSummary
+            {
+                get
+                {
+                    if (CampaignMirrorEntry != null)
+                    {
+                        return
+                            "campaign_mirror:" + (CampaignMirrorEntry.OriginalCharacterId ?? CampaignMirrorEntry.CharacterId ?? "unknown") +
+                            "{" +
+                            "W0=" + (CampaignMirrorEntry.CombatItem0Id ?? "-") +
+                            "/W1=" + (CampaignMirrorEntry.CombatItem1Id ?? "-") +
+                            "/W2=" + (CampaignMirrorEntry.CombatItem2Id ?? "-") +
+                            "/W3=" + (CampaignMirrorEntry.CombatItem3Id ?? "-") +
+                            "/H=" + (CampaignMirrorEntry.CombatHorseId ?? "-") +
+                            "}";
+                    }
+
+                    return string.Join("/", RoleIds ?? Array.Empty<string>());
+                }
+            }
+        }
+
+        private sealed class CampaignMirrorWeaponPriorityDefinitionSeed
+        {
+            public RosterEntryState Entry;
+            public bool Suspect;
+            public bool Control;
+            public string PairId;
+        }
+
+        private sealed class RoleMatrixStreamPalette
+        {
+            public string BowId;
+            public string CrossbowId;
+            public string BoltId;
+            public string ArrowId;
+            public string ThrowingId;
+            public string ShieldId;
+            public string OneHandedId;
+            public string BastardId;
+            public string TwoHandedId;
+            public string PolearmId;
+            public string HorseId;
+            public string HorseHarnessId;
+        }
+
+        private enum RoleMatrixStreamSlotRole
+        {
+            Empty = 0,
+            Bow = 1,
+            Crossbow = 2,
+            Bolt = 3,
+            Arrow = 4,
+            Throwing = 5,
+            Shield = 6,
+            OneHanded = 7,
+            Bastard = 8,
+            TwoHanded = 9,
+            Polearm = 10
         }
 
         private sealed class CommanderDeploymentOrderLeaseState
@@ -5330,6 +5481,11 @@ namespace CoopSpectator.MissionBehaviors
                 orientation,
                 hasRigidBody,
                 forcedMissileIndex);
+            TryTraceRoleMatrixStreamWeaponPriorityProjectile(
+                shooterAgent,
+                weaponIndex,
+                forcedMissileIndex,
+                "OnAgentShootMissile");
         }
 
         private static void TryTraceServerProjectileLaunchDiagnostics(
@@ -5662,6 +5818,7 @@ namespace CoopSpectator.MissionBehaviors
             TrySyncExactCampaignNativeOriginRemoval(Mission, affectedAgent, affectorAgent, agentState);
             TryTrackMaterializedBattleResultRemoval(affectedAgent, affectorAgent, agentState);
             TryLogMaterializedBattleResultRemovalDebug(affectedAgent, affectorAgent, agentState, blow);
+            TryHandleRoleMatrixStreamAgentRemoved(affectedAgent?.Index ?? -1);
             ClearMaterializedAgentIndexScopedRuntimeCaches(affectedAgent?.Index ?? -1, clearRemovedGuard: false);
             ExactCreateAgentCorridorDiagnostics.ClearServerAgentIndexState(
                 affectedAgent?.Index ?? -1,
@@ -5691,6 +5848,7 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattleSpawnRequestState.Reset();
             CoopBattleSpawnRuntimeState.Reset();
             CoopBattlePeerLifecycleRuntimeState.Reset();
+            ResetRoleMatrixStreamRuntime("end-mission");
             _lastAlignedControlledAgentIndexByPeer.Clear();
             _commanderDeploymentOrderLeasesByPeer.Clear();
             _materializedArmyEntryIdByAgentIndex.Clear();
@@ -6318,6 +6476,21 @@ namespace CoopSpectator.MissionBehaviors
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "shared-tick", "native-bootstrap-before", source);
             TryEnsureExactCampaignNativeArmyBootstrap(mission, source);
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "shared-tick", "native-bootstrap-after", source);
+            if (RunRoleMatrixStreamTick(mission, source))
+            {
+                AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "shared-tick", "role-matrix-stream", source);
+                TryConsumeSpawnRequests(mission);
+                TryApplySpawnIntentToPrimaryPeer(mission, source);
+                TrySyncExactCampaignBattlefieldRuntimeState(mission, source);
+                TryForceAuthoritativePeerTeams(mission, source);
+                TryForceFixedMissionCultures(mission, source);
+                TryForcePreferredHeroClassForPeer(mission, source);
+                TryRefreshPendingSpawnRequests(mission, source);
+                TryWriteEntryStatusSnapshot(mission, source + " role-matrix-stream");
+                AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "shared-tick", "role-matrix-stream-complete", source);
+                return;
+            }
+
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "shared-tick", "materialize-armies-before", source);
             TryEnsureBattlefieldArmiesMaterialized(mission, source);
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "shared-tick", "materialize-armies-after", source);
@@ -6598,6 +6771,22 @@ namespace CoopSpectator.MissionBehaviors
             if (entryState == null)
                 return false;
 
+            if (ShouldSuppressCampaignMirrorHeroesClientDestructiveVisualOverlay(
+                    mission,
+                    agent,
+                    entryState,
+                    source ?? "client exact visual queue",
+                    out string campaignMirrorHeroesQueueSuppressReason))
+            {
+                MarkCampaignMirrorHeroesClientDestructiveVisualOverlaySuppressed(
+                    agent,
+                    entryId,
+                    entryState,
+                    source ?? "client exact visual queue",
+                    campaignMirrorHeroesQueueSuppressReason);
+                return false;
+            }
+
             if (!IsHeroEntryEligibleForExactPersonalPerks(entryState) &&
                 ShouldTreatClientExactSiegeTroopVisualAsServerPreSpawnResolved(
                     agent,
@@ -6748,6 +6937,78 @@ namespace CoopSpectator.MissionBehaviors
                 " DelaySeconds=" + Math.Max(0.01, (notBeforeUtc - DateTime.UtcNow).TotalSeconds).ToString("0.00") +
                 " Source=" + (source ?? "unknown"));
             return true;
+        }
+
+        private static bool ShouldSuppressCampaignMirrorHeroesClientDestructiveVisualOverlay(
+            Mission mission,
+            Agent agent,
+            RosterEntryState entryState,
+            string source,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                agent == null ||
+                agent.IsMount ||
+                entryState == null ||
+                !IsCampaignMirrorHeroesRuntime() ||
+                !IsHeroEntryEligibleForExactPersonalPerks(entryState))
+            {
+                return false;
+            }
+
+            Mission effectiveMission = mission ?? agent.Mission ?? Mission.Current;
+            if (effectiveMission != null && !IsClientExactCampaignVisualOverlayRuntime(effectiveMission))
+                return false;
+
+            reason = "campaign-mirror-heroes-server-create-time-equipment-owned";
+            return true;
+        }
+
+        private static void MarkCampaignMirrorHeroesClientDestructiveVisualOverlaySuppressed(
+            Agent agent,
+            string entryId,
+            RosterEntryState entryState,
+            string source,
+            string reason)
+        {
+            if (agent == null || agent.Index < 0)
+                return;
+
+            bool alreadySuppressed =
+                _exactNativeClientVisualOverlayAppliedAgentIndices.Contains(agent.Index) &&
+                _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.TryGetValue(agent.Index, out bool includesWeapons) &&
+                includesWeapons;
+
+            _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agent.Index);
+            _exactNativeClientVisualOverlayAgentByIndex[agent.Index] = agent;
+            if (!string.IsNullOrWhiteSpace(entryId))
+            {
+                _materializedArmyEntryIdByAgentIndex[agent.Index] = entryId;
+                _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = entryId;
+            }
+
+            _exactNativeClientVisualOverlayAppliedAgentIndices.Add(agent.Index);
+            _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex[agent.Index] = true;
+            _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Remove(agent.Index);
+            _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Remove(agent.Index);
+            UpdateStrictExactHeroTransferVisualAppliedState(
+                agent.Index,
+                entryId,
+                true,
+                (source ?? "campaign mirror heroes client overlay suppression") + " suppressed");
+
+            if (!alreadySuppressed)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: suppressed campaign mirror heroes client destructive visual overlay. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " TroopId=" + (agent.Character?.StringId ?? "null") +
+                    " Hero=" + (entryState?.IsHero ?? false) +
+                    " Reason=" + (reason ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+            }
         }
 
         private static void ClearClientExactCampaignVisualOverlayAgentIndexState(
@@ -8073,137 +8334,8 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (!HasAnySnapshotWeapons(entryState))
-            {
-                reason = "field-materialized-siege-snapshot-has-no-weapons";
-                return false;
-            }
-
-            BattleSideEnum agentSide = agent.Team?.Side ?? BattleSideEnum.None;
-            if (!DoesClientVisualOverlayEntryMatchAgentSide(entryState, agentSide) ||
-                !DoesClientVisualOverlayEntryMatchAgentTroop(entryState, agent.Character?.StringId))
-            {
-                reason =
-                    "field-materialized-siege-entry-agent-mismatch" +
-                    "|AgentSide=" + agentSide +
-                    "|AgentTroop=" + (agent.Character?.StringId ?? "null") +
-                    "|EntryId=" + (entryState.EntryId ?? "null");
-                return false;
-            }
-
-            bool authoritativeMaterialized =
-                _clientAuthoritativeMaterializedEntryObservedAgentIndices.Contains(agent.Index) ||
-                (_materializedArmyEntryIdByAgentIndex.TryGetValue(agent.Index, out string trackedEntryId) &&
-                 string.Equals(trackedEntryId, entryState.EntryId, StringComparison.Ordinal));
-            if (!authoritativeMaterialized)
-            {
-                reason = "field-materialized-siege-authoritative-entry-pending";
-                return false;
-            }
-
-            if (DoClientAgentWeaponSlotsMatchSnapshotForOverlay(agent, entryState, out string weaponProjectionReason))
-            {
-                reason = "field-materialized-siege-weapons-already-match:" + (weaponProjectionReason ?? "ready");
-                return false;
-            }
-
-            reason = "field-materialized-siege-authoritative-weapon-mismatch:" + (weaponProjectionReason ?? "mismatch");
-            return true;
-        }
-
-        private static bool DoClientAgentWeaponSlotsMatchSnapshotForOverlay(
-            Agent agent,
-            RosterEntryState entryState,
-            out string reason)
-        {
-            reason = null;
-            if (agent == null || entryState == null)
-            {
-                reason = "agent-or-entry-invalid";
-                return false;
-            }
-
-            Equipment expectedEquipment = BuildSnapshotEquipmentForExactRuntime(
-                entryState,
-                includeWeapons: true,
-                honorExactVisualContracts: false,
-                includeArmorVisuals: false,
-                includeMountVisuals: false);
-            if (!HasAnyEquipmentWeapons(
-                    expectedEquipment,
-                    EquipmentIndex.Weapon0,
-                    EquipmentIndex.Weapon1,
-                    EquipmentIndex.Weapon2,
-                    EquipmentIndex.Weapon3))
-            {
-                reason = "snapshot-weapons-unresolved";
-                return false;
-            }
-
-            if (DoEquipmentWeaponSlotsMatch(expectedEquipment, agent.SpawnEquipment))
-            {
-                reason = "spawn-weapons-match-snapshot";
-                return true;
-            }
-
-            if (DoMissionWeaponSlotsMatch(expectedEquipment, agent.Equipment))
-            {
-                reason = "mission-weapons-match-snapshot";
-                return true;
-            }
-
-            reason =
-                "ExpectedWeapons={" + BuildExactEntryEquipmentSummary(
-                    expectedEquipment,
-                    EquipmentIndex.Weapon0,
-                    EquipmentIndex.Weapon1,
-                    EquipmentIndex.Weapon2,
-                    EquipmentIndex.Weapon3) + "}" +
-                "|SpawnWeapons={" + BuildExactEntryEquipmentSummary(
-                    agent.SpawnEquipment,
-                    EquipmentIndex.Weapon0,
-                    EquipmentIndex.Weapon1,
-                    EquipmentIndex.Weapon2,
-                    EquipmentIndex.Weapon3) + "}" +
-                "|MissionWeapons={" + BuildMissionEquipmentSummary(
-                    agent.Equipment,
-                    EquipmentIndex.Weapon0,
-                    EquipmentIndex.Weapon1,
-                    EquipmentIndex.Weapon2,
-                    EquipmentIndex.Weapon3) + "}";
+            reason = "field-materialized-siege-weapons-owned-by-create-agent";
             return false;
-        }
-
-        private static bool DoEquipmentWeaponSlotsMatch(Equipment expectedEquipment, Equipment actualEquipment)
-        {
-            if (expectedEquipment == null || actualEquipment == null)
-                return false;
-
-            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
-            {
-                string expectedItemId = expectedEquipment[slot].Item?.StringId ?? string.Empty;
-                string actualItemId = actualEquipment[slot].Item?.StringId ?? string.Empty;
-                if (!string.Equals(expectedItemId, actualItemId, StringComparison.OrdinalIgnoreCase))
-                    return false;
-            }
-
-            return true;
-        }
-
-        private static bool DoMissionWeaponSlotsMatch(Equipment expectedEquipment, MissionEquipment actualEquipment)
-        {
-            if (expectedEquipment == null || actualEquipment == null)
-                return false;
-
-            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
-            {
-                string expectedItemId = expectedEquipment[slot].Item?.StringId ?? string.Empty;
-                string actualItemId = actualEquipment[slot].Item?.StringId ?? string.Empty;
-                if (!string.Equals(expectedItemId, actualItemId, StringComparison.OrdinalIgnoreCase))
-                    return false;
-            }
-
-            return true;
         }
 
         private static bool ShouldTreatClientExactSiegeTroopVisualAsServerPreSpawnResolved(
@@ -8212,6 +8344,35 @@ namespace CoopSpectator.MissionBehaviors
             out string reason,
             out bool includesWeapons)
         {
+            reason = null;
+            includesWeapons = false;
+            Mission mission = agent?.Mission ?? Mission.Current;
+            if (!GameNetwork.IsServer &&
+                mission != null &&
+                ShouldUseFieldMaterializedSiegeReplayRuntime(mission) &&
+                agent != null &&
+                !agent.IsMount &&
+                agent.IsHuman &&
+                agent.IsActive() &&
+                entryState != null &&
+                !IsHeroEntryEligibleForExactPersonalPerks(entryState))
+            {
+                reason = "field-materialized-siege-create-agent-owned";
+                includesWeapons = HasAnyEquipmentWeapons(
+                                      agent.SpawnEquipment,
+                                      EquipmentIndex.Weapon0,
+                                      EquipmentIndex.Weapon1,
+                                      EquipmentIndex.Weapon2,
+                                      EquipmentIndex.Weapon3) ||
+                                  HasAnyMissionWeapons(
+                                      agent.Equipment,
+                                      EquipmentIndex.Weapon0,
+                                      EquipmentIndex.Weapon1,
+                                      EquipmentIndex.Weapon2,
+                                      EquipmentIndex.Weapon3);
+                return true;
+            }
+
             return ExactSiegeMaterializationModule.ShouldTreatClientTroopVisualAsServerPreSpawnResolved(
                 agent,
                 entryState,
@@ -9225,6 +9386,22 @@ namespace CoopSpectator.MissionBehaviors
                 RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
                 if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
                     continue;
+                if (ShouldSuppressCampaignMirrorHeroesClientDestructiveVisualOverlay(
+                        mission,
+                        agent,
+                        entryState,
+                        "client hero exact visual watchdog",
+                        out string campaignMirrorHeroesWatchdogSuppressReason))
+                {
+                    MarkCampaignMirrorHeroesClientDestructiveVisualOverlaySuppressed(
+                        agent,
+                        entryId,
+                        entryState,
+                        "client hero exact visual watchdog",
+                        campaignMirrorHeroesWatchdogSuppressReason);
+                    continue;
+                }
+
                 MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
                 bool locallyControlledHero = localMissionPeer != null && ReferenceEquals(localMissionPeer.ControlledAgent, agent);
                 bool peerControlledHero = agent.MissionPeer != null || locallyControlledHero;
@@ -10747,6 +10924,23 @@ namespace CoopSpectator.MissionBehaviors
 
             bool clientVisualOnly = overlayMode == ExactCampaignSnapshotOverlayMode.ClientVisualOnly;
             bool clientHeroEntry = IsHeroEntryEligibleForExactPersonalPerks(entryState);
+            if (clientVisualOnly &&
+                ShouldSuppressCampaignMirrorHeroesClientDestructiveVisualOverlay(
+                    agent.Mission ?? Mission.Current,
+                    agent,
+                    entryState,
+                    source ?? "client exact visual apply",
+                    out string campaignMirrorHeroesApplySuppressReason))
+            {
+                MarkCampaignMirrorHeroesClientDestructiveVisualOverlaySuppressed(
+                    agent,
+                    entryId,
+                    entryState,
+                    source ?? "client exact visual apply",
+                    campaignMirrorHeroesApplySuppressReason);
+                return true;
+            }
+
             if (clientVisualOnly &&
                 !clientHeroEntry &&
                 ShouldPausePendingClientExactVisualOverlaysForSelectionScreen(out _))
@@ -12331,6 +12525,9 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || !GameNetwork.IsServer)
                 return;
 
+            if (IsRoleMatrixStreamRuntime())
+                return;
+
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
             if (currentPhase < CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
                 return;
@@ -12639,6 +12836,2532 @@ namespace CoopSpectator.MissionBehaviors
             return pulsedAgentCount;
         }
 
+        private static bool RunRoleMatrixStreamTick(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer)
+                return false;
+
+            if (!IsRoleMatrixStreamRuntime())
+            {
+                if (ReferenceEquals(_roleMatrixStreamMission, mission))
+                    ResetRoleMatrixStreamRuntime("mode-left");
+                return false;
+            }
+
+            EnsureRoleMatrixStreamRuntimeInitialized(mission, source);
+            PruneRoleMatrixStreamAgents();
+            TryStartPendingRoleMatrixStreamBattleFromSpectator(mission, source);
+
+            if (_roleMatrixStreamDefinitions.Count == 0)
+            {
+                WriteRoleMatrixStreamProgress(mission, "NoDefinitions", source);
+                _hasMaterializedBattlefieldArmies = true;
+                return true;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (_roleMatrixStreamKillingWave)
+            {
+                DrainRoleMatrixStreamKillQueue(mission, source);
+                PruneRoleMatrixStreamAgents();
+                if (_roleMatrixStreamKillQueue.Count == 0 && _roleMatrixStreamActiveAgentsByIndex.Count == 0)
+                {
+                    _roleMatrixStreamKillingWave = false;
+                    _roleMatrixStreamWaveStartedUtc = DateTime.MinValue;
+                    WriteRoleMatrixStreamProgress(mission, "Completed", source);
+                }
+
+                return true;
+            }
+
+            if (_roleMatrixStreamActiveAgentsByIndex.Count > 0)
+            {
+                CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+                bool battleActive =
+                    currentPhase >= CoopBattlePhase.BattleActive &&
+                    currentPhase < CoopBattlePhase.BattleEnded;
+                if (!battleActive)
+                {
+                    _roleMatrixStreamWaveStartedUtc = DateTime.MinValue;
+                    if (nowUtc >= _nextRoleMatrixStreamLogUtc)
+                    {
+                        _nextRoleMatrixStreamLogUtc = nowUtc.AddSeconds(5);
+                        WriteRoleMatrixStreamProgress(mission, "WaitingBattleActive", source);
+                    }
+
+                    return true;
+                }
+
+                if (_roleMatrixStreamWaveStartedUtc == DateTime.MinValue)
+                {
+                    _roleMatrixStreamWaveStartedUtc = nowUtc;
+                    WriteRoleMatrixStreamProgress(mission, "BattleActive", source);
+                }
+
+                TryPulseRoleMatrixStreamActiveWaveAi(mission, source, force: false);
+                ObserveRoleMatrixStreamWeaponPriority(mission, source + " active-wave", force: false);
+
+                double lifetimeSeconds = Math.Max(
+                    3.0,
+                    CoopTestBattleOptions.ResolveRoleMatrixStreamWaveLifetimeSeconds(BattleSnapshotRuntimeState.GetCurrent()));
+                if (_roleMatrixStreamWaveStartedUtc != DateTime.MinValue &&
+                    nowUtc >= _roleMatrixStreamWaveStartedUtc.AddSeconds(lifetimeSeconds))
+                {
+                    EnqueueRoleMatrixStreamActiveWaveForKill();
+                    _roleMatrixStreamKillingWave = true;
+                    WriteRoleMatrixStreamProgress(mission, "Killing", source);
+                    DrainRoleMatrixStreamKillQueue(mission, source);
+                }
+                else if (nowUtc >= _nextRoleMatrixStreamLogUtc)
+                {
+                    _nextRoleMatrixStreamLogUtc = nowUtc.AddSeconds(5);
+                    WriteRoleMatrixStreamProgress(mission, "Spawned", source);
+                }
+
+                return true;
+            }
+
+            if (_roleMatrixStreamCursor >= _roleMatrixStreamDefinitions.Count)
+            {
+                if (!_roleMatrixStreamFinished)
+                {
+                    _roleMatrixStreamFinished = true;
+                    _hasMaterializedBattlefieldArmies = true;
+                    WriteRoleMatrixStreamProgress(mission, "Finished", source);
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: role-matrix stream finished. " +
+                        "Matrices=" + _roleMatrixStreamDefinitions.Count +
+                        " SkippedUnsafe=" + _roleMatrixStreamSkippedUnsafeCount +
+                        " Total=" + _roleMatrixStreamTotalMatrixCount +
+                        " Source=" + (source ?? "unknown"));
+                }
+
+                return true;
+            }
+
+            if (!IsRoleMatrixStreamSpawnGateOpen(mission, out string spawnGateWaitState))
+            {
+                if (nowUtc >= _nextRoleMatrixStreamLogUtc)
+                {
+                    _nextRoleMatrixStreamLogUtc = nowUtc.AddSeconds(5);
+                    WriteRoleMatrixStreamProgress(mission, spawnGateWaitState, source);
+                }
+
+                return true;
+            }
+
+            SpawnRoleMatrixStreamWave(mission, source);
+            TryStartPendingRoleMatrixStreamBattleFromSpectator(mission, source);
+            TryPulseRoleMatrixStreamActiveWaveAi(mission, source + " spawn", force: true);
+            ObserveRoleMatrixStreamWeaponPriority(mission, source + " spawn", force: true);
+            return true;
+        }
+
+        private static bool IsRoleMatrixStreamRuntime()
+        {
+            return CoopTestBattleOptions.IsRoleMatrixStreamSnapshot(BattleSnapshotRuntimeState.GetCurrent());
+        }
+
+        private static bool IsRoleMatrixStreamMountedRuntime()
+        {
+            return CoopTestBattleOptions.IsRoleMatrixStreamMountedSnapshot(BattleSnapshotRuntimeState.GetCurrent());
+        }
+
+        private static bool IsCampaignMirrorAllRuntime()
+        {
+            return CoopTestBattleOptions.IsCampaignMirrorSnapshot(BattleSnapshotRuntimeState.GetCurrent());
+        }
+
+        private static bool IsCampaignMirrorHeroesRuntime()
+        {
+            return CoopTestBattleOptions.IsCampaignMirrorHeroesSnapshot(BattleSnapshotRuntimeState.GetCurrent());
+        }
+
+        private static bool IsCampaignMirrorAllCampaignAiRuntime()
+        {
+            return CoopTestBattleOptions.IsCampaignMirrorAllCampaignAiSnapshot(BattleSnapshotRuntimeState.GetCurrent());
+        }
+
+        private static bool IsCampaignMirrorAllWeaponPriorityRuntime()
+        {
+            return CoopTestBattleOptions.IsCampaignMirrorAllWeaponPrioritySnapshot(BattleSnapshotRuntimeState.GetCurrent());
+        }
+
+        private static bool IsWeaponPriorityTraceRuntime()
+        {
+            return GameNetwork.IsServer &&
+                   IsCampaignMirrorAllWeaponPriorityRuntime();
+        }
+
+        private static bool IsWeaponPrioritySuspectFocusRuntime()
+        {
+            return GameNetwork.IsServer &&
+                   CoopTestBattleOptions.IsWeaponPrioritySuspectsSnapshot(BattleSnapshotRuntimeState.GetCurrent());
+        }
+
+        private static BattleSideEnum ResolveRoleMatrixStreamSide(string sideId, string sideText)
+        {
+            if (TryParseBattleSide(sideId, out BattleSideEnum side))
+                return side;
+
+            if (TryParseBattleSide(sideText, out side))
+                return side;
+
+            return BattleSideEnum.None;
+        }
+
+        private static bool IsRoleMatrixStreamMatrixEntryId(string entryId)
+        {
+            return !string.IsNullOrWhiteSpace(entryId) &&
+                (entryId.IndexOf("|role_matrix_stream|", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 entryId.IndexOf("|campaign_mirror_stream|", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        private static void RequestRoleMatrixStreamSpectatorAutoStart(
+            Mission mission,
+            MissionPeer missionPeer,
+            string source)
+        {
+            if (mission == null ||
+                missionPeer == null ||
+                !GameNetwork.IsServer ||
+                !IsRoleMatrixStreamRuntime())
+            {
+                return;
+            }
+
+            MissionPeer primaryPeer = ResolvePrimaryControllablePeer(mission);
+            if (!ReferenceEquals(primaryPeer, missionPeer))
+            {
+                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: ignored role-matrix stream spectator auto-start request from non-primary peer. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Source=" + (source ?? "unknown"));
+                return;
+            }
+
+            _roleMatrixStreamSpectatorAutoStartRequested = true;
+            TryStartPendingRoleMatrixStreamBattleFromSpectator(mission, source);
+        }
+
+        private static bool IsRoleMatrixStreamSpawnGateOpen(Mission mission, out string waitState)
+        {
+            waitState = "ReadyToSpawn";
+            if (mission == null)
+            {
+                waitState = "WaitingMission";
+                return false;
+            }
+
+            if (!_roleMatrixStreamSpectatorAutoStartRequested)
+            {
+                waitState = "WaitingSpectator";
+                return false;
+            }
+
+            MissionPeer primaryPeer = ResolvePrimaryControllablePeer(mission);
+            NetworkCommunicator peer = primaryPeer?.GetNetworkPeer();
+            if (primaryPeer == null ||
+                peer == null ||
+                peer.IsServerPeer ||
+                !peer.IsConnectionActive ||
+                !peer.IsSynchronized)
+            {
+                waitState = "WaitingPeerSync";
+                return false;
+            }
+
+            bool primaryPeerIsSpectator =
+                primaryPeer.Team == null ||
+                ReferenceEquals(primaryPeer.Team, mission.SpectatorTeam);
+            if (!primaryPeerIsSpectator || HasActiveControlledAgent(primaryPeer))
+            {
+                waitState = "WaitingSpectator";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void TryStartPendingRoleMatrixStreamBattleFromSpectator(Mission mission, string source)
+        {
+            if (mission == null ||
+                !GameNetwork.IsServer ||
+                !IsRoleMatrixStreamRuntime() ||
+                !_roleMatrixStreamSpectatorAutoStartRequested ||
+                _roleMatrixStreamBattleStartedFromSpectator)
+            {
+                return;
+            }
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase >= CoopBattlePhase.BattleActive)
+                return;
+
+            MissionPeer primaryPeer = ResolvePrimaryControllablePeer(mission);
+            bool primaryPeerIsSpectator =
+                primaryPeer == null ||
+                primaryPeer.Team == null ||
+                ReferenceEquals(primaryPeer.Team, mission.SpectatorTeam);
+            if (!primaryPeerIsSpectator || HasActiveControlledAgent(primaryPeer))
+                return;
+
+            bool armiesReady = AreBattlefieldArmiesReadyForStart(
+                mission,
+                out string readinessSource,
+                out int attackerActive,
+                out int defenderActive);
+            if (!armiesReady)
+                return;
+
+            if (currentPhase < CoopBattlePhase.PreBattleHold)
+            {
+                CoopBattlePhaseRuntimeState.AdvanceToAtLeast(
+                    CoopBattlePhase.PreBattleHold,
+                    (source ?? "unknown") + " role-matrix spectator armies-ready",
+                    mission);
+            }
+
+            CoopBattlePhaseRuntimeState.SetPhase(
+                CoopBattlePhase.BattleActive,
+                "role-matrix spectator auto-start from " + (source ?? "unknown"),
+                mission,
+                allowRegression: false);
+            _roleMatrixStreamBattleStartedFromSpectator = true;
+            _roleMatrixStreamWaveStartedUtc = DateTime.MinValue;
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: role-matrix stream battle auto-started from spectator. " +
+                "ArmiesReadySource=" + readinessSource +
+                " AttackerActive=" + attackerActive +
+                " DefenderActive=" + defenderActive +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        private static IReadOnlyList<RoleMatrixStreamEntryDefinition> BuildRoleMatrixStreamDefinitionsFromRuntime()
+        {
+            if (IsCampaignMirrorAllRuntime())
+                return BuildCampaignMirrorStreamDefinitionsFromRuntime();
+
+            bool mounted = IsRoleMatrixStreamMountedRuntime();
+            RosterEntryState templateEntry = ResolveRoleMatrixStreamTemplateEntry();
+            RoleMatrixStreamPalette palette = BuildRoleMatrixStreamPalette(templateEntry);
+            List<RoleMatrixStreamEntryDefinition> definitions = BuildRoleMatrixStreamDefinitions(palette, templateEntry, mounted);
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: built role-matrix stream runtime catalog. " +
+                "Definitions=" + definitions.Count +
+                " Mounted=" + mounted +
+                " TemplateEntry=" + (templateEntry?.EntryId ?? "null") +
+                " Bow=" + (palette.BowId ?? "missing") +
+                " Crossbow=" + (palette.CrossbowId ?? "missing") +
+                " Bolt=" + (palette.BoltId ?? "missing") +
+                " Arrow=" + (palette.ArrowId ?? "missing") +
+                " Throwing=" + (palette.ThrowingId ?? "missing") +
+                " Shield=" + (palette.ShieldId ?? "missing") +
+                " OneHanded=" + (palette.OneHandedId ?? "missing") +
+                " Bastard=" + (palette.BastardId ?? "missing") +
+                " TwoHanded=" + (palette.TwoHandedId ?? "missing") +
+                " Polearm=" + (palette.PolearmId ?? "missing") +
+                " Horse=" + (palette.HorseId ?? "missing") +
+                " HorseHarness=" + (palette.HorseHarnessId ?? "missing") + ".");
+            return definitions;
+        }
+
+        private static IReadOnlyList<RoleMatrixStreamEntryDefinition> BuildCampaignMirrorStreamDefinitionsFromRuntime()
+        {
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            var definitions = new List<RoleMatrixStreamEntryDefinition>();
+            if (runtimeState?.Sides == null)
+                return definitions;
+
+            bool weaponPriorityRuntime = IsCampaignMirrorAllWeaponPriorityRuntime();
+            bool suspectFocus = CoopTestBattleOptions.IsWeaponPrioritySuspectsSnapshot(runtimeState.Snapshot);
+            List<RosterEntryState> streamEntries = runtimeState.Sides
+                .Where(side => side != null)
+                .OrderBy(side => ResolveRoleMatrixStreamSide(side.SideId, side.SideText))
+                .ThenBy(side => side.SideId ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .SelectMany(side => side.Entries ?? new List<RosterEntryState>())
+                .Where(IsCampaignMirrorStreamEntryCandidate)
+                .GroupBy(entry => entry.EntryId ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+            List<RosterEntryState> candidateEntries = weaponPriorityRuntime
+                ? streamEntries.Where(IsCampaignMirrorWeaponPriorityCandidate).ToList()
+                : streamEntries;
+            List<CampaignMirrorWeaponPriorityDefinitionSeed> prioritySeeds = weaponPriorityRuntime
+                ? BuildCampaignMirrorWeaponPriorityDefinitionSeeds(candidateEntries, streamEntries, suspectFocus)
+                : null;
+            if (weaponPriorityRuntime)
+            {
+                definitions.AddRange(BuildCampaignMirrorStreamDefinitionsFromSeeds(prioritySeeds, weaponPriorityRuntime));
+            }
+            else
+            {
+                definitions.AddRange(BuildCampaignMirrorStreamDefinitionsFromEntries(
+                    SortCampaignMirrorStreamEntries(candidateEntries),
+                    weaponPriorityRuntime));
+            }
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: built campaign mirror stream runtime catalog. " +
+                "Definitions=" + definitions.Count +
+                " RuntimeEntries=" + (runtimeState.EntriesById?.Count ?? 0) +
+                " WeaponPriority=" + weaponPriorityRuntime +
+                " WeaponPriorityFocus=" + CoopTestBattleOptions.ResolveWeaponPriorityFocus(runtimeState.Snapshot) +
+                " WeaponPriorityAttackers=" + candidateEntries.Count(entry => ResolveRoleMatrixStreamSide(entry.SideId, null) == BattleSideEnum.Attacker) +
+                " WeaponPriorityDefenders=" + candidateEntries.Count(entry => ResolveRoleMatrixStreamSide(entry.SideId, null) == BattleSideEnum.Defender) +
+                " WeaponPriorityControls=" + definitions.Count(definition => definition.PriorityControl) +
+                " WeaponPrioritySuspects=" + definitions.Count(definition => definition.PrioritySuspect) +
+                " SourceBattleType=" + (runtimeState.Snapshot?.BattleType ?? "null") + ".");
+            return definitions;
+        }
+
+        private static List<RoleMatrixStreamEntryDefinition> BuildCampaignMirrorStreamDefinitionsFromEntries(
+            IEnumerable<RosterEntryState> entries,
+            bool weaponPriorityRuntime)
+        {
+            var seeds = (entries ?? Enumerable.Empty<RosterEntryState>())
+                .Where(entry => entry != null)
+                .Select(entry => new CampaignMirrorWeaponPriorityDefinitionSeed
+                {
+                    Entry = entry
+                })
+                .ToList();
+            return BuildCampaignMirrorStreamDefinitionsFromSeeds(seeds, weaponPriorityRuntime);
+        }
+
+        private static List<RoleMatrixStreamEntryDefinition> BuildCampaignMirrorStreamDefinitionsFromSeeds(
+            IEnumerable<CampaignMirrorWeaponPriorityDefinitionSeed> seeds,
+            bool weaponPriorityRuntime)
+        {
+            var definitions = new List<RoleMatrixStreamEntryDefinition>();
+            int index = 0;
+            foreach (CampaignMirrorWeaponPriorityDefinitionSeed seed in seeds ?? Enumerable.Empty<CampaignMirrorWeaponPriorityDefinitionSeed>())
+            {
+                if (seed?.Entry == null)
+                    continue;
+
+                index++;
+                definitions.Add(BuildCampaignMirrorStreamDefinition(
+                    seed.Entry,
+                    index,
+                    weaponPriorityRuntime,
+                    seed.Suspect,
+                    seed.Control,
+                    seed.PairId));
+            }
+
+            return definitions;
+        }
+
+        private static RoleMatrixStreamEntryDefinition BuildCampaignMirrorStreamDefinition(
+            RosterEntryState entry,
+            int index,
+            bool weaponPriorityRuntime,
+            bool prioritySuspect,
+            bool priorityControl,
+            string priorityPairId)
+        {
+            string characterId =
+                entry?.OriginalCharacterId ??
+                entry?.CharacterId ??
+                index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            string namePrefix = prioritySuspect
+                ? "campaign_mirror_priority_suspect_"
+                : priorityControl
+                    ? "campaign_mirror_priority_control_"
+                    : "campaign_mirror_";
+            return new RoleMatrixStreamEntryDefinition
+            {
+                MatrixId = "C" + index.ToString("00000", System.Globalization.CultureInfo.InvariantCulture),
+                MatrixIndex = index,
+                Name = namePrefix + characterId,
+                RoleIds = new[]
+                {
+                    entry?.CombatItem0Id ?? "empty",
+                    entry?.CombatItem1Id ?? "empty",
+                    entry?.CombatItem2Id ?? "empty",
+                    entry?.CombatItem3Id ?? "empty"
+                },
+                ItemIds = new[]
+                {
+                    entry?.CombatItem0Id,
+                    entry?.CombatItem1Id,
+                    entry?.CombatItem2Id,
+                    entry?.CombatItem3Id
+                },
+                HorseId = entry?.CombatHorseId,
+                HorseHarnessId = entry?.CombatHorseHarnessId,
+                IsMounted = entry?.IsMounted == true,
+                IsRanged = entry?.IsRanged == true,
+                HasShield = entry?.HasShield == true,
+                HasThrown = entry?.HasThrown == true,
+                TemplateEntry = entry,
+                CampaignMirrorEntry = entry,
+                PriorityProfile = weaponPriorityRuntime ? BuildCampaignMirrorWeaponPriorityProfile(entry) : null,
+                PrioritySuspect = prioritySuspect,
+                PriorityControl = priorityControl,
+                PriorityPairId = priorityPairId
+            };
+        }
+
+        private static List<CampaignMirrorWeaponPriorityDefinitionSeed> BuildCampaignMirrorWeaponPriorityDefinitionSeeds(
+            List<RosterEntryState> candidateEntries,
+            List<RosterEntryState> streamEntries,
+            bool suspectFocus)
+        {
+            return suspectFocus
+                ? BuildCampaignMirrorWeaponPrioritySuspectSeeds(candidateEntries, streamEntries)
+                : BuildCampaignMirrorWeaponPriorityFullSeeds(candidateEntries);
+        }
+
+        private static List<CampaignMirrorWeaponPriorityDefinitionSeed> BuildCampaignMirrorWeaponPriorityFullSeeds(
+            List<RosterEntryState> candidateEntries)
+        {
+            List<RosterEntryState> attackers = SortCampaignMirrorStreamEntries(candidateEntries)
+                .Where(entry => ResolveRoleMatrixStreamSide(entry.SideId, null) == BattleSideEnum.Attacker)
+                .ToList();
+            List<RosterEntryState> defenders = SortCampaignMirrorStreamEntries(candidateEntries)
+                .Where(entry => ResolveRoleMatrixStreamSide(entry.SideId, null) == BattleSideEnum.Defender)
+                .ToList();
+            List<RosterEntryState> other = SortCampaignMirrorStreamEntries(candidateEntries)
+                .Where(entry =>
+                {
+                    BattleSideEnum side = ResolveRoleMatrixStreamSide(entry.SideId, null);
+                    return side != BattleSideEnum.Attacker && side != BattleSideEnum.Defender;
+                })
+                .ToList();
+
+            var seeds = new List<CampaignMirrorWeaponPriorityDefinitionSeed>();
+            int attackerControlCursor = 0;
+            int defenderControlCursor = 0;
+            int max = Math.Max(attackers.Count, defenders.Count);
+            for (int i = 0; i < max; i++)
+            {
+                string pairId = "P" + (i + 1).ToString("00000", System.Globalization.CultureInfo.InvariantCulture);
+                if (i < attackers.Count)
+                {
+                    seeds.Add(new CampaignMirrorWeaponPriorityDefinitionSeed { Entry = attackers[i], PairId = pairId });
+                }
+                else
+                {
+                    RosterEntryState attackerControl = SelectCampaignMirrorWeaponPriorityControlEntry(attackers, ref attackerControlCursor);
+                    if (attackerControl != null)
+                        seeds.Add(new CampaignMirrorWeaponPriorityDefinitionSeed { Entry = attackerControl, Control = true, PairId = pairId });
+                }
+
+                if (i < defenders.Count)
+                {
+                    seeds.Add(new CampaignMirrorWeaponPriorityDefinitionSeed { Entry = defenders[i], PairId = pairId });
+                }
+                else
+                {
+                    RosterEntryState defenderControl = SelectCampaignMirrorWeaponPriorityControlEntry(defenders, ref defenderControlCursor);
+                    if (defenderControl != null)
+                        seeds.Add(new CampaignMirrorWeaponPriorityDefinitionSeed { Entry = defenderControl, Control = true, PairId = pairId });
+                }
+            }
+
+            foreach (RosterEntryState entry in other)
+            {
+                seeds.Add(new CampaignMirrorWeaponPriorityDefinitionSeed
+                {
+                    Entry = entry,
+                    PairId = "P-other"
+                });
+            }
+
+            return seeds;
+        }
+
+        private static List<CampaignMirrorWeaponPriorityDefinitionSeed> BuildCampaignMirrorWeaponPrioritySuspectSeeds(
+            List<RosterEntryState> candidateEntries,
+            List<RosterEntryState> streamEntries)
+        {
+            List<RosterEntryState> suspects = SortCampaignMirrorStreamEntries(candidateEntries)
+                .Where(IsCampaignMirrorWeaponPrioritySuspectEntry)
+                .ToList();
+            List<RosterEntryState> attackerMeleeControls = SortCampaignMirrorStreamEntries(streamEntries)
+                .Where(entry => ResolveRoleMatrixStreamSide(entry.SideId, null) == BattleSideEnum.Attacker)
+                .Where(IsCampaignMirrorWeaponPriorityMeleeControlCandidate)
+                .ToList();
+            List<RosterEntryState> defenderMeleeControls = SortCampaignMirrorStreamEntries(streamEntries)
+                .Where(entry => ResolveRoleMatrixStreamSide(entry.SideId, null) == BattleSideEnum.Defender)
+                .Where(IsCampaignMirrorWeaponPriorityMeleeControlCandidate)
+                .ToList();
+            List<RosterEntryState> attackerPriorityControls = SortCampaignMirrorStreamEntries(candidateEntries)
+                .Where(entry => ResolveRoleMatrixStreamSide(entry.SideId, null) == BattleSideEnum.Attacker)
+                .ToList();
+            List<RosterEntryState> defenderPriorityControls = SortCampaignMirrorStreamEntries(candidateEntries)
+                .Where(entry => ResolveRoleMatrixStreamSide(entry.SideId, null) == BattleSideEnum.Defender)
+                .ToList();
+            List<RosterEntryState> attackerAnyControls = SortCampaignMirrorStreamEntries(streamEntries)
+                .Where(entry => ResolveRoleMatrixStreamSide(entry.SideId, null) == BattleSideEnum.Attacker)
+                .ToList();
+            List<RosterEntryState> defenderAnyControls = SortCampaignMirrorStreamEntries(streamEntries)
+                .Where(entry => ResolveRoleMatrixStreamSide(entry.SideId, null) == BattleSideEnum.Defender)
+                .ToList();
+
+            var seeds = new List<CampaignMirrorWeaponPriorityDefinitionSeed>();
+            var foundSuspects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int attackerMeleeCursor = 0;
+            int defenderMeleeCursor = 0;
+            int attackerPriorityCursor = 0;
+            int defenderPriorityCursor = 0;
+            int attackerAnyCursor = 0;
+            int defenderAnyCursor = 0;
+            for (int i = 0; i < suspects.Count; i++)
+            {
+                RosterEntryState suspect = suspects[i];
+                if (suspect == null)
+                    continue;
+
+                string suspectId = GetCampaignMirrorWeaponPriorityCharacterKey(suspect);
+                if (!string.IsNullOrWhiteSpace(suspectId))
+                    foundSuspects.Add(suspectId);
+
+                string pairId = "S" + (i + 1).ToString("00000", System.Globalization.CultureInfo.InvariantCulture);
+                BattleSideEnum side = ResolveRoleMatrixStreamSide(suspect.SideId, null);
+                if (side == BattleSideEnum.Attacker)
+                {
+                    seeds.Add(new CampaignMirrorWeaponPriorityDefinitionSeed { Entry = suspect, Suspect = true, PairId = pairId });
+                    RosterEntryState defenderControl = SelectCampaignMirrorWeaponPriorityControlEntry(
+                        defenderMeleeControls,
+                        defenderPriorityControls,
+                        defenderAnyControls,
+                        ref defenderMeleeCursor,
+                        ref defenderPriorityCursor,
+                        ref defenderAnyCursor);
+                    if (defenderControl != null)
+                        seeds.Add(new CampaignMirrorWeaponPriorityDefinitionSeed { Entry = defenderControl, Control = true, PairId = pairId });
+                }
+                else if (side == BattleSideEnum.Defender)
+                {
+                    RosterEntryState attackerControl = SelectCampaignMirrorWeaponPriorityControlEntry(
+                        attackerMeleeControls,
+                        attackerPriorityControls,
+                        attackerAnyControls,
+                        ref attackerMeleeCursor,
+                        ref attackerPriorityCursor,
+                        ref attackerAnyCursor);
+                    if (attackerControl != null)
+                        seeds.Add(new CampaignMirrorWeaponPriorityDefinitionSeed { Entry = attackerControl, Control = true, PairId = pairId });
+                    seeds.Add(new CampaignMirrorWeaponPriorityDefinitionSeed { Entry = suspect, Suspect = true, PairId = pairId });
+                }
+            }
+
+            List<string> missing = CampaignMirrorWeaponPrioritySuspectCharacterIds
+                .Where(id => !foundSuspects.Contains(id))
+                .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: weapon priority suspect focus catalog. " +
+                "Suspects=" + suspects.Count +
+                " Controls=" + seeds.Count(seed => seed.Control) +
+                " Seeds=" + seeds.Count +
+                " MissingSuspects=[" + string.Join(",", missing) + "].");
+            return seeds;
+        }
+
+        private static RosterEntryState SelectCampaignMirrorWeaponPriorityControlEntry(
+            List<RosterEntryState> entries,
+            ref int cursor)
+        {
+            if (entries == null || entries.Count == 0)
+                return null;
+
+            RosterEntryState entry = entries[Math.Abs(cursor) % entries.Count];
+            cursor++;
+            return entry;
+        }
+
+        private static RosterEntryState SelectCampaignMirrorWeaponPriorityControlEntry(
+            List<RosterEntryState> preferredEntries,
+            List<RosterEntryState> fallbackEntries,
+            List<RosterEntryState> broadFallbackEntries,
+            ref int preferredCursor,
+            ref int fallbackCursor,
+            ref int broadFallbackCursor)
+        {
+            RosterEntryState preferred = SelectCampaignMirrorWeaponPriorityControlEntry(preferredEntries, ref preferredCursor);
+            if (preferred != null)
+                return preferred;
+
+            RosterEntryState fallback = SelectCampaignMirrorWeaponPriorityControlEntry(fallbackEntries, ref fallbackCursor);
+            if (fallback != null)
+                return fallback;
+
+            return SelectCampaignMirrorWeaponPriorityControlEntry(broadFallbackEntries, ref broadFallbackCursor);
+        }
+
+        private static List<RosterEntryState> OrderCampaignMirrorWeaponPriorityEntries(IEnumerable<RosterEntryState> entries)
+        {
+            List<RosterEntryState> attackers = SortCampaignMirrorStreamEntries(entries)
+                .Where(entry => ResolveRoleMatrixStreamSide(entry.SideId, null) == BattleSideEnum.Attacker)
+                .ToList();
+            List<RosterEntryState> defenders = SortCampaignMirrorStreamEntries(entries)
+                .Where(entry => ResolveRoleMatrixStreamSide(entry.SideId, null) == BattleSideEnum.Defender)
+                .ToList();
+            List<RosterEntryState> other = SortCampaignMirrorStreamEntries(entries)
+                .Where(entry =>
+                {
+                    BattleSideEnum side = ResolveRoleMatrixStreamSide(entry.SideId, null);
+                    return side != BattleSideEnum.Attacker && side != BattleSideEnum.Defender;
+                })
+                .ToList();
+
+            var result = new List<RosterEntryState>(attackers.Count + defenders.Count + other.Count);
+            int max = Math.Max(attackers.Count, defenders.Count);
+            for (int i = 0; i < max; i++)
+            {
+                if (i < attackers.Count)
+                    result.Add(attackers[i]);
+                if (i < defenders.Count)
+                    result.Add(defenders[i]);
+            }
+
+            result.AddRange(other);
+            return result;
+        }
+
+        private static List<RosterEntryState> SortCampaignMirrorStreamEntries(IEnumerable<RosterEntryState> entries)
+        {
+            return (entries ?? Enumerable.Empty<RosterEntryState>())
+                .Where(entry => entry != null)
+                .OrderBy(entry => ResolveRoleMatrixStreamSide(entry.SideId, null))
+                .ThenBy(entry => entry.CultureId ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(entry => entry.Tier)
+                .ThenBy(entry => entry.OriginalCharacterId ?? entry.CharacterId ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static bool IsCampaignMirrorWeaponPriorityCandidate(RosterEntryState entry)
+        {
+            CampaignMirrorAiWeaponRoleSnapshot roleSnapshot = BuildCampaignMirrorAiWeaponRoleSnapshot(entry);
+            bool hasRangedOrThrown =
+                (roleSnapshot.HasBow && roleSnapshot.HasAmmo) ||
+                (roleSnapshot.HasCrossbow && roleSnapshot.HasAmmo) ||
+                roleSnapshot.HasThrown;
+            bool hasMeleeFallback = roleSnapshot.HasMelee || roleSnapshot.HasPolearm;
+            return hasRangedOrThrown && hasMeleeFallback;
+        }
+
+        private static bool IsCampaignMirrorWeaponPrioritySuspectEntry(RosterEntryState entry)
+        {
+            string characterKey = GetCampaignMirrorWeaponPriorityCharacterKey(entry);
+            return !string.IsNullOrWhiteSpace(characterKey) &&
+                   CampaignMirrorWeaponPrioritySuspectCharacterIds.Contains(characterKey);
+        }
+
+        private static bool IsCampaignMirrorWeaponPriorityMeleeControlCandidate(RosterEntryState entry)
+        {
+            CampaignMirrorAiWeaponRoleSnapshot roleSnapshot = BuildCampaignMirrorAiWeaponRoleSnapshot(entry);
+            bool hasRangedOrThrown =
+                (roleSnapshot.HasBow && roleSnapshot.HasAmmo) ||
+                (roleSnapshot.HasCrossbow && roleSnapshot.HasAmmo) ||
+                roleSnapshot.HasThrown;
+            bool hasMeleeFallback = roleSnapshot.HasMelee || roleSnapshot.HasPolearm;
+            return hasMeleeFallback && !hasRangedOrThrown && !roleSnapshot.HasHorse;
+        }
+
+        private static string GetCampaignMirrorWeaponPriorityCharacterKey(RosterEntryState entry)
+        {
+            return entry?.OriginalCharacterId ??
+                   entry?.CharacterId ??
+                   entry?.SpawnTemplateId ??
+                   string.Empty;
+        }
+
+        private static string BuildCampaignMirrorWeaponPriorityProfile(RosterEntryState entry)
+        {
+            CampaignMirrorAiWeaponRoleSnapshot roleSnapshot = BuildCampaignMirrorAiWeaponRoleSnapshot(entry);
+            return
+                "Horse=" + roleSnapshot.HasHorse +
+                ",Bow=" + roleSnapshot.HasBow +
+                ",Crossbow=" + roleSnapshot.HasCrossbow +
+                ",Ammo=" + roleSnapshot.HasAmmo +
+                ",Thrown=" + roleSnapshot.HasThrown +
+                ",Shield=" + roleSnapshot.HasShield +
+                ",Melee=" + roleSnapshot.HasMelee +
+                ",Polearm=" + roleSnapshot.HasPolearm +
+                ",Slots=" + (roleSnapshot.SlotSummary ?? "(none)");
+        }
+
+        private static bool IsCampaignMirrorStreamEntryCandidate(RosterEntryState entry)
+        {
+            if (entry == null || string.IsNullOrWhiteSpace(entry.EntryId))
+                return false;
+
+            bool isHeroEntry =
+                entry.IsHero ||
+                !string.IsNullOrWhiteSpace(entry.HeroRole) ||
+                string.Equals(entry.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase);
+            if (isHeroEntry && !IsCampaignMirrorHeroesRuntime())
+                return false;
+
+            if (entry.IsMounted && string.IsNullOrWhiteSpace(entry.CombatHorseId))
+                return false;
+
+            if (entry.Count <= 0 || entry.WoundedCount >= entry.Count)
+                return false;
+
+            if (string.IsNullOrWhiteSpace(entry.CombatItem0Id) &&
+                string.IsNullOrWhiteSpace(entry.CombatItem1Id) &&
+                string.IsNullOrWhiteSpace(entry.CombatItem2Id) &&
+                string.IsNullOrWhiteSpace(entry.CombatItem3Id) &&
+                string.IsNullOrWhiteSpace(entry.CombatHeadId) &&
+                string.IsNullOrWhiteSpace(entry.CombatBodyId) &&
+                string.IsNullOrWhiteSpace(entry.CombatLegId) &&
+                string.IsNullOrWhiteSpace(entry.CombatGlovesId))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static RosterEntryState ResolveRoleMatrixStreamTemplateEntry()
+        {
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            RosterEntryState templateEntry = runtimeState?.Sides?
+                .SelectMany(side => side?.Entries ?? new List<RosterEntryState>())
+                .FirstOrDefault(entry =>
+                    entry != null &&
+                    !string.IsNullOrWhiteSpace(entry.EntryId) &&
+                    entry.EntryId.IndexOf("role_matrix_stream_control", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (templateEntry != null)
+                return templateEntry;
+
+            return runtimeState?.Sides?
+                .SelectMany(side => side?.Entries ?? new List<RosterEntryState>())
+                .FirstOrDefault(entry => entry != null);
+        }
+
+        private static RoleMatrixStreamPalette BuildRoleMatrixStreamPalette(RosterEntryState templateEntry)
+        {
+            var palette = new RoleMatrixStreamPalette();
+            TrySetRoleMatrixStreamPaletteItem(palette, templateEntry?.CombatHorseId);
+            TrySetRoleMatrixStreamPaletteItem(palette, templateEntry?.CombatHorseHarnessId);
+            TrySetRoleMatrixStreamPaletteItem(palette, templateEntry?.CombatItem0Id);
+            TrySetRoleMatrixStreamPaletteItem(palette, templateEntry?.CombatItem1Id);
+            TrySetRoleMatrixStreamPaletteItem(palette, templateEntry?.CombatItem2Id);
+            TrySetRoleMatrixStreamPaletteItem(palette, templateEntry?.CombatItem3Id);
+
+            if (MBObjectManager.Instance != null)
+            {
+                try
+                {
+                    MethodInfo getObjectTypeList = typeof(MBObjectManager).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                        .FirstOrDefault(method =>
+                            string.Equals(method.Name, "GetObjectTypeList", StringComparison.Ordinal) &&
+                            method.IsGenericMethodDefinition &&
+                            method.GetParameters().Length == 0);
+                    object objectList = getObjectTypeList?.MakeGenericMethod(typeof(ItemObject)).Invoke(MBObjectManager.Instance, null);
+                    if (objectList is System.Collections.IEnumerable enumerable)
+                    {
+                        foreach (object itemObject in enumerable)
+                        {
+                            if (!(itemObject is ItemObject item) || string.IsNullOrWhiteSpace(item.StringId))
+                                continue;
+
+                            TrySetRoleMatrixStreamPaletteItem(palette, item.StringId);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info("CoopMissionSpawnLogic: failed to scan role-matrix stream item palette: " + ex.Message);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(palette.BastardId) &&
+                TryResolveRoleMatrixStreamItem("mp_coop_test_bastard_sword") != null)
+            {
+                palette.BastardId = "mp_coop_test_bastard_sword";
+            }
+
+            return palette;
+        }
+
+        private static void TrySetRoleMatrixStreamPaletteItem(RoleMatrixStreamPalette palette, string itemId)
+        {
+            if (palette == null || string.IsNullOrWhiteSpace(itemId))
+                return;
+
+            ItemObject item = TryResolveRoleMatrixStreamItem(itemId);
+            if (item?.Type == ItemObject.ItemTypeEnum.Horse)
+            {
+                palette.HorseId = SetIfEmpty(palette.HorseId, itemId);
+                return;
+            }
+
+            if (item?.Type == ItemObject.ItemTypeEnum.HorseHarness)
+            {
+                palette.HorseHarnessId = SetIfEmpty(palette.HorseHarnessId, itemId);
+                return;
+            }
+
+            if (GetMaterializedMountedWeaponRole(item) == MaterializedMountedWeaponRole.Other)
+                return;
+
+            WeaponComponentData primaryWeapon = item?.PrimaryWeapon;
+            string weaponClass = primaryWeapon?.WeaponClass.ToString() ?? string.Empty;
+            string normalizedItemId = itemId.Trim().ToLowerInvariant();
+
+            if ((primaryWeapon != null && primaryWeapon.IsShield) ||
+                item.ItemType == ItemObject.ItemTypeEnum.Shield)
+            {
+                palette.ShieldId = SetIfEmpty(palette.ShieldId, itemId);
+                return;
+            }
+
+            if (item.ItemType == ItemObject.ItemTypeEnum.Arrows ||
+                weaponClass.IndexOf("Arrow", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                palette.ArrowId = SetIfEmpty(palette.ArrowId, itemId);
+                return;
+            }
+
+            if (item.ItemType == ItemObject.ItemTypeEnum.Bolts ||
+                weaponClass.IndexOf("Bolt", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                palette.BoltId = SetIfEmpty(palette.BoltId, itemId);
+                return;
+            }
+
+            if (item.ItemType == ItemObject.ItemTypeEnum.Crossbow ||
+                weaponClass.IndexOf("Crossbow", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                palette.CrossbowId = SetIfEmpty(palette.CrossbowId, itemId);
+                return;
+            }
+
+            if (item.ItemType == ItemObject.ItemTypeEnum.Bow ||
+                weaponClass.IndexOf("Bow", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                palette.BowId = SetIfEmpty(palette.BowId, itemId);
+                return;
+            }
+
+            if (item.ItemType == ItemObject.ItemTypeEnum.Thrown ||
+                weaponClass.IndexOf("Javelin", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                weaponClass.IndexOf("Throwing", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                weaponClass.IndexOf("Stone", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                ContainsAnyOrdinal(normalizedItemId, "javelin", "throwing", "jarid", "pilum", "stone"))
+            {
+                palette.ThrowingId = SetIfEmpty(palette.ThrowingId, itemId);
+                return;
+            }
+
+            if (IsRoleMatrixStreamBastardSword(item, itemId))
+            {
+                palette.BastardId = SetIfEmpty(palette.BastardId, itemId);
+                return;
+            }
+
+            if (item.ItemType == ItemObject.ItemTypeEnum.Polearm ||
+                (primaryWeapon != null && primaryWeapon.IsPolearm) ||
+                weaponClass.IndexOf("Polearm", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                weaponClass.IndexOf("Spear", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                weaponClass.IndexOf("Pike", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                ContainsAnyOrdinal(normalizedItemId, "spear", "polearm", "pike", "lance", "kontos"))
+            {
+                palette.PolearmId = SetIfEmpty(palette.PolearmId, itemId);
+                return;
+            }
+
+            if (item.ItemType == ItemObject.ItemTypeEnum.TwoHandedWeapon ||
+                (primaryWeapon != null && primaryWeapon.IsTwoHanded) ||
+                weaponClass.IndexOf("TwoHanded", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                ContainsAnyOrdinal(normalizedItemId, "two_handed", "twohanded", "_2h", "2h_", "greatsword", "falx", "maul"))
+            {
+                palette.TwoHandedId = SetIfEmpty(palette.TwoHandedId, itemId);
+                return;
+            }
+
+            if (item.ItemType == ItemObject.ItemTypeEnum.OneHandedWeapon ||
+                (primaryWeapon != null && (primaryWeapon.IsOneHanded || primaryWeapon.IsMeleeWeapon)) ||
+                ContainsAnyOrdinal(normalizedItemId, "sword", "spatha", "sabre", "axe", "mace"))
+            {
+                palette.OneHandedId = SetIfEmpty(palette.OneHandedId, itemId);
+            }
+        }
+
+        private static bool IsRoleMatrixStreamBastardSword(ItemObject item, string itemId)
+        {
+            if (GetMaterializedMountedWeaponRole(item) == MaterializedMountedWeaponRole.Other)
+                return false;
+
+            if (ContainsAnyOrdinal(itemId, "bastard", "long_sword", "longsword"))
+                return true;
+
+            bool hasOneHandedSword = false;
+            bool hasTwoHandedSword = false;
+            try
+            {
+                if (item?.Weapons != null)
+                {
+                    foreach (WeaponComponentData weapon in item.Weapons)
+                    {
+                        string weaponClass = weapon?.WeaponClass.ToString() ?? string.Empty;
+                        if (weaponClass.IndexOf("OneHanded", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                            weaponClass.IndexOf("Sword", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            hasOneHandedSword = true;
+                        }
+
+                        if (weaponClass.IndexOf("TwoHanded", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                            weaponClass.IndexOf("Sword", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            hasTwoHandedSword = true;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            return hasOneHandedSword && hasTwoHandedSword;
+        }
+
+        private static List<RoleMatrixStreamEntryDefinition> BuildRoleMatrixStreamDefinitions(
+            RoleMatrixStreamPalette palette,
+            RosterEntryState templateEntry,
+            bool mounted)
+        {
+            var definitions = new List<RoleMatrixStreamEntryDefinition>();
+            if (palette == null || templateEntry == null)
+                return definitions;
+
+            RoleMatrixStreamSlotRole[] roles =
+            {
+                RoleMatrixStreamSlotRole.Empty,
+                RoleMatrixStreamSlotRole.Bow,
+                RoleMatrixStreamSlotRole.Crossbow,
+                RoleMatrixStreamSlotRole.Bolt,
+                RoleMatrixStreamSlotRole.Arrow,
+                RoleMatrixStreamSlotRole.Throwing,
+                RoleMatrixStreamSlotRole.Shield,
+                RoleMatrixStreamSlotRole.OneHanded,
+                RoleMatrixStreamSlotRole.Bastard,
+                RoleMatrixStreamSlotRole.TwoHanded,
+                RoleMatrixStreamSlotRole.Polearm
+            };
+
+            var missingRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int logicalIndex = 0;
+            for (int slot0 = 0; slot0 < roles.Length; slot0++)
+            {
+                for (int slot1 = 0; slot1 < roles.Length; slot1++)
+                {
+                    for (int slot2 = 0; slot2 < roles.Length; slot2++)
+                    {
+                        for (int slot3 = 0; slot3 < roles.Length; slot3++)
+                        {
+                            RoleMatrixStreamSlotRole[] roleSlots =
+                            {
+                                roles[slot0],
+                                roles[slot1],
+                                roles[slot2],
+                                roles[slot3]
+                            };
+                            if (roleSlots.All(role => role == RoleMatrixStreamSlotRole.Empty))
+                                continue;
+
+                            logicalIndex++;
+                            if (TryBuildRoleMatrixStreamDefinition(
+                                    palette,
+                                    templateEntry,
+                                    roleSlots,
+                                    logicalIndex,
+                                    mounted,
+                                    out RoleMatrixStreamEntryDefinition definition,
+                                    missingRoles))
+                            {
+                                definitions.Add(definition);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (missingRoles.Count > 0)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: role-matrix stream skipped definitions because palette roles are missing. " +
+                    "MissingRoles=[" + string.Join(",", missingRoles.OrderBy(role => role, StringComparer.OrdinalIgnoreCase)) + "]" +
+                    " Built=" + definitions.Count + ".");
+            }
+
+            return definitions;
+        }
+
+        private static bool TryBuildRoleMatrixStreamDefinition(
+            RoleMatrixStreamPalette palette,
+            RosterEntryState templateEntry,
+            RoleMatrixStreamSlotRole[] roleSlots,
+            int logicalIndex,
+            bool mounted,
+            out RoleMatrixStreamEntryDefinition definition,
+            HashSet<string> missingRoles)
+        {
+            definition = null;
+            if (mounted)
+            {
+                if (string.IsNullOrWhiteSpace(palette?.HorseId))
+                {
+                    missingRoles?.Add("horse");
+                    return false;
+                }
+
+                if (string.IsNullOrWhiteSpace(palette?.HorseHarnessId))
+                {
+                    missingRoles?.Add("horse_harness");
+                    return false;
+                }
+            }
+
+            var itemIds = new string[4];
+            var roleIds = new string[4];
+            for (int i = 0; i < roleSlots.Length; i++)
+            {
+                roleIds[i] = FormatRoleMatrixStreamSlotRole(roleSlots[i]);
+                string itemId = ResolveRoleMatrixStreamSlotItemId(palette, roleSlots[i]);
+                if (roleSlots[i] != RoleMatrixStreamSlotRole.Empty && string.IsNullOrWhiteSpace(itemId))
+                {
+                    missingRoles?.Add(roleIds[i]);
+                    return false;
+                }
+
+                itemIds[i] = itemId;
+            }
+
+            definition = new RoleMatrixStreamEntryDefinition
+            {
+                MatrixId = "M" + logicalIndex.ToString("00000", System.Globalization.CultureInfo.InvariantCulture),
+                MatrixIndex = logicalIndex,
+                Name = (mounted ? "mounted_role_matrix_" : "role_matrix_") + string.Join("_", roleIds),
+                RoleIds = roleIds,
+                ItemIds = itemIds,
+                HorseId = mounted ? palette.HorseId : null,
+                HorseHarnessId = mounted ? palette.HorseHarnessId : null,
+                IsMounted = mounted,
+                IsRanged = roleSlots.Any(role =>
+                    role == RoleMatrixStreamSlotRole.Bow ||
+                    role == RoleMatrixStreamSlotRole.Crossbow ||
+                    role == RoleMatrixStreamSlotRole.Throwing),
+                HasShield = roleSlots.Any(role => role == RoleMatrixStreamSlotRole.Shield),
+                HasThrown = roleSlots.Any(role => role == RoleMatrixStreamSlotRole.Throwing),
+                TemplateEntry = templateEntry
+            };
+            return true;
+        }
+
+        private static RosterEntryState BuildRoleMatrixStreamEntryState(
+            RoleMatrixStreamEntryDefinition definition,
+            BattleSideEnum side)
+        {
+            if (definition?.CampaignMirrorEntry != null)
+                return CloneCampaignMirrorStreamEntryState(definition.CampaignMirrorEntry);
+
+            RosterEntryState template = definition?.TemplateEntry;
+            if (template == null)
+                return null;
+
+            string sideId = side == BattleSideEnum.Defender ? "defender" : "attacker";
+            string partyId = "coop_test_" + sideId + "_role_matrix_stream";
+            return new RosterEntryState
+            {
+                EntryId = sideId + "|" + partyId + "|role_matrix_stream|" + (definition.MatrixId ?? "M00000"),
+                SideId = sideId,
+                PartyId = partyId,
+                CharacterId = template.CharacterId,
+                OriginalCharacterId = template.OriginalCharacterId,
+                CampaignFormationClass = template.CampaignFormationClass,
+                SpawnTemplateId = template.SpawnTemplateId,
+                TroopName = "Coop Matrix " + (definition.MatrixId ?? "M00000") + " " + (definition.SlotSummary ?? string.Empty),
+                CultureId = template.CultureId,
+                HeroId = template.HeroId,
+                HeroRole = template.HeroRole,
+                HeroOccupationId = template.HeroOccupationId,
+                HeroClanId = template.HeroClanId,
+                HeroTemplateId = template.HeroTemplateId,
+                HeroBodyProperties = template.HeroBodyProperties,
+                HeroLevel = template.HeroLevel,
+                HeroAge = template.HeroAge,
+                HeroIsFemale = template.HeroIsFemale,
+                Count = 1,
+                WoundedCount = 0,
+                IsHero = false,
+                IsMounted = definition.IsMounted,
+                IsRanged = definition.IsRanged,
+                HasShield = definition.HasShield,
+                HasThrown = definition.HasThrown,
+                AttributeVigor = template.AttributeVigor,
+                AttributeControl = template.AttributeControl,
+                AttributeEndurance = template.AttributeEndurance,
+                SkillOneHanded = template.SkillOneHanded,
+                SkillTwoHanded = template.SkillTwoHanded,
+                SkillPolearm = template.SkillPolearm,
+                SkillBow = template.SkillBow,
+                SkillCrossbow = template.SkillCrossbow,
+                SkillThrowing = template.SkillThrowing,
+                SkillRiding = definition.IsMounted ? Math.Max(template.SkillRiding, 120) : template.SkillRiding,
+                SkillAthletics = template.SkillAthletics,
+                BaseHitPoints = template.BaseHitPoints,
+                PerkIds = template.PerkIds != null ? new List<string>(template.PerkIds) : new List<string>(),
+                CombatItem0Id = definition.ItemIds != null && definition.ItemIds.Length > 0 ? definition.ItemIds[0] : null,
+                CombatItem0Amount = template.CombatItem0Amount,
+                CombatItem1Id = definition.ItemIds != null && definition.ItemIds.Length > 1 ? definition.ItemIds[1] : null,
+                CombatItem1Amount = template.CombatItem1Amount,
+                CombatItem2Id = definition.ItemIds != null && definition.ItemIds.Length > 2 ? definition.ItemIds[2] : null,
+                CombatItem2Amount = template.CombatItem2Amount,
+                CombatItem3Id = definition.ItemIds != null && definition.ItemIds.Length > 3 ? definition.ItemIds[3] : null,
+                CombatItem3Amount = template.CombatItem3Amount,
+                CombatHeadId = template.CombatHeadId,
+                CombatBodyId = template.CombatBodyId,
+                CombatLegId = template.CombatLegId,
+                CombatGlovesId = template.CombatGlovesId,
+                CombatCapeId = template.CombatCapeId,
+                CombatHorseId = definition.IsMounted ? definition.HorseId : null,
+                CombatHorseHarnessId = definition.IsMounted ? definition.HorseHarnessId : null,
+                ServerCreateContractResolved = template.ServerCreateContractResolved,
+                ServerCreateUseStringIdExactEquipmentPath = template.ServerCreateUseStringIdExactEquipmentPath,
+                ServerCreateInjectEquipment = template.ServerCreateInjectEquipment,
+                ServerCreatePreSpawnIncludesWeapons = template.ServerCreatePreSpawnIncludesWeapons,
+                ServerCreatePreSpawnIncludesArmorVisuals = template.ServerCreatePreSpawnIncludesArmorVisuals,
+                ServerCreatePreSpawnIncludesCapeVisual = template.ServerCreatePreSpawnIncludesCapeVisual,
+                ServerCreatePreSpawnIncludesMountVisuals = definition.IsMounted && template.ServerCreatePreSpawnIncludesMountVisuals,
+                ServerCreatePayloadDiagnosticActive = template.ServerCreatePayloadDiagnosticActive,
+                ServerCreateRequestedProfile = template.ServerCreateRequestedProfile,
+                ServerCreateEffectiveProfile = template.ServerCreateEffectiveProfile,
+                Tier = template.Tier
+            };
+        }
+
+        private static RosterEntryState CloneCampaignMirrorStreamEntryState(RosterEntryState template)
+        {
+            if (template == null)
+                return null;
+
+            return new RosterEntryState
+            {
+                EntryId = template.EntryId,
+                SideId = template.SideId,
+                PartyId = template.PartyId,
+                CharacterId = template.CharacterId,
+                OriginalCharacterId = template.OriginalCharacterId,
+                CampaignFormationClass = template.CampaignFormationClass,
+                SpawnTemplateId = template.SpawnTemplateId,
+                TroopName = template.TroopName,
+                CultureId = template.CultureId,
+                HeroId = template.HeroId,
+                HeroRole = template.HeroRole,
+                HeroOccupationId = template.HeroOccupationId,
+                HeroClanId = template.HeroClanId,
+                HeroTemplateId = template.HeroTemplateId,
+                HeroBodyProperties = template.HeroBodyProperties,
+                HeroLevel = template.HeroLevel,
+                HeroAge = template.HeroAge,
+                HeroIsFemale = template.HeroIsFemale,
+                Count = 1,
+                WoundedCount = 0,
+                IsHero = template.IsHero,
+                IsMounted = template.IsMounted,
+                IsRanged = template.IsRanged,
+                HasShield = template.HasShield,
+                HasThrown = template.HasThrown,
+                AttributeVigor = template.AttributeVigor,
+                AttributeControl = template.AttributeControl,
+                AttributeEndurance = template.AttributeEndurance,
+                SkillOneHanded = template.SkillOneHanded,
+                SkillTwoHanded = template.SkillTwoHanded,
+                SkillPolearm = template.SkillPolearm,
+                SkillBow = template.SkillBow,
+                SkillCrossbow = template.SkillCrossbow,
+                SkillThrowing = template.SkillThrowing,
+                SkillRiding = template.SkillRiding,
+                SkillAthletics = template.SkillAthletics,
+                BaseHitPoints = template.BaseHitPoints,
+                PerkIds = template.PerkIds != null ? new List<string>(template.PerkIds) : new List<string>(),
+                CombatItem0Id = template.CombatItem0Id,
+                CombatItem0Amount = template.CombatItem0Amount,
+                CombatItem0CraftedWeaponKey = template.CombatItem0CraftedWeaponKey,
+                CombatItem0ModifierId = template.CombatItem0ModifierId,
+                CombatItem1Id = template.CombatItem1Id,
+                CombatItem1Amount = template.CombatItem1Amount,
+                CombatItem1CraftedWeaponKey = template.CombatItem1CraftedWeaponKey,
+                CombatItem1ModifierId = template.CombatItem1ModifierId,
+                CombatItem2Id = template.CombatItem2Id,
+                CombatItem2Amount = template.CombatItem2Amount,
+                CombatItem2CraftedWeaponKey = template.CombatItem2CraftedWeaponKey,
+                CombatItem2ModifierId = template.CombatItem2ModifierId,
+                CombatItem3Id = template.CombatItem3Id,
+                CombatItem3Amount = template.CombatItem3Amount,
+                CombatItem3CraftedWeaponKey = template.CombatItem3CraftedWeaponKey,
+                CombatItem3ModifierId = template.CombatItem3ModifierId,
+                CombatHeadId = template.CombatHeadId,
+                CombatBodyId = template.CombatBodyId,
+                CombatLegId = template.CombatLegId,
+                CombatGlovesId = template.CombatGlovesId,
+                CombatCapeId = template.CombatCapeId,
+                CombatHorseId = template.CombatHorseId,
+                CombatHorseHarnessId = template.CombatHorseHarnessId,
+                ServerCreateContractResolved = template.ServerCreateContractResolved,
+                ServerCreateUseStringIdExactEquipmentPath = template.ServerCreateUseStringIdExactEquipmentPath,
+                ServerCreateInjectEquipment = template.ServerCreateInjectEquipment,
+                ServerCreatePreSpawnIncludesWeapons = template.ServerCreatePreSpawnIncludesWeapons,
+                ServerCreatePreSpawnIncludesArmorVisuals = template.ServerCreatePreSpawnIncludesArmorVisuals,
+                ServerCreatePreSpawnIncludesCapeVisual = template.ServerCreatePreSpawnIncludesCapeVisual,
+                ServerCreatePreSpawnIncludesMountVisuals = template.ServerCreatePreSpawnIncludesMountVisuals,
+                ServerCreatePayloadDiagnosticActive = template.ServerCreatePayloadDiagnosticActive,
+                ServerCreateRequestedProfile = template.ServerCreateRequestedProfile,
+                ServerCreateEffectiveProfile = template.ServerCreateEffectiveProfile,
+                Tier = template.Tier
+            };
+        }
+
+        private static string ResolveRoleMatrixStreamSlotItemId(RoleMatrixStreamPalette palette, RoleMatrixStreamSlotRole role)
+        {
+            if (palette == null)
+                return null;
+
+            switch (role)
+            {
+                case RoleMatrixStreamSlotRole.Bow:
+                    return palette.BowId;
+                case RoleMatrixStreamSlotRole.Crossbow:
+                    return palette.CrossbowId;
+                case RoleMatrixStreamSlotRole.Bolt:
+                    return palette.BoltId;
+                case RoleMatrixStreamSlotRole.Arrow:
+                    return palette.ArrowId;
+                case RoleMatrixStreamSlotRole.Throwing:
+                    return palette.ThrowingId;
+                case RoleMatrixStreamSlotRole.Shield:
+                    return palette.ShieldId;
+                case RoleMatrixStreamSlotRole.OneHanded:
+                    return palette.OneHandedId;
+                case RoleMatrixStreamSlotRole.Bastard:
+                    return palette.BastardId;
+                case RoleMatrixStreamSlotRole.TwoHanded:
+                    return palette.TwoHandedId;
+                case RoleMatrixStreamSlotRole.Polearm:
+                    return palette.PolearmId;
+                default:
+                    return null;
+            }
+        }
+
+        private static string FormatRoleMatrixStreamSlotRole(RoleMatrixStreamSlotRole role)
+        {
+            switch (role)
+            {
+                case RoleMatrixStreamSlotRole.Bow:
+                    return "bow";
+                case RoleMatrixStreamSlotRole.Crossbow:
+                    return "crossbow";
+                case RoleMatrixStreamSlotRole.Bolt:
+                    return "bolt";
+                case RoleMatrixStreamSlotRole.Arrow:
+                    return "arrow";
+                case RoleMatrixStreamSlotRole.Throwing:
+                    return "throwing";
+                case RoleMatrixStreamSlotRole.Shield:
+                    return "shield";
+                case RoleMatrixStreamSlotRole.OneHanded:
+                    return "one_handed";
+                case RoleMatrixStreamSlotRole.Bastard:
+                    return "bastard";
+                case RoleMatrixStreamSlotRole.TwoHanded:
+                    return "two_handed";
+                case RoleMatrixStreamSlotRole.Polearm:
+                    return "polearm";
+                default:
+                    return "empty";
+            }
+        }
+
+        private static ItemObject TryResolveRoleMatrixStreamItem(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId) || MBObjectManager.Instance == null)
+                return null;
+
+            try
+            {
+                return MBObjectManager.Instance.GetObject<ItemObject>(itemId);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string SetIfEmpty(string target, string value)
+        {
+            return string.IsNullOrWhiteSpace(target) && !string.IsNullOrWhiteSpace(value)
+                ? value
+                : target;
+        }
+
+        private static bool ContainsAnyOrdinal(string value, params string[] tokens)
+        {
+            if (string.IsNullOrWhiteSpace(value) || tokens == null)
+                return false;
+
+            foreach (string token in tokens)
+            {
+                if (!string.IsNullOrWhiteSpace(token) &&
+                    value.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void EnsureRoleMatrixStreamRuntimeInitialized(Mission mission, string source)
+        {
+            if (ReferenceEquals(_roleMatrixStreamMission, mission))
+                return;
+
+            ResetRoleMatrixStreamRuntime("new-mission");
+            _roleMatrixStreamMission = mission;
+            _hasMaterializedBattlefieldArmies = false;
+            _hasTriggeredAuthoritativeBattleCompletion = false;
+            _authoritativeBattleCompletionReason = string.Empty;
+            _authoritativeBattleWinnerSide = string.Empty;
+            _materializedArmyEntryIdByAgentIndex.Clear();
+            _materializedArmySideByAgentIndex.Clear();
+            _materializedAgentInstanceByIndex.Clear();
+            ResetMaterializedCombatProfileRuntimeState();
+
+            IReadOnlyList<RoleMatrixStreamEntryDefinition> allDefinitions =
+                BuildRoleMatrixStreamDefinitionsFromRuntime();
+            HashSet<string> unsafeMatrixIds = CoopRoleMatrixStreamBridgeFile.ReadUnsafeMatrixIds();
+            _roleMatrixStreamTotalMatrixCount = allDefinitions.Count;
+            _roleMatrixStreamSkippedUnsafeCount = unsafeMatrixIds.Count;
+            _roleMatrixStreamDefinitions = allDefinitions
+                .Where(definition => definition != null &&
+                                     !unsafeMatrixIds.Contains(definition.MatrixId ?? string.Empty))
+                .OrderBy(definition => definition.MatrixIndex)
+                .ToList();
+            _roleMatrixStreamSkippedUnsafeCount = Math.Max(0, allDefinitions.Count - _roleMatrixStreamDefinitions.Count);
+            _roleMatrixStreamCursor = 0;
+            _roleMatrixStreamWave = 0;
+            _roleMatrixStreamFinished = false;
+            _roleMatrixStreamKillingWave = false;
+            _roleMatrixStreamSpectatorAutoStartRequested = false;
+            _roleMatrixStreamBattleStartedFromSpectator = false;
+            _roleMatrixStreamWaveStartedUtc = DateTime.MinValue;
+            _nextRoleMatrixStreamLogUtc = DateTime.MinValue;
+            _nextRoleMatrixStreamAiPulseUtc = DateTime.MinValue;
+            WriteRoleMatrixStreamProgress(mission, "Initialized", source);
+            BattleSnapshotMessage currentSnapshot = BattleSnapshotRuntimeState.GetCurrent();
+            int activeLimit = ResolveRoleMatrixStreamEffectiveActiveLimit(currentSnapshot);
+            float waveLifetime = CoopTestBattleOptions.ResolveRoleMatrixStreamWaveLifetimeSeconds(currentSnapshot);
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: role-matrix stream initialized. " +
+                "Definitions=" + _roleMatrixStreamDefinitions.Count +
+                " Total=" + _roleMatrixStreamTotalMatrixCount +
+                " SkippedUnsafe=" + _roleMatrixStreamSkippedUnsafeCount +
+                " ActiveLimit=" + activeLimit +
+                " WaveLifetime=" + waveLifetime.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " WeaponPriority=" + IsCampaignMirrorAllWeaponPriorityRuntime() +
+                " WeaponPriorityFocus=" + CoopTestBattleOptions.ResolveWeaponPriorityFocus(currentSnapshot) +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        private static BattleSideEnum ResolveRoleMatrixStreamDefinitionSide(RoleMatrixStreamEntryDefinition definition)
+        {
+            if (definition?.CampaignMirrorEntry != null)
+            {
+                BattleSideEnum campaignSide = ResolveRoleMatrixStreamSide(
+                    definition.CampaignMirrorEntry.SideId,
+                    null);
+                if (campaignSide != BattleSideEnum.None)
+                    return campaignSide;
+            }
+
+            return definition != null && definition.MatrixIndex % 2 == 0
+                ? BattleSideEnum.Defender
+                : BattleSideEnum.Attacker;
+        }
+
+        private static string GetRoleMatrixStreamSourceLabel()
+        {
+            return IsCampaignMirrorAllRuntime()
+                ? "campaign-mirror-stream"
+                : "role-matrix-stream";
+        }
+
+        private static void SpawnRoleMatrixStreamWave(Mission mission, string source)
+        {
+            if (mission == null || _roleMatrixStreamDefinitions.Count == 0)
+                return;
+
+            Team attackerTeam = mission.Teams?.Attacker;
+            Team defenderTeam = mission.Teams?.Defender;
+            if (attackerTeam == null || defenderTeam == null)
+                return;
+
+            int activeLimit = ResolveRoleMatrixStreamEffectiveActiveLimit(BattleSnapshotRuntimeState.GetCurrent());
+            int spawned = 0;
+            int attempted = 0;
+            _roleMatrixStreamWave++;
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            _roleMatrixStreamWaveStartedUtc =
+                currentPhase >= CoopBattlePhase.BattleActive &&
+                currentPhase < CoopBattlePhase.BattleEnded
+                    ? DateTime.UtcNow
+                    : DateTime.MinValue;
+            WriteRoleMatrixStreamProgress(mission, "Starting", source);
+
+            while (_roleMatrixStreamCursor < _roleMatrixStreamDefinitions.Count &&
+                   _roleMatrixStreamActiveAgentsByIndex.Count < activeLimit)
+            {
+                RoleMatrixStreamEntryDefinition definition =
+                    _roleMatrixStreamDefinitions[_roleMatrixStreamCursor++];
+                BattleSideEnum side = ResolveRoleMatrixStreamDefinitionSide(definition);
+                Team team = side == BattleSideEnum.Defender ? defenderTeam : attackerTeam;
+                RosterEntryState entryState = BuildRoleMatrixStreamEntryState(definition, side);
+                BasicCharacterObject troop = ResolveRoleMatrixStreamTroop(entryState);
+                attempted++;
+
+                if (entryState == null || troop == null || team == null)
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: role-matrix stream skipped matrix because spawn template was unavailable. " +
+                        "MatrixId=" + (definition.MatrixId ?? "null") +
+                        " EntryId=" + (entryState?.EntryId ?? "null") +
+                        " SpawnTemplateId=" + (entryState?.SpawnTemplateId ?? "null") +
+                        " Side=" + side +
+                        " Source=" + (source ?? "unknown"));
+                    continue;
+                }
+
+                int beforeCount = _roleMatrixStreamActiveAgentsByIndex.Count;
+                int sideOffset = CountRoleMatrixStreamActiveAgentsForSide(side);
+                WriteRoleMatrixStreamPlannedProgress(mission, definition, entryState, side, source);
+                int spawnedForEntry = SpawnMaterializedAgentsForEntry(
+                    mission,
+                    team,
+                    side,
+                    troop,
+                    entryState,
+                    spawnCount: 1,
+                    sideOffset: sideOffset,
+                    source: GetRoleMatrixStreamSourceLabel() + " " + (source ?? "unknown"),
+                    isReinforcement: false);
+                if (spawnedForEntry <= 0)
+                    continue;
+
+                TrackRoleMatrixStreamSpawnedAgent(definition, entryState, side, source);
+                if (_roleMatrixStreamActiveAgentsByIndex.Count > beforeCount)
+                    spawned++;
+            }
+
+            if (spawned > 0)
+            {
+                _hasMaterializedBattlefieldArmies = true;
+                _nextRoleMatrixStreamLogUtc = DateTime.UtcNow.AddSeconds(5);
+            }
+
+            WriteRoleMatrixStreamProgress(mission, spawned > 0 ? "Spawned" : "SpawnAttempted", source);
+            int attackerActive = CountRoleMatrixStreamActiveAgentsForSide(BattleSideEnum.Attacker);
+            int defenderActive = CountRoleMatrixStreamActiveAgentsForSide(BattleSideEnum.Defender);
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: role-matrix stream wave spawned. " +
+                "Wave=" + _roleMatrixStreamWave +
+                " Attempted=" + attempted +
+                " Spawned=" + spawned +
+                " Active=" + _roleMatrixStreamActiveAgentsByIndex.Count +
+                " AttackerActive=" + attackerActive +
+                " DefenderActive=" + defenderActive +
+                " Cursor=" + _roleMatrixStreamCursor + "/" + _roleMatrixStreamDefinitions.Count +
+                " WeaponPriority=" + IsCampaignMirrorAllWeaponPriorityRuntime() +
+                " WeaponPriorityFocus=" + CoopTestBattleOptions.ResolveWeaponPriorityFocus(BattleSnapshotRuntimeState.GetCurrent()) +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        private static BasicCharacterObject ResolveRoleMatrixStreamTroop(RosterEntryState entryState)
+        {
+            if (entryState == null || MBObjectManager.Instance == null)
+                return null;
+
+            foreach (string candidateId in new[]
+            {
+                entryState.SpawnTemplateId,
+                entryState.CharacterId,
+                entryState.OriginalCharacterId,
+                "mp_coop_light_infantry_empire_troop",
+                "mp_heavy_infantry_vlandia_troop"
+            })
+            {
+                if (string.IsNullOrWhiteSpace(candidateId))
+                    continue;
+
+                try
+                {
+                    BasicCharacterObject character = MBObjectManager.Instance.GetObject<BasicCharacterObject>(candidateId);
+                    if (character != null)
+                        return character;
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
+        }
+
+        private static void TrackRoleMatrixStreamSpawnedAgent(
+            RoleMatrixStreamEntryDefinition definition,
+            RosterEntryState entryState,
+            BattleSideEnum side,
+            string source)
+        {
+            if (definition == null || entryState == null || string.IsNullOrWhiteSpace(entryState.EntryId))
+                return;
+
+            foreach (KeyValuePair<int, string> pair in _materializedArmyEntryIdByAgentIndex.ToList())
+            {
+                if (!string.Equals(pair.Value, entryState.EntryId, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (_roleMatrixStreamActiveAgentsByIndex.ContainsKey(pair.Key))
+                    continue;
+
+                _materializedAgentInstanceByIndex.TryGetValue(pair.Key, out Agent agent);
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                Agent mountAgent = agent.MountAgent;
+                var state = new RoleMatrixStreamActiveAgentState
+                {
+                    AgentIndex = pair.Key,
+                    Agent = agent,
+                    MountAgentIndex = mountAgent?.Index ?? -1,
+                    MountAgent = mountAgent,
+                    MatrixId = definition.MatrixId,
+                    EntryId = entryState.EntryId,
+                    SlotSummary = definition.SlotSummary,
+                    Side = side,
+                    SpawnedUtc = DateTime.UtcNow,
+                    PriorityProfile = definition.PriorityProfile,
+                    PrioritySuspect = definition.PrioritySuspect,
+                    PriorityControl = definition.PriorityControl,
+                    PriorityPairId = definition.PriorityPairId
+                };
+                _roleMatrixStreamActiveAgentsByIndex[pair.Key] = state;
+                ObserveRoleMatrixStreamWeaponPriorityState(state, "spawn", source, force: true);
+                return;
+            }
+        }
+
+        private static int CountRoleMatrixStreamActiveAgentsForSide(BattleSideEnum side)
+        {
+            return _roleMatrixStreamActiveAgentsByIndex.Values.Count(state => state != null && state.Side == side);
+        }
+
+        private static int ResolveRoleMatrixStreamEffectiveActiveLimit(BattleSnapshotMessage snapshot)
+        {
+            int activeLimit = Math.Max(1, CoopTestBattleOptions.ResolveRoleMatrixStreamActiveLimit(snapshot));
+            if (CoopTestBattleOptions.IsCampaignMirrorAllWeaponPrioritySnapshot(snapshot))
+            {
+                activeLimit = Math.Max(2, activeLimit);
+                if (activeLimit > 2 && activeLimit % 2 != 0)
+                    activeLimit--;
+            }
+
+            return activeLimit;
+        }
+
+        private static int TryPulseRoleMatrixStreamActiveWaveAi(Mission mission, string source, bool force)
+        {
+            if (mission == null || _roleMatrixStreamActiveAgentsByIndex.Count == 0)
+                return 0;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase < CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
+                return 0;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (!force && nowUtc < _nextRoleMatrixStreamAiPulseUtc)
+                return 0;
+
+            _nextRoleMatrixStreamAiPulseUtc = nowUtc.AddSeconds(RoleMatrixStreamAiPulseIntervalSeconds);
+
+            int pulsedAgentCount = 0;
+            int pulsedFormationCount = 0;
+            var pulsedFormationKeys = new HashSet<int>();
+            foreach (RoleMatrixStreamActiveAgentState state in _roleMatrixStreamActiveAgentsByIndex.Values.ToList())
+            {
+                Agent agent = state?.Agent;
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                Formation formation = agent.Formation;
+                Team team = agent.Team;
+                if (formation == null || team == null || formation.CountOfUnits <= 0)
+                    continue;
+
+                int formationKey = GetBattlePhaseFormationKey(team, formation);
+                if (!pulsedFormationKeys.Add(formationKey))
+                    continue;
+
+                try
+                {
+                    formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
+                    formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
+                    formation.SetControlledByAI(true, true);
+                    int pulsed = TryPulseFormationAiEngage(formation, team);
+                    pulsedAgentCount += pulsed;
+                    if (pulsed > 0)
+                        pulsedFormationCount++;
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: role-matrix stream AI pulse failed. " +
+                        "AgentIndex=" + agent.Index +
+                        " MatrixId=" + (state.MatrixId ?? "null") +
+                        " EntryId=" + (state.EntryId ?? "null") +
+                        " TeamSide=" + team.Side +
+                        " Formation=" + formation.FormationIndex +
+                        " Message=" + ex.Message +
+                        " Source=" + (source ?? "unknown"));
+                }
+            }
+
+            int attackerActiveCount = CountRoleMatrixStreamActiveAgentsForSide(BattleSideEnum.Attacker);
+            int defenderActiveCount = CountRoleMatrixStreamActiveAgentsForSide(BattleSideEnum.Defender);
+            if (IsWeaponPrioritySuspectFocusRuntime() &&
+                attackerActiveCount > 0 &&
+                defenderActiveCount > 0)
+            {
+                pulsedAgentCount += TryPulseWeaponPriorityDirectTargets(source);
+            }
+            else if (IsCampaignMirrorAllWeaponPriorityRuntime() &&
+                     pulsedAgentCount == 0 &&
+                     attackerActiveCount > 0 &&
+                     defenderActiveCount > 0)
+            {
+                pulsedAgentCount += TryPulseWeaponPriorityDirectTargets(source);
+            }
+
+            if (force)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: role-matrix stream AI pulse. " +
+                    "Formations=" + pulsedFormationCount +
+                    " Agents=" + pulsedAgentCount +
+                    " Active=" + _roleMatrixStreamActiveAgentsByIndex.Count +
+                    " AttackerActive=" + attackerActiveCount +
+                    " DefenderActive=" + defenderActiveCount +
+                    " WeaponPriority=" + IsCampaignMirrorAllWeaponPriorityRuntime() +
+                    " WeaponPriorityFocus=" + CoopTestBattleOptions.ResolveWeaponPriorityFocus(BattleSnapshotRuntimeState.GetCurrent()) +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            return pulsedAgentCount;
+        }
+
+        private static int TryPulseWeaponPriorityDirectTargets(string source)
+        {
+            if (!IsWeaponPriorityTraceRuntime())
+                return 0;
+
+            List<RoleMatrixStreamActiveAgentState> attackers = _roleMatrixStreamActiveAgentsByIndex.Values
+                .Where(state => state?.Side == BattleSideEnum.Attacker && state.Agent != null && state.Agent.IsActive())
+                .OrderBy(state => state.AgentIndex)
+                .ToList();
+            List<RoleMatrixStreamActiveAgentState> defenders = _roleMatrixStreamActiveAgentsByIndex.Values
+                .Where(state => state?.Side == BattleSideEnum.Defender && state.Agent != null && state.Agent.IsActive())
+                .OrderBy(state => state.AgentIndex)
+                .ToList();
+            if (attackers.Count == 0 || defenders.Count == 0)
+                return 0;
+
+            int pulsed = 0;
+            foreach (RoleMatrixStreamActiveAgentState state in _roleMatrixStreamActiveAgentsByIndex.Values.ToList())
+            {
+                Agent agent = state?.Agent;
+                if (agent == null || !agent.IsActive() || agent.Controller != AgentControllerType.AI)
+                    continue;
+
+                List<RoleMatrixStreamActiveAgentState> enemyStates =
+                    state.Side == BattleSideEnum.Attacker
+                        ? defenders
+                        : state.Side == BattleSideEnum.Defender
+                            ? attackers
+                            : null;
+                if (enemyStates == null || enemyStates.Count == 0)
+                    continue;
+
+                RoleMatrixStreamActiveAgentState targetState =
+                    enemyStates[Math.Abs(state.AgentIndex) % enemyStates.Count];
+                Agent targetAgent = targetState?.Agent;
+                if (targetAgent == null || !targetAgent.IsActive())
+                    continue;
+
+                try
+                {
+                    agent.SetAutomaticTargetSelection(true);
+                    agent.SetWatchState(Agent.WatchState.Alarmed);
+                    agent.SetAlarmState(Agent.AIStateFlag.Alarmed);
+                    if (targetAgent.Formation != null)
+                        agent.SetTargetFormationIndex((int)targetAgent.Formation.FormationIndex);
+                    agent.SetTargetAgent(targetAgent);
+                    agent.ForceAiBehaviorSelection();
+                    if (IsWeaponPrioritySuspectFocusRuntime())
+                        TryTraceWeaponPrioritySuspectDirectTarget(state, targetState, source);
+                    pulsed++;
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: WeaponPriorityDirectTarget failed. " +
+                        "AgentIndex=" + state.AgentIndex +
+                        " TargetAgentIndex=" + targetAgent.Index +
+                        " Message=" + ex.Message +
+                        " Source=" + (source ?? "unknown"));
+                }
+            }
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: WeaponPriorityDirectTarget. " +
+                "Agents=" + pulsed +
+                " AttackerActive=" + attackers.Count +
+                " DefenderActive=" + defenders.Count +
+                " Source=" + (source ?? "unknown"));
+            return pulsed;
+        }
+
+        private static void TryTraceWeaponPrioritySuspectDirectTarget(
+            RoleMatrixStreamActiveAgentState state,
+            RoleMatrixStreamActiveAgentState targetState,
+            string source)
+        {
+            if (state?.Agent == null ||
+                targetState?.Agent == null ||
+                !IsWeaponPrioritySuspectFocusRuntime())
+            {
+                return;
+            }
+
+            try
+            {
+                Agent agent = state.Agent;
+                Agent targetAgent = targetState.Agent;
+                float targetDistance = SafeLength(targetAgent.Position - agent.Position);
+                string missionWeapons = BuildMissionEquipmentSummary(
+                    agent.Equipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3);
+                string targetMissionWeapons = BuildMissionEquipmentSummary(
+                    targetAgent.Equipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3);
+                string focusRole = state.PrioritySuspect
+                    ? "Suspect"
+                    : state.PriorityControl
+                        ? "Control"
+                        : "Candidate";
+                TryAddWeaponPriorityTransitionSample(
+                    state,
+                    "target:agent=" + targetAgent.Index +
+                    ",distance=" + FormatProjectileLaunchFloat(targetDistance) +
+                    ",targetEntry=" + (targetState.EntryId ?? "null"));
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: WeaponPrioritySuspectTarget. " +
+                    "FocusRole=" + focusRole +
+                    " PairId=" + (state.PriorityPairId ?? "null") +
+                    " MatrixId=" + (state.MatrixId ?? "null") +
+                    " EntryId=" + (state.EntryId ?? "null") +
+                    " AgentIndex=" + state.AgentIndex +
+                    " Side=" + state.Side +
+                    " TargetMatrixId=" + (targetState.MatrixId ?? "null") +
+                    " TargetEntryId=" + (targetState.EntryId ?? "null") +
+                    " TargetAgentIndex=" + targetAgent.Index +
+                    " TargetSide=" + targetState.Side +
+                    " TargetDistance=" + FormatProjectileLaunchFloat(targetDistance) +
+                    " MainRole=" + (state.LastMainRole ?? "unknown") +
+                    " MainItem=" + (state.LastMainItemId ?? "unknown") +
+                    " MissionWeapons={" + missionWeapons + "}" +
+                    " TargetMissionWeapons={" + targetMissionWeapons + "}" +
+                    " Source=" + (source ?? "unknown"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: WeaponPrioritySuspectTarget failed. " +
+                    "AgentIndex=" + (state?.AgentIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null") +
+                    " Message=" + ex.Message +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private static void EnqueueRoleMatrixStreamActiveWaveForKill()
+        {
+            foreach (int agentIndex in _roleMatrixStreamActiveAgentsByIndex.Keys.ToList())
+            {
+                if (!_roleMatrixStreamKillQueue.Contains(agentIndex))
+                    _roleMatrixStreamKillQueue.Enqueue(agentIndex);
+            }
+        }
+
+        private static void DrainRoleMatrixStreamKillQueue(Mission mission, string source)
+        {
+            if (mission == null)
+                return;
+
+            int processed = 0;
+            while (_roleMatrixStreamKillQueue.Count > 0 && processed < RoleMatrixStreamKillBatchPerTick)
+            {
+                int agentIndex = _roleMatrixStreamKillQueue.Dequeue();
+                processed++;
+                if (!_roleMatrixStreamActiveAgentsByIndex.TryGetValue(agentIndex, out RoleMatrixStreamActiveAgentState state))
+                    continue;
+
+                Agent agent = state.Agent;
+                Agent mountAgent = ResolveRoleMatrixStreamMountAgent(state);
+                TryWriteRoleMatrixStreamWeaponPrioritySummary(state, "kill-queue", source);
+
+                if (agent != null && agent.IsActive())
+                {
+                    try
+                    {
+                        mission.KillAgentCheat(agent);
+                    }
+                    catch (Exception ex)
+                    {
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: role-matrix stream failed to kill test agent. " +
+                            "AgentIndex=" + agentIndex +
+                            " MatrixId=" + (state.MatrixId ?? "null") +
+                            " EntryId=" + (state.EntryId ?? "null") +
+                            " Message=" + ex.Message +
+                            " Source=" + (source ?? "unknown"));
+                    }
+                }
+
+                if (mountAgent != null && mountAgent.IsActive())
+                {
+                    try
+                    {
+                        mission.KillAgentCheat(mountAgent);
+                    }
+                    catch (Exception ex)
+                    {
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: role-matrix stream failed to kill test mount agent. " +
+                            "AgentIndex=" + agentIndex +
+                            " MountAgentIndex=" + mountAgent.Index +
+                            " MatrixId=" + (state.MatrixId ?? "null") +
+                            " EntryId=" + (state.EntryId ?? "null") +
+                            " Message=" + ex.Message +
+                            " Source=" + (source ?? "unknown"));
+                    }
+                }
+            }
+        }
+
+        private static void PruneRoleMatrixStreamAgents()
+        {
+            foreach (KeyValuePair<int, RoleMatrixStreamActiveAgentState> pair in _roleMatrixStreamActiveAgentsByIndex.ToList())
+            {
+                Agent agent = pair.Value?.Agent;
+                if (agent == null || !agent.IsActive())
+                {
+                    TryWriteRoleMatrixStreamWeaponPrioritySummary(pair.Value, "prune-inactive", "prune");
+                    TryKillRoleMatrixStreamOrphanMount(pair.Value, "prune-inactive-rider");
+                    _roleMatrixStreamActiveAgentsByIndex.Remove(pair.Key);
+                }
+            }
+        }
+
+        private static void TryHandleRoleMatrixStreamAgentRemoved(int agentIndex)
+        {
+            if (agentIndex < 0)
+                return;
+
+            if (_roleMatrixStreamActiveAgentsByIndex.TryGetValue(agentIndex, out RoleMatrixStreamActiveAgentState state))
+            {
+                TryWriteRoleMatrixStreamWeaponPrioritySummary(state, "agent-removed", "agent-removed");
+                TryKillRoleMatrixStreamOrphanMount(state, "agent-removed");
+            }
+
+            _roleMatrixStreamActiveAgentsByIndex.Remove(agentIndex);
+        }
+
+        private static void ObserveRoleMatrixStreamWeaponPriority(Mission mission, string source, bool force)
+        {
+            if (mission == null || !IsWeaponPriorityTraceRuntime())
+                return;
+
+            foreach (RoleMatrixStreamActiveAgentState state in _roleMatrixStreamActiveAgentsByIndex.Values.ToList())
+                ObserveRoleMatrixStreamWeaponPriorityState(state, "observe", source, force);
+        }
+
+        private static void ObserveRoleMatrixStreamWeaponPriorityState(
+            RoleMatrixStreamActiveAgentState state,
+            string eventName,
+            string source,
+            bool force)
+        {
+            if (state == null || !IsWeaponPriorityTraceRuntime())
+                return;
+
+            Agent agent = state.Agent;
+            if (agent == null || !agent.IsActive() || agent.IsMount)
+                return;
+
+            RoleMatrixStreamWeaponPriorityWieldSnapshot snapshot =
+                BuildRoleMatrixStreamWeaponPriorityWieldSnapshot(agent);
+            if (snapshot == null || string.IsNullOrWhiteSpace(snapshot.Signature))
+                return;
+
+            bool hasLast = !string.IsNullOrWhiteSpace(state.LastWeaponSignature);
+            bool changed = !string.Equals(
+                state.LastWeaponSignature,
+                snapshot.Signature,
+                StringComparison.Ordinal);
+            if (!force && hasLast && !changed)
+                return;
+
+            if (string.IsNullOrWhiteSpace(state.FirstWeaponSignature))
+                state.FirstWeaponSignature = snapshot.Signature;
+
+            if (hasLast && changed)
+                state.WeaponChangeCount++;
+
+            UpdateWeaponPriorityObservationFlags(state, snapshot);
+            if (changed || !hasLast)
+            {
+                TryAddWeaponPriorityTransitionSample(
+                    state,
+                    (eventName ?? "observe") +
+                    "#" + state.WeaponChangeCount +
+                    ":main=" + snapshot.MainIndex +
+                    "/" + (snapshot.MainItemId ?? "none") +
+                    "/" + (snapshot.MainRole ?? "none") +
+                    ",off=" + snapshot.OffhandIndex +
+                    "/" + (snapshot.OffhandItemId ?? "none") +
+                    "/" + (snapshot.OffhandRole ?? "none"));
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: WeaponPriorityTrace. " +
+                    "Event=" + (eventName ?? "observe") +
+                    " MatrixId=" + (state.MatrixId ?? "null") +
+                    " EntryId=" + (state.EntryId ?? "null") +
+                    " AgentIndex=" + state.AgentIndex +
+                    " Side=" + state.Side +
+                    " FocusRole=" + FormatWeaponPriorityFocusRole(state) +
+                    " PairId=" + (state.PriorityPairId ?? "null") +
+                    " Changed=" + changed +
+                    " ChangeCount=" + state.WeaponChangeCount +
+                    " Main=" + snapshot.MainIndex +
+                    "/" + (snapshot.MainItemId ?? "none") +
+                    "/" + (snapshot.MainRole ?? "none") +
+                    " Offhand=" + snapshot.OffhandIndex +
+                    "/" + (snapshot.OffhandItemId ?? "none") +
+                    "/" + (snapshot.OffhandRole ?? "none") +
+                    " Profile={" + (state.PriorityProfile ?? "null") + "}" +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            state.LastWeaponSignature = snapshot.Signature;
+            state.LastMainRole = snapshot.MainRole;
+            state.LastMainItemId = snapshot.MainItemId;
+        }
+
+        private static RoleMatrixStreamWeaponPriorityWieldSnapshot BuildRoleMatrixStreamWeaponPriorityWieldSnapshot(Agent agent)
+        {
+            if (agent == null)
+                return null;
+
+            EquipmentIndex mainIndex = EquipmentIndex.None;
+            EquipmentIndex offhandIndex = EquipmentIndex.None;
+            MissionWeapon mainWeapon = MissionWeapon.Invalid;
+            MissionWeapon offhandWeapon = MissionWeapon.Invalid;
+            try
+            {
+                mainIndex = agent.GetPrimaryWieldedItemIndex();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                offhandIndex = agent.GetOffhandWieldedItemIndex();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                mainWeapon = agent.WieldedWeapon;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                offhandWeapon = agent.WieldedOffhandWeapon;
+            }
+            catch
+            {
+            }
+
+            string mainItemId = GetWeaponPriorityMissionWeaponItemId(mainWeapon);
+            string offhandItemId = GetWeaponPriorityMissionWeaponItemId(offhandWeapon);
+            string mainRole = ClassifyWeaponPriorityRole(mainWeapon);
+            string offhandRole = ClassifyWeaponPriorityRole(offhandWeapon);
+            string mainIndexText = FormatAgentWieldedEquipmentIndex(agent, mainIndex);
+            string offhandIndexText = FormatAgentWieldedEquipmentIndex(agent, offhandIndex);
+            return new RoleMatrixStreamWeaponPriorityWieldSnapshot
+            {
+                MainIndex = mainIndexText,
+                MainItemId = mainItemId,
+                MainRole = mainRole,
+                OffhandIndex = offhandIndexText,
+                OffhandItemId = offhandItemId,
+                OffhandRole = offhandRole,
+                Signature =
+                    mainIndexText + "|" + (mainItemId ?? "none") + "|" + (mainRole ?? "none") + "|" +
+                    offhandIndexText + "|" + (offhandItemId ?? "none") + "|" + (offhandRole ?? "none")
+            };
+        }
+
+        private static void UpdateWeaponPriorityObservationFlags(
+            RoleMatrixStreamActiveAgentState state,
+            RoleMatrixStreamWeaponPriorityWieldSnapshot snapshot)
+        {
+            if (state == null || snapshot == null)
+                return;
+
+            string effectiveRole = ResolveWeaponPriorityEffectiveRole(snapshot);
+            bool seesRangedOrThrown = IsWeaponPriorityRangedOrThrownRole(effectiveRole);
+            bool seesMelee = IsWeaponPriorityMeleeRole(effectiveRole);
+            if (seesRangedOrThrown)
+                state.SawRangedOrThrown = true;
+            if (state.SawRangedOrThrown && seesMelee)
+                state.SawMeleeAfterRangedOrThrown = true;
+        }
+
+        private static string ResolveWeaponPriorityEffectiveRole(RoleMatrixStreamWeaponPriorityWieldSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return "none";
+
+            if (!IsWeaponPriorityPassiveRole(snapshot.MainRole))
+                return snapshot.MainRole;
+
+            return !IsWeaponPriorityPassiveRole(snapshot.OffhandRole)
+                ? snapshot.OffhandRole
+                : snapshot.MainRole;
+        }
+
+        private static void TryTraceRoleMatrixStreamWeaponPriorityProjectile(
+            Agent shooterAgent,
+            EquipmentIndex weaponIndex,
+            int forcedMissileIndex,
+            string source)
+        {
+            if (!IsWeaponPriorityTraceRuntime() ||
+                shooterAgent == null ||
+                shooterAgent.IsMount ||
+                !_roleMatrixStreamActiveAgentsByIndex.TryGetValue(shooterAgent.Index, out RoleMatrixStreamActiveAgentState state))
+            {
+                return;
+            }
+
+            try
+            {
+                MissionWeapon launchWeapon = ResolveAgentMissionWeapon(shooterAgent, weaponIndex);
+                string launchItemId = GetWeaponPriorityMissionWeaponItemId(launchWeapon);
+                string launchRole = ClassifyWeaponPriorityRole(launchWeapon);
+                bool thrown = IsThrownProjectileLaunchWeapon(launchWeapon) ||
+                              string.Equals(launchRole, "thrown", StringComparison.OrdinalIgnoreCase);
+                bool ranged = IsWeaponPriorityRangedOrThrownRole(launchRole);
+                state.ProjectileLaunchCount++;
+                if (thrown)
+                    state.ThrownProjectileLaunchCount++;
+                else if (ranged)
+                    state.RangedProjectileLaunchCount++;
+
+                TryAddWeaponPriorityTransitionSample(
+                    state,
+                    "projectile#" + state.ProjectileLaunchCount +
+                    ":slot=" + weaponIndex +
+                    ",item=" + (launchItemId ?? "none") +
+                    ",role=" + (launchRole ?? "none") +
+                    ",forced=" + forcedMissileIndex);
+                ObserveRoleMatrixStreamWeaponPriorityState(state, "projectile", source, force: true);
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: WeaponPriorityProjectile. " +
+                    "MatrixId=" + (state.MatrixId ?? "null") +
+                    " EntryId=" + (state.EntryId ?? "null") +
+                    " AgentIndex=" + state.AgentIndex +
+                    " FocusRole=" + FormatWeaponPriorityFocusRole(state) +
+                    " PairId=" + (state.PriorityPairId ?? "null") +
+                    " WeaponIndex=" + weaponIndex +
+                    " LaunchItem=" + (launchItemId ?? "none") +
+                    " LaunchRole=" + (launchRole ?? "none") +
+                    " ProjectileCount=" + state.ProjectileLaunchCount +
+                    " ThrownCount=" + state.ThrownProjectileLaunchCount +
+                    " RangedCount=" + state.RangedProjectileLaunchCount +
+                    " ForcedMissileIndex=" + forcedMissileIndex +
+                    " Source=" + (source ?? "unknown"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: WeaponPriorityProjectile failed open. " +
+                    "AgentIndex=" + shooterAgent.Index +
+                    " Message=" + ex.Message +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private static void TryWriteRoleMatrixStreamWeaponPrioritySummary(
+            RoleMatrixStreamActiveAgentState state,
+            string reason,
+            string source)
+        {
+            if (state == null ||
+                state.PrioritySummaryLogged ||
+                !IsWeaponPriorityTraceRuntime())
+            {
+                return;
+            }
+
+            ObserveRoleMatrixStreamWeaponPriorityState(state, "summary", source, force: true);
+            state.PrioritySummaryLogged = true;
+            string result =
+                state.SawRangedOrThrown && state.SawMeleeAfterRangedOrThrown
+                    ? "ObservedRangedThenMelee"
+                    : state.SawRangedOrThrown
+                        ? "ObservedRangedOrThrownOnly"
+                        : "NoRangedOrThrownWieldObserved";
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: WeaponPrioritySummary. " +
+                "Result=" + result +
+                " Reason=" + (reason ?? "unknown") +
+                " MatrixId=" + (state.MatrixId ?? "null") +
+                " EntryId=" + (state.EntryId ?? "null") +
+                " AgentIndex=" + state.AgentIndex +
+                " Side=" + state.Side +
+                " FocusRole=" + FormatWeaponPriorityFocusRole(state) +
+                " PairId=" + (state.PriorityPairId ?? "null") +
+                " Profile={" + (state.PriorityProfile ?? "null") + "}" +
+                " First={" + (state.FirstWeaponSignature ?? "none") + "}" +
+                " Last={" + (state.LastWeaponSignature ?? "none") + "}" +
+                " Changes=" + state.WeaponChangeCount +
+                " Projectiles=" + state.ProjectileLaunchCount +
+                " ThrownProjectiles=" + state.ThrownProjectileLaunchCount +
+                " RangedProjectiles=" + state.RangedProjectileLaunchCount +
+                " SawRangedOrThrown=" + state.SawRangedOrThrown +
+                " SawMeleeAfterRangedOrThrown=" + state.SawMeleeAfterRangedOrThrown +
+                " Samples=[" + string.Join(" | ", state.WeaponTransitionSamples) + "]" +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        private static string FormatWeaponPriorityFocusRole(RoleMatrixStreamActiveAgentState state)
+        {
+            if (state == null)
+                return "Unknown";
+
+            if (state.PrioritySuspect)
+                return "Suspect";
+
+            return state.PriorityControl ? "Control" : "Candidate";
+        }
+
+        private static void TryAddWeaponPriorityTransitionSample(
+            RoleMatrixStreamActiveAgentState state,
+            string sample)
+        {
+            if (state == null ||
+                string.IsNullOrWhiteSpace(sample) ||
+                state.WeaponTransitionSamples.Count >= 10)
+            {
+                return;
+            }
+
+            state.WeaponTransitionSamples.Add(sample);
+        }
+
+        private static string GetWeaponPriorityMissionWeaponItemId(MissionWeapon weapon)
+        {
+            try
+            {
+                if (weapon.IsEmpty)
+                    return null;
+
+                return weapon.Item?.StringId;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string ClassifyWeaponPriorityRole(MissionWeapon weapon)
+        {
+            try
+            {
+                if (weapon.IsEmpty)
+                    return "none";
+
+                ItemObject item = weapon.Item;
+                WeaponComponentData usage = weapon.CurrentUsageItem ?? item?.PrimaryWeapon;
+                if (usage != null)
+                {
+                    if (usage.IsShield)
+                        return "shield";
+                    if (usage.IsAmmo)
+                        return "ammo";
+                    if (usage.RelevantSkill == DefaultSkills.Bow ||
+                        usage.WeaponClass == WeaponClass.Bow)
+                    {
+                        return "bow";
+                    }
+
+                    if (usage.RelevantSkill == DefaultSkills.Crossbow ||
+                        usage.WeaponClass == WeaponClass.Crossbow)
+                    {
+                        return "crossbow";
+                    }
+
+                    if (usage.RelevantSkill == DefaultSkills.Throwing ||
+                        usage.WeaponClass == WeaponClass.Javelin ||
+                        usage.WeaponClass == WeaponClass.ThrowingAxe ||
+                        usage.WeaponClass == WeaponClass.ThrowingKnife ||
+                        usage.WeaponClass == WeaponClass.Stone ||
+                        usage.WeaponClass == WeaponClass.SlingStone)
+                    {
+                        return "thrown";
+                    }
+
+                    if (usage.RelevantSkill == DefaultSkills.Polearm || usage.IsPolearm)
+                        return "polearm";
+                    if (usage.RelevantSkill == DefaultSkills.OneHanded || usage.IsOneHanded)
+                        return "one_handed";
+                    if (usage.RelevantSkill == DefaultSkills.TwoHanded || usage.IsTwoHanded)
+                        return "two_handed";
+                    if (usage.IsRangedWeapon)
+                        return "ranged";
+                    if (usage.IsMeleeWeapon)
+                        return "melee";
+                }
+
+                switch (item?.ItemType)
+                {
+                    case ItemObject.ItemTypeEnum.Shield:
+                        return "shield";
+                    case ItemObject.ItemTypeEnum.Arrows:
+                    case ItemObject.ItemTypeEnum.Bolts:
+                    case ItemObject.ItemTypeEnum.SlingStones:
+                        return "ammo";
+                    case ItemObject.ItemTypeEnum.Bow:
+                        return "bow";
+                    case ItemObject.ItemTypeEnum.Crossbow:
+                        return "crossbow";
+                    case ItemObject.ItemTypeEnum.Thrown:
+                    case ItemObject.ItemTypeEnum.Sling:
+                        return "thrown";
+                    case ItemObject.ItemTypeEnum.Polearm:
+                        return "polearm";
+                    case ItemObject.ItemTypeEnum.OneHandedWeapon:
+                        return "one_handed";
+                    case ItemObject.ItemTypeEnum.TwoHandedWeapon:
+                        return "two_handed";
+                    default:
+                        return item?.ItemType.ToString() ?? "other";
+                }
+            }
+            catch
+            {
+                return "unknown";
+            }
+        }
+
+        private static bool IsWeaponPriorityRangedOrThrownRole(string role)
+        {
+            return string.Equals(role, "bow", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(role, "crossbow", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(role, "thrown", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(role, "ranged", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsWeaponPriorityPassiveRole(string role)
+        {
+            return string.IsNullOrWhiteSpace(role) ||
+                   string.Equals(role, "none", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(role, "shield", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(role, "ammo", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(role, "unknown", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsWeaponPriorityMeleeRole(string role)
+        {
+            return string.Equals(role, "one_handed", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(role, "two_handed", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(role, "polearm", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(role, "melee", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void WriteRoleMatrixStreamProgress(Mission mission, string state, string source)
+        {
+            List<RoleMatrixStreamActiveAgentState> active = _roleMatrixStreamActiveAgentsByIndex.Values
+                .Where(item => item != null)
+                .OrderBy(item => item.MatrixId, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            WriteRoleMatrixStreamProgressSnapshot(
+                mission,
+                state,
+                source,
+                active.Count,
+                string.Join(",", active.Select(item => item.MatrixId).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase)),
+                string.Join(",", active.Select(item => item.EntryId).Where(id => !string.IsNullOrWhiteSpace(id))),
+                string.Join("; ", active.Select(item => (item.MatrixId ?? string.Empty) + "=" + (item.SlotSummary ?? string.Empty))));
+        }
+
+        private static void WriteRoleMatrixStreamPlannedProgress(
+            Mission mission,
+            RoleMatrixStreamEntryDefinition definition,
+            RosterEntryState entryState,
+            BattleSideEnum side,
+            string source)
+        {
+            if (definition == null)
+                return;
+
+            string matrixId = definition.MatrixId ?? string.Empty;
+            string entryId = entryState?.EntryId ?? string.Empty;
+            string slotSummary = matrixId + "=" + (definition.SlotSummary ?? string.Empty);
+            WriteRoleMatrixStreamProgressSnapshot(
+                mission,
+                "PlanningSpawn",
+                (source ?? string.Empty) + " side=" + side,
+                1,
+                matrixId,
+                entryId,
+                slotSummary);
+        }
+
+        private static void WriteRoleMatrixStreamProgressSnapshot(
+            Mission mission,
+            string state,
+            string source,
+            int activeCount,
+            string activeMatrixIds,
+            string activeEntryIds,
+            string activeSlotSummary)
+        {
+            CoopRoleMatrixStreamBridgeFile.WriteProgress(new CoopRoleMatrixStreamBridgeFile.ProgressSnapshot
+            {
+                BattleId = BattleSnapshotRuntimeState.GetCurrent()?.BattleId ?? string.Empty,
+                MissionName = mission?.SceneName ?? string.Empty,
+                Source = source ?? string.Empty,
+                State = state ?? string.Empty,
+                TotalMatrices = _roleMatrixStreamDefinitions.Count,
+                SkippedUnsafeMatrices = _roleMatrixStreamSkippedUnsafeCount,
+                Cursor = _roleMatrixStreamCursor,
+                Wave = _roleMatrixStreamWave,
+                ActiveCount = activeCount,
+                ActiveMatrixIds = activeMatrixIds ?? string.Empty,
+                ActiveEntryIds = activeEntryIds ?? string.Empty,
+                ActiveSlotSummary = activeSlotSummary ?? string.Empty,
+                UpdatedUtc = DateTime.UtcNow
+            });
+        }
+
+        private static Agent ResolveRoleMatrixStreamMountAgent(RoleMatrixStreamActiveAgentState state)
+        {
+            if (state == null)
+                return null;
+
+            Agent mountAgent = state.Agent?.MountAgent;
+            if (mountAgent != null)
+            {
+                state.MountAgent = mountAgent;
+                state.MountAgentIndex = mountAgent.Index;
+                return mountAgent;
+            }
+
+            if (state.MountAgent != null)
+                return state.MountAgent;
+
+            return null;
+        }
+
+        private static void TryKillRoleMatrixStreamOrphanMount(RoleMatrixStreamActiveAgentState state, string source)
+        {
+            Agent mountAgent = ResolveRoleMatrixStreamMountAgent(state);
+            if (mountAgent == null || !mountAgent.IsActive())
+                return;
+
+            Mission mission = mountAgent.Mission;
+            if (mission == null)
+                return;
+
+            try
+            {
+                mission.KillAgentCheat(mountAgent);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: role-matrix stream failed to kill orphan mount agent. " +
+                    "MountAgentIndex=" + mountAgent.Index +
+                    " MatrixId=" + (state?.MatrixId ?? "null") +
+                    " EntryId=" + (state?.EntryId ?? "null") +
+                    " Message=" + ex.Message +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private static void ResetRoleMatrixStreamRuntime(string reason)
+        {
+            bool hadState =
+                _roleMatrixStreamMission != null ||
+                _roleMatrixStreamDefinitions.Count > 0 ||
+                _roleMatrixStreamActiveAgentsByIndex.Count > 0 ||
+                _roleMatrixStreamKillQueue.Count > 0;
+            foreach (RoleMatrixStreamActiveAgentState state in _roleMatrixStreamActiveAgentsByIndex.Values.ToList())
+                TryWriteRoleMatrixStreamWeaponPrioritySummary(state, "reset", reason);
+            _roleMatrixStreamMission = null;
+            _roleMatrixStreamDefinitions = new List<RoleMatrixStreamEntryDefinition>();
+            _roleMatrixStreamActiveAgentsByIndex.Clear();
+            _roleMatrixStreamKillQueue.Clear();
+            _roleMatrixStreamCursor = 0;
+            _roleMatrixStreamWave = 0;
+            _roleMatrixStreamTotalMatrixCount = 0;
+            _roleMatrixStreamSkippedUnsafeCount = 0;
+            _roleMatrixStreamKillingWave = false;
+            _roleMatrixStreamFinished = false;
+            _roleMatrixStreamSpectatorAutoStartRequested = false;
+            _roleMatrixStreamBattleStartedFromSpectator = false;
+            _roleMatrixStreamWaveStartedUtc = DateTime.MinValue;
+            _nextRoleMatrixStreamLogUtc = DateTime.MinValue;
+            _nextRoleMatrixStreamAiPulseUtc = DateTime.MinValue;
+            if (hadState && !string.IsNullOrWhiteSpace(reason))
+                ModLogger.Info("CoopMissionSpawnLogic: role-matrix stream runtime reset. Reason=" + reason + ".");
+        }
+
         private static void TryEnsureBattlefieldArmiesMaterialized(Mission mission, string source)
         {
             if (mission == null || !GameNetwork.IsServer)
@@ -12857,6 +15580,9 @@ namespace CoopSpectator.MissionBehaviors
         private static void TrySpawnMaterializedBattlefieldReinforcements(Mission mission, string source)
         {
             if (mission == null || !GameNetwork.IsServer)
+                return;
+
+            if (IsRoleMatrixStreamRuntime())
                 return;
 
             bool useMaterializedSiegeReinforcements = ShouldUseMaterializedSiegeReinforcements(mission);
@@ -13380,7 +16106,7 @@ namespace CoopSpectator.MissionBehaviors
                 entryState.IsHero ||
                 !string.IsNullOrWhiteSpace(entryState.HeroRole) ||
                 string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase);
-            if (isHeroEntry)
+            if (isHeroEntry && !IsCampaignMirrorHeroesRuntime())
                 return "hero-entry";
 
             bool isPlayerPartyEntry =
@@ -13866,9 +16592,14 @@ namespace CoopSpectator.MissionBehaviors
             return string.Equals(snapshot?.BattleId, SyntheticLiveHeroesBattleId, StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsCoopTestBattleRuntime()
+        {
+            return CoopTestBattleOptions.IsTestBattleSnapshot(BattleSnapshotRuntimeState.GetCurrent());
+        }
+
         private static bool IsSyntheticRuntime()
         {
-            return IsSyntheticAllCampaignTroopsRuntime() || IsSyntheticLiveHeroesRuntime();
+            return IsSyntheticAllCampaignTroopsRuntime() || IsSyntheticLiveHeroesRuntime() || IsCoopTestBattleRuntime();
         }
 
         private static int GetMaterializedArmyAgentsPerSideCap(BattleSideEnum side, int requestedEntryCount)
@@ -14291,7 +17022,7 @@ namespace CoopSpectator.MissionBehaviors
             if (formationCounts == null || troop == null || count <= 0)
                 return;
 
-            FormationClass formationClass = ResolveSiegeAwareFormationClass(mission, side, troop);
+            FormationClass formationClass = ResolveSiegeAwareFormationClass(mission, side, troop, entryState);
             if ((int)formationClass < 0 || (int)formationClass >= (int)FormationClass.NumberOfRegularFormations)
                 formationClass = FormationClass.Infantry;
 
@@ -14317,7 +17048,26 @@ namespace CoopSpectator.MissionBehaviors
             BattleSideEnum side,
             BasicCharacterObject troop)
         {
-            FormationClass formationClass = troop?.DefaultFormationClass ?? FormationClass.Infantry;
+            return ResolveSiegeAwareFormationClass(mission, side, troop, null, out _);
+        }
+
+        private static FormationClass ResolveSiegeAwareFormationClass(
+            Mission mission,
+            BattleSideEnum side,
+            BasicCharacterObject troop,
+            RosterEntryState entryState)
+        {
+            return ResolveSiegeAwareFormationClass(mission, side, troop, entryState, out _);
+        }
+
+        private static FormationClass ResolveSiegeAwareFormationClass(
+            Mission mission,
+            BattleSideEnum side,
+            BasicCharacterObject troop,
+            RosterEntryState entryState,
+            out string formationSource)
+        {
+            FormationClass formationClass = ResolveCampaignMirrorAllCampaignAiFormationClass(troop, entryState, out formationSource);
             try
             {
                 if (troop != null && ShouldUseDismountedSiegeProjection(mission, side))
@@ -14336,6 +17086,255 @@ namespace CoopSpectator.MissionBehaviors
                 return FormationClass.Infantry;
 
             return formationClass;
+        }
+
+        private static FormationClass ResolveCampaignMirrorAllCampaignAiFormationClass(
+            BasicCharacterObject troop,
+            RosterEntryState entryState,
+            out string formationSource)
+        {
+            FormationClass fallbackFormationClass = troop?.DefaultFormationClass ?? FormationClass.Infantry;
+            formationSource = "troop-default";
+            if (!IsCampaignMirrorAllCampaignAiRuntime())
+                return fallbackFormationClass;
+
+            if (TryParseCampaignFormationClass(entryState?.CampaignFormationClass, out FormationClass snapshotFormationClass))
+            {
+                formationSource = "snapshot-campaign";
+                return snapshotFormationClass;
+            }
+
+            BasicCharacterObject originalCharacter = TryResolveCampaignMirrorOriginalCharacter(entryState);
+            if (originalCharacter != null &&
+                IsRegularFormationClass(originalCharacter.DefaultFormationClass))
+            {
+                formationSource = "original-character";
+                return originalCharacter.DefaultFormationClass;
+            }
+
+            if (TryDeriveCampaignMirrorAiFormationClassFromEquipment(entryState, out FormationClass derivedFormationClass, out _))
+            {
+                formationSource = "equipment-derived";
+                return derivedFormationClass;
+            }
+
+            formationSource = "troop-default-fallback";
+            return fallbackFormationClass;
+        }
+
+        private static bool TryParseCampaignFormationClass(string value, out FormationClass formationClass)
+        {
+            formationClass = FormationClass.Infantry;
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            if (!Enum.TryParse(value.Trim(), ignoreCase: true, out formationClass))
+                return false;
+
+            return IsRegularFormationClass(formationClass);
+        }
+
+        private static bool IsRegularFormationClass(FormationClass formationClass)
+        {
+            int formationIndex = (int)formationClass;
+            return formationIndex >= 0 && formationIndex < (int)FormationClass.NumberOfRegularFormations;
+        }
+
+        private static BasicCharacterObject TryResolveCampaignMirrorOriginalCharacter(RosterEntryState entryState)
+        {
+            string originalCharacterId = entryState?.OriginalCharacterId;
+            if (string.IsNullOrWhiteSpace(originalCharacterId))
+                return null;
+
+            try
+            {
+                return MBObjectManager.Instance?.GetObject<BasicCharacterObject>(originalCharacterId);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private sealed class CampaignMirrorAiWeaponRoleSnapshot
+        {
+            public bool HasHorse { get; set; }
+            public bool HasBow { get; set; }
+            public bool HasCrossbow { get; set; }
+            public bool HasAmmo { get; set; }
+            public bool HasThrown { get; set; }
+            public bool HasShield { get; set; }
+            public bool HasMelee { get; set; }
+            public bool HasPolearm { get; set; }
+            public string SlotSummary { get; set; }
+        }
+
+        private static bool TryDeriveCampaignMirrorAiFormationClassFromEquipment(
+            RosterEntryState entryState,
+            out FormationClass formationClass,
+            out CampaignMirrorAiWeaponRoleSnapshot roleSnapshot)
+        {
+            roleSnapshot = BuildCampaignMirrorAiWeaponRoleSnapshot(entryState);
+            formationClass = FormationClass.Infantry;
+            if (entryState == null)
+                return false;
+
+            bool hasDedicatedRangedWeapon = roleSnapshot.HasBow || roleSnapshot.HasCrossbow;
+            if (roleSnapshot.HasHorse)
+            {
+                formationClass = hasDedicatedRangedWeapon || roleSnapshot.HasThrown
+                    ? FormationClass.HorseArcher
+                    : FormationClass.Cavalry;
+                return true;
+            }
+
+            formationClass = hasDedicatedRangedWeapon || (roleSnapshot.HasThrown && !roleSnapshot.HasMelee)
+                ? FormationClass.Ranged
+                : FormationClass.Infantry;
+            return true;
+        }
+
+        private static CampaignMirrorAiWeaponRoleSnapshot BuildCampaignMirrorAiWeaponRoleSnapshot(RosterEntryState entryState)
+        {
+            var snapshot = new CampaignMirrorAiWeaponRoleSnapshot
+            {
+                HasHorse = entryState?.IsMounted == true || !string.IsNullOrWhiteSpace(entryState?.CombatHorseId)
+            };
+            var slotParts = new List<string>();
+            AppendCampaignMirrorAiWeaponRole(snapshot, entryState?.CombatItem0Id, "Item0", entryState, slotParts);
+            AppendCampaignMirrorAiWeaponRole(snapshot, entryState?.CombatItem1Id, "Item1", entryState, slotParts);
+            AppendCampaignMirrorAiWeaponRole(snapshot, entryState?.CombatItem2Id, "Item2", entryState, slotParts);
+            AppendCampaignMirrorAiWeaponRole(snapshot, entryState?.CombatItem3Id, "Item3", entryState, slotParts);
+            snapshot.SlotSummary = slotParts.Count > 0 ? string.Join(",", slotParts) : "(none)";
+            return snapshot;
+        }
+
+        private static void AppendCampaignMirrorAiWeaponRole(
+            CampaignMirrorAiWeaponRoleSnapshot snapshot,
+            string itemId,
+            string slotLabel,
+            RosterEntryState entryState,
+            List<string> slotParts)
+        {
+            if (snapshot == null || string.IsNullOrWhiteSpace(itemId))
+                return;
+
+            string resolvedItemId;
+            string resolutionSource;
+            ItemObject item = ResolveMaterializedEquipmentItem(
+                itemId,
+                entryState,
+                slotLabel,
+                out resolvedItemId,
+                out resolutionSource,
+                trackCoverage: false);
+            if (item == null)
+            {
+                slotParts?.Add(slotLabel + "=" + itemId + "(unresolved)");
+                return;
+            }
+
+            ApplyCampaignMirrorAiWeaponRoleToken(snapshot, item.Type.ToString());
+            try
+            {
+                if (item.Weapons != null)
+                {
+                    foreach (WeaponComponentData weapon in item.Weapons)
+                    {
+                        ApplyCampaignMirrorAiWeaponRoleToken(snapshot, weapon?.WeaponClass.ToString());
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            slotParts?.Add(
+                slotLabel + "=" + item.StringId +
+                (string.Equals(itemId, item.StringId, StringComparison.OrdinalIgnoreCase)
+                    ? string.Empty
+                    : "(from:" + itemId + ",via:" + (resolutionSource ?? "unknown") + ")"));
+        }
+
+        private static void ApplyCampaignMirrorAiWeaponRoleToken(
+            CampaignMirrorAiWeaponRoleSnapshot snapshot,
+            string token)
+        {
+            if (snapshot == null || string.IsNullOrWhiteSpace(token))
+                return;
+
+            if (token.IndexOf("Crossbow", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                snapshot.HasCrossbow = true;
+                return;
+            }
+
+            if (token.IndexOf("Bow", StringComparison.OrdinalIgnoreCase) >= 0)
+                snapshot.HasBow = true;
+
+            if (token.IndexOf("Arrow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("Bolt", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                snapshot.HasAmmo = true;
+            }
+
+            if (token.IndexOf("Throw", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("Javelin", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("Stone", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("Sling", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                snapshot.HasThrown = true;
+            }
+
+            if (token.IndexOf("Shield", StringComparison.OrdinalIgnoreCase) >= 0)
+                snapshot.HasShield = true;
+
+            if (token.IndexOf("Polearm", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("Spear", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("Pike", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("Lance", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                snapshot.HasPolearm = true;
+                snapshot.HasMelee = true;
+            }
+
+            if (token.IndexOf("OneHanded", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("TwoHanded", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("Sword", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("Axe", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("Mace", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("Dagger", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf("Pick", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                snapshot.HasMelee = true;
+            }
+        }
+
+        private static string BuildCampaignMirrorAiRoleDiagnostics(
+            RosterEntryState entryState,
+            BasicCharacterObject troop,
+            FormationClass formationClass,
+            string formationSource)
+        {
+            if (!IsCampaignMirrorAllCampaignAiRuntime())
+                return string.Empty;
+
+            CampaignMirrorAiWeaponRoleSnapshot roleSnapshot = BuildCampaignMirrorAiWeaponRoleSnapshot(entryState);
+            return "CampaignFieldAI={" +
+                   "SnapshotFormation=" + (entryState?.CampaignFormationClass ?? "null") +
+                   ",TroopDefault=" + (troop?.DefaultFormationClass.ToString() ?? "null") +
+                   ",ResolvedFormation=" + formationClass +
+                   ",FormationSource=" + (formationSource ?? "unknown") +
+                   ",Mounted=" + roleSnapshot.HasHorse +
+                   ",Bow=" + roleSnapshot.HasBow +
+                   ",Crossbow=" + roleSnapshot.HasCrossbow +
+                   ",Ammo=" + roleSnapshot.HasAmmo +
+                   ",Thrown=" + roleSnapshot.HasThrown +
+                   ",Shield=" + roleSnapshot.HasShield +
+                   ",Melee=" + roleSnapshot.HasMelee +
+                   ",Polearm=" + roleSnapshot.HasPolearm +
+                   ",Slots=" + (roleSnapshot.SlotSummary ?? "(none)") +
+                   "}";
         }
 
         private static FormationClass DismountSiegeFormationClass(FormationClass formationClass)
@@ -14542,7 +17541,12 @@ namespace CoopSpectator.MissionBehaviors
 
             string entryId = entryState?.EntryId;
 
-            FormationClass formationClass = ResolveSiegeAwareFormationClass(mission, side, troop);
+            FormationClass formationClass = ResolveSiegeAwareFormationClass(
+                mission,
+                side,
+                troop,
+                entryState,
+                out string formationSource);
             ResolveMaterializedArmySpawnFrame(
                 mission,
                 team,
@@ -14569,6 +17573,11 @@ namespace CoopSpectator.MissionBehaviors
             string equipmentOverrideDiagnostics = BuildMaterializedEquipmentOverrideDiagnostics(entryState, troop);
             string combatProfileDiagnostics = "AppliedCombatProfile=(none)";
             string identityDiagnostics = "AppliedIdentity=(none)";
+            string campaignAiDiagnostics = BuildCampaignMirrorAiRoleDiagnostics(
+                entryState,
+                troop,
+                formationClass,
+                formationSource);
             int spawnedCount = 0;
             ModLogger.Info(
                 "CoopMissionSpawnLogic: materialized battlefield entry spawn begin. " +
@@ -14577,6 +17586,8 @@ namespace CoopSpectator.MissionBehaviors
                 " EntryId=" + (entryId ?? "null") +
                 " RequestedCount=" + spawnCount +
                 " Reinforcement=" + isReinforcement +
+                " FormationClass=" + formationClass +
+                " " + campaignAiDiagnostics +
                 " SpawnFrameSource=" + spawnFrameSource +
                 " " + exactEntryCompatibilitySummary +
                 " Source=" + (source ?? "unknown"));
@@ -14901,7 +17912,11 @@ namespace CoopSpectator.MissionBehaviors
 
             try
             {
-                var origin = new BasicBattleAgentOrigin(troop);
+                IAgentOriginBase origin = BuildMaterializedAgentOriginForCreateTimePath(
+                    troop,
+                    entryState,
+                    team.Side,
+                    team);
                 AgentBuildData buildData = new AgentBuildData(troop);
                 bool forceDismountedSiegeProjection = ShouldUseDismountedSiegeProjection(mission, team.Side);
                 bool includeMountVisuals = ShouldIncludeMaterializedSpawnMountVisuals(
@@ -14910,9 +17925,56 @@ namespace CoopSpectator.MissionBehaviors
                     troop,
                     entryState);
                 bool useFieldMaterializedSiegeRuntime = ShouldUseFieldMaterializedSiegeReplayRuntime(mission);
+                bool useCampaignMirrorEquipment = IsCampaignMirrorAllRuntime() && entryState != null;
                 Equipment spawnEquipment;
                 string spawnEquipmentSource;
-                if (useFieldMaterializedSiegeRuntime)
+                if (useCampaignMirrorEquipment)
+                {
+                    Banner mirrorBanner = ResolveMaterializedCreateTimeBanner(team, team.Side);
+                    bool useCampaignMirrorHeroesCraftedCreateTime =
+                        CoopTestBattleOptions.IsCampaignMirrorHeroesCraftedWeaponsCreateTimeSnapshot(
+                            BattleSnapshotRuntimeState.GetCurrent());
+                    CoopCampaignMirrorCraftedWeaponPolicy craftedWeaponPolicy =
+                        IsCampaignMirrorHeroesRuntime() && !useCampaignMirrorHeroesCraftedCreateTime
+                            ? CoopCampaignMirrorCraftedWeaponPolicy.StripCreateTimeWeapons
+                            : CoopCampaignMirrorCraftedWeaponPolicy.UseMirrors;
+                    if (!CoopCampaignMirrorEquipmentResolver.TryBuild(
+                            entryState,
+                            mirrorBanner,
+                            "SpawnBattlefieldArmyAgent",
+                            out CoopCampaignMirrorEquipmentResult mirrorEquipment,
+                            out string mirrorFailure,
+                            includeWeapons: true,
+                            includeArmorVisuals: true,
+                            includeCape: true,
+                            includeMountVisuals: includeMountVisuals,
+                            craftedWeaponPolicy: craftedWeaponPolicy))
+                    {
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: campaign mirror materialization skipped entry because mirror equipment failed. " +
+                            "EntryId=" + (entryState.EntryId ?? "null") +
+                            " TroopId=" + troop.StringId +
+                            " Failure=" + (mirrorFailure ?? "unknown"));
+                        return null;
+                    }
+
+                    spawnEquipment = mirrorEquipment.SpawnEquipment;
+                    spawnEquipmentSource = "campaign-mirror";
+                    if (useCampaignMirrorHeroesCraftedCreateTime)
+                        spawnEquipmentSource += "+crafted-create-time";
+                    if (mirrorEquipment.HasDeferredCraftedWeapons)
+                    {
+                        spawnEquipmentSource += "+crafted-create-time-stripped";
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: deferred campaign mirror crafted weapons from create-time equipment. " +
+                            "EntryId=" + (entryState.EntryId ?? "null") +
+                            " TroopId=" + troop.StringId +
+                            " Deferred=[" + (mirrorEquipment.DeferredCraftedWeaponSummary ?? "(none)") + "]");
+                    }
+
+                    appliedArmorOverrides = "MirrorEquipment={" + (mirrorEquipment.Summary ?? "(none)") + "}";
+                }
+                else if (useFieldMaterializedSiegeRuntime)
                 {
                     spawnEquipment = BuildFieldMaterializedSiegeSpawnEquipment(
                         troop,
@@ -14952,6 +18014,13 @@ namespace CoopSpectator.MissionBehaviors
                     buildData.SpawnsUsingOwnTroopClass(true);
                     if (spawnEquipment != null)
                         buildData.Equipment(spawnEquipment);
+                    string createTimeMissionEquipmentState = TryApplyMaterializedCreateTimeMissionEquipment(
+                        buildData,
+                        spawnEquipment,
+                        team,
+                        entryState);
+                    if (!string.IsNullOrWhiteSpace(createTimeMissionEquipmentState))
+                        spawnEquipmentSource += "+" + createTimeMissionEquipmentState;
 
                     appliedIdentity = TryApplyEntryIdentityToBuildData(buildData, entryState);
                     Agent agent = mission.SpawnAgent(buildData, spawnFromAgentVisuals: false);
@@ -14973,6 +18042,8 @@ namespace CoopSpectator.MissionBehaviors
                         agent.SetAutomaticTargetSelection(true);
                         agent.SetFiringOrder(FiringOrder.RangedWeaponUsageOrderEnum.FireAtWill);
                         appliedCombatProfile = TryApplyMaterializedCombatProfile(agent, entryState);
+                        string roleMatrixInitialWield =
+                            TryApplyRoleMatrixStreamInitialWield(agent, entryState, "SpawnBattlefieldArmyAgent");
                         TraceMaterializedBattlefieldAgentSpawn(
                             agent,
                             team,
@@ -14986,6 +18057,7 @@ namespace CoopSpectator.MissionBehaviors
                             appliedArmorOverrides,
                             appliedCombatProfile,
                             appliedIdentity,
+                            roleMatrixInitialWield,
                             "SpawnBattlefieldArmyAgent");
                     }
                     else
@@ -15025,6 +18097,413 @@ namespace CoopSpectator.MissionBehaviors
                     " Message=" + ex.Message);
                 return null;
             }
+        }
+
+        private static IAgentOriginBase BuildMaterializedAgentOriginForCreateTimePath(
+            BasicCharacterObject troop,
+            RosterEntryState entryState,
+            BattleSideEnum side,
+            Team team)
+        {
+            if (troop == null)
+                return null;
+
+            if (!ShouldUseCoopTestBattleCreateTimeMaterialization(entryState))
+                return new BasicBattleAgentOrigin(troop);
+
+            Banner banner = ResolveMaterializedCreateTimeBanner(team, side);
+            uint color = BattleSnapshotRuntimeState.ResolveSideColor(side, team?.Color ?? 0u);
+            uint color2 = BattleSnapshotRuntimeState.ResolveSideColor2(side, team?.Color2 ?? 0u);
+            bool isPlayerSide = BattleSnapshotRuntimeState.GetSideState(side)?.IsPlayerSide == true;
+            string entryId = entryState?.EntryId ?? string.Empty;
+            string troopId =
+                !string.IsNullOrWhiteSpace(entryState?.OriginalCharacterId)
+                    ? entryState.OriginalCharacterId
+                    : troop.StringId;
+
+            return new ExactCampaignSnapshotAgentOrigin(
+                null,
+                troop,
+                entryId,
+                troopId,
+                side,
+                isPlayerSide,
+                color,
+                color2,
+                banner,
+                ComputeStableMaterializedOriginSeed(entryId, troopId, side));
+        }
+
+        private static bool ShouldUseCoopTestBattleCreateTimeMaterialization(RosterEntryState entryState)
+        {
+            return entryState != null &&
+                   CoopTestBattleOptions.IsTestBattleSnapshot(BattleSnapshotRuntimeState.GetCurrent());
+        }
+
+        private static string TryApplyMaterializedCreateTimeMissionEquipment(
+            AgentBuildData buildData,
+            Equipment spawnEquipment,
+            Team team,
+            RosterEntryState entryState)
+        {
+            if (buildData == null ||
+                spawnEquipment == null ||
+                !ShouldUseCoopTestBattleCreateTimeMaterialization(entryState))
+            {
+                return null;
+            }
+
+            try
+            {
+                Banner banner = ResolveMaterializedCreateTimeBanner(team, team?.Side ?? BattleSideEnum.None);
+                buildData.Banner(banner);
+                MissionEquipment missionEquipment = new MissionEquipment(spawnEquipment, banner);
+                string usageProjection = TryApplyWeaponPrioritySuspectThrownUsageProjection(
+                    missionEquipment,
+                    entryState,
+                    "TryApplyMaterializedCreateTimeMissionEquipment");
+                buildData.MissionEquipment(missionEquipment);
+                return "coop-test-create-time-mission-equipment" + usageProjection;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: failed to apply coop test battle create-time mission equipment. " +
+                    "EntryId=" + (entryState?.EntryId ?? "null") +
+                    " Message=" + ex.Message);
+                return "coop-test-create-time-mission-equipment-failed";
+            }
+        }
+
+        private static string TryApplyRoleMatrixStreamInitialWield(
+            Agent agent,
+            RosterEntryState entryState,
+            string source)
+        {
+            if (agent == null ||
+                (!IsRoleMatrixStreamMatrixEntryId(entryState?.EntryId) && !IsCampaignMirrorAllRuntime()))
+            {
+                return null;
+            }
+
+            try
+            {
+                EquipmentIndex preMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+                EquipmentIndex preOffHandIndex = agent.GetOffhandWieldedItemIndex();
+                string usageProjection = TryApplyWeaponPrioritySuspectThrownUsageProjection(
+                    agent.Equipment,
+                    entryState,
+                    (source ?? "unknown") + " pre-initial-wield");
+                agent.WieldInitialWeapons(
+                    Agent.WeaponWieldActionType.Instant,
+                    Equipment.InitialWeaponEquipPreference.Any);
+                EquipmentIndex postMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+                EquipmentIndex postOffHandIndex = agent.GetOffhandWieldedItemIndex();
+                bool success = postMainHandIndex != EquipmentIndex.None || postOffHandIndex != EquipmentIndex.None;
+                return
+                    "RoleMatrixInitialWield={Success=" + success +
+                    ",PreMain=" + FormatAgentWieldedEquipmentIndex(agent, preMainHandIndex) +
+                    ",PreOff=" + FormatAgentWieldedEquipmentIndex(agent, preOffHandIndex) +
+                    ",PostMain=" + FormatAgentWieldedEquipmentIndex(agent, postMainHandIndex) +
+                    ",PostOff=" + FormatAgentWieldedEquipmentIndex(agent, postOffHandIndex) +
+                    ",PostWieldedItem=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
+                    ",PostOffhandItem=" + (agent.WieldedOffhandWeapon.Item?.StringId ?? "none") +
+                    ",UsageProjection=" + (string.IsNullOrWhiteSpace(usageProjection) ? "(none)" : usageProjection) +
+                    "}";
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: role-matrix stream initial wield failed. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryState?.EntryId ?? "null") +
+                    " Message=" + ex.Message +
+                    " Source=" + (source ?? "unknown"));
+                return "RoleMatrixInitialWield={Success=False,Error=" + ex.GetType().Name + "}";
+            }
+        }
+
+        private static string TryApplyWeaponPrioritySuspectThrownUsageProjection(
+            MissionEquipment missionEquipment,
+            RosterEntryState entryState,
+            string source)
+        {
+            if (missionEquipment == null ||
+                entryState == null ||
+                !IsWeaponPrioritySuspectFocusRuntime() ||
+                !IsCampaignMirrorWeaponPrioritySuspectEntry(entryState))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                var appliedSlots = new List<string>();
+                for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+                {
+                    MissionWeapon missionWeapon = missionEquipment[slot];
+                    if (!TryResolveWeaponPriorityDualUseThrownUsageIndex(
+                            missionWeapon,
+                            out int thrownUsageIndex,
+                            out int rangedUsageIndex,
+                            out string usageSummary))
+                    {
+                        continue;
+                    }
+
+                    int beforeUsageIndex = SafeGetMissionWeaponCurrentUsageIndex(missionWeapon);
+                    missionEquipment.SetUsageIndexOfSlot(slot, thrownUsageIndex);
+                    MissionWeapon projectedWeapon = missionEquipment[slot];
+                    int afterUsageIndex = SafeGetMissionWeaponCurrentUsageIndex(projectedWeapon);
+                    appliedSlots.Add(
+                        GetEquipmentSlotLabel(slot) +
+                        "=" + (missionWeapon.Item?.StringId ?? "unknown") +
+                        "(before=" + beforeUsageIndex +
+                        ",after=" + afterUsageIndex +
+                        ",ranged=" + rangedUsageIndex +
+                        ",thrown=" + thrownUsageIndex +
+                        ",usages={" + usageSummary + "})");
+                }
+
+                string catalog = BuildWeaponPriorityMissionEquipmentUsageCatalog(missionEquipment);
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: WeaponPriorityUsageCatalog. " +
+                    "FocusRole=Suspect" +
+                    " EntryId=" + (entryState.EntryId ?? "null") +
+                    " CharacterId=" + (GetCampaignMirrorWeaponPriorityCharacterKey(entryState) ?? "null") +
+                    " AppliedThrownUsageSlots=[" + string.Join("; ", appliedSlots) + "]" +
+                    " Catalog={" + catalog + "}" +
+                    " Source=" + (source ?? "unknown"));
+
+                return appliedSlots.Count > 0
+                    ? "+weapon-priority-suspect-thrown-usage"
+                    : "+weapon-priority-suspect-usage-catalog";
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: WeaponPriorityUsageCatalog failed open. " +
+                    "EntryId=" + (entryState?.EntryId ?? "null") +
+                    " CharacterId=" + (GetCampaignMirrorWeaponPriorityCharacterKey(entryState) ?? "null") +
+                    " Message=" + ex.Message +
+                    " Source=" + (source ?? "unknown"));
+                return "+weapon-priority-suspect-thrown-usage-failed";
+            }
+        }
+
+        private static bool TryResolveWeaponPriorityDualUseThrownUsageIndex(
+            MissionWeapon missionWeapon,
+            out int thrownUsageIndex,
+            out int rangedUsageIndex,
+            out string usageSummary)
+        {
+            thrownUsageIndex = -1;
+            rangedUsageIndex = -1;
+            usageSummary = "(none)";
+
+            try
+            {
+                if (missionWeapon.IsEmpty || missionWeapon.Item == null)
+                    return false;
+
+                int weaponsCount = missionWeapon.WeaponsCount;
+                if (weaponsCount <= 0)
+                    return false;
+
+                try
+                {
+                    rangedUsageIndex = missionWeapon.GetRangedUsageIndex();
+                }
+                catch
+                {
+                    rangedUsageIndex = -1;
+                }
+
+                bool hasThrownUsage = false;
+                bool hasMeleeUsage = false;
+                int firstThrownUsageIndex = -1;
+                var usageParts = new List<string>();
+                for (int usageIndex = 0; usageIndex < weaponsCount; usageIndex++)
+                {
+                    WeaponComponentData usage = null;
+                    try
+                    {
+                        usage = missionWeapon.GetWeaponComponentDataForUsage(usageIndex);
+                    }
+                    catch
+                    {
+                    }
+
+                    bool thrown = IsWeaponPriorityThrownUsage(usage);
+                    bool melee = IsWeaponPriorityMeleeUsage(usage);
+                    if (thrown)
+                    {
+                        hasThrownUsage = true;
+                        if (firstThrownUsageIndex < 0)
+                            firstThrownUsageIndex = usageIndex;
+                    }
+
+                    if (melee)
+                        hasMeleeUsage = true;
+
+                    usageParts.Add(FormatWeaponPriorityUsageComponent(usageIndex, usage, thrown, melee));
+                }
+
+                usageSummary = string.Join("|", usageParts);
+                if (!hasThrownUsage || !hasMeleeUsage)
+                    return false;
+
+                if (rangedUsageIndex >= 0 && rangedUsageIndex < weaponsCount)
+                {
+                    WeaponComponentData rangedUsage = missionWeapon.GetWeaponComponentDataForUsage(rangedUsageIndex);
+                    if (IsWeaponPriorityThrownUsage(rangedUsage))
+                    {
+                        thrownUsageIndex = rangedUsageIndex;
+                        return true;
+                    }
+                }
+
+                thrownUsageIndex = firstThrownUsageIndex;
+                return thrownUsageIndex >= 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string BuildWeaponPriorityMissionEquipmentUsageCatalog(MissionEquipment missionEquipment)
+        {
+            if (missionEquipment == null)
+                return "(none)";
+
+            var parts = new List<string>();
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                try
+                {
+                    MissionWeapon missionWeapon = missionEquipment[slot];
+                    if (missionWeapon.IsEmpty || missionWeapon.Item == null)
+                    {
+                        parts.Add(GetEquipmentSlotLabel(slot) + "=empty");
+                        continue;
+                    }
+
+                    TryResolveWeaponPriorityDualUseThrownUsageIndex(
+                        missionWeapon,
+                        out int thrownUsageIndex,
+                        out int rangedUsageIndex,
+                        out string usageSummary);
+                    parts.Add(
+                        GetEquipmentSlotLabel(slot) +
+                        "=" + missionWeapon.Item.StringId +
+                        "(current=" + SafeGetMissionWeaponCurrentUsageIndex(missionWeapon) +
+                        ",ranged=" + rangedUsageIndex +
+                        ",thrown=" + thrownUsageIndex +
+                        ",usages={" + usageSummary + "})");
+                }
+                catch (Exception ex)
+                {
+                    parts.Add(GetEquipmentSlotLabel(slot) + "=error:" + ex.GetType().Name);
+                }
+            }
+
+            return parts.Count > 0 ? string.Join("; ", parts) : "(empty)";
+        }
+
+        private static string FormatWeaponPriorityUsageComponent(
+            int usageIndex,
+            WeaponComponentData usage,
+            bool thrown,
+            bool melee)
+        {
+            if (usage == null)
+                return usageIndex + ":null";
+
+            return
+                usageIndex +
+                ":" + usage.WeaponClass +
+                "/skill=" + (usage.RelevantSkill?.StringId ?? "none") +
+                "/itemUsage=" + (usage.ItemUsage ?? "none") +
+                "/thrown=" + thrown +
+                "/melee=" + melee +
+                "/ranged=" + usage.IsRangedWeapon +
+                "/polearm=" + usage.IsPolearm +
+                "/shield=" + usage.IsShield +
+                "/ammo=" + usage.IsAmmo;
+        }
+
+        private static bool IsWeaponPriorityThrownUsage(WeaponComponentData usage)
+        {
+            return usage != null &&
+                   (usage.RelevantSkill == DefaultSkills.Throwing ||
+                    usage.WeaponClass == WeaponClass.Javelin ||
+                    usage.WeaponClass == WeaponClass.ThrowingAxe ||
+                    usage.WeaponClass == WeaponClass.ThrowingKnife ||
+                    usage.WeaponClass == WeaponClass.Stone ||
+                    usage.WeaponClass == WeaponClass.SlingStone);
+        }
+
+        private static bool IsWeaponPriorityMeleeUsage(WeaponComponentData usage)
+        {
+            return usage != null &&
+                   (usage.IsMeleeWeapon ||
+                    usage.IsPolearm ||
+                    usage.IsOneHanded ||
+                    usage.IsTwoHanded ||
+                    usage.RelevantSkill == DefaultSkills.Polearm ||
+                    usage.RelevantSkill == DefaultSkills.OneHanded ||
+                    usage.RelevantSkill == DefaultSkills.TwoHanded);
+        }
+
+        private static int SafeGetMissionWeaponCurrentUsageIndex(MissionWeapon missionWeapon)
+        {
+            try
+            {
+                return missionWeapon.CurrentUsageIndex;
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static Banner ResolveMaterializedCreateTimeBanner(Team team, BattleSideEnum side)
+        {
+            uint color = BattleSnapshotRuntimeState.ResolveSideColor(side, team?.Color ?? 0u);
+            uint color2 = BattleSnapshotRuntimeState.ResolveSideColor2(side, team?.Color2 ?? 0u);
+            string bannerCode = BattleSnapshotRuntimeState.ResolveSideBannerCode(side, team?.Banner?.BannerCode);
+            if (!string.IsNullOrWhiteSpace(bannerCode))
+            {
+                try
+                {
+                    return new Banner(bannerCode, color, color2);
+                }
+                catch
+                {
+                }
+            }
+
+            return team?.Banner;
+        }
+
+        private static int ComputeStableMaterializedOriginSeed(string entryId, string troopId, BattleSideEnum side)
+        {
+            unchecked
+            {
+                int hash = 17;
+                string key = (entryId ?? string.Empty) + "|" + (troopId ?? string.Empty) + "|" + side;
+                for (int i = 0; i < key.Length; i++)
+                    hash = hash * 31 + key[i];
+                return NormalizeNetworkSafeOriginSeed(hash == 0 ? 17 : hash);
+            }
+        }
+
+        private static int NormalizeNetworkSafeOriginSeed(int seed)
+        {
+            const int maxInclusive = 2000;
+            int normalized = seed % (maxInclusive + 1);
+            return normalized < 0 ? -normalized : normalized;
         }
 
         private static string TryApplyEntryIdentityToBuildData(AgentBuildData buildData, RosterEntryState entryState)
@@ -19772,6 +23251,28 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
+            ItemObject craftedMirrorItem = TryResolveCraftedMaterializedEquipmentItem(
+                itemId,
+                entryState,
+                slotLabel,
+                out string craftedMirrorItemId,
+                out string craftedMirrorResolutionSource,
+                trackCoverage);
+            if (craftedMirrorItem != null)
+            {
+                resolvedItemId = craftedMirrorItemId;
+                resolutionSource = craftedMirrorResolutionSource;
+                return craftedMirrorItem;
+            }
+
+            if (!string.IsNullOrWhiteSpace(craftedMirrorResolutionSource))
+            {
+                resolvedItemId = itemId;
+                resolutionSource = craftedMirrorResolutionSource;
+                RecordMaterializedEquipmentMiss(itemId, trackCoverage);
+                return null;
+            }
+
             ItemObject directItem = TryGetMaterializedEquipmentItem(itemId);
             if (directItem != null)
             {
@@ -19846,6 +23347,63 @@ namespace CoopSpectator.MissionBehaviors
 
             RecordMaterializedEquipmentMiss(itemId, trackCoverage);
             return null;
+        }
+
+        private static ItemObject TryResolveCraftedMaterializedEquipmentItem(
+            string itemId,
+            RosterEntryState entryState,
+            string slotLabel,
+            out string resolvedItemId,
+            out string resolutionSource,
+            bool trackCoverage)
+        {
+            resolvedItemId = itemId;
+            resolutionSource = null;
+            string craftedWeaponKey = ResolveCraftedWeaponKeyForSlot(entryState, slotLabel);
+            if (string.IsNullOrWhiteSpace(craftedWeaponKey))
+                return null;
+
+            if (!ExactCampaignRuntimeItemRegistry.TryResolveCraftedMirrorItem(
+                    craftedWeaponKey,
+                    out string mirrorItemId,
+                    out string craftedMirrorFailure))
+            {
+                resolutionSource = "crafted-mirror-failed:" + (craftedMirrorFailure ?? "unknown");
+                return null;
+            }
+
+            ItemObject mirrorItem = TryGetMaterializedEquipmentItem(mirrorItemId);
+            if (mirrorItem == null)
+            {
+                resolvedItemId = mirrorItemId;
+                resolutionSource = "crafted-mirror-unresolved";
+                return null;
+            }
+
+            resolvedItemId = mirrorItem.StringId;
+            resolutionSource = "crafted-mirror";
+            RecordMaterializedEquipmentResolution(itemId, resolutionSource, trackCoverage);
+            return mirrorItem;
+        }
+
+        private static string ResolveCraftedWeaponKeyForSlot(RosterEntryState entryState, string slotLabel)
+        {
+            if (entryState == null || string.IsNullOrWhiteSpace(slotLabel))
+                return null;
+
+            switch (slotLabel)
+            {
+                case "Item0":
+                    return entryState.CombatItem0CraftedWeaponKey;
+                case "Item1":
+                    return entryState.CombatItem1CraftedWeaponKey;
+                case "Item2":
+                    return entryState.CombatItem2CraftedWeaponKey;
+                case "Item3":
+                    return entryState.CombatItem3CraftedWeaponKey;
+                default:
+                    return null;
+            }
         }
 
         private static bool ShouldPreferNormalizedMaterializedEquipmentItem(
@@ -21697,6 +25255,13 @@ namespace CoopSpectator.MissionBehaviors
             if (string.Equals(slot.ResolutionSource, "direct", StringComparison.Ordinal))
                 return true;
 
+            if (string.Equals(slot.ResolutionSource, "crafted-mirror", StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(slot.ResolvedItemId) &&
+                slot.ResolvedItemId.StartsWith("cs_crafted_", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
             if ((string.Equals(slot.ResolutionSource, "compat-alias", StringComparison.Ordinal) ||
                  string.Equals(slot.ResolutionSource, "normalized-preferred", StringComparison.Ordinal) ||
                  string.Equals(slot.ResolutionSource, "compat-standin", StringComparison.Ordinal)) &&
@@ -22343,6 +25908,7 @@ namespace CoopSpectator.MissionBehaviors
             string appliedArmorOverrides,
             string appliedCombatProfile,
             string appliedIdentity,
+            string roleMatrixInitialWield,
             string source)
         {
             if (agent == null)
@@ -22368,6 +25934,7 @@ namespace CoopSpectator.MissionBehaviors
                 " AppliedArmorOverrides=" + (appliedArmorOverrides ?? "(none)") +
                 " " + (appliedCombatProfile ?? "AppliedCombatProfile=(none)") +
                 " " + (appliedIdentity ?? "AppliedIdentity=(none)") +
+                (!string.IsNullOrWhiteSpace(roleMatrixInitialWield) ? " " + roleMatrixInitialWield : string.Empty) +
                 " Source=" + (source ?? "unknown"));
         }
 
@@ -27127,6 +30694,7 @@ namespace CoopSpectator.MissionBehaviors
             missionPeer.WantsToSpawnAsBot = false;
             MovePeerToSpectatorHoldingState(mission, missionPeer, peer, source + " spectator-request");
             CoopBattlePeerLifecycleRuntimeState.MarkNoSide(missionPeer, BattleSideEnum.None, source + " spectator-request");
+            RequestRoleMatrixStreamSpectatorAutoStart(mission, missionPeer, source + " spectator-request");
 
             ModLogger.Info(
                 "CoopMissionSpawnLogic: applied spectator selection request. " +
@@ -29406,6 +32974,9 @@ namespace CoopSpectator.MissionBehaviors
         private static bool IsSelectableMaterializedArmyAgent(Agent candidate, BattleSideEnum side, out string entryId)
         {
             entryId = null;
+            if (IsRoleMatrixStreamRuntime())
+                return false;
+
             if (candidate == null ||
                 !candidate.IsActive() ||
                 candidate.IsMount ||
@@ -29465,6 +33036,20 @@ namespace CoopSpectator.MissionBehaviors
                 bool sideMatches =
                     expectedSide == BattleSideEnum.None ||
                     DoesClientVisualOverlayEntryMatchAgentSide(trackedEntryState, expectedSide);
+                if (trackedEntryState == null &&
+                    IsRoleMatrixStreamRuntime() &&
+                    IsRoleMatrixStreamMatrixEntryId(trackedEntryId))
+                {
+                    bool roleMatrixSideMatches = expectedSide == BattleSideEnum.None ||
+                        (_materializedArmySideByAgentIndex.TryGetValue(agentIndex, out BattleSideEnum trackedSide) &&
+                         trackedSide == expectedSide);
+                    if (roleMatrixSideMatches)
+                    {
+                        entryId = trackedEntryId;
+                        return true;
+                    }
+                }
+
                 if (trackedEntryState != null &&
                     sideMatches &&
                     (DoesClientVisualOverlayEntryMatchAgentTroop(trackedEntryState, currentTroopId) ||

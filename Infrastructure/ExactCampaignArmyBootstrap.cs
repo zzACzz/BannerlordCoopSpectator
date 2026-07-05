@@ -4703,6 +4703,13 @@ namespace CoopSpectator.Infrastructure
 
         public BasicCharacterObject Troop => _troop;
 
+        private static int NormalizeNetworkSafeOriginSeed(int seed)
+        {
+            const int maxInclusive = 2000;
+            int normalized = seed % (maxInclusive + 1);
+            return normalized < 0 ? -normalized : normalized;
+        }
+
         bool IAgentOriginBase.IsUnderPlayersCommand => _isUnderPlayersCommand;
 
         bool IAgentOriginBase.IsInSameArmyAsPlayer => _isUnderPlayersCommand;
@@ -4750,7 +4757,7 @@ namespace CoopSpectator.Infrastructure
             _factionColor = factionColor;
             _factionColor2 = factionColor2;
             _banner = banner;
-            _seed = seed;
+            _seed = NormalizeNetworkSafeOriginSeed(seed);
             AgentOriginUtilities.GetDefaultTroopTraits(_troop, out _hasThrownWeapon, out _hasSpear, out _hasShield, out _hasHeavyArmor);
         }
 
