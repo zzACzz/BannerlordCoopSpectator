@@ -68,7 +68,31 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private static readonly object CoopTestBattleXmlItemTemplateCacheLock = new object();
         private const string CoopRoleMatrixStreamTestBastardSwordId = "mp_coop_test_bastard_sword";
         private const int CoopRoleMatrixStreamLogicalMatrixCount = 14640;
+        private const string CoopShieldBannersBaseCharacterId = "mp_coop_heavy_infantry_empire_troop";
+        private const string CoopShieldBannersWeaponId = "mp_empire_spatha";
+        private const string CoopShieldBannersAttackerBannerCode = "11.163.166.1528.1528.764.764.1.0.0.133.171.171.483.483.764.764.0.0.0";
+        private const string CoopShieldBannersDefenderBannerCode = "35.116.116.1528.1528.766.740.1.0.0.510.19.171.1528.353.758.658.0.0.0.510.19.171.1528.398.760.845.0.0.0";
+        private const uint CoopShieldBannersAttackerColor = 0xFF744C38u;
+        private const uint CoopShieldBannersAttackerColor2 = 0xFFFFB53Eu;
+        private const uint CoopShieldBannersDefenderColor = 0xFF2F4F7Fu;
+        private const uint CoopShieldBannersDefenderColor2 = 0xFFE6F2FFu;
         private static string _lastRoleMatrixStreamMissingRoleLogKey = string.Empty;
+
+        private static readonly CoopTestBattleShieldBannerCase[] CoopShieldBannerAttackerCases =
+        {
+            new CoopTestBattleShieldBannerCase("kite_druzhinnik", "Druzhinnik Kite", "cs_mirror_steel_druzhinnik_kite_shield_ba59e959", "sturgia", true),
+            new CoopTestBattleShieldBannerCase("kite_leaf", "Leaf Kite", "cs_mirror_sturgia_infantry_shield_a_fb5378c8", "sturgia", true),
+            new CoopTestBattleShieldBannerCase("round_heavy", "Heavy Round", "cs_mirror_heavy_round_shield_0a3b91c5", "sturgia", true),
+            new CoopTestBattleShieldBannerCase("heater_flat", "Flat Heater", "cs_mirror_flat_heater_shield_08d567b2", "vlandia", true)
+        };
+
+        private static readonly CoopTestBattleShieldBannerCase[] CoopShieldBannerDefenderCases =
+        {
+            new CoopTestBattleShieldBannerCase("adarga_large", "Large Adarga", "cs_mirror_large_adarga_fb43111b", "aserai", true),
+            new CoopTestBattleShieldBannerCase("adarga", "Adarga", "cs_mirror_adarga_f404925f", "aserai", true),
+            new CoopTestBattleShieldBannerCase("heater_small", "Small Heater", "cs_mirror_small_heater_shield_ed6bb42c", "vlandia", true),
+            new CoopTestBattleShieldBannerCase("targe_battania", "Battania Targe", "cs_mirror_battania_shield_targe_a_1b5bdb5f", "battania", true)
+        };
 
         private enum SyntheticRosterMode
         {
@@ -107,6 +131,29 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 Color != 0u ||
                 Color2 != 0u ||
                 !string.IsNullOrWhiteSpace(BannerCode);
+        }
+
+        private sealed class CoopTestBattleShieldBannerCase
+        {
+            public CoopTestBattleShieldBannerCase(
+                string caseId,
+                string label,
+                string shieldId,
+                string cultureId,
+                bool usesTableau)
+            {
+                CaseId = caseId;
+                Label = label;
+                ShieldId = shieldId;
+                CultureId = cultureId;
+                UsesTableau = usesTableau;
+            }
+
+            public string CaseId { get; }
+            public string Label { get; }
+            public string ShieldId { get; }
+            public string CultureId { get; }
+            public bool UsesTableau { get; }
         }
 
         private sealed class EncounterPartyWritebackState
@@ -3752,9 +3799,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " Troops=" + (payload?.Troops?.Count ?? 0);
 
             bool isCampaignMirrorHeroesSnapshot = CoopTestBattleOptions.IsCampaignMirrorHeroesSnapshot(snapshot);
-            bool ready = isCampaignMirrorHeroesSnapshot
-                ? sides.Count >= 2 && populatedSideCount >= 1 && (payload?.Troops?.Count ?? 0) > 0
-                : sides.Count >= 2 && populatedSideCount >= 2 && hasAttacker && hasDefender;
+            bool isCampaignMirrorHeroesCombatSnapshot = CoopTestBattleOptions.IsCampaignMirrorHeroesCombatSnapshot(snapshot);
+            bool ready = isCampaignMirrorHeroesCombatSnapshot
+                ? sides.Count >= 2 && populatedSideCount >= 2 && hasAttacker && hasDefender
+                : isCampaignMirrorHeroesSnapshot
+                    ? sides.Count >= 2 && populatedSideCount >= 1 && (payload?.Troops?.Count ?? 0) > 0
+                    : sides.Count >= 2 && populatedSideCount >= 2 && hasAttacker && hasDefender;
             if (!ready && DateTime.UtcNow >= _nextBattleStartWaitLogUtc)
             {
                 _nextBattleStartWaitLogUtc = DateTime.UtcNow.AddSeconds(2);
@@ -4456,8 +4506,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 rosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStream ||
                 rosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStreamMounted
                     ? CreateEmptyCoopTestBattleSnapshot(mapScene, playerSideText)
-                    : rosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorHeroes
-                        ? BuildCoopTestBattleCampaignMirrorHeroesSnapshot(mapScene, playerSideText)
+                    : rosterMode == CoopTestBattleOptions.RosterMode.ShieldBanners
+                        ? BuildCoopTestBattleShieldBannersSnapshot(mapScene, playerSideText)
+                    : rosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorHeroes ||
+                      rosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorHeroesCombat
+                        ? BuildCoopTestBattleCampaignMirrorHeroesSnapshot(
+                            mapScene,
+                            playerSideText,
+                            includeOpposingLords: rosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorHeroesCombat)
                     : BuildSyntheticAllCampaignTroopsSnapshot(mapScene, playerSideText);
             if (snapshot == null)
                 return null;
@@ -4473,7 +4529,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     ? 0
                     : rosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorAll
                         ? 0
-                    : rosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorHeroes
+                    : rosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorHeroes ||
+                      rosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorHeroesCombat
+                        ? 0
+                    : rosterMode == CoopTestBattleOptions.RosterMode.ShieldBanners
                         ? 0
                     : rosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStream ||
                       rosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStreamMounted
@@ -4492,13 +4551,81 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return snapshot;
         }
 
-        private static BattleSnapshotMessage BuildCoopTestBattleCampaignMirrorHeroesSnapshot(string mapScene, string playerSideText)
+        private static BattleSnapshotMessage BuildCoopTestBattleShieldBannersSnapshot(
+            string mapScene,
+            string playerSideText)
+        {
+            BattleSnapshotMessage snapshot = CreateEmptyCoopTestBattleSnapshot(mapScene, playerSideText);
+            if (snapshot == null)
+                return null;
+
+            BasicCharacterObject baseCharacter = ResolveCoopTestBattleShieldBannerBaseCharacter();
+            BattleSideSnapshotMessage attackerSide = EnsureCoopTestBattleSide(
+                snapshot,
+                BattleSideEnum.Attacker,
+                "attacker",
+                string.Equals(playerSideText, nameof(BattleSideEnum.Attacker), StringComparison.OrdinalIgnoreCase));
+            BattleSideSnapshotMessage defenderSide = EnsureCoopTestBattleSide(
+                snapshot,
+                BattleSideEnum.Defender,
+                "defender",
+                string.Equals(playerSideText, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase));
+
+            ApplyCoopTestBattleShieldBannerAppearance(
+                attackerSide,
+                BattleSideEnum.Attacker,
+                TryResolveCoopTestBattleLiveSideAppearance(BattleSideEnum.Attacker, attackerSide));
+            ApplyCoopTestBattleShieldBannerAppearance(
+                defenderSide,
+                BattleSideEnum.Defender,
+                TryResolveCoopTestBattleLiveSideAppearance(BattleSideEnum.Defender, defenderSide));
+
+            int attackerEntries = AppendCoopTestBattleShieldBannerParty(
+                attackerSide,
+                "coop_test_attacker_shield_banners",
+                "Coop Shield Banner Attackers",
+                CoopShieldBannerAttackerCases,
+                baseCharacter);
+            int defenderEntries = AppendCoopTestBattleShieldBannerParty(
+                defenderSide,
+                "coop_test_defender_shield_banners",
+                "Coop Shield Banner Defenders",
+                CoopShieldBannerDefenderCases,
+                baseCharacter);
+
+            foreach (BattleSideSnapshotMessage side in snapshot.Sides.Where(side => side != null))
+            {
+                side.TotalManCount = side.Troops?.Count ?? 0;
+                CanonicalizeSnapshotSideCulture(side);
+            }
+
+            ModLogger.Info(
+                "BattleDetector: using coop test battle shield banners snapshot. " +
+                "BaseCharacter=" + (baseCharacter?.StringId ?? "fallback") +
+                " AttackerEntries=" + attackerEntries +
+                " DefenderEntries=" + defenderEntries +
+                " TableauShields=" + (CoopShieldBannerAttackerCases.Count(shieldCase => shieldCase.UsesTableau) + CoopShieldBannerDefenderCases.Count(shieldCase => shieldCase.UsesTableau)) +
+                " NoTableauControls=" + (CoopShieldBannerAttackerCases.Count(shieldCase => !shieldCase.UsesTableau) + CoopShieldBannerDefenderCases.Count(shieldCase => !shieldCase.UsesTableau)) +
+                " AttackerBannerCodeLength=" + (attackerSide?.BannerCode?.Length ?? 0) +
+                " DefenderBannerCodeLength=" + (defenderSide?.BannerCode?.Length ?? 0) +
+                " AttackerAppearanceSource=" + (attackerSide?.AppearanceSource ?? "unknown") +
+                " DefenderAppearanceSource=" + (defenderSide?.AppearanceSource ?? "unknown") + ".");
+            return snapshot;
+        }
+
+        private static BattleSnapshotMessage BuildCoopTestBattleCampaignMirrorHeroesSnapshot(
+            string mapScene,
+            string playerSideText,
+            bool includeOpposingLords = false)
         {
             BattleSnapshotMessage snapshot = CreateEmptyCoopTestBattleSnapshot(mapScene, playerSideText);
             if (snapshot == null || snapshot.Sides == null || snapshot.Sides.Count == 0)
                 return snapshot;
 
             List<Hero> playerHeroes = CollectSyntheticPlayerHeroes();
+            List<Hero> opposingLords = includeOpposingLords
+                ? CollectSyntheticLordHeroes()
+                : new List<Hero>();
             if (playerHeroes.Count == 0)
             {
                 ModLogger.Info("BattleDetector: coop test battle campaign mirror heroes snapshot has no eligible player heroes.");
@@ -4510,7 +4637,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (heroSide == null)
                 return snapshot;
 
+            BattleSideSnapshotMessage opposingSide = includeOpposingLords
+                ? ResolveOpposingCoopTestBattleSideSnapshot(snapshot, heroSide)
+                : null;
+
             var rosterCharacters = playerHeroes
+                .Concat(opposingLords)
                 .Select(hero => (object)hero.CharacterObject)
                 .Where(character => character != null)
                 .ToList();
@@ -4523,6 +4655,27 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 rosterCharacters,
                 snapshot);
 
+            if (includeOpposingLords)
+            {
+                if (opposingSide == null || opposingLords.Count == 0)
+                {
+                    ModLogger.Info(
+                        "BattleDetector: coop test battle campaign mirror heroes combat snapshot has no eligible opposing lords. " +
+                        "OpposingSide=" + (opposingSide?.SideText ?? opposingSide?.SideId ?? "null") +
+                        " Lords=" + opposingLords.Count + ".");
+                }
+                else
+                {
+                    AddSyntheticHeroParty(
+                        opposingSide,
+                        "campaign_mirror_opposing_lords",
+                        "Campaign mirror opposing lords",
+                        opposingLords,
+                        rosterCharacters,
+                        snapshot);
+                }
+            }
+
             foreach (BattleSideSnapshotMessage side in snapshot.Sides.Where(side => side != null))
             {
                 side.TotalManCount = side.Troops?.Count ?? 0;
@@ -4534,8 +4687,60 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 "BattleDetector: using coop test battle campaign mirror heroes snapshot. " +
                 "HeroSide=" + (heroSide.SideText ?? heroSide.SideId ?? "unknown") +
                 " Heroes=" + playerHeroes.Count +
+                " Combat=" + includeOpposingLords +
+                " OpposingSide=" + (opposingSide?.SideText ?? opposingSide?.SideId ?? "none") +
+                " OpposingLords=" + opposingLords.Count +
                 " CraftedWeapons=" + (snapshot.CraftedWeapons?.Count ?? 0) + ".");
             return snapshot;
+        }
+
+        private static BattleSideSnapshotMessage ResolveOpposingCoopTestBattleSideSnapshot(
+            BattleSnapshotMessage snapshot,
+            BattleSideSnapshotMessage heroSide)
+        {
+            if (snapshot?.Sides == null || snapshot.Sides.Count == 0 || heroSide == null)
+                return null;
+
+            if (TryParseCoopTestBattleSide(heroSide.SideText, out BattleSideEnum parsedHeroSide) ||
+                TryParseCoopTestBattleSide(heroSide.SideId, out parsedHeroSide))
+            {
+                BattleSideEnum opposing = parsedHeroSide == BattleSideEnum.Attacker
+                    ? BattleSideEnum.Defender
+                    : parsedHeroSide == BattleSideEnum.Defender
+                        ? BattleSideEnum.Attacker
+                        : BattleSideEnum.None;
+                if (opposing != BattleSideEnum.None)
+                {
+                    string opposingText = opposing.ToString();
+                    BattleSideSnapshotMessage bySide = snapshot.Sides.FirstOrDefault(side =>
+                        side != null &&
+                        (string.Equals(side.SideText, opposingText, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(side.SideId, opposingText, StringComparison.OrdinalIgnoreCase)));
+                    if (bySide != null)
+                        return bySide;
+                }
+            }
+
+            return snapshot.Sides.FirstOrDefault(side => side != null && !ReferenceEquals(side, heroSide));
+        }
+
+        private static bool TryParseCoopTestBattleSide(string value, out BattleSideEnum side)
+        {
+            string normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+            if (normalized == "attacker" || normalized == "attackers")
+            {
+                side = BattleSideEnum.Attacker;
+                return true;
+            }
+
+            if (normalized == "defender" || normalized == "defenders")
+            {
+                side = BattleSideEnum.Defender;
+                return true;
+            }
+
+            side = BattleSideEnum.None;
+            return false;
         }
 
         private static BattleSideSnapshotMessage ResolveCoopTestBattlePlayerSideSnapshot(
@@ -5314,9 +5519,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             WeaponSlotMatrixPalette palette = characters.Count > 0
                 ? BuildCoopTestBattleMultiplayerWeaponSlotMatrixPalette(characters)
                 : BuildCoopTestBattleXmlWeaponSlotMatrixPalette(xmlSeeds);
+            int shieldBannerCases = CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.ShieldBanners
+                ? GetCoopTestBattleShieldBannerCaseCount()
+                : 0;
             int matrixLayouts = CoopTestBattleOptions.IncludeWeaponSlotMatrix
                 ? (CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.CampaignMirrorAll
                     ? CollectSyntheticAllCampaignTroops().Count
+                    : CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.ShieldBanners
+                    ? 0
                     : CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStream ||
                       CoopTestBattleOptions.CurrentRosterMode == CoopTestBattleOptions.RosterMode.RoleMatrixStreamMounted
                     ? BuildRoleMatrixStreamLayouts(palette, limit: 0).Count
@@ -5332,6 +5542,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                    " mpCharacters=" + characters.Count +
                    " xmlSeeds=" + xmlSeeds.Count +
                    " weaponSlotMatrix=" + matrixLayouts +
+                   " shieldBannerCases=" + shieldBannerCases +
                    " roleMatrixUnsafe=" + unsafeMatrices +
                    " " + CoopTestBattleOptions.GetStatusSummary();
         }
@@ -5648,6 +5859,220 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             };
             side.Parties.Add(created);
             return created;
+        }
+
+        private static BasicCharacterObject ResolveCoopTestBattleShieldBannerBaseCharacter()
+        {
+            try
+            {
+                BasicCharacterObject direct = MBObjectManager.Instance?.GetObject<BasicCharacterObject>(CoopShieldBannersBaseCharacterId);
+                if (direct != null)
+                    return direct;
+            }
+            catch
+            {
+            }
+
+            List<BasicCharacterObject> characters = CollectCoopTestBattleMultiplayerCharacters();
+            return characters.FirstOrDefault(character =>
+                       character != null &&
+                       string.Equals(character.StringId, CoopShieldBannersBaseCharacterId, StringComparison.OrdinalIgnoreCase)) ??
+                   characters.FirstOrDefault(character => character != null && !IsMountedCharacter(character)) ??
+                   characters.FirstOrDefault(character => character != null);
+        }
+
+        private static void ApplyCoopTestBattleShieldBannerAppearance(
+            BattleSideSnapshotMessage side,
+            BattleSideEnum sideEnum,
+            BattleSideAppearanceSnapshot liveAppearance)
+        {
+            if (side == null)
+                return;
+
+            if (liveAppearance?.HasAnyData == true)
+            {
+                side.CultureId = liveAppearance.CultureId ?? side.CultureId;
+                side.Color = liveAppearance.Color;
+                side.Color2 = liveAppearance.Color2;
+                side.BannerCode = liveAppearance.BannerCode ?? side.BannerCode;
+                side.AppearanceSource = liveAppearance.Source ?? "coop-test-shield-banners-live-side";
+                ApplyCoopTestBattleShieldBannerFallbackAppearance(side, sideEnum, true);
+                CanonicalizeSnapshotSideCulture(side);
+                return;
+            }
+
+            ApplyCoopTestBattleShieldBannerFallbackAppearance(side, sideEnum, false);
+            CanonicalizeSnapshotSideCulture(side);
+        }
+
+        private static void ApplyCoopTestBattleShieldBannerFallbackAppearance(
+            BattleSideSnapshotMessage side,
+            BattleSideEnum sideEnum,
+            bool fillMissingOnly)
+        {
+            if (side == null)
+                return;
+
+            if (sideEnum == BattleSideEnum.Attacker)
+            {
+                if (!fillMissingOnly || string.IsNullOrWhiteSpace(side.CultureId))
+                    side.CultureId = "empire";
+                if (!fillMissingOnly || side.Color == 0u)
+                    side.Color = CoopShieldBannersAttackerColor;
+                if (!fillMissingOnly || side.Color2 == 0u)
+                    side.Color2 = CoopShieldBannersAttackerColor2;
+                if (!fillMissingOnly || string.IsNullOrWhiteSpace(side.BannerCode))
+                    side.BannerCode = CoopShieldBannersAttackerBannerCode;
+            }
+            else
+            {
+                if (!fillMissingOnly || string.IsNullOrWhiteSpace(side.CultureId))
+                    side.CultureId = "aserai";
+                if (!fillMissingOnly || side.Color == 0u)
+                    side.Color = CoopShieldBannersDefenderColor;
+                if (!fillMissingOnly || side.Color2 == 0u)
+                    side.Color2 = CoopShieldBannersDefenderColor2;
+                if (!fillMissingOnly || string.IsNullOrWhiteSpace(side.BannerCode))
+                    side.BannerCode = CoopShieldBannersDefenderBannerCode;
+            }
+
+            if (!fillMissingOnly || string.IsNullOrWhiteSpace(side.AppearanceSource))
+                side.AppearanceSource = fillMissingOnly
+                    ? "coop-test-shield-banners-live-side-with-fallback"
+                    : "coop-test-shield-banners-fixed";
+        }
+
+        private static BattleSideAppearanceSnapshot TryResolveCoopTestBattleLiveSideAppearance(
+            BattleSideEnum sideEnum,
+            BattleSideSnapshotMessage sideSnapshot)
+        {
+            try
+            {
+                object battle = TryGetCurrentBattleObject();
+                if (battle == null)
+                    return null;
+
+                string propertyName = sideEnum == BattleSideEnum.Attacker
+                    ? "AttackerSide"
+                    : "DefenderSide";
+                object sideCarrier = TryGetPropertyValue(battle, propertyName);
+                BattleSideAppearanceSnapshot appearance = ResolveSideAppearanceSnapshot(
+                    sideCarrier,
+                    sideSnapshot,
+                    "coop-test-shield-banners-live-side");
+                return appearance?.HasAnyData == true ? appearance : null;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleDetector: failed to resolve coop test shield banner live side appearance for " +
+                    sideEnum + ": " + ex.Message);
+                return null;
+            }
+        }
+
+        private static int AppendCoopTestBattleShieldBannerParty(
+            BattleSideSnapshotMessage side,
+            string partyId,
+            string partyName,
+            CoopTestBattleShieldBannerCase[] shieldCases,
+            BasicCharacterObject baseCharacter)
+        {
+            if (side == null || shieldCases == null || shieldCases.Length == 0)
+                return 0;
+
+            BattlePartySnapshotMessage party = EnsureCoopTestBattleParty(side, partyId, partyName);
+            if (party == null)
+                return 0;
+
+            int added = 0;
+            for (int i = 0; i < shieldCases.Length; i++)
+            {
+                CoopTestBattleShieldBannerCase shieldCase = shieldCases[i];
+                if (shieldCase == null || string.IsNullOrWhiteSpace(shieldCase.ShieldId))
+                    continue;
+
+                TroopStackInfo troop = BuildCoopTestBattleShieldBannerTroop(
+                    side,
+                    partyId,
+                    baseCharacter,
+                    shieldCase,
+                    i);
+                party.Troops.Add(troop);
+                side.Troops.Add(troop);
+                side.MissionReadyEntryOrder.Add(troop.EntryId);
+                party.TotalManCount++;
+                side.TotalManCount++;
+                added++;
+            }
+
+            return added;
+        }
+
+        private static TroopStackInfo BuildCoopTestBattleShieldBannerTroop(
+            BattleSideSnapshotMessage side,
+            string partyId,
+            BasicCharacterObject baseCharacter,
+            CoopTestBattleShieldBannerCase shieldCase,
+            int caseIndex)
+        {
+            string characterId = baseCharacter?.StringId ?? CoopShieldBannersBaseCharacterId;
+            string caseToken = NormalizeHeroIdentityToken(shieldCase?.CaseId) ?? "shield_banner";
+            var troop = new TroopStackInfo
+            {
+                EntryId = (side?.SideId ?? "side") + "|" + partyId + "|shield_banner|" + (caseIndex + 1) + "|" + caseToken,
+                SideId = side?.SideId,
+                PartyId = partyId,
+                CharacterId = characterId,
+                OriginalCharacterId = characterId,
+                CampaignFormationClass = "Infantry",
+                SpawnTemplateId = characterId,
+                TroopName = "Coop Banner " + (shieldCase?.Label ?? "Shield"),
+                CultureId = CanonicalizeSnapshotCultureId(shieldCase?.CultureId ?? side?.CultureId),
+                Tier = Math.Max(1, baseCharacter != null ? TryGetIntProperty(baseCharacter, "Tier") : 25),
+                IsMounted = false,
+                IsRanged = false,
+                HasShield = true,
+                HasThrown = false,
+                IsHero = false,
+                Count = 1,
+                WoundedCount = 0
+            };
+
+            if (baseCharacter != null)
+            {
+                ApplyCombatEquipmentSnapshot(troop, baseCharacter);
+                ApplyCombatProfileSnapshot(troop, baseCharacter);
+            }
+            else
+            {
+                ApplyCoopTestBattleXmlSeedCombatProfile(troop, null);
+            }
+
+            troop.CombatItem0Id = CoopShieldBannersWeaponId;
+            troop.CombatItem0Amount = null;
+            troop.CombatItem0CraftedWeaponKey = null;
+            troop.CombatItem0ModifierId = null;
+            troop.CombatItem1Id = shieldCase?.ShieldId;
+            troop.CombatItem1Amount = null;
+            troop.CombatItem1CraftedWeaponKey = null;
+            troop.CombatItem1ModifierId = null;
+            troop.CombatItem2Id = null;
+            troop.CombatItem2Amount = null;
+            troop.CombatItem2CraftedWeaponKey = null;
+            troop.CombatItem2ModifierId = null;
+            troop.CombatItem3Id = null;
+            troop.CombatItem3Amount = null;
+            troop.CombatItem3CraftedWeaponKey = null;
+            troop.CombatItem3ModifierId = null;
+            troop.CombatHorseId = null;
+            troop.CombatHorseHarnessId = null;
+            return troop;
+        }
+
+        private static int GetCoopTestBattleShieldBannerCaseCount()
+        {
+            return (CoopShieldBannerAttackerCases?.Length ?? 0) + (CoopShieldBannerDefenderCases?.Length ?? 0);
         }
 
         private static TroopStackInfo BuildCoopTestBattleWeaponSlotMatrixTroop(

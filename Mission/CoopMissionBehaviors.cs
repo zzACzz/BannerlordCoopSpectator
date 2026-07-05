@@ -12967,6 +12967,11 @@ namespace CoopSpectator.MissionBehaviors
             return CoopTestBattleOptions.IsRoleMatrixStreamMountedSnapshot(BattleSnapshotRuntimeState.GetCurrent());
         }
 
+        private static bool IsShieldBannersRuntime()
+        {
+            return CoopTestBattleOptions.IsShieldBannersSnapshot(BattleSnapshotRuntimeState.GetCurrent());
+        }
+
         private static bool IsCampaignMirrorAllRuntime()
         {
             return CoopTestBattleOptions.IsCampaignMirrorSnapshot(BattleSnapshotRuntimeState.GetCurrent());
@@ -18162,6 +18167,21 @@ namespace CoopSpectator.MissionBehaviors
                     missionEquipment,
                     entryState,
                     "TryApplyMaterializedCreateTimeMissionEquipment");
+                if (IsShieldBannersRuntime())
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: shield banner create-time mission equipment. " +
+                        "EntryId=" + (entryState?.EntryId ?? "null") +
+                        " Side=" + (team?.Side.ToString() ?? "none") +
+                        " BannerCodeLength=" + (banner?.BannerCode?.Length ?? 0) +
+                        " MissionWeapons={" + BuildMissionEquipmentSummary(
+                            missionEquipment,
+                            EquipmentIndex.Weapon0,
+                            EquipmentIndex.Weapon1,
+                            EquipmentIndex.Weapon2,
+                            EquipmentIndex.Weapon3) + "}");
+                }
+
                 buildData.MissionEquipment(missionEquipment);
                 return "coop-test-create-time-mission-equipment" + usageProjection;
             }
@@ -18180,8 +18200,11 @@ namespace CoopSpectator.MissionBehaviors
             RosterEntryState entryState,
             string source)
         {
-            if (agent == null ||
-                (!IsRoleMatrixStreamMatrixEntryId(entryState?.EntryId) && !IsCampaignMirrorAllRuntime()))
+            bool shouldApplyInitialWield =
+                IsRoleMatrixStreamMatrixEntryId(entryState?.EntryId) ||
+                IsCampaignMirrorAllRuntime() ||
+                IsShieldBannersRuntime();
+            if (agent == null || !shouldApplyInitialWield)
             {
                 return null;
             }

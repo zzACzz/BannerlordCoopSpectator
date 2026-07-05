@@ -78,7 +78,7 @@ namespace CoopSpectator.Commands
             {
                 return "Coop test battle is " +
                        Campaign.BattleDetector.GetCoopTestBattleStatusSummary() +
-                       ". Usage: coop.test_battle <on|off|status|roster matrix_only|roster campaign_all|roster campaign_mirror_all|roster campaign_mirror_heroes|roster mixed|roster five_mode_matrix|roster role_matrix_stream|roster role_matrix_stream_mounted|matrix on|matrix off|five_mode_protocol on|five_mode_protocol off|campaign_ai on|campaign_ai off|weapon_priority on|weapon_priority all|weapon_priority suspects|weapon_priority off|crafted_weapons safe|crafted_weapons create_time|limit N|active_limit N|wave_lifetime seconds|priority_lifetime seconds|matrix_progress|matrix_progress reset|matrix_unsafe list|matrix_unsafe add M00001 [reason]|matrix_unsafe add_last [reason]|matrix_unsafe remove M00001|matrix_unsafe clear>.";
+                       ". Usage: coop.test_battle <on|off|status|roster matrix_only|roster campaign_all|roster campaign_mirror_all|roster campaign_mirror_heroes|roster campaign_mirror_heroes_combat|roster shield_banners|roster mixed|roster five_mode_matrix|roster role_matrix_stream|roster role_matrix_stream_mounted|matrix on|matrix off|five_mode_protocol on|five_mode_protocol off|campaign_ai on|campaign_ai off|weapon_priority on|weapon_priority all|weapon_priority suspects|weapon_priority off|crafted_weapons safe|crafted_weapons create_time|limit N|active_limit N|wave_lifetime seconds|priority_lifetime seconds|matrix_progress|matrix_progress reset|matrix_unsafe list|matrix_unsafe add M00001 [reason]|matrix_unsafe add_last [reason]|matrix_unsafe remove M00001|matrix_unsafe clear>.";
             }
 
             string action = (args[0] ?? string.Empty).Trim().ToLowerInvariant();
@@ -207,7 +207,7 @@ namespace CoopSpectator.Commands
                     return "Coop test battle roster mode updated. " + CoopTestBattleOptions.GetStatusSummary() + ".";
                 }
 
-                return "Unknown coop test battle roster mode. Use matrix_only, campaign_all, campaign_mirror_all, campaign_mirror_heroes, mixed, five_mode_matrix, role_matrix_stream, or role_matrix_stream_mounted.";
+                return "Unknown coop test battle roster mode. Use matrix_only, campaign_all, campaign_mirror_all, campaign_mirror_heroes, campaign_mirror_heroes_combat, shield_banners, mixed, five_mode_matrix, role_matrix_stream, or role_matrix_stream_mounted.";
             }
 
             if (action == "limit" && args.Count >= 2 && int.TryParse(args[1], out int limit))
@@ -289,7 +289,7 @@ namespace CoopSpectator.Commands
                 }
             }
 
-            return "Usage: coop.test_battle <on|off|status|roster matrix_only|roster campaign_all|roster campaign_mirror_all|roster campaign_mirror_heroes|roster mixed|roster five_mode_matrix|roster role_matrix_stream|roster role_matrix_stream_mounted|matrix on|matrix off|five_mode_protocol on|five_mode_protocol off|campaign_ai on|campaign_ai off|weapon_priority on|weapon_priority all|weapon_priority suspects|weapon_priority off|crafted_weapons safe|crafted_weapons create_time|limit N|active_limit N|wave_lifetime seconds|priority_lifetime seconds|matrix_progress|matrix_progress reset|matrix_unsafe list|matrix_unsafe add M00001 [reason]|matrix_unsafe add_last [reason]|matrix_unsafe remove M00001|matrix_unsafe clear>.";
+            return "Usage: coop.test_battle <on|off|status|roster matrix_only|roster campaign_all|roster campaign_mirror_all|roster campaign_mirror_heroes|roster campaign_mirror_heroes_combat|roster shield_banners|roster mixed|roster five_mode_matrix|roster role_matrix_stream|roster role_matrix_stream_mounted|matrix on|matrix off|five_mode_protocol on|five_mode_protocol off|campaign_ai on|campaign_ai off|weapon_priority on|weapon_priority all|weapon_priority suspects|weapon_priority off|crafted_weapons safe|crafted_weapons create_time|limit N|active_limit N|wave_lifetime seconds|priority_lifetime seconds|matrix_progress|matrix_progress reset|matrix_unsafe list|matrix_unsafe add M00001 [reason]|matrix_unsafe add_last [reason]|matrix_unsafe remove M00001|matrix_unsafe clear>.";
         }
     }
 }

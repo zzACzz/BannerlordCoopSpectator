@@ -1141,6 +1141,10 @@ namespace CoopSpectator.UI
 
         private static string ResolveSideBannerCode(BattleRuntimeState battleState, BattleSideEnum side)
         {
+            BattleSideState sideState = ResolveSideState(battleState, side);
+            if (!string.IsNullOrWhiteSpace(sideState?.BannerCode))
+                return sideState.BannerCode;
+
             string campaignBannerCode = TryResolveCampaignSideBannerCode(battleState, side);
             if (!string.IsNullOrWhiteSpace(campaignBannerCode))
                 return campaignBannerCode;
@@ -1188,6 +1192,15 @@ namespace CoopSpectator.UI
 
         private static void ResolveSideColors(BattleRuntimeState battleState, BattleSideEnum side, BasicCharacterObject character, out uint primaryColor, out uint secondaryColor)
         {
+            BattleSideState sideState = ResolveSideState(battleState, side);
+            if (sideState != null && (sideState.Color != 0u || sideState.Color2 != 0u))
+            {
+                primaryColor = sideState.Color;
+                secondaryColor = sideState.Color2;
+                FillMissingSideColors(battleState, side, character, ref primaryColor, ref secondaryColor);
+                return;
+            }
+
             Team missionTeam = ResolveMissionTeam(side);
             if (missionTeam != null)
             {
@@ -1216,6 +1229,55 @@ namespace CoopSpectator.UI
                 default:
                     primaryColor = NeutralPrimaryColor;
                     secondaryColor = NeutralSecondaryColor;
+                    break;
+            }
+        }
+
+        private static void FillMissingSideColors(BattleRuntimeState battleState, BattleSideEnum side, BasicCharacterObject character, ref uint primaryColor, ref uint secondaryColor)
+        {
+            if (primaryColor != 0u && secondaryColor != 0u)
+                return;
+
+            Team missionTeam = ResolveMissionTeam(side);
+            if (missionTeam != null)
+            {
+                if (primaryColor == 0u)
+                    primaryColor = missionTeam.Color;
+                if (secondaryColor == 0u)
+                    secondaryColor = missionTeam.Color2;
+                if (primaryColor != 0u && secondaryColor != 0u)
+                    return;
+            }
+
+            if (character?.Culture != null)
+            {
+                if (primaryColor == 0u)
+                    primaryColor = character.Culture.Color;
+                if (secondaryColor == 0u)
+                    secondaryColor = character.Culture.Color2;
+                if (primaryColor != 0u && secondaryColor != 0u)
+                    return;
+            }
+
+            switch (ResolveSideFlavor(battleState, side))
+            {
+                case SideFlavor.Bandit:
+                    if (primaryColor == 0u)
+                        primaryColor = BanditPrimaryColor;
+                    if (secondaryColor == 0u)
+                        secondaryColor = BanditSecondaryColor;
+                    break;
+                case SideFlavor.Deserter:
+                    if (primaryColor == 0u)
+                        primaryColor = DeserterPrimaryColor;
+                    if (secondaryColor == 0u)
+                        secondaryColor = DeserterSecondaryColor;
+                    break;
+                default:
+                    if (primaryColor == 0u)
+                        primaryColor = NeutralPrimaryColor;
+                    if (secondaryColor == 0u)
+                        secondaryColor = NeutralSecondaryColor;
                     break;
             }
         }

@@ -13,7 +13,9 @@ namespace CoopSpectator.Infrastructure
             RoleMatrixStream = 4,
             RoleMatrixStreamMounted = 5,
             CampaignMirrorAll = 6,
-            CampaignMirrorHeroes = 7
+            CampaignMirrorHeroes = 7,
+            CampaignMirrorHeroesCombat = 8,
+            ShieldBanners = 9
         }
 
         public enum CraftedWeaponsMode
@@ -32,6 +34,8 @@ namespace CoopSpectator.Infrastructure
         public const string CampaignMirrorAllCampaignAiBattleType = "CoopTestBattleCampaignMirrorAllCampaignAI";
         public const string CampaignMirrorAllWeaponPriorityBattleType = "CoopTestBattleCampaignMirrorAllWeaponPriority";
         public const string CampaignMirrorHeroesBattleType = "CoopTestBattleCampaignMirrorHeroes";
+        public const string CampaignMirrorHeroesCombatBattleType = "CoopTestBattleCampaignMirrorHeroesCombat";
+        public const string ShieldBannersBattleType = "CoopTestBattleShieldBanners";
         public const string ResolverSource = "coop-test-battle";
         public const string RuntimeScene = "mp_battle_map_001";
         public const string RuntimeGameType = CoopGameModeIds.OfficialBattle;
@@ -293,6 +297,29 @@ namespace CoopSpectator.Infrastructure
                 case "crafted-heroes":
                     mode = RosterMode.CampaignMirrorHeroes;
                     return true;
+                case "campaign_mirror_heroes_combat":
+                case "campaign-mirror-heroes-combat":
+                case "campaign_heroes_combat":
+                case "campaign-heroes-combat":
+                case "mirror_heroes_combat":
+                case "mirror-heroes-combat":
+                case "heroes_mirror_combat":
+                case "heroes-mirror-combat":
+                case "crafted_heroes_combat":
+                case "crafted-heroes-combat":
+                case "hero_combat":
+                case "hero-combat":
+                    mode = RosterMode.CampaignMirrorHeroesCombat;
+                    return true;
+                case "shield_banners":
+                case "shield-banners":
+                case "banner_shields":
+                case "banner-shields":
+                case "heraldry_shields":
+                case "heraldry-shields":
+                case "shields":
+                    mode = RosterMode.ShieldBanners;
+                    return true;
                 default:
                     mode = RosterMode.MatrixOnly;
                     return false;
@@ -317,6 +344,10 @@ namespace CoopSpectator.Infrastructure
                     return "campaign_mirror_all";
                 case RosterMode.CampaignMirrorHeroes:
                     return "campaign_mirror_heroes";
+                case RosterMode.CampaignMirrorHeroesCombat:
+                    return "campaign_mirror_heroes_combat";
+                case RosterMode.ShieldBanners:
+                    return "shield_banners";
                 default:
                     return "matrix_only";
             }
@@ -336,6 +367,12 @@ namespace CoopSpectator.Infrastructure
 
             if (_rosterMode == RosterMode.CampaignMirrorHeroes)
                 return CampaignMirrorHeroesBattleType;
+
+            if (_rosterMode == RosterMode.CampaignMirrorHeroesCombat)
+                return CampaignMirrorHeroesCombatBattleType;
+
+            if (_rosterMode == RosterMode.ShieldBanners)
+                return ShieldBannersBattleType;
 
             if (_rosterMode == RosterMode.RoleMatrixStreamMounted)
                 return RoleMatrixStreamMountedBattleType;
@@ -372,13 +409,20 @@ namespace CoopSpectator.Infrastructure
                     string.Equals(snapshot?.BattleType, CampaignMirrorAllBattleType, System.StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(snapshot?.BattleType, CampaignMirrorAllCampaignAiBattleType, System.StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(snapshot?.BattleType, CampaignMirrorAllWeaponPriorityBattleType, System.StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(snapshot?.BattleType, CampaignMirrorHeroesBattleType, System.StringComparison.OrdinalIgnoreCase));
+                    string.Equals(snapshot?.BattleType, CampaignMirrorHeroesBattleType, System.StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(snapshot?.BattleType, CampaignMirrorHeroesCombatBattleType, System.StringComparison.OrdinalIgnoreCase));
         }
 
         public static bool IsRoleMatrixStreamMountedSnapshot(BattleSnapshotMessage snapshot)
         {
             return IsTestBattleSnapshot(snapshot) &&
                    string.Equals(snapshot?.BattleType, RoleMatrixStreamMountedBattleType, System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool IsShieldBannersSnapshot(BattleSnapshotMessage snapshot)
+        {
+            return IsTestBattleSnapshot(snapshot) &&
+                   string.Equals(snapshot?.BattleType, ShieldBannersBattleType, System.StringComparison.OrdinalIgnoreCase);
         }
 
         public static bool IsCampaignMirrorAllSnapshot(BattleSnapshotMessage snapshot)
@@ -392,7 +436,14 @@ namespace CoopSpectator.Infrastructure
         public static bool IsCampaignMirrorHeroesSnapshot(BattleSnapshotMessage snapshot)
         {
             return IsTestBattleSnapshot(snapshot) &&
-                   string.Equals(snapshot?.BattleType, CampaignMirrorHeroesBattleType, System.StringComparison.OrdinalIgnoreCase);
+                   (string.Equals(snapshot?.BattleType, CampaignMirrorHeroesBattleType, System.StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(snapshot?.BattleType, CampaignMirrorHeroesCombatBattleType, System.StringComparison.OrdinalIgnoreCase));
+        }
+
+        public static bool IsCampaignMirrorHeroesCombatSnapshot(BattleSnapshotMessage snapshot)
+        {
+            return IsTestBattleSnapshot(snapshot) &&
+                   string.Equals(snapshot?.BattleType, CampaignMirrorHeroesCombatBattleType, System.StringComparison.OrdinalIgnoreCase);
         }
 
         public static bool IsCampaignMirrorHeroesCraftedWeaponsCreateTimeSnapshot(BattleSnapshotMessage snapshot)
