@@ -20730,6 +20730,9 @@ namespace CoopSpectator.MissionBehaviors
             int desiredRelevantSkill = TryGetCombatProfileSkillValue(profile, relevantSkill, templateRelevantSkill);
 
             bool suppressApproximateHeroRangedBallistics = ShouldSuppressApproximateHeroRangedBallistics(profile, agent, primaryWeapon);
+            bool lowLevelExactHeroRangedBallisticsActive =
+                suppressApproximateHeroRangedBallistics &&
+                CoopCampaignDerivedAgentStatCalculateModel.IsActiveForMission(mission);
 
             SetDrivenPropertyBaselineContext(profile, agent, isMountContext: false);
             try
@@ -20740,7 +20743,8 @@ namespace CoopSpectator.MissionBehaviors
                     CountMaterializedCombatProfileApply(profile, "weapon-skill", ref profile.CountedWeaponSkillAdjustment);
                 }
 
-                if ((suppressApproximateHeroRangedBallistics &&
+                if ((!lowLevelExactHeroRangedBallisticsActive &&
+                        suppressApproximateHeroRangedBallistics &&
                         TryApplyExactHeroPrimaryRangedAccuracyDrivenStats(
                             agent,
                             profile,
@@ -21042,6 +21046,8 @@ namespace CoopSpectator.MissionBehaviors
             bool applied = false;
             bool isMounted = agent.HasMount || agent.MountAgent != null;
             int adjustedRangedPerkCount = profile.PerkRangedCount;
+            bool suppressApproximateHeroRangedBallistics =
+                ShouldSuppressApproximateHeroRangedBallistics(profile, agent, primaryWeapon);
 
             if (TryApplyExactPersonalPerkDrivenStats(agent, profile, agentDrivenProperties, primaryWeapon, relevantSkill))
             {
@@ -21085,7 +21091,9 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (profile.PerkRidingCount > 0 && (agent.HasMount || agent.MountAgent != null))
+            if (profile.PerkRidingCount > 0 &&
+                (agent.HasMount || agent.MountAgent != null) &&
+                !suppressApproximateHeroRangedBallistics)
             {
                 if (TryApplyRidingPerkDrivenStats(agentDrivenProperties, profile.PerkRidingCount))
                 {

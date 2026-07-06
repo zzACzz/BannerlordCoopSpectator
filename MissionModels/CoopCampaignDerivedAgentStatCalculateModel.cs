@@ -5,6 +5,7 @@ using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Patches;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.MissionModels
@@ -55,9 +56,11 @@ namespace CoopSpectator.MissionModels
         public override void UpdateAgentStats(Agent agent, AgentDrivenProperties agentDrivenProperties)
         {
             _baseModel.UpdateAgentStats(agent, agentDrivenProperties);
+            bool exactRangedDrivenPropertiesApplied = TryApplyExactHeroRangedCampaignDrivenPropertyOverrides(agent, agentDrivenProperties);
             TryApplyExactDefenseDrivenPropertyOverrides(agent, agentDrivenProperties);
             TryApplyExactMeleeDrivenPropertyOverrides(agent, agentDrivenProperties);
-            TryApplyExactRangedDrivenPropertyOverrides(agent, agentDrivenProperties);
+            if (!exactRangedDrivenPropertiesApplied)
+                TryApplyExactRangedDrivenPropertyOverrides(agent, agentDrivenProperties);
         }
 
         public override float GetDifficultyModifier()
@@ -98,6 +101,9 @@ namespace CoopSpectator.MissionModels
 
         public override float GetWeaponInaccuracy(Agent agent, WeaponComponentData weapon, int weaponSkill)
         {
+            if (TryResolveExactRangedSkillForWeapon(agent, weapon, out int exactSkill, out _))
+                return ComputeCampaignRangedWeaponInaccuracy(weapon, exactSkill);
+
             return _baseModel.GetWeaponInaccuracy(agent, weapon, weaponSkill);
         }
 
@@ -128,12 +134,20 @@ namespace CoopSpectator.MissionModels
 
         public override int GetEffectiveSkillForWeapon(Agent agent, WeaponComponentData weapon)
         {
-            if (weapon == null || weapon.RelevantSkill == null)
+            SkillObject weaponRelevantSkill = ResolveWeaponDamageRelevantSkill(weapon);
+            if (weapon == null || weaponRelevantSkill == null)
                 return _baseModel.GetEffectiveSkillForWeapon(agent, weapon);
 
-            int desiredSkill = GetEffectiveSkill(agent, weapon.RelevantSkill);
+            int fallbackWeaponSkill = _baseModel.GetEffectiveSkillForWeapon(agent, weapon);
+            if (TryResolveExactRangedSkillForWeapon(agent, weapon, out int exactRangedSkill, out string exactRangedEntryId))
+            {
+                TryLogExactSkillOverride(agent, weaponRelevantSkill, fallbackWeaponSkill, exactRangedSkill, exactRangedEntryId);
+                return exactRangedSkill;
+            }
+
+            int desiredSkill = GetEffectiveSkill(agent, weaponRelevantSkill);
             if (desiredSkill <= 0)
-                return _baseModel.GetEffectiveSkillForWeapon(agent, weapon);
+                return fallbackWeaponSkill;
 
             if (weapon.IsRangedWeapon)
             {
@@ -385,7 +399,9 @@ namespace CoopSpectator.MissionModels
                 case WeaponClass.Javelin:
                 case WeaponClass.ThrowingAxe:
                 case WeaponClass.ThrowingKnife:
+                case WeaponClass.Sling:
                 case WeaponClass.Stone:
+                case WeaponClass.SlingStone:
                     return DefaultSkills.Throwing;
                 default:
                     return relevantSkill;
@@ -835,6 +851,424 @@ namespace CoopSpectator.MissionModels
                 currentMissileSpeedMultiplier,
                 desiredMissileSpeedMultiplier,
                 appliedPerkSummary);
+        }
+
+        private bool TryApplyExactHeroRangedCampaignDrivenPropertyOverrides(Agent agent, AgentDrivenProperties agentDrivenProperties)
+        {
+            if (agent == null || agentDrivenProperties == null || !agent.IsHuman)
+                return false;
+
+            Mission mission = agent.Mission;
+            if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                return false;
+
+            MissionEquipment equipment = agent.Equipment;
+            if (equipment == null)
+                return false;
+
+            EquipmentIndex primaryWieldedItemIndex = agent.GetPrimaryWieldedItemIndex();
+            if (primaryWieldedItemIndex == EquipmentIndex.None)
+                return false;
+
+            WeaponComponentData primaryWeapon = equipment[primaryWieldedItemIndex].CurrentUsageItem;
+            SkillObject relevantSkill = ResolveWeaponDamageRelevantSkill(primaryWeapon);
+            if (!IsExactRangedRelevantSkill(relevantSkill))
+                return false;
+
+            if (!TryResolveExactSkillOverride(agent, relevantSkill, 0, out int exactSkill, out string entryId))
+                return false;
+
+            int fallbackRidingSkill = TryGetCharacterSkillValue(agent.Character, DefaultSkills.Riding);
+            int exactRidingSkill = fallbackRidingSkill;
+            TryResolveExactSkillOverride(agent, DefaultSkills.Riding, fallbackRidingSkill, out exactRidingSkill, out _);
+
+            float baseWeaponInaccuracy = agentDrivenProperties.WeaponInaccuracy;
+            float baseMovementPenalty = agentDrivenProperties.WeaponMaxMovementAccuracyPenalty;
+            float baseUnsteadyPenalty = agentDrivenProperties.WeaponMaxUnsteadyAccuracyPenalty;
+            float baseBestAccuracyWaitTime = agentDrivenProperties.WeaponBestAccuracyWaitTime;
+            float baseReloadMovementPenaltyFactor = agentDrivenProperties.ReloadMovementPenaltyFactor;
+            float baseReloadSpeed = agentDrivenProperties.ReloadSpeed;
+            float baseReadySpeed = agentDrivenProperties.ThrustOrRangedReadySpeedMultiplier;
+            float baseMissileSpeedMultiplier = agentDrivenProperties.MissileSpeedMultiplier;
+
+            float weaponInaccuracy = ComputeCampaignRangedWeaponInaccuracy(primaryWeapon, exactSkill);
+            ComputeCampaignRangedAccuracyPenalties(
+                agent,
+                primaryWeapon,
+                relevantSkill,
+                exactSkill,
+                exactRidingSkill,
+                out float movementPenalty,
+                out float unsteadyPenalty,
+                out float bestAccuracyWaitTime,
+                out float unsteadyBeginTime,
+                out float unsteadyEndTime,
+                out float rotationalAccuracyPenalty);
+
+            float reloadMovementPenaltyFactor = baseReloadMovementPenaltyFactor > 0f ? baseReloadMovementPenaltyFactor : 1f;
+            float reloadSpeed = baseReloadSpeed > 0f ? baseReloadSpeed : 0.93f;
+            float readySpeed = baseReadySpeed > 0f ? baseReadySpeed : 0.93f;
+            float missileSpeedMultiplier = baseMissileSpeedMultiplier > 0f ? baseMissileSpeedMultiplier : 1f;
+            string appliedPerkSummary = string.Empty;
+            bool isMounted = agent.HasMount || agent.MountAgent != null;
+            string relevantSkillId = relevantSkill.StringId ?? string.Empty;
+
+            if (isMounted && HasExactHeroPerk(agent, "RidingSagittarius"))
+            {
+                movementPenalty *= 0.85f;
+                unsteadyPenalty *= 0.85f;
+                appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "RidingSagittarius=0.85");
+            }
+
+            if (string.Equals(relevantSkillId, "Bow", StringComparison.OrdinalIgnoreCase))
+            {
+                if (HasExactHeroPerk(agent, "BowNockingPoint"))
+                {
+                    reloadMovementPenaltyFactor *= 0.5f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "NockingPoint=0.5");
+                }
+
+                if (HasExactHeroPerk(agent, "BowBowControl"))
+                {
+                    movementPenalty *= 0.7f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "BowControl=0.7");
+                }
+
+                if (HasExactHeroPerk(agent, "BowRapidFire"))
+                {
+                    reloadSpeed *= 1.25f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "RapidFire=1.25");
+                }
+
+                if (HasExactHeroPerk(agent, "BowQuickAdjustments"))
+                {
+                    rotationalAccuracyPenalty *= 0.5f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "QuickAdjustments=0.5");
+                }
+
+                if (HasExactHeroPerk(agent, "BowDiscipline"))
+                {
+                    unsteadyBeginTime *= 1.5f;
+                    unsteadyEndTime *= 1.5f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "Discipline=1.5");
+                }
+
+                if (HasExactHeroPerk(agent, "BowQuickDraw"))
+                {
+                    readySpeed *= 1.25f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "QuickDraw=1.25");
+                }
+
+                if (isMounted && HasExactHeroPerk(agent, "BowMountedArchery"))
+                {
+                    movementPenalty *= 0.7f;
+                    unsteadyPenalty *= 0.7f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "MountedArchery=0.7");
+                }
+
+                if (exactSkill > 200 && HasExactHeroPerk(agent, "BowDeadshot"))
+                {
+                    float epicFactor = 1f + (exactSkill - 200) * 0.002f;
+                    reloadSpeed *= epicFactor;
+                    appliedPerkSummary = AppendAppliedPerkSummary(
+                        appliedPerkSummary,
+                        "DeadshotReload=" + epicFactor.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
+            else if (string.Equals(relevantSkillId, "Crossbow", StringComparison.OrdinalIgnoreCase))
+            {
+                if (isMounted && HasExactHeroPerk(agent, "CrossbowSteady"))
+                {
+                    movementPenalty *= 0.5f;
+                    rotationalAccuracyPenalty *= 0.5f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "Steady=0.5");
+                }
+
+                if (HasExactHeroPerk(agent, "CrossbowWindWinder"))
+                {
+                    reloadSpeed *= 1.25f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "WindWinder=1.25");
+                }
+
+                if (HasExactHeroPerk(agent, "CrossbowDonkeysSwiftness"))
+                {
+                    movementPenalty *= 0.7f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "DonkeysSwiftness=0.7");
+                }
+
+                if (HasExactHeroPerk(agent, "CrossbowMarksmen"))
+                {
+                    readySpeed *= 1.25f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "Marksmen=1.25");
+                }
+
+                if (exactSkill > 200 && HasExactHeroPerk(agent, "CrossbowMightyPull"))
+                {
+                    float epicFactor = 1f + (exactSkill - 200) * 0.002f;
+                    reloadSpeed *= epicFactor;
+                    appliedPerkSummary = AppendAppliedPerkSummary(
+                        appliedPerkSummary,
+                        "MightyPullReload=" + epicFactor.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
+            else if (string.Equals(relevantSkillId, "Throwing", StringComparison.OrdinalIgnoreCase))
+            {
+                if (HasExactHeroPerk(agent, "ThrowingQuickDraw"))
+                {
+                    reloadSpeed *= 1.2f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "QuickDraw=1.2");
+                }
+
+                if (HasExactHeroPerk(agent, "ThrowingPerfectTechnique"))
+                {
+                    missileSpeedMultiplier *= 1.25f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "PerfectTechnique=1.25");
+                }
+
+                if (isMounted && HasExactHeroPerk(agent, "ThrowingMountedSkirmisher"))
+                {
+                    movementPenalty *= 0.8f;
+                    unsteadyPenalty *= 0.8f;
+                    appliedPerkSummary = AppendAppliedPerkSummary(appliedPerkSummary, "MountedSkirmisher=0.8");
+                }
+
+                if (exactSkill > 200 && HasExactHeroPerk(agent, "ThrowingUnstoppableForce"))
+                {
+                    float epicFactor = 1f + (exactSkill - 200) * 0.002f;
+                    missileSpeedMultiplier *= epicFactor;
+                    appliedPerkSummary = AppendAppliedPerkSummary(
+                        appliedPerkSummary,
+                        "UnstoppableForceSpeed=" + epicFactor.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
+
+            agentDrivenProperties.WeaponInaccuracy = weaponInaccuracy;
+            agentDrivenProperties.WeaponMaxMovementAccuracyPenalty = Math.Max(0f, movementPenalty);
+            agentDrivenProperties.WeaponMaxUnsteadyAccuracyPenalty = Math.Max(0f, unsteadyPenalty);
+            agentDrivenProperties.WeaponBestAccuracyWaitTime = Math.Max(0f, bestAccuracyWaitTime);
+            agentDrivenProperties.WeaponUnsteadyBeginTime = Math.Max(0f, unsteadyBeginTime);
+            agentDrivenProperties.WeaponUnsteadyEndTime = Math.Max(0f, unsteadyEndTime);
+            agentDrivenProperties.WeaponRotationalAccuracyPenaltyInRadians = Math.Max(0f, rotationalAccuracyPenalty);
+            agentDrivenProperties.ReloadMovementPenaltyFactor = Math.Max(0f, reloadMovementPenaltyFactor);
+            agentDrivenProperties.ReloadSpeed = Math.Max(0f, reloadSpeed);
+            agentDrivenProperties.ThrustOrRangedReadySpeedMultiplier = Math.Max(0f, readySpeed);
+            agentDrivenProperties.MissileSpeedMultiplier = Math.Max(0f, missileSpeedMultiplier);
+
+            TryLogExactHeroRangedCampaignDrivenOverride(
+                agent,
+                relevantSkill,
+                entryId,
+                baseWeaponInaccuracy,
+                weaponInaccuracy,
+                baseMovementPenalty,
+                movementPenalty,
+                baseUnsteadyPenalty,
+                unsteadyPenalty,
+                baseBestAccuracyWaitTime,
+                bestAccuracyWaitTime,
+                baseReloadSpeed,
+                reloadSpeed,
+                baseReadySpeed,
+                readySpeed,
+                baseMissileSpeedMultiplier,
+                missileSpeedMultiplier,
+                appliedPerkSummary);
+
+            return true;
+        }
+
+        private static bool IsExactRangedRelevantSkill(SkillObject relevantSkill)
+        {
+            string relevantSkillId = relevantSkill?.StringId ?? string.Empty;
+            return string.Equals(relevantSkillId, "Bow", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(relevantSkillId, "Crossbow", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(relevantSkillId, "Throwing", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool TryResolveExactRangedSkillForWeapon(
+            Agent agent,
+            WeaponComponentData weapon,
+            out int exactSkill,
+            out string entryId)
+        {
+            exactSkill = 0;
+            entryId = string.Empty;
+
+            if (weapon == null || !weapon.IsRangedWeapon)
+                return false;
+
+            SkillObject relevantSkill = ResolveWeaponDamageRelevantSkill(weapon);
+            if (!IsExactRangedRelevantSkill(relevantSkill))
+                return false;
+
+            return TryResolveExactSkillOverride(agent, relevantSkill, 0, out exactSkill, out entryId);
+        }
+
+        private static float ComputeCampaignRangedWeaponInaccuracy(WeaponComponentData weapon, int exactSkill)
+        {
+            if (weapon == null)
+                return 0f;
+
+            float skillFactor = weapon.WeaponClass == WeaponClass.Sling
+                ? 1f - 0.003f * exactSkill
+                : 1f - 0.002f * exactSkill;
+            float inaccuracy = (100f - weapon.Accuracy) * skillFactor * 0.001f;
+
+            return Math.Max(0.0001f, inaccuracy);
+        }
+
+        private static void ComputeCampaignRangedAccuracyPenalties(
+            Agent agent,
+            WeaponComponentData weapon,
+            SkillObject relevantSkill,
+            int exactSkill,
+            int exactRidingSkill,
+            out float movementPenalty,
+            out float unsteadyPenalty,
+            out float bestAccuracyWaitTime,
+            out float unsteadyBeginTime,
+            out float unsteadyEndTime,
+            out float rotationalAccuracyPenalty)
+        {
+            bool isMounted = agent != null && agent.HasMount;
+            int thrustSpeed = weapon?.ThrustSpeed ?? 0;
+
+            if (!isMounted)
+            {
+                float skillFactor = Math.Max(0f, 1f - exactSkill / 500f);
+                movementPenalty = Math.Max(0f, 0.125f * skillFactor);
+                unsteadyPenalty = Math.Max(0f, 0.1f * skillFactor);
+            }
+            else
+            {
+                float skillFactor = Math.Max(0f, (1f - exactSkill / 500f) * (1f - exactRidingSkill / 1800f));
+                movementPenalty = Math.Max(0f, 0.025f * skillFactor);
+                unsteadyPenalty = Math.Max(0f, 0.12f * skillFactor);
+            }
+
+            string relevantSkillId = relevantSkill?.StringId ?? string.Empty;
+            WeaponClass weaponClass = weapon?.WeaponClass ?? WeaponClass.Undefined;
+
+            if (string.Equals(relevantSkillId, "Bow", StringComparison.OrdinalIgnoreCase))
+            {
+                float thrustFactor = MBMath.ClampFloat((thrustSpeed - 45f) / 90f, 0f, 1f);
+                movementPenalty *= 6f;
+                unsteadyPenalty *= 4.5f / MBMath.Lerp(0.75f, 2f, thrustFactor, 1E-05f);
+            }
+            else if (string.Equals(relevantSkillId, "Throwing", StringComparison.OrdinalIgnoreCase))
+            {
+                if (weaponClass == WeaponClass.Sling)
+                {
+                    float thrustFactor = MBMath.ClampFloat((thrustSpeed - 30f) / 90f, 0f, 1f);
+                    movementPenalty *= 5f;
+                    unsteadyPenalty *= 2.4f * MBMath.Lerp(2.4f, 1.2f, thrustFactor, 1E-05f);
+                }
+                else
+                {
+                    float thrustFactor = MBMath.ClampFloat((thrustSpeed - 89f) / 13f, 0f, 1f);
+                    movementPenalty *= 0.5f;
+                    unsteadyPenalty *= 1.5f * MBMath.Lerp(1.5f, 0.8f, thrustFactor, 1E-05f);
+                }
+            }
+            else if (string.Equals(relevantSkillId, "Crossbow", StringComparison.OrdinalIgnoreCase))
+            {
+                movementPenalty *= 2.5f;
+                unsteadyPenalty *= 1.2f;
+            }
+
+            if (weaponClass == WeaponClass.Bow)
+            {
+                bestAccuracyWaitTime = 0.3f + (95.75f - thrustSpeed) * 0.005f;
+                float thrustFactor = MBMath.ClampFloat((thrustSpeed - 45f) / 90f, 0f, 1f);
+                unsteadyBeginTime = 0.6f + exactSkill * 0.01f * MBMath.Lerp(2f, 4f, thrustFactor, 1E-05f);
+                if (agent != null && agent.IsAIControlled)
+                    unsteadyBeginTime *= 4f;
+                unsteadyEndTime = 2f + unsteadyBeginTime;
+                rotationalAccuracyPenalty = 0.1f;
+            }
+            else if (weaponClass == WeaponClass.Javelin || weaponClass == WeaponClass.ThrowingAxe || weaponClass == WeaponClass.ThrowingKnife || weaponClass == WeaponClass.Stone)
+            {
+                bestAccuracyWaitTime = 0.2f + (89f - thrustSpeed) * 0.009f;
+                unsteadyBeginTime = 2.5f + exactSkill * 0.01f;
+                unsteadyEndTime = 10f + unsteadyBeginTime;
+                rotationalAccuracyPenalty = 0.025f;
+            }
+            else if (weaponClass == WeaponClass.Sling)
+            {
+                bestAccuracyWaitTime = 2.6f + (89f - thrustSpeed) * 0.12f;
+                unsteadyBeginTime = 3f + exactSkill * 0.064f;
+                unsteadyEndTime = 22f + unsteadyBeginTime;
+                rotationalAccuracyPenalty = 0.2f;
+            }
+            else
+            {
+                bestAccuracyWaitTime = 0.1f;
+                unsteadyBeginTime = 0f;
+                unsteadyEndTime = 0f;
+                rotationalAccuracyPenalty = 0.1f;
+            }
+        }
+
+        private static bool HasExactHeroPerk(Agent agent, string perkId)
+        {
+            return CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(agent, perkId, out _);
+        }
+
+        private void TryLogExactHeroRangedCampaignDrivenOverride(
+            Agent agent,
+            SkillObject relevantSkill,
+            string entryId,
+            float baseWeaponInaccuracy,
+            float exactWeaponInaccuracy,
+            float baseMovementPenalty,
+            float exactMovementPenalty,
+            float baseUnsteadyPenalty,
+            float exactUnsteadyPenalty,
+            float baseBestAccuracyWaitTime,
+            float exactBestAccuracyWaitTime,
+            float baseReloadSpeed,
+            float exactReloadSpeed,
+            float baseReadySpeed,
+            float exactReadySpeed,
+            float baseMissileSpeedMultiplier,
+            float exactMissileSpeedMultiplier,
+            string appliedPerkSummary)
+        {
+            string skillId = relevantSkill?.StringId ?? "null";
+            string logKey =
+                (agent?.Index ?? -1).ToString() + "|" +
+                skillId + "|" +
+                (entryId ?? string.Empty) + "|" +
+                exactWeaponInaccuracy.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                exactMovementPenalty.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                exactUnsteadyPenalty.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                (appliedPerkSummary ?? string.Empty);
+
+            if (!_loggedRangedDrivenKeys.Add(logKey))
+                return;
+
+            TryLogBattleActivation(agent);
+            ModLogger.Info(
+                "CoopCampaignDerivedAgentStatCalculateModel: exact campaign ranged driven-property override applied. " +
+                "Agent=" + (agent?.Index ?? -1) +
+                " EntryId=" + (string.IsNullOrWhiteSpace(entryId) ? "unknown" : entryId) +
+                " Skill=" + skillId +
+                " WeaponInaccuracy=" + baseWeaponInaccuracy.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) +
+                "->" + exactWeaponInaccuracy.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) +
+                " MovementPenalty=" + baseMovementPenalty.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) +
+                "->" + exactMovementPenalty.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) +
+                " UnsteadyPenalty=" + baseUnsteadyPenalty.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) +
+                "->" + exactUnsteadyPenalty.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) +
+                " BestWait=" + baseBestAccuracyWaitTime.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                "->" + exactBestAccuracyWaitTime.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " ReloadSpeed=" + baseReloadSpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                "->" + exactReloadSpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " ReadySpeed=" + baseReadySpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                "->" + exactReadySpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " MissileSpeedMultiplier=" + baseMissileSpeedMultiplier.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                "->" + exactMissileSpeedMultiplier.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " AppliedPerks=" + (string.IsNullOrWhiteSpace(appliedPerkSummary) ? "none" : appliedPerkSummary) +
+                " Mission=" + (agent?.Mission?.SceneName ?? "null") + ".");
         }
 
         private void TryLogRangedDrivenOverride(
