@@ -10808,10 +10808,39 @@ namespace CoopSpectator.Patches
             if (team == null)
                 return null;
 
-            if (formation != null && !string.IsNullOrEmpty(formation.BannerCode))
-                return formation.Banner ?? (formation.Banner = new Banner(formation.BannerCode, team.Color, team.Color2));
+            string fallbackBannerCode =
+                !string.IsNullOrWhiteSpace(formation?.BannerCode)
+                    ? formation.BannerCode
+                    : team.Banner?.BannerCode;
+            string bannerCode = BattleSnapshotRuntimeState.ResolveSideBannerCode(team.Side, fallbackBannerCode);
+            if (string.IsNullOrWhiteSpace(bannerCode))
+                return formation?.Banner ?? team.Banner;
 
-            return null;
+            if (formation != null &&
+                string.Equals(formation.BannerCode ?? string.Empty, bannerCode, StringComparison.Ordinal) &&
+                formation.Banner != null)
+            {
+                return formation.Banner;
+            }
+
+            uint color = BattleSnapshotRuntimeState.ResolveSideColor(team.Side, team.Color);
+            uint color2 = BattleSnapshotRuntimeState.ResolveSideColor2(team.Side, team.Color2);
+            try
+            {
+                Banner banner = new Banner(bannerCode, color, color2);
+                if (formation != null)
+                {
+                    formation.BannerCode = bannerCode;
+                    formation.Banner = banner;
+                }
+
+                return banner;
+            }
+            catch
+            {
+            }
+
+            return formation?.Banner ?? team.Banner;
         }
 
         private static void CanonicalizeCreateAgentPayloadForBattleMap(CreateAgent createAgent)
@@ -11093,6 +11122,60 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (agent != null &&
+                    TrySuppressExactSiegeCreateTimeMaterializedSynchronizeAgentEquipmentPayload(
+                        mission,
+                        synchronizeAgentSpawnEquipment,
+                        agent,
+                        out string createTimeMaterializedSyncReason))
+                {
+                    ExactTransferContractRuntimeCache.ObserveClientEquipmentSynchronized(
+                        agent.Index,
+                        "battle-map handoff SynchronizeAgentSpawnEquipment suppressed-create-time-materialized");
+                    CoopMissionSpawnLogic.ObserveClientSynchronizeAgentEquipment(
+                        agent.Index,
+                        "battle-map handoff SynchronizeAgentSpawnEquipment suppressed-create-time-materialized");
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientSynchronizeAgentEquipment(
+                        synchronizeAgentSpawnEquipment,
+                        agent,
+                        "battle-map handoff SynchronizeAgentSpawnEquipment suppressed-create-time-materialized");
+
+                    if (ExperimentalFeatures.EnableExactCreateAgentCorridorDiagnostics)
+                    {
+                        string payloadSummary = BuildEquipmentSummary(
+                            synchronizeAgentSpawnEquipment.SpawnEquipment,
+                            EquipmentIndex.Weapon0,
+                            EquipmentIndex.Weapon1,
+                            EquipmentIndex.Weapon2,
+                            EquipmentIndex.Weapon3,
+                            EquipmentIndex.Head,
+                            EquipmentIndex.Body,
+                            EquipmentIndex.Leg,
+                            EquipmentIndex.Gloves,
+                            EquipmentIndex.Cape,
+                            EquipmentIndex.Horse,
+                            EquipmentIndex.HorseHarness);
+                        string missionWeaponSummary = BuildMissionEquipmentWeaponSummary(agent.Equipment);
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed exact siege create-time materialized SynchronizeAgentSpawnEquipment payload before native refresh. " +
+                            "AgentIndex=" + agent.Index +
+                            " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                            " Reason=" + (createTimeMaterializedSyncReason ?? "unknown") +
+                            " MissionWeapons={" + missionWeaponSummary + "}" +
+                            " PayloadEquipment={" + payloadSummary + "}");
+                        ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                            "client-synchronize-agent-equipment-suppressed-create-time-materialized",
+                            "AgentIndex=" + agent.Index +
+                            " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                            " Reason=" + (createTimeMaterializedSyncReason ?? "unknown") +
+                            " MissionWeapons={" + missionWeaponSummary + "}" +
+                            " PayloadEquipment={" + payloadSummary + "}" +
+                            " Source=battle-map handoff SynchronizeAgentSpawnEquipment suppressed-create-time-materialized");
+                    }
+
+                    return false;
+                }
+
                 TryCanonicalizeStrictMountedHeroSynchronizeAgentEquipmentPayload(
                     synchronizeAgentSpawnEquipment,
                     agent);
@@ -11182,6 +11265,155 @@ namespace CoopSpectator.Patches
                 ModLogger.Info("BattleMapSpawnHandoffPatch: SynchronizeAgentSpawnEquipment prefix failed open: " + ex.Message);
                 return true;
             }
+        }
+
+        private static bool TrySuppressExactSiegeCreateTimeMaterializedSynchronizeAgentEquipmentPayload(
+            Mission mission,
+            SynchronizeAgentSpawnEquipment synchronizeAgentSpawnEquipment,
+            Agent agent,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                mission == null ||
+                synchronizeAgentSpawnEquipment?.SpawnEquipment == null ||
+                agent == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            if (!CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out string entryId) ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (entryState == null || IsExactHeroEntry(entryState))
+                return false;
+
+            Equipment expectedEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
+                entryState,
+                includeWeapons: true,
+                honorExactVisualContracts: false,
+                includeArmorVisuals: true,
+                includeMountVisuals: false);
+            if (expectedEquipment == null)
+                return false;
+
+            if (!DoMissionWeaponSlotsMatchExpectedEquipment(
+                    agent.Equipment,
+                    expectedEquipment,
+                    out string liveWeaponMismatch))
+            {
+                reason = "create-time-mission-weapons-not-authoritative:" + (liveWeaponMismatch ?? "unknown");
+                return false;
+            }
+
+            if (!DoEquipmentSlotsMatchExpectedEquipment(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    expectedEquipment,
+                    out string payloadMismatch,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3,
+                    EquipmentIndex.Head,
+                    EquipmentIndex.Body,
+                    EquipmentIndex.Leg,
+                    EquipmentIndex.Gloves,
+                    EquipmentIndex.Cape,
+                    EquipmentIndex.Horse,
+                    EquipmentIndex.HorseHarness))
+            {
+                reason = "sync-payload-not-duplicate:" + (payloadMismatch ?? "unknown");
+                return false;
+            }
+
+            reason =
+                "exact-siege-create-time-materialized-agent" +
+                "|EntryId=" + entryId +
+                "|PayloadMatchesSnapshot=True" +
+                "|MissionWeaponsMatchSnapshot=True";
+            return true;
+        }
+
+        private static bool DoMissionWeaponSlotsMatchExpectedEquipment(
+            MissionEquipment missionEquipment,
+            Equipment expectedEquipment,
+            out string mismatch)
+        {
+            mismatch = null;
+            if (missionEquipment == null || expectedEquipment == null)
+            {
+                mismatch = "missing-equipment";
+                return false;
+            }
+
+            var mismatches = new List<string>();
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                string expectedItemId = expectedEquipment[slot].Item?.StringId ?? string.Empty;
+                string actualItemId = missionEquipment[slot].Item?.StringId ?? string.Empty;
+                if (string.Equals(expectedItemId, actualItemId, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (mismatches.Count < 6)
+                {
+                    mismatches.Add(
+                        slot +
+                        ":expected=" + (string.IsNullOrWhiteSpace(expectedItemId) ? "empty" : expectedItemId) +
+                        ",actual=" + (string.IsNullOrWhiteSpace(actualItemId) ? "empty" : actualItemId));
+                }
+            }
+
+            if (mismatches.Count == 0)
+                return true;
+
+            mismatch = string.Join("; ", mismatches);
+            return false;
+        }
+
+        private static bool DoEquipmentSlotsMatchExpectedEquipment(
+            Equipment actualEquipment,
+            Equipment expectedEquipment,
+            out string mismatch,
+            params EquipmentIndex[] slots)
+        {
+            mismatch = null;
+            if (actualEquipment == null || expectedEquipment == null)
+            {
+                mismatch = "missing-equipment";
+                return false;
+            }
+
+            var mismatches = new List<string>();
+            for (int i = 0; i < slots.Length; i++)
+            {
+                EquipmentIndex slot = slots[i];
+                string expectedItemId = expectedEquipment[slot].Item?.StringId ?? string.Empty;
+                string actualItemId = actualEquipment[slot].Item?.StringId ?? string.Empty;
+                if (string.Equals(expectedItemId, actualItemId, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (mismatches.Count < 6)
+                {
+                    mismatches.Add(
+                        slot +
+                        ":expected=" + (string.IsNullOrWhiteSpace(expectedItemId) ? "empty" : expectedItemId) +
+                        ",actual=" + (string.IsNullOrWhiteSpace(actualItemId) ? "empty" : actualItemId));
+                }
+            }
+
+            if (mismatches.Count == 0)
+                return true;
+
+            mismatch = string.Join("; ", mismatches);
+            return false;
         }
 
         private static bool ShouldSuppressCorruptedClientSynchronizeAgentEquipmentPayload(

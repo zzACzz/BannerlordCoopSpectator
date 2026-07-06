@@ -12,6 +12,7 @@ namespace CoopSpectator.Infrastructure
         private const string EnvDebugTexts = "COOP_DEBUG_TEXTS";
         private const string EnvDebugDedicatedStdio = "COOP_DEBUG_DEDICATED_STDIO";
         private const string EnvOrderOfBattleDiagnostics = "COOPSPECTATOR_OOB_DIAGNOSTICS";
+        private const string EnvShieldBannerDiagnostics = "COOPSPECTATOR_SHIELD_BANNER_DIAGNOSTICS";
 
         /// <summary>Увімкнути reflection dump API GameTextManager та двофазну валідацію ключа (BeforeLoad/AfterLoad).</summary>
         public static bool DebugTexts => GetEnvBool(EnvDebugTexts);
@@ -21,6 +22,9 @@ namespace CoopSpectator.Infrastructure
 
         /// <summary>Enable focused Order of Battle formation/count diagnostics.</summary>
         public static bool OrderOfBattleDiagnostics => GetEnvBool(EnvOrderOfBattleDiagnostics);
+
+        /// <summary>Enable focused shield banner materialization diagnostics.</summary>
+        public static bool ShieldBannerDiagnostics => GetEnvBool(EnvShieldBannerDiagnostics);
 
         private static bool GetEnvBool(string name)
         {
