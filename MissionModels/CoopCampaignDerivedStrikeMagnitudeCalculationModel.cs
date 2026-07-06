@@ -87,7 +87,7 @@ namespace CoopSpectator.MissionModels
         public override float CalculateAdjustedArmorForBlow(in AttackInformation attackInformation, in AttackCollisionData collisionData, float baseArmor, BasicCharacterObject attackerCharacter, BasicCharacterObject attackerCaptainCharacter, BasicCharacterObject victimCharacter, BasicCharacterObject victimCaptainCharacter, WeaponComponentData weaponComponent)
         {
             float adjustedArmor = _baseModel.CalculateAdjustedArmorForBlow(attackInformation, collisionData, baseArmor, attackerCharacter, attackerCaptainCharacter, victimCharacter, victimCaptainCharacter, weaponComponent);
-            if (!TryApplyExactPersonalCrossbowArmorPenetration(attackInformation.AttackerAgent, baseArmor, adjustedArmor, weaponComponent, out float exactAdjustedArmor))
+            if (!TryApplyExactPersonalArmorPenetration(attackInformation.AttackerAgent, collisionData, baseArmor, adjustedArmor, weaponComponent, out float exactAdjustedArmor))
                 return adjustedArmor;
 
             return exactAdjustedArmor;
@@ -163,7 +163,10 @@ namespace CoopSpectator.MissionModels
             if (relevantSkill != null)
             {
                 string relevantSkillId = relevantSkill.StringId;
-                if (string.Equals(relevantSkillId, "Bow", StringComparison.OrdinalIgnoreCase) ||
+                if (string.Equals(relevantSkillId, "OneHanded", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relevantSkillId, "TwoHanded", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relevantSkillId, "Polearm", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(relevantSkillId, "Bow", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(relevantSkillId, "Crossbow", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(relevantSkillId, "Throwing", StringComparison.OrdinalIgnoreCase))
                 {
@@ -173,6 +176,22 @@ namespace CoopSpectator.MissionModels
 
             switch (weaponComponent.WeaponClass)
             {
+                case WeaponClass.OneHandedSword:
+                case WeaponClass.OneHandedAxe:
+                case WeaponClass.Mace:
+                case WeaponClass.Pick:
+                case WeaponClass.Dagger:
+                case WeaponClass.OneHandedPolearm:
+                case WeaponClass.SmallShield:
+                case WeaponClass.LargeShield:
+                    return DefaultSkills.OneHanded;
+                case WeaponClass.TwoHandedSword:
+                case WeaponClass.TwoHandedAxe:
+                case WeaponClass.TwoHandedMace:
+                    return DefaultSkills.TwoHanded;
+                case WeaponClass.TwoHandedPolearm:
+                case WeaponClass.LowGripPolearm:
+                    return DefaultSkills.Polearm;
                 case WeaponClass.Arrow:
                 case WeaponClass.Bow:
                     return DefaultSkills.Bow;
@@ -182,42 +201,109 @@ namespace CoopSpectator.MissionModels
                 case WeaponClass.Javelin:
                 case WeaponClass.ThrowingAxe:
                 case WeaponClass.ThrowingKnife:
+                case WeaponClass.Sling:
                 case WeaponClass.Stone:
+                case WeaponClass.SlingStone:
                     return DefaultSkills.Throwing;
                 default:
                     return relevantSkill;
             }
         }
 
-        private static bool TryApplyExactPersonalCrossbowArmorPenetration(
+        private static bool TryApplyExactPersonalArmorPenetration(
             Agent attackerAgent,
+            in AttackCollisionData collisionData,
             float baseArmor,
             float adjustedArmor,
             WeaponComponentData weaponComponent,
             out float exactAdjustedArmor)
         {
             exactAdjustedArmor = adjustedArmor;
+            attackerAgent = ResolveHumanAgent(attackerAgent);
             if (attackerAgent == null || weaponComponent == null || adjustedArmor <= 0f)
                 return false;
 
             SkillObject relevantSkill = ResolveRelevantSkill(weaponComponent);
-            if (!string.Equals(relevantSkill?.StringId, "Crossbow", StringComparison.OrdinalIgnoreCase))
+            string skillId = relevantSkill?.StringId ?? string.Empty;
+            if (!IsSupportedArmorPenetrationSkill(skillId))
                 return false;
 
-            if (baseArmor < 20f &&
+            if (string.Equals(skillId, "Crossbow", StringComparison.OrdinalIgnoreCase) &&
+                baseArmor < 20f &&
                 CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "CrossbowPiercer", out _))
             {
                 exactAdjustedArmor = 0f;
                 return true;
             }
 
-            if (CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "CrossbowPuncture", out _))
+            if (weaponComponent.WeaponClass == WeaponClass.Sling &&
+                IsHeadHit(collisionData) &&
+                CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "ThrowingSlingingCompetitions", out _))
             {
-                exactAdjustedArmor = TaleWorlds.Library.MathF.Max(0f, adjustedArmor * 0.9f);
-                return Math.Abs(exactAdjustedArmor - adjustedArmor) > 0.0001f;
+                exactAdjustedArmor = 0f;
+                return true;
             }
 
-            return false;
+            float penetrationFactor = 0f;
+            if (CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "TwoHandedVandal", out _))
+                penetrationFactor += 0.25f;
+
+            if (string.Equals(skillId, "OneHanded", StringComparison.OrdinalIgnoreCase) &&
+                CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "OneHandedChinkInTheArmor", out _))
+            {
+                penetrationFactor += 0.1f;
+            }
+
+            if (string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase) &&
+                CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "BowBodkin", out _))
+            {
+                penetrationFactor += 0.1f;
+            }
+
+            if (string.Equals(skillId, "Crossbow", StringComparison.OrdinalIgnoreCase) &&
+                CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "CrossbowPuncture", out _))
+            {
+                penetrationFactor += 0.1f;
+            }
+
+            if (string.Equals(skillId, "Throwing", StringComparison.OrdinalIgnoreCase) &&
+                CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "ThrowingWeakSpot", out _))
+            {
+                penetrationFactor += 0.3f;
+            }
+
+            if (penetrationFactor <= 0f)
+                return false;
+
+            penetrationFactor = MBMath.ClampFloat(penetrationFactor, 0f, 0.95f);
+            exactAdjustedArmor = TaleWorlds.Library.MathF.Max(0f, adjustedArmor * (1f - penetrationFactor));
+            return Math.Abs(exactAdjustedArmor - adjustedArmor) > 0.0001f;
+        }
+
+        private static bool IsSupportedArmorPenetrationSkill(string skillId)
+        {
+            return string.Equals(skillId, "OneHanded", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(skillId, "TwoHanded", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(skillId, "Crossbow", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(skillId, "Throwing", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static Agent ResolveHumanAgent(Agent agent)
+        {
+            if (agent == null)
+                return null;
+
+            if (agent.IsMount)
+                return agent.RiderAgent;
+
+            return agent.IsHuman ? agent : null;
+        }
+
+        private static bool IsHeadHit(in AttackCollisionData collisionData)
+        {
+            return (int)collisionData.VictimHitBodyPart == 0;
         }
 
         private static bool ShouldUseSandboxArmorFormula()
