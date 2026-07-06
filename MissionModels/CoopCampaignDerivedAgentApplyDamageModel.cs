@@ -27,7 +27,21 @@ namespace CoopSpectator.MissionModels
 
         public override bool IsDamageIgnored(in AttackInformation attackInformation, in AttackCollisionData collisionData)
         {
-            return _baseModel.IsDamageIgnored(attackInformation, collisionData);
+            if (_baseModel.IsDamageIgnored(attackInformation, collisionData))
+                return true;
+
+            Agent exactVictimAgent = ResolveExactVictimHumanAgent(attackInformation);
+            WeaponComponentData weapon = attackInformation.AttackerWeapon.CurrentUsageItem;
+            if (exactVictimAgent == null ||
+                weapon == null ||
+                !weapon.IsConsumable ||
+                !collisionData.CollidedWithShieldOnBack ||
+                !CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(exactVictimAgent, "CrossbowPavise", out _))
+            {
+                return false;
+            }
+
+            return MBRandom.RandomFloat <= 0.75f;
         }
 
         public override float ApplyDamageAmplifications(in AttackInformation attackInformation, in AttackCollisionData collisionData, float baseDamage)
@@ -64,7 +78,25 @@ namespace CoopSpectator.MissionModels
 
         public override float ApplyDamageReductions(in AttackInformation attackInformation, in AttackCollisionData collisionData, float baseDamage)
         {
-            return _baseModel.ApplyDamageReductions(attackInformation, collisionData, baseDamage);
+            float reducedDamage = _baseModel.ApplyDamageReductions(attackInformation, collisionData, baseDamage);
+            if (!collisionData.IsMissile)
+                return reducedDamage;
+
+            WeaponComponentData attackerWeapon = attackInformation.AttackerWeapon.CurrentUsageItem;
+            if (attackerWeapon == null || !attackerWeapon.IsConsumable)
+                return reducedDamage;
+
+            Agent victimAgent = attackInformation.VictimAgent;
+            WeaponComponentData victimWeapon = attackInformation.VictimMainHandWeapon.CurrentUsageItem;
+            if (victimAgent == null ||
+                victimWeapon == null ||
+                !IsCrossbowSkill(ResolveRelevantSkill(victimWeapon)?.StringId) ||
+                !CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(victimAgent, "CrossbowCounterFire", out _))
+            {
+                return reducedDamage;
+            }
+
+            return MathF.Max(0f, reducedDamage * 0.9f);
         }
 
         public override float ApplyGeneralDamageModifiers(in AttackInformation attackInformation, in AttackCollisionData collisionData, float baseDamage)
@@ -171,7 +203,11 @@ namespace CoopSpectator.MissionModels
 
         public override bool CanWeaponDismount(Agent attackerAgent, WeaponComponentData attackerWeapon, in Blow blow, in AttackCollisionData collisionData)
         {
-            return _baseModel.CanWeaponDismount(attackerAgent, attackerWeapon, blow, collisionData);
+            if (_baseModel.CanWeaponDismount(attackerAgent, attackerWeapon, blow, collisionData))
+                return true;
+
+            return IsDismountableBodyPart(blow.VictimBodyPart) &&
+                   HasExactPersonalCrossbowHammerBolts(attackerAgent, attackerWeapon);
         }
 
         public override bool CanWeaponKnockback(Agent attackerAgent, WeaponComponentData attackerWeapon, in Blow blow, in AttackCollisionData collisionData)
@@ -226,7 +262,11 @@ namespace CoopSpectator.MissionModels
 
         public override float GetDismountPenetration(Agent attackerAgent, WeaponComponentData attackerWeapon, in Blow blow, in AttackCollisionData collisionData)
         {
-            return _baseModel.GetDismountPenetration(attackerAgent, attackerWeapon, blow, collisionData);
+            float penetration = _baseModel.GetDismountPenetration(attackerAgent, attackerWeapon, blow, collisionData);
+            if (HasExactPersonalCrossbowHammerBolts(attackerAgent, attackerWeapon))
+                penetration += 0.5f;
+
+            return MathF.Max(0f, penetration);
         }
 
         public override float GetKnockBackPenetration(Agent attackerAgent, WeaponComponentData attackerWeapon, in Blow blow, in AttackCollisionData collisionData)
@@ -348,6 +388,32 @@ namespace CoopSpectator.MissionModels
                         "UnstoppableForce=" + unstoppableForceFactor.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
                 }
             }
+            else if (IsCrossbowSkill(skillId))
+            {
+                if (attackInformation.IsVictimAgentMount &&
+                    CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "CrossbowUnhorser", out _))
+                {
+                    totalFactor *= 1.4f;
+                    factorSummary = AppendFactorSummary(factorSummary, "Unhorser=1.4");
+                }
+
+                if (attackInformation.IsHeadShot &&
+                    CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "CrossbowSheriff", out _))
+                {
+                    totalFactor *= 1.5f;
+                    factorSummary = AppendFactorSummary(factorSummary, "Sheriff=1.5");
+                }
+
+                if (exactSkill > 200 &&
+                    CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "CrossbowMightyPull", out _))
+                {
+                    float mightyPullFactor = 1f + (exactSkill - 200) * 0.005f;
+                    totalFactor *= mightyPullFactor;
+                    factorSummary = AppendFactorSummary(
+                        factorSummary,
+                        "MightyPull=" + mightyPullFactor.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
 
             if ((attackInformation.DoesAttackerHaveMountAgent || attackInformation.IsAttackerAgentMount) &&
                 weapon.IsConsumable &&
@@ -409,7 +475,40 @@ namespace CoopSpectator.MissionModels
         private static bool IsSupportedRangedDamageSkill(string skillId)
         {
             return string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase) ||
+                   IsCrossbowSkill(skillId) ||
                    string.Equals(skillId, "Throwing", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsCrossbowSkill(string skillId)
+        {
+            return string.Equals(skillId, "Crossbow", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static Agent ResolveExactVictimHumanAgent(in AttackInformation attackInformation)
+        {
+            Agent victimAgent = attackInformation.VictimAgent;
+            if (victimAgent == null)
+                return null;
+
+            if (attackInformation.IsVictimAgentMount)
+                return victimAgent.RiderAgent;
+
+            return victimAgent.IsHuman ? victimAgent : null;
+        }
+
+        private static bool HasExactPersonalCrossbowHammerBolts(Agent attackerAgent, WeaponComponentData attackerWeapon)
+        {
+            return attackerAgent != null &&
+                   attackerWeapon != null &&
+                   attackerWeapon.IsConsumable &&
+                   IsCrossbowSkill(ResolveRelevantSkill(attackerWeapon)?.StringId) &&
+                   CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "CrossbowHammerBolts", out _);
+        }
+
+        private static bool IsDismountableBodyPart(BoneBodyPartType bodyPart)
+        {
+            int bodyPartValue = (int)bodyPart;
+            return bodyPartValue >= 0 && bodyPartValue <= 6;
         }
 
         private static bool IsBallistaProjectileWeapon(MissionWeapon weapon)

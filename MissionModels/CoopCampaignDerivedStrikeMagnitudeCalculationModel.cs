@@ -86,7 +86,11 @@ namespace CoopSpectator.MissionModels
 
         public override float CalculateAdjustedArmorForBlow(in AttackInformation attackInformation, in AttackCollisionData collisionData, float baseArmor, BasicCharacterObject attackerCharacter, BasicCharacterObject attackerCaptainCharacter, BasicCharacterObject victimCharacter, BasicCharacterObject victimCaptainCharacter, WeaponComponentData weaponComponent)
         {
-            return _baseModel.CalculateAdjustedArmorForBlow(attackInformation, collisionData, baseArmor, attackerCharacter, attackerCaptainCharacter, victimCharacter, victimCaptainCharacter, weaponComponent);
+            float adjustedArmor = _baseModel.CalculateAdjustedArmorForBlow(attackInformation, collisionData, baseArmor, attackerCharacter, attackerCaptainCharacter, victimCharacter, victimCaptainCharacter, weaponComponent);
+            if (!TryApplyExactPersonalCrossbowArmorPenetration(attackInformation.AttackerAgent, baseArmor, adjustedArmor, weaponComponent, out float exactAdjustedArmor))
+                return adjustedArmor;
+
+            return exactAdjustedArmor;
         }
 
         private void TryLogMissileMagnitude(
@@ -183,6 +187,37 @@ namespace CoopSpectator.MissionModels
                 default:
                     return relevantSkill;
             }
+        }
+
+        private static bool TryApplyExactPersonalCrossbowArmorPenetration(
+            Agent attackerAgent,
+            float baseArmor,
+            float adjustedArmor,
+            WeaponComponentData weaponComponent,
+            out float exactAdjustedArmor)
+        {
+            exactAdjustedArmor = adjustedArmor;
+            if (attackerAgent == null || weaponComponent == null || adjustedArmor <= 0f)
+                return false;
+
+            SkillObject relevantSkill = ResolveRelevantSkill(weaponComponent);
+            if (!string.Equals(relevantSkill?.StringId, "Crossbow", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (baseArmor < 20f &&
+                CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "CrossbowPiercer", out _))
+            {
+                exactAdjustedArmor = 0f;
+                return true;
+            }
+
+            if (CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(attackerAgent, "CrossbowPuncture", out _))
+            {
+                exactAdjustedArmor = TaleWorlds.Library.MathF.Max(0f, adjustedArmor * 0.9f);
+                return Math.Abs(exactAdjustedArmor - adjustedArmor) > 0.0001f;
+            }
+
+            return false;
         }
 
         private static bool ShouldUseSandboxArmorFormula()
