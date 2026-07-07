@@ -78,7 +78,7 @@ namespace CoopSpectator.Commands
             {
                 return "Coop test battle is " +
                        Campaign.BattleDetector.GetCoopTestBattleStatusSummary() +
-                       ". Usage: coop.test_battle <on|off|status|roster matrix_only|roster campaign_all|roster campaign_mirror_all|roster campaign_mirror_heroes|roster campaign_mirror_heroes_combat|roster shield_banners|roster mixed|roster five_mode_matrix|roster role_matrix_stream|roster role_matrix_stream_mounted|matrix on|matrix off|five_mode_protocol on|five_mode_protocol off|campaign_ai on|campaign_ai off|weapon_priority on|weapon_priority all|weapon_priority suspects|weapon_priority off|crafted_weapons safe|crafted_weapons create_time|limit N|active_limit N|wave_lifetime seconds|priority_lifetime seconds|matrix_progress|matrix_progress reset|matrix_unsafe list|matrix_unsafe add M00001 [reason]|matrix_unsafe add_last [reason]|matrix_unsafe remove M00001|matrix_unsafe clear>.";
+                       ". Usage: coop.test_battle <on|off|status|roster matrix_only|roster campaign_all|roster campaign_mirror_all|roster campaign_mirror_heroes|roster campaign_mirror_heroes_combat|roster shield_banners|roster mixed|roster five_mode_matrix|roster role_matrix_stream|roster role_matrix_stream_mounted|matrix on|matrix off|five_mode_protocol on|five_mode_protocol off|campaign_ai on|campaign_ai off|weapon_priority on|weapon_priority all|weapon_priority suspects|weapon_priority off|crafted_weapons safe|crafted_weapons create_time|debug shield_banners on|debug possession on|limit N|active_limit N|wave_lifetime seconds|priority_lifetime seconds|matrix_progress|matrix_progress reset|matrix_unsafe list|matrix_unsafe add M00001 [reason]|matrix_unsafe add_last [reason]|matrix_unsafe remove M00001|matrix_unsafe clear>.";
             }
 
             string action = (args[0] ?? string.Empty).Trim().ToLowerInvariant();
@@ -199,6 +199,64 @@ namespace CoopSpectator.Commands
                 return "Unknown coop test battle crafted weapons mode. Use safe or create_time.";
             }
 
+            if (action == "debug" && args.Count >= 2)
+            {
+                string debugTarget = (args[1] ?? string.Empty).Trim().ToLowerInvariant();
+                if (debugTarget == "shield_banners" || debugTarget == "shield-banners" || debugTarget == "banners")
+                {
+                    string debugAction = args.Count >= 3 ? (args[2] ?? string.Empty).Trim().ToLowerInvariant() : "status";
+                    if (debugAction == "status")
+                        return CoopDebugConfig.GetShieldBannerDiagnosticsStatus() + ".";
+
+                    if (debugAction == "on" || debugAction == "enable" || debugAction == "1" || debugAction == "true")
+                    {
+                        CoopDebugConfig.SetShieldBannerDiagnosticsRuntimeOverride(true);
+                        return "Shield banner diagnostics enabled. " + CoopDebugConfig.GetShieldBannerDiagnosticsStatus() + ".";
+                    }
+
+                    if (debugAction == "off" || debugAction == "disable" || debugAction == "0" || debugAction == "false")
+                    {
+                        CoopDebugConfig.SetShieldBannerDiagnosticsRuntimeOverride(false);
+                        return "Shield banner diagnostics disabled. " + CoopDebugConfig.GetShieldBannerDiagnosticsStatus() + ".";
+                    }
+
+                    if (debugAction == "reset" || debugAction == "env" || debugAction == "inherit")
+                    {
+                        CoopDebugConfig.SetShieldBannerDiagnosticsRuntimeOverride(null);
+                        return "Shield banner diagnostics runtime override cleared. " + CoopDebugConfig.GetShieldBannerDiagnosticsStatus() + ".";
+                    }
+
+                    return "Usage: coop.test_battle debug shield_banners <on|off|status|reset>.";
+                }
+
+                if (debugTarget == "possession" || debugTarget == "possess" || debugTarget == "controlled_agent" || debugTarget == "controlled-agent")
+                {
+                    string debugAction = args.Count >= 3 ? (args[2] ?? string.Empty).Trim().ToLowerInvariant() : "status";
+                    if (debugAction == "status")
+                        return CoopDebugConfig.GetPossessionDiagnosticsStatus() + ".";
+
+                    if (debugAction == "on" || debugAction == "enable" || debugAction == "1" || debugAction == "true")
+                    {
+                        CoopDebugConfig.SetPossessionDiagnosticsRuntimeOverride(true);
+                        return "Possession diagnostics enabled. " + CoopDebugConfig.GetPossessionDiagnosticsStatus() + ".";
+                    }
+
+                    if (debugAction == "off" || debugAction == "disable" || debugAction == "0" || debugAction == "false")
+                    {
+                        CoopDebugConfig.SetPossessionDiagnosticsRuntimeOverride(false);
+                        return "Possession diagnostics disabled. " + CoopDebugConfig.GetPossessionDiagnosticsStatus() + ".";
+                    }
+
+                    if (debugAction == "reset" || debugAction == "env" || debugAction == "inherit")
+                    {
+                        CoopDebugConfig.SetPossessionDiagnosticsRuntimeOverride(null);
+                        return "Possession diagnostics runtime override cleared. " + CoopDebugConfig.GetPossessionDiagnosticsStatus() + ".";
+                    }
+
+                    return "Usage: coop.test_battle debug possession <on|off|status|reset>.";
+                }
+            }
+
             if (action == "roster" && args.Count >= 2)
             {
                 if (CoopTestBattleOptions.TryParseRosterMode(args[1], out CoopTestBattleOptions.RosterMode rosterMode))
@@ -289,7 +347,7 @@ namespace CoopSpectator.Commands
                 }
             }
 
-            return "Usage: coop.test_battle <on|off|status|roster matrix_only|roster campaign_all|roster campaign_mirror_all|roster campaign_mirror_heroes|roster campaign_mirror_heroes_combat|roster shield_banners|roster mixed|roster five_mode_matrix|roster role_matrix_stream|roster role_matrix_stream_mounted|matrix on|matrix off|five_mode_protocol on|five_mode_protocol off|campaign_ai on|campaign_ai off|weapon_priority on|weapon_priority all|weapon_priority suspects|weapon_priority off|crafted_weapons safe|crafted_weapons create_time|limit N|active_limit N|wave_lifetime seconds|priority_lifetime seconds|matrix_progress|matrix_progress reset|matrix_unsafe list|matrix_unsafe add M00001 [reason]|matrix_unsafe add_last [reason]|matrix_unsafe remove M00001|matrix_unsafe clear>.";
+            return "Usage: coop.test_battle <on|off|status|roster matrix_only|roster campaign_all|roster campaign_mirror_all|roster campaign_mirror_heroes|roster campaign_mirror_heroes_combat|roster shield_banners|roster mixed|roster five_mode_matrix|roster role_matrix_stream|roster role_matrix_stream_mounted|matrix on|matrix off|five_mode_protocol on|five_mode_protocol off|campaign_ai on|campaign_ai off|weapon_priority on|weapon_priority all|weapon_priority suspects|weapon_priority off|crafted_weapons safe|crafted_weapons create_time|debug shield_banners on|debug possession on|limit N|active_limit N|wave_lifetime seconds|priority_lifetime seconds|matrix_progress|matrix_progress reset|matrix_unsafe list|matrix_unsafe add M00001 [reason]|matrix_unsafe add_last [reason]|matrix_unsafe remove M00001|matrix_unsafe clear>.";
         }
     }
 }

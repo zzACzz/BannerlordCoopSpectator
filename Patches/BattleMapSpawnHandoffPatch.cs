@@ -111,6 +111,9 @@ namespace CoopSpectator.Patches
         private static string _lastDeferredExactSiegeUnsafeWeaponAmmoDataKey;
         private static string _lastDeferredExactSiegeUnsafeWeaponReloadPhaseKey;
         private static string _lastSuppressedExactSiegeUnsafeWeaponStateKey;
+        private static string _lastSuppressedPostPossessionControlledTroopWeaponStateKey;
+        private static string _lastAllowedPostPossessionControlledTroopRangedReloadStateKey;
+        private static string _lastPossessionLifecycleDiagnosticsKey;
         private static bool _suppressExactCommanderOrderHotkeyFallbackUntilRelease;
         private static object _activeExactCommanderMissionOrderVm;
         private static PendingLocalCommanderOrderControlFinalization _pendingLocalCommanderOrderControlFinalization;
@@ -672,6 +675,11 @@ namespace CoopSpectator.Patches
             _lastExactCommanderTwoPositionOrderBridgeKey = null;
             _lastRegisteredActiveExactCommanderMissionOrderVmKey = null;
             _lastDeferredExactSiegeUnsafeWeaponAmmoDataKey = null;
+            _lastDeferredExactSiegeUnsafeWeaponReloadPhaseKey = null;
+            _lastSuppressedExactSiegeUnsafeWeaponStateKey = null;
+            _lastSuppressedPostPossessionControlledTroopWeaponStateKey = null;
+            _lastAllowedPostPossessionControlledTroopRangedReloadStateKey = null;
+            _lastPossessionLifecycleDiagnosticsKey = null;
             lock (ExactSiegeMissionObjectSyncDiagnosticsLock)
             {
                 LoggedExactSiegeMissionObjectSyncDiagnosticKeys.Clear();
@@ -2176,6 +2184,13 @@ namespace CoopSpectator.Patches
                 ExactTransferContractRuntimeCache.ObserveClientPeerBound(
                     agent.Index,
                     "battle-map handoff SetAgentPeer");
+                bool postPossessionWeaponStateWindowArmed =
+                    CoopMissionSpawnLogic.ArmClientPostPossessionControlledTroopWeaponStateSuppression(
+                        mission,
+                        agent,
+                        preferredEntryId,
+                        "battle-map handoff SetAgentPeer local",
+                        out string postPossessionWeaponStateWindowReason);
                 bool deferImmediateExactVisualFinalize =
                     ShouldDeferImmediateClientExactVisualFinalize(agent);
                 bool exactVisualApplied = CoopMissionSpawnLogic.TryFinalizeClientExactCampaignVisualForAgent(
@@ -2196,6 +2211,13 @@ namespace CoopSpectator.Patches
                 }
                 if (exactVisualApplied && !deferImmediateExactVisualFinalize)
                     agent.MountAgent?.UpdateAgentProperties();
+                bool postPossessionLiveWeaponRefreshed =
+                    CoopMissionSpawnLogic.TryRefreshClientPostPossessionControlledTroopLiveWeaponState(
+                        mission,
+                        agent,
+                        preferredEntryId,
+                        "battle-map handoff SetAgentPeer local",
+                        out string postPossessionLiveWeaponRefreshReason);
 
                 _lastLocalVisualFinalizeKey = logKey;
                 ModLogger.Info(
@@ -2206,6 +2228,10 @@ namespace CoopSpectator.Patches
                     " ExactVisualApplied=" + exactVisualApplied +
                     " TroopExactVisualApplied=" + troopExactVisualApplied +
                     " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
+                    " PostPossessionWeaponStateWindowArmed=" + postPossessionWeaponStateWindowArmed +
+                    " PostPossessionWeaponStateWindow=" + (postPossessionWeaponStateWindowReason ?? "none") +
+                    " PostPossessionLiveWeaponRefreshed=" + postPossessionLiveWeaponRefreshed +
+                    " PostPossessionLiveWeaponRefresh=" + (postPossessionLiveWeaponRefreshReason ?? "none") +
                     " PreferredEntryId=" + (preferredEntryId ?? "null") +
                     " EntryResolutionSource=" + (entryResolutionSource ?? "null") +
                     " BridgeTroop=" + (entryPolicy.BridgeTroopOrEntryId ?? "null") +
@@ -2218,7 +2244,11 @@ namespace CoopSpectator.Patches
                     " PreferredEntryId=" + (preferredEntryId ?? "null") +
                     " DeferredImmediateExactVisualFinalize=" + deferImmediateExactVisualFinalize +
                     " ExactVisualApplied=" + exactVisualApplied +
-                    " TroopExactVisualApplied=" + troopExactVisualApplied);
+                    " TroopExactVisualApplied=" + troopExactVisualApplied +
+                    " PostPossessionWeaponStateWindowArmed=" + postPossessionWeaponStateWindowArmed +
+                    " PostPossessionWeaponStateWindow=" + (postPossessionWeaponStateWindowReason ?? "none") +
+                    " PostPossessionLiveWeaponRefreshed=" + postPossessionLiveWeaponRefreshed +
+                    " PostPossessionLiveWeaponRefresh=" + (postPossessionLiveWeaponRefreshReason ?? "none"));
             }
             catch (Exception ex)
             {
@@ -7957,6 +7987,106 @@ namespace CoopSpectator.Patches
                 " Source=" + (source ?? "unknown"));
         }
 
+        private static void LogSuppressedPostPossessionControlledTroopWeaponState(
+            string messageName,
+            int agentIndex,
+            EquipmentIndex equipmentIndex,
+            string reason,
+            string source)
+        {
+            string key =
+                (messageName ?? "unknown") + "|" +
+                agentIndex + "|" +
+                equipmentIndex + "|" +
+                (reason ?? "unknown");
+            if (string.Equals(_lastSuppressedPostPossessionControlledTroopWeaponStateKey, key, StringComparison.Ordinal))
+                return;
+
+            _lastSuppressedPostPossessionControlledTroopWeaponStateKey = key;
+            string summary =
+                "Message=" + (messageName ?? "weapon-state-message") +
+                " AgentIndex=" + agentIndex +
+                " EquipmentIndex=" + equipmentIndex +
+                " Reason=" + (reason ?? "unknown") +
+                " Source=" + (source ?? "unknown");
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: suppressed client post-possession controlled troop weapon-state echo. " +
+                summary);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                "client-post-possession-controlled-troop-weapon-state-suppressed",
+                summary);
+        }
+
+        private static void LogAllowedPostPossessionControlledTroopRangedReloadState(
+            string messageName,
+            int agentIndex,
+            EquipmentIndex equipmentIndex,
+            string reason,
+            string source)
+        {
+            if (!CoopDebugConfig.PossessionDiagnostics)
+                return;
+
+            string key =
+                (messageName ?? "unknown") + "|" +
+                agentIndex + "|" +
+                equipmentIndex + "|" +
+                (reason ?? "unknown");
+            if (string.Equals(_lastAllowedPostPossessionControlledTroopRangedReloadStateKey, key, StringComparison.Ordinal))
+                return;
+
+            _lastAllowedPostPossessionControlledTroopRangedReloadStateKey = key;
+            string summary =
+                "Message=" + (messageName ?? "weapon-state-message") +
+                " AgentIndex=" + agentIndex +
+                " EquipmentIndex=" + equipmentIndex +
+                " Reason=" + (reason ?? "unknown") +
+                " Source=" + (source ?? "unknown");
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: allowed client post-possession controlled troop ranged reload state. " +
+                summary);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                "client-post-possession-controlled-troop-ranged-reload-state-allowed",
+                summary);
+        }
+
+        private static void TryLogClientPossessionLifecycleDiagnostics(
+            Mission mission,
+            int agentIndex,
+            Agent agent,
+            string eventName,
+            string payloadSummary)
+        {
+            if (!CoopMissionSpawnLogic.TryBuildClientPossessionLifecycleDiagnostics(
+                    mission,
+                    agentIndex,
+                    agent,
+                    eventName,
+                    out string diagnosticsSummary))
+            {
+                return;
+            }
+
+            string summary =
+                diagnosticsSummary +
+                " Payload={" + (payloadSummary ?? "(none)") + "}";
+            string key =
+                eventName + "|" +
+                agentIndex + "|" +
+                (payloadSummary ?? string.Empty) + "|" +
+                diagnosticsSummary;
+            if (string.Equals(_lastPossessionLifecycleDiagnosticsKey, key, StringComparison.Ordinal))
+                return;
+
+            _lastPossessionLifecycleDiagnosticsKey = key;
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: client possession lifecycle diagnostics. " +
+                summary);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                "client-possession-lifecycle-diagnostics",
+                summary);
+        }
+
         private static void TryReplayDeferredClientSetWeaponReloadPhase(
             Mission mission,
             string source,
@@ -12349,6 +12479,14 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                TryLogClientPossessionLifecycleDiagnostics(
+                    mission,
+                    spawnAttachedWeaponOnCorpse.AgentIndex,
+                    agent,
+                    nameof(SpawnAttachedWeaponOnCorpse),
+                    "AttachedIndex=" + spawnAttachedWeaponOnCorpse.AttachedIndex +
+                    " ForcedIndex=" + spawnAttachedWeaponOnCorpse.ForcedIndex);
+
                 return true;
             }
             catch (Exception ex)
@@ -12502,6 +12640,25 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (CoopMissionSpawnLogic.ShouldSuppressClientPostPossessionControlledTroopWeaponState(
+                        mission,
+                        agent,
+                        setWeaponNetworkData.WeaponEquipmentIndex,
+                        nameof(SetWeaponNetworkData),
+                        out string postPossessionWeaponStateReason))
+                {
+                    RemoveDeferredClientSetWeaponNetworkDataPayload(
+                        setWeaponNetworkData.AgentIndex,
+                        setWeaponNetworkData);
+                    LogSuppressedPostPossessionControlledTroopWeaponState(
+                        nameof(SetWeaponNetworkData),
+                        setWeaponNetworkData.AgentIndex,
+                        setWeaponNetworkData.WeaponEquipmentIndex,
+                        postPossessionWeaponStateReason,
+                        "prefix");
+                    return false;
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -12552,6 +12709,47 @@ namespace CoopSpectator.Patches
                         "AgentIndex=" + setWeaponAmmoData.AgentIndex +
                         " WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
                         " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex);
+                    return false;
+                }
+
+                if (CoopMissionSpawnLogic.ShouldAllowClientPostPossessionControlledTroopRangedReloadState(
+                        mission,
+                        agent,
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        nameof(SetWeaponAmmoData),
+                        out string allowedPostPossessionRangedReloadReason))
+                {
+                    LogAllowedPostPossessionControlledTroopRangedReloadState(
+                        nameof(SetWeaponAmmoData),
+                        setWeaponAmmoData.AgentIndex,
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        allowedPostPossessionRangedReloadReason,
+                        "prefix");
+                    TryLogClientPossessionLifecycleDiagnostics(
+                        mission,
+                        setWeaponAmmoData.AgentIndex,
+                        agent,
+                        "SetWeaponAmmoDataAllowedPostPossessionRangedReload",
+                        "WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
+                        " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex +
+                        " Ammo=" + setWeaponAmmoData.Ammo);
+                }
+                else if (CoopMissionSpawnLogic.ShouldSuppressClientPostPossessionControlledTroopWeaponState(
+                        mission,
+                        agent,
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        nameof(SetWeaponAmmoData),
+                        out string postPossessionWeaponStateReason))
+                {
+                    RemoveDeferredClientSetWeaponAmmoDataPayload(
+                        setWeaponAmmoData.AgentIndex,
+                        setWeaponAmmoData);
+                    LogSuppressedPostPossessionControlledTroopWeaponState(
+                        nameof(SetWeaponAmmoData),
+                        setWeaponAmmoData.AgentIndex,
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        postPossessionWeaponStateReason,
+                        "prefix");
                     return false;
                 }
 
@@ -12673,6 +12871,45 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (CoopMissionSpawnLogic.ShouldAllowClientPostPossessionControlledTroopRangedReloadState(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.EquipmentIndex,
+                        nameof(SetWeaponReloadPhase),
+                        out string allowedPostPossessionRangedReloadReason))
+                {
+                    LogAllowedPostPossessionControlledTroopRangedReloadState(
+                        nameof(SetWeaponReloadPhase),
+                        setWeaponReloadPhase.AgentIndex,
+                        setWeaponReloadPhase.EquipmentIndex,
+                        allowedPostPossessionRangedReloadReason,
+                        "prefix");
+                    TryLogClientPossessionLifecycleDiagnostics(
+                        mission,
+                        setWeaponReloadPhase.AgentIndex,
+                        agent,
+                        "SetWeaponReloadPhaseAllowedPostPossessionRangedReload",
+                        "EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex);
+                }
+                else if (CoopMissionSpawnLogic.ShouldSuppressClientPostPossessionControlledTroopWeaponState(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.EquipmentIndex,
+                        nameof(SetWeaponReloadPhase),
+                        out string postPossessionWeaponStateReason))
+                {
+                    RemoveDeferredClientSetWeaponReloadPhasePayload(
+                        setWeaponReloadPhase.AgentIndex,
+                        setWeaponReloadPhase);
+                    LogSuppressedPostPossessionControlledTroopWeaponState(
+                        nameof(SetWeaponReloadPhase),
+                        setWeaponReloadPhase.AgentIndex,
+                        setWeaponReloadPhase.EquipmentIndex,
+                        postPossessionWeaponStateReason,
+                        "prefix");
+                    return false;
+                }
+
                 if (IsPermanentExactSiegeClientWeaponStateUnsafe(
                         mission,
                         agent,
@@ -12761,6 +12998,25 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (CoopMissionSpawnLogic.ShouldSuppressClientPostPossessionControlledTroopWeaponState(
+                        mission,
+                        agent,
+                        startSwitchingWeaponUsageIndex.EquipmentIndex,
+                        nameof(StartSwitchingWeaponUsageIndex),
+                        out string postPossessionWeaponStateReason))
+                {
+                    RemoveDeferredClientStartSwitchingWeaponUsageIndexPayload(
+                        startSwitchingWeaponUsageIndex.AgentIndex,
+                        startSwitchingWeaponUsageIndex);
+                    LogSuppressedPostPossessionControlledTroopWeaponState(
+                        nameof(StartSwitchingWeaponUsageIndex),
+                        startSwitchingWeaponUsageIndex.AgentIndex,
+                        startSwitchingWeaponUsageIndex.EquipmentIndex,
+                        postPossessionWeaponStateReason,
+                        "prefix");
+                    return false;
+                }
+
                 if (IsPermanentExactSiegeClientWeaponStateUnsafe(
                         mission,
                         agent,
@@ -12842,6 +13098,25 @@ namespace CoopSpectator.Patches
                         "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
                         " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
                         " UsageIndex=" + weaponUsageIndexChangeMessage.UsageIndex);
+                    return false;
+                }
+
+                if (CoopMissionSpawnLogic.ShouldSuppressClientPostPossessionControlledTroopWeaponState(
+                        mission,
+                        agent,
+                        weaponUsageIndexChangeMessage.SlotIndex,
+                        nameof(WeaponUsageIndexChangeMessage),
+                        out string postPossessionWeaponStateReason))
+                {
+                    RemoveDeferredClientWeaponUsageIndexChangePayload(
+                        weaponUsageIndexChangeMessage.AgentIndex,
+                        weaponUsageIndexChangeMessage);
+                    LogSuppressedPostPossessionControlledTroopWeaponState(
+                        nameof(WeaponUsageIndexChangeMessage),
+                        weaponUsageIndexChangeMessage.AgentIndex,
+                        weaponUsageIndexChangeMessage.SlotIndex,
+                        postPossessionWeaponStateReason,
+                        "prefix");
                     return false;
                 }
 
@@ -13324,6 +13599,13 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                TryLogClientPossessionLifecycleDiagnostics(
+                    mission,
+                    makeAgentDead.AgentIndex,
+                    agent,
+                    nameof(MakeAgentDead),
+                    "IsKilled=" + makeAgentDead.IsKilled);
+
                 return true;
             }
             catch (Exception ex)
@@ -13379,6 +13661,42 @@ namespace CoopSpectator.Patches
 
                 if (agent == null)
                     return true;
+
+                if (ShouldUseSafeStringIdCreateAgentPathOnClient(mission) &&
+                    CoopMissionSpawnLogic.ShouldSuppressClientPostPossessionControlledTroopWeaponState(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.WieldedItemIndex,
+                        nameof(SetWieldedItemIndex),
+                        out string postPossessionWeaponStateReason))
+                {
+                    __state = true;
+                    LogSuppressedPostPossessionControlledTroopWeaponState(
+                        nameof(SetWieldedItemIndex),
+                        setWieldedItemIndex.AgentIndex,
+                        setWieldedItemIndex.WieldedItemIndex,
+                        postPossessionWeaponStateReason +
+                        "|PayloadIsLeftHand=" + setWieldedItemIndex.IsLeftHand +
+                        "|PayloadIsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
+                        "|PayloadIsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
+                        "|PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex,
+                        "prefix");
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientSetWieldedItemIndex(
+                        setWieldedItemIndex,
+                        agent,
+                        suppressed: true,
+                        source: "battle-map handoff post-possession controlled troop weapon-state guard");
+                    CoopMissionSpawnLogic.ObserveClientSetWieldedItemIndex(
+                        setWieldedItemIndex.AgentIndex,
+                        setWieldedItemIndex.IsWieldedOnSpawn,
+                        "battle-map handoff post-possession controlled troop weapon-state guard");
+                    CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
+                        agent,
+                        "client-set-wielded-item-index-suppressed",
+                        "battle-map handoff post-possession controlled troop weapon-state guard",
+                        postPossessionWeaponStateReason ?? "post-possession-controlled-troop-weapon-state");
+                    return false;
+                }
 
                 if (setWieldedItemIndex.IsWieldedOnSpawn &&
                     TrySuppressStrictExactHeroStaleOnSpawnWield(setWieldedItemIndex, agent))

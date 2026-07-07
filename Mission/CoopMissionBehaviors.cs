@@ -3716,6 +3716,11 @@ namespace CoopSpectator.MissionBehaviors
         private static int _clientPostPossessionExactVisualPauseControlledAgentIndex = -1;
         private static DateTime _clientPostPossessionMountedTroopWeaponRefreshResumeUtc;
         private static int _clientPostPossessionMountedTroopWeaponRefreshControlledAgentIndex = -1;
+        private static DateTime _clientPostPossessionControlledTroopWeaponStateSuppressUntilUtc = DateTime.MinValue;
+        private static int _clientPostPossessionControlledTroopWeaponStateAgentIndex = -1;
+        private static int _clientPostPossessionPreviousControlledAgentIndex = -1;
+        private static readonly Dictionary<int, MaterializedPossessionProtectionState> _materializedPossessionProtectionByAgentIndex =
+            new Dictionary<int, MaterializedPossessionProtectionState>();
         private static int _lastObservedClientControlledAgentIndexForExactVisualPause = int.MinValue;
         private static bool _pendingClientExactVisualSelectionPauseSticky;
         private static bool? _lastAppliedBattlePhaseAiHold;
@@ -3781,6 +3786,18 @@ namespace CoopSpectator.MissionBehaviors
             public Agent Agent;
             public string EntryId;
             public BattleSideEnum Side;
+            public string Source;
+        }
+
+        private sealed class MaterializedPossessionProtectionState
+        {
+            public int AgentIndex;
+            public Agent Agent;
+            public Agent.MortalityState PreviousMortalityState;
+            public DateTime RestoreUtc;
+            public int PeerIndex = -1;
+            public string PeerName;
+            public string Role;
             public string Source;
         }
 
@@ -3934,6 +3951,8 @@ namespace CoopSpectator.MissionBehaviors
         private const double ClientPostPossessionExactVisualPauseSeconds = 1.75d;
         private const double ClientPostPossessionExactVisualAcquirePauseSeconds = 1.10d;
         private const double ClientPostPossessionMountedTroopWeaponRefreshCooldownSeconds = 3.25d;
+        private const double ClientPostPossessionControlledTroopWeaponStateSuppressionSeconds = 3.0d;
+        private const double MaterializedPossessionProtectionSeconds = 1.0d;
         private static Agent _diagnosticAllowedAgent;
         private const bool EnableFixedMissionCulturesExperiment = true;
         private const string SyntheticAllCampaignTroopsBattleId = "synthetic_all_campaign_troops";
@@ -4771,6 +4790,10 @@ namespace CoopSpectator.MissionBehaviors
             _clientPostPossessionExactVisualPauseControlledAgentIndex = -1;
             _clientPostPossessionMountedTroopWeaponRefreshResumeUtc = DateTime.MinValue;
             _clientPostPossessionMountedTroopWeaponRefreshControlledAgentIndex = -1;
+            _clientPostPossessionControlledTroopWeaponStateSuppressUntilUtc = DateTime.MinValue;
+            _clientPostPossessionControlledTroopWeaponStateAgentIndex = -1;
+            _clientPostPossessionPreviousControlledAgentIndex = -1;
+            _materializedPossessionProtectionByAgentIndex.Clear();
             _lastObservedClientControlledAgentIndexForExactVisualPause = int.MinValue;
             _lastPendingClientExactVisualPauseReason = string.Empty;
             _pendingClientExactVisualSelectionPauseSticky = false;
@@ -5405,6 +5428,7 @@ namespace CoopSpectator.MissionBehaviors
         {
             base.OnMissionTick(dt);
             if (!_hasLoggedStart) return;
+            TryRestoreExpiredMaterializedPossessionProtection(Mission, "CoopMissionSpawnLogic.OnMissionTick");
             _timeUntilNextPeerLog -= dt;
             if (_timeUntilNextPeerLog <= 0f)
             {
@@ -5833,6 +5857,10 @@ namespace CoopSpectator.MissionBehaviors
             TryTrackMaterializedBattleResultRemoval(affectedAgent, affectorAgent, agentState);
             TryLogMaterializedBattleResultRemovalDebug(affectedAgent, affectorAgent, agentState, blow);
             TryHandleRoleMatrixStreamAgentRemoved(affectedAgent?.Index ?? -1);
+            DropMaterializedPossessionProtectionForRemovedAgent(
+                affectedAgent,
+                agentState,
+                "CoopMissionSpawnLogic.OnAgentRemoved");
             ClearMaterializedAgentIndexScopedRuntimeCaches(affectedAgent?.Index ?? -1, clearRemovedGuard: false);
             ExactCreateAgentCorridorDiagnostics.ClearServerAgentIndexState(
                 affectedAgent?.Index ?? -1,
@@ -5894,6 +5922,10 @@ namespace CoopSpectator.MissionBehaviors
             _clientPostPossessionExactVisualPauseControlledAgentIndex = -1;
             _clientPostPossessionMountedTroopWeaponRefreshResumeUtc = DateTime.MinValue;
             _clientPostPossessionMountedTroopWeaponRefreshControlledAgentIndex = -1;
+            _clientPostPossessionControlledTroopWeaponStateSuppressUntilUtc = DateTime.MinValue;
+            _clientPostPossessionControlledTroopWeaponStateAgentIndex = -1;
+            _clientPostPossessionPreviousControlledAgentIndex = -1;
+            _materializedPossessionProtectionByAgentIndex.Clear();
             _lastObservedClientControlledAgentIndexForExactVisualPause = int.MinValue;
             _lastPendingClientExactVisualPauseReason = string.Empty;
             _pendingClientExactVisualSelectionPauseSticky = false;
@@ -6447,6 +6479,8 @@ namespace CoopSpectator.MissionBehaviors
         {
             if (mission == null || !GameNetwork.IsServer)
                 return;
+
+            TryRestoreExpiredMaterializedPossessionProtection(mission, (source ?? "shared-tick") + " possession-protection");
 
             AppendExactBattleAgentSpawnTraceLifecycleStep(
                 mission,
@@ -8100,6 +8134,10 @@ namespace CoopSpectator.MissionBehaviors
             _clientPostPossessionMountedTroopWeaponRefreshResumeUtc =
                 nowUtc.AddSeconds(Math.Max(durationSeconds, ClientPostPossessionMountedTroopWeaponRefreshCooldownSeconds));
             _clientPostPossessionMountedTroopWeaponRefreshControlledAgentIndex = currentControlledAgentIndex;
+            _clientPostPossessionControlledTroopWeaponStateSuppressUntilUtc =
+                nowUtc.AddSeconds(ClientPostPossessionControlledTroopWeaponStateSuppressionSeconds);
+            _clientPostPossessionControlledTroopWeaponStateAgentIndex = currentControlledAgentIndex;
+            _clientPostPossessionPreviousControlledAgentIndex = previousControlledAgentIndex;
             int droppedPendingTroopOverlays =
                 DropPendingClientTroopExactVisualOverlaysForLiveControl(
                     (source ?? "client post-possession exact visual stabilization") + " live-control-arm");
@@ -8110,6 +8148,8 @@ namespace CoopSpectator.MissionBehaviors
                 " DurationSeconds=" + durationSeconds.ToString("0.00") +
                 " MountedTroopWeaponCooldownSeconds=" +
                 Math.Max(durationSeconds, ClientPostPossessionMountedTroopWeaponRefreshCooldownSeconds).ToString("0.00") +
+                " ControlledTroopWeaponStateSuppressionSeconds=" +
+                ClientPostPossessionControlledTroopWeaponStateSuppressionSeconds.ToString("0.00") +
                 " DroppedPendingTroopOverlays=" + droppedPendingTroopOverlays +
                 " PendingCount=" + _pendingExactNativeClientVisualOverlaysByAgentIndex.Count +
                 " Source=" + (source ?? "unknown"));
@@ -8186,6 +8226,417 @@ namespace CoopSpectator.MissionBehaviors
             reason =
                 "ControlledAgentIndex=" + _clientPostPossessionExactVisualPauseControlledAgentIndex +
                 " RemainingSeconds=" + remainingSeconds.ToString("0.00");
+            return true;
+        }
+
+        internal static bool ShouldSuppressClientPostPossessionControlledTroopWeaponState(
+            Mission mission,
+            Agent agent,
+            EquipmentIndex equipmentIndex,
+            string messageName,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                mission == null ||
+                agent == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                agent.Team == null ||
+                agent.Team.Side == BattleSideEnum.None)
+            {
+                return false;
+            }
+
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            if (!IsLocalPeerControlledAgent(agent))
+                return false;
+
+            if (_clientPostPossessionControlledTroopWeaponStateAgentIndex != agent.Index)
+                return false;
+
+            DateTime suppressUntilUtc = _clientPostPossessionControlledTroopWeaponStateSuppressUntilUtc;
+            if (suppressUntilUtc == DateTime.MinValue)
+                return false;
+
+            double remainingSeconds = (suppressUntilUtc - DateTime.UtcNow).TotalSeconds;
+            if (remainingSeconds <= 0d)
+                return false;
+
+            string entryId = null;
+            if (!TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                !TryResolveSelectableEntryId(agent, out entryId) &&
+                !ExactTransferContractRuntimeCache.TryGetEntryIdByRiderAgentIndex(agent.Index, out entryId))
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (entryState == null || entryState.IsHero)
+                return false;
+
+            reason =
+                "exact-siege-controlled-troop-post-possession-weapon-state" +
+                "|Message=" + (messageName ?? "unknown") +
+                "|AgentIndex=" + agent.Index +
+                "|EntryId=" + (entryId ?? "null") +
+                "|CharacterId=" + (entryState.CharacterId ?? "null") +
+                "|TroopName=" + (entryState.TroopName ?? "null") +
+                "|EquipmentIndex=" + equipmentIndex +
+                "|RemainingSeconds=" + remainingSeconds.ToString("0.00");
+            return true;
+        }
+
+        internal static bool ShouldAllowClientPostPossessionControlledTroopRangedReloadState(
+            Mission mission,
+            Agent agent,
+            EquipmentIndex equipmentIndex,
+            string messageName,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                mission == null ||
+                agent == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                agent.Team == null ||
+                agent.Team.Side == BattleSideEnum.None)
+            {
+                return false;
+            }
+
+            if (!string.Equals(messageName, nameof(SetWeaponAmmoData), StringComparison.Ordinal) &&
+                !string.Equals(messageName, nameof(SetWeaponReloadPhase), StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            if (!IsLocalPeerControlledAgent(agent))
+                return false;
+
+            if (_clientPostPossessionControlledTroopWeaponStateAgentIndex != agent.Index)
+                return false;
+
+            DateTime suppressUntilUtc = _clientPostPossessionControlledTroopWeaponStateSuppressUntilUtc;
+            if (suppressUntilUtc == DateTime.MinValue)
+                return false;
+
+            double remainingSeconds = (suppressUntilUtc - DateTime.UtcNow).TotalSeconds;
+            if (remainingSeconds <= 0d)
+                return false;
+
+            if (equipmentIndex < EquipmentIndex.Weapon0 || equipmentIndex > EquipmentIndex.Weapon3)
+                return false;
+
+            EquipmentIndex currentMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+            if (currentMainHandIndex != equipmentIndex)
+                return false;
+
+            if (!IsBowOrCrossbowAgentEquipmentIndex(
+                    agent,
+                    equipmentIndex,
+                    out string itemId,
+                    out string usageClass))
+            {
+                return false;
+            }
+
+            reason =
+                "exact-siege-controlled-troop-post-possession-ranged-reload-state-allowed" +
+                "|Message=" + (messageName ?? "unknown") +
+                "|AgentIndex=" + agent.Index +
+                "|EquipmentIndex=" + equipmentIndex +
+                "|CurrentMain=" + currentMainHandIndex +
+                "|Item=" + (itemId ?? "null") +
+                "|Usage=" + (usageClass ?? "null") +
+                "|RemainingSeconds=" + remainingSeconds.ToString("0.00");
+            return true;
+        }
+
+        internal static bool ArmClientPostPossessionControlledTroopWeaponStateSuppression(
+            Mission mission,
+            Agent agent,
+            string preferredEntryId,
+            string source,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                mission == null ||
+                agent == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                agent.Team == null ||
+                agent.Team.Side == BattleSideEnum.None)
+            {
+                return false;
+            }
+
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out _))
+                return false;
+
+            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            bool isLocalPeerAgent =
+                IsLocalPeerControlledAgent(agent) ||
+                (localMissionPeer != null && ReferenceEquals(agent.MissionPeer, localMissionPeer));
+            if (!isLocalPeerAgent)
+                return false;
+
+            string entryId = null;
+            RosterEntryState entryState = null;
+            if (!string.IsNullOrWhiteSpace(preferredEntryId))
+            {
+                entryState = BattleSnapshotRuntimeState.GetEntryState(preferredEntryId);
+                if (entryState != null)
+                    entryId = preferredEntryId;
+            }
+
+            if (entryState == null)
+            {
+                if (!TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                    !TryResolveSelectableEntryId(agent, out entryId) &&
+                    !ExactTransferContractRuntimeCache.TryGetEntryIdByRiderAgentIndex(agent.Index, out entryId))
+                {
+                    return false;
+                }
+
+                entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            }
+
+            if (entryState == null || entryState.IsHero)
+                return false;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            DateTime suppressUntilUtc =
+                nowUtc.AddSeconds(ClientPostPossessionControlledTroopWeaponStateSuppressionSeconds);
+            bool alreadyArmedForAgent =
+                _clientPostPossessionControlledTroopWeaponStateAgentIndex == agent.Index &&
+                _clientPostPossessionControlledTroopWeaponStateSuppressUntilUtc > nowUtc;
+
+            _clientPostPossessionControlledTroopWeaponStateAgentIndex = agent.Index;
+            if (_clientPostPossessionControlledTroopWeaponStateSuppressUntilUtc < suppressUntilUtc)
+                _clientPostPossessionControlledTroopWeaponStateSuppressUntilUtc = suppressUntilUtc;
+
+            double remainingSeconds =
+                (_clientPostPossessionControlledTroopWeaponStateSuppressUntilUtc - nowUtc).TotalSeconds;
+            reason =
+                "exact-siege-controlled-troop-post-possession-weapon-state-window" +
+                "|AgentIndex=" + agent.Index +
+                "|EntryId=" + (entryId ?? "null") +
+                "|PreferredEntryId=" + (preferredEntryId ?? "null") +
+                "|CharacterId=" + (entryState.CharacterId ?? "null") +
+                "|TroopName=" + (entryState.TroopName ?? "null") +
+                "|AlreadyArmed=" + alreadyArmedForAgent +
+                "|RemainingSeconds=" + remainingSeconds.ToString("0.00") +
+                "|Source=" + (source ?? "unknown");
+
+            if (!alreadyArmedForAgent)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: armed client post-possession controlled troop weapon-state suppression from local SetAgentPeer. " +
+                    reason);
+            }
+
+            return true;
+        }
+
+        internal static bool TryRefreshClientPostPossessionControlledTroopLiveWeaponState(
+            Mission mission,
+            Agent agent,
+            string preferredEntryId,
+            string source,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                mission == null ||
+                agent == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                agent.Team == null ||
+                agent.Team.Side == BattleSideEnum.None)
+            {
+                return false;
+            }
+
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            bool isLocalPeerAgent =
+                IsLocalPeerControlledAgent(agent) ||
+                (localMissionPeer != null && ReferenceEquals(agent.MissionPeer, localMissionPeer));
+            if (!isLocalPeerAgent)
+                return false;
+
+            if (_clientPostPossessionControlledTroopWeaponStateAgentIndex != agent.Index)
+                return false;
+
+            DateTime suppressUntilUtc = _clientPostPossessionControlledTroopWeaponStateSuppressUntilUtc;
+            if (suppressUntilUtc == DateTime.MinValue)
+                return false;
+
+            double remainingSeconds = (suppressUntilUtc - DateTime.UtcNow).TotalSeconds;
+            if (remainingSeconds <= 0d)
+                return false;
+
+            string entryId = null;
+            RosterEntryState entryState = null;
+            if (!string.IsNullOrWhiteSpace(preferredEntryId))
+            {
+                entryState = BattleSnapshotRuntimeState.GetEntryState(preferredEntryId);
+                if (entryState != null)
+                    entryId = preferredEntryId;
+            }
+
+            if (entryState == null)
+            {
+                if (!TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                    !TryResolveSelectableEntryId(agent, out entryId) &&
+                    !ExactTransferContractRuntimeCache.TryGetEntryIdByRiderAgentIndex(agent.Index, out entryId))
+                {
+                    return false;
+                }
+
+                entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            }
+
+            if (entryState == null || entryState.IsHero)
+                return false;
+
+            Equipment overlaySpawnEquipment = null;
+            if (ExactTransferContractRuntimeCache.TryGetContract(entryId, out ExactTransferSpawnContract contract))
+                overlaySpawnEquipment = contract?.Equipment?.SpawnEquipment?.Clone(false);
+
+            if (overlaySpawnEquipment == null)
+            {
+                overlaySpawnEquipment = BuildSnapshotEquipmentForExactRuntime(
+                    entryState,
+                    includeWeapons: true,
+                    honorExactVisualContracts: false,
+                    includeArmorVisuals: false,
+                    includeMountVisuals: false);
+            }
+
+            if (overlaySpawnEquipment == null)
+            {
+                reason =
+                    "exact-siege-controlled-troop-post-possession-live-weapon-refresh-equipment-unresolved" +
+                    "|AgentIndex=" + agent.Index +
+                    "|EntryId=" + (entryId ?? "null") +
+                    "|PreferredEntryId=" + (preferredEntryId ?? "null") +
+                    "|CharacterId=" + (entryState.CharacterId ?? "null") +
+                    "|TroopName=" + (entryState.TroopName ?? "null") +
+                    "|Source=" + (source ?? "unknown");
+                return false;
+            }
+
+            bool refreshed = TryRefreshClientOverlayLiveWeaponWieldState(
+                agent,
+                overlaySpawnEquipment,
+                entryId,
+                source ?? "client post-possession controlled troop live weapon refresh",
+                out string appliedWieldRefresh,
+                out string wieldRefreshIssue,
+                allowLocalPeerControlledAgent: true);
+            reason =
+                "exact-siege-controlled-troop-post-possession-live-weapon-refresh" +
+                "|AgentIndex=" + agent.Index +
+                "|EntryId=" + (entryId ?? "null") +
+                "|PreferredEntryId=" + (preferredEntryId ?? "null") +
+                "|CharacterId=" + (entryState.CharacterId ?? "null") +
+                "|TroopName=" + (entryState.TroopName ?? "null") +
+                "|Refreshed=" + refreshed +
+                "|Applied=" + (appliedWieldRefresh ?? "(none)") +
+                "|Issue=" + (wieldRefreshIssue ?? "(none)") +
+                "|RemainingSeconds=" + remainingSeconds.ToString("0.00") +
+                "|Source=" + (source ?? "unknown");
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: processed client post-possession controlled troop live weapon refresh. " +
+                reason);
+            return refreshed;
+        }
+
+        internal static bool TryBuildClientPossessionLifecycleDiagnostics(
+            Mission mission,
+            int agentIndex,
+            Agent agent,
+            string eventName,
+            out string summary)
+        {
+            summary = null;
+            if (!CoopDebugConfig.PossessionDiagnostics ||
+                GameNetwork.IsServer ||
+                mission == null ||
+                agentIndex < 0)
+            {
+                return false;
+            }
+
+            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            Agent controlledAgent = localMissionPeer?.ControlledAgent ?? Agent.Main;
+            int controlledAgentIndex =
+                controlledAgent != null && controlledAgent.IsActive()
+                    ? controlledAgent.Index
+                    : -1;
+            int mainAgentIndex = Agent.Main != null && Agent.Main.IsActive() ? Agent.Main.Index : -1;
+            bool localControlled =
+                agent != null &&
+                controlledAgent != null &&
+                ReferenceEquals(controlledAgent, agent);
+            bool trackedPostPossessionAgent =
+                agentIndex == _clientPostPossessionControlledTroopWeaponStateAgentIndex ||
+                agentIndex == _clientPostPossessionPreviousControlledAgentIndex ||
+                agentIndex == controlledAgentIndex ||
+                agentIndex == mainAgentIndex;
+            if (!localControlled && !trackedPostPossessionAgent)
+                return false;
+
+            string entryId = null;
+            if (agent != null)
+            {
+                TryResolveAuthoritativeTrackedEntryId(agent, out entryId);
+                if (string.IsNullOrWhiteSpace(entryId))
+                    TryResolveSelectableEntryId(agent, out entryId);
+                if (string.IsNullOrWhiteSpace(entryId))
+                    ExactTransferContractRuntimeCache.TryGetEntryIdByRiderAgentIndex(agent.Index, out entryId);
+            }
+
+            double weaponStateWindowRemainingSeconds =
+                Math.Max(0d, (_clientPostPossessionControlledTroopWeaponStateSuppressUntilUtc - DateTime.UtcNow).TotalSeconds);
+            double exactVisualWindowRemainingSeconds =
+                Math.Max(0d, (_clientPostPossessionExactVisualPauseResumeUtc - DateTime.UtcNow).TotalSeconds);
+            summary =
+                "Event=" + (eventName ?? "unknown") +
+                " AgentIndex=" + agentIndex +
+                " AgentExists=" + (agent != null) +
+                " AgentActive=" + (agent != null && agent.IsActive()) +
+                " AgentIsHuman=" + (agent != null && agent.IsHuman) +
+                " AgentIsMount=" + (agent != null && agent.IsMount) +
+                " CharacterId=" + (agent?.Character?.StringId ?? "null") +
+                " TeamSide=" + (agent?.Team?.Side.ToString() ?? "null") +
+                " EntryId=" + (entryId ?? "null") +
+                " LocalControlled=" + localControlled +
+                " ControlledAgentIndex=" + controlledAgentIndex +
+                " MainAgentIndex=" + mainAgentIndex +
+                " PreviousControlledAgentIndex=" + _clientPostPossessionPreviousControlledAgentIndex +
+                " WeaponStateWindowAgentIndex=" + _clientPostPossessionControlledTroopWeaponStateAgentIndex +
+                " WeaponStateWindowRemainingSeconds=" + weaponStateWindowRemainingSeconds.ToString("0.00") +
+                " ExactVisualWindowRemainingSeconds=" + exactVisualWindowRemainingSeconds.ToString("0.00");
             return true;
         }
 
@@ -11720,12 +12171,81 @@ namespace CoopSpectator.MissionBehaviors
                 EquipmentIndex preOffHandIndex = agent.GetOffhandWieldedItemIndex();
                 int desiredMainHandUsageIndex = ResolveEquipmentCurrentUsageIndex(agent, overlaySpawnEquipment, desiredMainHandIndex);
 
-                if (preOffHandIndex != EquipmentIndex.None)
-                    agent.TryToSheathWeaponInHand(Agent.HandIndex.OffHand, Agent.WeaponWieldActionType.Instant);
-                if (preMainHandIndex != EquipmentIndex.None)
-                    agent.TryToSheathWeaponInHand(Agent.HandIndex.MainHand, Agent.WeaponWieldActionType.Instant);
+                bool mainHandAlreadyDesired =
+                    !hasDesiredMainHand ||
+                    preMainHandIndex == desiredMainHandIndex;
+                bool offHandAlreadyDesired =
+                    hasDesiredOffHand
+                        ? preOffHandIndex == desiredOffHandIndex
+                        : preOffHandIndex == EquipmentIndex.None;
 
-                if (hasDesiredOffHand)
+                if (mainHandAlreadyDesired && offHandAlreadyDesired)
+                {
+                    string skippedDetails =
+                        "AgentIndex=" + agent.Index +
+                        " EntryId=" + (entryId ?? "null") +
+                        " DesiredMain=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredMainHandIndex) +
+                        " DesiredOff=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredOffHandIndex) +
+                        " MainNotUsableWithOneHand=" + mainNotUsableWithOneHand +
+                        " OffhandSuppressed=" + (offhandSuppressedReason ?? "(none)") +
+                        " PreMain=" + FormatAgentWieldedEquipmentIndex(agent, preMainHandIndex) +
+                        " PreOff=" + FormatAgentWieldedEquipmentIndex(agent, preOffHandIndex) +
+                        " Source=" + (source ?? "unknown");
+                    appliedWieldRefresh = "Wield=client-live-refresh-skipped:already-matched";
+                    wieldRefreshIssue = "client-live-wield-refresh-skipped:already-matched";
+                    ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                        "client-live-wield-refresh-skipped",
+                        skippedDetails);
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: client live wield refresh skipped because current wielded state already matches desired loadout. " +
+                        skippedDetails);
+                    return false;
+                }
+
+                if (allowLocalPeerControlledAgent &&
+                    IsLocalPeerControlledAgent(agent) &&
+                    hasDesiredMainHand &&
+                    preMainHandIndex != desiredMainHandIndex &&
+                    IsRangedOrThrownEquipmentIndex(
+                        overlaySpawnEquipment,
+                        desiredMainHandIndex,
+                        out string desiredRangedItemId,
+                        out string desiredRangedUsageClass))
+                {
+                    string skippedDetails =
+                        "AgentIndex=" + agent.Index +
+                        " EntryId=" + (entryId ?? "null") +
+                        " DesiredMain=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredMainHandIndex) +
+                        " DesiredOff=" + FormatWeaponEquipmentIndex(overlaySpawnEquipment, desiredOffHandIndex) +
+                        " DesiredRangedItem=" + (desiredRangedItemId ?? "null") +
+                        " DesiredRangedUsage=" + (desiredRangedUsageClass ?? "null") +
+                        " PreMain=" + FormatAgentWieldedEquipmentIndex(agent, preMainHandIndex) +
+                        " PreOff=" + FormatAgentWieldedEquipmentIndex(agent, preOffHandIndex) +
+                        " Source=" + (source ?? "unknown");
+                    appliedWieldRefresh = "Wield=client-live-refresh-skipped:post-possession-ranged-manual-switch";
+                    wieldRefreshIssue = "client-live-wield-refresh-skipped:post-possession-ranged-manual-switch";
+                    ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                        "client-live-wield-refresh-skipped-post-possession-ranged",
+                        skippedDetails);
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: skipped client post-possession ranged live wield refresh; native campaign control keeps current weapon state. " +
+                        skippedDetails);
+                    return false;
+                }
+
+                if (preOffHandIndex != EquipmentIndex.None &&
+                    (!hasDesiredOffHand || preOffHandIndex != desiredOffHandIndex))
+                {
+                    agent.TryToSheathWeaponInHand(Agent.HandIndex.OffHand, Agent.WeaponWieldActionType.Instant);
+                }
+
+                if (preMainHandIndex != EquipmentIndex.None &&
+                    (!hasDesiredMainHand || preMainHandIndex != desiredMainHandIndex))
+                {
+                    agent.TryToSheathWeaponInHand(Agent.HandIndex.MainHand, Agent.WeaponWieldActionType.Instant);
+                }
+
+                if (hasDesiredOffHand && preOffHandIndex != desiredOffHandIndex)
                 {
                     agent.SetWieldedItemIndexAsClient(
                         Agent.HandIndex.OffHand,
@@ -11739,7 +12259,7 @@ namespace CoopSpectator.MissionBehaviors
                         isWieldedOnSpawn: false);
                 }
 
-                if (hasDesiredMainHand)
+                if (hasDesiredMainHand && preMainHandIndex != desiredMainHandIndex)
                 {
                     agent.SetWieldedItemIndexAsClient(
                         Agent.HandIndex.MainHand,
@@ -11838,6 +12358,77 @@ namespace CoopSpectator.MissionBehaviors
             return item != null &&
                    (item.PrimaryWeapon?.IsShield == true ||
                     item.ItemType == ItemObject.ItemTypeEnum.Shield);
+        }
+
+        private static bool IsRangedOrThrownEquipmentIndex(
+            Equipment equipment,
+            EquipmentIndex equipmentIndex,
+            out string itemId,
+            out string usageClass)
+        {
+            itemId = null;
+            usageClass = null;
+            if (equipment == null ||
+                equipmentIndex < EquipmentIndex.Weapon0 ||
+                equipmentIndex > EquipmentIndex.Weapon3)
+            {
+                return false;
+            }
+
+            EquipmentElement element = equipment[equipmentIndex];
+            ItemObject item = element.Item;
+            WeaponComponentData usage = item?.PrimaryWeapon;
+            itemId = item?.StringId;
+            usageClass = usage?.WeaponClass.ToString();
+            if (item == null)
+                return false;
+
+            return item.ItemType == ItemObject.ItemTypeEnum.Bow ||
+                   item.ItemType == ItemObject.ItemTypeEnum.Crossbow ||
+                   item.ItemType == ItemObject.ItemTypeEnum.Thrown ||
+                   item.ItemType == ItemObject.ItemTypeEnum.Sling ||
+                   usage?.IsRangedWeapon == true ||
+                   usage?.RelevantSkill == DefaultSkills.Bow ||
+                   usage?.RelevantSkill == DefaultSkills.Crossbow ||
+                   usage?.RelevantSkill == DefaultSkills.Throwing ||
+                   usage?.WeaponClass == WeaponClass.Bow ||
+                   usage?.WeaponClass == WeaponClass.Crossbow ||
+                   usage?.WeaponClass == WeaponClass.Javelin ||
+                   usage?.WeaponClass == WeaponClass.ThrowingAxe ||
+                   usage?.WeaponClass == WeaponClass.ThrowingKnife ||
+                   usage?.WeaponClass == WeaponClass.Stone ||
+                   usage?.WeaponClass == WeaponClass.SlingStone;
+        }
+
+        private static bool IsBowOrCrossbowAgentEquipmentIndex(
+            Agent agent,
+            EquipmentIndex equipmentIndex,
+            out string itemId,
+            out string usageClass)
+        {
+            itemId = null;
+            usageClass = null;
+            if (agent?.Equipment == null ||
+                equipmentIndex < EquipmentIndex.Weapon0 ||
+                equipmentIndex > EquipmentIndex.Weapon3)
+            {
+                return false;
+            }
+
+            MissionWeapon missionWeapon = agent.Equipment[equipmentIndex];
+            ItemObject item = missionWeapon.Item;
+            WeaponComponentData usage = missionWeapon.CurrentUsageItem ?? item?.PrimaryWeapon;
+            itemId = item?.StringId;
+            usageClass = usage?.WeaponClass.ToString();
+            if (item == null)
+                return false;
+
+            return item.ItemType == ItemObject.ItemTypeEnum.Bow ||
+                   item.ItemType == ItemObject.ItemTypeEnum.Crossbow ||
+                   usage?.WeaponClass == WeaponClass.Bow ||
+                   usage?.WeaponClass == WeaponClass.Crossbow ||
+                   usage?.RelevantSkill == DefaultSkills.Bow ||
+                   usage?.RelevantSkill == DefaultSkills.Crossbow;
         }
 
         private static int ResolveEquipmentCurrentUsageIndex(Agent agent, Equipment overlaySpawnEquipment, EquipmentIndex equipmentIndex)
@@ -27575,6 +28166,8 @@ namespace CoopSpectator.MissionBehaviors
             string possessionStage = "start";
             bool useManualSiegeRespawnPossession = false;
             string manualRespawnReason = string.Empty;
+            Agent protectedMountAgent = null;
+            string possessionProtectionState = "PossessionProtection=not-armed";
             try
             {
                 possessionStage = "resolve-target-entry";
@@ -27682,15 +28275,44 @@ namespace CoopSpectator.MissionBehaviors
                 possessionStage = "ensure-vanilla-gold-floor";
                 TryEnsureVanillaSpawnGoldFloor(gameMode, peer, missionPeer, source + " replace-bot");
 
+                possessionStage = "arm-possession-protection";
+                protectedMountAgent = targetAgent.MountAgent;
+                string agentProtectionState = ArmMaterializedPossessionProtection(
+                    targetAgent,
+                    peer,
+                    "rider",
+                    source + " replace-bot");
+                string mountProtectionState =
+                    protectedMountAgent != null
+                        ? ArmMaterializedPossessionProtection(
+                            protectedMountAgent,
+                            peer,
+                            "mount",
+                            source + " replace-bot")
+                        : "mountProtection=skipped:no-mount";
+                possessionProtectionState = agentProtectionState + " " + mountProtectionState;
+
                 possessionStage = "native-replace-bot";
                 Agent replacedAgent = mission.ReplaceBotWithPlayer(targetAgent, missionPeer);
                 if (replacedAgent == null)
                 {
+                    string protectionRestoreState =
+                        RestoreMaterializedPossessionProtectionForAgent(
+                            targetAgent,
+                            force: true,
+                            source: source + " replace-bot returned-null") +
+                        " " +
+                        RestoreMaterializedPossessionProtectionForAgent(
+                            protectedMountAgent,
+                            force: true,
+                            source: source + " replace-bot returned-null mount");
                     ModLogger.Info(
                         "CoopMissionSpawnLogic: materialized army replace-bot returned null. " +
                         "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
                         " AgentIndex=" + targetAgent.Index +
                         " Formation=" + targetFormation.FormationIndex +
+                        " " + possessionProtectionState +
+                        " ProtectionRestore={" + protectionRestoreState + "}" +
                         " Source=" + (source ?? "unknown"));
                     return false;
                 }
@@ -27751,6 +28373,7 @@ namespace CoopSpectator.MissionBehaviors
                     " " + formationOwnershipState +
                     " " + reappliedAgentState +
                     " RemovedPendingVisuals=" + removedPendingVisuals +
+                    " " + possessionProtectionState +
                     " Source=" + (source ?? "unknown"));
                 TraceMaterializedReplaceBotSuccess(
                     peer,
@@ -27767,6 +28390,16 @@ namespace CoopSpectator.MissionBehaviors
             }
             catch (Exception ex)
             {
+                string protectionRestoreState =
+                    RestoreMaterializedPossessionProtectionForAgent(
+                        targetAgent,
+                        force: true,
+                        source: source + " replace-bot exception") +
+                    " " +
+                    RestoreMaterializedPossessionProtectionForAgent(
+                        protectedMountAgent,
+                        force: true,
+                        source: source + " replace-bot exception mount");
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: materialized army replace-bot failed (" + source + "): " +
                     ex.GetType().Name +
@@ -27781,9 +28414,200 @@ namespace CoopSpectator.MissionBehaviors
                     " MissionPeerTeamNull=" + (missionPeer.Team == null) +
                     " MissionPeerControlledAgentNull=" + (missionPeer.ControlledAgent == null) +
                     " PeerControlledAgentNull=" + (peer.ControlledAgent == null) +
-                    " ControlledFormationNull=" + (missionPeer.ControlledFormation == null));
+                    " ControlledFormationNull=" + (missionPeer.ControlledFormation == null) +
+                    " ProtectionState={" + possessionProtectionState + "}" +
+                    " ProtectionRestore={" + protectionRestoreState + "}");
                 return false;
             }
+        }
+
+        private static string ArmMaterializedPossessionProtection(
+            Agent agent,
+            NetworkCommunicator peer,
+            string role,
+            string source)
+        {
+            if (!GameNetwork.IsServer)
+                return (role ?? "agent") + "Protection=skipped:not-server";
+            if (agent == null)
+                return (role ?? "agent") + "Protection=skipped:null-agent";
+            if (!agent.IsActive())
+                return (role ?? "agent") + "Protection=skipped:inactive|AgentIndex=" + agent.Index;
+
+            try
+            {
+                DateTime nowUtc = DateTime.UtcNow;
+                DateTime restoreUtc = nowUtc.AddSeconds(MaterializedPossessionProtectionSeconds);
+                bool newlyTracked = false;
+                if (!_materializedPossessionProtectionByAgentIndex.TryGetValue(agent.Index, out MaterializedPossessionProtectionState state) ||
+                    !ReferenceEquals(state.Agent, agent))
+                {
+                    state = new MaterializedPossessionProtectionState
+                    {
+                        AgentIndex = agent.Index,
+                        Agent = agent,
+                        PreviousMortalityState = agent.CurrentMortalityState,
+                        RestoreUtc = restoreUtc,
+                        PeerIndex = peer?.Index ?? -1,
+                        PeerName = peer?.UserName,
+                        Role = role ?? "agent",
+                        Source = source
+                    };
+                    _materializedPossessionProtectionByAgentIndex[agent.Index] = state;
+                    newlyTracked = true;
+                }
+                else if (state.RestoreUtc < restoreUtc)
+                {
+                    state.RestoreUtc = restoreUtc;
+                }
+
+                Agent.MortalityState beforeState = agent.CurrentMortalityState;
+                if (beforeState != Agent.MortalityState.Invulnerable)
+                    agent.SetMortalityState(Agent.MortalityState.Invulnerable);
+
+                string summary =
+                    (role ?? "agent") + "Protection=armed" +
+                    "|AgentIndex=" + agent.Index +
+                    "|Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    "|Previous=" + state.PreviousMortalityState +
+                    "|Before=" + beforeState +
+                    "|After=" + agent.CurrentMortalityState +
+                    "|Seconds=" + MaterializedPossessionProtectionSeconds.ToString("0.00") +
+                    "|New=" + newlyTracked +
+                    "|Source=" + (source ?? "unknown");
+                ModLogger.Info("CoopMissionSpawnLogic: armed materialized possession protection. " + summary);
+                return summary;
+            }
+            catch (Exception ex)
+            {
+                return
+                    (role ?? "agent") + "Protection=failed" +
+                    "|AgentIndex=" + agent.Index +
+                    "|Exception=" + ex.GetType().Name +
+                    "|Source=" + (source ?? "unknown");
+            }
+        }
+
+        private static void TryRestoreExpiredMaterializedPossessionProtection(Mission mission, string source)
+        {
+            if (!GameNetwork.IsServer || _materializedPossessionProtectionByAgentIndex.Count == 0)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            List<int> expiredAgentIndices = null;
+            foreach (KeyValuePair<int, MaterializedPossessionProtectionState> pair in _materializedPossessionProtectionByAgentIndex)
+            {
+                MaterializedPossessionProtectionState state = pair.Value;
+                if (state == null)
+                {
+                    if (expiredAgentIndices == null)
+                        expiredAgentIndices = new List<int>();
+                    expiredAgentIndices.Add(pair.Key);
+                    continue;
+                }
+
+                if (state.RestoreUtc <= nowUtc ||
+                    (mission != null && state.Agent != null && !ReferenceEquals(state.Agent.Mission, mission)))
+                {
+                    if (expiredAgentIndices == null)
+                        expiredAgentIndices = new List<int>();
+                    expiredAgentIndices.Add(pair.Key);
+                }
+            }
+
+            if (expiredAgentIndices == null)
+                return;
+
+            for (int i = 0; i < expiredAgentIndices.Count; i++)
+                RestoreMaterializedPossessionProtectionByAgentIndex(expiredAgentIndices[i], force: false, source: source);
+        }
+
+        private static string RestoreMaterializedPossessionProtectionForAgent(
+            Agent agent,
+            bool force,
+            string source)
+        {
+            if (agent == null)
+                return "ProtectionRestore=skipped:null-agent|Source=" + (source ?? "unknown");
+
+            return RestoreMaterializedPossessionProtectionByAgentIndex(agent.Index, force, source);
+        }
+
+        private static string RestoreMaterializedPossessionProtectionByAgentIndex(
+            int agentIndex,
+            bool force,
+            string source)
+        {
+            if (!_materializedPossessionProtectionByAgentIndex.TryGetValue(agentIndex, out MaterializedPossessionProtectionState state))
+                return "ProtectionRestore=skipped:not-tracked|AgentIndex=" + agentIndex + "|Source=" + (source ?? "unknown");
+
+            if (!force && state != null && state.RestoreUtc > DateTime.UtcNow)
+                return "ProtectionRestore=skipped:not-expired|AgentIndex=" + agentIndex + "|Source=" + (source ?? "unknown");
+
+            _materializedPossessionProtectionByAgentIndex.Remove(agentIndex);
+            if (state == null)
+                return "ProtectionRestore=dropped:null-state|AgentIndex=" + agentIndex + "|Source=" + (source ?? "unknown");
+
+            Agent agent = state.Agent;
+            string restoreAction = "dropped";
+            Agent.MortalityState currentState = Agent.MortalityState.Mortal;
+            if (agent != null)
+            {
+                currentState = agent.CurrentMortalityState;
+                if (agent.IsActive() &&
+                    ReferenceEquals(agent, state.Agent) &&
+                    currentState == Agent.MortalityState.Invulnerable &&
+                    state.PreviousMortalityState != Agent.MortalityState.Invulnerable)
+                {
+                    agent.SetMortalityState(state.PreviousMortalityState);
+                    restoreAction = "restored";
+                }
+                else if (agent.IsActive() &&
+                         currentState == Agent.MortalityState.Invulnerable &&
+                         state.PreviousMortalityState == Agent.MortalityState.Invulnerable)
+                {
+                    restoreAction = "kept-previous-invulnerable";
+                }
+                else if (agent.IsActive())
+                {
+                    restoreAction = "left-current-state";
+                }
+            }
+
+            string summary =
+                "ProtectionRestore=" + restoreAction +
+                "|AgentIndex=" + agentIndex +
+                "|Role=" + (state.Role ?? "agent") +
+                "|Peer=" + (state.PeerName ?? state.PeerIndex.ToString()) +
+                "|Previous=" + state.PreviousMortalityState +
+                "|BeforeRestore=" + currentState +
+                "|AfterRestore=" + (agent?.CurrentMortalityState.ToString() ?? "null") +
+                "|Force=" + force +
+                "|Source=" + (source ?? "unknown");
+            ModLogger.Info("CoopMissionSpawnLogic: restored materialized possession protection. " + summary);
+            return summary;
+        }
+
+        private static void DropMaterializedPossessionProtectionForRemovedAgent(
+            Agent affectedAgent,
+            AgentState agentState,
+            string source)
+        {
+            if (!GameNetwork.IsServer || affectedAgent == null)
+                return;
+
+            if (!_materializedPossessionProtectionByAgentIndex.TryGetValue(affectedAgent.Index, out MaterializedPossessionProtectionState state))
+                return;
+
+            _materializedPossessionProtectionByAgentIndex.Remove(affectedAgent.Index);
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: dropped materialized possession protection because protected agent was removed. " +
+                "AgentIndex=" + affectedAgent.Index +
+                " Role=" + (state?.Role ?? "agent") +
+                " Peer=" + (state?.PeerName ?? state?.PeerIndex.ToString() ?? "none") +
+                " AgentState=" + agentState +
+                " CurrentMortality=" + affectedAgent.CurrentMortalityState +
+                " Source=" + (source ?? "unknown"));
         }
 
         private static bool ShouldUseManualMaterializedSiegeRespawnPossession(
