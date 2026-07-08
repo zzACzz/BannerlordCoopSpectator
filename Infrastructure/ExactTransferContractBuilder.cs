@@ -56,7 +56,7 @@ namespace CoopSpectator.Infrastructure
                 CoopMissionSpawnLogic.IsCurrentRuntimeExactEntryContractSupported(entryState);
             PopulateIdentity(contract.Identity, entryState, isPlayerControlledOrigin);
             PopulateBody(contract.Body, entryState);
-            PopulateEquipment(contract.Equipment, entryState, isStrictHeroEntry, isRuntimeExactSupported, buildMode);
+            PopulateEquipment(contract.Equipment, entryState, isStrictHeroEntry, isRuntimeExactSupported, buildMode, teamIndex);
             PopulateMount(contract.Mount, entryState);
             PopulatePeerBinding(contract.PeerBinding, entryState, isPlayerControlledOrigin);
             PopulateInitialWield(contract.InitialWield, entryState, contract.Equipment);
@@ -117,7 +117,8 @@ namespace CoopSpectator.Infrastructure
             RosterEntryState entryState,
             bool isStrictHeroEntry,
             bool isRuntimeExactSupported,
-            BuildMode buildMode)
+            BuildMode buildMode,
+            int teamIndex)
         {
             equipment.SpawnEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
                 entryState,
@@ -148,7 +149,11 @@ namespace CoopSpectator.Infrastructure
             AddSlot(equipment, EquipmentIndex.Horse, "Horse", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Horse, entryState.CombatHorseId), mustExistAtCreateAgentTime: entryState.IsMounted, canBeLateSynchronized: false, isMountedCritical: entryState.IsMounted);
             AddSlot(equipment, EquipmentIndex.HorseHarness, "HorseHarness", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.HorseHarness, entryState.CombatHorseHarnessId), mustExistAtCreateAgentTime: entryState.IsMounted && !string.IsNullOrWhiteSpace(entryState.CombatHorseHarnessId), canBeLateSynchronized: false, isMountedCritical: entryState.IsMounted);
 
-            NormalizeStrictHeroWeaponLayout(equipment, entryState, isStrictHeroEntry || isRuntimeExactSupported);
+            NormalizeStrictHeroWeaponLayout(
+                equipment,
+                entryState,
+                isStrictHeroEntry || isRuntimeExactSupported,
+                ShouldApplyMountedWeaponLayoutPolicy(entryState, teamIndex));
         }
 
         private static void PopulateMount(ExactTransferMountContract mount, RosterEntryState entryState)
@@ -195,15 +200,19 @@ namespace CoopSpectator.Infrastructure
                     Equipment.InitialWeaponEquipPreference.Any);
                 initialWield.PreferredMainHandSlotIndex = (int)mainHandWeaponIndex;
                 initialWield.PreferredOffHandSlotIndex = (int)offHandWeaponIndex;
+                bool applyMountedWeaponLayoutPolicy = ShouldApplyMountedWeaponLayoutPolicy(entryState, -1);
                 initialWield.HasWeapon2Risk =
-                    DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment.SpawnEquipment) ||
-                    (entryState.IsMounted && mainHandWeaponIndex == EquipmentIndex.Weapon2);
+                    applyMountedWeaponLayoutPolicy &&
+                    (DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment.SpawnEquipment) ||
+                     mainHandWeaponIndex == EquipmentIndex.Weapon2);
             }
             catch
             {
+                bool applyMountedWeaponLayoutPolicy = ShouldApplyMountedWeaponLayoutPolicy(entryState, -1);
                 initialWield.HasWeapon2Risk =
-                    DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment.SpawnEquipment) ||
-                    (entryState.IsMounted && !string.IsNullOrWhiteSpace(entryState.CombatItem2Id));
+                    applyMountedWeaponLayoutPolicy &&
+                    (DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment.SpawnEquipment) ||
+                     !string.IsNullOrWhiteSpace(entryState.CombatItem2Id));
             }
         }
 
@@ -274,6 +283,7 @@ namespace CoopSpectator.Infrastructure
             bool hasRanged = slots.Any(slot => slot.Role == MountedWeaponRole.Ranged);
             bool hasAmmo = slots.Any(slot => slot.Role == MountedWeaponRole.Ammo);
             bool hasUnsafeRangedWeapon2Layout = DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment);
+            bool applyMountedWeaponLayoutPolicy = ShouldApplyMountedWeaponLayoutPolicy(entryState, -1);
             if (!hasRanged && !hasAmmo && !DoesWeapon2ContainLiveCandidate(equipment))
             {
                 summary = BuildMountedLayoutSummary(slots, slots);
@@ -281,11 +291,11 @@ namespace CoopSpectator.Infrastructure
             }
 
             List<MountedWeaponSlotState> orderedSlots = null;
-            if (!entryState.IsHero && entryState.IsMounted && hasRanged && hasAmmo)
+            if (!entryState.IsHero && applyMountedWeaponLayoutPolicy && hasRanged && hasAmmo)
                 orderedSlots = BuildCanonicalMountedRangedAiWeaponLayout(slots);
-            else if (hasRanged && hasAmmo && hasUnsafeRangedWeapon2Layout)
+            else if (applyMountedWeaponLayoutPolicy && hasRanged && hasAmmo && hasUnsafeRangedWeapon2Layout)
                 orderedSlots = BuildCanonicalStrictHeroRangedWeaponLayout(slots);
-            else if (entryState.IsMounted && (hasRanged || hasAmmo || DoesWeapon2ContainLiveCandidate(equipment)))
+            else if (applyMountedWeaponLayoutPolicy && (hasRanged || hasAmmo || DoesWeapon2ContainLiveCandidate(equipment)))
                 orderedSlots = BuildCanonicalMountedWeaponLayout(slots, hasAmmo);
 
             if (orderedSlots == null)
@@ -307,7 +317,8 @@ namespace CoopSpectator.Infrastructure
         private static void NormalizeStrictHeroWeaponLayout(
             ExactTransferEquipmentContract equipment,
             RosterEntryState entryState,
-            bool isStrictHeroEntry)
+            bool isStrictHeroEntry,
+            bool applyMountedWeaponLayoutPolicy)
         {
             if (equipment?.SpawnEquipment == null || entryState == null || !isStrictHeroEntry)
                 return;
@@ -325,8 +336,42 @@ namespace CoopSpectator.Infrastructure
             // downstream exact-contract diagnostics. Those diagnostics only need to
             // know whether the current layout is safe, not whether a reorder happened.
             equipment.MountedWeaponLayoutNormalized =
-                normalized || HasSafeMountedRangedWeaponLayout(equipment.SpawnEquipment);
+                applyMountedWeaponLayoutPolicy &&
+                (normalized || HasSafeMountedRangedWeaponLayout(equipment.SpawnEquipment));
             equipment.MountedWeaponLayoutSummary = summary;
+        }
+
+        internal static bool ShouldApplyMountedWeaponLayoutPolicy(RosterEntryState entryState, int teamIndex)
+        {
+            if (entryState?.IsMounted != true)
+                return false;
+
+            Mission mission = Mission.Current;
+            if (mission == null)
+                return true;
+
+            BattleSideEnum side = ResolveBattleSide(teamIndex);
+            if (side != BattleSideEnum.None &&
+                ExactCampaignArmyBootstrap.TryGetSpawnHorses(mission, side, out bool spawnHorses))
+            {
+                return spawnHorses;
+            }
+
+            if (SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            return true;
+        }
+
+        private static BattleSideEnum ResolveBattleSide(int teamIndex)
+        {
+            if (teamIndex == (int)BattleSideEnum.Attacker)
+                return BattleSideEnum.Attacker;
+
+            if (teamIndex == (int)BattleSideEnum.Defender)
+                return BattleSideEnum.Defender;
+
+            return BattleSideEnum.None;
         }
 
         private static List<MountedWeaponSlotState> BuildCanonicalStrictHeroRangedWeaponLayout(

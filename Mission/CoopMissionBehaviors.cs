@@ -24581,7 +24581,7 @@ namespace CoopSpectator.MissionBehaviors
                 .Where(slot => slot != null && slot.SourceSlotLabel != null && slot.SourceSlotLabel.StartsWith("Item", StringComparison.Ordinal))
                 .ToList();
             diagnostic.HasMountedRangedSequentialLayout =
-                entryState.IsMounted &&
+                ExactTransferContractBuilder.ShouldApplyMountedWeaponLayoutPolicy(entryState, -1) &&
                 weaponSlots.Any(slot => string.Equals(slot.ItemRole, "ranged", StringComparison.OrdinalIgnoreCase)) &&
                 weaponSlots.Any(slot => string.Equals(slot.ItemRole, "ammo", StringComparison.OrdinalIgnoreCase)) &&
                 contract?.Equipment?.MountedWeaponLayoutNormalized != true;
