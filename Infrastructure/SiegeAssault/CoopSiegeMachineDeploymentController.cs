@@ -1322,8 +1322,10 @@ namespace CoopSpectator.Infrastructure
             bool verboseDiagnostics)
         {
             var details = new List<string>();
+            bool stateOnlyDeployment = ShouldUseDedicatedFieldMaterializedSiegeMachineStateOnly(mission);
             details.Add("Before=" + FormatDeploymentPoint(deploymentPoint));
             details.Add("Weapon=" + FormatSiegeWeapon(siegeWeapon));
+            details.Add("StateOnly=" + stateOnlyDeployment);
 
             details.Add("PointPrepare={" + PrepareDeploymentPointWeaponCache(deploymentPoint) + "}");
             details.Add("WeaponPrepare={" + PrepareSiegeWeaponDeployEntityLists(siegeWeapon, verboseDiagnostics) + "}");
@@ -1331,16 +1333,36 @@ namespace CoopSpectator.Infrastructure
             details.Add("WeaponVisibility={" + SetSynchedVisibility(siegeWeapon, true) + "}");
             details.Add("PointVisibility={" + SetSynchedVisibility(deploymentPoint, false) + "}");
             details.Add("WeaponParentVisibility={" + ToggleWeaponVisibility(deploymentPoint, siegeWeapon, true) + "}");
-            details.Add("ForcedUse={" + SetForcedUse(siegeWeapon) + "}");
-            details.Add("WeaponStateChanged={" + InvokeSiegeWeaponDeploymentStateChanged(siegeWeapon, true) + "}");
-            details.Add("VisualTree={" + NormalizeAuthoritativeSiegeWeaponVisualTree(deploymentPoint, siegeWeapon, true) + "}");
-            details.Add("Controller={" + SyncSiegeControllerAfterDeploy(team.Side, siegeWeapon) + "}");
-            details.Add("Formations={" + PrepareFormationsForSiegeMachineAssignment(team) + "}");
-            details.Add("TickAux={" + TickAuxForInit(siegeWeapon) + "}");
-            details.Add("FallbackUse={" + EnsureFormationUsesMachine(team, siegeWeapon) + "}");
-            details.Add("AutoAssign={" + AutoAssignDetachments(team, siegeDeploymentHandler) + "}");
+            if (stateOnlyDeployment)
+            {
+                details.Add("ForcedUse={Skipped=True Reason=dedicated-field-materialized-state-only}");
+                details.Add("WeaponStateChanged={Skipped=True Reason=dedicated-field-materialized-state-only}");
+                details.Add("VisualTree={" + NormalizeAuthoritativeSiegeWeaponVisualTree(deploymentPoint, siegeWeapon, true) + "}");
+                details.Add("Controller={Skipped=True Reason=dedicated-field-materialized-state-only}");
+                details.Add("Formations={Skipped=True Reason=dedicated-field-materialized-state-only}");
+                details.Add("TickAux={Skipped=True Reason=dedicated-field-materialized-state-only}");
+                details.Add("FallbackUse={Skipped=True Reason=dedicated-field-materialized-state-only}");
+                details.Add("AutoAssign={Skipped=True Reason=dedicated-field-materialized-state-only}");
+            }
+            else
+            {
+                details.Add("ForcedUse={" + SetForcedUse(siegeWeapon) + "}");
+                details.Add("WeaponStateChanged={" + InvokeSiegeWeaponDeploymentStateChanged(siegeWeapon, true) + "}");
+                details.Add("VisualTree={" + NormalizeAuthoritativeSiegeWeaponVisualTree(deploymentPoint, siegeWeapon, true) + "}");
+                details.Add("Controller={" + SyncSiegeControllerAfterDeploy(team.Side, siegeWeapon) + "}");
+                details.Add("Formations={" + PrepareFormationsForSiegeMachineAssignment(team) + "}");
+                details.Add("TickAux={" + TickAuxForInit(siegeWeapon) + "}");
+                details.Add("FallbackUse={" + EnsureFormationUsesMachine(team, siegeWeapon) + "}");
+                details.Add("AutoAssign={" + AutoAssignDetachments(team, siegeDeploymentHandler) + "}");
+            }
             details.Add("After=" + FormatDeploymentPoint(deploymentPoint));
             return string.Join(" ", details.ToArray());
+        }
+
+        private static bool ShouldUseDedicatedFieldMaterializedSiegeMachineStateOnly(Mission mission)
+        {
+            // Siege machines need the controlled native deployment steps to become usable.
+            return false;
         }
 
         private static string PrepareDeploymentPointWeaponCache(DeploymentPoint deploymentPoint)

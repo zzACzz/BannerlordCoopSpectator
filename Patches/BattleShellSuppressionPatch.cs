@@ -46,6 +46,8 @@ namespace CoopSpectator.Patches
         private static string _lastDedicatedSiegeWarmupSpawningTickSuppressionKey;
         private static string _lastDedicatedSiegeTimerStartSuppressionKey;
         private static string _lastDedicatedSiegeTeamTickSuppressionKey;
+        private static readonly HashSet<string> LoggedDedicatedSiegeRangedWeaponAiSuppressionKeys =
+            new HashSet<string>(StringComparer.Ordinal);
         private static string _lastDedicatedSiegeScoreStatsSuppressionKey;
         private static string _lastAfterStartPostfixObservationKey;
         private static string _lastSiegeStartupPassThroughLogKey;
@@ -221,6 +223,15 @@ namespace CoopSpectator.Patches
                 "TaleWorlds.MountAndBlade.Team",
                 "Tick",
                 nameof(Team_Tick_Prefix),
+                typeof(float)) ? 1 : 0;
+            patchedCount += TryPatchMethod(
+                harmony,
+                "TaleWorlds.MountAndBlade.RangedSiegeWeaponAi",
+                "OnTick",
+                nameof(RangedSiegeWeaponAi_OnTick_Prefix),
+                typeof(Agent),
+                typeof(Formation),
+                typeof(Team),
                 typeof(float)) ? 1 : 0;
             patchedCount += TryPatchMethod(
                 harmony,
@@ -1098,6 +1109,50 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool RangedSiegeWeaponAi_OnTick_Prefix(
+            object __instance,
+            Agent agentToCompareTo,
+            Formation formationToCompareTo,
+            Team potentialUsersTeam,
+            float dt)
+        {
+            try
+            {
+                Team team = potentialUsersTeam ?? formationToCompareTo?.Team ?? agentToCompareTo?.Team;
+                Mission mission = team?.Mission ?? Mission.Current;
+                if (!ShouldSuppressDedicatedFieldMaterializedSiegeRangedWeaponAi(mission, team))
+                    return true;
+
+                string key =
+                    (mission.SceneName ?? "unknown") + "|" +
+                    SafeMissionModeName(mission) + "|" +
+                    mission.CurrentState + "|" +
+                    CoopBattlePhaseRuntimeState.GetPhase() + "|" +
+                    (team?.Side.ToString() ?? "None") + "|" +
+                    (team?.TeamIndex.ToString() ?? "-1");
+                if (!LoggedDedicatedSiegeRangedWeaponAiSuppressionKeys.Contains(key))
+                {
+                    LoggedDedicatedSiegeRangedWeaponAiSuppressionKeys.Add(key);
+                    ModLogger.Info(
+                        "BattleShellSuppressionPatch: suppressed dedicated field-materialized siege RangedSiegeWeaponAi.OnTick. " +
+                        "Scene=" + (mission.SceneName ?? "unknown") +
+                        " Mode=" + SafeMissionModeName(mission) +
+                        " MissionState=" + mission.CurrentState +
+                        " BattlePhase=" + CoopBattlePhaseRuntimeState.GetPhase() +
+                        " Dt=" + dt.ToString("0.0000") +
+                        " TeamSide=" + (team?.Side.ToString() ?? "None") +
+                        " TeamIndex=" + (team?.TeamIndex.ToString() ?? "-1") + ".");
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleShellSuppressionPatch: RangedSiegeWeaponAi.OnTick guard failed: " + ex.Message);
+                return true;
+            }
+        }
+
         private static bool ShouldSuppressDedicatedSiegeWarmupAfterStart(object instance)
         {
             Mission mission = (instance as MissionBehavior)?.Mission ?? Mission.Current;
@@ -1161,7 +1216,37 @@ namespace CoopSpectator.Patches
             }
 
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
-            if (currentPhase < CoopBattlePhase.PreBattleHold || currentPhase >= CoopBattlePhase.BattleActive)
+            if (currentPhase < CoopBattlePhase.Deployment || currentPhase >= CoopBattlePhase.BattleActive)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+        }
+
+        private static bool ShouldSuppressDedicatedFieldMaterializedSiegeRangedWeaponAi(Mission mission, Team team)
+        {
+            if (!GameNetwork.IsServer || mission == null || team == null || !IsDedicatedServerProcess())
+                return false;
+
+            if (!ExperimentalFeatures.EnableSiegeReplayFieldMaterializedArmyRuntime)
+                return false;
+
+            if (team.Side == BattleSideEnum.None || ReferenceEquals(team, mission.SpectatorTeam))
+                return false;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase >= CoopBattlePhase.BattleActive)
+                return false;
+
+            if (!IsCoopBattleMapRuntime(mission) ||
+                mission.GetMissionBehavior<MissionMultiplayerCoopSiegeAssaultWithDeployment>() == null)
+            {
+                return false;
+            }
+
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
                 return false;
 
             BattleScenarioContextMessage scenarioContext =

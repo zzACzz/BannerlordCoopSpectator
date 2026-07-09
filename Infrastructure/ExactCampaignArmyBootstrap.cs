@@ -2301,16 +2301,26 @@ namespace CoopSpectator.Infrastructure
                 out string laneDiagnosticsBefore);
             bool laneQuerySystemNeedsRepair = lanesReadBefore && !lanesReadyBefore;
             bool tacticsAlreadyRebuilt = SiegeAssaultTeamAiLifecycleTacticRepairs.Contains(mission);
-            if (tacticsAlreadyRebuilt && !laneQuerySystemNeedsRepair)
+            bool attackerDeploymentFinishedNotificationNeeded =
+                !TeamAiDeploymentFinishedNotifications.Contains(mission.AttackerTeam.TeamAI);
+            bool defenderDeploymentFinishedNotificationNeeded =
+                !TeamAiDeploymentFinishedNotifications.Contains(mission.DefenderTeam.TeamAI);
+            bool deploymentFinishedNotificationNeeded =
+                attackerDeploymentFinishedNotificationNeeded ||
+                defenderDeploymentFinishedNotificationNeeded;
+
+            if (tacticsAlreadyRebuilt &&
+                !laneQuerySystemNeedsRepair &&
+                !deploymentFinishedNotificationNeeded)
             {
                 return;
             }
 
             bool attackerNotified = true;
             bool defenderNotified = true;
-            string attackerNotificationDiagnostics = "not-required-lanes-ready-or-unavailable";
-            string defenderNotificationDiagnostics = "not-required-lanes-ready-or-unavailable";
-            if (laneQuerySystemNeedsRepair)
+            string attackerNotificationDiagnostics = "not-required-already-notified";
+            string defenderNotificationDiagnostics = "not-required-already-notified";
+            if (deploymentFinishedNotificationNeeded || laneQuerySystemNeedsRepair)
             {
                 attackerNotified = TryNotifyExistingMissionTeamAiDeploymentFinished(
                     mission.AttackerTeam,
@@ -2356,6 +2366,7 @@ namespace CoopSpectator.Infrastructure
                 " Phase=" + currentPhase +
                 " TacticsAlreadyRebuilt=" + tacticsAlreadyRebuilt +
                 " LaneQuerySystemNeedsRepair=" + laneQuerySystemNeedsRepair +
+                " DeploymentFinishedNotificationNeeded=" + deploymentFinishedNotificationNeeded +
                 " LanesBefore={Readable=" + lanesReadBefore +
                 " Ready=" + lanesReadyBefore +
                 " Count=" + laneCountBefore +

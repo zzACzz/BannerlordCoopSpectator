@@ -76,6 +76,8 @@ namespace CoopSpectator.Patches
         private static string _lastSuppressedServerSiegeEngineProjectileNativeDropKey;
         private static string _lastSuppressedServerCorpseAttachedWeaponKey;
         private static string _lastSuppressedServerSpawnedWeaponAttachmentKey;
+        private static string _lastSuppressedServerInvalidCorpseAttachedWeaponIndexKey;
+        private static string _lastSuppressedServerInvalidSpawnedWeaponAttachmentIndexKey;
 #if COOPSPECTATOR_DEDICATED
         private static string _lastSuppressedServerProjectileAttachVisualKey;
 #endif
@@ -161,8 +163,16 @@ namespace CoopSpectator.Patches
             new List<DeferredClientSetAgentHealthPayload>();
         private static readonly List<DeferredClientMakeAgentDeadPayload> DeferredClientMakeAgentDeadPayloads =
             new List<DeferredClientMakeAgentDeadPayload>();
+        private static readonly List<DelayedLocalControlledWeaponStatePayload> DelayedLocalControlledWeaponStatePayloads =
+            new List<DelayedLocalControlledWeaponStatePayload>();
         private static int _remainingExactSiegeMissionObjectSyncDiagnosticBudget = ExactSiegeMissionObjectSyncDiagnosticBudget;
         private static bool _exactSiegeMissionObjectSyncDiagnosticBudgetExhaustedLogged;
+
+        private enum DelayedLocalControlledWeaponStateMessageKind
+        {
+            AmmoData = 0,
+            ReloadPhase = 1
+        }
 
         private enum SynchronizeMountedWeaponRole
         {
@@ -194,12 +204,15 @@ namespace CoopSpectator.Patches
         private static long _nextDeferredClientSetWieldedItemIndexSequence;
         private static long _nextDeferredClientSetAgentHealthSequence;
         private static long _nextDeferredClientMakeAgentDeadSequence;
+        private static long _nextDelayedLocalControlledWeaponStateSequence;
+        private static int _delayedLocalControlledWeaponStateReplayDepth;
         private static int _unsafeImmediateClientAgentBaselineMaterializationDepth;
         private static readonly TimeSpan LocalFollowEchoSuppressionWindow = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan DeferredClientSiegeMissionObjectReplayDelay = TimeSpan.FromMilliseconds(750);
         private static readonly TimeSpan DeferredClientSiegeMissingMissionObjectDropDelay = TimeSpan.FromSeconds(8);
         private static readonly TimeSpan ClientThrownProjectileBecomeInvisibleVisualGrace = TimeSpan.FromMilliseconds(650);
         private static readonly TimeSpan ClientSiegeEngineProjectileVisualGraceMaxAge = TimeSpan.FromMilliseconds(2500);
+        private static readonly TimeSpan DelayedLocalControlledWeaponStateMaxDelay = TimeSpan.FromSeconds(3);
         private static DateTime _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
         private static int _localFollowEchoSuppressionAgentIndex = -1;
 
@@ -361,6 +374,34 @@ namespace CoopSpectator.Patches
             public DateTime LastAttemptUtc;
             public int Attempts;
             public string DeferralReason;
+        }
+
+        private sealed class DelayedLocalControlledWeaponStatePayload
+        {
+            public long Sequence;
+            public DelayedLocalControlledWeaponStateMessageKind Kind;
+            public SetWeaponAmmoData AmmoMessage;
+            public SetWeaponReloadPhase ReloadPhaseMessage;
+            public DateTime QueuedUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+            public string DeferralReason;
+            public DelayedLocalControlledWeaponSlotSnapshot WeaponSnapshot;
+            public DelayedLocalControlledWeaponSlotSnapshot AmmoSnapshot;
+        }
+
+        private sealed class DelayedLocalControlledWeaponSlotSnapshot
+        {
+            public bool Captured;
+            public EquipmentIndex EquipmentIndex;
+            public string ItemId;
+            public string UsageId;
+            public string WeaponClass;
+            public int Amount;
+            public int Ammo;
+            public short ReloadPhase;
+            public short ReloadPhaseCount;
+            public int CurrentUsageIndex;
         }
 
         private sealed class DeferredClientStartSwitchingWeaponUsageIndexPayload
@@ -610,6 +651,10 @@ namespace CoopSpectator.Patches
             {
                 DeferredClientMakeAgentDeadPayloads.Clear();
             }
+            lock (DelayedLocalControlledWeaponStatePayloads)
+            {
+                DelayedLocalControlledWeaponStatePayloads.Clear();
+            }
             _nextDeferredClientCreateAgentSequence = 0;
             _nextDeferredClientSetAgentActionSetSequence = 0;
             _nextDeferredClientSynchronizeAgentEquipmentSequence = 0;
@@ -631,6 +676,8 @@ namespace CoopSpectator.Patches
             _nextDeferredClientSetWieldedItemIndexSequence = 0;
             _nextDeferredClientSetAgentHealthSequence = 0;
             _nextDeferredClientMakeAgentDeadSequence = 0;
+            _nextDelayedLocalControlledWeaponStateSequence = 0;
+            _delayedLocalControlledWeaponStateReplayDepth = 0;
             _unsafeImmediateClientAgentBaselineMaterializationDepth = 0;
             _clientProjectileVisualGraceReplayDepth = 0;
             LoggedClientProjectileVisualGraceKeys.Clear();
@@ -642,6 +689,8 @@ namespace CoopSpectator.Patches
             _lastSuppressedServerProjectileStickKey = null;
             _lastSuppressedServerCorpseAttachedWeaponKey = null;
             _lastSuppressedServerSpawnedWeaponAttachmentKey = null;
+            _lastSuppressedServerInvalidCorpseAttachedWeaponIndexKey = null;
+            _lastSuppressedServerInvalidSpawnedWeaponAttachmentIndexKey = null;
 #if COOPSPECTATOR_DEDICATED
             _lastSuppressedServerProjectileAttachVisualKey = null;
 #endif
@@ -2834,6 +2883,7 @@ namespace CoopSpectator.Patches
             TryReplayDeferredClientSetWeaponNetworkData(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSetWeaponAmmoData(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSetWeaponReloadPhase(mission, source, snapshotReadinessSummary);
+            TryProcessDelayedLocalControlledWeaponStateMessages(mission, source);
             TryReplayDeferredClientCreateMissile(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientHandleMissileCollisionReaction(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSetWieldedItemIndex(mission, source, snapshotReadinessSummary);
@@ -5385,10 +5435,34 @@ namespace CoopSpectator.Patches
             try
             {
                 if (!ShouldUseServerExactBattleProjectileStickSuppression(__instance) ||
-                    agent == null ||
-                    attachedWeaponIndex < 0)
+                    agent == null)
                 {
                     return true;
+                }
+
+                if (attachedWeaponIndex < 0)
+                {
+                    __result = null;
+                    if (ExperimentalFeatures.EnableExactCreateAgentCorridorDiagnostics)
+                    {
+                        string invalidIndexLogKey =
+                            agent.Index + "|" +
+                            attachedWeaponIndex + "|" +
+                            forcedSpawnIndex + "|" +
+                            ((agent.Character as BasicCharacterObject)?.StringId ?? "null");
+                        if (!string.Equals(_lastSuppressedServerInvalidCorpseAttachedWeaponIndexKey, invalidIndexLogKey, StringComparison.Ordinal))
+                        {
+                            _lastSuppressedServerInvalidCorpseAttachedWeaponIndexKey = invalidIndexLogKey;
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: suppressed server SpawnAttachedWeaponOnCorpse because native provided invalid attached weapon index. " +
+                                "AgentIndex=" + agent.Index +
+                                " CharacterId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                                " AttachedWeaponIndex=" + attachedWeaponIndex +
+                                " ForcedSpawnIndex=" + forcedSpawnIndex);
+                        }
+                    }
+
+                    return false;
                 }
 
                 if (agent.IsActive() && agent.Health > 0f)
@@ -5448,10 +5522,33 @@ namespace CoopSpectator.Patches
             try
             {
                 if (!ShouldUseServerExactBattleProjectileStickSuppression(__instance) ||
-                    spawnedWeapon == null ||
-                    attachmentIndex < 0)
+                    spawnedWeapon == null)
                 {
                     return true;
+                }
+
+                if (attachmentIndex < 0)
+                {
+                    if (ExperimentalFeatures.EnableExactCreateAgentCorridorDiagnostics)
+                    {
+                        string invalidIndexLogKey =
+                            GetMissionObjectIdValue(spawnedWeapon.Id) + "|" +
+                            attachmentIndex + "|" +
+                            forcedSpawnIndex + "|" +
+                            (spawnedWeapon.WeaponCopy.Item?.StringId ?? "null");
+                        if (!string.Equals(_lastSuppressedServerInvalidSpawnedWeaponAttachmentIndexKey, invalidIndexLogKey, StringComparison.Ordinal))
+                        {
+                            _lastSuppressedServerInvalidSpawnedWeaponAttachmentIndexKey = invalidIndexLogKey;
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: suppressed server SpawnAttachedWeaponOnSpawnedWeapon because native provided invalid attachment index. " +
+                                "SpawnedWeaponId=" + GetMissionObjectIdValue(spawnedWeapon.Id) +
+                                " ParentItem=" + (spawnedWeapon.WeaponCopy.Item?.StringId ?? "null") +
+                                " AttachmentIndex=" + attachmentIndex +
+                                " ForcedSpawnIndex=" + forcedSpawnIndex);
+                        }
+                    }
+
+                    return false;
                 }
 
                 ItemObject parentItem = spawnedWeapon.WeaponCopy.Item;
@@ -7551,6 +7648,1257 @@ namespace CoopSpectator.Patches
                 out reason);
         }
 
+        private static bool TryApplyLocalPredictedReloadPhaseAsManagedStateOnly(
+            Mission mission,
+            Agent agent,
+            SetWeaponReloadPhase setWeaponReloadPhase,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                mission == null ||
+                agent == null ||
+                setWeaponReloadPhase == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                agent.Equipment == null)
+            {
+                return false;
+            }
+
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            if (!IsLocalMissionPeerControlledAgent(agent))
+                return false;
+
+            EquipmentIndex equipmentIndex = setWeaponReloadPhase.EquipmentIndex;
+            if (equipmentIndex < EquipmentIndex.Weapon0 || equipmentIndex > EquipmentIndex.Weapon3)
+                return false;
+
+            EquipmentIndex currentMainHandIndex;
+            try
+            {
+                currentMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (currentMainHandIndex != equipmentIndex)
+                return false;
+
+            MissionWeapon missionWeapon;
+            ItemObject item;
+            WeaponComponentData usage;
+            try
+            {
+                missionWeapon = agent.Equipment[equipmentIndex];
+                item = missionWeapon.Item;
+                if (missionWeapon.IsEmpty || item == null)
+                    return false;
+
+                usage = missionWeapon.CurrentUsageItem ?? item.PrimaryWeapon;
+                if (usage == null)
+                    return false;
+            }
+            catch
+            {
+                return false;
+            }
+
+            bool isBow =
+                item.ItemType == ItemObject.ItemTypeEnum.Bow ||
+                usage.WeaponClass == WeaponClass.Bow ||
+                usage.RelevantSkill == DefaultSkills.Bow;
+            if (!isBow)
+                return false;
+
+            if (!IsAgentInReloadLastPhase(agent, channelNo: 1, out string actionSummary))
+                return false;
+
+            short reloadPhase = setWeaponReloadPhase.ReloadPhase;
+            bool predictedReloadPhase = reloadPhase == 1;
+            if (!predictedReloadPhase)
+                return false;
+
+            try
+            {
+                agent.Equipment.SetReloadPhaseOfSlot(equipmentIndex, reloadPhase);
+            }
+            catch (Exception ex)
+            {
+                reason = "managed-state-only-apply-failed:" + ex.GetType().Name;
+                return false;
+            }
+
+            reason =
+                "local-predicted-reload-last-phase" +
+                "|AgentIndex=" + agent.Index +
+                "|EquipmentIndex=" + equipmentIndex +
+                "|CurrentMain=" + currentMainHandIndex +
+                "|ReloadPhase=" + reloadPhase +
+                "|Item=" + (item.StringId ?? "null") +
+                "|Usage=" + usage.WeaponClass +
+                "|Action1={" + actionSummary + "}";
+            return true;
+        }
+
+        private static bool IsAgentInReloadLastPhase(
+            Agent agent,
+            int channelNo,
+            out string actionSummary)
+        {
+            actionSummary = null;
+            if (agent == null)
+                return false;
+
+            try
+            {
+                string actionType = agent.GetCurrentActionType(channelNo).ToString();
+                string actionStage = agent.GetCurrentActionStage(channelNo).ToString();
+                string action = agent.GetCurrentAction(channelNo).ToString();
+                actionSummary =
+                    "Channel=" + channelNo +
+                    " Action=" + action +
+                    " Type=" + actionType +
+                    " Stage=" + actionStage +
+                    " Progress=" + agent.GetCurrentActionProgress(channelNo).ToString("0.000");
+                return string.Equals(actionType, "Reload", StringComparison.Ordinal) &&
+                       string.Equals(actionStage, "ReloadLastPhase", StringComparison.Ordinal);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryQueueDelayedLocalControlledWeaponAmmoData(
+            Mission mission,
+            Agent agent,
+            SetWeaponAmmoData setWeaponAmmoData,
+            out string reason)
+        {
+            reason = null;
+            if (_delayedLocalControlledWeaponStateReplayDepth > 0 ||
+                GameNetwork.IsServer ||
+                mission == null ||
+                agent == null ||
+                setWeaponAmmoData == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                agent.Equipment == null)
+            {
+                return false;
+            }
+
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            if (!IsLocalMissionPeerControlledAgent(agent))
+                return false;
+
+            EquipmentIndex weaponEquipmentIndex = setWeaponAmmoData.WeaponEquipmentIndex;
+            EquipmentIndex ammoEquipmentIndex = setWeaponAmmoData.AmmoEquipmentIndex;
+            if (weaponEquipmentIndex < EquipmentIndex.Weapon0 ||
+                weaponEquipmentIndex > EquipmentIndex.Weapon3 ||
+                ammoEquipmentIndex < EquipmentIndex.Weapon0 ||
+                ammoEquipmentIndex > EquipmentIndex.Weapon3 ||
+                setWeaponAmmoData.Ammo <= 0)
+            {
+                return false;
+            }
+
+            if (!TryGetAgentPrimaryWieldedItemIndex(agent, out EquipmentIndex currentMainHandIndex) ||
+                currentMainHandIndex != weaponEquipmentIndex)
+            {
+                return false;
+            }
+
+            if (!TryGetAgentMissionWeaponUsage(
+                    agent,
+                    weaponEquipmentIndex,
+                    out _,
+                    out ItemObject weaponItem,
+                    out WeaponComponentData weaponUsage) ||
+                !IsCrossbowWeaponUsage(weaponItem, weaponUsage))
+            {
+                return false;
+            }
+
+            if (!TryGetAgentMissionWeaponUsage(
+                    agent,
+                    ammoEquipmentIndex,
+                    out _,
+                    out ItemObject ammoItem,
+                    out WeaponComponentData ammoUsage) ||
+                !IsBoltAmmoUsage(ammoItem, ammoUsage))
+            {
+                return false;
+            }
+
+            if (!IsAgentInReloadLastPhase(agent, channelNo: 1, out string actionSummary))
+                return false;
+
+            reason =
+                "local-controlled-crossbow-ammo-reload-last-phase" +
+                "|AgentIndex=" + agent.Index +
+                "|WeaponEquipmentIndex=" + weaponEquipmentIndex +
+                "|AmmoEquipmentIndex=" + ammoEquipmentIndex +
+                "|CurrentMain=" + currentMainHandIndex +
+                "|Ammo=" + setWeaponAmmoData.Ammo +
+                "|Item=" + (weaponItem.StringId ?? "null") +
+                "|AmmoItem=" + (ammoItem.StringId ?? "null") +
+                "|Usage=" + weaponUsage.WeaponClass +
+                "|AmmoUsage=" + ammoUsage.WeaponClass +
+                "|Action1={" + actionSummary + "}";
+            RegisterDelayedLocalControlledWeaponStatePayload(
+                DelayedLocalControlledWeaponStateMessageKind.AmmoData,
+                setWeaponAmmoData,
+                null,
+                agent,
+                reason);
+            return true;
+        }
+
+        private static bool TryQueueDelayedLocalControlledWeaponReloadPhase(
+            Mission mission,
+            Agent agent,
+            SetWeaponReloadPhase setWeaponReloadPhase,
+            out string reason)
+        {
+            reason = null;
+            if (_delayedLocalControlledWeaponStateReplayDepth > 0 ||
+                GameNetwork.IsServer ||
+                mission == null ||
+                agent == null ||
+                setWeaponReloadPhase == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                agent.Equipment == null)
+            {
+                return false;
+            }
+
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            if (!IsLocalMissionPeerControlledAgent(agent))
+                return false;
+
+            EquipmentIndex equipmentIndex = setWeaponReloadPhase.EquipmentIndex;
+            if (equipmentIndex < EquipmentIndex.Weapon0 || equipmentIndex > EquipmentIndex.Weapon3)
+                return false;
+
+            if (!TryGetAgentPrimaryWieldedItemIndex(agent, out EquipmentIndex currentMainHandIndex) ||
+                currentMainHandIndex != equipmentIndex)
+            {
+                return false;
+            }
+
+            if (!TryGetAgentMissionWeaponUsage(
+                    agent,
+                    equipmentIndex,
+                    out MissionWeapon missionWeapon,
+                    out ItemObject item,
+                    out WeaponComponentData usage))
+            {
+                return false;
+            }
+
+            short reloadPhase = setWeaponReloadPhase.ReloadPhase;
+            bool isThrown = IsThrownProjectileLaunchWeapon(missionWeapon);
+            bool isCrossbow = IsCrossbowWeaponUsage(item, usage);
+            bool shouldDelay =
+                (isThrown && reloadPhase == 1) ||
+                (isCrossbow && reloadPhase == 2);
+            if (!shouldDelay)
+                return false;
+
+            if (!IsAgentInReloadLastPhase(agent, channelNo: 1, out string actionSummary))
+                return false;
+
+            reason =
+                "local-controlled-reload-last-phase" +
+                "|AgentIndex=" + agent.Index +
+                "|EquipmentIndex=" + equipmentIndex +
+                "|CurrentMain=" + currentMainHandIndex +
+                "|ReloadPhase=" + reloadPhase +
+                "|Item=" + (item.StringId ?? "null") +
+                "|Usage=" + usage.WeaponClass +
+                "|IsThrown=" + isThrown +
+                "|IsCrossbow=" + isCrossbow +
+                "|Action1={" + actionSummary + "}";
+            RegisterDelayedLocalControlledWeaponStatePayload(
+                DelayedLocalControlledWeaponStateMessageKind.ReloadPhase,
+                null,
+                setWeaponReloadPhase,
+                agent,
+                reason);
+            return true;
+        }
+
+        private static bool TryApplyDelayedReloadPhaseAsManagedStateOnly(
+            Agent agent,
+            DelayedLocalControlledWeaponStatePayload payload,
+            out string reason)
+        {
+            reason = null;
+            if (agent == null ||
+                payload == null ||
+                payload.Kind != DelayedLocalControlledWeaponStateMessageKind.ReloadPhase ||
+                payload.ReloadPhaseMessage == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                agent.Equipment == null)
+            {
+                return false;
+            }
+
+            SetWeaponReloadPhase setWeaponReloadPhase = payload.ReloadPhaseMessage;
+            EquipmentIndex equipmentIndex = setWeaponReloadPhase.EquipmentIndex;
+            if (equipmentIndex < EquipmentIndex.Weapon0 || equipmentIndex > EquipmentIndex.Weapon3)
+                return false;
+
+            if (!TryGetAgentPrimaryWieldedItemIndex(agent, out EquipmentIndex currentMainHandIndex) ||
+                currentMainHandIndex != equipmentIndex)
+            {
+                reason =
+                    "current-main-mismatch" +
+                    "|CurrentMain=" + currentMainHandIndex +
+                    "|EquipmentIndex=" + equipmentIndex;
+                return false;
+            }
+
+            if (!TryGetAgentMissionWeaponUsage(
+                    agent,
+                    equipmentIndex,
+                    out MissionWeapon missionWeapon,
+                    out ItemObject item,
+                    out WeaponComponentData usage))
+            {
+                reason = "mission-weapon-unavailable";
+                return false;
+            }
+
+            short reloadPhase = setWeaponReloadPhase.ReloadPhase;
+            bool isThrown = IsThrownProjectileLaunchWeapon(missionWeapon);
+            bool isCrossbow = IsCrossbowWeaponUsage(item, usage);
+            bool isSupported =
+                (isThrown && reloadPhase == 1) ||
+                (isCrossbow && reloadPhase == 2);
+            if (!isSupported)
+            {
+                reason =
+                    "unsupported-delayed-reload-phase" +
+                    "|ReloadPhase=" + reloadPhase +
+                    "|IsThrown=" + isThrown +
+                    "|IsCrossbow=" + isCrossbow;
+                return false;
+            }
+
+            try
+            {
+                agent.Equipment.SetReloadPhaseOfSlot(equipmentIndex, reloadPhase);
+            }
+            catch (Exception ex)
+            {
+                reason = "managed-state-only-apply-failed:" + ex.GetType().Name;
+                return false;
+            }
+
+            reason =
+                "managed-state-only-delayed-reload-phase" +
+                "|AgentIndex=" + agent.Index +
+                "|EquipmentIndex=" + equipmentIndex +
+                "|CurrentMain=" + currentMainHandIndex +
+                "|ReloadPhase=" + reloadPhase +
+                "|Item=" + (item.StringId ?? "null") +
+                "|Usage=" + usage.WeaponClass +
+                "|IsThrown=" + isThrown +
+                "|IsCrossbow=" + isCrossbow;
+            return true;
+        }
+
+        private static bool TryGetAgentPrimaryWieldedItemIndex(Agent agent, out EquipmentIndex equipmentIndex)
+        {
+            equipmentIndex = EquipmentIndex.None;
+            if (agent == null)
+                return false;
+
+            try
+            {
+                equipmentIndex = agent.GetPrimaryWieldedItemIndex();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryGetAgentMissionWeaponUsage(
+            Agent agent,
+            EquipmentIndex equipmentIndex,
+            out MissionWeapon missionWeapon,
+            out ItemObject item,
+            out WeaponComponentData usage)
+        {
+            missionWeapon = MissionWeapon.Invalid;
+            item = null;
+            usage = null;
+            if (agent?.Equipment == null ||
+                equipmentIndex < EquipmentIndex.Weapon0 ||
+                equipmentIndex > EquipmentIndex.Weapon3)
+            {
+                return false;
+            }
+
+            try
+            {
+                missionWeapon = agent.Equipment[equipmentIndex];
+                item = missionWeapon.Item;
+                if (missionWeapon.IsEmpty || item == null)
+                    return false;
+
+                usage = missionWeapon.CurrentUsageItem ?? item.PrimaryWeapon;
+                return usage != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsCrossbowWeaponUsage(ItemObject item, WeaponComponentData usage)
+        {
+            if (usage == null)
+                return false;
+
+            return item?.ItemType == ItemObject.ItemTypeEnum.Crossbow ||
+                   usage.WeaponClass == WeaponClass.Crossbow ||
+                   usage.RelevantSkill == DefaultSkills.Crossbow;
+        }
+
+        private static bool IsBoltAmmoUsage(ItemObject item, WeaponComponentData usage)
+        {
+            if (usage == null)
+                return false;
+
+            return item?.ItemType == ItemObject.ItemTypeEnum.Bolts ||
+                   usage.WeaponClass == WeaponClass.Bolt;
+        }
+
+        private static DelayedLocalControlledWeaponSlotSnapshot BuildDelayedLocalControlledWeaponSlotSnapshot(
+            Agent agent,
+            EquipmentIndex equipmentIndex)
+        {
+            DelayedLocalControlledWeaponSlotSnapshot snapshot =
+                new DelayedLocalControlledWeaponSlotSnapshot
+                {
+                    Captured = false,
+                    EquipmentIndex = equipmentIndex
+                };
+
+            if (!TryGetAgentMissionWeaponUsage(
+                    agent,
+                    equipmentIndex,
+                    out MissionWeapon missionWeapon,
+                    out ItemObject item,
+                    out WeaponComponentData usage))
+            {
+                return snapshot;
+            }
+
+            snapshot.Captured = true;
+            snapshot.ItemId = item?.StringId ?? missionWeapon.Item?.StringId ?? string.Empty;
+            snapshot.UsageId = usage?.ItemUsage ?? string.Empty;
+            snapshot.WeaponClass = usage?.WeaponClass.ToString() ?? string.Empty;
+            snapshot.Amount = missionWeapon.Amount;
+            snapshot.Ammo = missionWeapon.Ammo;
+            snapshot.ReloadPhase = missionWeapon.ReloadPhase;
+            snapshot.ReloadPhaseCount = missionWeapon.ReloadPhaseCount;
+            snapshot.CurrentUsageIndex = missionWeapon.CurrentUsageIndex;
+            return snapshot;
+        }
+
+        private static bool DoesDelayedWeaponSlotSnapshotMatchCurrentWeapon(
+            DelayedLocalControlledWeaponSlotSnapshot snapshot,
+            MissionWeapon missionWeapon,
+            ItemObject item,
+            WeaponComponentData usage,
+            out string reason)
+        {
+            reason = null;
+            if (snapshot == null || !snapshot.Captured)
+                return true;
+
+            string currentItemId = item?.StringId ?? missionWeapon.Item?.StringId ?? string.Empty;
+            if (!string.Equals(snapshot.ItemId ?? string.Empty, currentItemId, StringComparison.OrdinalIgnoreCase))
+            {
+                reason =
+                    "snapshot-item-mismatch" +
+                    "|Snapshot={" + BuildDelayedWeaponSlotSnapshotSummary(snapshot) + "}" +
+                    "|Current={" + BuildDelayedWeaponStateFingerprint(missionWeapon, item, usage) + "}";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static string BuildDelayedWeaponSlotSnapshotSummary(
+            DelayedLocalControlledWeaponSlotSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return "null";
+
+            if (!snapshot.Captured)
+                return "not-captured|Slot=" + snapshot.EquipmentIndex;
+
+            return
+                "Slot=" + snapshot.EquipmentIndex +
+                "|Item=" + (snapshot.ItemId ?? "null") +
+                "|Usage=" + (snapshot.WeaponClass ?? "null") +
+                "|UsageId=" + (snapshot.UsageId ?? "null") +
+                "|Amount=" + snapshot.Amount +
+                "|Ammo=" + snapshot.Ammo +
+                "|ReloadPhase=" + snapshot.ReloadPhase +
+                "|ReloadPhaseCount=" + snapshot.ReloadPhaseCount +
+                "|CurrentUsageIndex=" + snapshot.CurrentUsageIndex;
+        }
+
+        private static void RegisterDelayedLocalControlledWeaponStatePayload(
+            DelayedLocalControlledWeaponStateMessageKind kind,
+            SetWeaponAmmoData ammoMessage,
+            SetWeaponReloadPhase reloadPhaseMessage,
+            Agent agent,
+            string deferralReason)
+        {
+            int agentIndex = GetDelayedLocalControlledWeaponStateAgentIndex(kind, ammoMessage, reloadPhaseMessage);
+            EquipmentIndex equipmentIndex =
+                GetDelayedLocalControlledWeaponStateEquipmentIndex(kind, ammoMessage, reloadPhaseMessage);
+            if (agentIndex < 0 ||
+                equipmentIndex < EquipmentIndex.Weapon0 ||
+                equipmentIndex > EquipmentIndex.Weapon3)
+            {
+                return;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            DelayedLocalControlledWeaponSlotSnapshot weaponSnapshot =
+                BuildDelayedLocalControlledWeaponSlotSnapshot(agent, equipmentIndex);
+            DelayedLocalControlledWeaponSlotSnapshot ammoSnapshot =
+                kind == DelayedLocalControlledWeaponStateMessageKind.AmmoData
+                    ? BuildDelayedLocalControlledWeaponSlotSnapshot(agent, ammoMessage?.AmmoEquipmentIndex ?? EquipmentIndex.None)
+                    : null;
+            lock (DelayedLocalControlledWeaponStatePayloads)
+            {
+                DelayedLocalControlledWeaponStatePayload existingPayload =
+                    DelayedLocalControlledWeaponStatePayloads.FirstOrDefault(candidate =>
+                        candidate != null &&
+                        candidate.Kind == kind &&
+                        GetDelayedLocalControlledWeaponStateAgentIndex(candidate) == agentIndex &&
+                        GetDelayedLocalControlledWeaponStateEquipmentIndex(candidate) == equipmentIndex &&
+                        (kind != DelayedLocalControlledWeaponStateMessageKind.AmmoData ||
+                         candidate.AmmoMessage?.AmmoEquipmentIndex == ammoMessage?.AmmoEquipmentIndex));
+                if (existingPayload != null)
+                {
+                    existingPayload.AmmoMessage = ammoMessage;
+                    existingPayload.ReloadPhaseMessage = reloadPhaseMessage;
+                    existingPayload.DeferralReason = deferralReason;
+                    existingPayload.WeaponSnapshot = weaponSnapshot;
+                    existingPayload.AmmoSnapshot = ammoSnapshot;
+                    return;
+                }
+
+                DelayedLocalControlledWeaponStatePayloads.Add(
+                    new DelayedLocalControlledWeaponStatePayload
+                    {
+                        Sequence = ++_nextDelayedLocalControlledWeaponStateSequence,
+                        Kind = kind,
+                        AmmoMessage = ammoMessage,
+                        ReloadPhaseMessage = reloadPhaseMessage,
+                        QueuedUtc = nowUtc,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0,
+                        DeferralReason = deferralReason,
+                        WeaponSnapshot = weaponSnapshot,
+                        AmmoSnapshot = ammoSnapshot
+                    });
+            }
+        }
+
+        private static void RemoveDelayedLocalControlledWeaponStatePayload(
+            DelayedLocalControlledWeaponStatePayload payload)
+        {
+            if (payload == null)
+                return;
+
+            lock (DelayedLocalControlledWeaponStatePayloads)
+            {
+                DelayedLocalControlledWeaponStatePayloads.RemoveAll(candidate =>
+                    ReferenceEquals(candidate, payload) ||
+                    (candidate != null && candidate.Sequence == payload.Sequence));
+            }
+        }
+
+        private static int GetDelayedLocalControlledWeaponStateAgentIndex(
+            DelayedLocalControlledWeaponStatePayload payload)
+        {
+            if (payload == null)
+                return -1;
+
+            return GetDelayedLocalControlledWeaponStateAgentIndex(
+                payload.Kind,
+                payload.AmmoMessage,
+                payload.ReloadPhaseMessage);
+        }
+
+        private static int GetDelayedLocalControlledWeaponStateAgentIndex(
+            DelayedLocalControlledWeaponStateMessageKind kind,
+            SetWeaponAmmoData ammoMessage,
+            SetWeaponReloadPhase reloadPhaseMessage)
+        {
+            switch (kind)
+            {
+                case DelayedLocalControlledWeaponStateMessageKind.AmmoData:
+                    return ammoMessage?.AgentIndex ?? -1;
+                case DelayedLocalControlledWeaponStateMessageKind.ReloadPhase:
+                    return reloadPhaseMessage?.AgentIndex ?? -1;
+                default:
+                    return -1;
+            }
+        }
+
+        private static EquipmentIndex GetDelayedLocalControlledWeaponStateEquipmentIndex(
+            DelayedLocalControlledWeaponStatePayload payload)
+        {
+            if (payload == null)
+                return EquipmentIndex.None;
+
+            return GetDelayedLocalControlledWeaponStateEquipmentIndex(
+                payload.Kind,
+                payload.AmmoMessage,
+                payload.ReloadPhaseMessage);
+        }
+
+        private static EquipmentIndex GetDelayedLocalControlledWeaponStateEquipmentIndex(
+            DelayedLocalControlledWeaponStateMessageKind kind,
+            SetWeaponAmmoData ammoMessage,
+            SetWeaponReloadPhase reloadPhaseMessage)
+        {
+            switch (kind)
+            {
+                case DelayedLocalControlledWeaponStateMessageKind.AmmoData:
+                    return ammoMessage?.WeaponEquipmentIndex ?? EquipmentIndex.None;
+                case DelayedLocalControlledWeaponStateMessageKind.ReloadPhase:
+                    return reloadPhaseMessage?.EquipmentIndex ?? EquipmentIndex.None;
+                default:
+                    return EquipmentIndex.None;
+            }
+        }
+
+        private static void TryProcessDelayedLocalControlledWeaponStateMessages(Mission mission, string source)
+        {
+            if (!GameNetwork.IsClient ||
+                mission == null ||
+                !ShouldRunAgentMaterializationHandoff(mission))
+            {
+                return;
+            }
+
+            if (_missionNetworkComponentHandleServerEventSetWeaponAmmoDataMethod == null ||
+                _missionNetworkComponentHandleServerEventSetWeaponReloadPhaseMethod == null)
+            {
+                return;
+            }
+
+            List<DelayedLocalControlledWeaponStatePayload> delayedPayloads;
+            lock (DelayedLocalControlledWeaponStatePayloads)
+            {
+                if (DelayedLocalControlledWeaponStatePayloads.Count <= 0)
+                    return;
+
+                delayedPayloads = DelayedLocalControlledWeaponStatePayloads
+                    .OrderBy(candidate => candidate.Sequence)
+                    .ToList();
+            }
+
+            MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DelayedLocalControlledWeaponStatePayload payload in delayedPayloads)
+            {
+                if (payload == null)
+                    continue;
+
+                int agentIndex = GetDelayedLocalControlledWeaponStateAgentIndex(payload);
+                EquipmentIndex equipmentIndex = GetDelayedLocalControlledWeaponStateEquipmentIndex(payload);
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(agentIndex, canBeNull: true);
+                if (agent == null || !agent.IsActive() || agent.IsMount || !agent.IsHuman)
+                {
+                    LogDelayedLocalControlledWeaponState(
+                        payload,
+                        agent,
+                        equipmentIndex,
+                        "dropped-agent-unavailable",
+                        "agent-missing-or-inactive",
+                        source);
+                    RemoveDelayedLocalControlledWeaponStatePayload(payload);
+                    continue;
+                }
+
+                if (!TryGetAgentPrimaryWieldedItemIndex(agent, out EquipmentIndex currentMainHandIndex))
+                {
+                    LogDelayedLocalControlledWeaponState(
+                        payload,
+                        agent,
+                        equipmentIndex,
+                        "dropped-current-main-unavailable",
+                        "current-main-unavailable",
+                        source);
+                    RemoveDelayedLocalControlledWeaponStatePayload(payload);
+                    continue;
+                }
+
+                bool currentWeaponChanged = currentMainHandIndex != equipmentIndex;
+                bool inReloadLastPhase = IsAgentInReloadLastPhase(agent, channelNo: 1, out string actionSummary);
+                TimeSpan age = nowUtc - payload.QueuedUtc;
+                bool timedOut = age >= DelayedLocalControlledWeaponStateMaxDelay;
+                string replayReason =
+                    "AgeMs=" + ((int)Math.Max(0.0, age.TotalMilliseconds)) +
+                    " TimedOut=" + timedOut +
+                    " CurrentMain=" + currentMainHandIndex +
+                    " EquipmentIndex=" + equipmentIndex +
+                    " InReloadLastPhase=" + inReloadLastPhase +
+                    " Action1={" + (actionSummary ?? "none") + "}";
+
+                if (currentWeaponChanged)
+                {
+                    LogDelayedLocalControlledWeaponState(
+                        payload,
+                        agent,
+                        equipmentIndex,
+                        "dropped-current-weapon-changed",
+                        replayReason,
+                        source);
+                    RemoveDelayedLocalControlledWeaponStatePayload(payload);
+                    continue;
+                }
+
+                if (inReloadLastPhase)
+                {
+                    if (timedOut)
+                    {
+                        LogDelayedLocalControlledWeaponState(
+                            payload,
+                            agent,
+                            equipmentIndex,
+                            "dropped-timeout-still-reloading",
+                            replayReason,
+                            source);
+                        RemoveDelayedLocalControlledWeaponStatePayload(payload);
+                    }
+
+                    continue;
+                }
+
+                if (TryAcknowledgeDelayedLocalControlledWeaponStatePayload(
+                        agent,
+                        payload,
+                        out string acknowledgementReason))
+                {
+                    LogDelayedLocalControlledWeaponState(
+                        payload,
+                        agent,
+                        equipmentIndex,
+                        "acknowledged-after-reload-state-exit",
+                        replayReason + " AcknowledgementReason=" + (acknowledgementReason ?? "unknown"),
+                        source);
+                    RemoveDelayedLocalControlledWeaponStatePayload(payload);
+                    continue;
+                }
+
+                string disposition = "replayed-after-reload-state-exit";
+
+                if (TryReplayDelayedLocalControlledWeaponStatePayload(
+                        missionNetworkComponent,
+                        payload,
+                        out string replayError))
+                {
+                    LogDelayedLocalControlledWeaponState(
+                        payload,
+                        agent,
+                        equipmentIndex,
+                        disposition,
+                        replayReason,
+                        source);
+                    RemoveDelayedLocalControlledWeaponStatePayload(payload);
+                }
+                else
+                {
+                    LogDelayedLocalControlledWeaponState(
+                        payload,
+                        agent,
+                        equipmentIndex,
+                        "dropped-replay-failed",
+                        (replayError ?? "unknown") + " " + replayReason,
+                        source);
+                    RemoveDelayedLocalControlledWeaponStatePayload(payload);
+                }
+            }
+        }
+
+        private static bool TryAcknowledgeDelayedLocalControlledWeaponStatePayload(
+            Agent agent,
+            DelayedLocalControlledWeaponStatePayload payload,
+            out string reason)
+        {
+            reason = null;
+            if (agent == null ||
+                payload == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                agent.Equipment == null)
+            {
+                return false;
+            }
+
+            switch (payload.Kind)
+            {
+                case DelayedLocalControlledWeaponStateMessageKind.AmmoData:
+                    return TryAcknowledgeDelayedLocalControlledWeaponAmmoData(
+                        agent,
+                        payload,
+                        out reason);
+                case DelayedLocalControlledWeaponStateMessageKind.ReloadPhase:
+                    return TryAcknowledgeDelayedLocalControlledWeaponReloadPhase(
+                        agent,
+                        payload,
+                        out reason);
+                default:
+                    reason = "unsupported-delayed-kind:" + payload.Kind;
+                    return false;
+            }
+        }
+
+        private static bool TryAcknowledgeDelayedLocalControlledWeaponAmmoData(
+            Agent agent,
+            DelayedLocalControlledWeaponStatePayload payload,
+            out string reason)
+        {
+            reason = null;
+            SetWeaponAmmoData ammoMessage = payload?.AmmoMessage;
+            if (ammoMessage == null)
+                return false;
+
+            EquipmentIndex weaponEquipmentIndex = ammoMessage.WeaponEquipmentIndex;
+            EquipmentIndex ammoEquipmentIndex = ammoMessage.AmmoEquipmentIndex;
+            if (weaponEquipmentIndex < EquipmentIndex.Weapon0 ||
+                weaponEquipmentIndex > EquipmentIndex.Weapon3 ||
+                ammoEquipmentIndex < EquipmentIndex.Weapon0 ||
+                ammoEquipmentIndex > EquipmentIndex.Weapon3)
+            {
+                reason = "ammo-data-slot-out-of-range";
+                return false;
+            }
+
+            if (!TryGetAgentMissionWeaponUsage(
+                    agent,
+                    weaponEquipmentIndex,
+                    out MissionWeapon weapon,
+                    out ItemObject weaponItem,
+                    out WeaponComponentData weaponUsage))
+            {
+                reason = "ammo-data-weapon-unavailable";
+                return false;
+            }
+
+            if (!IsCrossbowWeaponUsage(weaponItem, weaponUsage))
+            {
+                reason = "ammo-data-weapon-not-crossbow";
+                return false;
+            }
+
+            if (!DoesDelayedWeaponSlotSnapshotMatchCurrentWeapon(
+                    payload?.WeaponSnapshot,
+                    weapon,
+                    weaponItem,
+                    weaponUsage,
+                    out string weaponSnapshotMismatchReason))
+            {
+                reason = "ammo-data-" + weaponSnapshotMismatchReason;
+                return false;
+            }
+
+            if (!TryGetAgentMissionWeaponUsage(
+                    agent,
+                    ammoEquipmentIndex,
+                    out MissionWeapon ammo,
+                    out ItemObject ammoItem,
+                    out WeaponComponentData ammoUsage))
+            {
+                reason = "ammo-data-ammo-slot-unavailable";
+                return false;
+            }
+
+            if (!IsBoltAmmoUsage(ammoItem, ammoUsage))
+            {
+                reason = "ammo-data-ammo-slot-not-bolt";
+                return false;
+            }
+
+            if (!DoesDelayedWeaponSlotSnapshotMatchCurrentWeapon(
+                    payload?.AmmoSnapshot,
+                    ammo,
+                    ammoItem,
+                    ammoUsage,
+                    out string ammoSnapshotMismatchReason))
+            {
+                reason = "ammo-data-ammo-" + ammoSnapshotMismatchReason;
+                return false;
+            }
+
+            int currentWeaponAmmo = weapon.Ammo;
+            if (currentWeaponAmmo != ammoMessage.Ammo)
+            {
+                reason =
+                    "ammo-data-state-mismatch" +
+                    "|ExpectedAmmo=" + ammoMessage.Ammo +
+                    "|CurrentWeaponAmmo=" + currentWeaponAmmo +
+                    "|WeaponState={" + BuildDelayedWeaponStateFingerprint(weapon, weaponItem, weaponUsage) + "}" +
+                    "|AmmoState={" + BuildDelayedWeaponStateFingerprint(ammo, ammoItem, ammoUsage) + "}";
+                return false;
+            }
+
+            reason =
+                "ammo-data-state-match" +
+                "|ExpectedAmmo=" + ammoMessage.Ammo +
+                "|WeaponState={" + BuildDelayedWeaponStateFingerprint(weapon, weaponItem, weaponUsage) + "}" +
+                "|AmmoState={" + BuildDelayedWeaponStateFingerprint(ammo, ammoItem, ammoUsage) + "}";
+            return true;
+        }
+
+        private static bool TryAcknowledgeDelayedLocalControlledWeaponReloadPhase(
+            Agent agent,
+            DelayedLocalControlledWeaponStatePayload payload,
+            out string reason)
+        {
+            reason = null;
+            SetWeaponReloadPhase reloadPhaseMessage = payload?.ReloadPhaseMessage;
+            if (reloadPhaseMessage == null)
+                return false;
+
+            EquipmentIndex equipmentIndex = reloadPhaseMessage.EquipmentIndex;
+            if (equipmentIndex < EquipmentIndex.Weapon0 || equipmentIndex > EquipmentIndex.Weapon3)
+            {
+                reason = "reload-phase-slot-out-of-range";
+                return false;
+            }
+
+            if (!TryGetAgentMissionWeaponUsage(
+                    agent,
+                    equipmentIndex,
+                    out MissionWeapon missionWeapon,
+                    out ItemObject item,
+                    out WeaponComponentData usage))
+            {
+                reason = "reload-phase-weapon-unavailable";
+                return false;
+            }
+
+            if (!DoesDelayedWeaponSlotSnapshotMatchCurrentWeapon(
+                    payload?.WeaponSnapshot,
+                    missionWeapon,
+                    item,
+                    usage,
+                    out string weaponSnapshotMismatchReason))
+            {
+                reason = "reload-phase-" + weaponSnapshotMismatchReason;
+                return false;
+            }
+
+            short expectedReloadPhase = reloadPhaseMessage.ReloadPhase;
+            short currentReloadPhase = missionWeapon.ReloadPhase;
+            bool isThrown = IsThrownProjectileLaunchWeapon(missionWeapon);
+            bool isCrossbow = IsCrossbowWeaponUsage(item, usage);
+            if (!isThrown && !isCrossbow)
+            {
+                reason =
+                    "reload-phase-weapon-not-ack-supported" +
+                    "|ExpectedReloadPhase=" + expectedReloadPhase +
+                    "|WeaponState={" + BuildDelayedWeaponStateFingerprint(missionWeapon, item, usage) + "}";
+                return false;
+            }
+
+            if (isThrown && expectedReloadPhase == 1)
+            {
+                if (missionWeapon.Amount <= 0)
+                {
+                    reason =
+                        "reload-phase-thrown-stack-empty-ack" +
+                        "|ExpectedReloadPhase=" + expectedReloadPhase +
+                        "|CurrentReloadPhase=" + currentReloadPhase +
+                        "|QueuedWeapon={" + BuildDelayedWeaponSlotSnapshotSummary(payload?.WeaponSnapshot) + "}" +
+                        "|WeaponState={" + BuildDelayedWeaponStateFingerprint(missionWeapon, item, usage) + "}";
+                    return true;
+                }
+
+                if (TrySetManagedReloadPhaseOfSlot(
+                        agent,
+                        equipmentIndex,
+                        expectedReloadPhase,
+                        out string managedReloadPhaseError))
+                {
+                    reason =
+                        "reload-phase-thrown-managed-state-ack" +
+                        "|ExpectedReloadPhase=" + expectedReloadPhase +
+                        "|PreviousReloadPhase=" + currentReloadPhase +
+                        "|QueuedWeapon={" + BuildDelayedWeaponSlotSnapshotSummary(payload?.WeaponSnapshot) + "}" +
+                        "|WeaponState={" + BuildDelayedWeaponStateFingerprint(missionWeapon, item, usage) + "}";
+                    return true;
+                }
+
+                reason =
+                    "reload-phase-thrown-managed-state-failed" +
+                    "|Error=" + (managedReloadPhaseError ?? "unknown") +
+                    "|ExpectedReloadPhase=" + expectedReloadPhase +
+                    "|CurrentReloadPhase=" + currentReloadPhase +
+                    "|WeaponState={" + BuildDelayedWeaponStateFingerprint(missionWeapon, item, usage) + "}";
+                return false;
+            }
+
+            if (isCrossbow && expectedReloadPhase == 2 && missionWeapon.Ammo > 0)
+            {
+                if (TrySetManagedReloadPhaseOfSlot(
+                        agent,
+                        equipmentIndex,
+                        expectedReloadPhase,
+                        out string managedReloadPhaseError))
+                {
+                    reason =
+                        "reload-phase-crossbow-managed-state-ack" +
+                        "|ExpectedReloadPhase=" + expectedReloadPhase +
+                        "|PreviousReloadPhase=" + currentReloadPhase +
+                        "|QueuedWeapon={" + BuildDelayedWeaponSlotSnapshotSummary(payload?.WeaponSnapshot) + "}" +
+                        "|WeaponState={" + BuildDelayedWeaponStateFingerprint(missionWeapon, item, usage) + "}";
+                    return true;
+                }
+
+                reason =
+                    "reload-phase-crossbow-managed-state-failed" +
+                    "|Error=" + (managedReloadPhaseError ?? "unknown") +
+                    "|ExpectedReloadPhase=" + expectedReloadPhase +
+                    "|CurrentReloadPhase=" + currentReloadPhase +
+                    "|WeaponState={" + BuildDelayedWeaponStateFingerprint(missionWeapon, item, usage) + "}";
+                return false;
+            }
+
+            if (currentReloadPhase != expectedReloadPhase)
+            {
+                reason =
+                    "reload-phase-state-mismatch" +
+                    "|ExpectedReloadPhase=" + expectedReloadPhase +
+                    "|CurrentReloadPhase=" + currentReloadPhase +
+                    "|IsThrown=" + isThrown +
+                    "|IsCrossbow=" + isCrossbow +
+                    "|WeaponState={" + BuildDelayedWeaponStateFingerprint(missionWeapon, item, usage) + "}";
+                return false;
+            }
+
+            reason =
+                "reload-phase-state-match" +
+                "|ExpectedReloadPhase=" + expectedReloadPhase +
+                "|IsThrown=" + isThrown +
+                "|IsCrossbow=" + isCrossbow +
+                "|WeaponState={" + BuildDelayedWeaponStateFingerprint(missionWeapon, item, usage) + "}";
+            return true;
+        }
+
+        private static string BuildDelayedWeaponStateFingerprint(
+            MissionWeapon missionWeapon,
+            ItemObject item,
+            WeaponComponentData usage)
+        {
+            try
+            {
+                return
+                    "Item=" + (item?.StringId ?? missionWeapon.Item?.StringId ?? "empty") +
+                    "|Usage=" + (usage?.WeaponClass.ToString() ?? "null") +
+                    "|UsageId=" + (usage?.ItemUsage ?? "null") +
+                    "|Amount=" + missionWeapon.Amount +
+                    "|Ammo=" + missionWeapon.Ammo +
+                    "|ReloadPhase=" + missionWeapon.ReloadPhase +
+                    "|ReloadPhaseCount=" + missionWeapon.ReloadPhaseCount +
+                    "|CurrentUsageIndex=" + missionWeapon.CurrentUsageIndex;
+            }
+            catch (Exception ex)
+            {
+                return "error:" + ex.GetType().Name;
+            }
+        }
+
+        private static bool TrySetManagedReloadPhaseOfSlot(
+            Agent agent,
+            EquipmentIndex equipmentIndex,
+            short reloadPhase,
+            out string error)
+        {
+            error = null;
+            if (agent?.Equipment == null ||
+                equipmentIndex < EquipmentIndex.Weapon0 ||
+                equipmentIndex > EquipmentIndex.Weapon3)
+            {
+                error = "agent-equipment-or-slot-invalid";
+                return false;
+            }
+
+            try
+            {
+                agent.Equipment.SetReloadPhaseOfSlot(equipmentIndex, reloadPhase);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.GetType().Name;
+                return false;
+            }
+        }
+
+        private static bool TryReplayDelayedLocalControlledWeaponStatePayload(
+            MissionNetworkComponent missionNetworkComponent,
+            DelayedLocalControlledWeaponStatePayload payload,
+            out string error)
+        {
+            error = null;
+            if (missionNetworkComponent == null || payload == null)
+            {
+                error = "mission-network-component-or-payload-null";
+                return false;
+            }
+
+            MethodInfo method;
+            GameNetworkMessage message;
+            switch (payload.Kind)
+            {
+                case DelayedLocalControlledWeaponStateMessageKind.AmmoData:
+                    method = _missionNetworkComponentHandleServerEventSetWeaponAmmoDataMethod;
+                    message = payload.AmmoMessage;
+                    break;
+                case DelayedLocalControlledWeaponStateMessageKind.ReloadPhase:
+                    method = _missionNetworkComponentHandleServerEventSetWeaponReloadPhaseMethod;
+                    message = payload.ReloadPhaseMessage;
+                    break;
+                default:
+                    method = null;
+                    message = null;
+                    break;
+            }
+
+            if (method == null || message == null)
+            {
+                error = "method-or-message-null";
+                return false;
+            }
+
+            try
+            {
+                payload.LastAttemptUtc = DateTime.UtcNow;
+                payload.Attempts++;
+                _delayedLocalControlledWeaponStateReplayDepth++;
+                method.Invoke(missionNetworkComponent, new object[] { message });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Exception root = ex is TargetInvocationException && ex.InnerException != null
+                    ? ex.InnerException
+                    : ex;
+                error = BuildCompactExceptionDiagnostics(root);
+                return false;
+            }
+            finally
+            {
+                _delayedLocalControlledWeaponStateReplayDepth = Math.Max(
+                    0,
+                    _delayedLocalControlledWeaponStateReplayDepth - 1);
+            }
+        }
+
+        private static void TryLogQueuedDelayedLocalControlledWeaponState(
+            DelayedLocalControlledWeaponStateMessageKind kind,
+            int agentIndex,
+            EquipmentIndex equipmentIndex,
+            Agent agent,
+            string reason,
+            string source)
+        {
+            if (!CoopDebugConfig.PossessionDiagnostics)
+                return;
+
+            DelayedLocalControlledWeaponStatePayload payload;
+            lock (DelayedLocalControlledWeaponStatePayloads)
+            {
+                payload = DelayedLocalControlledWeaponStatePayloads
+                    .OrderByDescending(candidate => candidate?.Sequence ?? 0)
+                    .FirstOrDefault(candidate =>
+                        candidate != null &&
+                        candidate.Kind == kind &&
+                        GetDelayedLocalControlledWeaponStateAgentIndex(candidate) == agentIndex &&
+                        GetDelayedLocalControlledWeaponStateEquipmentIndex(candidate) == equipmentIndex);
+            }
+
+            LogDelayedLocalControlledWeaponState(
+                payload,
+                agent,
+                equipmentIndex,
+                "queued",
+                reason,
+                source);
+        }
+
+        private static void LogDelayedLocalControlledWeaponState(
+            DelayedLocalControlledWeaponStatePayload payload,
+            Agent agent,
+            EquipmentIndex equipmentIndex,
+            string disposition,
+            string reason,
+            string source)
+        {
+            if (!CoopDebugConfig.PossessionDiagnostics || payload == null)
+                return;
+
+            TimeSpan age = DateTime.UtcNow - payload.QueuedUtc;
+            string summary =
+                "Kind=" + payload.Kind +
+                " Disposition=" + (disposition ?? "unknown") +
+                " AgentIndex=" + GetDelayedLocalControlledWeaponStateAgentIndex(payload) +
+                " CharacterId=" + (agent?.Character?.StringId ?? "null") +
+                " EquipmentIndex=" + equipmentIndex +
+                " AgeMs=" + ((int)Math.Max(0.0, age.TotalMilliseconds)) +
+                " Attempts=" + payload.Attempts +
+                " DeferralReason=" + (payload.DeferralReason ?? "unknown") +
+                " WeaponSnapshot={" + BuildDelayedWeaponSlotSnapshotSummary(payload.WeaponSnapshot) + "}" +
+                " AmmoSnapshot={" + BuildDelayedWeaponSlotSnapshotSummary(payload.AmmoSnapshot) + "}" +
+                " Reason=" + (reason ?? "unknown") +
+                " Source=" + (source ?? "unknown");
+
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: delayed local controlled weapon-state. " +
+                summary);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                "client-delayed-local-controlled-weapon-state",
+                summary);
+        }
+
         private static bool IsExactSiegeClientWeaponUsageIndexNativeSafe(
             Mission mission,
             Agent agent,
@@ -8085,6 +9433,170 @@ namespace CoopSpectator.Patches
             ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
                 "client-possession-lifecycle-diagnostics",
                 summary);
+        }
+
+        private static void TryLogLocalControlledWeaponStateDiagnostics(
+            Mission mission,
+            Agent agent,
+            int agentIndex,
+            string messageName,
+            EquipmentIndex equipmentIndex,
+            string payloadSummary,
+            string disposition,
+            string source)
+        {
+            if (!CoopDebugConfig.PossessionDiagnostics ||
+                GameNetwork.IsServer ||
+                mission == null ||
+                agent == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty) ||
+                !IsLocalMissionPeerControlledAgent(agent))
+            {
+                return;
+            }
+
+            EquipmentIndex currentMainHandIndex = EquipmentIndex.None;
+            EquipmentIndex currentOffHandIndex = EquipmentIndex.None;
+            try
+            {
+                currentMainHandIndex = agent.GetPrimaryWieldedItemIndex();
+                currentOffHandIndex = agent.GetOffhandWieldedItemIndex();
+            }
+            catch
+            {
+            }
+
+            CoopMissionSpawnLogic.TryBuildClientPossessionLifecycleDiagnostics(
+                mission,
+                agentIndex,
+                agent,
+                messageName,
+                out string lifecycleSummary);
+
+            string summary =
+                "Message=" + (messageName ?? "weapon-state-message") +
+                " Disposition=" + (disposition ?? "unknown") +
+                " AgentIndex=" + agentIndex +
+                " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                " TeamSide=" + (agent.Team?.Side.ToString() ?? "null") +
+                " Controller=" + agent.Controller +
+                " IsActive=" + agent.IsActive() +
+                " Health=" + agent.Health.ToString("0.0") +
+                " PayloadEquipmentIndex=" + equipmentIndex +
+                " Payload={" + (payloadSummary ?? "(none)") + "}" +
+                " CurrentMain=" + currentMainHandIndex +
+                " CurrentOffhand=" + currentOffHandIndex +
+                " CurrentMainWeapon=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
+                " CurrentOffhandWeapon=" + (agent.WieldedOffhandWeapon.Item?.StringId ?? "none") +
+                " PayloadSlot={" + BuildAgentMissionWeaponSlotDiagnostics(agent, equipmentIndex) + "}" +
+                " MainSlot={" + BuildAgentMissionWeaponSlotDiagnostics(agent, currentMainHandIndex) + "}" +
+                " OffhandSlot={" + BuildAgentMissionWeaponSlotDiagnostics(agent, currentOffHandIndex) + "}" +
+                " RuntimeState={" + BuildLocalControlledAgentRuntimeDiagnostics(agent) + "}" +
+                " Lifecycle={" + (lifecycleSummary ?? "(none)") + "}" +
+                " Source=" + (source ?? "unknown");
+
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: local controlled weapon-state diagnostics. " +
+                summary);
+            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                "client-local-controlled-weapon-state-diagnostics",
+                summary);
+        }
+
+        private static string BuildLocalControlledAgentRuntimeDiagnostics(Agent agent)
+        {
+            if (agent == null)
+                return "State=no-agent";
+
+            try
+            {
+                return
+                    "IsPlayerControlled=" + agent.IsPlayerControlled +
+                    " IsAIControlled=" + agent.IsAIControlled +
+                    " CombatActionsEnabled=" + agent.CombatActionsEnabled +
+                    " MovementFlags=" + agent.MovementFlags +
+                    " EventControlFlags=" + agent.EventControlFlags +
+                    " Action0={" + BuildAgentActionChannelDiagnostics(agent, 0) + "}" +
+                    " Action1={" + BuildAgentActionChannelDiagnostics(agent, 1) + "}";
+            }
+            catch (Exception ex)
+            {
+                return "State=failed Error=" + BuildCompactExceptionDiagnostics(ex);
+            }
+        }
+
+        private static string BuildAgentActionChannelDiagnostics(Agent agent, int channelNo)
+        {
+            if (agent == null)
+                return "Channel=" + channelNo + " State=no-agent";
+
+            try
+            {
+                ActionIndexCache action = agent.GetCurrentAction(channelNo);
+                return
+                    "Channel=" + channelNo +
+                    " ActionIndex=" + action.Index +
+                    " Action=" + action +
+                    " Type=" + agent.GetCurrentActionType(channelNo) +
+                    " Stage=" + agent.GetCurrentActionStage(channelNo) +
+                    " Direction=" + agent.GetCurrentActionDirection(channelNo) +
+                    " Progress=" + agent.GetCurrentActionProgress(channelNo).ToString("0.000") +
+                    " Priority=" + agent.GetCurrentActionPriority(channelNo) +
+                    " Weight=" + agent.GetActionChannelWeight(channelNo).ToString("0.000") +
+                    " AnimFlags=" + agent.GetCurrentAnimationFlag(channelNo);
+            }
+            catch (Exception ex)
+            {
+                return "Channel=" + channelNo + " State=failed Error=" + BuildCompactExceptionDiagnostics(ex);
+            }
+        }
+
+        private static string BuildCompactExceptionDiagnostics(Exception ex)
+        {
+            if (ex == null)
+                return "unknown";
+
+            string message = ex.Message ?? string.Empty;
+            message = message.Replace('\r', ' ').Replace('\n', ' ');
+            if (message.Length > 160)
+                message = message.Substring(0, 160);
+
+            return ex.GetType().Name + ":" + message;
+        }
+
+        private static string BuildAgentMissionWeaponSlotDiagnostics(Agent agent, EquipmentIndex equipmentIndex)
+        {
+            if (agent?.Equipment == null)
+                return "Slot=" + equipmentIndex + " State=no-equipment";
+
+            if (equipmentIndex < EquipmentIndex.Weapon0 || equipmentIndex > EquipmentIndex.Weapon3)
+                return "Slot=" + equipmentIndex + " State=not-weapon-slot";
+
+            try
+            {
+                MissionWeapon missionWeapon = agent.Equipment[equipmentIndex];
+                if (missionWeapon.IsEmpty || missionWeapon.Item == null)
+                    return "Slot=" + equipmentIndex + " State=empty";
+
+                ItemObject item = missionWeapon.Item;
+                WeaponComponentData usage = missionWeapon.CurrentUsageItem ?? item.PrimaryWeapon;
+                return
+                    "Slot=" + equipmentIndex +
+                    " Item=" + (item.StringId ?? "null") +
+                    " ItemType=" + item.ItemType +
+                    " Usage=" + (usage?.WeaponClass.ToString() ?? "null") +
+                    " UsageId=" + (usage?.ItemUsage ?? "null") +
+                    " RelevantSkill=" + (usage?.RelevantSkill?.StringId ?? "null") +
+                    " CurrentUsageIndex=" + missionWeapon.CurrentUsageIndex +
+                    " ReloadPhase=" + missionWeapon.ReloadPhase +
+                    " ReloadPhaseCount=" + missionWeapon.ReloadPhaseCount +
+                    " Amount=" + missionWeapon.Amount +
+                    " Ammo=" + missionWeapon.Ammo;
+            }
+            catch (Exception ex)
+            {
+                return "Slot=" + equipmentIndex + " State=error:" + ex.GetType().Name;
+            }
         }
 
         private static void TryReplayDeferredClientSetWeaponReloadPhase(
@@ -10335,7 +11847,11 @@ namespace CoopSpectator.Patches
             if (!IsExactHeroEntry(entryState))
                 return false;
 
-            if (!TryBuildExactHeroExpectedSpawnEquipment(entryId, entryState, out Equipment expectedEquipment))
+            if (!TryBuildExactHeroExpectedSpawnEquipment(
+                    entryId,
+                    entryState,
+                    out Equipment expectedEquipment,
+                    preferSnapshotWeaponOrder: true))
                 return false;
 
             if (!HasExactHeroWeaponPayloadMismatch(
@@ -10436,13 +11952,15 @@ namespace CoopSpectator.Patches
         private static bool TryBuildExactHeroExpectedSpawnEquipment(
             string entryId,
             RosterEntryState entryState,
-            out Equipment expectedEquipment)
+            out Equipment expectedEquipment,
+            bool preferSnapshotWeaponOrder = false)
         {
             expectedEquipment = null;
             if (entryState == null)
                 return false;
 
-            if (!string.IsNullOrWhiteSpace(entryId) &&
+            if (!preferSnapshotWeaponOrder &&
+                !string.IsNullOrWhiteSpace(entryId) &&
                 ExactTransferContractRuntimeCache.TryGetContract(entryId, out ExactTransferSpawnContract contract))
             {
                 expectedEquipment = contract?.Equipment?.SpawnEquipment?.Clone(false);
@@ -11306,6 +12824,10 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                TryCanonicalizeExactHeroSynchronizeAgentEquipmentWeaponSlots(
+                    mission,
+                    synchronizeAgentSpawnEquipment,
+                    agent);
                 TryCanonicalizeStrictMountedHeroSynchronizeAgentEquipmentPayload(
                     synchronizeAgentSpawnEquipment,
                     agent);
@@ -11394,6 +12916,136 @@ namespace CoopSpectator.Patches
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: SynchronizeAgentSpawnEquipment prefix failed open: " + ex.Message);
                 return true;
+            }
+        }
+
+        private static void TryCanonicalizeExactHeroSynchronizeAgentEquipmentWeaponSlots(
+            Mission mission,
+            SynchronizeAgentSpawnEquipment synchronizeAgentSpawnEquipment,
+            Agent agent)
+        {
+            try
+            {
+                if (GameNetwork.IsServer ||
+                    mission == null ||
+                    synchronizeAgentSpawnEquipment?.SpawnEquipment == null ||
+                    agent == null ||
+                    agent.IsMount ||
+                    !agent.IsHuman ||
+                    !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
+                {
+                    return;
+                }
+
+                string entryId = null;
+                if (!CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                    !CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId) &&
+                    !ExactTransferContractRuntimeCache.TryGetEntryIdByRiderAgentIndex(agent.Index, out entryId))
+                {
+                    return;
+                }
+
+                RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+                if (!IsExactHeroEntry(entryState))
+                    return;
+
+                if (!TryBuildExactHeroExpectedSpawnEquipment(
+                        entryId,
+                        entryState,
+                        out Equipment expectedEquipment,
+                        preferSnapshotWeaponOrder: SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty)))
+                    return;
+
+                if (!HasExactHeroWeaponPayloadMismatch(
+                        synchronizeAgentSpawnEquipment.SpawnEquipment,
+                        expectedEquipment,
+                        out string mismatchReason))
+                {
+                    return;
+                }
+
+                string beforePayloadWeapons = BuildEquipmentSummary(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3);
+                string beforeMissionWeapons = BuildMissionEquipmentWeaponSummary(agent.Equipment);
+                string beforeSpawnWeapons = BuildEquipmentSummary(
+                    agent.SpawnEquipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3);
+
+                var changedSlots = new List<string>();
+                CanonicalizeSynchronizeAgentEquipmentSlot(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    expectedEquipment,
+                    EquipmentIndex.Weapon0,
+                    changedSlots);
+                CanonicalizeSynchronizeAgentEquipmentSlot(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    expectedEquipment,
+                    EquipmentIndex.Weapon1,
+                    changedSlots);
+                CanonicalizeSynchronizeAgentEquipmentSlot(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    expectedEquipment,
+                    EquipmentIndex.Weapon2,
+                    changedSlots);
+                CanonicalizeSynchronizeAgentEquipmentSlot(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    expectedEquipment,
+                    EquipmentIndex.Weapon3,
+                    changedSlots);
+
+                if (changedSlots.Count == 0)
+                    return;
+
+                string afterPayloadWeapons = BuildEquipmentSummary(
+                    synchronizeAgentSpawnEquipment.SpawnEquipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3);
+                string expectedWeapons = BuildEquipmentSummary(
+                    expectedEquipment,
+                    EquipmentIndex.Weapon0,
+                    EquipmentIndex.Weapon1,
+                    EquipmentIndex.Weapon2,
+                    EquipmentIndex.Weapon3);
+
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: canonicalized exact hero SynchronizeAgentSpawnEquipment weapon payload before native refresh. " +
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                    " Reason=" + (mismatchReason ?? "unknown") +
+                    " ChangedSlots=[" + string.Join(", ", changedSlots) + "]" +
+                    " ExpectedWeapons={" + expectedWeapons + "}" +
+                    " PayloadWeaponsBefore={" + beforePayloadWeapons + "}" +
+                    " PayloadWeaponsAfter={" + afterPayloadWeapons + "}" +
+                    " MissionWeaponsBefore={" + beforeMissionWeapons + "}" +
+                    " SpawnWeaponsBefore={" + beforeSpawnWeapons + "}");
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "client-synchronize-agent-equipment-canonicalized-exact-hero-weapons",
+                    "AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                    " Reason=" + (mismatchReason ?? "unknown") +
+                    " ChangedSlots=[" + string.Join(", ", changedSlots) + "]" +
+                    " ExpectedWeapons={" + expectedWeapons + "}" +
+                    " PayloadWeaponsBefore={" + beforePayloadWeapons + "}" +
+                    " PayloadWeaponsAfter={" + afterPayloadWeapons + "}" +
+                    " MissionWeaponsBefore={" + beforeMissionWeapons + "}" +
+                    " SpawnWeaponsBefore={" + beforeSpawnWeapons + "}");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: exact hero SynchronizeAgentSpawnEquipment weapon payload canonicalization failed open: " +
+                    ex.Message);
             }
         }
 
@@ -12640,6 +14292,18 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                string setWeaponNetworkDataPayloadSummary =
+                    "WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex;
+                TryLogLocalControlledWeaponStateDiagnostics(
+                    mission,
+                    agent,
+                    setWeaponNetworkData.AgentIndex,
+                    nameof(SetWeaponNetworkData),
+                    setWeaponNetworkData.WeaponEquipmentIndex,
+                    setWeaponNetworkDataPayloadSummary,
+                    "pre",
+                    "prefix");
+
                 if (CoopMissionSpawnLogic.ShouldSuppressClientPostPossessionControlledTroopWeaponState(
                         mission,
                         agent,
@@ -12647,6 +14311,16 @@ namespace CoopSpectator.Patches
                         nameof(SetWeaponNetworkData),
                         out string postPossessionWeaponStateReason))
                 {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponNetworkData.AgentIndex,
+                        nameof(SetWeaponNetworkData),
+                        setWeaponNetworkData.WeaponEquipmentIndex,
+                        setWeaponNetworkDataPayloadSummary +
+                        " SuppressedReason=" + (postPossessionWeaponStateReason ?? "unknown"),
+                        "suppressed-post-possession",
+                        "prefix");
                     RemoveDeferredClientSetWeaponNetworkDataPayload(
                         setWeaponNetworkData.AgentIndex,
                         setWeaponNetworkData);
@@ -12659,6 +14333,15 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                TryLogLocalControlledWeaponStateDiagnostics(
+                    mission,
+                    agent,
+                    setWeaponNetworkData.AgentIndex,
+                    nameof(SetWeaponNetworkData),
+                    setWeaponNetworkData.WeaponEquipmentIndex,
+                    setWeaponNetworkDataPayloadSummary,
+                    "native-allowed",
+                    "prefix");
                 return true;
             }
             catch (Exception ex)
@@ -12712,6 +14395,21 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                string setWeaponAmmoDataPayloadSummary =
+                    "WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
+                    " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex +
+                    " Ammo=" + setWeaponAmmoData.Ammo +
+                    " AmmoSlot={" + BuildAgentMissionWeaponSlotDiagnostics(agent, setWeaponAmmoData.AmmoEquipmentIndex) + "}";
+                TryLogLocalControlledWeaponStateDiagnostics(
+                    mission,
+                    agent,
+                    setWeaponAmmoData.AgentIndex,
+                    nameof(SetWeaponAmmoData),
+                    setWeaponAmmoData.WeaponEquipmentIndex,
+                    setWeaponAmmoDataPayloadSummary,
+                    "pre",
+                    "prefix");
+
                 if (CoopMissionSpawnLogic.ShouldAllowClientPostPossessionControlledTroopRangedReloadState(
                         mission,
                         agent,
@@ -12733,6 +14431,16 @@ namespace CoopSpectator.Patches
                         "WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
                         " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex +
                         " Ammo=" + setWeaponAmmoData.Ammo);
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponAmmoData.AgentIndex,
+                        nameof(SetWeaponAmmoData),
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        setWeaponAmmoDataPayloadSummary +
+                        " AllowedReason=" + (allowedPostPossessionRangedReloadReason ?? "unknown"),
+                        "allowed-post-possession-ranged-reload",
+                        "prefix");
                 }
                 else if (CoopMissionSpawnLogic.ShouldSuppressClientPostPossessionControlledTroopWeaponState(
                         mission,
@@ -12741,6 +14449,16 @@ namespace CoopSpectator.Patches
                         nameof(SetWeaponAmmoData),
                         out string postPossessionWeaponStateReason))
                 {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponAmmoData.AgentIndex,
+                        nameof(SetWeaponAmmoData),
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        setWeaponAmmoDataPayloadSummary +
+                        " SuppressedReason=" + (postPossessionWeaponStateReason ?? "unknown"),
+                        "suppressed-post-possession",
+                        "prefix");
                     RemoveDeferredClientSetWeaponAmmoDataPayload(
                         setWeaponAmmoData.AgentIndex,
                         setWeaponAmmoData);
@@ -12759,6 +14477,16 @@ namespace CoopSpectator.Patches
                         setWeaponAmmoData.WeaponEquipmentIndex,
                         out string permanentUnsafeReason))
                 {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponAmmoData.AgentIndex,
+                        nameof(SetWeaponAmmoData),
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        setWeaponAmmoDataPayloadSummary +
+                        " SuppressedReason=" + (permanentUnsafeReason ?? "unknown"),
+                        "suppressed-permanent-unsafe",
+                        "prefix");
                     RemoveDeferredClientSetWeaponAmmoDataPayload(
                         setWeaponAmmoData.AgentIndex,
                         setWeaponAmmoData);
@@ -12777,6 +14505,16 @@ namespace CoopSpectator.Patches
                         setWeaponAmmoData,
                         out string permanentAmmoUnsafeReason))
                 {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponAmmoData.AgentIndex,
+                        nameof(SetWeaponAmmoData),
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        setWeaponAmmoDataPayloadSummary +
+                        " SuppressedReason=" + (permanentAmmoUnsafeReason ?? "unknown"),
+                        "suppressed-permanent-ammo-unsafe",
+                        "prefix");
                     RemoveDeferredClientSetWeaponAmmoDataPayload(
                         setWeaponAmmoData.AgentIndex,
                         setWeaponAmmoData);
@@ -12797,6 +14535,16 @@ namespace CoopSpectator.Patches
                 {
                     if (IsPermanentExactSiegeClientWeaponAmmoNativeUnsafeReason(exactSiegeUnsafeReason))
                     {
+                        TryLogLocalControlledWeaponStateDiagnostics(
+                            mission,
+                            agent,
+                            setWeaponAmmoData.AgentIndex,
+                            nameof(SetWeaponAmmoData),
+                            setWeaponAmmoData.WeaponEquipmentIndex,
+                            setWeaponAmmoDataPayloadSummary +
+                            " SuppressedReason=" + (exactSiegeUnsafeReason ?? "unknown"),
+                            "suppressed-exact-native-unsafe",
+                            "prefix");
                         RemoveDeferredClientSetWeaponAmmoDataPayload(
                             setWeaponAmmoData.AgentIndex,
                             setWeaponAmmoData);
@@ -12817,9 +14565,54 @@ namespace CoopSpectator.Patches
                         exactSiegeUnsafeReason,
                         0,
                         "prefix");
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponAmmoData.AgentIndex,
+                        nameof(SetWeaponAmmoData),
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        setWeaponAmmoDataPayloadSummary +
+                        " DeferredReason=" + (exactSiegeUnsafeReason ?? "unknown"),
+                        "deferred-exact-native-unsafe",
+                        "prefix");
                     return false;
                 }
 
+                if (TryQueueDelayedLocalControlledWeaponAmmoData(
+                        mission,
+                        agent,
+                        setWeaponAmmoData,
+                        out string delayedLocalControlledAmmoReason))
+                {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponAmmoData.AgentIndex,
+                        nameof(SetWeaponAmmoData),
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        setWeaponAmmoDataPayloadSummary +
+                        " DelayedReason=" + (delayedLocalControlledAmmoReason ?? "unknown"),
+                        "delayed-local-controlled",
+                        "prefix");
+                    TryLogQueuedDelayedLocalControlledWeaponState(
+                        DelayedLocalControlledWeaponStateMessageKind.AmmoData,
+                        setWeaponAmmoData.AgentIndex,
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        agent,
+                        delayedLocalControlledAmmoReason,
+                        "prefix");
+                    return false;
+                }
+
+                TryLogLocalControlledWeaponStateDiagnostics(
+                    mission,
+                    agent,
+                    setWeaponAmmoData.AgentIndex,
+                    nameof(SetWeaponAmmoData),
+                    setWeaponAmmoData.WeaponEquipmentIndex,
+                    setWeaponAmmoDataPayloadSummary,
+                    "native-allowed",
+                    "prefix");
                 return true;
             }
             catch (Exception ex)
@@ -12871,6 +14664,19 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                string setWeaponReloadPhasePayloadSummary =
+                    "EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
+                    " ReloadPhase=" + setWeaponReloadPhase.ReloadPhase;
+                TryLogLocalControlledWeaponStateDiagnostics(
+                    mission,
+                    agent,
+                    setWeaponReloadPhase.AgentIndex,
+                    nameof(SetWeaponReloadPhase),
+                    setWeaponReloadPhase.EquipmentIndex,
+                    setWeaponReloadPhasePayloadSummary,
+                    "pre",
+                    "prefix");
+
                 if (CoopMissionSpawnLogic.ShouldAllowClientPostPossessionControlledTroopRangedReloadState(
                         mission,
                         agent,
@@ -12890,6 +14696,16 @@ namespace CoopSpectator.Patches
                         agent,
                         "SetWeaponReloadPhaseAllowedPostPossessionRangedReload",
                         "EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex);
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.AgentIndex,
+                        nameof(SetWeaponReloadPhase),
+                        setWeaponReloadPhase.EquipmentIndex,
+                        setWeaponReloadPhasePayloadSummary +
+                        " AllowedReason=" + (allowedPostPossessionRangedReloadReason ?? "unknown"),
+                        "allowed-post-possession-ranged-reload",
+                        "prefix");
                 }
                 else if (CoopMissionSpawnLogic.ShouldSuppressClientPostPossessionControlledTroopWeaponState(
                         mission,
@@ -12898,6 +14714,16 @@ namespace CoopSpectator.Patches
                         nameof(SetWeaponReloadPhase),
                         out string postPossessionWeaponStateReason))
                 {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.AgentIndex,
+                        nameof(SetWeaponReloadPhase),
+                        setWeaponReloadPhase.EquipmentIndex,
+                        setWeaponReloadPhasePayloadSummary +
+                        " SuppressedReason=" + (postPossessionWeaponStateReason ?? "unknown"),
+                        "suppressed-post-possession",
+                        "prefix");
                     RemoveDeferredClientSetWeaponReloadPhasePayload(
                         setWeaponReloadPhase.AgentIndex,
                         setWeaponReloadPhase);
@@ -12916,6 +14742,16 @@ namespace CoopSpectator.Patches
                         setWeaponReloadPhase.EquipmentIndex,
                         out string permanentUnsafeReason))
                 {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.AgentIndex,
+                        nameof(SetWeaponReloadPhase),
+                        setWeaponReloadPhase.EquipmentIndex,
+                        setWeaponReloadPhasePayloadSummary +
+                        " SuppressedReason=" + (permanentUnsafeReason ?? "unknown"),
+                        "suppressed-permanent-unsafe",
+                        "prefix");
                     RemoveDeferredClientSetWeaponReloadPhasePayload(
                         setWeaponReloadPhase.AgentIndex,
                         setWeaponReloadPhase);
@@ -12934,6 +14770,16 @@ namespace CoopSpectator.Patches
                         setWeaponReloadPhase,
                         out string exactSiegeUnsafeReason))
                 {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.AgentIndex,
+                        nameof(SetWeaponReloadPhase),
+                        setWeaponReloadPhase.EquipmentIndex,
+                        setWeaponReloadPhasePayloadSummary +
+                        " DeferredReason=" + (exactSiegeUnsafeReason ?? "unknown"),
+                        "deferred-exact-native-unsafe",
+                        "prefix");
                     RegisterDeferredClientSetWeaponReloadPhasePayload(
                         setWeaponReloadPhase,
                         "exact-siege-native-weapon-slot-not-ready:" + (exactSiegeUnsafeReason ?? "unknown"));
@@ -12945,6 +14791,63 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (TryQueueDelayedLocalControlledWeaponReloadPhase(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase,
+                        out string delayedLocalControlledReloadReason))
+                {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.AgentIndex,
+                        nameof(SetWeaponReloadPhase),
+                        setWeaponReloadPhase.EquipmentIndex,
+                        setWeaponReloadPhasePayloadSummary +
+                        " DelayedReason=" + (delayedLocalControlledReloadReason ?? "unknown"),
+                        "delayed-local-controlled",
+                        "prefix");
+                    TryLogQueuedDelayedLocalControlledWeaponState(
+                        DelayedLocalControlledWeaponStateMessageKind.ReloadPhase,
+                        setWeaponReloadPhase.AgentIndex,
+                        setWeaponReloadPhase.EquipmentIndex,
+                        agent,
+                        delayedLocalControlledReloadReason,
+                        "prefix");
+                    return false;
+                }
+
+                if (TryApplyLocalPredictedReloadPhaseAsManagedStateOnly(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase,
+                        out string managedStateOnlyReason))
+                {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.AgentIndex,
+                        nameof(SetWeaponReloadPhase),
+                        setWeaponReloadPhase.EquipmentIndex,
+                        setWeaponReloadPhasePayloadSummary +
+                        " ManagedStateOnlyReason=" + (managedStateOnlyReason ?? "unknown"),
+                        "managed-state-only-local-predicted-reload",
+                        "prefix");
+                    RemoveDeferredClientSetWeaponReloadPhasePayload(
+                        setWeaponReloadPhase.AgentIndex,
+                        setWeaponReloadPhase);
+                    return false;
+                }
+
+                TryLogLocalControlledWeaponStateDiagnostics(
+                    mission,
+                    agent,
+                    setWeaponReloadPhase.AgentIndex,
+                    nameof(SetWeaponReloadPhase),
+                    setWeaponReloadPhase.EquipmentIndex,
+                    setWeaponReloadPhasePayloadSummary,
+                    "native-allowed",
+                    "prefix");
                 return true;
             }
             catch (Exception ex)
@@ -13662,6 +15565,22 @@ namespace CoopSpectator.Patches
                 if (agent == null)
                     return true;
 
+                string setWieldedItemIndexPayloadSummary =
+                    "WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
+                    " IsLeftHand=" + setWieldedItemIndex.IsLeftHand +
+                    " IsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
+                    " IsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
+                    " MainHandCurrentUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex;
+                TryLogLocalControlledWeaponStateDiagnostics(
+                    mission,
+                    agent,
+                    setWieldedItemIndex.AgentIndex,
+                    nameof(SetWieldedItemIndex),
+                    setWieldedItemIndex.WieldedItemIndex,
+                    setWieldedItemIndexPayloadSummary,
+                    "pre",
+                    "prefix");
+
                 if (ShouldUseSafeStringIdCreateAgentPathOnClient(mission) &&
                     CoopMissionSpawnLogic.ShouldSuppressClientPostPossessionControlledTroopWeaponState(
                         mission,
@@ -13671,6 +15590,16 @@ namespace CoopSpectator.Patches
                         out string postPossessionWeaponStateReason))
                 {
                     __state = true;
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.AgentIndex,
+                        nameof(SetWieldedItemIndex),
+                        setWieldedItemIndex.WieldedItemIndex,
+                        setWieldedItemIndexPayloadSummary +
+                        " SuppressedReason=" + (postPossessionWeaponStateReason ?? "unknown"),
+                        "suppressed-post-possession",
+                        "prefix");
                     LogSuppressedPostPossessionControlledTroopWeaponState(
                         nameof(SetWieldedItemIndex),
                         setWieldedItemIndex.AgentIndex,
@@ -13713,6 +15642,16 @@ namespace CoopSpectator.Patches
                         out string exactSiegeHeroUnsafeWieldReason))
                 {
                     __state = true;
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.AgentIndex,
+                        nameof(SetWieldedItemIndex),
+                        setWieldedItemIndex.WieldedItemIndex,
+                        setWieldedItemIndexPayloadSummary +
+                        " SuppressedReason=" + (exactSiegeHeroUnsafeWieldReason ?? "unknown"),
+                        "suppressed-exact-hero-unsafe",
+                        "prefix");
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: suppressed exact siege hero unsafe post-possession SetWieldedItemIndex. " +
                         "AgentIndex=" + agent.Index +
@@ -13743,6 +15682,16 @@ namespace CoopSpectator.Patches
                         " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
                         " SuppressedReason=" + (incompleteLoadoutGuardReason ?? "unsafe-incomplete-loadout");
 
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.AgentIndex,
+                        nameof(SetWieldedItemIndex),
+                        setWieldedItemIndex.WieldedItemIndex,
+                        setWieldedItemIndexPayloadSummary +
+                        " SuppressedReason=" + (incompleteLoadoutGuardReason ?? "unsafe-incomplete-loadout"),
+                        "suppressed-incomplete-loadout",
+                        "prefix");
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: suppressed unsafe client SetWieldedItemIndex because local equipment state is incomplete for native wield refresh. " +
                         "AgentIndex=" + agent.Index +
@@ -13790,6 +15739,16 @@ namespace CoopSpectator.Patches
                         " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
                         " SuppressedReason=" + (unsafeUsageIndexReason ?? "unsafe-usage-index");
 
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.AgentIndex,
+                        nameof(SetWieldedItemIndex),
+                        setWieldedItemIndex.WieldedItemIndex,
+                        setWieldedItemIndexPayloadSummary +
+                        " SuppressedReason=" + (unsafeUsageIndexReason ?? "unsafe-usage-index"),
+                        "suppressed-usage-index-unsafe",
+                        "prefix");
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: suppressed unsafe client SetWieldedItemIndex because exact siege weapon usage index is not native-safe. " +
                         "AgentIndex=" + agent.Index +
@@ -13821,21 +15780,65 @@ namespace CoopSpectator.Patches
                 }
 
                 if (setWieldedItemIndex.WieldedItemIndex != EquipmentIndex.None || agent.IsMount)
+                {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.AgentIndex,
+                        nameof(SetWieldedItemIndex),
+                        setWieldedItemIndex.WieldedItemIndex,
+                        setWieldedItemIndexPayloadSummary,
+                        "native-allowed",
+                        "prefix");
                     return true;
+                }
 
                 if (agent.IsActive() && agent.Health > 0f)
+                {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.AgentIndex,
+                        nameof(SetWieldedItemIndex),
+                        setWieldedItemIndex.WieldedItemIndex,
+                        setWieldedItemIndexPayloadSummary,
+                        "native-allowed",
+                        "prefix");
                     return true;
+                }
 
                 string entryId = null;
                 if (!CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
                     !CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId))
                 {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.AgentIndex,
+                        nameof(SetWieldedItemIndex),
+                        setWieldedItemIndex.WieldedItemIndex,
+                        setWieldedItemIndexPayloadSummary +
+                        " NativeAllowedReason=entry-unresolved",
+                        "native-allowed",
+                        "prefix");
                     return true;
                 }
 
                 RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
                 if (entryState == null || !entryState.IsHero)
+                {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWieldedItemIndex.AgentIndex,
+                        nameof(SetWieldedItemIndex),
+                        setWieldedItemIndex.WieldedItemIndex,
+                        setWieldedItemIndexPayloadSummary +
+                        " NativeAllowedReason=non-hero-or-missing-entry",
+                        "native-allowed",
+                        "prefix");
                     return true;
+                }
 
                 __state = true;
                 string payloadSummary =
@@ -13846,6 +15849,16 @@ namespace CoopSpectator.Patches
                     " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
                     " SuppressedReason=dead-exact-hero-none-wield-reset";
 
+                TryLogLocalControlledWeaponStateDiagnostics(
+                    mission,
+                    agent,
+                    setWieldedItemIndex.AgentIndex,
+                    nameof(SetWieldedItemIndex),
+                    setWieldedItemIndex.WieldedItemIndex,
+                    setWieldedItemIndexPayloadSummary +
+                    " SuppressedReason=dead-exact-hero-none-wield-reset",
+                    "suppressed-dead-exact-hero",
+                    "prefix");
                 ModLogger.Info(
                     "BattleMapSpawnHandoffPatch: suppressed dead exact-hero SetWieldedItemIndex after removal. " +
                     "AgentIndex=" + agent.Index +

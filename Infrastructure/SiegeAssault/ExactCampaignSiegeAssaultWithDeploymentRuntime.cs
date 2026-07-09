@@ -32,6 +32,7 @@ namespace CoopSpectator.Infrastructure
         private static BattleSideEnum _activePlayerSide = BattleSideEnum.None;
         private static bool _deploymentPlanPrepared;
         private static bool _nativeSpawnContractApplied;
+        private static bool _fieldMaterializedDeploymentLifecycleFinished;
 
         private sealed class CoopIdempotentSiegeDeploymentHandler : SiegeDeploymentHandler
         {
@@ -424,6 +425,13 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
+            if (ExperimentalFeatures.EnableSiegeReplayFieldMaterializedArmyRuntime &&
+                SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                diagnostics = "suppressed-field-materialized-runtime-no-initial-player-agent";
+                return false;
+            }
+
             if (!SiegeAssaultMissionOpenBridge.ShouldAllowLiveDeploymentControllers(
                     mission,
                     out string bridgeDiagnostics))
@@ -641,6 +649,7 @@ namespace CoopSpectator.Infrastructure
                 _activePlayerSide = BattleSideEnum.None;
                 _deploymentPlanPrepared = false;
                 _nativeSpawnContractApplied = false;
+                _fieldMaterializedDeploymentLifecycleFinished = false;
 
                 if (hadPreparedPlan || hadAppliedSpawnContract)
                 {
@@ -679,6 +688,15 @@ namespace CoopSpectator.Infrastructure
         {
             if (mission == null || !IsDeploymentRuntimeActive(mission))
                 return false;
+
+            lock (Sync)
+            {
+                if (ReferenceEquals(_activeMission, mission) &&
+                    _fieldMaterializedDeploymentLifecycleFinished)
+                {
+                    return true;
+                }
+            }
 
             try
             {
@@ -940,7 +958,8 @@ namespace CoopSpectator.Infrastructure
                 }
                 else
                 {
-                    if (siegeMachinesDeployed)
+                    if (siegeMachinesDeployed &&
+                        !ShouldUseDedicatedFieldMaterializedSiegeMachineStateOnly(mission))
                     {
                         ForceUpdateDeploymentTeamUnits(battleTeam);
                         forceUpdatedUnits = true;
@@ -998,6 +1017,12 @@ namespace CoopSpectator.Infrastructure
                 " TeamDeployment={" + teamDeploymentDiagnostics + "}" +
                 " ForceUpdatedUnits=" + forceUpdatedUnits;
             return autoDeployedTeam || siegeMachinesDeployed;
+        }
+
+        private static bool ShouldUseDedicatedFieldMaterializedSiegeMachineStateOnly(Mission mission)
+        {
+            // Siege machines need the controlled native deployment steps to become usable.
+            return false;
         }
 
         public static bool TryEnsureAutoDeployedSiegeMachinesBeforeBattleStart(
@@ -1189,6 +1214,8 @@ namespace CoopSpectator.Infrastructure
 
             SiegeDeploymentHandler siegeDeploymentHandler = mission.GetMissionBehavior<SiegeDeploymentHandler>();
             DeploymentHandler deploymentHandler = mission.GetMissionBehavior<DeploymentHandler>();
+            bool stateOnlyFieldMaterializedDeployment =
+                ShouldUseDedicatedFieldMaterializedSiegeMachineStateOnly(mission);
 
             int autoDeployedTeamCount = 0;
             bool forceUpdatedUnits = false;
@@ -1266,7 +1293,8 @@ namespace CoopSpectator.Infrastructure
                         battleTeams,
                         siegeDeploymentHandler,
                         out controlledSiegeMachineDiagnostics);
-                    if (!controlledSiegeMachinesDeployed)
+                    if (!controlledSiegeMachinesDeployed &&
+                        !stateOnlyFieldMaterializedDeployment)
                     {
                         diagnostics =
                             "deployment-handler-missing-controlled-siege-machine-auto-deploy-failed " +
@@ -1275,14 +1303,26 @@ namespace CoopSpectator.Infrastructure
                         return false;
                     }
 
-                    foreach (Team battleTeam in battleTeams)
+                    if (!stateOnlyFieldMaterializedDeployment)
                     {
-                        ForceUpdateDeploymentTeamUnits(battleTeam);
+                        foreach (Team battleTeam in battleTeams)
+                        {
+                            ForceUpdateDeploymentTeamUnits(battleTeam);
+                        }
+
+                        forceUpdatedUnits = true;
                     }
 
-                    forceUpdatedUnits = true;
+                    if (finishDeployment &&
+                        (stateOnlyFieldMaterializedDeployment || controlledSiegeMachinesDeployed))
+                    {
+                        MarkFieldMaterializedDeploymentLifecycleFinished(mission);
+                    }
+
                     finishedDeployment = finishDeployment && HasDeploymentLifecycleFinished(mission);
-                    deploymentDiagnostics = "deployment-handler-missing-controlled-siege-machines-only";
+                    deploymentDiagnostics =
+                        "deployment-handler-missing-controlled-siege-machines-only" +
+                        " StateOnlyFieldMaterialized=" + stateOnlyFieldMaterializedDeployment;
                 }
             }
             catch (Exception ex)
@@ -1316,8 +1356,20 @@ namespace CoopSpectator.Infrastructure
                 " NonFatalFaults=[" + string.Join("; ", nonFatalDeploymentFaults) + "]" +
                 " DeploymentFinished=" + deploymentFinished;
             return finishDeployment
-                ? deploymentFinished && (autoDeployedTeamCount > 0 || controlledSiegeMachinesDeployed)
+                ? deploymentFinished && (autoDeployedTeamCount > 0 || controlledSiegeMachinesDeployed || stateOnlyFieldMaterializedDeployment)
                 : autoDeployedTeamCount > 0 || controlledSiegeMachinesDeployed;
+        }
+
+        private static void MarkFieldMaterializedDeploymentLifecycleFinished(Mission mission)
+        {
+            if (mission == null)
+                return;
+
+            lock (Sync)
+            {
+                if (ReferenceEquals(_activeMission, mission))
+                    _fieldMaterializedDeploymentLifecycleFinished = true;
+            }
         }
 
         public static bool TryPrepareDeploymentPlanContract(
@@ -1516,8 +1568,18 @@ namespace CoopSpectator.Infrastructure
                     ExperimentalFeatures.EnableSiegeReplayFieldMaterializedArmyRuntime &&
                     mission != null &&
                     SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
-                int effectiveDefenderTotal = useFieldMaterializedSiegeRuntime ? 0 : defenderTotal;
-                int effectiveAttackerTotal = useFieldMaterializedSiegeRuntime ? 0 : attackerTotal;
+                int effectiveDefenderTotal = defenderTotal;
+                int effectiveAttackerTotal = attackerTotal;
+                if (useFieldMaterializedSiegeRuntime)
+                {
+                    effectiveDefenderTotal = Math.Max(0, effectiveDefenderTotal);
+                    effectiveAttackerTotal = Math.Max(0, effectiveAttackerTotal);
+                    if ((long)effectiveDefenderTotal + effectiveAttackerTotal <= 0L)
+                    {
+                        effectiveDefenderTotal = 1;
+                        effectiveAttackerTotal = 1;
+                    }
+                }
                 int effectiveDefenderInitial = useFieldMaterializedSiegeRuntime ? 0 : defenderInitial;
                 int effectiveAttackerInitial = useFieldMaterializedSiegeRuntime ? 0 : attackerInitial;
                 spawnLogic.SetSpawnHorses(BattleSideEnum.Defender, false);
@@ -1534,7 +1596,7 @@ namespace CoopSpectator.Infrastructure
                 diagnostics =
                     "SpawnHorses={Defender=False Attacker=False} " +
                     "SinglePhaseInitialized=True " +
-                    "SpawnMode=" + (useFieldMaterializedSiegeRuntime ? "FieldMaterializedDependencyOnlyZeroPhase" : "NativeWithDeploymentFalseFalse") + " " +
+                    "SpawnMode=" + (useFieldMaterializedSiegeRuntime ? "FieldMaterializedDependencyOnlyZeroInitial" : "NativeWithDeploymentFalseFalse") + " " +
                     "FieldMaterializedSiegeRuntime=" + useFieldMaterializedSiegeRuntime +
                     " " +
                     "LiveDeploymentControllers=" + (shouldMountLiveDeploymentControllers ? "Enabled" : "Suppressed") +
@@ -1572,6 +1634,9 @@ namespace CoopSpectator.Infrastructure
 
             lock (Sync)
             {
+                if (!ReferenceEquals(_activeMission, mission))
+                    _fieldMaterializedDeploymentLifecycleFinished = false;
+
                 _activeMission = mission;
                 _activePlayerSide = playerSide;
                 _deploymentPlanPrepared = true;
@@ -1586,7 +1651,10 @@ namespace CoopSpectator.Infrastructure
             lock (Sync)
             {
                 if (!ReferenceEquals(_activeMission, mission))
+                {
                     _activeMission = mission;
+                    _fieldMaterializedDeploymentLifecycleFinished = false;
+                }
 
                 _nativeSpawnContractApplied = true;
             }

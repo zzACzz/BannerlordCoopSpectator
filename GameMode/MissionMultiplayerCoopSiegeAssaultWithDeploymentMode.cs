@@ -401,6 +401,9 @@ namespace CoopSpectator.GameMode
                     required: true);
             }
 
+            BattleSideEnum playerSide = isPlayerAttacker
+                ? BattleSideEnum.Attacker
+                : BattleSideEnum.Defender;
             bool shouldMountLiveDeploymentControllers =
                 ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldMountLiveDeploymentControllers(
                     mission,
@@ -411,12 +414,10 @@ namespace CoopSpectator.GameMode
                     "CoopSiegeAssaultWithDeployment: live deployment controllers suppressed. " +
                     "Scene=" + (mission?.SceneName ?? "null") +
                     " Policy=" + (deploymentPolicy ?? "unknown"));
+                TryAppendInitialNativeSpawnLogicBootstrap(list, mission, playerSide);
                 return;
             }
 
-            BattleSideEnum playerSide = isPlayerAttacker
-                ? BattleSideEnum.Attacker
-                : BattleSideEnum.Defender;
             AddIfMissing(
                 list,
                 mission,

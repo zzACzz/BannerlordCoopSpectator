@@ -229,6 +229,14 @@ namespace CoopSpectator
                 missionState != Mission.State.Initializing;
             bool strictReadyRequired =
                 CoopMissionSpawnLogic.ShouldDedicatedObserverUseStrictNativeReadyGate(mission);
+            bool fieldMaterializedSiegeStartupModeAccepted =
+                strictReadyRequired &&
+                !modeReady &&
+                missionStateReady &&
+                hasLobbyComponent &&
+                hasTimerComponent &&
+                hasTeamSelectComponent &&
+                CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission);
 
             details =
                 "Scene=" + (string.IsNullOrWhiteSpace(sceneName) ? "(empty)" : sceneName) +
@@ -239,13 +247,19 @@ namespace CoopSpectator
                 " HasLobbyComponent=" + hasLobbyComponent +
                 " HasTimerComponent=" + hasTimerComponent +
                 " HasTeamSelectComponent=" + hasTeamSelectComponent +
-                " StrictReadyRequired=" + strictReadyRequired;
+                " StrictReadyRequired=" + strictReadyRequired +
+                " FieldMaterializedSiegeStartupModeAccepted=" + fieldMaterializedSiegeStartupModeAccepted;
 
             if (string.IsNullOrWhiteSpace(sceneName))
                 return false;
 
             if (strictReadyRequired)
+            {
+                if (fieldMaterializedSiegeStartupModeAccepted)
+                    return true;
+
                 return modeReady && missionStateReady && hasLobbyComponent && hasTimerComponent && hasTeamSelectComponent;
+            }
 
             return modeReady && hasLobbyComponent && hasTimerComponent && hasTeamSelectComponent;
         }

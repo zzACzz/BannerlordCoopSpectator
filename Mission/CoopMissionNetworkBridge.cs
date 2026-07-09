@@ -6153,19 +6153,18 @@ namespace CoopSpectator.MissionBehaviors
             if (transportState.IsCompleted)
                 return true;
 
-            SendBattleSnapshotManifest(peer, transportState);
-
-            int maxBootstrapChunks = Math.Max(BattleSnapshotInitialWindowChunks, BattleSnapshotMaxInflightChunksPerPeer);
-            int chunksResent = Math.Min(transportState.ChunkCount, maxBootstrapChunks);
-            for (int chunkIndex = 0; chunkIndex < chunksResent; chunkIndex++)
-                SendBattleSnapshotChunkV2(peer, transportState, chunkIndex);
+            int chunksSent = TryAdvanceBattleSnapshotTransportState(
+                peer,
+                transportState,
+                allowUnsynchronizedPeer: true);
 
             ModLogger.Info(
-                "CoopMissionNetworkBridge: force-resent V2 battle snapshot bootstrap after explicit client request. " +
+                "CoopMissionNetworkBridge: force-advanced V2 battle snapshot bootstrap after explicit client request. " +
                 "Peer=" + (peer.UserName ?? "null") +
                 " TransmissionId=" + transportState.TransmissionId +
-                " ChunksResent=" + chunksResent +
+                " ChunksSent=" + chunksSent +
                 " ChunkCount=" + transportState.ChunkCount +
+                " ActiveWindow=" + transportState.ActiveWindowStartChunkIndex + "-" + transportState.ActiveWindowEndChunkIndex +
                 " IsSynchronized=" + peer.IsSynchronized +
                 " Source=" + (source ?? "unknown"));
             return true;
@@ -6247,22 +6246,14 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            bool manifestSentNow = false;
-            if (!transportState.ManifestSent)
-            {
-                SendBattleSnapshotManifest(peer, transportState);
-                manifestSentNow = true;
-            }
-
-            int chunksSentNow = 0;
-            for (int chunkIndex = 0; chunkIndex < transportState.ChunkCount; chunkIndex++)
-            {
-                if (transportState.SentChunkFlags[chunkIndex])
-                    continue;
-
-                SendBattleSnapshotChunkV2(peer, transportState, chunkIndex);
-                chunksSentNow++;
-            }
+            bool manifestWasSent = transportState.ManifestSent;
+            int sentChunkCountBefore = transportState.SentChunkCount;
+            int chunksSentNow = TryAdvanceBattleSnapshotTransportState(
+                peer,
+                transportState,
+                allowUnsynchronizedPeer: true);
+            bool manifestSentNow = !manifestWasSent && transportState.ManifestSent;
+            int sentChunkDelta = Math.Max(0, transportState.SentChunkCount - sentChunkCountBefore);
 
             if (!manifestSentNow && chunksSentNow <= 0)
             {
@@ -6283,6 +6274,8 @@ namespace CoopSpectator.MissionBehaviors
                 " ChunkCount=" + transportState.ChunkCount +
                 " ManifestSentNow=" + manifestSentNow +
                 " ChunksSentNow=" + chunksSentNow +
+                " SentChunkDelta=" + sentChunkDelta +
+                " ActiveWindow=" + transportState.ActiveWindowStartChunkIndex + "-" + transportState.ActiveWindowEndChunkIndex +
                 " Eligibility=" + (eligibilitySummary ?? "unknown") +
                 " Source=" + (source ?? "unknown"));
             return true;
@@ -6869,10 +6862,13 @@ namespace CoopSpectator.MissionBehaviors
             return newState;
         }
 
-        private void TryAdvanceBattleSnapshotTransportState(NetworkCommunicator peer, BattleSnapshotTransportState transportState)
+        private int TryAdvanceBattleSnapshotTransportState(
+            NetworkCommunicator peer,
+            BattleSnapshotTransportState transportState,
+            bool allowUnsynchronizedPeer = false)
         {
-            if (!IsBattleSnapshotBootstrapEligiblePeer(peer) || transportState == null || transportState.IsCompleted)
-                return;
+            if (!IsBattleSnapshotBootstrapEligiblePeer(peer, allowUnsynchronizedPeer) || transportState == null || transportState.IsCompleted)
+                return 0;
 
             DateTime nowUtc = DateTime.UtcNow;
             bool shouldSendManifest = !transportState.HasObservedClientRequest &&
@@ -6891,9 +6887,21 @@ namespace CoopSpectator.MissionBehaviors
                         " ChunkCount=" + transportState.ChunkCount);
                 }
             }
+            else if (transportState.ManifestSent &&
+                     !transportState.HasObservedClientRequest &&
+                     !transportState.HasActiveWindow &&
+                     transportState.TryPrimeInitialActiveWindow(nowUtc))
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: primed initial V2 battle snapshot active window after existing manifest. " +
+                    "Peer=" + (peer.UserName ?? "null") +
+                    " TransmissionId=" + transportState.TransmissionId +
+                    " ActiveWindow=" + transportState.ActiveWindowStartChunkIndex + "-" + transportState.ActiveWindowEndChunkIndex +
+                    " ChunkCount=" + transportState.ChunkCount);
+            }
 
             if (!transportState.HasActiveWindow)
-                return;
+                return 0;
 
             if (transportState.IsActiveWindowSatisfiedByClient &&
                 transportState.TryAdvanceToNextWindow())
@@ -6930,6 +6938,8 @@ namespace CoopSpectator.MissionBehaviors
 
                 break;
             }
+
+            return chunksSentThisTick;
         }
 
         private static void SendBattleSnapshotManifest(NetworkCommunicator peer, BattleSnapshotTransportState transportState)
@@ -7016,6 +7026,11 @@ namespace CoopSpectator.MissionBehaviors
                 " HighestContiguous=" + message.HighestContiguousChunkIndex +
                 " ReceivedChunkCount=" + message.ReceivedChunkCount +
                 " ActiveWindow=" + transportState.ActiveWindowStartChunkIndex + "-" + transportState.ActiveWindowEndChunkIndex);
+
+            TryAdvanceBattleSnapshotTransportState(
+                peer,
+                transportState,
+                allowUnsynchronizedPeer: true);
         }
 
         private void AcceptClientBattleSnapshotRangeAck(NetworkCommunicator peer, CoopBattleSnapshotRangeAckMessage message)
@@ -7048,6 +7063,11 @@ namespace CoopSpectator.MissionBehaviors
                 " ReceivedChunkCount=" + message.ReceivedChunkCount +
                 " ActiveWindow=" + transportState.ActiveWindowStartChunkIndex + "-" + transportState.ActiveWindowEndChunkIndex +
                 " State=" + message.AssemblyState);
+
+            TryAdvanceBattleSnapshotTransportState(
+                peer,
+                transportState,
+                allowUnsynchronizedPeer: true);
         }
 
         private void AcceptClientBattleSnapshotCompleteAck(NetworkCommunicator peer, CoopBattleSnapshotCompleteAckMessage message)

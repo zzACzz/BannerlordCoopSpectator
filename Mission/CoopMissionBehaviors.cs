@@ -8278,6 +8278,15 @@ namespace CoopSpectator.MissionBehaviors
             if (entryState == null || entryState.IsHero)
                 return false;
 
+            if (ShouldAllowNativeClientPostPossessionControlledTroopWeaponState(
+                    agent,
+                    equipmentIndex,
+                    messageName,
+                    out _))
+            {
+                return false;
+            }
+
             reason =
                 "exact-siege-controlled-troop-post-possession-weapon-state" +
                 "|Message=" + (messageName ?? "unknown") +
@@ -8288,6 +8297,53 @@ namespace CoopSpectator.MissionBehaviors
                 "|EquipmentIndex=" + equipmentIndex +
                 "|RemainingSeconds=" + remainingSeconds.ToString("0.00");
             return true;
+        }
+
+        private static bool ShouldAllowNativeClientPostPossessionControlledTroopWeaponState(
+            Agent agent,
+            EquipmentIndex equipmentIndex,
+            string messageName,
+            out string reason)
+        {
+            reason = null;
+            if (agent?.Equipment == null ||
+                equipmentIndex < EquipmentIndex.Weapon0 ||
+                equipmentIndex > EquipmentIndex.Weapon3)
+            {
+                return false;
+            }
+
+            if (!string.Equals(messageName, nameof(SetWieldedItemIndex), StringComparison.Ordinal) &&
+                !string.Equals(messageName, nameof(SetWeaponNetworkData), StringComparison.Ordinal) &&
+                !string.Equals(messageName, nameof(SetWeaponAmmoData), StringComparison.Ordinal) &&
+                !string.Equals(messageName, nameof(SetWeaponReloadPhase), StringComparison.Ordinal) &&
+                !string.Equals(messageName, nameof(StartSwitchingWeaponUsageIndex), StringComparison.Ordinal) &&
+                !string.Equals(messageName, nameof(WeaponUsageIndexChangeMessage), StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            try
+            {
+                MissionWeapon missionWeapon = agent.Equipment[equipmentIndex];
+                ItemObject item = missionWeapon.Item;
+                if (missionWeapon.IsEmpty || item == null)
+                    return false;
+
+                WeaponComponentData usage = missionWeapon.CurrentUsageItem ?? item.PrimaryWeapon;
+                reason =
+                    "exact-siege-controlled-troop-post-possession-native-safe-mp-weapon-state" +
+                    "|Message=" + (messageName ?? "unknown") +
+                    "|AgentIndex=" + agent.Index +
+                    "|EquipmentIndex=" + equipmentIndex +
+                    "|Item=" + (item.StringId ?? "null") +
+                    "|Usage=" + (usage?.WeaponClass.ToString() ?? "null");
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         internal static bool ShouldAllowClientPostPossessionControlledTroopRangedReloadState(
@@ -8492,6 +8548,21 @@ namespace CoopSpectator.MissionBehaviors
             double remainingSeconds = (suppressUntilUtc - DateTime.UtcNow).TotalSeconds;
             if (remainingSeconds <= 0d)
                 return false;
+
+            bool preserveNativeReplaceBotWeaponState = !GameNetwork.IsServer;
+            if (preserveNativeReplaceBotWeaponState)
+            {
+                reason =
+                    "exact-siege-controlled-troop-post-possession-live-weapon-refresh-skipped-native-replace-bot" +
+                    "|AgentIndex=" + agent.Index +
+                    "|PreferredEntryId=" + (preferredEntryId ?? "null") +
+                    "|RemainingSeconds=" + remainingSeconds.ToString("0.00") +
+                    "|Source=" + (source ?? "unknown");
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: skipped client post-possession controlled troop live weapon refresh; native ReplaceBotWithPlayer preserves current weapon state. " +
+                    reason);
+                return false;
+            }
 
             string entryId = null;
             RosterEntryState entryState = null;
@@ -31699,9 +31770,20 @@ namespace CoopSpectator.MissionBehaviors
                 requestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment ||
                 requestKind == CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment ||
                 requestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment;
+            bool allowControlledCommanderDeploymentCompletion =
+                requestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment &&
+                TryResolveExactSiegeControlledCommanderCompletion(
+                    mission,
+                    missionPeer,
+                    requestedSide,
+                    troopOrEntryId,
+                    out _,
+                    out _);
             bool peerOccupiesActiveCoopLifeForRequest = overlapsSelectionOrSpawnLifecycle &&
+                !allowControlledCommanderDeploymentCompletion &&
                 IsPeerOccupyingActiveCoopLife(missionPeer);
             bool peerHasSpawnTransitionInFlight = overlapsSelectionOrSpawnLifecycle &&
+                !allowControlledCommanderDeploymentCompletion &&
                 IsPeerSelectionOrSpawnTransitionInFlight(missionPeer, out inFlightReason);
             if (peerOccupiesActiveCoopLifeForRequest || peerHasSpawnTransitionInFlight)
             {
@@ -32565,6 +32647,37 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (TryResolveExactSiegeControlledCommanderCompletion(
+                    mission,
+                    missionPeer,
+                    authoritativeSide,
+                    troopOrEntryId,
+                    out _,
+                    out string controlledCommanderDiagnostics))
+            {
+                ClearCommanderDeploymentOrderLease(missionPeer, source + " controlled-commander-completed");
+                CoopBattleSelectionRequestState.Clear(missionPeer, source + " controlled-commander-completed");
+                CoopBattleSpawnRequestState.Clear(missionPeer, source + " controlled-commander-completed");
+                ApplyDerivedPeerLifecycleState(
+                    mission,
+                    missionPeer,
+                    preferSpawnQueued: false,
+                    preserveDeadAwaitingRespawn: true,
+                    source + " controlled-commander-completed");
+
+                NetworkCommunicator controlledPeer = missionPeer.GetNetworkPeer();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: completed commander deployment request with already controlled commander. " +
+                    "Peer=" + (controlledPeer?.UserName ?? controlledPeer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " QueuedSpawn=False" +
+                    " SelectionApplied=" + selectionApplied +
+                    " ControlledCommander={" + (controlledCommanderDiagnostics ?? string.Empty) + "}" +
+                    " DeploymentDiagnostics=" + (deploymentDiagnostics ?? string.Empty) +
+                    " Source=" + source);
+                return true;
+            }
+
             bool queuedSpawn = TryQueueSpawnIntentForPeer(mission, missionPeer, source + " spawn-after-deployment");
             if (queuedSpawn)
                 ClearCommanderDeploymentOrderLease(missionPeer, source + " completed");
@@ -32578,6 +32691,130 @@ namespace CoopSpectator.MissionBehaviors
                 " DeploymentDiagnostics=" + (deploymentDiagnostics ?? string.Empty) +
                 " Source=" + source);
             return queuedSpawn;
+        }
+
+        private static bool TryResolveExactSiegeControlledCommanderCompletion(
+            Mission mission,
+            MissionPeer missionPeer,
+            BattleSideEnum requestedOrAuthoritativeSide,
+            string troopOrEntryId,
+            out BattleSideEnum authoritativeSide,
+            out string diagnostics)
+        {
+            authoritativeSide = BattleSideEnum.None;
+            diagnostics = string.Empty;
+            if (mission == null || missionPeer == null || !GameNetwork.IsServer)
+            {
+                diagnostics = "missing-mission-or-peer";
+                return false;
+            }
+
+            Agent controlledAgent = missionPeer.ControlledAgent;
+            if (controlledAgent == null || !controlledAgent.IsActive() || controlledAgent.IsMount)
+            {
+                diagnostics = "missing-active-controlled-agent";
+                return false;
+            }
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (!IsExactSiegeCommanderDeploymentWindowActive(
+                    mission,
+                    currentPhase,
+                    out string deploymentWindowDiagnostics))
+            {
+                diagnostics = deploymentWindowDiagnostics;
+                return false;
+            }
+
+            authoritativeSide = requestedOrAuthoritativeSide != BattleSideEnum.None
+                ? requestedOrAuthoritativeSide
+                : ResolveAuthoritativeSide(missionPeer, mission, "controlled-commander-completion authoritative-side");
+            if (authoritativeSide == BattleSideEnum.None)
+            {
+                diagnostics = "missing-authoritative-side";
+                return false;
+            }
+
+            Team authoritativeTeam = ResolveAuthoritativeMissionTeam(mission, missionPeer, authoritativeSide);
+            if (authoritativeTeam == null || ReferenceEquals(authoritativeTeam, mission.SpectatorTeam))
+            {
+                diagnostics = "missing-authoritative-team";
+                return false;
+            }
+
+            if (!ReferenceEquals(controlledAgent.Team, authoritativeTeam))
+            {
+                diagnostics =
+                    "controlled-agent-team-mismatch" +
+                    " AgentTeam=" + (controlledAgent.Team?.TeamIndex.ToString() ?? "null") +
+                    " AuthoritativeTeam=" + authoritativeTeam.TeamIndex;
+                return false;
+            }
+
+            RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(
+                BattleSnapshotRuntimeState.GetState(),
+                authoritativeSide);
+            if (commanderEntry == null || string.IsNullOrWhiteSpace(commanderEntry.EntryId))
+            {
+                diagnostics = "commander-entry-missing";
+                return false;
+            }
+
+            bool requestMatchesCommander = false;
+            string matchedSource = string.Empty;
+            string matchedValue = string.Empty;
+            if (!string.IsNullOrWhiteSpace(troopOrEntryId))
+            {
+                requestMatchesCommander =
+                    TryMatchExactSiegeCommanderDeploymentEntryId(
+                        commanderEntry,
+                        troopOrEntryId,
+                        "request-entry",
+                        out matchedSource,
+                        out matchedValue) ||
+                    TryMatchExactSiegeCommanderDeploymentTroopId(
+                        commanderEntry,
+                        troopOrEntryId,
+                        "request-troop",
+                        out matchedSource,
+                        out matchedValue);
+            }
+
+            CoopBattlePeerSessionState.TryBuild(
+                mission,
+                missionPeer,
+                "controlled-commander-completion",
+                out CoopBattlePeerSessionSnapshot sessionSnapshot);
+            bool selectionMatchesCommander =
+                requestMatchesCommander ||
+                TryMatchExactSiegeCommanderDeploymentSelection(
+                    missionPeer,
+                    sessionSnapshot,
+                    commanderEntry,
+                    out matchedSource,
+                    out matchedValue);
+            if (!selectionMatchesCommander)
+            {
+                diagnostics = "selection-not-commander";
+                return false;
+            }
+
+            if (!DoesAgentMatchAuthoritativeEntryId(controlledAgent, commanderEntry.EntryId))
+            {
+                diagnostics =
+                    "controlled-agent-entry-mismatch" +
+                    " AgentIndex=" + controlledAgent.Index +
+                    " CommanderEntry=" + commanderEntry.EntryId;
+                return false;
+            }
+
+            diagnostics =
+                "agent=" + controlledAgent.Index +
+                " team=" + authoritativeTeam.TeamIndex +
+                " entry=" + commanderEntry.EntryId +
+                " matched=" + (matchedSource ?? string.Empty) +
+                ":" + (matchedValue ?? string.Empty);
+            return true;
         }
 
         private static bool TryValidateRequestedSelectionTargetIsSelectable(
