@@ -36,6 +36,8 @@ namespace CoopSpectator.Patches
         private static readonly object ExactSiegeMissionObjectSyncDiagnosticsLock = new object();
         private static readonly HashSet<string> LoggedExactSiegeMissionObjectSyncDiagnosticKeys = new HashSet<string>();
         private const int ExactSiegeMissionObjectSyncDiagnosticBudget = 64;
+        private const float LocalControlledRangedReloadCompletionMinimumProgress = 0.80f;
+        private const double LocalControlledCrossbowTerminalAttackDownGuardTimeoutSeconds = 3.0d;
         private static readonly HashSet<string> LoggedProjectileLaunchDiagnosticKeys = new HashSet<string>();
         private const int ProjectileLaunchDiagnosticBudget = 64;
         private static readonly HashSet<string> LoggedClientProjectileVisualGraceKeys = new HashSet<string>();
@@ -167,6 +169,8 @@ namespace CoopSpectator.Patches
             new List<DelayedLocalControlledWeaponStatePayload>();
         private static int _remainingExactSiegeMissionObjectSyncDiagnosticBudget = ExactSiegeMissionObjectSyncDiagnosticBudget;
         private static bool _exactSiegeMissionObjectSyncDiagnosticBudgetExhaustedLogged;
+        private static LocalControlledRangedReloadCompletionState _localControlledRangedReloadCompletionState;
+        private static PendingLocalControlledCrossbowTerminalAttackDownGuard _pendingLocalControlledCrossbowTerminalAttackDownGuard;
 
         private enum DelayedLocalControlledWeaponStateMessageKind
         {
@@ -404,6 +408,23 @@ namespace CoopSpectator.Patches
             public int CurrentUsageIndex;
         }
 
+        private sealed class LocalControlledRangedReloadCompletionState
+        {
+            public int AgentIndex;
+            public EquipmentIndex EquipmentIndex;
+            public string ItemId;
+            public bool IsReloadLastPhase;
+            public float ActionProgress;
+        }
+
+        private sealed class PendingLocalControlledCrossbowTerminalAttackDownGuard
+        {
+            public int AgentIndex;
+            public EquipmentIndex EquipmentIndex;
+            public string ItemId;
+            public DateTime ArmedUtc;
+        }
+
         private sealed class DeferredClientStartSwitchingWeaponUsageIndexPayload
         {
             public long Sequence;
@@ -539,6 +560,7 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchOrderTroopPlacerMissionScreenTick), () => PatchOrderTroopPlacerMissionScreenTick(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSelectAllFormations), () => PatchMissionNetworkComponentSelectAllFormations(harmony));
             TryApplyPatchStep(nameof(PatchMissionMultiplayerGameModeFlagDominationClientBotsControlledChanged), () => PatchMissionMultiplayerGameModeFlagDominationClientBotsControlledChanged(harmony));
+            TryApplyPatchStep(nameof(PatchMissionMainAgentControllerPreMissionTick), () => PatchMissionMainAgentControllerPreMissionTick(harmony));
             TryApplyPatchStep(nameof(PatchMissionGauntletMultiplayerOrderUIHandlerMissionScreenTick), () => PatchMissionGauntletMultiplayerOrderUIHandlerMissionScreenTick(harmony));
             TryApplyPatchStep(nameof(PatchMissionOrderVmViewOrders), () => PatchMissionOrderVmViewOrders(harmony));
             TryApplyPatchStep(nameof(PatchMissionOrderVmOpenToggleOrder), () => PatchMissionOrderVmOpenToggleOrder(harmony));
@@ -735,6 +757,8 @@ namespace CoopSpectator.Patches
                 _remainingExactSiegeMissionObjectSyncDiagnosticBudget = ExactSiegeMissionObjectSyncDiagnosticBudget;
                 _exactSiegeMissionObjectSyncDiagnosticBudgetExhaustedLogged = false;
             }
+            _localControlledRangedReloadCompletionState = null;
+            _pendingLocalControlledCrossbowTerminalAttackDownGuard = null;
             if (!preserveCommanderOrderControlState)
             {
                 _suppressExactCommanderOrderHotkeyFallbackUntilRelease = false;
@@ -1899,6 +1923,29 @@ namespace CoopSpectator.Patches
             ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to MissionGauntletMultiplayerOrderUIHandler.OnMissionScreenTick.");
         }
 
+        private static void PatchMissionMainAgentControllerPreMissionTick(Harmony harmony)
+        {
+            Type targetType = AccessTools.TypeByName(
+                "TaleWorlds.MountAndBlade.View.MissionViews.MissionMainAgentController");
+            MethodInfo target = targetType?.GetMethod(
+                "OnPreMissionTick",
+                BindingFlags.Instance | BindingFlags.Public,
+                binder: null,
+                types: new[] { typeof(float) },
+                modifiers: null);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionMainAgentController_OnPreMissionTick_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionMainAgentController.OnPreMissionTick not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to MissionMainAgentController.OnPreMissionTick.");
+        }
+
         private static void PatchOrderTroopPlacerMissionScreenTick(Harmony harmony)
         {
             Type targetType = AccessTools.TypeByName(
@@ -2891,6 +2938,7 @@ namespace CoopSpectator.Patches
             TryReplayDeferredClientWeaponUsageIndexChangeMessage(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSetAgentHealth(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientMakeAgentDead(mission, source, snapshotReadinessSummary);
+            TryApplyLocalControlledRangedTerminalReloadCompletion(mission);
         }
 
         internal static void TryProcessDeferredClientMountedHeroCreateAgents(Mission mission, string source)
@@ -9653,6 +9701,113 @@ namespace CoopSpectator.Patches
             {
                 return "Channel=" + channelNo + " State=failed Error=" + BuildCompactExceptionDiagnostics(ex);
             }
+        }
+
+        private static void TryApplyLocalControlledRangedTerminalReloadCompletion(Mission mission)
+        {
+            if (!GameNetwork.IsClient ||
+                mission == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                ClearLocalControlledRangedReloadCompletionState();
+                return;
+            }
+
+            try
+            {
+                MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+                Agent agent = localMissionPeer?.ControlledAgent ?? Agent.Main;
+                if (agent == null ||
+                    agent.IsMount ||
+                    !agent.IsHuman ||
+                    !agent.IsActive() ||
+                    agent.Equipment == null ||
+                    !IsLocalMissionPeerControlledAgent(agent))
+                {
+                    ClearLocalControlledRangedReloadCompletionState();
+                    return;
+                }
+
+                if (!TryGetAgentPrimaryWieldedItemIndex(agent, out EquipmentIndex equipmentIndex) ||
+                    equipmentIndex < EquipmentIndex.Weapon0 ||
+                    equipmentIndex > EquipmentIndex.Weapon3 ||
+                    !TryGetAgentMissionWeaponUsage(
+                        agent,
+                        equipmentIndex,
+                        out MissionWeapon missionWeapon,
+                        out ItemObject item,
+                        out WeaponComponentData usage))
+                {
+                    ClearLocalControlledRangedReloadCompletionState();
+                    return;
+                }
+
+                bool isThrown = IsThrownProjectileLaunchWeapon(missionWeapon);
+                bool isCrossbow = IsCrossbowWeaponUsage(item, usage);
+                if (!isThrown && !isCrossbow)
+                {
+                    ClearLocalControlledRangedReloadCompletionState();
+                    return;
+                }
+
+                bool isReloadLastPhase =
+                    agent.GetCurrentActionType(1) == Agent.ActionCodeType.Reload &&
+                    agent.GetCurrentActionStage(1) == Agent.ActionStage.ReloadLastPhase;
+                var currentState = new LocalControlledRangedReloadCompletionState
+                {
+                    AgentIndex = agent.Index,
+                    EquipmentIndex = equipmentIndex,
+                    ItemId = item.StringId ?? "null",
+                    IsReloadLastPhase = isReloadLastPhase,
+                    ActionProgress = agent.GetCurrentActionProgress(1)
+                };
+
+                LocalControlledRangedReloadCompletionState previousState =
+                    _localControlledRangedReloadCompletionState;
+                _localControlledRangedReloadCompletionState = currentState;
+                if (previousState == null ||
+                    previousState.AgentIndex != currentState.AgentIndex ||
+                    previousState.EquipmentIndex != currentState.EquipmentIndex ||
+                    !string.Equals(previousState.ItemId, currentState.ItemId, StringComparison.Ordinal) ||
+                    !previousState.IsReloadLastPhase ||
+                    currentState.IsReloadLastPhase ||
+                    previousState.ActionProgress < LocalControlledRangedReloadCompletionMinimumProgress)
+                {
+                    return;
+                }
+
+                if (isThrown && missionWeapon.ReloadPhase == 0 && missionWeapon.Amount > 0)
+                {
+                    agent.SetWeaponReloadPhaseAsClient(equipmentIndex, 1);
+                }
+                else if (isCrossbow &&
+                         missionWeapon.ReloadPhase == 1 &&
+                         missionWeapon.Amount > 0 &&
+                         missionWeapon.Ammo <= 0)
+                {
+                    _pendingLocalControlledCrossbowTerminalAttackDownGuard =
+                        new PendingLocalControlledCrossbowTerminalAttackDownGuard
+                        {
+                            AgentIndex = agent.Index,
+                            EquipmentIndex = equipmentIndex,
+                            ItemId = item.StringId ?? "null",
+                            ArmedUtc = DateTime.UtcNow
+                        };
+                }
+                else
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                ClearLocalControlledRangedReloadCompletionState();
+            }
+        }
+
+        private static void ClearLocalControlledRangedReloadCompletionState()
+        {
+            _localControlledRangedReloadCompletionState = null;
         }
 
         private static string BuildCompactExceptionDiagnostics(Exception ex)
@@ -16779,6 +16934,91 @@ namespace CoopSpectator.Patches
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: local commander order-control finalization tick failed: " + ex.Message);
             }
+        }
+
+        private static void MissionMainAgentController_OnPreMissionTick_Postfix()
+        {
+            if (_pendingLocalControlledCrossbowTerminalAttackDownGuard == null)
+                return;
+
+            try
+            {
+                TrySuppressPendingLocalControlledCrossbowTerminalAttackDown(Mission.Current);
+            }
+            catch
+            {
+                ClearPendingLocalControlledCrossbowTerminalAttackDownGuard();
+            }
+        }
+
+        private static void TrySuppressPendingLocalControlledCrossbowTerminalAttackDown(Mission mission)
+        {
+            PendingLocalControlledCrossbowTerminalAttackDownGuard guard =
+                _pendingLocalControlledCrossbowTerminalAttackDownGuard;
+            if (guard == null)
+                return;
+
+            if (!GameNetwork.IsClient ||
+                mission == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                ClearPendingLocalControlledCrossbowTerminalAttackDownGuard();
+                return;
+            }
+
+            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            Agent agent = localMissionPeer?.ControlledAgent ?? Agent.Main;
+            if (agent == null ||
+                agent.Index != guard.AgentIndex ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                agent.Equipment == null ||
+                !IsLocalMissionPeerControlledAgent(agent) ||
+                !TryGetAgentPrimaryWieldedItemIndex(agent, out EquipmentIndex equipmentIndex) ||
+                equipmentIndex != guard.EquipmentIndex ||
+                !TryGetAgentMissionWeaponUsage(
+                    agent,
+                    equipmentIndex,
+                    out MissionWeapon missionWeapon,
+                    out ItemObject item,
+                    out WeaponComponentData usage) ||
+                !string.Equals(item.StringId ?? "null", guard.ItemId, StringComparison.Ordinal) ||
+                !IsCrossbowWeaponUsage(item, usage))
+            {
+                ClearPendingLocalControlledCrossbowTerminalAttackDownGuard();
+                return;
+            }
+
+            double elapsedSeconds = (DateTime.UtcNow - guard.ArmedUtc).TotalSeconds;
+            if (missionWeapon.ReloadPhase >= 2 || missionWeapon.Ammo > 0)
+            {
+                ClearPendingLocalControlledCrossbowTerminalAttackDownGuard();
+                return;
+            }
+
+            if (elapsedSeconds >= LocalControlledCrossbowTerminalAttackDownGuardTimeoutSeconds)
+            {
+                ClearPendingLocalControlledCrossbowTerminalAttackDownGuard();
+                return;
+            }
+
+            if (missionWeapon.ReloadPhase != 1 || missionWeapon.Ammo > 0)
+            {
+                ClearPendingLocalControlledCrossbowTerminalAttackDownGuard();
+                return;
+            }
+
+            Agent.MovementControlFlag movementFlags = agent.MovementFlags;
+            if ((movementFlags & Agent.MovementControlFlag.AttackDown) != Agent.MovementControlFlag.AttackDown)
+                return;
+
+            agent.MovementFlags = movementFlags & ~Agent.MovementControlFlag.AttackDown;
+        }
+
+        private static void ClearPendingLocalControlledCrossbowTerminalAttackDownGuard()
+        {
+            _pendingLocalControlledCrossbowTerminalAttackDownGuard = null;
         }
 
         private static void TryPromoteLocalExactCommanderFromClientOrderTick(string source)
