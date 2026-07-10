@@ -37,6 +37,7 @@ namespace CoopSpectator.Patches
         private static readonly HashSet<string> LoggedExactSiegeMissionObjectSyncDiagnosticKeys = new HashSet<string>();
         private const int ExactSiegeMissionObjectSyncDiagnosticBudget = 64;
         private const float LocalControlledRangedReloadCompletionMinimumProgress = 0.80f;
+        private const double LocalControlledBowTerminalReloadCompletionTimeoutSeconds = 3.0d;
         private const double LocalControlledCrossbowTerminalAttackDownGuardTimeoutSeconds = 3.0d;
         private static readonly HashSet<string> LoggedProjectileLaunchDiagnosticKeys = new HashSet<string>();
         private const int ProjectileLaunchDiagnosticBudget = 64;
@@ -170,6 +171,7 @@ namespace CoopSpectator.Patches
         private static int _remainingExactSiegeMissionObjectSyncDiagnosticBudget = ExactSiegeMissionObjectSyncDiagnosticBudget;
         private static bool _exactSiegeMissionObjectSyncDiagnosticBudgetExhaustedLogged;
         private static LocalControlledRangedReloadCompletionState _localControlledRangedReloadCompletionState;
+        private static PendingLocalControlledBowTerminalReloadCompletion _pendingLocalControlledBowTerminalReloadCompletion;
         private static PendingLocalControlledCrossbowTerminalAttackDownGuard _pendingLocalControlledCrossbowTerminalAttackDownGuard;
 
         private enum DelayedLocalControlledWeaponStateMessageKind
@@ -410,11 +412,21 @@ namespace CoopSpectator.Patches
 
         private sealed class LocalControlledRangedReloadCompletionState
         {
+            public Agent Agent;
             public int AgentIndex;
             public EquipmentIndex EquipmentIndex;
             public string ItemId;
             public bool IsReloadLastPhase;
             public float ActionProgress;
+        }
+
+        private sealed class PendingLocalControlledBowTerminalReloadCompletion
+        {
+            public Agent Agent;
+            public int AgentIndex;
+            public EquipmentIndex EquipmentIndex;
+            public string ItemId;
+            public DateTime ArmedUtc;
         }
 
         private sealed class PendingLocalControlledCrossbowTerminalAttackDownGuard
@@ -7757,17 +7769,32 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            bool isBow =
-                item.ItemType == ItemObject.ItemTypeEnum.Bow ||
-                usage.WeaponClass == WeaponClass.Bow ||
-                usage.RelevantSkill == DefaultSkills.Bow;
-            if (!IsAgentInReloadLastPhase(agent, channelNo: 1, out string actionSummary))
-                return false;
-
+            bool isBow = IsBowWeaponUsage(item, usage);
             short reloadPhase = setWeaponReloadPhase.ReloadPhase;
             bool terminalReloadPhase = isBow && reloadPhase == 1;
             if (!terminalReloadPhase)
                 return false;
+
+            bool isReloadLastPhase =
+                IsAgentInReloadLastPhase(agent, channelNo: 1, out string actionSummary);
+            bool recentlyCompletedReloadLastPhase = false;
+            if (!isReloadLastPhase)
+            {
+                if ((missionWeapon.ReloadPhase != 0 && missionWeapon.ReloadPhase != 1) ||
+                    missionWeapon.Amount <= 0 ||
+                    missionWeapon.Ammo <= 0)
+                {
+                    return false;
+                }
+
+                recentlyCompletedReloadLastPhase =
+                    TryConsumePendingLocalControlledBowTerminalReloadCompletion(
+                        agent,
+                        equipmentIndex,
+                        item.StringId ?? "null");
+                if (!recentlyCompletedReloadLastPhase)
+                    return false;
+            }
 
             try
             {
@@ -7779,8 +7806,11 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
+            _pendingLocalControlledBowTerminalReloadCompletion = null;
             reason =
-                "local-terminal-reload-last-phase" +
+                (recentlyCompletedReloadLastPhase
+                    ? "local-terminal-reload-recently-completed"
+                    : "local-terminal-reload-last-phase") +
                 "|AgentIndex=" + agent.Index +
                 "|EquipmentIndex=" + equipmentIndex +
                 "|CurrentMain=" + currentMainHandIndex +
@@ -7792,6 +7822,92 @@ namespace CoopSpectator.Patches
                 "|Ammo=" + missionWeapon.Ammo +
                 "|Action1={" + actionSummary + "}";
             return true;
+        }
+
+        private static bool TryConsumePendingLocalControlledBowTerminalReloadCompletion(
+            Agent agent,
+            EquipmentIndex equipmentIndex,
+            string itemId)
+        {
+            string normalizedItemId = itemId ?? "null";
+            PendingLocalControlledBowTerminalReloadCompletion pending =
+                _pendingLocalControlledBowTerminalReloadCompletion;
+            if (pending != null)
+            {
+                double elapsedSeconds = (DateTime.UtcNow - pending.ArmedUtc).TotalSeconds;
+                bool matches =
+                    DoesPendingLocalControlledBowTerminalReloadCompletionMatch(
+                        pending,
+                        agent,
+                        equipmentIndex,
+                        normalizedItemId) &&
+                    elapsedSeconds >= 0.0d &&
+                    elapsedSeconds < LocalControlledBowTerminalReloadCompletionTimeoutSeconds;
+                if (matches)
+                {
+                    _pendingLocalControlledBowTerminalReloadCompletion = null;
+                    return true;
+                }
+
+                TryRevertPendingLocalControlledBowTerminalReloadCompletion();
+            }
+
+            LocalControlledRangedReloadCompletionState trackedState =
+                _localControlledRangedReloadCompletionState;
+            return trackedState != null &&
+                   ReferenceEquals(trackedState.Agent, agent) &&
+                   trackedState.AgentIndex == agent.Index &&
+                   trackedState.EquipmentIndex == equipmentIndex &&
+                   string.Equals(trackedState.ItemId, normalizedItemId, StringComparison.Ordinal) &&
+                   trackedState.IsReloadLastPhase &&
+                   trackedState.ActionProgress >= LocalControlledRangedReloadCompletionMinimumProgress;
+        }
+
+        private static bool DoesPendingLocalControlledBowTerminalReloadCompletionMatch(
+            PendingLocalControlledBowTerminalReloadCompletion pending,
+            Agent agent,
+            EquipmentIndex equipmentIndex,
+            string itemId)
+        {
+            return pending != null &&
+                   ReferenceEquals(pending.Agent, agent) &&
+                   pending.AgentIndex == agent.Index &&
+                   pending.EquipmentIndex == equipmentIndex &&
+                   string.Equals(pending.ItemId, itemId ?? "null", StringComparison.Ordinal);
+        }
+
+        private static void TryRevertPendingLocalControlledBowTerminalReloadCompletion()
+        {
+            PendingLocalControlledBowTerminalReloadCompletion pending =
+                _pendingLocalControlledBowTerminalReloadCompletion;
+            _pendingLocalControlledBowTerminalReloadCompletion = null;
+            if (pending?.Agent?.Equipment == null)
+                return;
+
+            try
+            {
+                if (pending.EquipmentIndex < EquipmentIndex.Weapon0 ||
+                    pending.EquipmentIndex > EquipmentIndex.Weapon3)
+                {
+                    return;
+                }
+
+                MissionWeapon missionWeapon = pending.Agent.Equipment[pending.EquipmentIndex];
+                ItemObject item = missionWeapon.Item;
+                if (missionWeapon.IsEmpty ||
+                    item == null ||
+                    !string.Equals(item.StringId ?? "null", pending.ItemId, StringComparison.Ordinal) ||
+                    missionWeapon.ReloadPhase != 1 ||
+                    missionWeapon.Ammo > 0)
+                {
+                    return;
+                }
+
+                pending.Agent.Equipment.SetReloadPhaseOfSlot(pending.EquipmentIndex, 0);
+            }
+            catch
+            {
+            }
         }
 
         private static bool TryMaskLocalCrossbowAttackDownForTerminalWeaponState(
@@ -8235,6 +8351,16 @@ namespace CoopSpectator.Patches
             return item?.ItemType == ItemObject.ItemTypeEnum.Crossbow ||
                    usage.WeaponClass == WeaponClass.Crossbow ||
                    usage.RelevantSkill == DefaultSkills.Crossbow;
+        }
+
+        private static bool IsBowWeaponUsage(ItemObject item, WeaponComponentData usage)
+        {
+            if (usage == null)
+                return false;
+
+            return item?.ItemType == ItemObject.ItemTypeEnum.Bow ||
+                   usage.WeaponClass == WeaponClass.Bow ||
+                   usage.RelevantSkill == DefaultSkills.Bow;
         }
 
         private static bool IsBoltAmmoUsage(ItemObject item, WeaponComponentData usage)
@@ -9744,10 +9870,34 @@ namespace CoopSpectator.Patches
 
                 bool isThrown = IsThrownProjectileLaunchWeapon(missionWeapon);
                 bool isCrossbow = IsCrossbowWeaponUsage(item, usage);
-                if (!isThrown && !isCrossbow)
+                bool isBow = IsBowWeaponUsage(item, usage);
+                if (!isThrown && !isCrossbow && !isBow)
                 {
                     ClearLocalControlledRangedReloadCompletionState();
                     return;
+                }
+
+                string itemId = item.StringId ?? "null";
+                PendingLocalControlledBowTerminalReloadCompletion pendingBowCompletion =
+                    _pendingLocalControlledBowTerminalReloadCompletion;
+                if (pendingBowCompletion != null)
+                {
+                    double elapsedSeconds =
+                        (DateTime.UtcNow - pendingBowCompletion.ArmedUtc).TotalSeconds;
+                    bool pendingMatches =
+                        DoesPendingLocalControlledBowTerminalReloadCompletionMatch(
+                            pendingBowCompletion,
+                            agent,
+                            equipmentIndex,
+                            itemId);
+                    if (!pendingMatches || elapsedSeconds < 0.0d)
+                    {
+                        TryRevertPendingLocalControlledBowTerminalReloadCompletion();
+                    }
+                    else if (elapsedSeconds >= LocalControlledBowTerminalReloadCompletionTimeoutSeconds)
+                    {
+                        TryRevertPendingLocalControlledBowTerminalReloadCompletion();
+                    }
                 }
 
                 bool isReloadLastPhase =
@@ -9755,9 +9905,10 @@ namespace CoopSpectator.Patches
                     agent.GetCurrentActionStage(1) == Agent.ActionStage.ReloadLastPhase;
                 var currentState = new LocalControlledRangedReloadCompletionState
                 {
+                    Agent = agent,
                     AgentIndex = agent.Index,
                     EquipmentIndex = equipmentIndex,
-                    ItemId = item.StringId ?? "null",
+                    ItemId = itemId,
                     IsReloadLastPhase = isReloadLastPhase,
                     ActionProgress = agent.GetCurrentActionProgress(1)
                 };
@@ -9765,10 +9916,13 @@ namespace CoopSpectator.Patches
                 LocalControlledRangedReloadCompletionState previousState =
                     _localControlledRangedReloadCompletionState;
                 _localControlledRangedReloadCompletionState = currentState;
-                if (previousState == null ||
-                    previousState.AgentIndex != currentState.AgentIndex ||
-                    previousState.EquipmentIndex != currentState.EquipmentIndex ||
-                    !string.Equals(previousState.ItemId, currentState.ItemId, StringComparison.Ordinal) ||
+                bool sameTrackedWeapon =
+                    previousState != null &&
+                    ReferenceEquals(previousState.Agent, currentState.Agent) &&
+                    previousState.AgentIndex == currentState.AgentIndex &&
+                    previousState.EquipmentIndex == currentState.EquipmentIndex &&
+                    string.Equals(previousState.ItemId, currentState.ItemId, StringComparison.Ordinal);
+                if (!sameTrackedWeapon ||
                     !previousState.IsReloadLastPhase ||
                     currentState.IsReloadLastPhase ||
                     previousState.ActionProgress < LocalControlledRangedReloadCompletionMinimumProgress)
@@ -9779,6 +9933,21 @@ namespace CoopSpectator.Patches
                 if (isThrown && missionWeapon.ReloadPhase == 0 && missionWeapon.Amount > 0)
                 {
                     agent.SetWeaponReloadPhaseAsClient(equipmentIndex, 1);
+                }
+                else if (isBow &&
+                         missionWeapon.ReloadPhase == 0 &&
+                         missionWeapon.Amount > 0)
+                {
+                    agent.Equipment.SetReloadPhaseOfSlot(equipmentIndex, 1);
+                    _pendingLocalControlledBowTerminalReloadCompletion =
+                        new PendingLocalControlledBowTerminalReloadCompletion
+                        {
+                            Agent = agent,
+                            AgentIndex = agent.Index,
+                            EquipmentIndex = equipmentIndex,
+                            ItemId = itemId,
+                            ArmedUtc = DateTime.UtcNow
+                        };
                 }
                 else if (isCrossbow &&
                          missionWeapon.ReloadPhase == 1 &&
@@ -9807,6 +9976,7 @@ namespace CoopSpectator.Patches
 
         private static void ClearLocalControlledRangedReloadCompletionState()
         {
+            TryRevertPendingLocalControlledBowTerminalReloadCompletion();
             _localControlledRangedReloadCompletionState = null;
         }
 
