@@ -18680,6 +18680,7 @@ namespace CoopSpectator.MissionBehaviors
                 try
                 {
                     buildData.Team(team);
+                    ApplyResolvedArmyClothingColors(buildData, team);
                     buildData.Controller(AgentControllerType.AI);
                     buildData.TroopOrigin(origin);
                     buildData.InitialPosition(in spawnPosition);
@@ -18779,6 +18780,17 @@ namespace CoopSpectator.MissionBehaviors
                     " Message=" + ex.Message);
                 return null;
             }
+        }
+
+        private static void ApplyResolvedArmyClothingColors(AgentBuildData buildData, Team team)
+        {
+            if (buildData == null || team == null)
+                return;
+
+            uint clothingColor1 = BattleSnapshotRuntimeState.ResolveSideColor(team.Side, team.Color);
+            uint clothingColor2 = BattleSnapshotRuntimeState.ResolveSideColor2(team.Side, team.Color2);
+            buildData.ClothingColor1(clothingColor1);
+            buildData.ClothingColor2(clothingColor2);
         }
 
         private static IAgentOriginBase BuildMaterializedAgentOriginForCreateTimePath(
@@ -35963,6 +35975,7 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     buildData.MissionPeer(missionPeer);
                     buildData.Team(team);
+                    ApplyResolvedArmyClothingColors(buildData, team);
                     buildData.TroopOrigin(origin);
                     buildData.Controller(AgentControllerType.Player);
                     buildData.InitialPosition(in spawnPosition);
@@ -36161,8 +36174,7 @@ namespace CoopSpectator.MissionBehaviors
                 previewBuildData.IsFemale(missionPeer.Peer?.IsFemale ?? false);
                 previewBuildData.BodyProperties((missionPeer.Peer?.BodyProperties).GetValueOrDefault());
                 previewBuildData.VisualsIndex(0);
-                previewBuildData.ClothingColor1(team.Color);
-                previewBuildData.ClothingColor2(team.Color2);
+                ApplyResolvedArmyClothingColors(previewBuildData, team);
 
                 gameMode.HandleAgentVisualSpawning(peer, previewBuildData);
 
