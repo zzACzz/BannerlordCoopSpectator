@@ -7648,7 +7648,7 @@ namespace CoopSpectator.Patches
                 out reason);
         }
 
-        private static bool TryApplyLocalPredictedReloadPhaseAsManagedStateOnly(
+        private static bool TryApplyLocalTerminalReloadPhaseAsManagedStateOnly(
             Mission mission,
             Agent agent,
             SetWeaponReloadPhase setWeaponReloadPhase,
@@ -7713,15 +7713,12 @@ namespace CoopSpectator.Patches
                 item.ItemType == ItemObject.ItemTypeEnum.Bow ||
                 usage.WeaponClass == WeaponClass.Bow ||
                 usage.RelevantSkill == DefaultSkills.Bow;
-            if (!isBow)
-                return false;
-
             if (!IsAgentInReloadLastPhase(agent, channelNo: 1, out string actionSummary))
                 return false;
 
             short reloadPhase = setWeaponReloadPhase.ReloadPhase;
-            bool predictedReloadPhase = reloadPhase == 1;
-            if (!predictedReloadPhase)
+            bool terminalReloadPhase = isBow && reloadPhase == 1;
+            if (!terminalReloadPhase)
                 return false;
 
             try
@@ -7735,13 +7732,120 @@ namespace CoopSpectator.Patches
             }
 
             reason =
-                "local-predicted-reload-last-phase" +
+                "local-terminal-reload-last-phase" +
                 "|AgentIndex=" + agent.Index +
                 "|EquipmentIndex=" + equipmentIndex +
                 "|CurrentMain=" + currentMainHandIndex +
                 "|ReloadPhase=" + reloadPhase +
                 "|Item=" + (item.StringId ?? "null") +
                 "|Usage=" + usage.WeaponClass +
+                "|IsBow=" + isBow +
+                "|Amount=" + missionWeapon.Amount +
+                "|Ammo=" + missionWeapon.Ammo +
+                "|Action1={" + actionSummary + "}";
+            return true;
+        }
+
+        private static bool TryMaskLocalCrossbowAttackDownForTerminalWeaponState(
+            Mission mission,
+            Agent agent,
+            EquipmentIndex payloadEquipmentIndex,
+            string messageName,
+            string terminalStateSummary,
+            out string reason)
+        {
+            reason = null;
+            if (_delayedLocalControlledWeaponStateReplayDepth > 0 ||
+                GameNetwork.IsServer ||
+                mission == null ||
+                agent == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                agent.Equipment == null)
+            {
+                return false;
+            }
+
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+                return false;
+
+            if (!IsLocalMissionPeerControlledAgent(agent))
+                return false;
+
+            if (payloadEquipmentIndex < EquipmentIndex.Weapon0 || payloadEquipmentIndex > EquipmentIndex.Weapon3)
+                return false;
+
+            if (!TryGetAgentPrimaryWieldedItemIndex(agent, out EquipmentIndex currentMainHandIndex) ||
+                currentMainHandIndex < EquipmentIndex.Weapon0 ||
+                currentMainHandIndex > EquipmentIndex.Weapon3)
+            {
+                return false;
+            }
+
+            if (!TryGetAgentMissionWeaponUsage(
+                    agent,
+                    currentMainHandIndex,
+                    out MissionWeapon missionWeapon,
+                    out ItemObject item,
+                    out WeaponComponentData usage) ||
+                !IsCrossbowWeaponUsage(item, usage))
+            {
+                return false;
+            }
+
+            string payloadSlotSummary = "current-main-crossbow";
+            if (payloadEquipmentIndex != currentMainHandIndex)
+            {
+                if (!TryGetAgentMissionWeaponUsage(
+                        agent,
+                        payloadEquipmentIndex,
+                        out _,
+                        out ItemObject payloadItem,
+                        out WeaponComponentData payloadUsage) ||
+                    !IsBoltAmmoUsage(payloadItem, payloadUsage))
+                {
+                    return false;
+                }
+
+                payloadSlotSummary = "bolt-ammo-slot:" + (payloadItem.StringId ?? "null");
+            }
+
+            if (!IsAgentInReloadLastPhase(agent, channelNo: 1, out string actionSummary))
+                return false;
+
+            Agent.MovementControlFlag movementFlags = agent.MovementFlags;
+            if ((movementFlags & Agent.MovementControlFlag.AttackDown) != Agent.MovementControlFlag.AttackDown)
+                return false;
+
+            Agent.MovementControlFlag maskedMovementFlags =
+                movementFlags & ~Agent.MovementControlFlag.AttackDown;
+            if (maskedMovementFlags == movementFlags)
+                return false;
+
+            try
+            {
+                agent.MovementFlags = maskedMovementFlags;
+            }
+            catch (Exception ex)
+            {
+                reason = "crossbow-attackdown-mask-failed:" + ex.GetType().Name;
+                return false;
+            }
+
+            reason =
+                "local-crossbow-terminal-weapon-state-attackdown-masked" +
+                "|AgentIndex=" + agent.Index +
+                "|Message=" + (messageName ?? "unknown") +
+                "|PayloadEquipmentIndex=" + payloadEquipmentIndex +
+                "|CurrentMain=" + currentMainHandIndex +
+                "|Item=" + (item.StringId ?? "null") +
+                "|Usage=" + usage.WeaponClass +
+                "|Ammo=" + missionWeapon.Ammo +
+                "|PayloadSlot=" + payloadSlotSummary +
+                "|MovementFlagsBefore=" + movementFlags +
+                "|MovementFlagsAfter=" + maskedMovementFlags +
+                "|TerminalState={" + (terminalStateSummary ?? "(none)") + "}" +
                 "|Action1={" + actionSummary + "}";
             return true;
         }
@@ -14333,6 +14437,30 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (TryMaskLocalCrossbowAttackDownForTerminalWeaponState(
+                        mission,
+                        agent,
+                        setWeaponNetworkData.WeaponEquipmentIndex,
+                        nameof(SetWeaponNetworkData),
+                        setWeaponNetworkDataPayloadSummary,
+                        out string crossbowAttackDownMaskReason))
+                {
+                    TryLogLocalControlledWeaponStateDiagnostics(
+                        mission,
+                        agent,
+                        setWeaponNetworkData.AgentIndex,
+                        nameof(SetWeaponNetworkData),
+                        setWeaponNetworkData.WeaponEquipmentIndex,
+                        setWeaponNetworkDataPayloadSummary +
+                        " MaskReason=" + (crossbowAttackDownMaskReason ?? "unknown"),
+                        "native-allowed-crossbow-attackdown-masked",
+                        "prefix");
+                    RemoveDeferredClientSetWeaponNetworkDataPayload(
+                        setWeaponNetworkData.AgentIndex,
+                        setWeaponNetworkData);
+                    return true;
+                }
+
                 TryLogLocalControlledWeaponStateDiagnostics(
                     mission,
                     agent,
@@ -14578,11 +14706,14 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (TryQueueDelayedLocalControlledWeaponAmmoData(
+                if (setWeaponAmmoData.Ammo > 0 &&
+                    TryMaskLocalCrossbowAttackDownForTerminalWeaponState(
                         mission,
                         agent,
-                        setWeaponAmmoData,
-                        out string delayedLocalControlledAmmoReason))
+                        setWeaponAmmoData.WeaponEquipmentIndex,
+                        nameof(SetWeaponAmmoData),
+                        setWeaponAmmoDataPayloadSummary,
+                        out string crossbowAttackDownMaskReason))
                 {
                     TryLogLocalControlledWeaponStateDiagnostics(
                         mission,
@@ -14591,17 +14722,13 @@ namespace CoopSpectator.Patches
                         nameof(SetWeaponAmmoData),
                         setWeaponAmmoData.WeaponEquipmentIndex,
                         setWeaponAmmoDataPayloadSummary +
-                        " DelayedReason=" + (delayedLocalControlledAmmoReason ?? "unknown"),
-                        "delayed-local-controlled",
+                        " MaskReason=" + (crossbowAttackDownMaskReason ?? "unknown"),
+                        "native-allowed-crossbow-attackdown-masked",
                         "prefix");
-                    TryLogQueuedDelayedLocalControlledWeaponState(
-                        DelayedLocalControlledWeaponStateMessageKind.AmmoData,
+                    RemoveDeferredClientSetWeaponAmmoDataPayload(
                         setWeaponAmmoData.AgentIndex,
-                        setWeaponAmmoData.WeaponEquipmentIndex,
-                        agent,
-                        delayedLocalControlledAmmoReason,
-                        "prefix");
-                    return false;
+                        setWeaponAmmoData);
+                    return true;
                 }
 
                 TryLogLocalControlledWeaponStateDiagnostics(
@@ -14791,11 +14918,14 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (TryQueueDelayedLocalControlledWeaponReloadPhase(
+                if (setWeaponReloadPhase.ReloadPhase == 2 &&
+                    TryMaskLocalCrossbowAttackDownForTerminalWeaponState(
                         mission,
                         agent,
-                        setWeaponReloadPhase,
-                        out string delayedLocalControlledReloadReason))
+                        setWeaponReloadPhase.EquipmentIndex,
+                        nameof(SetWeaponReloadPhase),
+                        setWeaponReloadPhasePayloadSummary,
+                        out string crossbowAttackDownMaskReason))
                 {
                     TryLogLocalControlledWeaponStateDiagnostics(
                         mission,
@@ -14804,20 +14934,16 @@ namespace CoopSpectator.Patches
                         nameof(SetWeaponReloadPhase),
                         setWeaponReloadPhase.EquipmentIndex,
                         setWeaponReloadPhasePayloadSummary +
-                        " DelayedReason=" + (delayedLocalControlledReloadReason ?? "unknown"),
-                        "delayed-local-controlled",
+                        " MaskReason=" + (crossbowAttackDownMaskReason ?? "unknown"),
+                        "native-allowed-crossbow-attackdown-masked",
                         "prefix");
-                    TryLogQueuedDelayedLocalControlledWeaponState(
-                        DelayedLocalControlledWeaponStateMessageKind.ReloadPhase,
+                    RemoveDeferredClientSetWeaponReloadPhasePayload(
                         setWeaponReloadPhase.AgentIndex,
-                        setWeaponReloadPhase.EquipmentIndex,
-                        agent,
-                        delayedLocalControlledReloadReason,
-                        "prefix");
-                    return false;
+                        setWeaponReloadPhase);
+                    return true;
                 }
 
-                if (TryApplyLocalPredictedReloadPhaseAsManagedStateOnly(
+                if (TryApplyLocalTerminalReloadPhaseAsManagedStateOnly(
                         mission,
                         agent,
                         setWeaponReloadPhase,
@@ -14831,7 +14957,7 @@ namespace CoopSpectator.Patches
                         setWeaponReloadPhase.EquipmentIndex,
                         setWeaponReloadPhasePayloadSummary +
                         " ManagedStateOnlyReason=" + (managedStateOnlyReason ?? "unknown"),
-                        "managed-state-only-local-predicted-reload",
+                        "managed-state-only-local-terminal-reload",
                         "prefix");
                     RemoveDeferredClientSetWeaponReloadPhasePayload(
                         setWeaponReloadPhase.AgentIndex,
