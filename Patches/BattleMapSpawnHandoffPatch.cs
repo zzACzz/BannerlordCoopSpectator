@@ -11014,6 +11014,9 @@ namespace CoopSpectator.Patches
                 if (agent == null || !agent.IsActive() || agent.IsMount || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
                     return;
 
+                TryEnsureExactSiegeAgentOriginBanner(
+                    mission,
+                    agent);
                 ExactTransferContractRuntimeCache.ObserveClientMaterialized(
                     agent.Index,
                     agent,
@@ -12750,6 +12753,43 @@ namespace CoopSpectator.Patches
             return formation?.Banner ?? team.Banner;
         }
 
+        private static void TryEnsureExactSiegeAgentOriginBanner(
+            Mission mission,
+            Agent agent)
+        {
+            if (GameNetwork.IsServer ||
+                mission == null ||
+                agent == null ||
+                agent.IsMount ||
+                !agent.IsHuman ||
+                !agent.IsActive() ||
+                agent.Team == null ||
+                agent.Team.Side == BattleSideEnum.None ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return;
+            }
+
+            Banner banner = ResolveStrictExactHeroCreateAgentBanner(agent.Team, agent.Formation);
+            if (banner == null)
+                return;
+
+            IAgentOriginBase origin = agent.Origin;
+            if (origin == null)
+            {
+                if (agent.Character == null)
+                    return;
+
+                origin = new BasicBattleAgentOrigin(agent.Character);
+            }
+
+            IAgentOriginBase bannerAwareOrigin = BannerAwareAgentOrigin.Ensure(origin, banner);
+            if (bannerAwareOrigin == null)
+                return;
+
+            agent.Origin = bannerAwareOrigin;
+        }
+
         private static void CanonicalizeCreateAgentPayloadForBattleMap(CreateAgent createAgent)
         {
             if (createAgent == null)
@@ -12979,6 +13019,12 @@ namespace CoopSpectator.Patches
                 }
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(synchronizeAgentSpawnEquipment.AgentIndex, canBeNull: true);
+                if (agent != null)
+                {
+                    TryEnsureExactSiegeAgentOriginBanner(
+                        mission,
+                        agent);
+                }
                 if (agent == null && HasDeferredClientCreateAgentPayload(synchronizeAgentSpawnEquipment.AgentIndex))
                 {
                     RegisterDeferredClientSynchronizeAgentEquipmentPayload(

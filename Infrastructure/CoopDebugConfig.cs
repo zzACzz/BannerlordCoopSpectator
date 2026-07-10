@@ -12,14 +12,10 @@ namespace CoopSpectator.Infrastructure
         private const string EnvDebugTexts = "COOP_DEBUG_TEXTS";
         private const string EnvDebugDedicatedStdio = "COOP_DEBUG_DEDICATED_STDIO";
         private const string EnvOrderOfBattleDiagnostics = "COOPSPECTATOR_OOB_DIAGNOSTICS";
-        private const string EnvShieldBannerDiagnostics = "COOPSPECTATOR_SHIELD_BANNER_DIAGNOSTICS";
         private const string EnvPossessionDiagnostics = "COOPSPECTATOR_POSSESSION_DIAGNOSTICS";
         private const double SharedDebugOverrideCacheSeconds = 1.0d;
-        private const string SharedShieldBannerDiagnosticsKey = "shield_banners";
         private const string SharedPossessionDiagnosticsKey = "possession";
-        private static bool? _shieldBannerDiagnosticsRuntimeOverride;
         private static bool? _possessionDiagnosticsRuntimeOverride;
-        private static bool? _sharedShieldBannerDiagnosticsOverride;
         private static bool? _sharedPossessionDiagnosticsOverride;
         private static DateTime _sharedDebugOverrideCacheExpiresUtc = DateTime.MinValue;
         private static readonly object SharedDebugOverrideLock = new object();
@@ -33,38 +29,16 @@ namespace CoopSpectator.Infrastructure
         /// <summary>Enable focused Order of Battle formation/count diagnostics.</summary>
         public static bool OrderOfBattleDiagnostics => GetEnvBool(EnvOrderOfBattleDiagnostics);
 
-        /// <summary>Enable focused shield banner materialization diagnostics.</summary>
-        public static bool ShieldBannerDiagnostics =>
-            _shieldBannerDiagnosticsRuntimeOverride ??
-            GetSharedShieldBannerDiagnosticsOverride() ??
-            GetEnvBool(EnvShieldBannerDiagnostics);
-
         /// <summary>Enable focused possession/corpse/controlled-agent diagnostics.</summary>
         public static bool PossessionDiagnostics =>
             _possessionDiagnosticsRuntimeOverride ??
             GetSharedPossessionDiagnosticsOverride() ??
             GetEnvBool(EnvPossessionDiagnostics);
 
-        public static void SetShieldBannerDiagnosticsRuntimeOverride(bool? enabled)
-        {
-            _shieldBannerDiagnosticsRuntimeOverride = enabled;
-            SetSharedDebugOverride(SharedShieldBannerDiagnosticsKey, enabled);
-        }
-
         public static void SetPossessionDiagnosticsRuntimeOverride(bool? enabled)
         {
             _possessionDiagnosticsRuntimeOverride = enabled;
             SetSharedDebugOverride(SharedPossessionDiagnosticsKey, enabled);
-        }
-
-        public static string GetShieldBannerDiagnosticsStatus()
-        {
-            string runtimeState =
-                _shieldBannerDiagnosticsRuntimeOverride.HasValue
-                    ? (_shieldBannerDiagnosticsRuntimeOverride.Value ? "runtime-on" : "runtime-off")
-                    : "runtime-inherit-env";
-            string sharedState = FormatSharedOverrideState(GetSharedShieldBannerDiagnosticsOverride());
-            return "ShieldBannerDiagnostics=" + (ShieldBannerDiagnostics ? "ON" : "OFF") + " (" + runtimeState + ", " + sharedState + ")";
         }
 
         public static string GetPossessionDiagnosticsStatus()
@@ -75,12 +49,6 @@ namespace CoopSpectator.Infrastructure
                     : "runtime-inherit-env";
             string sharedState = FormatSharedOverrideState(GetSharedPossessionDiagnosticsOverride());
             return "PossessionDiagnostics=" + (PossessionDiagnostics ? "ON" : "OFF") + " (" + runtimeState + ", " + sharedState + ")";
-        }
-
-        private static bool? GetSharedShieldBannerDiagnosticsOverride()
-        {
-            RefreshSharedDebugOverrideCacheIfNeeded();
-            return _sharedShieldBannerDiagnosticsOverride;
         }
 
         private static bool? GetSharedPossessionDiagnosticsOverride()
@@ -108,7 +76,6 @@ namespace CoopSpectator.Infrastructure
                 if (_sharedDebugOverrideCacheExpiresUtc > nowUtc)
                     return;
 
-                _sharedShieldBannerDiagnosticsOverride = null;
                 _sharedPossessionDiagnosticsOverride = null;
                 try
                 {
@@ -132,16 +99,13 @@ namespace CoopSpectator.Infrastructure
                             if (!parsedValue.HasValue)
                                 continue;
 
-                            if (string.Equals(key, SharedShieldBannerDiagnosticsKey, StringComparison.OrdinalIgnoreCase))
-                                _sharedShieldBannerDiagnosticsOverride = parsedValue.Value;
-                            else if (string.Equals(key, SharedPossessionDiagnosticsKey, StringComparison.OrdinalIgnoreCase))
+                            if (string.Equals(key, SharedPossessionDiagnosticsKey, StringComparison.OrdinalIgnoreCase))
                                 _sharedPossessionDiagnosticsOverride = parsedValue.Value;
                         }
                     }
                 }
                 catch
                 {
-                    _sharedShieldBannerDiagnosticsOverride = null;
                     _sharedPossessionDiagnosticsOverride = null;
                 }
                 finally

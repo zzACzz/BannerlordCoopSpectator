@@ -4108,18 +4108,11 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<string, int> MaterializedEquipmentMissCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> MaterializedEquipmentNormalizedFallbackCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> MaterializedCombatProfileApplyCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        private static readonly Dictionary<string, int> ShieldBannerDiagnosticMissingMissionBannerCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<int, MaterializedCombatProfileRuntimeState> _materializedCombatProfilesByAgentIndex = new Dictionary<int, MaterializedCombatProfileRuntimeState>();
         private static readonly Dictionary<string, MaterializedBattleResultEntryRuntimeState> _materializedBattleResultEntriesByEntryId = new Dictionary<string, MaterializedBattleResultEntryRuntimeState>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<int> _materializedBattleResultRemovedAgentIndices = new HashSet<int>();
         private static readonly Dictionary<int, MaterializedBattleResultLastHitDebugState> _materializedBattleResultLastHitDebugByVictimAgentIndex = new Dictionary<int, MaterializedBattleResultLastHitDebugState>();
         private static readonly List<CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot> _materializedBattleResultCombatEvents = new List<CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot>();
-        private static int _shieldBannerDiagnosticCreateTimeShieldSlots;
-        private static int _shieldBannerDiagnosticCreateTimeBannerPresent;
-        private static int _shieldBannerDiagnosticCreateTimeBannerMissing;
-        private static int _shieldBannerDiagnosticPostSpawnShieldSlots;
-        private static int _shieldBannerDiagnosticPostSpawnBannerPresent;
-        private static int _shieldBannerDiagnosticPostSpawnBannerMissing;
         private static Mission _lastMaterializedCombatProfileMission;
         private static Mission _lastMaterializedBattleResultMission;
         private static Mission _lastCombatProfileDrivenRefreshMission;
@@ -4743,7 +4736,6 @@ namespace CoopSpectator.MissionBehaviors
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _loggedManualMaterializedSiegeRespawnRejectKeys.Clear();
-            ResetShieldBannerDiagnosticsRuntime();
             _lastBattlePhaseAiHoldMission = null;
             _lastMaterializedArmyMission = null;
             _lastClientBattleSnapshotRefreshMission = null;
@@ -5934,7 +5926,6 @@ namespace CoopSpectator.MissionBehaviors
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _loggedManualMaterializedSiegeRespawnRejectKeys.Clear();
-            ResetShieldBannerDiagnosticsRuntime();
             _lastBattlePhaseAiHoldMission = null;
             _lastAppliedBattlePhaseAiHold = null;
             _lastAppliedFormationHoldPhase = null;
@@ -18595,6 +18586,7 @@ namespace CoopSpectator.MissionBehaviors
             try
             {
                 IAgentOriginBase origin = BuildMaterializedAgentOriginForCreateTimePath(
+                    mission,
                     troop,
                     entryState,
                     team.Side,
@@ -18790,6 +18782,7 @@ namespace CoopSpectator.MissionBehaviors
         }
 
         private static IAgentOriginBase BuildMaterializedAgentOriginForCreateTimePath(
+            Mission mission,
             BasicCharacterObject troop,
             RosterEntryState entryState,
             BattleSideEnum side,
@@ -18799,7 +18792,7 @@ namespace CoopSpectator.MissionBehaviors
                 return null;
 
             if (!ShouldUseCoopTestBattleCreateTimeMaterialization(entryState))
-                return new BasicBattleAgentOrigin(troop);
+                return BuildBannerAwareBasicAgentOrigin(mission, troop, team, side);
 
             Banner banner = ResolveMaterializedCreateTimeBanner(team, side);
             uint color = BattleSnapshotRuntimeState.ResolveSideColor(side, team?.Color ?? 0u);
@@ -18822,6 +18815,27 @@ namespace CoopSpectator.MissionBehaviors
                 color2,
                 banner,
                 ComputeStableMaterializedOriginSeed(entryId, troopId, side));
+        }
+
+        private static IAgentOriginBase BuildBannerAwareBasicAgentOrigin(
+            Mission mission,
+            BasicCharacterObject troop,
+            Team team,
+            BattleSideEnum side)
+        {
+            if (troop == null)
+                return null;
+
+            IAgentOriginBase origin = new BasicBattleAgentOrigin(troop);
+            if (mission == null ||
+                team == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return origin;
+            }
+
+            Banner banner = ResolveMaterializedCreateTimeBanner(team, side);
+            return BannerAwareAgentOrigin.Ensure(origin, banner);
         }
 
         private static bool ShouldUseCoopTestBattleCreateTimeMaterialization(RosterEntryState entryState)
@@ -18901,16 +18915,6 @@ namespace CoopSpectator.MissionBehaviors
                 string usageProjection = TryApplyWeaponPrioritySuspectThrownUsageProjection(
                     missionEquipment,
                     entryState,
-                    "TryApplyMaterializedCreateTimeMissionEquipment");
-                TryLogShieldBannerDiagnostics(
-                    "create-time",
-                    null,
-                    team,
-                    null,
-                    entryState,
-                    spawnEquipment,
-                    missionEquipment,
-                    banner,
                     "TryApplyMaterializedCreateTimeMissionEquipment");
                 if (IsShieldBannersRuntime())
                 {
@@ -25371,205 +25375,6 @@ namespace CoopSpectator.MissionBehaviors
                 " Source=" + (source ?? "unknown"));
         }
 
-        private static void ResetShieldBannerDiagnosticsRuntime()
-        {
-            ShieldBannerDiagnosticMissingMissionBannerCounts.Clear();
-            _shieldBannerDiagnosticCreateTimeShieldSlots = 0;
-            _shieldBannerDiagnosticCreateTimeBannerPresent = 0;
-            _shieldBannerDiagnosticCreateTimeBannerMissing = 0;
-            _shieldBannerDiagnosticPostSpawnShieldSlots = 0;
-            _shieldBannerDiagnosticPostSpawnBannerPresent = 0;
-            _shieldBannerDiagnosticPostSpawnBannerMissing = 0;
-        }
-
-        private static void TryLogShieldBannerDiagnostics(
-            string stage,
-            Agent agent,
-            Team team,
-            BasicCharacterObject troop,
-            RosterEntryState entryState,
-            Equipment spawnEquipment,
-            MissionEquipment missionEquipment,
-            Banner expectedBanner,
-            string source)
-        {
-            if (!CoopDebugConfig.ShieldBannerDiagnostics)
-                return;
-
-            try
-            {
-                var missingMissionBannerItems = new List<string>();
-                string details = BuildShieldBannerDiagnosticsDetails(
-                    spawnEquipment,
-                    missionEquipment,
-                    expectedBanner,
-                    missingMissionBannerItems,
-                    out int shieldSlots,
-                    out int missionBannerPresent,
-                    out int missionBannerMissing);
-                if (shieldSlots <= 0)
-                    return;
-
-                bool postSpawnStage = string.Equals(stage, "post-spawn", StringComparison.OrdinalIgnoreCase);
-                if (postSpawnStage)
-                {
-                    _shieldBannerDiagnosticPostSpawnShieldSlots += shieldSlots;
-                    _shieldBannerDiagnosticPostSpawnBannerPresent += missionBannerPresent;
-                    _shieldBannerDiagnosticPostSpawnBannerMissing += missionBannerMissing;
-                }
-                else
-                {
-                    _shieldBannerDiagnosticCreateTimeShieldSlots += shieldSlots;
-                    _shieldBannerDiagnosticCreateTimeBannerPresent += missionBannerPresent;
-                    _shieldBannerDiagnosticCreateTimeBannerMissing += missionBannerMissing;
-                }
-
-                foreach (string itemId in missingMissionBannerItems)
-                {
-                    string normalizedItemId = string.IsNullOrWhiteSpace(itemId) ? "unknown" : itemId.Trim();
-                    if (!ShieldBannerDiagnosticMissingMissionBannerCounts.TryGetValue(normalizedItemId, out int count))
-                        count = 0;
-                    ShieldBannerDiagnosticMissingMissionBannerCounts[normalizedItemId] = count + 1;
-                }
-
-                string message =
-                    "Stage=" + (stage ?? "unknown") +
-                    " AgentIndex=" + (agent != null ? agent.Index.ToString() : "none") +
-                    " TeamSide=" + (team?.Side.ToString() ?? "none") +
-                    " TeamIndex=" + (team != null ? team.TeamIndex.ToString() : "null") +
-                    " EntryId=" + (entryState?.EntryId ?? "null") +
-                    " TroopId=" + (troop?.StringId ?? entryState?.CharacterId ?? entryState?.OriginalCharacterId ?? "null") +
-                    " ExpectedBannerPresent=" + (expectedBanner != null) +
-                    " ExpectedBannerCodeLength=" + (expectedBanner?.BannerCode?.Length ?? 0) +
-                    " ShieldSlots=" + shieldSlots +
-                    " MissionBannerPresent=" + missionBannerPresent +
-                    " MissionBannerMissing=" + missionBannerMissing +
-                    " Details={" + details + "}" +
-                    " Totals={" + BuildShieldBannerDiagnosticsTotals() + "}" +
-                    " MissingMissionBannerItems={" + BuildShieldBannerDiagnosticMissingItemSummary(8) + "}" +
-                    " Source=" + (source ?? "unknown");
-
-                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
-                    "shield-banner-diagnostics",
-                    message);
-                ModLogger.Info("CoopMissionSpawnLogic: shield banner diagnostics. " + message);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: shield banner diagnostics failed open. " +
-                    "Stage=" + (stage ?? "unknown") +
-                    " EntryId=" + (entryState?.EntryId ?? "null") +
-                    " Message=" + ex.Message);
-            }
-        }
-
-        private static string BuildShieldBannerDiagnosticsDetails(
-            Equipment spawnEquipment,
-            MissionEquipment missionEquipment,
-            Banner expectedBanner,
-            List<string> missingMissionBannerItems,
-            out int shieldSlots,
-            out int missionBannerPresent,
-            out int missionBannerMissing)
-        {
-            shieldSlots = 0;
-            missionBannerPresent = 0;
-            missionBannerMissing = 0;
-
-            var parts = new List<string>();
-            EquipmentIndex[] slots =
-            {
-                EquipmentIndex.Weapon0,
-                EquipmentIndex.Weapon1,
-                EquipmentIndex.Weapon2,
-                EquipmentIndex.Weapon3
-            };
-
-            foreach (EquipmentIndex slot in slots)
-            {
-                EquipmentElement spawnElement = spawnEquipment != null
-                    ? spawnEquipment[slot]
-                    : default(EquipmentElement);
-                ItemObject spawnItem = spawnElement.Item;
-                MissionWeapon missionWeapon = missionEquipment != null
-                    ? missionEquipment[slot]
-                    : default(MissionWeapon);
-                ItemObject missionItem = !missionWeapon.IsEmpty ? missionWeapon.Item : null;
-                bool spawnIsShield = IsShieldBannerDiagnosticShieldItem(spawnItem);
-                bool missionIsShield = IsShieldBannerDiagnosticShieldItem(missionItem);
-                if (!spawnIsShield && !missionIsShield)
-                    continue;
-
-                shieldSlots++;
-                Banner missionBanner = missionWeapon.Banner;
-                bool missionBannerHasCode = !string.IsNullOrWhiteSpace(missionBanner?.BannerCode);
-                bool bannerMatchesExpected = DoesShieldBannerDiagnosticMatchExpected(missionBanner, expectedBanner);
-                if (missionBannerHasCode)
-                {
-                    missionBannerPresent++;
-                }
-                else
-                {
-                    missionBannerMissing++;
-                    missingMissionBannerItems?.Add(missionItem?.StringId ?? spawnItem?.StringId ?? "empty");
-                }
-
-                parts.Add(
-                    GetEquipmentSlotLabel(slot) +
-                    "[SpawnItem=" + (spawnItem?.StringId ?? "empty") +
-                    " SpawnShield=" + spawnIsShield +
-                    " MissionItem=" + (missionItem?.StringId ?? "empty") +
-                    " MissionShield=" + missionIsShield +
-                    " MissionBannerPresent=" + missionBannerHasCode +
-                    " MissionBannerCodeLength=" + (missionBanner?.BannerCode?.Length ?? 0) +
-                    " MatchesExpectedBanner=" + bannerMatchesExpected +
-                    " HitPoints=" + (!missionWeapon.IsEmpty ? missionWeapon.HitPoints.ToString() : "empty") +
-                    " MaxHitPoints=" + (!missionWeapon.IsEmpty ? missionWeapon.ModifiedMaxHitPoints.ToString() : "empty") +
-                    "]");
-            }
-
-            return parts.Count > 0 ? string.Join("; ", parts) : "(none)";
-        }
-
-        private static bool IsShieldBannerDiagnosticShieldItem(ItemObject item)
-        {
-            return item != null && item.ItemType == ItemObject.ItemTypeEnum.Shield;
-        }
-
-        private static bool DoesShieldBannerDiagnosticMatchExpected(Banner actualBanner, Banner expectedBanner)
-        {
-            string actualCode = actualBanner?.BannerCode;
-            string expectedCode = expectedBanner?.BannerCode;
-            return !string.IsNullOrWhiteSpace(actualCode) &&
-                   !string.IsNullOrWhiteSpace(expectedCode) &&
-                   string.Equals(actualCode, expectedCode, StringComparison.Ordinal);
-        }
-
-        private static string BuildShieldBannerDiagnosticsTotals()
-        {
-            return "CreateTimeShieldSlots=" + _shieldBannerDiagnosticCreateTimeShieldSlots +
-                   " CreateTimeBannerPresent=" + _shieldBannerDiagnosticCreateTimeBannerPresent +
-                   " CreateTimeBannerMissing=" + _shieldBannerDiagnosticCreateTimeBannerMissing +
-                   " PostSpawnShieldSlots=" + _shieldBannerDiagnosticPostSpawnShieldSlots +
-                   " PostSpawnBannerPresent=" + _shieldBannerDiagnosticPostSpawnBannerPresent +
-                   " PostSpawnBannerMissing=" + _shieldBannerDiagnosticPostSpawnBannerMissing;
-        }
-
-        private static string BuildShieldBannerDiagnosticMissingItemSummary(int limit)
-        {
-            if (ShieldBannerDiagnosticMissingMissionBannerCounts.Count <= 0)
-                return "(none)";
-
-            return string.Join(
-                ", ",
-                ShieldBannerDiagnosticMissingMissionBannerCounts
-                    .OrderByDescending(pair => pair.Value)
-                    .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-                    .Take(Math.Max(1, limit))
-                    .Select(pair => pair.Key + "=" + pair.Value));
-        }
-
         private static string BuildMissionEquipmentSummary(MissionEquipment equipment, params EquipmentIndex[] slots)
         {
             if (equipment == null)
@@ -26891,17 +26696,6 @@ namespace CoopSpectator.MissionBehaviors
         {
             if (agent == null)
                 return;
-
-            TryLogShieldBannerDiagnostics(
-                "post-spawn",
-                agent,
-                team,
-                troop,
-                entryState,
-                spawnEquipment,
-                agent.Equipment,
-                ResolveMaterializedCreateTimeBanner(team, team?.Side ?? BattleSideEnum.None),
-                source);
 
             ExactEntryCompatibilityDiagnostic diagnostic = GetExactEntryCompatibilityDiagnostic(entryState);
             AppendExactBattleAgentSpawnTraceEvent(
@@ -36157,7 +35951,11 @@ namespace CoopSpectator.MissionBehaviors
                 bool usingExactSnapshotSpawnEquipment = snapshotSpawnEquipment != null;
                 ExactEntryCompatibilityDiagnostic exactEntryCompatibility = GetExactEntryCompatibilityDiagnostic(entryState);
                 string exactEntryCompatibilitySummary = BuildExactEntryCompatibilityShortSummary(exactEntryCompatibility);
-                var origin = new BasicBattleAgentOrigin(troop);
+                IAgentOriginBase origin = BuildBannerAwareBasicAgentOrigin(
+                    mission,
+                    troop,
+                    team,
+                    authoritativeSide);
 
                 bool hasTemporaryNameOverride = TryApplyEntryNameToSpawnCharacter(troop, entryState, out TextObject originalTroopName);
                 AgentBuildData buildData = new AgentBuildData(troop);
