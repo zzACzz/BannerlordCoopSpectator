@@ -104,6 +104,9 @@ namespace CoopSpectator.MissionBehaviors
                 ExactCampaignRuntimeItemRegistry.EnsureLoadedFromState(
                     BattleSnapshotRuntimeState.GetState(),
                     "client-afterstart:" + (mission.SceneName ?? "null"));
+                CampaignMapPatchMissionInit.TryApplyCampaignAtmosphereToLiveScene(
+                    mission,
+                    "CoopMissionClientLogic.AfterStart");
                 BattleMapContractDiagnostics.LogMissionRuntimeContract(mission, "CoopMissionClientLogic.AfterStart");
             }
             _lastControlledAgent = Agent.Main;
@@ -6443,6 +6446,9 @@ namespace CoopSpectator.MissionBehaviors
                 MissionMultiplayerCoopBattle.TryApplyAuthoritativeBattleCultureOptionsFromRuntimeState(teamInitSource);
                 MissionMultiplayerCoopBattle.EnsureOpposingTeamsReadyForMission(mission, teamInitSource);
             }
+            CampaignMapPatchMissionInit.TryApplyCampaignAtmosphereToLiveScene(
+                mission,
+                (_lastServerRuntimeInitializationSource ?? source ?? "unknown") + " time-of-day");
             CampaignMapPatchMissionInit.TryRepairLiveMissionContract(
                 mission,
                 (_lastServerRuntimeInitializationSource ?? source ?? "unknown") + " live-contract-repair");

@@ -21,6 +21,7 @@ using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Siege;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using Helpers;
 using TaleWorlds.ObjectSystem;
 
@@ -3912,6 +3913,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 message.Snapshot.MultiplayerSceneResolverSource = message.MultiplayerSceneResolverSource;
                 message.Snapshot.PlayerTroopsReceivedDamageMultiplier = playerTroopsReceivedDamageMultiplier;
                 message.Snapshot.ScenarioContext = scenarioContext?.Clone();
+                PopulateCampaignTimeOfDayContext(message.Snapshot);
             }
 
             // 5) Legacy fields for transitional clients/runtime // Пояснюємо блок
@@ -4203,6 +4205,185 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 ModLogger.Info("BattleDetector: failed to capture siege mission initializer profile. " + ex.Message);
             }
+        }
+
+        private static void PopulateCampaignTimeOfDayContext(BattleSnapshotMessage snapshot)
+        {
+            if (snapshot == null)
+                return;
+
+            bool hasAtmosphere = false;
+            AtmosphereInfo atmosphere = default(AtmosphereInfo);
+            string atmosphereSource = string.Empty;
+            bool hasTimeOfDay = false;
+            float timeOfDay = -1f;
+            string timeOfDaySource = string.Empty;
+
+            try
+            {
+                Mission mission = Mission.Current;
+                object boxedRecord =
+                    TryGetPropertyValue(mission, "InitializerRecord") ??
+                    TryGetPropertyValue(mission, "<InitializerRecord>k__BackingField");
+                if (boxedRecord is MissionInitializerRecord record &&
+                    IsCampaignAtmosphereUsable(record.AtmosphereOnCampaign))
+                {
+                    atmosphere = record.AtmosphereOnCampaign;
+                    hasAtmosphere = true;
+                    atmosphereSource = "Mission.Current.InitializerRecord.AtmosphereOnCampaign";
+                }
+            }
+            catch
+            {
+            }
+
+            if (!hasAtmosphere)
+            {
+                try
+                {
+                    MobileParty mainParty = MobileParty.MainParty;
+                    if (TaleWorlds.CampaignSystem.Campaign.Current?.Models?.MapWeatherModel != null && mainParty != null)
+                    {
+                        CampaignVec2 position = mainParty.MapEvent != null
+                            ? mainParty.MapEvent.Position
+                            : mainParty.Position;
+                        AtmosphereInfo mapAtmosphere =
+                            TaleWorlds.CampaignSystem.Campaign.Current.Models.MapWeatherModel.GetAtmosphereModel(position);
+                        if (IsCampaignAtmosphereUsable(mapAtmosphere))
+                        {
+                            atmosphere = mapAtmosphere;
+                            hasAtmosphere = true;
+                            atmosphereSource = "Campaign.Current.Models.MapWeatherModel.GetAtmosphereModel";
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            snapshot.CampaignAtmosphere = hasAtmosphere
+                ? CreateCampaignAtmosphereSnapshot(atmosphere, atmosphereSource)
+                : null;
+
+            if (hasAtmosphere &&
+                TryNormalizeCampaignTimeOfDay(atmosphere.TimeInfo.TimeOfDay, out float atmosphereTimeOfDay))
+            {
+                hasTimeOfDay = true;
+                timeOfDay = atmosphereTimeOfDay;
+                timeOfDaySource = atmosphereSource + ".TimeInfo.TimeOfDay";
+            }
+
+            if (!hasTimeOfDay)
+            {
+                try
+                {
+                    if (TaleWorlds.CampaignSystem.Campaign.Current != null &&
+                        TryNormalizeCampaignTimeOfDay(CampaignTime.Now.CurrentHourInDay, out float campaignTimeOfDay))
+                    {
+                        hasTimeOfDay = true;
+                        timeOfDay = campaignTimeOfDay;
+                        timeOfDaySource = "CampaignTime.Now.CurrentHourInDay";
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            snapshot.HasCampaignTimeOfDay = hasTimeOfDay;
+            snapshot.CampaignTimeOfDay = hasTimeOfDay ? timeOfDay : -1f;
+            snapshot.CampaignTimeOfDaySource = hasTimeOfDay ? timeOfDaySource : string.Empty;
+
+            if (ExperimentalFeatures.EnableBattleMapFullContractDiagnostics)
+            {
+                ModLogger.Info(
+                    "BattleDetector: captured campaign time of day. " +
+                    "Available=" + hasTimeOfDay +
+                    " TimeOfDay=" + (hasTimeOfDay ? timeOfDay.ToString("0.###") : "n/a") +
+                    " Source=" + (string.IsNullOrWhiteSpace(timeOfDaySource) ? "none" : timeOfDaySource) +
+                    " AtmosphereAvailable=" + hasAtmosphere +
+                    " AtmosphereName=" + (hasAtmosphere ? atmosphere.AtmosphereName ?? "null" : "n/a") +
+                    " InterpolatedAtmosphereName=" + (hasAtmosphere ? atmosphere.InterpolatedAtmosphereName ?? "null" : "n/a") +
+                    " AtmosphereSource=" + (string.IsNullOrWhiteSpace(atmosphereSource) ? "none" : atmosphereSource) + ".");
+            }
+        }
+
+        private static bool IsCampaignAtmosphereUsable(AtmosphereInfo atmosphere)
+        {
+            return !string.IsNullOrWhiteSpace(atmosphere.AtmosphereName) ||
+                   !string.IsNullOrWhiteSpace(atmosphere.InterpolatedAtmosphereName) ||
+                   atmosphere.SunInfo.MaxBrightness > 0f ||
+                   atmosphere.SunInfo.Brightness > 0f ||
+                   atmosphere.SkyInfo.Brightness > 0f ||
+                   atmosphere.AmbientInfo.EnvironmentMultiplier > 0f;
+        }
+
+        private static CampaignAtmosphereSnapshotMessage CreateCampaignAtmosphereSnapshot(
+            AtmosphereInfo atmosphere,
+            string source)
+        {
+            return new CampaignAtmosphereSnapshotMessage
+            {
+                Source = source,
+                Seed = atmosphere.Seed,
+                AtmosphereName = atmosphere.AtmosphereName,
+                InterpolatedAtmosphereName = atmosphere.InterpolatedAtmosphereName,
+                SunAltitude = atmosphere.SunInfo.Altitude,
+                SunAngle = atmosphere.SunInfo.Angle,
+                SunColorX = atmosphere.SunInfo.Color.x,
+                SunColorY = atmosphere.SunInfo.Color.y,
+                SunColorZ = atmosphere.SunInfo.Color.z,
+                SunBrightness = atmosphere.SunInfo.Brightness,
+                SunMaxBrightness = atmosphere.SunInfo.MaxBrightness,
+                SunSize = atmosphere.SunInfo.Size,
+                SunRayStrength = atmosphere.SunInfo.RayStrength,
+                RainDensity = atmosphere.RainInfo.Density,
+                SnowDensity = atmosphere.SnowInfo.Density,
+                AmbientEnvironmentMultiplier = atmosphere.AmbientInfo.EnvironmentMultiplier,
+                AmbientColorX = atmosphere.AmbientInfo.AmbientColor.x,
+                AmbientColorY = atmosphere.AmbientInfo.AmbientColor.y,
+                AmbientColorZ = atmosphere.AmbientInfo.AmbientColor.z,
+                AmbientMieScatterStrength = atmosphere.AmbientInfo.MieScatterStrength,
+                AmbientRayleighConstant = atmosphere.AmbientInfo.RayleighConstant,
+                FogDensity = atmosphere.FogInfo.Density,
+                FogColorX = atmosphere.FogInfo.Color.x,
+                FogColorY = atmosphere.FogInfo.Color.y,
+                FogColorZ = atmosphere.FogInfo.Color.z,
+                FogFalloff = atmosphere.FogInfo.Falloff,
+                SkyBrightness = atmosphere.SkyInfo.Brightness,
+                NauticalWaveStrength = atmosphere.NauticalInfo.WaveStrength,
+                NauticalWindX = atmosphere.NauticalInfo.WindVector.x,
+                NauticalWindY = atmosphere.NauticalInfo.WindVector.y,
+                NauticalCanUseLowAltitudeAtmosphere = atmosphere.NauticalInfo.CanUseLowAltitudeAtmosphere,
+                NauticalUseSceneWindDirection = atmosphere.NauticalInfo.UseSceneWindDirection,
+                NauticalIsRiverBattle = atmosphere.NauticalInfo.IsRiverBattle,
+                NauticalIsInsideStorm = atmosphere.NauticalInfo.IsInsideStorm,
+                NauticalUsesNavalSimulatedWater = atmosphere.NauticalInfo.UsesNavalSimulatedWater,
+                TimeOfDay = atmosphere.TimeInfo.TimeOfDay,
+                NightTimeFactor = atmosphere.TimeInfo.NightTimeFactor,
+                DrynessFactor = atmosphere.TimeInfo.DrynessFactor,
+                WinterTimeFactor = atmosphere.TimeInfo.WinterTimeFactor,
+                Season = atmosphere.TimeInfo.Season,
+                AreaTemperature = atmosphere.AreaInfo.Temperature,
+                AreaHumidity = atmosphere.AreaInfo.Humidity,
+                PostProcessMinExposure = atmosphere.PostProInfo.MinExposure,
+                PostProcessMaxExposure = atmosphere.PostProInfo.MaxExposure,
+                PostProcessBrightpassThreshold = atmosphere.PostProInfo.BrightpassThreshold,
+                PostProcessMiddleGray = atmosphere.PostProInfo.MiddleGray
+            };
+        }
+
+        private static bool TryNormalizeCampaignTimeOfDay(float value, out float normalized)
+        {
+            normalized = -1f;
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return false;
+
+            normalized = value % 24f;
+            if (normalized < 0f)
+                normalized += 24f;
+            return true;
         }
 
         private static void PopulateSiegeEngineContext(SiegeEvent siegeEvent, BattleSiegeContextMessage siegeContext)

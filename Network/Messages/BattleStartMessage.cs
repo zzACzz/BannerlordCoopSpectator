@@ -49,9 +49,63 @@ namespace CoopSpectator.Network.Messages
         public string BattleSizeBudgetSource { get; set; }
         public string PlayerSide { get; set; }
         public float PlayerTroopsReceivedDamageMultiplier { get; set; } = 1f;
+        public bool HasCampaignTimeOfDay { get; set; }
+        public float CampaignTimeOfDay { get; set; } = -1f;
+        public string CampaignTimeOfDaySource { get; set; }
+        public CampaignAtmosphereSnapshotMessage CampaignAtmosphere { get; set; }
         public BattleScenarioContextMessage ScenarioContext { get; set; }
         public List<CraftedWeaponSnapshotMessage> CraftedWeapons { get; set; } = new List<CraftedWeaponSnapshotMessage>();
         public List<BattleSideSnapshotMessage> Sides { get; set; } = new List<BattleSideSnapshotMessage>();
+    }
+
+    public sealed class CampaignAtmosphereSnapshotMessage
+    {
+        public string Source { get; set; }
+        public uint Seed { get; set; }
+        public string AtmosphereName { get; set; }
+        public string InterpolatedAtmosphereName { get; set; }
+        public float SunAltitude { get; set; }
+        public float SunAngle { get; set; }
+        public float SunColorX { get; set; }
+        public float SunColorY { get; set; }
+        public float SunColorZ { get; set; }
+        public float SunBrightness { get; set; }
+        public float SunMaxBrightness { get; set; }
+        public float SunSize { get; set; }
+        public float SunRayStrength { get; set; }
+        public float RainDensity { get; set; }
+        public float SnowDensity { get; set; }
+        public float AmbientEnvironmentMultiplier { get; set; }
+        public float AmbientColorX { get; set; }
+        public float AmbientColorY { get; set; }
+        public float AmbientColorZ { get; set; }
+        public float AmbientMieScatterStrength { get; set; }
+        public float AmbientRayleighConstant { get; set; }
+        public float FogDensity { get; set; }
+        public float FogColorX { get; set; }
+        public float FogColorY { get; set; }
+        public float FogColorZ { get; set; }
+        public float FogFalloff { get; set; }
+        public float SkyBrightness { get; set; }
+        public float NauticalWaveStrength { get; set; }
+        public float NauticalWindX { get; set; }
+        public float NauticalWindY { get; set; }
+        public int NauticalCanUseLowAltitudeAtmosphere { get; set; }
+        public int NauticalUseSceneWindDirection { get; set; }
+        public int NauticalIsRiverBattle { get; set; }
+        public int NauticalIsInsideStorm { get; set; }
+        public int NauticalUsesNavalSimulatedWater { get; set; }
+        public float TimeOfDay { get; set; }
+        public float NightTimeFactor { get; set; }
+        public float DrynessFactor { get; set; }
+        public float WinterTimeFactor { get; set; }
+        public int Season { get; set; }
+        public float AreaTemperature { get; set; }
+        public float AreaHumidity { get; set; }
+        public float PostProcessMinExposure { get; set; }
+        public float PostProcessMaxExposure { get; set; }
+        public float PostProcessBrightpassThreshold { get; set; }
+        public float PostProcessMiddleGray { get; set; }
     }
 
     public sealed class CraftedWeaponSnapshotMessage

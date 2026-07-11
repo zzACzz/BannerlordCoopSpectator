@@ -24,6 +24,137 @@ namespace CoopSpectator.Infrastructure
         private static readonly FieldInfo BattleSpawnPathSelectorField =
             typeof(Mission).GetField("_battleSpawnPathSelector", BindingFlags.Instance | BindingFlags.NonPublic);
 
+        public static bool TryApplyCampaignAtmosphereToLiveScene(Mission mission, string logSource)
+        {
+            if (mission?.Scene == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            if (GameNetwork.IsServer && !GameNetwork.IsClient)
+                return false;
+
+            string source = string.IsNullOrWhiteSpace(logSource)
+                ? "CampaignMapPatchMissionInit.Atmosphere"
+                : logSource;
+            BattleSnapshotMessage snapshot = TryResolveSnapshot(source);
+            if (snapshot == null ||
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(snapshot.ScenarioContext))
+            {
+                return false;
+            }
+
+            CampaignAtmosphereSnapshotMessage atmosphereSnapshot = snapshot.CampaignAtmosphere;
+            if (atmosphereSnapshot == null)
+                return TryApplyCampaignTimeOfDayFallbackToLiveScene(mission, snapshot, source);
+
+            try
+            {
+                AtmosphereInfo atmosphere = CreateCampaignAtmosphereInfo(atmosphereSnapshot);
+                float previousTimeOfDay = mission.Scene.TimeOfDay;
+                if (TryGetMissionInitializerRecord(mission, out MissionInitializerRecord initializerRecord) &&
+                    AreCampaignAtmospheresEquivalent(initializerRecord.AtmosphereOnCampaign, atmosphere) &&
+                    IsCampaignTimeOfDayWithinTolerance(
+                        previousTimeOfDay,
+                        atmosphere.TimeInfo.TimeOfDay,
+                        0.51f))
+                {
+                    ModLogger.Info(
+                        "CampaignMapPatchMissionInit: skipped late campaign atmosphere replay because mission initializer already applied it. " +
+                        "Scene=" + (mission.SceneName ?? "null") +
+                        " TimeOfDay=" + previousTimeOfDay.ToString("0.###") +
+                        " AtmosphereName=" + (atmosphere.AtmosphereName ?? "null") +
+                        " InterpolatedAtmosphereName=" + (atmosphere.InterpolatedAtmosphereName ?? "null") +
+                        " SnapshotSource=" + (atmosphereSnapshot.Source ?? "unknown") +
+                        " Source=" + source + ".");
+                    return true;
+                }
+
+                string atmosphereName = atmosphere.AtmosphereName;
+                if (!string.IsNullOrWhiteSpace(atmosphereName))
+                    mission.Scene.SetAtmosphereWithName(atmosphereName);
+
+                mission.Scene.TimeOfDay = atmosphere.TimeInfo.TimeOfDay;
+                mission.Scene.SetWinterTimeFactor(atmosphere.TimeInfo.WinterTimeFactor);
+                mission.Scene.SetDrynessFactor(atmosphere.TimeInfo.DrynessFactor);
+                mission.Scene.SetTemperature(atmosphere.AreaInfo.Temperature);
+                mission.Scene.SetHumidity(atmosphere.AreaInfo.Humidity);
+                mission.Scene.SetRainDensity(atmosphere.RainInfo.Density);
+                mission.Scene.SetSnowDensity(atmosphere.SnowInfo.Density);
+                mission.Scene.SetGlobalWindStrengthVector(atmosphere.NauticalInfo.WindVector);
+
+                ModLogger.Info(
+                    "CampaignMapPatchMissionInit: applied reduced late campaign atmosphere fallback to live exact siege scene. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " PreviousTimeOfDay=" + previousTimeOfDay.ToString("0.###") +
+                    " TimeOfDay=" + atmosphere.TimeInfo.TimeOfDay.ToString("0.###") +
+                    " AtmosphereName=" + (atmosphere.AtmosphereName ?? "null") +
+                    " InterpolatedAtmosphereName=" + (atmosphere.InterpolatedAtmosphereName ?? "null") +
+                    " SnapshotSource=" + (atmosphereSnapshot.Source ?? "unknown") +
+                    " Source=" + source + ".");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CampaignMapPatchMissionInit: failed to apply campaign atmosphere to live exact siege scene. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " TimeOfDay=" + atmosphereSnapshot.TimeOfDay.ToString("0.###") +
+                    " Message=" + ex.Message +
+                    " Source=" + source + ".");
+                return false;
+            }
+        }
+
+        private static bool TryApplyCampaignTimeOfDayFallbackToLiveScene(
+            Mission mission,
+            BattleSnapshotMessage snapshot,
+            string source)
+        {
+            if (snapshot?.HasCampaignTimeOfDay != true ||
+                !TryNormalizeCampaignTimeOfDay(snapshot.CampaignTimeOfDay, out float targetTimeOfDay))
+            {
+                return false;
+            }
+
+            try
+            {
+                float previousTimeOfDay = mission.Scene.TimeOfDay;
+                mission.Scene.TimeOfDay = targetTimeOfDay;
+                ModLogger.Info(
+                    "CampaignMapPatchMissionInit: applied campaign time-of-day fallback to exact siege scene. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " PreviousTimeOfDay=" + previousTimeOfDay.ToString("0.###") +
+                    " TimeOfDay=" + targetTimeOfDay.ToString("0.###") +
+                    " SnapshotSource=" + (snapshot.CampaignTimeOfDaySource ?? "unknown") +
+                    " Source=" + source + ".");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CampaignMapPatchMissionInit: failed to apply campaign time-of-day fallback to exact siege scene. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " TimeOfDay=" + targetTimeOfDay.ToString("0.###") +
+                    " Message=" + ex.Message +
+                    " Source=" + source + ".");
+                return false;
+            }
+        }
+
+        private static bool TryNormalizeCampaignTimeOfDay(float value, out float normalized)
+        {
+            normalized = -1f;
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return false;
+
+            normalized = value % 24f;
+            if (normalized < 0f)
+                normalized += 24f;
+            return true;
+        }
+
         public static void TryApply(ref MissionInitializerRecord record, string runtimeScene, string logSource)
         {
             string source = string.IsNullOrWhiteSpace(logSource) ? "CampaignMapPatchMissionInit" : logSource;
@@ -49,6 +180,7 @@ namespace CoopSpectator.Infrastructure
                 string siegeSubtype = snapshot?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
                 if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
                 {
+                    ApplyCampaignAtmosphereContext(ref record, snapshot, runtimeScene, source);
                     ApplyOpenSiegeAssaultSceneProfile(ref record, snapshot, runtimeScene, source);
                     record.SceneHasMapPatch = false;
                     record.PatchCoordinates = new Vec2(0f, 0f);
@@ -140,6 +272,215 @@ namespace CoopSpectator.Infrastructure
                 " PatchEncounterDir=(" + record.PatchEncounterDir.x.ToString("0.###") + ", " + record.PatchEncounterDir.y.ToString("0.###") + ")" +
                 " DirectionSource=" + (snapshot.PatchEncounterDirectionSource ?? "unknown") + ".");
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " post-apply");
+        }
+
+        private static void ApplyCampaignAtmosphereContext(
+            ref MissionInitializerRecord record,
+            BattleSnapshotMessage snapshot,
+            string runtimeScene,
+            string source)
+        {
+            CampaignAtmosphereSnapshotMessage atmosphereSnapshot = snapshot?.CampaignAtmosphere;
+            if (atmosphereSnapshot == null ||
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(snapshot?.ScenarioContext))
+            {
+                return;
+            }
+
+            AtmosphereInfo atmosphere = CreateCampaignAtmosphereInfo(atmosphereSnapshot);
+            if (TryNormalizeCampaignTimeOfDay(atmosphere.TimeInfo.TimeOfDay, out float normalizedTimeOfDay))
+                atmosphere.TimeInfo.TimeOfDay = normalizedTimeOfDay;
+
+            AtmosphereInfo previousAtmosphere = record.AtmosphereOnCampaign;
+            if (AreCampaignAtmospheresEquivalent(previousAtmosphere, atmosphere))
+                return;
+
+            record.AtmosphereOnCampaign = atmosphere;
+            ModLogger.Info(
+                source + ": applied full campaign atmosphere to exact siege mission initializer. " +
+                "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                " PreviousTimeOfDay=" + previousAtmosphere.TimeInfo.TimeOfDay.ToString("0.###") +
+                " TimeOfDay=" + atmosphere.TimeInfo.TimeOfDay.ToString("0.###") +
+                " AtmosphereName=" + (atmosphere.AtmosphereName ?? "null") +
+                " InterpolatedAtmosphereName=" + (atmosphere.InterpolatedAtmosphereName ?? "null") +
+                " SunBrightness=" + atmosphere.SunInfo.Brightness.ToString("0.###") +
+                " EnvironmentMultiplier=" + atmosphere.AmbientInfo.EnvironmentMultiplier.ToString("0.###") +
+                " AtmosphereSource=" + (atmosphereSnapshot.Source ?? "unknown") + ".");
+        }
+
+        private static AtmosphereInfo CreateCampaignAtmosphereInfo(
+            CampaignAtmosphereSnapshotMessage snapshot)
+        {
+            string atmosphereName = ResolveStandaloneSemiCloudyAtmosphereName(snapshot.TimeOfDay);
+
+            return new AtmosphereInfo
+            {
+                Seed = snapshot.Seed,
+                AtmosphereName = atmosphereName,
+                InterpolatedAtmosphereName = snapshot.InterpolatedAtmosphereName,
+                SunInfo = new SunInformation
+                {
+                    Altitude = snapshot.SunAltitude,
+                    Angle = snapshot.SunAngle,
+                    Color = new Vec3(snapshot.SunColorX, snapshot.SunColorY, snapshot.SunColorZ),
+                    Brightness = snapshot.SunBrightness,
+                    MaxBrightness = snapshot.SunMaxBrightness,
+                    Size = snapshot.SunSize,
+                    RayStrength = snapshot.SunRayStrength
+                },
+                RainInfo = new RainInformation
+                {
+                    Density = snapshot.RainDensity
+                },
+                SnowInfo = new SnowInformation
+                {
+                    Density = snapshot.SnowDensity
+                },
+                AmbientInfo = new AmbientInformation
+                {
+                    EnvironmentMultiplier = snapshot.AmbientEnvironmentMultiplier,
+                    AmbientColor = new Vec3(snapshot.AmbientColorX, snapshot.AmbientColorY, snapshot.AmbientColorZ),
+                    MieScatterStrength = snapshot.AmbientMieScatterStrength,
+                    RayleighConstant = snapshot.AmbientRayleighConstant
+                },
+                FogInfo = new FogInformation
+                {
+                    Density = snapshot.FogDensity,
+                    Color = new Vec3(snapshot.FogColorX, snapshot.FogColorY, snapshot.FogColorZ),
+                    Falloff = snapshot.FogFalloff
+                },
+                SkyInfo = new SkyInformation
+                {
+                    Brightness = snapshot.SkyBrightness
+                },
+                NauticalInfo = new NauticalInformation
+                {
+                    WaveStrength = snapshot.NauticalWaveStrength,
+                    WindVector = new Vec2(snapshot.NauticalWindX, snapshot.NauticalWindY),
+                    CanUseLowAltitudeAtmosphere = snapshot.NauticalCanUseLowAltitudeAtmosphere,
+                    UseSceneWindDirection = snapshot.NauticalUseSceneWindDirection,
+                    IsRiverBattle = snapshot.NauticalIsRiverBattle,
+                    IsInsideStorm = snapshot.NauticalIsInsideStorm,
+                    UsesNavalSimulatedWater = snapshot.NauticalUsesNavalSimulatedWater
+                },
+                TimeInfo = new TimeInformation
+                {
+                    TimeOfDay = snapshot.TimeOfDay,
+                    NightTimeFactor = snapshot.NightTimeFactor,
+                    DrynessFactor = snapshot.DrynessFactor,
+                    WinterTimeFactor = snapshot.WinterTimeFactor,
+                    Season = snapshot.Season
+                },
+                AreaInfo = new AreaInformation
+                {
+                    Temperature = snapshot.AreaTemperature,
+                    Humidity = snapshot.AreaHumidity
+                },
+                PostProInfo = new PostProcessInformation
+                {
+                    MinExposure = snapshot.PostProcessMinExposure,
+                    MaxExposure = snapshot.PostProcessMaxExposure,
+                    BrightpassThreshold = snapshot.PostProcessBrightpassThreshold,
+                    MiddleGray = snapshot.PostProcessMiddleGray
+                }
+            };
+        }
+
+        private static bool AreCampaignAtmospheresEquivalent(
+            AtmosphereInfo left,
+            AtmosphereInfo right)
+        {
+            return string.Equals(left.AtmosphereName, right.AtmosphereName, StringComparison.Ordinal) &&
+                   string.Equals(left.InterpolatedAtmosphereName, right.InterpolatedAtmosphereName, StringComparison.Ordinal) &&
+                   Approximately(left.TimeInfo.TimeOfDay, right.TimeInfo.TimeOfDay) &&
+                   Approximately(left.SunInfo.Brightness, right.SunInfo.Brightness) &&
+                   Approximately(left.SunInfo.Altitude, right.SunInfo.Altitude) &&
+                   Approximately(left.SkyInfo.Brightness, right.SkyInfo.Brightness) &&
+                   Approximately(left.AmbientInfo.EnvironmentMultiplier, right.AmbientInfo.EnvironmentMultiplier) &&
+                   Approximately(left.PostProInfo.MinExposure, right.PostProInfo.MinExposure) &&
+                   Approximately(left.PostProInfo.MaxExposure, right.PostProInfo.MaxExposure);
+        }
+
+        private static bool Approximately(float left, float right)
+        {
+            return Math.Abs(left - right) <= 0.0001f;
+        }
+
+        private static bool IsCampaignTimeOfDayWithinTolerance(
+            float left,
+            float right,
+            float tolerance)
+        {
+            if (!TryNormalizeCampaignTimeOfDay(left, out float normalizedLeft) ||
+                !TryNormalizeCampaignTimeOfDay(right, out float normalizedRight))
+            {
+                return false;
+            }
+
+            float difference = Math.Abs(normalizedLeft - normalizedRight);
+            difference = Math.Min(difference, 24f - difference);
+            return difference <= Math.Max(0f, tolerance);
+        }
+
+        private static string ResolveStandaloneSemiCloudyAtmosphereName(float campaignTimeOfDay)
+        {
+            if (!TryNormalizeCampaignTimeOfDay(campaignTimeOfDay, out float normalizedTimeOfDay))
+                normalizedTimeOfDay = 12f;
+
+            int profileHour;
+            if (normalizedTimeOfDay <= 12f)
+            {
+                profileHour = ClampStandaloneAtmosphereProfileHour(
+                    (int)Math.Round(normalizedTimeOfDay, MidpointRounding.AwayFromZero));
+            }
+            else if (normalizedTimeOfDay <= 15f)
+            {
+                profileHour = InterpolateStandaloneAtmosphereProfileHour(
+                    12,
+                    4,
+                    (normalizedTimeOfDay - 12f) / 3f);
+            }
+            else if (normalizedTimeOfDay <= 18f)
+            {
+                profileHour = InterpolateStandaloneAtmosphereProfileHour(
+                    4,
+                    3,
+                    (normalizedTimeOfDay - 15f) / 3f);
+            }
+            else if (normalizedTimeOfDay <= 22f)
+            {
+                profileHour = InterpolateStandaloneAtmosphereProfileHour(
+                    3,
+                    1,
+                    (normalizedTimeOfDay - 18f) / 4f);
+            }
+            else
+            {
+                profileHour = 1;
+            }
+
+            return "TOD_" + profileHour.ToString("00") + "_00_SemiCloudy";
+        }
+
+        private static int InterpolateStandaloneAtmosphereProfileHour(
+            int startProfileHour,
+            int endProfileHour,
+            float amount)
+        {
+            float clampedAmount = Math.Max(0f, Math.Min(1f, amount));
+            float interpolated = startProfileHour +
+                                 (endProfileHour - startProfileHour) * clampedAmount;
+            return ClampStandaloneAtmosphereProfileHour(
+                (int)Math.Round(interpolated, MidpointRounding.AwayFromZero));
+        }
+
+        private static int ClampStandaloneAtmosphereProfileHour(int profileHour)
+        {
+            if (profileHour < 1)
+                return 1;
+            if (profileHour > 12)
+                return 12;
+            return profileHour;
         }
 
         private static void ApplyCampaignDifficultyContext(

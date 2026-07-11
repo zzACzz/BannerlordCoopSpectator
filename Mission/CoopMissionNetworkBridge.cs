@@ -7236,6 +7236,9 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             BattleSnapshotRuntimeState.SetCurrent(snapshot, "CoopMissionNetworkBridge.V2");
+            CampaignMapPatchMissionInit.TryApplyCampaignAtmosphereToLiveScene(
+                Mission,
+                "CoopMissionNetworkBridge.V2 applied authoritative battle snapshot");
             MarkClientBattleSnapshotApplied(assemblyState.TransmissionId, assemblyState.PayloadHash);
             _lastClientBattleSnapshotBootstrapRequestUtc = DateTime.MinValue;
             BattleMapSpawnHandoffPatch.TryProcessDeferredClientCreateAgentMessages(

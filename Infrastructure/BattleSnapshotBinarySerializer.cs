@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 9;
+        private const int SchemaVersion = 11;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -67,6 +67,8 @@ namespace CoopSpectator.Infrastructure
                         schemaVersion != 6 &&
                         schemaVersion != 7 &&
                         schemaVersion != 8 &&
+                        schemaVersion != 9 &&
+                        schemaVersion != 10 &&
                         schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
@@ -109,6 +111,10 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, snapshot.BattleSizeBudgetSource);
             WriteString(writer, snapshot.PlayerSide);
             writer.Write(snapshot.PlayerTroopsReceivedDamageMultiplier);
+            writer.Write(snapshot.HasCampaignTimeOfDay);
+            writer.Write(snapshot.CampaignTimeOfDay);
+            WriteString(writer, snapshot.CampaignTimeOfDaySource);
+            WriteCampaignAtmosphere(writer, snapshot.CampaignAtmosphere);
             WriteBattleScenarioContext(writer, snapshot.ScenarioContext);
             WriteList(writer, snapshot.CraftedWeapons, WriteCraftedWeaponSnapshot);
             WriteList(writer, snapshot.Sides, WriteBattleSide);
@@ -137,11 +143,127 @@ namespace CoopSpectator.Infrastructure
                 BattleSizeBudgetSource = ReadString(reader),
                 PlayerSide = ReadString(reader),
                 PlayerTroopsReceivedDamageMultiplier = schemaVersion >= 2 ? reader.ReadSingle() : 1f,
+                HasCampaignTimeOfDay = schemaVersion >= 10 && reader.ReadBoolean(),
+                CampaignTimeOfDay = schemaVersion >= 10 ? reader.ReadSingle() : -1f,
+                CampaignTimeOfDaySource = schemaVersion >= 10 ? ReadString(reader) : null,
+                CampaignAtmosphere = schemaVersion >= 11 ? ReadCampaignAtmosphere(reader) : null,
                 ScenarioContext = schemaVersion >= 4 ? ReadBattleScenarioContext(reader, schemaVersion) : null,
                 CraftedWeapons = schemaVersion >= 9
                     ? ReadList(reader, ReadCraftedWeaponSnapshot) ?? new List<CraftedWeaponSnapshotMessage>()
                     : new List<CraftedWeaponSnapshotMessage>(),
                 Sides = ReadList(reader, itemReader => ReadBattleSide(itemReader, schemaVersion)) ?? new List<BattleSideSnapshotMessage>()
+            };
+        }
+
+        private static void WriteCampaignAtmosphere(
+            BinaryWriter writer,
+            CampaignAtmosphereSnapshotMessage atmosphere)
+        {
+            writer.Write(atmosphere != null);
+            if (atmosphere == null)
+                return;
+
+            WriteString(writer, atmosphere.Source);
+            writer.Write(atmosphere.Seed);
+            WriteString(writer, atmosphere.AtmosphereName);
+            WriteString(writer, atmosphere.InterpolatedAtmosphereName);
+            writer.Write(atmosphere.SunAltitude);
+            writer.Write(atmosphere.SunAngle);
+            writer.Write(atmosphere.SunColorX);
+            writer.Write(atmosphere.SunColorY);
+            writer.Write(atmosphere.SunColorZ);
+            writer.Write(atmosphere.SunBrightness);
+            writer.Write(atmosphere.SunMaxBrightness);
+            writer.Write(atmosphere.SunSize);
+            writer.Write(atmosphere.SunRayStrength);
+            writer.Write(atmosphere.RainDensity);
+            writer.Write(atmosphere.SnowDensity);
+            writer.Write(atmosphere.AmbientEnvironmentMultiplier);
+            writer.Write(atmosphere.AmbientColorX);
+            writer.Write(atmosphere.AmbientColorY);
+            writer.Write(atmosphere.AmbientColorZ);
+            writer.Write(atmosphere.AmbientMieScatterStrength);
+            writer.Write(atmosphere.AmbientRayleighConstant);
+            writer.Write(atmosphere.FogDensity);
+            writer.Write(atmosphere.FogColorX);
+            writer.Write(atmosphere.FogColorY);
+            writer.Write(atmosphere.FogColorZ);
+            writer.Write(atmosphere.FogFalloff);
+            writer.Write(atmosphere.SkyBrightness);
+            writer.Write(atmosphere.NauticalWaveStrength);
+            writer.Write(atmosphere.NauticalWindX);
+            writer.Write(atmosphere.NauticalWindY);
+            writer.Write(atmosphere.NauticalCanUseLowAltitudeAtmosphere);
+            writer.Write(atmosphere.NauticalUseSceneWindDirection);
+            writer.Write(atmosphere.NauticalIsRiverBattle);
+            writer.Write(atmosphere.NauticalIsInsideStorm);
+            writer.Write(atmosphere.NauticalUsesNavalSimulatedWater);
+            writer.Write(atmosphere.TimeOfDay);
+            writer.Write(atmosphere.NightTimeFactor);
+            writer.Write(atmosphere.DrynessFactor);
+            writer.Write(atmosphere.WinterTimeFactor);
+            writer.Write(atmosphere.Season);
+            writer.Write(atmosphere.AreaTemperature);
+            writer.Write(atmosphere.AreaHumidity);
+            writer.Write(atmosphere.PostProcessMinExposure);
+            writer.Write(atmosphere.PostProcessMaxExposure);
+            writer.Write(atmosphere.PostProcessBrightpassThreshold);
+            writer.Write(atmosphere.PostProcessMiddleGray);
+        }
+
+        private static CampaignAtmosphereSnapshotMessage ReadCampaignAtmosphere(BinaryReader reader)
+        {
+            if (!reader.ReadBoolean())
+                return null;
+
+            return new CampaignAtmosphereSnapshotMessage
+            {
+                Source = ReadString(reader),
+                Seed = reader.ReadUInt32(),
+                AtmosphereName = ReadString(reader),
+                InterpolatedAtmosphereName = ReadString(reader),
+                SunAltitude = reader.ReadSingle(),
+                SunAngle = reader.ReadSingle(),
+                SunColorX = reader.ReadSingle(),
+                SunColorY = reader.ReadSingle(),
+                SunColorZ = reader.ReadSingle(),
+                SunBrightness = reader.ReadSingle(),
+                SunMaxBrightness = reader.ReadSingle(),
+                SunSize = reader.ReadSingle(),
+                SunRayStrength = reader.ReadSingle(),
+                RainDensity = reader.ReadSingle(),
+                SnowDensity = reader.ReadSingle(),
+                AmbientEnvironmentMultiplier = reader.ReadSingle(),
+                AmbientColorX = reader.ReadSingle(),
+                AmbientColorY = reader.ReadSingle(),
+                AmbientColorZ = reader.ReadSingle(),
+                AmbientMieScatterStrength = reader.ReadSingle(),
+                AmbientRayleighConstant = reader.ReadSingle(),
+                FogDensity = reader.ReadSingle(),
+                FogColorX = reader.ReadSingle(),
+                FogColorY = reader.ReadSingle(),
+                FogColorZ = reader.ReadSingle(),
+                FogFalloff = reader.ReadSingle(),
+                SkyBrightness = reader.ReadSingle(),
+                NauticalWaveStrength = reader.ReadSingle(),
+                NauticalWindX = reader.ReadSingle(),
+                NauticalWindY = reader.ReadSingle(),
+                NauticalCanUseLowAltitudeAtmosphere = reader.ReadInt32(),
+                NauticalUseSceneWindDirection = reader.ReadInt32(),
+                NauticalIsRiverBattle = reader.ReadInt32(),
+                NauticalIsInsideStorm = reader.ReadInt32(),
+                NauticalUsesNavalSimulatedWater = reader.ReadInt32(),
+                TimeOfDay = reader.ReadSingle(),
+                NightTimeFactor = reader.ReadSingle(),
+                DrynessFactor = reader.ReadSingle(),
+                WinterTimeFactor = reader.ReadSingle(),
+                Season = reader.ReadInt32(),
+                AreaTemperature = reader.ReadSingle(),
+                AreaHumidity = reader.ReadSingle(),
+                PostProcessMinExposure = reader.ReadSingle(),
+                PostProcessMaxExposure = reader.ReadSingle(),
+                PostProcessBrightpassThreshold = reader.ReadSingle(),
+                PostProcessMiddleGray = reader.ReadSingle()
             };
         }
 
