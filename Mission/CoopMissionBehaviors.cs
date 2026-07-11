@@ -3652,6 +3652,8 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<int, int> _lastAlignedControlledAgentIndexByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, CommanderDeploymentOrderLeaseState> _commanderDeploymentOrderLeasesByPeer =
             new Dictionary<int, CommanderDeploymentOrderLeaseState>();
+        private static readonly Dictionary<int, DeferredDeploymentSpawnState> _deferredDeploymentSpawnsByPeer =
+            new Dictionary<int, DeferredDeploymentSpawnState>();
         private static readonly Dictionary<int, string> _materializedArmyEntryIdByAgentIndex = new Dictionary<int, string>();
         private static readonly Dictionary<int, BattleSideEnum> _materializedArmySideByAgentIndex = new Dictionary<int, BattleSideEnum>();
         private static readonly Dictionary<int, Agent> _materializedAgentInstanceByIndex = new Dictionary<int, Agent>();
@@ -3933,6 +3935,15 @@ namespace CoopSpectator.MissionBehaviors
             public int AgentIndex;
             public int TeamIndex;
             public DateTime UpdatedUtc;
+        }
+
+        private sealed class DeferredDeploymentSpawnState
+        {
+            public int PeerIndex;
+            public BattleSideEnum Side;
+            public string EntryId;
+            public string TroopId;
+            public DateTime RequestedUtc;
         }
 
         private static DateTime _nextExactSceneNativeBootstrapDeferLogUtc;
@@ -5888,6 +5899,7 @@ namespace CoopSpectator.MissionBehaviors
             ResetRoleMatrixStreamRuntime("end-mission");
             _lastAlignedControlledAgentIndexByPeer.Clear();
             _commanderDeploymentOrderLeasesByPeer.Clear();
+            _deferredDeploymentSpawnsByPeer.Clear();
             _materializedArmyEntryIdByAgentIndex.Clear();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
@@ -6366,6 +6378,7 @@ namespace CoopSpectator.MissionBehaviors
             _appliedCoopClassAvailabilityStates.Clear();
             _lastAlignedControlledAgentIndexByPeer.Clear();
             _commanderDeploymentOrderLeasesByPeer.Clear();
+            _deferredDeploymentSpawnsByPeer.Clear();
             _materializedArmyEntryIdByAgentIndex.Clear();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
@@ -6528,6 +6541,7 @@ namespace CoopSpectator.MissionBehaviors
                 TryConsumeSpawnRequests(mission);
                 TryApplySpawnIntentToPrimaryPeer(mission, source);
                 TrySyncExactCampaignBattlefieldRuntimeState(mission, source);
+                TryPromoteDeferredDeploymentSpawnRequests(mission, source + " role-matrix-stream");
                 TryForceAuthoritativePeerTeams(mission, source);
                 TryForceFixedMissionCultures(mission, source);
                 TryForcePreferredHeroClassForPeer(mission, source);
@@ -6545,6 +6559,7 @@ namespace CoopSpectator.MissionBehaviors
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "shared-tick", "runtime-sync-before", source);
             TrySyncExactCampaignBattlefieldRuntimeState(mission, source);
             AppendExactBattleAgentSpawnTraceLifecycleStep(mission, "shared-tick", "runtime-sync-after", source);
+            TryPromoteDeferredDeploymentSpawnRequests(mission, source + " post-runtime-sync");
             TryForceAuthoritativePeerTeams(mission, source);
             TryForceFixedMissionCultures(mission, source);
             TryForcePreferredHeroClassForPeer(mission, source);
@@ -16053,6 +16068,7 @@ namespace CoopSpectator.MissionBehaviors
                 _hasLoggedMaterializedEquipmentCoverageSummary = false;
                 _lastAlignedControlledAgentIndexByPeer.Clear();
                 _commanderDeploymentOrderLeasesByPeer.Clear();
+                _deferredDeploymentSpawnsByPeer.Clear();
                 _materializedArmyEntryIdByAgentIndex.Clear();
                 _materializedArmySideByAgentIndex.Clear();
                 _materializedAgentInstanceByIndex.Clear();
@@ -30682,6 +30698,7 @@ namespace CoopSpectator.MissionBehaviors
                     string lastTroopId = (controlledAgent?.Character as BasicCharacterObject)?.StringId ?? CoopBattleAuthorityState.GetSelectedTroopId(missionPeer);
                     string lastEntryId = CoopBattleAuthorityState.GetSelectedEntryId(missionPeer);
                     _spawnedCoopPeerIndices.Remove(peer.Index);
+                    ClearDeferredDeploymentSpawn(missionPeer, source + " lost-controlled-agent");
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " lost-controlled-agent");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " lost-controlled-agent");
                     ExpireMissionPeerVanillaSpawnVisuals(missionPeer);
@@ -30702,6 +30719,7 @@ namespace CoopSpectator.MissionBehaviors
 
                 if (HasActiveControlledAgent(missionPeer))
                 {
+                    ClearDeferredDeploymentSpawn(missionPeer, source + " controlled-agent");
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " controlled-agent");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " controlled-agent");
                     CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
@@ -30725,6 +30743,7 @@ namespace CoopSpectator.MissionBehaviors
                     BattleSideEnum spectatorAuthoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " spectator-pending-request");
                     if (spectatorAuthoritativeSide == BattleSideEnum.None)
                     {
+                        ClearDeferredDeploymentSpawn(missionPeer, source + " spectator");
                         CoopBattleSelectionRequestState.Clear(missionPeer, source + " spectator");
                         CoopBattleSpawnRequestState.Clear(missionPeer, source + " spectator");
                         CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
@@ -30739,6 +30758,7 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(missionPeer, mission, source + " pending-request");
                 if (authoritativeSide == BattleSideEnum.None)
                 {
+                    ClearDeferredDeploymentSpawn(missionPeer, source + " no-side");
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " no-side");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " no-side");
                     CoopBattlePeerReconnectState.ClearActiveBattleReconnectFinalizeGate(
@@ -30755,6 +30775,7 @@ namespace CoopSpectator.MissionBehaviors
                     !string.IsNullOrWhiteSpace(selectionState.TroopId);
                 if (!hasMeaningfulSelection)
                 {
+                    ClearDeferredDeploymentSpawn(missionPeer, source + " no-selection");
                     CoopBattleSelectionRequestState.Clear(missionPeer, source + " no-selection");
                     CoopBattleSpawnRequestState.Clear(missionPeer, source + " no-selection");
                     CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " no-selection");
@@ -31581,7 +31602,8 @@ namespace CoopSpectator.MissionBehaviors
                 requestKind == CoopBattleSelectionRequestKind.SpawnNow ||
                 requestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment ||
                 requestKind == CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment ||
-                requestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment;
+                requestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment ||
+                requestKind == CoopBattleSelectionRequestKind.QueueSpawnAfterDeployment;
             bool allowControlledCommanderDeploymentCompletion =
                 requestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment &&
                 TryResolveExactSiegeControlledCommanderCompletion(
@@ -31656,6 +31678,13 @@ namespace CoopSpectator.MissionBehaviors
                         troopOrEntryId,
                         forceAutoDeploy: true,
                         source + " commander-finish-deployment");
+                case CoopBattleSelectionRequestKind.QueueSpawnAfterDeployment:
+                    return TryQueueSpawnAfterDeploymentForPeer(
+                        mission,
+                        missionPeer,
+                        requestedSide,
+                        troopOrEntryId,
+                        source + " queue-spawn-after-deployment");
                 case CoopBattleSelectionRequestKind.ForceRespawnable:
                     return TryForcePeerRespawnable(mission, missionPeer, source + " force-respawnable");
                 default:
@@ -31666,7 +31695,8 @@ namespace CoopSpectator.MissionBehaviors
         private static bool IsBattleDataReadinessBypassRequest(CoopBattleSelectionRequestKind requestKind)
         {
             return requestKind == CoopBattleSelectionRequestKind.Spectate ||
-                requestKind == CoopBattleSelectionRequestKind.ForceRespawnable;
+                requestKind == CoopBattleSelectionRequestKind.ForceRespawnable ||
+                requestKind == CoopBattleSelectionRequestKind.QueueSpawnAfterDeployment;
         }
 
         private static bool TryValidateBattleDataReadinessForNetworkRequest(
@@ -31691,7 +31721,8 @@ namespace CoopSpectator.MissionBehaviors
                 requestKind == CoopBattleSelectionRequestKind.SpawnNow ||
                 requestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment ||
                 requestKind == CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment ||
-                requestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment;
+                requestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment ||
+                requestKind == CoopBattleSelectionRequestKind.QueueSpawnAfterDeployment;
             if (readinessSide == BattleSideEnum.None &&
                 requestNeedsAssignedSide)
             {
@@ -31729,6 +31760,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             CoopBattleSelectionIntentState.Reset();
+            ClearDeferredDeploymentSpawn(missionPeer, source + " spectator-request");
             CoopBattleAuthorityState.ClearPeerSelectionAndSide(missionPeer, source + " spectator-request");
             CoopBattleSelectionRequestState.Clear(missionPeer, source + " spectator-request");
             CoopBattleSpawnRequestState.Clear(missionPeer, source + " spectator-request");
@@ -31875,6 +31907,11 @@ namespace CoopSpectator.MissionBehaviors
 
             if (CoopBattleAuthorityState.TrySetSelectedEntryId(missionPeer, troopOrEntryId, source + " intent entry"))
             {
+                ClearDeferredDeploymentSpawnIfSelectionChanged(
+                    missionPeer,
+                    troopOrEntryId,
+                    isEntryId: true,
+                    source + " intent entry");
                 if (ShouldAutoQueueSelectionFromAuthority(missionPeer))
                     CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
                 ApplyDerivedPeerLifecycleState(
@@ -31888,6 +31925,11 @@ namespace CoopSpectator.MissionBehaviors
 
             if (CoopBattleAuthorityState.TrySetSelectedTroopId(missionPeer, troopOrEntryId, source + " intent troop"))
             {
+                ClearDeferredDeploymentSpawnIfSelectionChanged(
+                    missionPeer,
+                    troopOrEntryId,
+                    isEntryId: false,
+                    source + " intent troop");
                 if (ShouldAutoQueueSelectionFromAuthority(missionPeer))
                     CoopBattleSelectionRequestState.TryQueueFromAuthoritySelection(missionPeer, source + " selection-request");
                 ApplyDerivedPeerLifecycleState(
@@ -32086,6 +32128,135 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private static void ClearDeferredDeploymentSpawn(MissionPeer missionPeer, string source)
+        {
+            try
+            {
+                NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
+                if (peer == null || !_deferredDeploymentSpawnsByPeer.Remove(peer.Index))
+                    return;
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: cleared deferred deployment spawn. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " Source=" + (source ?? "unknown"));
+            }
+            catch
+            {
+            }
+        }
+
+        private static void ClearDeferredDeploymentSpawnIfSelectionChanged(
+            MissionPeer missionPeer,
+            string selectedId,
+            bool isEntryId,
+            string source)
+        {
+            NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
+            if (peer == null ||
+                !_deferredDeploymentSpawnsByPeer.TryGetValue(peer.Index, out DeferredDeploymentSpawnState deferredState) ||
+                deferredState == null)
+            {
+                return;
+            }
+
+            string deferredId = isEntryId ? deferredState.EntryId : deferredState.TroopId;
+            if (string.Equals(deferredId ?? string.Empty, selectedId ?? string.Empty, StringComparison.Ordinal))
+                return;
+
+            ClearDeferredDeploymentSpawn(missionPeer, source + " selection-changed");
+        }
+
+        private static void TryPromoteDeferredDeploymentSpawnRequests(Mission mission, string source)
+        {
+            if (mission == null || !GameNetwork.IsServer || _deferredDeploymentSpawnsByPeer.Count == 0)
+                return;
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase >= CoopBattlePhase.BattleEnded)
+            {
+                int clearedCount = _deferredDeploymentSpawnsByPeer.Count;
+                _deferredDeploymentSpawnsByPeer.Clear();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: cleared deferred deployment spawns because battle ended. " +
+                    "Count=" + clearedCount +
+                    " Source=" + (source ?? "unknown"));
+                return;
+            }
+
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
+                return;
+
+            foreach (DeferredDeploymentSpawnState deferredState in _deferredDeploymentSpawnsByPeer.Values.ToList())
+            {
+                if (deferredState == null)
+                    continue;
+
+                NetworkCommunicator peer = GameNetwork.NetworkPeers?.FirstOrDefault(candidate =>
+                    candidate != null && candidate.Index == deferredState.PeerIndex);
+                MissionPeer missionPeer = peer?.GetComponent<MissionPeer>();
+                if (peer == null ||
+                    !peer.IsConnectionActive ||
+                    !peer.IsSynchronized ||
+                    missionPeer == null)
+                {
+                    _deferredDeploymentSpawnsByPeer.Remove(deferredState.PeerIndex);
+                    continue;
+                }
+
+                if (HasActiveControlledAgent(missionPeer))
+                {
+                    ClearDeferredDeploymentSpawn(missionPeer, source + " already-controlled");
+                    continue;
+                }
+
+                if (CoopBattleSpawnRequestState.HasPendingRequest(missionPeer))
+                {
+                    ClearDeferredDeploymentSpawn(missionPeer, source + " spawn-already-queued");
+                    continue;
+                }
+
+                BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(
+                    missionPeer,
+                    mission,
+                    source + " authoritative-side");
+                string selectedEntryId = CoopBattleAuthorityState.GetSelectedEntryId(missionPeer);
+                if (authoritativeSide != deferredState.Side ||
+                    !string.Equals(selectedEntryId, deferredState.EntryId, StringComparison.Ordinal))
+                {
+                    ClearDeferredDeploymentSpawn(missionPeer, source + " authority-selection-changed");
+                    continue;
+                }
+
+                if (!TryResolvePeerSpawnAvailability(
+                        mission,
+                        missionPeer,
+                        authoritativeSide,
+                        out CoopBattlePhase _,
+                        out IReadOnlyList<string> _,
+                        out string _,
+                        out string _,
+                        out int _,
+                        out int _,
+                        out string _))
+                {
+                    continue;
+                }
+
+                if (!TryQueueSpawnIntentForPeer(mission, missionPeer, source + " promote-deferred"))
+                    continue;
+
+                _deferredDeploymentSpawnsByPeer.Remove(deferredState.PeerIndex);
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: promoted deferred deployment spawn into normal spawn queue. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " Side=" + deferredState.Side +
+                    " EntryId=" + (deferredState.EntryId ?? string.Empty) +
+                    " WaitMs=" + Math.Max(0d, (DateTime.UtcNow - deferredState.RequestedUtc).TotalMilliseconds).ToString("0") +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
         private static Agent ResolveCommanderDeploymentOrderLeaseAgent(
             Mission mission,
             Team team,
@@ -32275,6 +32446,122 @@ namespace CoopSpectator.MissionBehaviors
                 " Phase=" + currentPhase +
                 " Diagnostics=" + (diagnostics ?? string.Empty) +
                 " OrderLease=" + (orderLeaseDiagnostics ?? string.Empty) +
+                " Source=" + source);
+            return true;
+        }
+
+        private static bool TryQueueSpawnAfterDeploymentForPeer(
+            Mission mission,
+            MissionPeer missionPeer,
+            BattleSideEnum requestedSide,
+            string troopOrEntryId,
+            string source)
+        {
+            if (mission == null || missionPeer == null || !GameNetwork.IsServer || string.IsNullOrWhiteSpace(troopOrEntryId))
+                return false;
+
+            bool selectionApplied = TryApplySelectionIntentToPeer(
+                mission,
+                missionPeer,
+                requestedSide,
+                troopOrEntryId,
+                source + " select-entry");
+            BattleSideEnum authoritativeSide = requestedSide != BattleSideEnum.None
+                ? requestedSide
+                : ResolveAuthoritativeSide(missionPeer, mission, source + " authoritative-side");
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+
+            if (!IsExactSiegeCommanderDeploymentWindowActive(
+                    mission,
+                    currentPhase,
+                    out string deploymentWindowDiagnostics))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected deferred deployment spawn request outside deployment window. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " Target=" + troopOrEntryId +
+                    " Diagnostics=" + (deploymentWindowDiagnostics ?? string.Empty) +
+                    " Source=" + source);
+                return false;
+            }
+
+            string selectedEntryId = CoopBattleAuthorityState.GetSelectedEntryId(missionPeer);
+            string selectionValidationReason = "selection-mismatch";
+            bool hasValidSelection =
+                authoritativeSide != BattleSideEnum.None &&
+                !string.IsNullOrWhiteSpace(selectedEntryId) &&
+                LooksLikeEntryId(troopOrEntryId) &&
+                string.Equals(selectedEntryId, troopOrEntryId, StringComparison.Ordinal) &&
+                TryValidateRequestedSelectionTargetIsSelectable(
+                    mission,
+                    missionPeer,
+                    authoritativeSide,
+                    selectedEntryId,
+                    source + " validate-entry",
+                    out selectionValidationReason);
+            if (!hasValidSelection)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected deferred deployment spawn request with invalid selection. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " RequestedEntry=" + troopOrEntryId +
+                    " SelectedEntry=" + (selectedEntryId ?? string.Empty) +
+                    " SelectionApplied=" + selectionApplied +
+                    " Reason=" + (selectionValidationReason ?? "selection-mismatch") +
+                    " Source=" + source);
+                return false;
+            }
+
+            RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(
+                BattleSnapshotRuntimeState.GetState(),
+                authoritativeSide);
+            if (commanderEntry != null &&
+                !string.IsNullOrWhiteSpace(commanderEntry.EntryId) &&
+                DoesPossessedEntryMatchCommanderEntry(commanderEntry.EntryId, selectedEntryId))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected deferred deployment spawn request for commander entry. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " EntryId=" + selectedEntryId +
+                    " Source=" + source);
+                return false;
+            }
+
+            if (peer == null)
+                return false;
+
+            CoopBattleSelectionRequestState.Clear(missionPeer, source + " deferred-wait");
+            CoopBattleSpawnRequestState.Clear(missionPeer, source + " deferred-wait");
+            CoopBattleSpawnRuntimeState.Clear(missionPeer, source + " deferred-wait");
+            missionPeer.WantsToSpawnAsBot = false;
+
+            string selectedTroopId = CoopBattleAuthorityState.GetSelectedTroopId(missionPeer);
+            _deferredDeploymentSpawnsByPeer[peer.Index] = new DeferredDeploymentSpawnState
+            {
+                PeerIndex = peer.Index,
+                Side = authoritativeSide,
+                EntryId = selectedEntryId,
+                TroopId = selectedTroopId,
+                RequestedUtc = DateTime.UtcNow
+            };
+            CoopBattlePeerLifecycleRuntimeState.MarkWaiting(
+                missionPeer,
+                authoritativeSide,
+                selectedTroopId,
+                selectedEntryId,
+                source + " accepted");
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: accepted deferred deployment spawn request. " +
+                "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                " Side=" + authoritativeSide +
+                " EntryId=" + selectedEntryId +
+                " TroopId=" + (selectedTroopId ?? string.Empty) +
+                " Phase=" + currentPhase +
                 " Source=" + source);
             return true;
         }
@@ -33453,6 +33740,42 @@ namespace CoopSpectator.MissionBehaviors
             return hostedLocalPeer != null && ReferenceEquals(hostedLocalPeer, missionPeer);
         }
 
+        private static bool CanBattleStartAuthorityAutoDeployExactSiege(
+            Mission mission,
+            MissionPeer missionPeer,
+            CoopBattlePhase currentPhase)
+        {
+            if (mission == null ||
+                missionPeer == null ||
+                HasActiveControlledAgent(missionPeer) ||
+                !IsBattleStartAuthorityPeer(mission, missionPeer) ||
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission) ||
+                !IsExactSiegeCommanderDeploymentWindowActive(mission, currentPhase, out _))
+            {
+                return false;
+            }
+
+            NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+            if (peer == null ||
+                !_deferredDeploymentSpawnsByPeer.TryGetValue(
+                    peer.Index,
+                    out DeferredDeploymentSpawnState deferredState) ||
+                deferredState == null)
+            {
+                return false;
+            }
+
+            BattleSideEnum authoritativeSide = ResolveAuthoritativeSide(
+                missionPeer,
+                mission,
+                "battle-start-authority-auto-deploy");
+            string selectedEntryId = CoopBattleAuthorityState.GetSelectedEntryId(missionPeer);
+            return authoritativeSide != BattleSideEnum.None &&
+                   deferredState.Side == authoritativeSide &&
+                   !string.IsNullOrWhiteSpace(selectedEntryId) &&
+                   string.Equals(deferredState.EntryId, selectedEntryId, StringComparison.Ordinal);
+        }
+
         private static bool HasBootstrapReadySide(MissionPeer missionPeer, Mission mission, string source)
         {
             if (missionPeer == null || mission == null)
@@ -33590,12 +33913,20 @@ namespace CoopSpectator.MissionBehaviors
                     currentPhase,
                     readinessSessionSnapshot,
                     out _);
+            bool allowExactSiegeDeferredDeploymentReadiness =
+                ShouldAllowExactSiegeDeferredDeploymentSpawn(
+                    mission,
+                    missionPeer,
+                    statusSide,
+                    currentPhase,
+                    out _);
             bool exactSiegeCommanderDeploymentBlocking =
                 statusSide != BattleSideEnum.None &&
                 IsExactSiegeCommanderDeploymentWindowActive(mission, currentPhase, out _);
 
             if (!AreBattlefieldArmiesReadyForStart(mission, out _, out _, out _) &&
-                !allowExactSiegeCommanderDeploymentReadiness)
+                !allowExactSiegeCommanderDeploymentReadiness &&
+                !allowExactSiegeDeferredDeploymentReadiness)
             {
                 if (exactSiegeCommanderDeploymentBlocking)
                 {
@@ -33861,6 +34192,67 @@ namespace CoopSpectator.MissionBehaviors
 
             diagnostics = "selection-not-commander";
             return false;
+        }
+
+        private static bool ShouldAllowExactSiegeDeferredDeploymentSpawn(
+            Mission mission,
+            MissionPeer missionPeer,
+            BattleSideEnum authoritativeSide,
+            CoopBattlePhase currentPhase,
+            out string diagnostics)
+        {
+            diagnostics = string.Empty;
+            NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
+            if (mission == null || missionPeer == null || peer == null)
+            {
+                diagnostics = "missing-mission-or-peer";
+                return false;
+            }
+
+            if (!_deferredDeploymentSpawnsByPeer.TryGetValue(
+                    peer.Index,
+                    out DeferredDeploymentSpawnState deferredState) ||
+                deferredState == null)
+            {
+                diagnostics = "deferred-request-missing";
+                return false;
+            }
+
+            if (currentPhase < CoopBattlePhase.SideSelection || currentPhase >= CoopBattlePhase.BattleEnded)
+            {
+                diagnostics = "phase-outside-deferred-window";
+                return false;
+            }
+
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission) ||
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
+            {
+                diagnostics = "deployment-not-finished";
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            {
+                diagnostics = "not-exact-siege-assault";
+                return false;
+            }
+
+            string selectedEntryId = CoopBattleAuthorityState.GetSelectedEntryId(missionPeer);
+            if (authoritativeSide == BattleSideEnum.None ||
+                deferredState.Side != authoritativeSide ||
+                string.IsNullOrWhiteSpace(selectedEntryId) ||
+                !string.Equals(deferredState.EntryId, selectedEntryId, StringComparison.Ordinal))
+            {
+                diagnostics = "deferred-selection-mismatch";
+                return false;
+            }
+
+            diagnostics = "deferred-deployment-finished";
+            return true;
         }
 
         private static bool TryMatchExactSiegeCommanderDeploymentSelection(
@@ -35009,7 +35401,13 @@ namespace CoopSpectator.MissionBehaviors
             bool canStartBattle = IsBattleStartReady(mission, out _, out _) &&
                 currentPhase >= CoopBattlePhase.PreBattleHold &&
                 currentPhase < CoopBattlePhase.BattleActive;
-            bool canStartBattleForPeer = canStartBattle && IsBattleStartAuthorityPeer(mission, missionPeer);
+            bool isBattleStartAuthorityPeer = IsBattleStartAuthorityPeer(mission, missionPeer);
+            bool canAutoDeployExactSiegeForPeer =
+                isBattleStartAuthorityPeer &&
+                CanBattleStartAuthorityAutoDeployExactSiege(mission, missionPeer, currentPhase);
+            bool canStartBattleForPeer =
+                isBattleStartAuthorityPeer &&
+                (canStartBattle || canAutoDeployExactSiegeForPeer);
             IReadOnlyList<string> attackerSelectableEntryIds = ResolveSelectableEntryIdsForStatus(
                 mission,
                 BattleSideEnum.Attacker,
@@ -35411,14 +35809,24 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (IsExactSiegeCommanderDeploymentWindowActive(mission, currentPhase, out _) &&
-                !ShouldAllowExactSiegeCommanderDeploymentSpawn(
+            bool allowExactSiegeCommanderDeploymentSpawn =
+                ShouldAllowExactSiegeCommanderDeploymentSpawn(
                     mission,
                     missionPeer,
                     authoritativeSide,
                     currentPhase,
                     sessionSnapshot,
-                    out _))
+                    out _);
+            bool allowExactSiegeDeferredDeploymentSpawn =
+                ShouldAllowExactSiegeDeferredDeploymentSpawn(
+                    mission,
+                    missionPeer,
+                    authoritativeSide,
+                    currentPhase,
+                    out _);
+            if (IsExactSiegeCommanderDeploymentWindowActive(mission, currentPhase, out _) &&
+                !allowExactSiegeCommanderDeploymentSpawn &&
+                !allowExactSiegeDeferredDeploymentSpawn)
             {
                 reason = "siege deployment phase active";
                 return false;
@@ -35517,9 +35925,17 @@ namespace CoopSpectator.MissionBehaviors
                     currentPhase,
                     spawnAvailabilitySessionSnapshot,
                     out _);
+            bool allowExactSiegeDeferredDeploymentSpawn =
+                ShouldAllowExactSiegeDeferredDeploymentSpawn(
+                    mission,
+                    missionPeer,
+                    authoritativeSide,
+                    currentPhase,
+                    out _);
 
             if (IsExactSiegeCommanderDeploymentWindowActive(mission, currentPhase, out _) &&
-                !allowExactSiegeCommanderDeploymentSpawn)
+                !allowExactSiegeCommanderDeploymentSpawn &&
+                !allowExactSiegeDeferredDeploymentSpawn)
             {
                 reason =
                     "siege deployment still active" +
@@ -35556,7 +35972,9 @@ namespace CoopSpectator.MissionBehaviors
                 out readinessSource,
                 out attackerActive,
                 out defenderActive);
-            if (!armiesReady && !allowExactSiegeCommanderDeploymentSpawn)
+            if (!armiesReady &&
+                !allowExactSiegeCommanderDeploymentSpawn &&
+                !allowExactSiegeDeferredDeploymentSpawn)
             {
                 reason =
                     "battlefield armies not ready" +
@@ -35568,7 +35986,11 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             if (!armiesReady)
-                readinessSource = "exact-siege-commander-deployment";
+            {
+                readinessSource = allowExactSiegeDeferredDeploymentSpawn
+                    ? "exact-siege-deferred-deployment-spawn"
+                    : "exact-siege-commander-deployment";
+            }
 
             return true;
         }

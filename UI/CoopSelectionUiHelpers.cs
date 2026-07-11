@@ -5,6 +5,7 @@ using System.Linq;
 using TaleWorlds.CampaignSystem;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
@@ -35,6 +36,7 @@ namespace CoopSpectator.UI
         public string BattleDataReadinessReason { get; set; }
         public string BattleDataLoadingProgressText { get; set; } = string.Empty;
         public bool CanSpawn { get; set; }
+        public bool CanQueueSpawnAfterDeployment { get; set; }
         public bool CanShowOverlay { get; set; }
         public bool ReconnectSelectionContractActive { get; set; }
         public bool ShouldSuppressLivePreview { get; set; }
@@ -225,6 +227,15 @@ namespace CoopSpectator.UI
                     null)
                 : string.Empty;
 
+            bool canQueueSpawnAfterDeployment = CanQueueExactSiegeSpawnAfterDeployment(
+                status,
+                battleState,
+                battleDataReady,
+                effectiveSide,
+                effectiveSelectableEntryIds,
+                selectedEntryId,
+                hasLocalControlledAgent,
+                reconnectSelectionContractActive);
             CoopSelectionUiSnapshot snapshot = new CoopSelectionUiSnapshot
             {
                 Status = status,
@@ -250,6 +261,7 @@ namespace CoopSpectator.UI
                 BattleDataReadinessReason = status?.BattleDataReadinessReason ?? string.Empty,
                 BattleDataLoadingProgressText = battleDataLoadingProgressText,
                 CanSpawn = battleDataReady && (status?.CanRespawn ?? false) && !string.IsNullOrWhiteSpace(selectedEntryId),
+                CanQueueSpawnAfterDeployment = canQueueSpawnAfterDeployment,
                 CanShowOverlay = ShouldOverlayBeVisible(status, hasLocalControlledAgent),
                 ReconnectSelectionContractActive = reconnectSelectionContractActive,
                 ShouldSuppressLivePreview = reconnectSelectionContractActive
@@ -258,6 +270,55 @@ namespace CoopSpectator.UI
             snapshot.TeamRefreshKey = BuildTeamRefreshKey(snapshot);
             snapshot.ClassRefreshKey = BuildClassRefreshKey(snapshot);
             return snapshot;
+        }
+
+        private static bool CanQueueExactSiegeSpawnAfterDeployment(
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
+            BattleRuntimeState battleState,
+            bool battleDataReady,
+            BattleSideEnum effectiveSide,
+            IReadOnlyCollection<string> effectiveSelectableEntryIds,
+            string selectedEntryId,
+            bool hasLocalControlledAgent,
+            bool reconnectSelectionContractActive)
+        {
+            if (!battleDataReady ||
+                hasLocalControlledAgent ||
+                reconnectSelectionContractActive ||
+                status == null ||
+                status.HasAgent ||
+                status.CanRespawn ||
+                effectiveSide == BattleSideEnum.None ||
+                string.IsNullOrWhiteSpace(selectedEntryId) ||
+                effectiveSelectableEntryIds == null ||
+                !effectiveSelectableEntryIds.Contains(selectedEntryId, StringComparer.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext = battleState?.ScenarioContext;
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                return false;
+
+            string battlePhase = !string.IsNullOrWhiteSpace(status.BattlePhase)
+                ? status.BattlePhase
+                : CoopBattlePhaseBridgeFile.ReadStatus()?.Phase.ToString() ?? string.Empty;
+            if (!Enum.TryParse(battlePhase, true, out CoopBattlePhase parsedPhase) ||
+                parsedPhase < CoopBattlePhase.SideSelection ||
+                parsedPhase >= CoopBattlePhase.BattleActive)
+            {
+                return false;
+            }
+
+            string readinessStage = status.BattleDataReadinessStage ?? string.Empty;
+            if (!string.Equals(readinessStage, "UnitSelection", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(readinessStage, "CommanderDeployment", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = ResolveEntryState(effectiveSide, selectedEntryId);
+            return entryState != null && !IsCommanderEntry(battleState, effectiveSide, entryState);
         }
 
         private static bool ShouldRequireExactSiegePreSelectionMaterialization(
@@ -347,8 +408,11 @@ namespace CoopSpectator.UI
             if (!snapshot.BattleDataReady)
                 return string.Empty;
 
-            return snapshot.CanSpawn
-                ? "Deploy into the selected living unit."
+            if (snapshot.CanSpawn)
+                return "Deploy into the selected living unit.";
+
+            return snapshot.CanQueueSpawnAfterDeployment
+                ? "Confirm the selected unit and wait for deployment to finish."
                 : "Choose a living unit, then deploy.";
         }
 
@@ -449,7 +513,9 @@ namespace CoopSpectator.UI
         {
             RosterEntryState entryState = ResolveEntryState(snapshot?.EffectiveSide ?? BattleSideEnum.None, snapshot?.SelectedEntryId);
             if (entryState == null)
-                return snapshot?.CanSpawn == true ? "Ready to deploy." : "Choose a unit to preview.";
+                return snapshot?.CanSpawn == true || snapshot?.CanQueueSpawnAfterDeployment == true
+                    ? "Ready to deploy."
+                    : "Choose a unit to preview.";
 
             string partyName = ResolvePartyDisplayName(snapshot?.BattleState, entryState);
             if (!string.IsNullOrWhiteSpace(partyName))
@@ -1010,6 +1076,7 @@ namespace CoopSpectator.UI
                 snapshot.EffectiveSide.ToString(),
                 snapshot.SelectedEntryId ?? string.Empty,
                 snapshot.CanSpawn.ToString(),
+                snapshot.CanQueueSpawnAfterDeployment.ToString(),
                 snapshot.IsBattleEnded.ToString(),
                 ResolveSideDisplayName(snapshot.BattleState, snapshot.EffectiveSide),
                 ResolveCommanderBadgeText(snapshot, snapshot.SelectedEntryId)

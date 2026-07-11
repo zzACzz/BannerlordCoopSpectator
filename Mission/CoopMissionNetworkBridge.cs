@@ -75,6 +75,16 @@ namespace CoopSpectator.MissionBehaviors
                 (source ?? "commander-deployment") + " FinishCommanderDeployment");
         }
 
+        public static bool TryQueueSpawnAfterDeployment(BattleSideEnum side, string entryId, string source)
+        {
+            TrySelectEntry(side, entryId, (source ?? "deployment-wait") + " SelectEntry");
+            return TrySendClientRequest(
+                CoopBattleSelectionRequestKind.QueueSpawnAfterDeployment,
+                side,
+                entryId,
+                (source ?? "deployment-wait") + " QueueSpawnAfterDeployment");
+        }
+
         public static bool TrySyncCommanderDeploymentFormationAssignments(
             BattleSideEnum side,
             byte[] assignmentBytes,
@@ -299,7 +309,8 @@ namespace CoopSpectator.MissionBehaviors
                 requestKind != CoopBattleSelectionRequestKind.SpawnNow &&
                 requestKind != CoopBattleSelectionRequestKind.BeginCommanderDeployment &&
                 requestKind != CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment &&
-                requestKind != CoopBattleSelectionRequestKind.FinishCommanderDeployment)
+                requestKind != CoopBattleSelectionRequestKind.FinishCommanderDeployment &&
+                requestKind != CoopBattleSelectionRequestKind.QueueSpawnAfterDeployment)
             {
                 return false;
             }
@@ -2050,7 +2061,8 @@ namespace CoopSpectator.MissionBehaviors
                     message.RequestKind == CoopBattleSelectionRequestKind.Spectate ||
                     message.RequestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment ||
                     message.RequestKind == CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment ||
-                    message.RequestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment;
+                    message.RequestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment ||
+                    message.RequestKind == CoopBattleSelectionRequestKind.QueueSpawnAfterDeployment;
                 bool shouldForceStatusAfterRejectedInteractiveRequest =
                     !applied &&
                     (message.RequestKind == CoopBattleSelectionRequestKind.SelectSide ||
@@ -2058,7 +2070,8 @@ namespace CoopSpectator.MissionBehaviors
                      message.RequestKind == CoopBattleSelectionRequestKind.SpawnNow ||
                      message.RequestKind == CoopBattleSelectionRequestKind.BeginCommanderDeployment ||
                      message.RequestKind == CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment ||
-                     message.RequestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment);
+                     message.RequestKind == CoopBattleSelectionRequestKind.FinishCommanderDeployment ||
+                     message.RequestKind == CoopBattleSelectionRequestKind.QueueSpawnAfterDeployment);
                 if ((applied && shouldForceImmediateStatus) || shouldForceStatusAfterRejectedInteractiveRequest)
                     TrySendImmediatePeerStatusPayloads(peer);
             }
@@ -2649,21 +2662,31 @@ namespace CoopSpectator.MissionBehaviors
                 .ToList();
             List<DeploymentPoint> deploymentPoints = EnumerateCommanderDeploymentPoints()
                 .Where(deploymentPoint => deploymentPoint != null &&
-                                          deploymentPoint.Side == side &&
-                                          deploymentPoint.IsDeployed &&
-                                          deploymentPoint.DeployedWeapon is SiegeWeapon)
+                                          deploymentPoint.Side == side)
                 .ToList();
 
             int sentCount = 0;
             int failedCount = 0;
+            int selectedPointCount = 0;
+            int clearedPointCount = 0;
             var details = new List<string>();
             foreach (DeploymentPoint deploymentPoint in deploymentPoints)
             {
-                SiegeWeapon siegeWeapon = deploymentPoint.DeployedWeapon as SiegeWeapon;
-                if (siegeWeapon == null || siegeWeapon.Side != side)
-                    continue;
+                SiegeWeapon siegeWeapon = deploymentPoint.IsDeployed
+                    ? deploymentPoint.DeployedWeapon as SiegeWeapon
+                    : null;
+                bool clearSelection = siegeWeapon == null || siegeWeapon.Side != side;
+                if (clearSelection)
+                    clearedPointCount++;
+                else
+                    selectedPointCount++;
 
-                string siegeWeaponTypeName = BuildCommanderDeploymentSiegeWeaponTypeName(siegeWeapon);
+                MissionObjectId siegeWeaponId = clearSelection
+                    ? MissionObjectId.Invalid
+                    : siegeWeapon.Id;
+                string siegeWeaponTypeName = clearSelection
+                    ? string.Empty
+                    : BuildCommanderDeploymentSiegeWeaponTypeName(siegeWeapon);
                 Vec3 deploymentPointPosition = ResolveCommanderDeploymentPointPosition(deploymentPoint);
                 foreach (NetworkCommunicator peer in peers)
                 {
@@ -2674,9 +2697,9 @@ namespace CoopSpectator.MissionBehaviors
                             side,
                             deploymentPoint.Id,
                             deploymentPointPosition,
-                            siegeWeapon.Id,
+                            siegeWeaponId,
                             siegeWeaponTypeName,
-                            clearSelection: false));
+                            clearSelection));
                         GameNetwork.EndModuleEventAsServer();
                         sentCount++;
                     }
@@ -2700,6 +2723,8 @@ namespace CoopSpectator.MissionBehaviors
             diagnostics =
                 "Side=" + side +
                 " Points=" + deploymentPoints.Count +
+                " SelectedPoints=" + selectedPointCount +
+                " ClearedPoints=" + clearedPointCount +
                 " Peers=" + peers.Count +
                 " Sent=" + sentCount +
                 " Failed=" + failedCount +

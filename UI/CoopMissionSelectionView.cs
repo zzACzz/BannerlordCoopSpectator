@@ -99,11 +99,13 @@ namespace CoopSpectator.UI
         private bool _inputCapturedCommanderDeploymentMode;
         private bool _hadLocalControlledAgent;
         private bool _startBattleInstructionShown;
+        private bool _autoDeployInstructionShown;
         private bool _spectatorOverlayHidden;
         private DateTime _overlaySuppressedUntilUtc = DateTime.MinValue;
         private float _reopenSelectionHotkeyCooldown;
         private string _lastAppliedRefreshKey = string.Empty;
         private bool _localSpawnPending;
+        private bool _localSpawnPendingWaitsForDeployment;
         private DateTime _localSpawnPendingStartedUtc = DateTime.MinValue;
         private string _localSpawnPendingEntryId;
         private BattleSideEnum _localSpawnPendingSide = BattleSideEnum.None;
@@ -138,6 +140,7 @@ namespace CoopSpectator.UI
             _overlayStartupDelay = InitialOverlayDelaySeconds;
             _hadLocalControlledAgent = HasLocalControlledAgent();
             _startBattleInstructionShown = false;
+            _autoDeployInstructionShown = false;
             _reconnectSelectionContractActive = false;
             _lastReconnectSelectionContractLogKey = string.Empty;
             _lastIgnoredEntryStatusLogKey = string.Empty;
@@ -3725,7 +3728,10 @@ namespace CoopSpectator.UI
         {
             bool hasLocalControlledAgent = HasLocalControlledAgent();
             CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
-            if (snapshot == null || !snapshot.CanSpawn || snapshot.EffectiveSide == BattleSideEnum.None || string.IsNullOrWhiteSpace(snapshot.SelectedEntryId))
+            if (snapshot == null ||
+                (!snapshot.CanSpawn && !snapshot.CanQueueSpawnAfterDeployment) ||
+                snapshot.EffectiveSide == BattleSideEnum.None ||
+                string.IsNullOrWhiteSpace(snapshot.SelectedEntryId))
                 return;
 
             _selectedSideOverride = snapshot.EffectiveSide;
@@ -3742,7 +3748,23 @@ namespace CoopSpectator.UI
                 return;
             }
 
-            MarkLocalSpawnPending(snapshot);
+            if (snapshot.CanQueueSpawnAfterDeployment)
+            {
+                MarkLocalSpawnPending(snapshot, waitsForDeployment: true);
+                _overlaySuppressedUntilUtc = DateTime.UtcNow + LocalSpawnOverlaySuppressionDuration;
+                if (!CoopBattleNetworkRequestTransport.TryQueueSpawnAfterDeployment(
+                        snapshot.EffectiveSide,
+                        snapshot.SelectedEntryId,
+                        "CoopClassLoadoutUI DeploymentWait"))
+                {
+                    ClearLocalSpawnPending("deployment-wait-request-write-failed");
+                }
+
+                RefreshOverlay(force: true, hasLocalControlledAgent);
+                return;
+            }
+
+            MarkLocalSpawnPending(snapshot, waitsForDeployment: false);
             _overlaySuppressedUntilUtc = DateTime.UtcNow + LocalSpawnOverlaySuppressionDuration;
             if (!TrySendPendingSpawnRequests("CoopClassLoadoutUI Spawn", includeSelectEntry: true))
                 ClearLocalSpawnPending("spawn-request-write-failed");
@@ -3919,7 +3941,7 @@ namespace CoopSpectator.UI
                 : CoopBattleNetworkRequestTransport.TryFinishCommanderDeployment(snapshot.EffectiveSide, snapshot.SelectedEntryId, source);
             if (queued && !autoDeploy)
             {
-                MarkLocalSpawnPending(snapshot);
+                MarkLocalSpawnPending(snapshot, waitsForDeployment: false);
                 _overlaySuppressedUntilUtc = DateTime.UtcNow + LocalSpawnOverlaySuppressionDuration;
                 ReleaseOverlayInput();
                 ReleaseCurrentMovie();
@@ -4013,9 +4035,10 @@ namespace CoopSpectator.UI
                    string.Equals(status.LifecycleState, "DeadAwaitingRespawn", StringComparison.OrdinalIgnoreCase);
         }
 
-        private void MarkLocalSpawnPending(CoopSelectionUiSnapshot snapshot)
+        private void MarkLocalSpawnPending(CoopSelectionUiSnapshot snapshot, bool waitsForDeployment)
         {
             _localSpawnPending = true;
+            _localSpawnPendingWaitsForDeployment = waitsForDeployment;
             _localSpawnPendingStartedUtc = DateTime.UtcNow;
             _localSpawnPendingEntryId = snapshot?.SelectedEntryId;
             _localSpawnPendingSide = snapshot?.EffectiveSide ?? BattleSideEnum.None;
@@ -4024,7 +4047,8 @@ namespace CoopSpectator.UI
             ModLogger.Info(
                 "CoopMissionSelectionView: marked local spawn pending. " +
                 "Side=" + _localSpawnPendingSide +
-                " EntryId=" + (_localSpawnPendingEntryId ?? string.Empty));
+                " EntryId=" + (_localSpawnPendingEntryId ?? string.Empty) +
+                " WaitsForDeployment=" + _localSpawnPendingWaitsForDeployment);
         }
 
         private void ClearLocalSpawnPending(string source)
@@ -4038,6 +4062,7 @@ namespace CoopSpectator.UI
                 " Side=" + _localSpawnPendingSide +
                 " EntryId=" + (_localSpawnPendingEntryId ?? string.Empty));
             _localSpawnPending = false;
+            _localSpawnPendingWaitsForDeployment = false;
             _localSpawnPendingStartedUtc = DateTime.MinValue;
             _localSpawnPendingEntryId = null;
             _localSpawnPendingSide = BattleSideEnum.None;
@@ -4062,6 +4087,21 @@ namespace CoopSpectator.UI
             {
                 ClearLocalSpawnPending("authoritative-agent-ready");
                 return false;
+            }
+
+            if (_localSpawnPendingWaitsForDeployment)
+            {
+                if (IsExactSiegeDeploymentWaitStillActive(snapshot))
+                    return true;
+
+                _localSpawnPendingWaitsForDeployment = false;
+                _localSpawnPendingStartedUtc = DateTime.UtcNow;
+                _localSpawnPendingLastRequestUtc = DateTime.MinValue;
+                _localSpawnPendingRequestAttemptCount = 0;
+                ModLogger.Info(
+                    "CoopMissionSelectionView: deployment wait ended; continuing as normal local spawn pending. " +
+                    "Side=" + _localSpawnPendingSide +
+                    " EntryId=" + (_localSpawnPendingEntryId ?? string.Empty));
             }
 
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = snapshot?.Status;
@@ -4141,6 +4181,36 @@ namespace CoopSpectator.UI
 
             ClearLocalSpawnPending("state-no-longer-pending");
             return false;
+        }
+
+        private static bool IsExactSiegeDeploymentWaitStillActive(CoopSelectionUiSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return true;
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status = snapshot.Status;
+            if (status?.CanRespawn == true)
+                return false;
+
+            string spawnStatus = status?.SpawnStatus ?? string.Empty;
+            if (string.Equals(spawnStatus, CoopBattleSpawnStatus.Pending.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(spawnStatus, CoopBattleSpawnStatus.Validating.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(spawnStatus, CoopBattleSpawnStatus.Validated.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string lifecycle = status?.LifecycleState ?? snapshot.Lifecycle ?? string.Empty;
+            if (string.Equals(lifecycle, CoopBattlePeerLifecycleStatus.SpawnQueued.ToString(), StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            string battlePhase = snapshot.BattlePhase ?? status?.BattlePhase ?? string.Empty;
+            if (Enum.TryParse(battlePhase, true, out CoopBattlePhase parsedPhase))
+                return parsedPhase < CoopBattlePhase.BattleActive;
+
+            string readinessStage = snapshot.BattleDataReadinessStage ?? status?.BattleDataReadinessStage ?? string.Empty;
+            return string.Equals(readinessStage, "UnitSelection", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(readinessStage, "CommanderDeployment", StringComparison.OrdinalIgnoreCase);
         }
 
         private bool TrySendPendingSpawnRequests(string source, bool includeSelectEntry)
@@ -5279,10 +5349,17 @@ namespace CoopSpectator.UI
                 return;
 
             _startBattleHotkeyCooldown -= dt;
-            if (_startBattleHotkeyCooldown > 0f || !hasLocalControlledAgent || !Input.IsKeyPressed(InputKey.H))
+            if (_startBattleHotkeyCooldown > 0f || !Input.IsKeyPressed(InputKey.H))
                 return;
 
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
+            bool isAutoDeploymentRequest =
+                !hasLocalControlledAgent &&
+                _localSpawnPending &&
+                _localSpawnPendingWaitsForDeployment;
+            if (!hasLocalControlledAgent && !isAutoDeploymentRequest)
+                return;
+
             bool canStartBattleNow = snapshot != null && snapshot.CanStartBattle;
             if (!canStartBattleNow)
             {
@@ -5297,22 +5374,52 @@ namespace CoopSpectator.UI
                 return;
             }
 
-            if (CoopBattlePhaseBridgeFile.WriteStartBattleRequest("Battle-map client H hotkey via CoopMissionSelectionView"))
+            string requestSource = isAutoDeploymentRequest
+                ? "Battle-map host H hotkey auto-deploy via CoopMissionSelectionView"
+                : "Battle-map client H hotkey via CoopMissionSelectionView";
+            if (CoopBattlePhaseBridgeFile.WriteStartBattleRequest(requestSource))
             {
                 _startBattleHotkeyCooldown = StartBattleHotkeyCooldownSeconds;
-                InformationManager.DisplayMessage(new InformationMessage("Coop Battle: start requested"));
-                ModLogger.Info("CoopMissionSelectionView: wrote start battle request from H hotkey.");
+                InformationManager.DisplayMessage(
+                    new InformationMessage(
+                        isAutoDeploymentRequest
+                            ? "Coop Battle: automatic deployment of both armies requested"
+                            : "Coop Battle: start requested"));
+                ModLogger.Info(
+                    isAutoDeploymentRequest
+                        ? "CoopMissionSelectionView: wrote both-armies auto-deployment request from host H hotkey."
+                        : "CoopMissionSelectionView: wrote start battle request from H hotkey.");
             }
         }
 
         private void TryShowStartBattleInstruction(bool hasLocalControlledAgent)
         {
-            if (_startBattleInstructionShown || !hasLocalControlledAgent || !GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
                 return;
 
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot = CoopBattleEntryStatusBridgeFile.ReadStatus();
             bool canStartBattleNow = snapshot != null && snapshot.CanStartBattle;
             if (!canStartBattleNow)
+                return;
+
+            if (!hasLocalControlledAgent)
+            {
+                if (_autoDeployInstructionShown ||
+                    !_localSpawnPending ||
+                    !_localSpawnPendingWaitsForDeployment)
+                {
+                    return;
+                }
+
+                _autoDeployInstructionShown = true;
+                InformationManager.DisplayMessage(
+                    new InformationMessage("Coop Battle: press H to auto-deploy both armies."));
+                ModLogger.Info(
+                    "CoopMissionSelectionView: showed one-shot both-armies auto-deployment instruction for local host peer.");
+                return;
+            }
+
+            if (_startBattleInstructionShown)
                 return;
 
             _startBattleInstructionShown = true;

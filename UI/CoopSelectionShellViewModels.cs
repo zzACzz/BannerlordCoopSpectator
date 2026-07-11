@@ -205,7 +205,7 @@ namespace CoopSpectator.UI
             ShowSelectedCommanderBadge = !string.IsNullOrWhiteSpace(SelectedCommanderBadgeText);
             RefreshSelectedCard(snapshot);
             IsAttacker = snapshot?.EffectiveSide == BattleSideEnum.Attacker;
-            CanSpawn = snapshot?.CanSpawn == true;
+            CanSpawn = snapshot?.CanSpawn == true || snapshot?.CanQueueSpawnAfterDeployment == true;
             string selectedEntryId = snapshot?.SelectedEntryId ?? string.Empty;
             string unitListSignature = BuildUnitListSignature(snapshot, orderedEntryIds);
             bool unitListChanged = force || !string.Equals(_lastUnitListSignature, unitListSignature, StringComparison.Ordinal);

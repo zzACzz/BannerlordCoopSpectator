@@ -1936,6 +1936,7 @@ namespace CoopSpectator.Infrastructure
                         {
                             SiegeWeapon movedWeapon = otherPoint.DeployedWeapon as SiegeWeapon;
                             otherPoint.Disband();
+                            otherPoint.Hide();
                             disbandedOtherPoints++;
                             visualDiagnostics.Add("OtherDisband={" +
                                                   CoopSiegeMachineDeploymentController.NormalizeLocalDeployedSiegeWeaponVisualTree(
@@ -1961,12 +1962,21 @@ namespace CoopSpectator.Infrastructure
                                           "}");
                 }
 
+                deploymentPoint.Hide();
+                visualDiagnostics.Add("TargetBaselineHidden=True");
+
                 if (!clearSelection &&
                     siegeWeapon != null &&
                     !ReferenceEquals(deploymentPoint.DeployedWeapon, siegeWeapon))
                 {
                     deploymentPoint.Deploy(siegeWeapon);
                     deployedTargetPoint = true;
+                }
+                else if (!clearSelection &&
+                         siegeWeapon != null &&
+                         ReferenceEquals(deploymentPoint.DeployedWeapon, siegeWeapon))
+                {
+                    deploymentPoint.Show();
                 }
 
                 if (!clearSelection && siegeWeapon != null)
