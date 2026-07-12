@@ -5088,25 +5088,34 @@ namespace CoopSpectator.UI
                 return;
             }
 
-            if (!TryResolveCameraPreviewAgent(snapshot, out Agent previewAgent))
+            bool resolvedExactPreviewAgent = TryResolveCameraPreviewAgent(snapshot, out Agent previewAgent);
+            if (!resolvedExactPreviewAgent &&
+                !TryResolveCameraPreviewRepresentative(snapshot, out previewAgent))
             {
                 ClearCameraPreviewTarget("camera-preview-target-missing");
                 return;
             }
 
             ScreenBase missionScreen = MissionScreen;
-            if (missionScreen == null || !TrySetMissionScreenPreviewFollowTarget(missionScreen, previewAgent))
+            if (missionScreen == null)
             {
                 ClearCameraPreviewTarget("camera-preview-screen-unavailable");
                 return;
             }
 
             SetActiveCameraPreviewTarget(previewAgent, snapshot.SelectedEntryId);
+            if (!TrySetMissionScreenPreviewFollowTarget(missionScreen, previewAgent))
+            {
+                ClearCameraPreviewTarget("camera-preview-screen-unavailable");
+                return;
+            }
+
             LogCameraPreviewState(
                 "focus:" + previewAgent.Index + ":" + snapshot.SelectedEntryId,
-                "focused camera preview on selected live unit. " +
+                "focused camera preview on selected unit representative. " +
                 "AgentIndex=" + previewAgent.Index +
                 " EntryId=" + snapshot.SelectedEntryId +
+                " Exact=" + resolvedExactPreviewAgent +
                 " Side=" + snapshot.EffectiveSide);
         }
 
@@ -5196,6 +5205,97 @@ namespace CoopSpectator.UI
             return false;
         }
 
+        private bool TryResolveCameraPreviewRepresentative(
+            CoopSelectionUiSnapshot snapshot,
+            out Agent previewAgent)
+        {
+            previewAgent = null;
+            Mission mission = Mission;
+            RosterEntryState selectedEntryState = BattleSnapshotRuntimeState.GetEntryState(snapshot?.SelectedEntryId);
+            if (selectedEntryState == null ||
+                mission?.AllAgents == null ||
+                snapshot.EffectiveSide == BattleSideEnum.None)
+            {
+                return false;
+            }
+
+            int bestScore = int.MinValue;
+            for (int agentIndex = 0; agentIndex < mission.AllAgents.Count; agentIndex++)
+            {
+                Agent candidate = mission.AllAgents[agentIndex];
+                if (!IsCameraPreviewCandidate(candidate, snapshot.EffectiveSide) ||
+                    candidate.Controller == AgentControllerType.Player)
+                {
+                    continue;
+                }
+
+                RosterEntryState candidateEntryState = null;
+                if (CoopMissionSpawnLogic.TryResolveSelectableEntryId(candidate, out string candidateEntryId))
+                    candidateEntryState = BattleSnapshotRuntimeState.GetEntryState(candidateEntryId);
+
+                int candidateScore = ScoreCameraPreviewRepresentative(
+                    selectedEntryState,
+                    candidateEntryState,
+                    candidate.Character?.StringId);
+                if (candidateScore <= 0 ||
+                    (candidateScore == bestScore &&
+                     previewAgent != null &&
+                     candidate.Index >= previewAgent.Index))
+                {
+                    continue;
+                }
+
+                bestScore = candidateScore;
+                previewAgent = candidate;
+            }
+
+            return previewAgent != null;
+        }
+
+        private static int ScoreCameraPreviewRepresentative(
+            RosterEntryState selectedEntryState,
+            RosterEntryState candidateEntryState,
+            string candidateCharacterId)
+        {
+            if (selectedEntryState == null)
+                return 0;
+
+            int score = 0;
+            if (candidateEntryState != null)
+            {
+                if (AreNonEmptyIdsEqual(selectedEntryState.OriginalCharacterId, candidateEntryState.OriginalCharacterId))
+                    score += 1000;
+                if (AreNonEmptyIdsEqual(selectedEntryState.SpawnTemplateId, candidateEntryState.SpawnTemplateId))
+                    score += 500;
+                if (AreNonEmptyIdsEqual(selectedEntryState.CharacterId, candidateEntryState.CharacterId))
+                    score += 450;
+                if (AreNonEmptyIdsEqual(selectedEntryState.CampaignFormationClass, candidateEntryState.CampaignFormationClass))
+                    score += 160;
+                if (selectedEntryState.IsMounted == candidateEntryState.IsMounted)
+                    score += 40;
+                if (selectedEntryState.IsRanged == candidateEntryState.IsRanged)
+                    score += 40;
+                if (selectedEntryState.HasShield == candidateEntryState.HasShield)
+                    score += 10;
+                if (selectedEntryState.HasThrown == candidateEntryState.HasThrown)
+                    score += 10;
+            }
+
+            if (AreNonEmptyIdsEqual(selectedEntryState.SpawnTemplateId, candidateCharacterId))
+                score += 500;
+            if (AreNonEmptyIdsEqual(selectedEntryState.CharacterId, candidateCharacterId))
+                score += 450;
+
+            return score;
+        }
+
+        private static bool AreNonEmptyIdsEqual(string left, string right)
+        {
+            return !string.IsNullOrWhiteSpace(left) &&
+                   !string.IsNullOrWhiteSpace(right) &&
+                   string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+        }
+
         internal static bool IsCommanderDeploymentPlacementInputActive()
         {
             return _commanderDeploymentPlacementInputActive;
@@ -5269,13 +5369,12 @@ namespace CoopSpectator.UI
             if (missionScreen == null || agent == null)
                 return false;
 
-            if (TrySetMissionScreenLastFollowedAgent(missionScreen, agent))
-            {
+            bool lastFollowedAgentSet = TrySetMissionScreenLastFollowedAgent(missionScreen, agent);
+            if (lastFollowedAgentSet)
                 TrySetInstanceProperty(missionScreen, "LastFollowedAgentVisuals", null);
-                return true;
-            }
 
-            return TrySetMissionScreenAgentToFollowOverride(missionScreen, agent);
+            bool agentToFollowOverrideSet = TrySetMissionScreenAgentToFollowOverride(missionScreen, agent);
+            return lastFollowedAgentSet || agentToFollowOverrideSet;
         }
 
         private static bool TrySetMissionScreenLastFollowedAgent(ScreenBase missionScreen, Agent agent)

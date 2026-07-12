@@ -18304,7 +18304,8 @@ namespace CoopSpectator.MissionBehaviors
                 out Vec2 formationDirection,
                 out string spawnFrameSource,
                 out float formationPlannedWidth,
-                out float formationPlannedDepth);
+                out float formationPlannedDepth,
+                out int formationPlannedTroopCount);
 
             if (formationDirection.LengthSquared < 0.001f)
                 formationDirection = side == BattleSideEnum.Attacker ? new Vec2(1f, 0f) : new Vec2(-1f, 0f);
@@ -18313,6 +18314,12 @@ namespace CoopSpectator.MissionBehaviors
             Vec3 forward = new Vec3(formationDirection.x, formationDirection.y, 0f);
             Vec3 right = new Vec3(-formationDirection.y, formationDirection.x, 0f);
             Vec3 basePosition = formationSpawnPosition;
+            Formation targetFormation = team.GetFormation(formationClass);
+            bool useNativeFormationSpawn =
+                !isReinforcement &&
+                targetFormation != null &&
+                formationPlannedTroopCount > 0 &&
+                string.Equals(spawnFrameSource, "formation-repaired", StringComparison.Ordinal);
 
             ExactEntryCompatibilityDiagnostic exactEntryCompatibility = GetExactEntryCompatibilityDiagnostic(entryState);
             string exactEntryCompatibilitySummary = BuildExactEntryCompatibilityShortSummary(exactEntryCompatibility);
@@ -18360,6 +18367,10 @@ namespace CoopSpectator.MissionBehaviors
                 float lateralOffset = (column - ((columnCount - 1) * 0.5f)) * lateralSpacing;
                 float depthOffset = row * depthSpacing * (side == BattleSideEnum.Attacker ? -1f : 1f);
                 Vec3 spawnPosition = basePosition + right * lateralOffset + forward * depthOffset;
+                int formationTroopSpawnIndex = targetFormation?.CountOfUnits ?? absoluteIndex;
+                int formationTroopSpawnCount = Math.Max(
+                    formationPlannedTroopCount,
+                    formationTroopSpawnIndex + 1);
 
                 string appliedArmorOverrides;
                 string appliedCombatProfile;
@@ -18370,6 +18381,11 @@ namespace CoopSpectator.MissionBehaviors
                     troop,
                     entryState,
                     formationClass,
+                    targetFormation,
+                    formationTroopSpawnCount,
+                    formationTroopSpawnIndex,
+                    useNativeFormationSpawn,
+                    isReinforcement,
                     spawnPosition,
                     formationDirection,
                     out appliedArmorOverrides,
@@ -18438,13 +18454,15 @@ namespace CoopSpectator.MissionBehaviors
             out Vec2 spawnDirection,
             out string spawnFrameSource,
             out float plannedWidth,
-            out float plannedDepth)
+            out float plannedDepth,
+            out int plannedTroopCount)
         {
             spawnPosition = new Vec3(0f, 0f, 0f);
             spawnDirection = side == BattleSideEnum.Attacker ? new Vec2(1f, 0f) : new Vec2(-1f, 0f);
             spawnFrameSource = "direct-fallback";
             plannedWidth = 0f;
             plannedDepth = 0f;
+            plannedTroopCount = 0;
 
             bool useMaterializedSiegeReinforcements =
                 isReinforcement &&
@@ -18459,7 +18477,8 @@ namespace CoopSpectator.MissionBehaviors
                     out spawnDirection,
                     out _,
                     out plannedWidth,
-                    out plannedDepth))
+                    out plannedDepth,
+                    out plannedTroopCount))
             {
                 spawnFrameSource = "siege-reinforcement-plan";
                 return;
@@ -18477,7 +18496,8 @@ namespace CoopSpectator.MissionBehaviors
                     out spawnDirection,
                     out string repairedSpawnDiagnostics,
                     out plannedWidth,
-                    out plannedDepth))
+                    out plannedDepth,
+                    out plannedTroopCount))
                 {
                     spawnFrameSource = isReinforcement ? "formation-reinforcement-repaired" : "formation-repaired";
                     return;
@@ -18538,13 +18558,15 @@ namespace CoopSpectator.MissionBehaviors
             out Vec2 spawnDirection,
             out string diagnostics,
             out float plannedWidth,
-            out float plannedDepth)
+            out float plannedDepth,
+            out int plannedTroopCount)
         {
             spawnPosition = new Vec3(0f, 0f, 0f);
             spawnDirection = Vec2.Invalid;
             diagnostics = null;
             plannedWidth = 0f;
             plannedDepth = 0f;
+            plannedTroopCount = 0;
 
             if (mission == null || team == null)
             {
@@ -18616,6 +18638,7 @@ namespace CoopSpectator.MissionBehaviors
                     plannedWidth = Math.Max(0f, formationPlan.PlannedWidth);
                     plannedDepth = Math.Max(0f, formationPlan.PlannedDepth);
                 }
+                plannedTroopCount = Math.Max(0, formationPlan.PlannedTroopCount);
 
                 Vec2 direction = formationPlan.GetDirection();
                 if (direction.LengthSquared <= 0.001f)
@@ -18644,6 +18667,11 @@ namespace CoopSpectator.MissionBehaviors
             BasicCharacterObject troop,
             RosterEntryState entryState,
             FormationClass formationClass,
+            Formation targetFormation,
+            int formationTroopSpawnCount,
+            int formationTroopSpawnIndex,
+            bool useNativeFormationSpawn,
+            bool isReinforcement,
             Vec3 spawnPosition,
             Vec2 direction,
             out string appliedArmorOverrides,
@@ -18756,9 +18784,22 @@ namespace CoopSpectator.MissionBehaviors
                     ApplyResolvedArmyClothingColors(buildData, team);
                     buildData.Controller(AgentControllerType.AI);
                     buildData.TroopOrigin(origin);
-                    buildData.InitialPosition(in spawnPosition);
-                    buildData.InitialDirection(in direction);
-                    buildData.SpawnsIntoOwnFormation(true);
+                    buildData.IsReinforcement(isReinforcement);
+                    if (useNativeFormationSpawn &&
+                        targetFormation != null &&
+                        formationTroopSpawnCount > 0 &&
+                        formationTroopSpawnIndex >= 0)
+                    {
+                        buildData.Formation(targetFormation);
+                        buildData.FormationTroopSpawnCount(formationTroopSpawnCount);
+                        buildData.FormationTroopSpawnIndex(formationTroopSpawnIndex);
+                    }
+                    else
+                    {
+                        buildData.InitialPosition(in spawnPosition);
+                        buildData.InitialDirection(in direction);
+                        buildData.SpawnsIntoOwnFormation(true);
+                    }
                     buildData.SpawnsUsingOwnTroopClass(true);
                     if (spawnEquipment != null)
                         buildData.Equipment(spawnEquipment);
@@ -18788,14 +18829,15 @@ namespace CoopSpectator.MissionBehaviors
                         if ((int)resolvedFormationClass < 0 || (int)resolvedFormationClass >= team.FormationsIncludingSpecialAndEmpty.Count())
                             resolvedFormationClass = FormationClass.Infantry;
 
-                        Formation targetFormation = team.GetFormation(resolvedFormationClass);
-                        if (targetFormation != null && !ReferenceEquals(agent.Formation, targetFormation))
+                        Formation resolvedTargetFormation = targetFormation ?? team.GetFormation(resolvedFormationClass);
+                        if (resolvedTargetFormation != null && !ReferenceEquals(agent.Formation, resolvedTargetFormation))
                         {
-                            agent.Formation = targetFormation;
+                            agent.Formation = resolvedTargetFormation;
                             agent.ForceUpdateCachedAndFormationValues(updateOnlyMovement: false, arrangementChangeAllowed: false);
                         }
 
                         agent.SetAutomaticTargetSelection(true);
+                        agent.SetWatchState(Agent.WatchState.Alarmed);
                         agent.SetFiringOrder(FiringOrder.RangedWeaponUsageOrderEnum.FireAtWill);
                         appliedCombatProfile = TryApplyMaterializedCombatProfile(agent, entryState);
                         string roleMatrixInitialWield =
@@ -18806,7 +18848,7 @@ namespace CoopSpectator.MissionBehaviors
                             troop,
                             entryState,
                             formationClass,
-                            spawnPosition,
+                            useNativeFormationSpawn ? agent.Position : spawnPosition,
                             direction,
                             spawnEquipment,
                             spawnEquipmentSource,
