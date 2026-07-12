@@ -13365,8 +13365,17 @@ namespace CoopSpectator.MissionBehaviors
                         _battlePhaseHeldFormationUnitCounts.Remove(formationKey);
                         formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
                         formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
-                        formation.SetControlledByAI(true, true);
-                        int pulsedFormationAgents = TryPulseFormationAiEngage(formation, team);
+                        bool isPlayerOwnedFormation = formation.PlayerOwner != null;
+                        int pulsedFormationAgents = 0;
+                        if (isPlayerOwnedFormation)
+                        {
+                            formation.SetControlledByAI(false, false);
+                        }
+                        else
+                        {
+                            formation.SetControlledByAI(true, true);
+                            pulsedFormationAgents = TryPulseFormationAiEngage(formation, team);
+                        }
                         pulsedAgentCount += pulsedFormationAgents;
                         affectedFormationCount++;
 
@@ -13392,7 +13401,10 @@ namespace CoopSpectator.MissionBehaviors
                     team.HasAnyEnemyTeamsWithAgents(false))
                 {
                     team.ResetTactic();
-                    team.DelegateCommandToAI();
+                    CoopMissionNetworkBridge.ReapplyDelegatedFormationOwnership(
+                        mission,
+                        team,
+                        "battle-phase-release-after-tactic-reset");
                     delegatedTeamCount++;
                 }
             }
@@ -15200,8 +15212,13 @@ namespace CoopSpectator.MissionBehaviors
 
                 Formation formation = agent.Formation;
                 Team team = agent.Team;
-                if (formation == null || team == null || formation.CountOfUnits <= 0)
+                if (formation == null ||
+                    team == null ||
+                    formation.CountOfUnits <= 0 ||
+                    formation.PlayerOwner != null)
+                {
                     continue;
+                }
 
                 int formationKey = GetBattlePhaseFormationKey(team, formation);
                 if (!pulsedFormationKeys.Add(formationKey))
@@ -16558,8 +16575,12 @@ namespace CoopSpectator.MissionBehaviors
             int pulsedAgentCount = 0;
             foreach (Formation formation in team.FormationsIncludingSpecialAndEmpty)
             {
-                if (formation == null || formation.CountOfUnits <= 0)
+                if (formation == null ||
+                    formation.CountOfUnits <= 0 ||
+                    formation.PlayerOwner != null)
+                {
                     continue;
+                }
 
                 formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
                 formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
@@ -16570,7 +16591,10 @@ namespace CoopSpectator.MissionBehaviors
             if (team.HasTeamAi && team.HasAnyEnemyTeamsWithAgents(false))
             {
                 team.ResetTactic();
-                team.DelegateCommandToAI();
+                CoopMissionNetworkBridge.ReapplyDelegatedFormationOwnership(
+                    team.Mission,
+                    team,
+                    "reinforcement-wave-after-tactic-reset");
             }
 
             return pulsedAgentCount;
@@ -16680,6 +16704,7 @@ namespace CoopSpectator.MissionBehaviors
                 : null;
             string commanderEntryId = commanderEntry?.EntryId;
             bool commanderEntryIncluded = false;
+            bool preserveExactCampaignHeroes = ShouldUseFieldMaterializedSiegeReplayRuntime(Mission.Current);
             var filteredEntries = new List<RosterEntryState>(entryStates.Count);
             var exactPlayerPartyFallbackEntries = new List<RosterEntryState>(entryStates.Count);
             foreach (RosterEntryState entryState in entryStates)
@@ -16706,6 +16731,28 @@ namespace CoopSpectator.MissionBehaviors
                             " PreviousSkipReason=" + skipReason +
                             " Hero=" + entryState.IsHero +
                             " HeroRole=" + (entryState.HeroRole ?? "null"));
+                    }
+                    continue;
+                }
+
+                bool isLivingCampaignHero =
+                    preserveExactCampaignHeroes &&
+                    (entryState.IsHero || !string.IsNullOrWhiteSpace(entryState.HeroRole)) &&
+                    entryState.Count - entryState.WoundedCount > 0 &&
+                    !string.IsNullOrWhiteSpace(ResolveEntrySpawnTemplateId(entryState));
+                if (isLivingCampaignHero)
+                {
+                    filteredEntries.Add(entryState);
+                    string heroLogKey = "campaign-hero-automated-materialization:" + side + ":" + entryState.EntryId;
+                    if (_loggedAutomatedMaterializedEntrySkipIds.Add(heroLogKey))
+                    {
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: preserving living campaign hero for automated field-materialized siege materialization. " +
+                            "Side=" + side +
+                            " EntryId=" + (entryState.EntryId ?? "null") +
+                            " PreviousSkipReason=" + skipReason +
+                            " HeroRole=" + (entryState.HeroRole ?? "null") +
+                            " HeroLevel=" + entryState.HeroLevel);
                     }
                     continue;
                 }
@@ -16749,7 +16796,11 @@ namespace CoopSpectator.MissionBehaviors
                 if (!string.IsNullOrWhiteSpace(commanderEntryId) && filteredEntries.Count > 1)
                 {
                     filteredEntries = filteredEntries
-                        .OrderBy(entry => string.Equals(entry?.EntryId, commanderEntryId, StringComparison.Ordinal) ? 0 : 1)
+                        .OrderBy(entry =>
+                            string.Equals(entry?.EntryId, commanderEntryId, StringComparison.Ordinal)
+                                ? -1
+                                : GetAllowedEntrySelectionPriority(entry))
+                        .ThenByDescending(entry => entry?.HeroLevel ?? 0)
                         .ThenBy(entry => entry?.EntryId, StringComparer.Ordinal)
                         .ToList();
                 }
@@ -28897,7 +28948,15 @@ namespace CoopSpectator.MissionBehaviors
                 BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
                 RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(runtimeState, authoritativeSide);
                 if (commanderEntry == null || string.IsNullOrWhiteSpace(commanderEntry.EntryId))
-                    return "CommanderControl=(captain)";
+                {
+                    return TryPromoteExactCampaignDelegatedCaptainPeer(
+                        mission,
+                        missionPeer,
+                        peer,
+                        controlledAgent,
+                        pendingRequest,
+                        source);
+                }
 
                 string possessedEntryId = pendingRequest.EntryId;
                 if (string.IsNullOrWhiteSpace(possessedEntryId) &&
@@ -28907,13 +28966,22 @@ namespace CoopSpectator.MissionBehaviors
                 }
 
                 if (!DoesPossessedEntryMatchCommanderEntry(commanderEntry.EntryId, possessedEntryId))
-                    return "CommanderControl=(captain)";
+                {
+                    return TryPromoteExactCampaignDelegatedCaptainPeer(
+                        mission,
+                        missionPeer,
+                        peer,
+                        controlledAgent,
+                        pendingRequest,
+                        source);
+                }
 
                 Team team = missionPeer.Team ?? controlledAgent.Team;
                 if (team == null)
                     return "CommanderControl=(captain)";
 
-                team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
+                if (!team.IsPlayerGeneral || team.IsPlayerSergeant)
+                    team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
 
                 OrderController commanderOrderController = team.GetOrderControllerOf(controlledAgent);
                 if (commanderOrderController != null)
@@ -28938,6 +29006,11 @@ namespace CoopSpectator.MissionBehaviors
                     SetServerMemberValue(formation, "IsPlayerTroopInFormation", isControlledFormation);
                 }
 
+                CoopMissionNetworkBridge.ReapplyDelegatedFormationOwnership(
+                    mission,
+                    team,
+                    source + " commander promotion");
+
                 int controlledBotTotal = 0;
                 int controlledBotAlive = 0;
                 if (mission.AllAgents != null)
@@ -28954,6 +29027,9 @@ namespace CoopSpectator.MissionBehaviors
                         {
                             continue;
                         }
+
+                        if (!ReferenceEquals(GetServerMemberValue(candidate.Formation, "PlayerOwner"), controlledAgent))
+                            continue;
 
                         controlledBotTotal++;
                         if (candidate.IsActive())
@@ -29007,6 +29083,133 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private static string TryPromoteExactCampaignDelegatedCaptainPeer(
+            Mission mission,
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            Agent controlledAgent,
+            CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest,
+            string source)
+        {
+            Team team = missionPeer?.Team ?? controlledAgent?.Team;
+            if (mission == null || missionPeer == null || controlledAgent == null || team == null)
+                return "CommanderControl=(captain)";
+
+            string possessedEntryId = pendingRequest.EntryId;
+            if (string.IsNullOrWhiteSpace(possessedEntryId))
+                TryResolveAuthoritativeTrackedEntryId(controlledAgent, out possessedEntryId);
+
+            var delegatedFormationIndices = new List<int>();
+            if (!string.IsNullOrWhiteSpace(possessedEntryId))
+            {
+                CoopMissionNetworkBridge.TryGetDelegatedFormationIndices(
+                    mission,
+                    team,
+                    possessedEntryId,
+                    out delegatedFormationIndices);
+            }
+
+            var controlledFormationIndices = new HashSet<int>(delegatedFormationIndices);
+
+            try
+            {
+                CoopMissionNetworkBridge.ReapplyDelegatedFormationOwnership(
+                    mission,
+                    team,
+                    source + " delegated captain promotion");
+                if (controlledFormationIndices.Count <= 0)
+                    return "CommanderControl=(captain)";
+
+                controlledAgent.SetCanLeadFormationsRemotely(value: true);
+                OrderController orderController = team.GetOrderControllerOf(controlledAgent);
+                if (orderController != null)
+                    orderController.Owner = controlledAgent;
+
+                var delegatedFormations = new HashSet<Formation>();
+                foreach (int formationIndex in controlledFormationIndices.OrderBy(index => index))
+                {
+                    Formation formation = team.FormationsIncludingEmpty.FirstOrDefault(
+                        candidate => candidate != null && candidate.Index == formationIndex);
+                    if (formation == null)
+                        continue;
+
+                    team.AssignPlayerAsSergeantOfFormation(missionPeer, formation.FormationIndex);
+                    delegatedFormations.Add(formation);
+                }
+
+                if (delegatedFormations.Count <= 0)
+                    return "CommanderControl=(captain)";
+
+                int controlledBotTotal = 0;
+                int controlledBotAlive = 0;
+                if (mission.AllAgents != null)
+                {
+                    for (int i = 0; i < mission.AllAgents.Count; i++)
+                    {
+                        Agent candidate = mission.AllAgents[i];
+                        if (candidate == null ||
+                            candidate.IsMount ||
+                            !delegatedFormations.Contains(candidate.Formation) ||
+                            ReferenceEquals(candidate, controlledAgent) ||
+                            candidate.MissionPeer != null ||
+                            candidate.Controller == AgentControllerType.Player)
+                        {
+                            continue;
+                        }
+
+                        controlledBotTotal++;
+                        if (candidate.IsActive())
+                            controlledBotAlive++;
+                    }
+                }
+
+                ApplyBotsUnderControlCounts(
+                    missionPeer,
+                    controlledBotAlive,
+                    controlledBotTotal,
+                    peer,
+                    source + " delegated-captain-control",
+                    out int appliedControlledBotAlive,
+                    out int appliedControlledBotTotal);
+
+                if (peer != null && peer.IsConnectionActive)
+                {
+                    GameNetwork.BeginModuleEventAsServer(peer);
+                    WriteBotsControlledChangeClamped(
+                        peer,
+                        appliedControlledBotAlive,
+                        appliedControlledBotTotal,
+                        source + " delegated-captain-control");
+                    GameNetwork.EndModuleEventAsServer();
+                }
+
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: promoted exact campaign companion peer to delegated formation control. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + team.Side +
+                    " EntryId=" + possessedEntryId +
+                    " AgentIndex=" + controlledAgent.Index +
+                    " FormationCount=" + delegatedFormations.Count +
+                    " ControlledBotsAlive=" + appliedControlledBotAlive +
+                    " ControlledBotsTotal=" + appliedControlledBotTotal +
+                    " Source=" + (source ?? "unknown"));
+
+                return "CommanderControl=delegated-captain FormationCount=" + delegatedFormations.Count +
+                       " ControlledBotsAlive=" + appliedControlledBotAlive +
+                       " ControlledBotsTotal=" + appliedControlledBotTotal;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: failed to promote exact campaign companion peer to delegated formation control. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " AgentIndex=" + controlledAgent.Index +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+                return "CommanderControl=(delegated-promotion-failed:" + ex.GetType().Name + ")";
+            }
+        }
+
         private static string NormalizeMaterializedPeerFormationOwnershipAfterReplaceBot(
             MissionPeer missionPeer,
             NetworkCommunicator peer,
@@ -29024,6 +29227,12 @@ namespace CoopSpectator.MissionBehaviors
                 commanderControlState.StartsWith("CommanderControl=general", StringComparison.Ordinal);
             if (commanderOwnsFormation)
                 return "FormationOwnership=general";
+
+            bool delegatedCaptainOwnsFormations =
+                !string.IsNullOrWhiteSpace(commanderControlState) &&
+                commanderControlState.StartsWith("CommanderControl=delegated-captain", StringComparison.Ordinal);
+            if (delegatedCaptainOwnsFormations)
+                return "FormationOwnership=delegated-captain";
 
             bool resetFormationPlayerStateApplied =
                 resetFormationPlayerState &&
@@ -32301,7 +32510,8 @@ namespace CoopSpectator.MissionBehaviors
 
             try
             {
-                team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
+                if (!team.IsPlayerGeneral || team.IsPlayerSergeant)
+                    team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
             }
             catch
             {

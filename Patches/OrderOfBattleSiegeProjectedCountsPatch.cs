@@ -41,6 +41,36 @@ namespace CoopSpectator.Patches
             PatchOrderOfBattleFilterUseToggled(harmony);
             PatchOrderOfBattleFormationClassChanged(harmony);
             PatchCommanderDeploymentSiegeMachineSelection(harmony);
+            PatchExactCampaignHeroInformationRefresh(harmony);
+        }
+
+        private static void PatchExactCampaignHeroInformationRefresh(Harmony harmony)
+        {
+            MethodInfo target = AccessTools.Method(
+                typeof(OrderOfBattleHeroItemVM),
+                nameof(OrderOfBattleHeroItemVM.RefreshInformation));
+            MethodInfo postfix = typeof(OrderOfBattleSiegeProjectedCountsPatch).GetMethod(
+                nameof(OrderOfBattleHeroItemVM_RefreshInformation_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info(
+                    "OrderOfBattleSiegeProjectedCountsPatch: " +
+                    "OrderOfBattleHeroItemVM.RefreshInformation not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info(
+                "OrderOfBattleSiegeProjectedCountsPatch: postfix applied to " +
+                "OrderOfBattleHeroItemVM.RefreshInformation.");
+        }
+
+        private static void OrderOfBattleHeroItemVM_RefreshInformation_Postfix(
+            OrderOfBattleHeroItemVM __instance)
+        {
+            CoopSiegeOrderOfBattleVM.TryApplyExactCampaignHeroImage(__instance);
         }
 
         private static Type GetOrderOfBattleUIHelperType()
@@ -1871,7 +1901,7 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static bool TrySyncCommanderDeploymentFormationAssignmentsForTeam(Team team, string source)
+        internal static bool TrySyncCommanderDeploymentFormationAssignmentsForTeam(Team team, string source)
         {
             if (!GameNetwork.IsClient ||
                 !GameNetwork.IsSessionActive ||
@@ -1902,6 +1932,14 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
+            byte[] captainAssignmentBytes = Array.Empty<byte>();
+            string captainAssignmentKey = string.Empty;
+            CoopSiegeOrderOfBattleVM.TryBuildReusableCaptainAssignmentPayload(
+                team,
+                out captainAssignmentBytes,
+                out captainAssignmentKey);
+            assignmentKey += "|C=" + captainAssignmentKey;
+
             if (string.Equals(
                     _lastSentCommanderDeploymentFormationAssignmentsKey,
                     assignmentKey,
@@ -1912,7 +1950,8 @@ namespace CoopSpectator.Patches
                     team,
                     source,
                     "AssignmentBytes=" + assignmentBytes.Length +
-                    " LayoutBytes=" + formationLayoutBytes.Length);
+                    " LayoutBytes=" + formationLayoutBytes.Length +
+                    " CaptainBytes=" + captainAssignmentBytes.Length);
                 return false;
             }
 
@@ -1920,6 +1959,7 @@ namespace CoopSpectator.Patches
                     team.Side,
                     assignmentBytes,
                     formationLayoutBytes,
+                    captainAssignmentBytes,
                     source))
             {
                 LogCommanderDeploymentAssignmentSyncDiagnostics(
@@ -1927,7 +1967,8 @@ namespace CoopSpectator.Patches
                     team,
                     source,
                     "AssignmentBytes=" + assignmentBytes.Length +
-                    " LayoutBytes=" + formationLayoutBytes.Length);
+                    " LayoutBytes=" + formationLayoutBytes.Length +
+                    " CaptainBytes=" + captainAssignmentBytes.Length);
                 return false;
             }
 
@@ -1937,7 +1978,8 @@ namespace CoopSpectator.Patches
                 team,
                 source,
                 "AssignmentBytes=" + assignmentBytes.Length +
-                " LayoutBytes=" + formationLayoutBytes.Length);
+                " LayoutBytes=" + formationLayoutBytes.Length +
+                " CaptainBytes=" + captainAssignmentBytes.Length);
             return true;
         }
 

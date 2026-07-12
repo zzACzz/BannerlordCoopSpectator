@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
@@ -149,11 +150,7 @@ namespace CoopSpectator.Patches
             NetworkCommunicator networkPeer,
             ref Team __result)
         {
-            if (!CoopMissionSpawnLogic.TryResolveCommanderDeploymentOrderLease(
-                    networkPeer,
-                    out Team team,
-                    out _,
-                    out _))
+            if (!TryResolveOrderLease(networkPeer, out Team team, out _))
             {
                 return true;
             }
@@ -166,11 +163,7 @@ namespace CoopSpectator.Patches
             NetworkCommunicator networkPeer,
             ref OrderController __result)
         {
-            if (!CoopMissionSpawnLogic.TryResolveCommanderDeploymentOrderLease(
-                    networkPeer,
-                    out _,
-                    out OrderController orderController,
-                    out _))
+            if (!TryResolveOrderLease(networkPeer, out _, out OrderController orderController))
             {
                 return true;
             }
@@ -194,7 +187,29 @@ namespace CoopSpectator.Patches
                     return true;
 
                 TryRefreshNativeSelectionFromShadow(networkPeer, team, orderController);
+                List<Formation> selectedFormations = ResolveShadowSelectedFormations(
+                    networkPeer,
+                    team,
+                    includeEmpty: false);
+                if (selectedFormations.Count <= 0 && orderController.SelectedFormations != null)
+                {
+                    selectedFormations.AddRange(
+                        orderController.SelectedFormations.Where(formation =>
+                            formation != null &&
+                            formation.CountOfUnits > 0 &&
+                            ReferenceEquals(formation.Team, team)));
+                }
                 orderController.SetOrder(message.OrderType);
+                if (message.OrderType == OrderType.AIControlOn ||
+                    message.OrderType == OrderType.AIControlOff)
+                {
+                    CoopMissionNetworkBridge.UpdateVoluntaryFormationAiControl(
+                        Mission.Current,
+                        team,
+                        selectedFormations,
+                        message.OrderType == OrderType.AIControlOn,
+                        "commander-simple-order-" + message.OrderType);
+                }
 
                 LogOrderDiagnostics(
                     "simple-order-applied",
@@ -219,7 +234,11 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!TryResolveOrderLease(networkPeer, out Team team, out OrderController orderController))
+                if (!TryResolveOrderLease(
+                        networkPeer,
+                        out Team team,
+                        out OrderController orderController,
+                        out bool isDeploymentOrderLease))
                     return true;
 
                 ApplyOrderWithPosition message = baseMessage as ApplyOrderWithPosition;
@@ -233,11 +252,14 @@ namespace CoopSpectator.Patches
                     UIntPtr.Zero,
                     message.Position,
                     hasValidZ: false);
-                CoopSiegeDeploymentBoundaryRuntime.TryClampCommanderDeploymentPosition(
-                    mission,
-                    team,
-                    ref orderPosition,
-                    "server-position-order");
+                if (isDeploymentOrderLease)
+                {
+                    CoopSiegeDeploymentBoundaryRuntime.TryClampCommanderDeploymentPosition(
+                        mission,
+                        team,
+                        ref orderPosition,
+                        "server-position-order");
+                }
                 orderController.SetOrderWithPosition(message.OrderType, orderPosition);
 
                 LogOrderDiagnostics(
@@ -341,7 +363,11 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!TryResolveOrderLease(networkPeer, out Team team, out OrderController orderController))
+                if (!TryResolveOrderLease(
+                        networkPeer,
+                        out Team team,
+                        out OrderController orderController,
+                        out bool isDeploymentOrderLease))
                     return true;
 
                 ApplyOrderWithTwoPositions message = baseMessage as ApplyOrderWithTwoPositions;
@@ -364,19 +390,23 @@ namespace CoopSpectator.Patches
                 bool previousTeleportingAgents = mission.IsTeleportingAgents;
                 try
                 {
-                    mission.IsTeleportingAgents = true;
+                    if (isDeploymentOrderLease)
+                        mission.IsTeleportingAgents = true;
                     var position1 = new WorldPosition(mission.Scene, UIntPtr.Zero, message.Position1, hasValidZ: false);
                     var position2 = new WorldPosition(mission.Scene, UIntPtr.Zero, message.Position2, hasValidZ: false);
-                    CoopSiegeDeploymentBoundaryRuntime.TryClampCommanderDeploymentPosition(
-                        mission,
-                        team,
-                        ref position1,
-                        "server-two-position-order-start");
-                    CoopSiegeDeploymentBoundaryRuntime.TryClampCommanderDeploymentPosition(
-                        mission,
-                        team,
-                        ref position2,
-                        "server-two-position-order-end");
+                    if (isDeploymentOrderLease)
+                    {
+                        CoopSiegeDeploymentBoundaryRuntime.TryClampCommanderDeploymentPosition(
+                            mission,
+                            team,
+                            ref position1,
+                            "server-two-position-order-start");
+                        CoopSiegeDeploymentBoundaryRuntime.TryClampCommanderDeploymentPosition(
+                            mission,
+                            team,
+                            ref position2,
+                            "server-two-position-order-end");
+                    }
                     bool nativeSelectionMatchesShadow = !shouldUseShadowSelection ||
                         IsNativeSelectionEquivalentToShadow(orderController, shadowFormations);
                     if (nativeSelectionMatchesShadow)
@@ -385,25 +415,29 @@ namespace CoopSpectator.Patches
                             message.OrderType,
                             position1,
                             position2);
-                        ForceCommanderDeploymentPositioning(orderController);
+                        if (isDeploymentOrderLease)
+                            ForceCommanderDeploymentPositioning(orderController);
                     }
                     else if (!TryApplyShadowMoveToLineSegment(
                                  orderController,
                                  shadowFormations,
                                  message.OrderType,
                                  position1,
-                                 position2))
+                                 position2,
+                                 forceDeploymentPositioning: isDeploymentOrderLease))
                     {
                         orderController.SetOrderWithTwoPositions(
                             message.OrderType,
                             position1,
                             position2);
-                        ForceCommanderDeploymentPositioning(orderController);
+                        if (isDeploymentOrderLease)
+                            ForceCommanderDeploymentPositioning(orderController);
                     }
                 }
                 finally
                 {
-                    mission.IsTeleportingAgents = previousTeleportingAgents;
+                    if (isDeploymentOrderLease)
+                        mission.IsTeleportingAgents = previousTeleportingAgents;
                 }
 
                 LogOrderDiagnostics(
@@ -549,6 +583,8 @@ namespace CoopSpectator.Patches
 
                 SelectFormation message = baseMessage as SelectFormation;
                 Formation formation = message == null ? null : ResolveFormation(team, message.FormationIndex);
+                if (formation != null && !IsFormationAuthorized(networkPeer, team, formation.Index))
+                    formation = null;
                 if (formation != null)
                     AddShadowSelectedFormation(networkPeer, team, formation.Index);
                 if (formation != null)
@@ -674,11 +710,44 @@ namespace CoopSpectator.Patches
             out Team team,
             out OrderController orderController)
         {
-            return CoopMissionSpawnLogic.TryResolveCommanderDeploymentOrderLease(
+            return TryResolveOrderLease(
                 networkPeer,
                 out team,
                 out orderController,
                 out _);
+        }
+
+        private static bool TryResolveOrderLease(
+            NetworkCommunicator networkPeer,
+            out Team team,
+            out OrderController orderController,
+            out bool isDeploymentOrderLease)
+        {
+            if (CoopMissionSpawnLogic.TryResolveCommanderDeploymentOrderLease(
+                    networkPeer,
+                    out team,
+                    out orderController,
+                    out _))
+            {
+                isDeploymentOrderLease = true;
+                SetAuthorizedFormationIndices(networkPeer, team, authorizedFormationIndices: null);
+                return true;
+            }
+
+            isDeploymentOrderLease = false;
+            if (!CoopMissionNetworkBridge.TryResolveExactBattleOrderAuthority(
+                    networkPeer,
+                    out team,
+                    out orderController,
+                    out _,
+                    out List<int> authorizedFormationIndices,
+                    out _))
+            {
+                return false;
+            }
+
+            SetAuthorizedFormationIndices(networkPeer, team, authorizedFormationIndices);
+            return orderController != null;
         }
 
         internal static void TryRefreshCommanderDeploymentSelection(
@@ -782,7 +851,8 @@ namespace CoopSpectator.Patches
             List<Formation> shadowFormations,
             OrderType orderType,
             WorldPosition position1,
-            WorldPosition position2)
+            WorldPosition position2,
+            bool forceDeploymentPositioning)
         {
             if (orderController == null ||
                 shadowFormations == null ||
@@ -816,7 +886,8 @@ namespace CoopSpectator.Patches
                             position2,
                             orderType == OrderType.MoveToLineSegment
                         });
-                    ForceCommanderDeploymentPositioning(activeFormations);
+                    if (forceDeploymentPositioning)
+                        ForceCommanderDeploymentPositioning(activeFormations);
                     return true;
                 }
             }
@@ -845,7 +916,8 @@ namespace CoopSpectator.Patches
                 }
             }
 
-            ForceCommanderDeploymentPositioning(activeFormations);
+            if (forceDeploymentPositioning)
+                ForceCommanderDeploymentPositioning(activeFormations);
             return true;
         }
 
@@ -949,8 +1021,10 @@ namespace CoopSpectator.Patches
                     return Array.Empty<int>();
                 }
 
-                int[] result = new int[state.FormationIndices.Count];
-                state.FormationIndices.CopyTo(result);
+                IEnumerable<int> selectedIndices = state.FormationIndices;
+                if (state.AuthorizedFormationIndices != null)
+                    selectedIndices = selectedIndices.Where(state.AuthorizedFormationIndices.Contains);
+                int[] result = selectedIndices.ToArray();
                 Array.Sort(result);
                 return result;
             }
@@ -964,6 +1038,11 @@ namespace CoopSpectator.Patches
             lock (CommanderDeploymentSelectionLock)
             {
                 CommanderDeploymentSelectionState state = GetOrCreateShadowSelectionState(key, team);
+                if (state.AuthorizedFormationIndices != null &&
+                    !state.AuthorizedFormationIndices.Contains(formationIndex))
+                {
+                    return;
+                }
                 state.FormationIndices.Add(formationIndex);
             }
         }
@@ -1009,9 +1088,54 @@ namespace CoopSpectator.Patches
                 state.FormationIndices.Clear();
                 foreach (Formation formation in team.FormationsIncludingEmpty)
                 {
-                    if (formation != null && formation.CountOfUnits > 0)
+                    if (formation != null &&
+                        formation.CountOfUnits > 0 &&
+                        (state.AuthorizedFormationIndices == null ||
+                         state.AuthorizedFormationIndices.Contains(formation.Index)))
+                    {
                         state.FormationIndices.Add(formation.Index);
+                    }
                 }
+            }
+        }
+
+        private static void SetAuthorizedFormationIndices(
+            NetworkCommunicator networkPeer,
+            Team team,
+            IEnumerable<int> authorizedFormationIndices)
+        {
+            if (!TryGetPeerKey(networkPeer, out int key) || team == null)
+                return;
+
+            lock (CommanderDeploymentSelectionLock)
+            {
+                CommanderDeploymentSelectionState state = GetOrCreateShadowSelectionState(key, team);
+                state.AuthorizedFormationIndices = authorizedFormationIndices == null
+                    ? null
+                    : new HashSet<int>(authorizedFormationIndices);
+                if (state.AuthorizedFormationIndices != null)
+                    state.FormationIndices.RemoveWhere(index => !state.AuthorizedFormationIndices.Contains(index));
+            }
+        }
+
+        private static bool IsFormationAuthorized(
+            NetworkCommunicator networkPeer,
+            Team team,
+            int formationIndex)
+        {
+            if (!TryGetPeerKey(networkPeer, out int key) || team == null)
+                return false;
+
+            lock (CommanderDeploymentSelectionLock)
+            {
+                if (!CommanderDeploymentSelectionsByPeer.TryGetValue(key, out CommanderDeploymentSelectionState state) ||
+                    state.TeamIndex != team.TeamIndex)
+                {
+                    return false;
+                }
+
+                return state.AuthorizedFormationIndices == null ||
+                       state.AuthorizedFormationIndices.Contains(formationIndex);
             }
         }
 
@@ -1153,6 +1277,7 @@ namespace CoopSpectator.Patches
 
             public int TeamIndex { get; }
             public HashSet<int> FormationIndices { get; }
+            public HashSet<int> AuthorizedFormationIndices { get; set; }
         }
     }
 }

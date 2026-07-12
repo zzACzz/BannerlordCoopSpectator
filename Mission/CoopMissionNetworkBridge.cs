@@ -89,6 +89,7 @@ namespace CoopSpectator.MissionBehaviors
             BattleSideEnum side,
             byte[] assignmentBytes,
             byte[] formationLayoutBytes,
+            byte[] captainAssignmentBytes,
             string source)
         {
             if (!GameNetwork.IsClient ||
@@ -120,10 +121,25 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            byte[] safeCaptainBytes = captainAssignmentBytes ?? Array.Empty<byte>();
+            if (safeCaptainBytes.Length > CoopCommanderDeploymentFormationAssignmentsMessage.MaxCaptainAssignmentBytes)
+            {
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: commander deployment captain assignment payload is too large. " +
+                    "Side=" + side +
+                    " Bytes=" + safeCaptainBytes.Length +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
+
             try
             {
                 GameNetwork.BeginModuleEventAsClient();
-                GameNetwork.WriteMessage(new CoopCommanderDeploymentFormationAssignmentsMessage(side, assignmentBytes, safeLayoutBytes));
+                GameNetwork.WriteMessage(new CoopCommanderDeploymentFormationAssignmentsMessage(
+                    side,
+                    assignmentBytes,
+                    safeLayoutBytes,
+                    safeCaptainBytes));
                 GameNetwork.EndModuleEventAsClient();
                 return true;
             }
@@ -134,6 +150,7 @@ namespace CoopSpectator.MissionBehaviors
                     "Side=" + side +
                     " Bytes=" + assignmentBytes.Length +
                     " LayoutBytes=" + safeLayoutBytes.Length +
+                    " CaptainBytes=" + safeCaptainBytes.Length +
                     " Source=" + (source ?? "unknown") +
                     " Error=" + ex.Message);
                 return false;
@@ -1605,6 +1622,8 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly TimeSpan BattleSnapshotAssemblyIdleTimeout = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan BattleSnapshotBootstrapRequestRetryDelay = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan BattleReconnectFinalizeReadyAckRetryDelay = TimeSpan.FromMilliseconds(900);
+        private static readonly FieldInfo FormationEnforceNotSplittableByAiField =
+            typeof(Formation).GetField("_enforceNotSplittableByAI", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo CommanderDeploymentPointWeaponsField =
             typeof(DeploymentPoint).GetField("_weapons", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo CommanderDeploymentPointOnDeploymentStateChangedField =
@@ -1641,6 +1660,14 @@ namespace CoopSpectator.MissionBehaviors
         private readonly Dictionary<string, PayloadAssemblyState> _clientPayloadAssemblies = new Dictionary<string, PayloadAssemblyState>(StringComparer.Ordinal);
         private readonly Dictionary<int, BattleSnapshotTransportState> _battleSnapshotTransportStatesByPeer = new Dictionary<int, BattleSnapshotTransportState>();
         private readonly Dictionary<int, BattleSnapshotClientAssemblyState> _clientBattleSnapshotAssembliesByTransmission = new Dictionary<int, BattleSnapshotClientAssemblyState>();
+        private readonly Dictionary<BattleSideEnum, Dictionary<int, string>> _delegatedCaptainEntryIdByFormationIndexAndSide =
+            new Dictionary<BattleSideEnum, Dictionary<int, string>>();
+        private readonly Dictionary<BattleSideEnum, HashSet<int>> _voluntarilyAiControlledFormationIndicesBySide =
+            new Dictionary<BattleSideEnum, HashSet<int>>();
+        private readonly Dictionary<BattleSideEnum, string> _lastBroadcastDelegatedCaptainAssignmentKeyBySide =
+            new Dictionary<BattleSideEnum, string>();
+        private readonly Dictionary<string, int> _lastObservedFormationUnitCountByTeamAndIndex =
+            new Dictionary<string, int>(StringComparer.Ordinal);
         private static readonly Dictionary<int, int> _expectedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _acknowledgedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private static int _clientObservedBattleSnapshotTransmissionId;
@@ -1749,6 +1776,7 @@ namespace CoopSpectator.MissionBehaviors
                 registerer.RegisterBaseHandler<CoopBattlePayloadChunkMessage>(HandleServerPayloadChunk);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotManifestMessage>(HandleServerBattleSnapshotManifest);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotChunkV2Message>(HandleServerBattleSnapshotChunkV2);
+                registerer.RegisterBaseHandler<CoopDelegatedCaptainAssignmentsStateMessage>(HandleServerDelegatedCaptainAssignmentsState);
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentSiegeMachineStateMessage>(HandleServerCommanderDeploymentSiegeMachineState);
                 registerer.RegisterBaseHandler<CoopSiegeMissionObjectIdMapMessage>(HandleServerSiegeMissionObjectIdMap);
                 ModLogger.Info("CoopMissionNetworkBridge: registered client payload chunk handler.");
@@ -1994,6 +2022,10 @@ namespace CoopSpectator.MissionBehaviors
             _clientPayloadAssemblies.Clear();
             _battleSnapshotTransportStatesByPeer.Clear();
             _clientBattleSnapshotAssembliesByTransmission.Clear();
+            _delegatedCaptainEntryIdByFormationIndexAndSide.Clear();
+            _voluntarilyAiControlledFormationIndicesBySide.Clear();
+            _lastBroadcastDelegatedCaptainAssignmentKeyBySide.Clear();
+            _lastObservedFormationUnitCountByTeamAndIndex.Clear();
             _expectedBattleSnapshotTransmissionIdByPeer.Clear();
             _acknowledgedBattleSnapshotTransmissionIdByPeer.Clear();
             CoopBattlePeerReconnectState.Reset("CoopMissionNetworkBridge.OnRemoveBehavior");
@@ -2146,6 +2178,64 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return true;
+        }
+
+        private void HandleServerDelegatedCaptainAssignmentsState(GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopDelegatedCaptainAssignmentsStateMessage message) ||
+                message.AssignmentSide == BattleSideEnum.None)
+            {
+                return;
+            }
+
+            try
+            {
+                Team team = Mission?.Teams?.FirstOrDefault(candidate =>
+                    candidate != null &&
+                    !ReferenceEquals(candidate, Mission.SpectatorTeam) &&
+                    candidate.Side == message.AssignmentSide);
+                string error = team == null ? "team-missing" : string.Empty;
+                Dictionary<int, string> assignments = new Dictionary<int, string>();
+                if (team == null ||
+                    !TryDecodeDelegatedCaptainAssignments(
+                        Mission,
+                        team,
+                        message.CaptainAssignmentBytes,
+                        out assignments,
+                        out error,
+                        requireMaterializedCaptainAgent: false))
+                {
+                    if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "CoopMissionNetworkBridge: ignored delegated captain assignment state. " +
+                            "Side=" + message.AssignmentSide +
+                            " TeamNull=" + (team == null) +
+                            " Error=" + (error ?? string.Empty));
+                    }
+                    return;
+                }
+
+                _delegatedCaptainEntryIdByFormationIndexAndSide[message.AssignmentSide] =
+                    new Dictionary<int, string>(assignments);
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: applied delegated captain assignment state. " +
+                        "Side=" + message.AssignmentSide +
+                        " Assignments=" + assignments.Count);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: delegated captain assignment state handling failed. " +
+                        "Side=" + message.AssignmentSide +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message);
+                }
+            }
         }
 
         private void HandleServerCommanderDeploymentSiegeMachineState(GameNetworkMessage baseMessage)
@@ -4817,6 +4907,29 @@ namespace CoopSpectator.MissionBehaviors
 
             Dictionary<int, CommanderDeploymentFormationLayout> formationLayouts =
                 DecodeCommanderDeploymentFormationLayouts(message.FormationLayoutBytes);
+            bool hasCaptainAssignmentPayload = message.CaptainAssignmentBytes != null &&
+                                               message.CaptainAssignmentBytes.Length > 0;
+            var delegatedCaptainAssignments = new Dictionary<int, string>();
+            if (hasCaptainAssignmentPayload &&
+                !TryDecodeDelegatedCaptainAssignments(
+                    mission,
+                    team,
+                    message.CaptainAssignmentBytes,
+                    out delegatedCaptainAssignments,
+                    out string captainDecodeError))
+            {
+                LogCommanderDeploymentAssignmentDiagnostics(
+                    "skip-invalid-captain-payload",
+                    peer,
+                    message,
+                    team,
+                    0,
+                    0,
+                    0,
+                    formationLayouts.Count,
+                    captainDecodeError ?? string.Empty);
+                return false;
+            }
             var moves = new List<(Agent Agent, Formation TargetFormation)>();
             var impactedFormations = new HashSet<Formation>();
             var layoutFormations = new HashSet<Formation>();
@@ -4861,7 +4974,7 @@ namespace CoopSpectator.MissionBehaviors
                     return false;
                 }
 
-                return TryApplyCommanderDeploymentFormationCompositionAssignments(
+                bool compositionApplied = TryApplyCommanderDeploymentFormationCompositionAssignments(
                     peer,
                     message,
                     mission,
@@ -4871,6 +4984,10 @@ namespace CoopSpectator.MissionBehaviors
                     formationLayouts,
                     layoutFormations,
                     compositionRecords);
+                if (compositionApplied && hasCaptainAssignmentPayload)
+                    ApplyDelegatedCaptainAssignmentSnapshot(mission, team, delegatedCaptainAssignments);
+
+                return compositionApplied;
             }
 
             if (assignmentBytes.Length % CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerAssignment != 0)
@@ -5007,6 +5124,661 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return true;
+        }
+
+        internal static bool TryGetDelegatedFormationIndices(
+            Mission mission,
+            Team team,
+            string entryId,
+            out List<int> formationIndices)
+        {
+            formationIndices = new List<int>();
+            if (mission == null || team == null || string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null ||
+                !bridge._delegatedCaptainEntryIdByFormationIndexAndSide.TryGetValue(
+                    team.Side,
+                    out Dictionary<int, string> assignments))
+            {
+                return false;
+            }
+
+            foreach (KeyValuePair<int, string> assignment in assignments)
+            {
+                if (string.Equals(assignment.Value, entryId, StringComparison.Ordinal))
+                    formationIndices.Add(assignment.Key);
+            }
+
+            formationIndices.Sort();
+            return formationIndices.Count > 0;
+        }
+
+        internal static bool TryResolveAuthorizedFormationIndices(
+            Mission mission,
+            Team team,
+            string entryId,
+            out List<int> formationIndices,
+            out string authorityRole)
+        {
+            formationIndices = new List<int>();
+            authorityRole = "none";
+            if (mission == null || team == null || string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            Dictionary<int, string> assignments = null;
+            if (bridge != null)
+            {
+                bridge._delegatedCaptainEntryIdByFormationIndexAndSide.TryGetValue(
+                    team.Side,
+                    out assignments);
+            }
+            assignments = assignments ?? new Dictionary<int, string>();
+            bridge?.ObserveFormationActivationTransitions(
+                team,
+                "resolve-authorized-formations",
+                logTransitions: true);
+
+            RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(
+                BattleSnapshotRuntimeState.GetState(),
+                team.Side);
+            if (commanderEntry != null &&
+                !string.IsNullOrWhiteSpace(commanderEntry.EntryId) &&
+                string.Equals(commanderEntry.EntryId, entryId, StringComparison.Ordinal))
+            {
+                authorityRole = "campaign-commander";
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (formation == null ||
+                        !ReferenceEquals(formation.Team, team) ||
+                        formation.Index < 0 ||
+                        formation.Index >= (int)FormationClass.NumberOfRegularFormations ||
+                        assignments.ContainsKey(formation.Index))
+                    {
+                        continue;
+                    }
+
+                    formationIndices.Add(formation.Index);
+                }
+            }
+            else
+            {
+                foreach (KeyValuePair<int, string> assignment in assignments)
+                {
+                    if (string.Equals(assignment.Value, entryId, StringComparison.Ordinal))
+                        formationIndices.Add(assignment.Key);
+                }
+
+                if (formationIndices.Count > 0)
+                    authorityRole = "delegated-captain";
+            }
+
+            formationIndices.Sort();
+            return true;
+        }
+
+        internal static bool TryResolveExactBattleOrderAuthority(
+            NetworkCommunicator peer,
+            out Team team,
+            out OrderController orderController,
+            out Agent controlledAgent,
+            out List<int> authorizedFormationIndices,
+            out string authorityRole)
+        {
+            team = null;
+            orderController = null;
+            controlledAgent = null;
+            authorizedFormationIndices = new List<int>();
+            authorityRole = "none";
+            if (!GameNetwork.IsServer || peer == null)
+                return false;
+
+            Mission mission = Mission.Current;
+            CoopBattlePhase phase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (mission == null ||
+                (phase != CoopBattlePhase.PreBattleHold && phase != CoopBattlePhase.BattleActive) ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+            controlledAgent = missionPeer?.ControlledAgent;
+            team = missionPeer?.Team ?? controlledAgent?.Team;
+            if (controlledAgent == null ||
+                !controlledAgent.IsActive() ||
+                controlledAgent.IsMount ||
+                team == null ||
+                !ReferenceEquals(controlledAgent.Team, team))
+            {
+                return false;
+            }
+
+            if (!CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(controlledAgent, out string entryId) ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                authorityRole = "unresolved-entry";
+                orderController = team.GetOrderControllerOf(controlledAgent) ?? team.PlayerOrderController;
+                if (orderController != null)
+                    orderController.Owner = controlledAgent;
+                return true;
+            }
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            bridge?.ReapplyDelegatedFormationOwnership(
+                team,
+                "exact-battle-order-authority-resolve");
+
+            TryResolveAuthorizedFormationIndices(
+                mission,
+                team,
+                entryId,
+                out authorizedFormationIndices,
+                out authorityRole);
+            orderController = team.GetOrderControllerOf(controlledAgent) ?? team.PlayerOrderController;
+            if (orderController != null)
+                orderController.Owner = controlledAgent;
+            return true;
+        }
+
+        internal static void ReapplyDelegatedFormationOwnership(
+            Mission mission,
+            Team team,
+            string source)
+        {
+            if (mission == null || team == null)
+                return;
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            bridge?.ReapplyDelegatedFormationOwnership(team, source);
+        }
+
+        internal static void UpdateVoluntaryFormationAiControl(
+            Mission mission,
+            Team team,
+            IEnumerable<Formation> formations,
+            bool isAiControlled,
+            string source)
+        {
+            if (mission == null || team == null || formations == null)
+                return;
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            bridge?.UpdateVoluntaryFormationAiControl(team, formations, isAiControlled, source);
+        }
+
+        private bool TryDecodeDelegatedCaptainAssignments(
+            Mission mission,
+            Team team,
+            byte[] payload,
+            out Dictionary<int, string> assignments,
+            out string error,
+            bool requireMaterializedCaptainAgent = true)
+        {
+            assignments = new Dictionary<int, string>();
+            error = string.Empty;
+            if (payload == null || payload.Length <= 0)
+                return true;
+
+            int offset = 0;
+            int recordCount = payload[offset++];
+            RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(
+                BattleSnapshotRuntimeState.GetState(),
+                team.Side);
+
+            for (int recordIndex = 0; recordIndex < recordCount; recordIndex++)
+            {
+                if (offset + 3 > payload.Length)
+                {
+                    error = "truncated-header Record=" + recordIndex;
+                    return false;
+                }
+
+                int formationIndex = payload[offset++];
+                int entryIdLength = payload[offset++] | (payload[offset++] << 8);
+                if (entryIdLength <= 0 || offset + entryIdLength > payload.Length)
+                {
+                    error = "invalid-entry-length Record=" + recordIndex + " Length=" + entryIdLength;
+                    return false;
+                }
+
+                string entryId = Encoding.UTF8.GetString(payload, offset, entryIdLength).Trim();
+                offset += entryIdLength;
+                if (formationIndex < 0 ||
+                    formationIndex >= (int)FormationClass.NumberOfRegularFormations ||
+                    string.IsNullOrWhiteSpace(entryId) ||
+                    assignments.ContainsKey(formationIndex))
+                {
+                    error = "invalid-record Record=" + recordIndex + " Formation=" + formationIndex;
+                    return false;
+                }
+
+                RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+                if (entryState?.IsHero != true ||
+                    string.Equals(commanderEntry?.EntryId, entryId, StringComparison.Ordinal) ||
+                    (requireMaterializedCaptainAgent && ResolveDelegatedCaptainAgent(mission, team, entryId) == null))
+                {
+                    error = "invalid-companion Record=" + recordIndex + " EntryId=" + entryId;
+                    return false;
+                }
+
+                assignments[formationIndex] = entryId;
+            }
+
+            if (offset != payload.Length)
+            {
+                error = "trailing-bytes Bytes=" + (payload.Length - offset);
+                return false;
+            }
+
+            return true;
+        }
+
+        private void ApplyDelegatedCaptainAssignmentSnapshot(
+            Mission mission,
+            Team team,
+            Dictionary<int, string> assignments)
+        {
+            if (mission == null || team == null || assignments == null)
+                return;
+
+            _delegatedCaptainEntryIdByFormationIndexAndSide.TryGetValue(
+                team.Side,
+                out Dictionary<int, string> previousAssignments);
+
+            if (previousAssignments != null)
+            {
+                foreach (KeyValuePair<int, string> previous in previousAssignments)
+                {
+                    if (assignments.ContainsKey(previous.Key))
+                        continue;
+
+                    Formation previousFormation = ResolveCommanderDeploymentFormation(team, previous.Key);
+                    Agent previousCaptain = ResolveDelegatedCaptainAgent(mission, team, previous.Value);
+                    if (previousFormation != null &&
+                        previousCaptain != null &&
+                        ReferenceEquals(previousFormation.Captain, previousCaptain))
+                    {
+                        previousFormation.Captain = null;
+                    }
+                }
+            }
+
+            var storedAssignments = new Dictionary<int, string>(assignments);
+            _delegatedCaptainEntryIdByFormationIndexAndSide[team.Side] = storedAssignments;
+            if (_voluntarilyAiControlledFormationIndicesBySide.TryGetValue(
+                    team.Side,
+                    out HashSet<int> voluntarilyAiControlledFormationIndices))
+            {
+                voluntarilyAiControlledFormationIndices.RemoveWhere(storedAssignments.ContainsKey);
+            }
+            ObserveFormationActivationTransitions(
+                team,
+                "captain-assignment-baseline",
+                logTransitions: false);
+            foreach (KeyValuePair<int, string> assignment in storedAssignments)
+            {
+                Formation formation = ResolveCommanderDeploymentFormation(team, assignment.Key);
+                Agent captainAgent = ResolveDelegatedCaptainAgent(mission, team, assignment.Value);
+                if (formation == null || captainAgent == null)
+                    continue;
+
+                formation.Captain = captainAgent;
+                captainAgent.SetCanLeadFormationsRemotely(value: true);
+            }
+
+            TryBroadcastDelegatedCaptainAssignmentState(team.Side, force: false);
+        }
+
+        private static byte[] EncodeDelegatedCaptainAssignments(Dictionary<int, string> assignments)
+        {
+            var records = assignments == null
+                ? new List<KeyValuePair<int, string>>()
+                : assignments
+                    .Where(assignment =>
+                        assignment.Key >= 0 &&
+                        assignment.Key < (int)FormationClass.NumberOfRegularFormations &&
+                        !string.IsNullOrWhiteSpace(assignment.Value))
+                    .OrderBy(assignment => assignment.Key)
+                    .ToList();
+            var encodedRecords = new List<byte>();
+            int encodedRecordCount = 0;
+            foreach (KeyValuePair<int, string> record in records)
+            {
+                byte[] entryIdBytes = Encoding.UTF8.GetBytes(record.Value.Trim());
+                if (entryIdBytes.Length <= 0 || entryIdBytes.Length > ushort.MaxValue)
+                    continue;
+
+                if (1 + encodedRecords.Count + 3 + entryIdBytes.Length >
+                    CoopCommanderDeploymentFormationAssignmentsMessage.MaxCaptainAssignmentBytes)
+                {
+                    break;
+                }
+
+                encodedRecords.Add((byte)record.Key);
+                encodedRecords.Add((byte)(entryIdBytes.Length & 0xFF));
+                encodedRecords.Add((byte)((entryIdBytes.Length >> 8) & 0xFF));
+                encodedRecords.AddRange(entryIdBytes);
+                encodedRecordCount++;
+            }
+
+            var bytes = new List<byte>(1 + encodedRecords.Count)
+            {
+                (byte)Math.Min(byte.MaxValue, encodedRecordCount)
+            };
+            bytes.AddRange(encodedRecords);
+            return bytes.ToArray();
+        }
+
+        private void TryBroadcastDelegatedCaptainAssignmentState(BattleSideEnum side, bool force)
+        {
+            if (!GameNetwork.IsServer || side == BattleSideEnum.None || GameNetwork.NetworkPeers == null)
+                return;
+
+            _delegatedCaptainEntryIdByFormationIndexAndSide.TryGetValue(
+                side,
+                out Dictionary<int, string> assignments);
+            byte[] payload = EncodeDelegatedCaptainAssignments(assignments);
+            string assignmentKey = Convert.ToBase64String(payload);
+            if (!force &&
+                _lastBroadcastDelegatedCaptainAssignmentKeyBySide.TryGetValue(side, out string previousKey) &&
+                string.Equals(previousKey, assignmentKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            int sentCount = 0;
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (!IsEligibleRemotePeer(peer))
+                    continue;
+
+                if (TrySendDelegatedCaptainAssignmentStateToPeer(peer, side, payload))
+                    sentCount++;
+            }
+
+            _lastBroadcastDelegatedCaptainAssignmentKeyBySide[side] = assignmentKey;
+            if (CoopDebugConfig.OrderOfBattleDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: broadcast delegated captain assignment state. " +
+                    "Side=" + side +
+                    " Assignments=" + (assignments?.Count ?? 0) +
+                    " Peers=" + sentCount);
+            }
+        }
+
+        private bool TrySendDelegatedCaptainAssignmentStateToPeer(
+            NetworkCommunicator peer,
+            BattleSideEnum side,
+            byte[] payload = null)
+        {
+            if (!GameNetwork.IsServer || !IsEligibleRemotePeer(peer) || side == BattleSideEnum.None)
+                return false;
+
+            if (payload == null)
+            {
+                _delegatedCaptainEntryIdByFormationIndexAndSide.TryGetValue(
+                    side,
+                    out Dictionary<int, string> assignments);
+                payload = EncodeDelegatedCaptainAssignments(assignments);
+            }
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsServer(peer);
+                GameNetwork.WriteMessage(new CoopDelegatedCaptainAssignmentsStateMessage(side, payload));
+                GameNetwork.EndModuleEventAsServer();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: delegated captain assignment state send failed. " +
+                        "Peer=" + (peer?.UserName ?? "null") +
+                        " Side=" + side +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message);
+                }
+                return false;
+            }
+        }
+
+        private void ReapplyDelegatedFormationOwnership(Team team, string source)
+        {
+            Mission mission = this.Mission ?? Mission.Current;
+            if (mission == null || team == null)
+                return;
+
+            if (!_delegatedCaptainEntryIdByFormationIndexAndSide.TryGetValue(
+                    team.Side,
+                    out Dictionary<int, string> assignments))
+            {
+                assignments = new Dictionary<int, string>();
+            }
+
+            var assignedFormationIndices = new HashSet<int>(assignments.Keys);
+            if (!_voluntarilyAiControlledFormationIndicesBySide.TryGetValue(
+                    team.Side,
+                    out HashSet<int> voluntarilyAiControlledFormationIndices))
+            {
+                voluntarilyAiControlledFormationIndices = new HashSet<int>();
+            }
+
+            foreach (KeyValuePair<int, string> assignment in assignments)
+            {
+                Formation formation = ResolveCommanderDeploymentFormation(team, assignment.Key);
+                Agent captainAgent = ResolveDelegatedCaptainAgent(mission, team, assignment.Value);
+                if (formation == null || captainAgent == null)
+                    continue;
+
+                formation.Captain = captainAgent;
+                captainAgent.SetCanLeadFormationsRemotely(value: true);
+                MissionPeer captainPeer = captainAgent.MissionPeer;
+                if (captainPeer?.ControlledAgent != null &&
+                    ReferenceEquals(captainPeer.ControlledAgent, captainAgent) &&
+                    captainAgent.IsActive())
+                {
+                    team.AssignPlayerAsSergeantOfFormation(captainPeer, formation.FormationIndex);
+                    formation.PlayerOwner = captainAgent;
+                    if (voluntarilyAiControlledFormationIndices.Contains(formation.Index))
+                        EnsureDelegatedFormationAiControl(formation);
+                    else
+                        formation.SetControlledByAI(false, false);
+                    continue;
+                }
+
+                formation.PlayerOwner = null;
+                EnsureDelegatedFormationAiControl(formation);
+            }
+
+            Agent campaignCommanderAgent = team.GeneralAgent;
+            bool campaignCommanderIsPlayerControlled =
+                campaignCommanderAgent != null &&
+                campaignCommanderAgent.IsActive() &&
+                campaignCommanderAgent.MissionPeer?.ControlledAgent != null &&
+                ReferenceEquals(campaignCommanderAgent.MissionPeer.ControlledAgent, campaignCommanderAgent);
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null ||
+                    !ReferenceEquals(formation.Team, team) ||
+                    assignedFormationIndices.Contains(formation.Index))
+                {
+                    continue;
+                }
+
+                if (campaignCommanderIsPlayerControlled)
+                {
+                    if (!ReferenceEquals(formation.PlayerOwner, campaignCommanderAgent))
+                        formation.PlayerOwner = campaignCommanderAgent;
+
+                    if (voluntarilyAiControlledFormationIndices.Contains(formation.Index))
+                        EnsureDelegatedFormationAiControl(formation);
+                    else
+                        formation.SetControlledByAI(false, false);
+                }
+                else
+                {
+                    formation.PlayerOwner = null;
+                    formation.SetControlledByAI(true, true);
+                }
+            }
+
+            ObserveFormationActivationTransitions(
+                team,
+                source ?? "reapply-formation-ownership",
+                logTransitions: true);
+
+            if (CoopDebugConfig.OrderOfBattleDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: reapplied delegated formation ownership. " +
+                    "Side=" + team.Side +
+                    " Assignments=" + assignments.Count +
+                    " VoluntaryAiFormations=" + voluntarilyAiControlledFormationIndices.Count +
+                    " CampaignCommanderPlayerControlled=" + campaignCommanderIsPlayerControlled +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private void UpdateVoluntaryFormationAiControl(
+            Team team,
+            IEnumerable<Formation> formations,
+            bool isAiControlled,
+            string source)
+        {
+            if (team == null || formations == null)
+                return;
+
+            if (!_voluntarilyAiControlledFormationIndicesBySide.TryGetValue(
+                    team.Side,
+                    out HashSet<int> voluntarilyAiControlledFormationIndices))
+            {
+                voluntarilyAiControlledFormationIndices = new HashSet<int>();
+                _voluntarilyAiControlledFormationIndicesBySide[team.Side] =
+                    voluntarilyAiControlledFormationIndices;
+            }
+
+            int changedCount = 0;
+            foreach (Formation formation in formations)
+            {
+                if (formation == null ||
+                    !ReferenceEquals(formation.Team, team) ||
+                    formation.Index < 0 ||
+                    formation.Index >= (int)FormationClass.NumberOfRegularFormations)
+                {
+                    continue;
+                }
+
+                bool changed = isAiControlled
+                    ? voluntarilyAiControlledFormationIndices.Add(formation.Index)
+                    : voluntarilyAiControlledFormationIndices.Remove(formation.Index);
+                if (changed)
+                    changedCount++;
+            }
+
+            ReapplyDelegatedFormationOwnership(team, source ?? "voluntary-ai-control-updated");
+
+            if (CoopDebugConfig.OrderOfBattleDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: updated voluntary formation AI control. " +
+                    "Side=" + team.Side +
+                    " IsAiControlled=" + isAiControlled +
+                    " Changed=" + changedCount +
+                    " Stored=" + voluntarilyAiControlledFormationIndices.Count +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private static void EnsureDelegatedFormationAiControl(Formation formation)
+        {
+            if (formation == null)
+                return;
+
+            if (formation.IsAIControlled &&
+                FormationEnforceNotSplittableByAiField?.GetValue(formation) is bool enforceNotSplittableByAi &&
+                enforceNotSplittableByAi)
+            {
+                return;
+            }
+
+            // SetControlledByAI returns early when the requested value already matches.
+            // Toggle once so enforceNotSplittableByAI is actually applied.
+            if (formation.IsAIControlled)
+                formation.SetControlledByAI(false, false);
+            formation.SetControlledByAI(true, true);
+        }
+
+        private void ObserveFormationActivationTransitions(
+            Team team,
+            string source,
+            bool logTransitions)
+        {
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics ||
+                team?.FormationsIncludingEmpty == null)
+            {
+                return;
+            }
+
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null || !ReferenceEquals(formation.Team, team))
+                    continue;
+
+                string key = team.TeamIndex + ":" + formation.Index;
+                int currentCount = Math.Max(0, formation.CountOfUnits);
+                bool hadPreviousCount = _lastObservedFormationUnitCountByTeamAndIndex.TryGetValue(
+                    key,
+                    out int previousCount);
+                _lastObservedFormationUnitCountByTeamAndIndex[key] = currentCount;
+                if (!logTransitions || !hadPreviousCount || previousCount != 0 || currentCount <= 0)
+                    continue;
+
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: formation became active after deployment baseline. " +
+                    "TeamIndex=" + team.TeamIndex +
+                    " Side=" + team.Side +
+                    " FormationIndex=" + formation.Index +
+                    " Count=" + currentCount +
+                    " Class=" + formation.FormationIndex +
+                    " PlayerOwner=" + (formation.PlayerOwner?.Index.ToString() ?? "null") +
+                    " IsAIControlled=" + formation.IsAIControlled +
+                    " Captain=" + (formation.Captain?.Index.ToString() ?? "null") +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private static Agent ResolveDelegatedCaptainAgent(Mission mission, Team team, string entryId)
+        {
+            if (mission?.AllAgents == null || team == null || string.IsNullOrWhiteSpace(entryId))
+                return null;
+
+            RosterEntryState expectedEntryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (expectedEntryState?.IsHero != true)
+                return null;
+
+            for (int i = 0; i < mission.AllAgents.Count; i++)
+            {
+                Agent candidate = mission.AllAgents[i];
+                if (candidate == null ||
+                    !candidate.IsActive() ||
+                    candidate.IsMount ||
+                    !ReferenceEquals(candidate.Team, team) ||
+                    !CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(candidate, out string candidateEntryId) ||
+                    !string.Equals(candidateEntryId, entryId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                return candidate;
+            }
+
+            return null;
         }
 
         private static bool IsCommanderDeploymentCompositionAssignmentPayload(byte[] assignmentBytes)
@@ -6522,6 +7294,8 @@ namespace CoopSpectator.MissionBehaviors
 
             TrySendMaterializedAgentEntrySnapshotToPeer(peer, force: true);
             TrySendEntryStatusToPeer(peer, force: true);
+            foreach (BattleSideEnum side in _delegatedCaptainEntryIdByFormationIndexAndSide.Keys.ToArray())
+                TrySendDelegatedCaptainAssignmentStateToPeer(peer, side);
         }
 
         private bool AreBootstrapDependentPeerPayloadsReady(NetworkCommunicator peer, out string readinessSummary)

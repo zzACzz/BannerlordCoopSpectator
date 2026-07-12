@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using CoopSpectator.MissionBehaviors;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.Library;
@@ -1346,14 +1347,32 @@ namespace CoopSpectator.Infrastructure
             }
             else
             {
-                details.Add("ForcedUse={" + SetForcedUse(siegeWeapon) + "}");
-                details.Add("WeaponStateChanged={" + InvokeSiegeWeaponDeploymentStateChanged(siegeWeapon, true) + "}");
-                details.Add("VisualTree={" + NormalizeAuthoritativeSiegeWeaponVisualTree(deploymentPoint, siegeWeapon, true) + "}");
-                details.Add("Controller={" + SyncSiegeControllerAfterDeploy(team.Side, siegeWeapon) + "}");
-                details.Add("Formations={" + PrepareFormationsForSiegeMachineAssignment(team) + "}");
-                details.Add("TickAux={" + TickAuxForInit(siegeWeapon) + "}");
-                details.Add("FallbackUse={" + EnsureFormationUsesMachine(team, siegeWeapon) + "}");
-                details.Add("AutoAssign={" + AutoAssignDetachments(team, siegeDeploymentHandler) + "}");
+                List<FormationControlSnapshot> formationControlSnapshots =
+                    CaptureFormationControlSnapshots(team);
+                try
+                {
+                    details.Add("ForcedUse={" + SetForcedUse(siegeWeapon) + "}");
+                    details.Add("WeaponStateChanged={" + InvokeSiegeWeaponDeploymentStateChanged(siegeWeapon, true) + "}");
+                    details.Add("VisualTree={" + NormalizeAuthoritativeSiegeWeaponVisualTree(deploymentPoint, siegeWeapon, true) + "}");
+                    details.Add("Controller={" + SyncSiegeControllerAfterDeploy(team.Side, siegeWeapon) + "}");
+                    details.Add("Formations={" + PrepareFormationsForSiegeMachineAssignment(team) + "}");
+                    details.Add("TickAux={" + TickAuxForInit(siegeWeapon) + "}");
+                    details.Add("FallbackUse={" + EnsureFormationUsesMachine(team, siegeWeapon) + "}");
+                    details.Add("AutoAssign={" + AutoAssignDetachments(team, siegeDeploymentHandler) + "}");
+                }
+                finally
+                {
+                    details.Add("FormationControlRestore={" +
+                        RestoreFormationControlSnapshots(formationControlSnapshots) + "}");
+                    CoopBattlePhase phase = CoopBattlePhaseRuntimeState.GetPhase();
+                    if (phase == CoopBattlePhase.PreBattleHold || phase == CoopBattlePhase.BattleActive)
+                    {
+                        CoopMissionNetworkBridge.ReapplyDelegatedFormationOwnership(
+                            mission,
+                            team,
+                            "siege-machine-deployment-control-restore");
+                    }
+                }
             }
             details.Add("After=" + FormatDeploymentPoint(deploymentPoint));
             return string.Join(" ", details.ToArray());
@@ -1945,6 +1964,7 @@ namespace CoopSpectator.Infrastructure
 
             int formationCount = 0;
             int aiControlledSetCount = 0;
+            int playerOwnedPreservedCount = 0;
             string error = string.Empty;
             try
             {
@@ -1954,6 +1974,12 @@ namespace CoopSpectator.Infrastructure
                         continue;
 
                     formationCount++;
+                    if (formation.PlayerOwner != null)
+                    {
+                        playerOwnedPreservedCount++;
+                        continue;
+                    }
+
                     try
                     {
                         formation.SetControlledByAI(true, true);
@@ -1972,6 +1998,65 @@ namespace CoopSpectator.Infrastructure
 
             return "Formations=" + formationCount +
                    " AiControlledSet=" + aiControlledSetCount +
+                   " PlayerOwnedPreserved=" + playerOwnedPreservedCount +
+                   " Error=" + (string.IsNullOrWhiteSpace(error) ? "<none>" : error);
+        }
+
+        private static List<FormationControlSnapshot> CaptureFormationControlSnapshots(Team team)
+        {
+            var snapshots = new List<FormationControlSnapshot>();
+            if (team?.FormationsIncludingEmpty == null)
+                return snapshots;
+
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null)
+                    continue;
+
+                snapshots.Add(new FormationControlSnapshot(
+                    formation,
+                    formation.PlayerOwner,
+                    formation.IsAIControlled));
+            }
+
+            return snapshots;
+        }
+
+        private static string RestoreFormationControlSnapshots(
+            IEnumerable<FormationControlSnapshot> snapshots)
+        {
+            int restoredCount = 0;
+            int playerOwnedCount = 0;
+            int aiControlledCount = 0;
+            string error = string.Empty;
+            if (snapshots == null)
+                return "Snapshots=0";
+
+            foreach (FormationControlSnapshot snapshot in snapshots)
+            {
+                Formation formation = snapshot.Formation;
+                if (formation == null)
+                    continue;
+
+                try
+                {
+                    formation.PlayerOwner = snapshot.PlayerOwner;
+                    formation.SetControlledByAI(snapshot.IsAIControlled, false);
+                    restoredCount++;
+                    if (snapshot.PlayerOwner != null)
+                        playerOwnedCount++;
+                    if (snapshot.IsAIControlled)
+                        aiControlledCount++;
+                }
+                catch (Exception ex)
+                {
+                    error = AppendError(error, "formation-" + formation.Index, ex);
+                }
+            }
+
+            return "Restored=" + restoredCount +
+                   " PlayerOwned=" + playerOwnedCount +
+                   " AiControlled=" + aiControlledCount +
                    " Error=" + (string.IsNullOrWhiteSpace(error) ? "<none>" : error);
         }
 
@@ -2006,6 +2091,7 @@ namespace CoopSpectator.Infrastructure
             }
 
             Formation selectedFormation = null;
+            bool selectedFormationIsPlayerOwned = true;
             float selectedDistanceSquared = float.MaxValue;
             int scannedFormations = 0;
             int eligibleFormations = 0;
@@ -2018,11 +2104,16 @@ namespace CoopSpectator.Infrastructure
                         continue;
 
                     eligibleFormations++;
+                    bool candidateIsPlayerOwned = formation.PlayerOwner != null;
                     float distanceSquared = GetFormationDistanceSquaredToMachine(formation, siegeWeapon);
-                    if (distanceSquared < selectedDistanceSquared)
+                    if (selectedFormation == null ||
+                        (selectedFormationIsPlayerOwned && !candidateIsPlayerOwned) ||
+                        (selectedFormationIsPlayerOwned == candidateIsPlayerOwned &&
+                         distanceSquared < selectedDistanceSquared))
                     {
                         selectedDistanceSquared = distanceSquared;
                         selectedFormation = formation;
+                        selectedFormationIsPlayerOwned = candidateIsPlayerOwned;
                     }
                 }
             }
@@ -2046,6 +2137,7 @@ namespace CoopSpectator.Infrastructure
                 bool attached = team.DetachmentManager != null && team.DetachmentManager.ContainsDetachment(detachment);
                 int userFormationCount = CountUserFormationsForTeam(usableMachine, team);
                 return "Selected=True FormationIndex=" + selectedFormation.Index +
+                       " PlayerOwnedFallback=" + selectedFormationIsPlayerOwned +
                        " Attached=" + attached +
                        " UserFormations=" + userFormationCount +
                        " Scanned=" + scannedFormations +
@@ -2056,6 +2148,7 @@ namespace CoopSpectator.Infrastructure
             catch (Exception ex)
             {
                 return "Selected=True FormationIndex=" + selectedFormation.Index +
+                       " PlayerOwnedFallback=" + selectedFormationIsPlayerOwned +
                        " Error=" + ex.GetType().Name + ":" + ex.Message +
                        " DetachmentWeight=" + FormatFloat(detachmentWeight);
             }
@@ -2080,6 +2173,23 @@ namespace CoopSpectator.Infrastructure
             }
 
             return count;
+        }
+
+        private readonly struct FormationControlSnapshot
+        {
+            public FormationControlSnapshot(
+                Formation formation,
+                Agent playerOwner,
+                bool isAIControlled)
+            {
+                Formation = formation;
+                PlayerOwner = playerOwner;
+                IsAIControlled = isAIControlled;
+            }
+
+            public Formation Formation { get; }
+            public Agent PlayerOwner { get; }
+            public bool IsAIControlled { get; }
         }
 
         private static bool IsEligibleFormationForSiegeMachine(Formation formation, IDetachment detachment)

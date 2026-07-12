@@ -180,6 +180,7 @@ namespace CoopSpectator.UI
             TryShowStartBattleInstruction(hasLocalControlledAgent);
             TryHandleReopenSelectionHotkey(dt, hasLocalControlledAgent);
             TryTickCommanderDeploymentViewModel();
+            TryCompleteAutoDeployCaptainAssignmentRestoration();
             TryTickCommanderDeploymentBoundaries(dt);
             TryTickCommanderDeploymentFreeCamera(dt);
 
@@ -767,6 +768,7 @@ namespace CoopSpectator.UI
                 HandleCommanderAutoDeployRequested,
                 HandleCommanderReadyRequested,
                 new Dictionary<int, Agent>());
+            commanderVm.EnableReusableCompanionCaptainAssignments();
             commanderVm.IsEnabled = true;
             commanderVm.AreCameraControlsEnabled = false;
             commanderVm.CanStartMission = true;
@@ -1360,7 +1362,8 @@ namespace CoopSpectator.UI
             bool setPlayerRole = false;
             try
             {
-                playerTeam.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
+                if (!playerTeam.IsPlayerGeneral || playerTeam.IsPlayerSergeant)
+                    playerTeam.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
                 setPlayerRole = playerTeam.IsPlayerGeneral;
             }
             catch (Exception ex)
@@ -1952,7 +1955,7 @@ namespace CoopSpectator.UI
                 return false;
             }
 
-            OrderController orderController = team.PlayerOrderController;
+            OrderController orderController = ResolveLocalBattleOrderController(team, mainAgent);
             if (orderController == null)
             {
                 unavailableReason = "order-controller-missing";
@@ -1965,13 +1968,18 @@ namespace CoopSpectator.UI
                 team.IsPlayerGeneral &&
                 IsSameAgent(team.GeneralAgent, mainAgent) &&
                 IsSameAgent(orderController.Owner, mainAgent);
-            if (!isExactCommanderEntry && !hasEstablishedCommanderControl)
+            Agent localMainAgent = mainAgent;
+            bool hasDelegatedFormationControl =
+                IsSameAgent(orderController.Owner, mainAgent) &&
+                team.FormationsIncludingEmpty.Any(formation =>
+                    formation != null && IsSameAgent(formation.PlayerOwner, localMainAgent));
+            if (!isExactCommanderEntry && !hasDelegatedFormationControl)
             {
-                unavailableReason = "not-local-commander";
+                unavailableReason = "not-local-commander-or-delegated-captain";
                 return false;
             }
 
-            if (!hasEstablishedCommanderControl)
+            if (isExactCommanderEntry && !hasEstablishedCommanderControl)
             {
                 unavailableReason = "commander-control-pending";
                 return false;
@@ -1981,6 +1989,17 @@ namespace CoopSpectator.UI
                 mission.PlayerTeam = team;
 
             return true;
+        }
+
+        private static OrderController ResolveLocalBattleOrderController(Team team, Agent mainAgent)
+        {
+            if (team == null || mainAgent == null)
+                return null;
+
+            if (IsSameAgent(team.PlayerOrderController?.Owner, mainAgent))
+                return team.PlayerOrderController;
+
+            return team.GetOrderControllerOf(mainAgent);
         }
 
         private static string ResolveCommanderBattleControlledEntryId(MissionPeer missionPeer, Agent mainAgent)
@@ -2055,7 +2074,7 @@ namespace CoopSpectator.UI
             if (_gauntletLayer == null || mission == null || team == null || mainAgent == null)
                 return false;
 
-            OrderController orderController = team.PlayerOrderController;
+            OrderController orderController = ResolveLocalBattleOrderController(team, mainAgent);
             if (orderController == null)
                 return false;
 
@@ -3936,9 +3955,15 @@ namespace CoopSpectator.UI
             _requestedScreen = CoopSelectionScreen.CommanderDeployment;
             _spectatorOverlayHidden = false;
 
+            CoopSiegeOrderOfBattleVM reusableCaptainVm =
+                autoDeploy ? _commanderDeploymentViewModel as CoopSiegeOrderOfBattleVM : null;
+            reusableCaptainVm?.BeginAutoDeployCaptainAssignmentPreservation(Mission?.PlayerTeam);
+
             bool queued = autoDeploy
                 ? CoopBattleNetworkRequestTransport.TryAutoDeployCommanderDeployment(snapshot.EffectiveSide, snapshot.SelectedEntryId, source)
                 : CoopBattleNetworkRequestTransport.TryFinishCommanderDeployment(snapshot.EffectiveSide, snapshot.SelectedEntryId, source);
+            if (autoDeploy && !queued)
+                reusableCaptainVm?.CancelAutoDeployCaptainAssignmentPreservation();
             if (queued && !autoDeploy)
             {
                 MarkLocalSpawnPending(snapshot, waitsForDeployment: false);
@@ -3964,8 +3989,19 @@ namespace CoopSpectator.UI
                 " EntryId=" + (snapshot.SelectedEntryId ?? string.Empty) +
                 " Source=" + (source ?? "unknown"));
             if (autoDeploy || !queued)
+            {
                 RefreshOverlay(force: true, hasLocalControlledAgent);
+            }
             return queued;
+        }
+
+        private void TryCompleteAutoDeployCaptainAssignmentRestoration()
+        {
+            if (_currentScreen != CoopSelectionScreen.CommanderDeployment)
+                return;
+
+            (_commanderDeploymentViewModel as CoopSiegeOrderOfBattleVM)?
+                .TryCompleteAutoDeployCaptainAssignmentRestorationIfStable(Mission?.PlayerTeam);
         }
 
         private void HandleCommanderBackRequested()

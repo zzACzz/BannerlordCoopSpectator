@@ -17579,7 +17579,16 @@ namespace CoopSpectator.Patches
                 bridgeTroopOrEntryId: null,
                 out _);
             bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
-            if (!isExactCommander &&
+            bool hasDelegatedOrderAuthority =
+                TryResolveLocalAuthorizedFormationIndices(
+                    mission,
+                    team,
+                    controlledEntryId,
+                    out HashSet<int> delegatedAuthorizedFormationIndices,
+                    out string delegatedAuthorityRole) &&
+                delegatedAuthorizedFormationIndices.Count > 0 &&
+                string.Equals(delegatedAuthorityRole, "delegated-captain", StringComparison.Ordinal);
+            if (!isExactCommander && !hasDelegatedOrderAuthority &&
                 string.IsNullOrWhiteSpace(controlledEntryId) &&
                 TryBypassNonCommanderSuppressionFromEstablishedLocalCommanderState(
                     context: "TwoPositionOrderBridge",
@@ -17593,7 +17602,7 @@ namespace CoopSpectator.Patches
                 isExactCommander = true;
             }
 
-            if (!isExactCommander)
+            if (!isExactCommander && !hasDelegatedOrderAuthority)
                 return false;
 
             bool hasEstablishedCommanderControl =
@@ -17772,7 +17781,16 @@ namespace CoopSpectator.Patches
                 entryPolicy.BridgeTroopOrEntryId,
                 out _);
             bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
-            if (!isExactCommander &&
+            bool hasDelegatedOrderAuthority =
+                TryResolveLocalAuthorizedFormationIndices(
+                    mission,
+                    team,
+                    controlledEntryId,
+                    out HashSet<int> delegatedAuthorizedFormationIndices,
+                    out string delegatedAuthorityRole) &&
+                delegatedAuthorizedFormationIndices.Count > 0 &&
+                string.Equals(delegatedAuthorityRole, "delegated-captain", StringComparison.Ordinal);
+            if (!isExactCommander && !hasDelegatedOrderAuthority &&
                 string.IsNullOrWhiteSpace(controlledEntryId) &&
                 TryBypassNonCommanderSuppressionFromEstablishedLocalCommanderState(
                     context: "OrderUi",
@@ -17786,7 +17804,7 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (!isExactCommander &&
+            if (!isExactCommander && !hasDelegatedOrderAuthority &&
                 ShouldDeferNonCommanderSuppressionUntilControlledEntryIdentityResolves(
                     "OrderUi",
                     myPeer,
@@ -17802,7 +17820,7 @@ namespace CoopSpectator.Patches
 
             bool hasCommanderIdentity = !string.IsNullOrWhiteSpace(commanderEntryId);
             bool hasCommanderControlCounts = myMissionPeer.BotsUnderControlTotal > 1 || myMissionPeer.BotsUnderControlAlive > 0;
-            if (isExactCommander || (!hasCommanderIdentity && hasCommanderControlCounts))
+            if (isExactCommander || hasDelegatedOrderAuthority || (!hasCommanderIdentity && hasCommanderControlCounts))
                 return false;
 
             string suppressionStateKey =
@@ -17972,6 +17990,33 @@ namespace CoopSpectator.Patches
             return string.IsNullOrWhiteSpace(fallbackEntryId)
                 ? null
                 : fallbackEntryId;
+        }
+
+        private static bool TryResolveLocalAuthorizedFormationIndices(
+            Mission mission,
+            Team team,
+            string entryId,
+            out HashSet<int> authorizedFormationIndices,
+            out string authorityRole)
+        {
+            authorizedFormationIndices = new HashSet<int>();
+            authorityRole = "none";
+            if (!GameNetwork.IsClient ||
+                mission == null ||
+                team == null ||
+                string.IsNullOrWhiteSpace(entryId) ||
+                !CoopMissionNetworkBridge.TryResolveAuthorizedFormationIndices(
+                    mission,
+                    team,
+                    entryId,
+                    out List<int> resolvedFormationIndices,
+                    out authorityRole))
+            {
+                return false;
+            }
+
+            authorizedFormationIndices = new HashSet<int>(resolvedFormationIndices);
+            return !string.Equals(authorityRole, "none", StringComparison.Ordinal);
         }
 
         private static string ResolveControlledEntryId(
@@ -18808,6 +18853,15 @@ namespace CoopSpectator.Patches
                     ? spawnIdentityState.EntryId
                     : null);
             bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
+            bool hasExactOrderAuthority =
+                CoopMissionNetworkBridge.TryResolveExactBattleOrderAuthority(
+                    networkPeer,
+                    out _,
+                    out _,
+                    out _,
+                    out List<int> authorizedFormationIndices,
+                    out _) &&
+                authorizedFormationIndices.Count > 0;
             if (!isExactCommander &&
                 ShouldDeferNonCommanderSuppressionUntilControlledEntryIdentityResolves(
                     "ServerSelectAllFormations",
@@ -18822,7 +18876,7 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (!isExactCommander)
+            if (!isExactCommander && !hasExactOrderAuthority)
             {
                 logKey =
                     networkPeer.Index + "|" +
@@ -18927,7 +18981,16 @@ namespace CoopSpectator.Patches
                 entryPolicy.BridgeTroopOrEntryId,
                 out _);
             bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
-            if (!isExactCommander &&
+            bool hasDelegatedOrderAuthority =
+                TryResolveLocalAuthorizedFormationIndices(
+                    mission,
+                    team,
+                    controlledEntryId,
+                    out HashSet<int> delegatedAuthorizedFormationIndices,
+                    out string delegatedAuthorityRole) &&
+                delegatedAuthorizedFormationIndices.Count > 0 &&
+                string.Equals(delegatedAuthorityRole, "delegated-captain", StringComparison.Ordinal);
+            if (!isExactCommander && !hasDelegatedOrderAuthority &&
                 string.IsNullOrWhiteSpace(controlledEntryId) &&
                 TryBypassNonCommanderSuppressionFromEstablishedLocalCommanderState(
                     context: "SelectAllFormations",
@@ -18941,7 +19004,7 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (!isExactCommander &&
+            if (!isExactCommander && !hasDelegatedOrderAuthority &&
                 ShouldDeferNonCommanderSuppressionUntilControlledEntryIdentityResolves(
                     "SelectAllFormations",
                     myPeer,
@@ -18955,7 +19018,7 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (!isExactCommander)
+            if (!isExactCommander && !hasDelegatedOrderAuthority)
             {
                 logKey =
                     myPeer.Index + "|" +
@@ -19088,7 +19151,16 @@ namespace CoopSpectator.Patches
                 entryPolicy.BridgeTroopOrEntryId,
                 out _);
             bool isExactCommander = IsEntryIdExactCommanderForTeam(team, controlledEntryId, out string commanderEntryId);
-            if (!isExactCommander &&
+            bool hasDelegatedOrderAuthority =
+                TryResolveLocalAuthorizedFormationIndices(
+                    mission,
+                    team,
+                    controlledEntryId,
+                    out HashSet<int> delegatedAuthorizedFormationIndices,
+                    out string delegatedAuthorityRole) &&
+                delegatedAuthorizedFormationIndices.Count > 0 &&
+                string.Equals(delegatedAuthorityRole, "delegated-captain", StringComparison.Ordinal);
+            if (!isExactCommander && !hasDelegatedOrderAuthority &&
                 string.IsNullOrWhiteSpace(controlledEntryId) &&
                 TryBypassNonCommanderSuppressionFromEstablishedLocalCommanderState(
                     context: "OrderTroopPlacerTick",
@@ -19102,7 +19174,7 @@ namespace CoopSpectator.Patches
                 isExactCommander = true;
             }
 
-            if (!isExactCommander &&
+            if (!isExactCommander && !hasDelegatedOrderAuthority &&
                 ShouldDeferNonCommanderSuppressionUntilControlledEntryIdentityResolves(
                     "OrderTroopPlacerTick",
                     myPeer,
@@ -19116,7 +19188,7 @@ namespace CoopSpectator.Patches
                 isExactCommander = true;
             }
 
-            if (!isExactCommander)
+            if (!isExactCommander && !hasDelegatedOrderAuthority)
             {
                 logKey =
                     myPeer.Index + "|" +
@@ -19286,19 +19358,22 @@ namespace CoopSpectator.Patches
             if (entryPolicy == null || !entryPolicy.UseAuthoritativeTroopPath)
                 return false;
 
-            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
-            RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(runtimeState, team.Side);
-            if (commanderEntry == null || string.IsNullOrWhiteSpace(commanderEntry.EntryId))
-                return false;
-
             string controlledEntryId = ResolveControlledEntryId(
                 myMissionPeer,
                 controlledAgent,
                 mission,
                 entryPolicy.BridgeTroopOrEntryId,
                 out _);
-            if (!IsEntryIdExactCommanderForTeam(team, controlledEntryId, out _))
+            if (!TryResolveLocalAuthorizedFormationIndices(
+                    mission,
+                    team,
+                    controlledEntryId,
+                    out HashSet<int> authorizedFormationIndices,
+                    out string authorityRole) ||
+                authorizedFormationIndices.Count <= 0)
+            {
                 return false;
+            }
 
             if (promotionBeforeLocalFormationAttach)
             {
@@ -19306,7 +19381,8 @@ namespace CoopSpectator.Patches
                     myPeer.Index + "|" +
                     team.TeamIndex + "|" +
                     controlledAgent.Index + "|" +
-                    commanderEntry.EntryId + "|" +
+                    controlledEntryId + "|" +
+                    authorityRole + "|" +
                     botAliveCount + "|" +
                     botTotalCount;
                 if (!string.Equals(_lastPreFormationCommanderPromotionKey, preFormationLogKey, StringComparison.Ordinal))
@@ -19317,7 +19393,8 @@ namespace CoopSpectator.Patches
                         "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
                         " TeamIndex=" + team.TeamIndex +
                         " Side=" + team.Side +
-                        " EntryId=" + commanderEntry.EntryId +
+                        " EntryId=" + controlledEntryId +
+                        " AuthorityRole=" + authorityRole +
                         " ControlledAgentIndex=" + controlledAgent.Index +
                         " ControlledFormationIndex=" + (myMissionPeer.ControlledFormation?.FormationIndex.ToString() ?? "null") +
                         " AgentFormationIndex=" + (controlledAgent.Formation?.FormationIndex.ToString() ?? "null") +
@@ -19327,7 +19404,8 @@ namespace CoopSpectator.Patches
                 }
             }
 
-            team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
+            if (!team.IsPlayerGeneral || team.IsPlayerSergeant)
+                team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
             controlledAgent.SetCanLeadFormationsRemotely(value: true);
             if (!ReferenceEquals(team.GeneralAgent, controlledAgent))
                 team.GeneralAgent = controlledAgent;
@@ -19343,11 +19421,16 @@ namespace CoopSpectator.Patches
                 if (formation == null || !ReferenceEquals(formation.Team, team))
                     continue;
 
-                TrySetInstanceMemberValue(formation, "PlayerOwner", orderOwnerAgent);
-                bool isOwnedFormation = formation.CountOfUnits > 0;
+                bool isOwnedFormation =
+                    formation.CountOfUnits > 0 &&
+                    authorizedFormationIndices.Contains(formation.Index);
+                TrySetLocalFormationPlayerOwnerIfChanged(
+                    formation,
+                    isOwnedFormation ? orderOwnerAgent : null);
                 TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
                 TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
             }
+            PruneUnauthorizedLocalSelectedFormations(playerOrderController, authorizedFormationIndices);
 
             Formation commanderFormation = controlledAgent.Formation ?? priorControlledFormation;
             if (commanderFormation != null && ReferenceEquals(commanderFormation.Team, team))
@@ -19359,7 +19442,7 @@ namespace CoopSpectator.Patches
                 PeerIndex = myPeer.Index,
                 TeamIndex = team.TeamIndex,
                 AgentIndex = controlledAgent.Index,
-                EntryId = commanderEntry.EntryId,
+                EntryId = controlledEntryId,
                 QueuedUtc = DateTime.UtcNow,
                 Attempts = 0
             };
@@ -19368,14 +19451,16 @@ namespace CoopSpectator.Patches
                 myPeer.Index + "|" +
                 controlledAgent.Index + "|" +
                 team.TeamIndex + "|" +
-                commanderEntry.EntryId + "|" +
+                controlledEntryId + "|" +
+                authorityRole + "|" +
                 botAliveCount + "|" +
                 botTotalCount;
             logDetails =
                 "Peer=" + (myPeer.UserName ?? myPeer.Index.ToString()) +
                 " TeamIndex=" + team.TeamIndex +
                 " Side=" + team.Side +
-                " EntryId=" + commanderEntry.EntryId +
+                " EntryId=" + controlledEntryId +
+                " AuthorityRole=" + authorityRole +
                 " ControlledAgentIndex=" + controlledAgent.Index +
                 " AgentMainIndex=" + (Agent.Main?.Index.ToString() ?? "null") +
                 " OrderOwnerIndex=" + (orderOwnerAgent?.Index.ToString() ?? "null") +
@@ -19384,6 +19469,7 @@ namespace CoopSpectator.Patches
                 " PromotionBeforeLocalFormationAttach=" + promotionBeforeLocalFormationAttach +
                 " BotsUnderControlAlive=" + botAliveCount +
                 " BotsUnderControlTotal=" + botTotalCount +
+                " AuthorizedFormationCount=" + authorizedFormationIndices.Count +
                 " FormationCount=" + team.FormationsIncludingEmpty.Count +
                 " Mission=" + (mission.SceneName ?? "null");
             return true;
@@ -19625,7 +19711,8 @@ namespace CoopSpectator.Patches
             if (!ReferenceEquals(mission.PlayerTeam, team))
                 mission.PlayerTeam = team;
 
-            team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
+            if (!team.IsPlayerGeneral || team.IsPlayerSergeant)
+                team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
             controlledAgent.SetCanLeadFormationsRemotely(value: true);
             if (!ReferenceEquals(team.GeneralAgent, controlledAgent))
                 team.GeneralAgent = controlledAgent;
@@ -19635,16 +19722,28 @@ namespace CoopSpectator.Patches
             if (agentOrderController != null && !ReferenceEquals(agentOrderController.Owner, mainAgent))
                 agentOrderController.Owner = mainAgent;
 
+            string controlledEntryId = ResolveAgentEntryId(controlledAgent, fallbackEntryId: null);
+            TryResolveLocalAuthorizedFormationIndices(
+                mission,
+                team,
+                controlledEntryId,
+                out HashSet<int> authorizedFormationIndices,
+                out _);
+
             foreach (Formation formation in team.FormationsIncludingEmpty)
             {
                 if (formation == null || !ReferenceEquals(formation.Team, team))
                     continue;
 
-                TrySetInstanceMemberValue(formation, "PlayerOwner", mainAgent);
-                bool isOwnedFormation = formation.CountOfUnits > 0;
+                bool isOwnedFormation =
+                    formation.CountOfUnits > 0 &&
+                    authorizedFormationIndices.Contains(formation.Index);
+                TrySetLocalFormationPlayerOwnerIfChanged(
+                    formation,
+                    isOwnedFormation ? mainAgent : null);
                 TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
                 TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
-                if (formation.CountOfUnits <= 0)
+                if (!isOwnedFormation)
                     continue;
 
                 formationsWithUnits++;
@@ -19652,6 +19751,7 @@ namespace CoopSpectator.Patches
                 if (formationPlayerOwner != null && formationPlayerOwner.Index == mainAgent.Index)
                     ownedFormationsWithUnits++;
             }
+            PruneUnauthorizedLocalSelectedFormations(playerOrderController, authorizedFormationIndices);
 
             Formation commanderFormation = controlledAgent.Formation;
             if (commanderFormation != null && ReferenceEquals(commanderFormation.Team, team))
@@ -19694,8 +19794,23 @@ namespace CoopSpectator.Patches
             try
             {
                 playerOrderController.ClearSelectedFormations();
-                playerOrderController.SelectAllFormations(uiFeedback: false);
-                autoSelectAllInvoked = true;
+                int selectedCount = 0;
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (formation == null ||
+                        formation.CountOfUnits <= 0)
+                    {
+                        continue;
+                    }
+
+                    Agent playerOwner = TryGetInstanceMemberValue(formation, "PlayerOwner") as Agent;
+                    if (playerOwner == null || playerOwner.Index != mainAgent.Index)
+                        continue;
+
+                    playerOrderController.SelectFormation(formation);
+                    selectedCount++;
+                }
+                autoSelectAllInvoked = selectedCount > 0;
             }
             catch
             {
@@ -19707,6 +19822,46 @@ namespace CoopSpectator.Patches
                 _lastAutoSelectedAllLocalCommanderFormationsKey = autoSelectKey;
 
             return autoSelectAllInvoked;
+        }
+
+        private static void PruneUnauthorizedLocalSelectedFormations(
+            OrderController orderController,
+            HashSet<int> authorizedFormationIndices)
+        {
+            if (orderController?.SelectedFormations == null || authorizedFormationIndices == null)
+                return;
+
+            foreach (Formation formation in orderController.SelectedFormations.ToList())
+            {
+                if (formation == null || authorizedFormationIndices.Contains(formation.Index))
+                    continue;
+
+                try
+                {
+                    orderController.DeselectFormation(formation);
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private static void TrySetLocalFormationPlayerOwnerIfChanged(
+            Formation formation,
+            Agent desiredPlayerOwner)
+        {
+            if (formation == null)
+                return;
+
+            Agent currentPlayerOwner = TryGetInstanceMemberValue(formation, "PlayerOwner") as Agent;
+            bool sameOwner = ReferenceEquals(currentPlayerOwner, desiredPlayerOwner) ||
+                             (currentPlayerOwner != null &&
+                              desiredPlayerOwner != null &&
+                              currentPlayerOwner.Index == desiredPlayerOwner.Index);
+            if (sameOwner || (currentPlayerOwner == null && desiredPlayerOwner == null))
+                return;
+
+            TrySetInstanceMemberValue(formation, "PlayerOwner", desiredPlayerOwner);
         }
 
         private static void TryFinalizePendingLocalCommanderOrderControl(object orderUiHandler)
@@ -19801,7 +19956,8 @@ namespace CoopSpectator.Patches
                 return;
             }
 
-            team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
+            if (!team.IsPlayerGeneral || team.IsPlayerSergeant)
+                team.SetPlayerRole(isPlayerGeneral: true, isPlayerSergeant: false);
             controlledAgent.SetCanLeadFormationsRemotely(value: true);
             if (!ReferenceEquals(team.GeneralAgent, controlledAgent))
                 team.GeneralAgent = controlledAgent;
@@ -19830,16 +19986,26 @@ namespace CoopSpectator.Patches
 
             int ownedFormationCount = 0;
             int formationsWithUnits = 0;
+            TryResolveLocalAuthorizedFormationIndices(
+                mission,
+                team,
+                pending.EntryId,
+                out HashSet<int> authorizedFormationIndices,
+                out _);
             foreach (Formation formation in team.FormationsIncludingEmpty)
             {
                 if (formation == null || !ReferenceEquals(formation.Team, team))
                     continue;
 
-                TrySetInstanceMemberValue(formation, "PlayerOwner", mainAgent);
-                bool isOwnedFormation = formation.CountOfUnits > 0;
+                bool isOwnedFormation =
+                    formation.CountOfUnits > 0 &&
+                    authorizedFormationIndices.Contains(formation.Index);
+                TrySetLocalFormationPlayerOwnerIfChanged(
+                    formation,
+                    isOwnedFormation ? mainAgent : null);
                 TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
                 TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
-                if (formation.CountOfUnits > 0)
+                if (isOwnedFormation)
                 {
                     formationsWithUnits++;
                     Agent formationPlayerOwner = TryGetInstanceMemberValue(formation, "PlayerOwner") as Agent;
@@ -19847,6 +20013,7 @@ namespace CoopSpectator.Patches
                         ownedFormationCount++;
                 }
             }
+            PruneUnauthorizedLocalSelectedFormations(playerOrderController, authorizedFormationIndices);
 
             Formation commanderFormation = controlledAgent.Formation;
             if (commanderFormation != null && ReferenceEquals(commanderFormation.Team, team))
@@ -19985,16 +20152,27 @@ namespace CoopSpectator.Patches
 
             int formationsWithUnits = 0;
             int ownedFormationsWithUnits = 0;
+            string controlledEntryId = ResolveAgentEntryId(controlledAgent, fallbackEntryId: null);
+            TryResolveLocalAuthorizedFormationIndices(
+                mission,
+                team,
+                controlledEntryId,
+                out HashSet<int> authorizedFormationIndices,
+                out _);
             foreach (Formation formation in team.FormationsIncludingEmpty)
             {
                 if (formation == null || !ReferenceEquals(formation.Team, team))
                     continue;
 
-                TrySetInstanceMemberValue(formation, "PlayerOwner", mainAgent);
-                bool isOwnedFormation = formation.CountOfUnits > 0;
+                bool isOwnedFormation =
+                    formation.CountOfUnits > 0 &&
+                    authorizedFormationIndices.Contains(formation.Index);
+                TrySetLocalFormationPlayerOwnerIfChanged(
+                    formation,
+                    isOwnedFormation ? mainAgent : null);
                 TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
                 TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
-                if (formation.CountOfUnits <= 0)
+                if (!isOwnedFormation)
                     continue;
 
                 formationsWithUnits++;
@@ -20002,6 +20180,7 @@ namespace CoopSpectator.Patches
                 if (formationPlayerOwner != null && formationPlayerOwner.Index == mainAgent.Index)
                     ownedFormationsWithUnits++;
             }
+            PruneUnauthorizedLocalSelectedFormations(playerOrderController, authorizedFormationIndices);
 
             int selectedFormationCount = playerOrderController.SelectedFormations?.Count ?? 0;
             bool afterInitializeInvoked = false;

@@ -2354,6 +2354,15 @@ namespace CoopSpectator.Infrastructure
 
             SiegeAssaultTeamAiLifecycleTacticRepairs.Add(mission);
 
+            CoopMissionNetworkBridge.ReapplyDelegatedFormationOwnership(
+                mission,
+                mission.AttackerTeam,
+                "siege-team-ai-lifecycle-repair-attacker");
+            CoopMissionNetworkBridge.ReapplyDelegatedFormationOwnership(
+                mission,
+                mission.DefenderTeam,
+                "siege-team-ai-lifecycle-repair-defender");
+
             TryGetSiegeLaneQuerySystemReadiness(
                 out bool lanesReadyAfter,
                 out int laneCountAfter,
