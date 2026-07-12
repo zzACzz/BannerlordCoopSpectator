@@ -59,6 +59,7 @@ namespace CoopSpectator.Infrastructure
         public string PartyName { get; set; }
         public string SideId { get; set; }
         public bool IsMainParty { get; set; }
+        public bool HasMobileParty { get; set; }
         public int TotalManCount { get; set; }
         public BattlePartyModifierState Modifiers { get; set; } = new BattlePartyModifierState();
         public List<RosterEntryState> Entries { get; set; } = new List<RosterEntryState>();
@@ -83,6 +84,7 @@ namespace CoopSpectator.Infrastructure
         public int QuartermasterStewardSkill { get; set; }
         public int EngineerEngineeringSkill { get; set; }
         public int SurgeonMedicineSkill { get; set; }
+        public int SurvivalMedicineSkill { get; set; }
         public List<string> PartyLeaderPerkIds { get; set; } = new List<string>();
         public List<string> ArmyCommanderPerkIds { get; set; } = new List<string>();
         public List<string> CaptainPerkIds { get; set; } = new List<string>();
@@ -112,6 +114,12 @@ namespace CoopSpectator.Infrastructure
         public int HeroLevel { get; set; }
         public float HeroAge { get; set; }
         public bool HeroIsFemale { get; set; }
+        public int CharacterLevel { get; set; }
+        public float HeroTotalArmorSum { get; set; }
+        public bool IsPlayerCharacter { get; set; }
+        public bool IsPlayerClanHero { get; set; }
+        public bool HeroCanDieInBattle { get; set; } = true;
+        public bool ForceUnconscious { get; set; }
         public int Count { get; set; }
         public int WoundedCount { get; set; }
         public bool IsHero { get; set; }
@@ -194,6 +202,7 @@ namespace CoopSpectator.Infrastructure
         public string PartyName { get; set; }
         public string SideId { get; set; }
         public bool IsMainParty { get; set; }
+        public bool HasMobileParty { get; set; }
         public int TotalManCount { get; set; }
         public BattlePartyModifierProjectionState Modifiers { get; set; } = new BattlePartyModifierProjectionState();
         public List<BattleRosterEntryProjectionState> Entries { get; set; } = new List<BattleRosterEntryProjectionState>();
@@ -218,6 +227,7 @@ namespace CoopSpectator.Infrastructure
         public int QuartermasterStewardSkill { get; set; }
         public int EngineerEngineeringSkill { get; set; }
         public int SurgeonMedicineSkill { get; set; }
+        public int SurvivalMedicineSkill { get; set; }
         public List<string> PartyLeaderPerkIds { get; set; } = new List<string>();
         public List<string> ArmyCommanderPerkIds { get; set; } = new List<string>();
         public List<string> CaptainPerkIds { get; set; } = new List<string>();
@@ -247,6 +257,12 @@ namespace CoopSpectator.Infrastructure
         public int HeroLevel { get; set; }
         public float HeroAge { get; set; }
         public bool HeroIsFemale { get; set; }
+        public int CharacterLevel { get; set; }
+        public float HeroTotalArmorSum { get; set; }
+        public bool IsPlayerCharacter { get; set; }
+        public bool IsPlayerClanHero { get; set; }
+        public bool HeroCanDieInBattle { get; set; } = true;
+        public bool ForceUnconscious { get; set; }
         public int Count { get; set; }
         public int WoundedCount { get; set; }
         public bool IsHero { get; set; }
@@ -1505,6 +1521,7 @@ namespace CoopSpectator.Infrastructure
                         PartyName = partySnapshot.PartyName,
                         SideId = sideProjection.CanonicalSideKey,
                         IsMainParty = partySnapshot.IsMainParty,
+                        HasMobileParty = partySnapshot.HasMobileParty,
                         TotalManCount = partySnapshot.TotalManCount,
                         Modifiers = BuildPartyModifierProjection(partySnapshot.Modifiers)
                     };
@@ -1639,6 +1656,7 @@ namespace CoopSpectator.Infrastructure
                         PartyName = partyProjection.PartyName,
                         SideId = partyProjection.SideId,
                         IsMainParty = partyProjection.IsMainParty,
+                        HasMobileParty = partyProjection.HasMobileParty,
                         TotalManCount = partyProjection.TotalManCount,
                         Modifiers = BuildPartyModifierState(partyProjection.Modifiers)
                     };
@@ -1668,6 +1686,12 @@ namespace CoopSpectator.Infrastructure
                         HeroLevel = entryProjection.HeroLevel,
                         HeroAge = entryProjection.HeroAge,
                         HeroIsFemale = entryProjection.HeroIsFemale,
+                        CharacterLevel = entryProjection.CharacterLevel,
+                        HeroTotalArmorSum = entryProjection.HeroTotalArmorSum,
+                        IsPlayerCharacter = entryProjection.IsPlayerCharacter,
+                        IsPlayerClanHero = entryProjection.IsPlayerClanHero,
+                        HeroCanDieInBattle = entryProjection.HeroCanDieInBattle,
+                        ForceUnconscious = entryProjection.ForceUnconscious,
                         Count = entryProjection.Count,
                         WoundedCount = entryProjection.WoundedCount,
                         IsHero = entryProjection.IsHero,
@@ -1783,6 +1807,12 @@ namespace CoopSpectator.Infrastructure
                 HeroLevel = troop.HeroLevel,
                 HeroAge = troop.HeroAge,
                 HeroIsFemale = troop.HeroIsFemale,
+                CharacterLevel = troop.CharacterLevel,
+                HeroTotalArmorSum = troop.HeroTotalArmorSum,
+                IsPlayerCharacter = troop.IsPlayerCharacter,
+                IsPlayerClanHero = troop.IsPlayerClanHero,
+                HeroCanDieInBattle = troop.HeroCanDieInBattle,
+                ForceUnconscious = troop.ForceUnconscious,
                 Count = troop.Count,
                 WoundedCount = troop.WoundedCount,
                 IsHero = troop.IsHero,
@@ -1863,6 +1893,7 @@ namespace CoopSpectator.Infrastructure
                 QuartermasterStewardSkill = modifierSnapshot.QuartermasterStewardSkill,
                 EngineerEngineeringSkill = modifierSnapshot.EngineerEngineeringSkill,
                 SurgeonMedicineSkill = modifierSnapshot.SurgeonMedicineSkill,
+                SurvivalMedicineSkill = modifierSnapshot.SurvivalMedicineSkill,
                 PartyLeaderPerkIds = modifierSnapshot.PartyLeaderPerkIds != null ? new List<string>(modifierSnapshot.PartyLeaderPerkIds) : new List<string>(),
                 ArmyCommanderPerkIds = modifierSnapshot.ArmyCommanderPerkIds != null ? new List<string>(modifierSnapshot.ArmyCommanderPerkIds) : new List<string>(),
                 CaptainPerkIds = modifierSnapshot.CaptainPerkIds != null ? new List<string>(modifierSnapshot.CaptainPerkIds) : new List<string>(),
@@ -1896,6 +1927,7 @@ namespace CoopSpectator.Infrastructure
                 QuartermasterStewardSkill = modifierProjection.QuartermasterStewardSkill,
                 EngineerEngineeringSkill = modifierProjection.EngineerEngineeringSkill,
                 SurgeonMedicineSkill = modifierProjection.SurgeonMedicineSkill,
+                SurvivalMedicineSkill = modifierProjection.SurvivalMedicineSkill,
                 PartyLeaderPerkIds = modifierProjection.PartyLeaderPerkIds != null ? new List<string>(modifierProjection.PartyLeaderPerkIds) : new List<string>(),
                 ArmyCommanderPerkIds = modifierProjection.ArmyCommanderPerkIds != null ? new List<string>(modifierProjection.ArmyCommanderPerkIds) : new List<string>(),
                 CaptainPerkIds = modifierProjection.CaptainPerkIds != null ? new List<string>(modifierProjection.CaptainPerkIds) : new List<string>(),

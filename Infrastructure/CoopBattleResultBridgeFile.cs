@@ -13,6 +13,8 @@ namespace CoopSpectator.Infrastructure
         public sealed class BattleResultSnapshot
         {
             public string BattleId { get; set; }
+            public string BattleInstanceId { get; set; }
+            public string ResultId { get; set; }
             public string BattleType { get; set; }
             public string MapScene { get; set; }
             public string Source { get; set; }
@@ -23,6 +25,26 @@ namespace CoopSpectator.Infrastructure
             public List<BattleResultEntrySnapshot> Entries { get; set; } = new List<BattleResultEntrySnapshot>();
             public int DroppedCombatEventCount { get; set; }
             public List<BattleResultCombatEventSnapshot> CombatEvents { get; set; } = new List<BattleResultCombatEventSnapshot>();
+            public List<BattleResultCasualtyEventSnapshot> CasualtyEvents { get; set; } = new List<BattleResultCasualtyEventSnapshot>();
+        }
+
+        public sealed class BattleResultCasualtyEventSnapshot
+        {
+            public string CasualtyEventId { get; set; }
+            public string SpawnInstanceId { get; set; }
+            public string Outcome { get; set; }
+            public string VictimEntryId { get; set; }
+            public string VictimSideId { get; set; }
+            public string VictimPartyId { get; set; }
+            public string VictimCharacterId { get; set; }
+            public string VictimOriginalCharacterId { get; set; }
+            public string VictimHeroId { get; set; }
+            public bool VictimIsHero { get; set; }
+            public string AttackerEntryId { get; set; }
+            public string AttackerPartyId { get; set; }
+            public string DamageType { get; set; }
+            public string WeaponFlags { get; set; }
+            public float MissionTime { get; set; }
         }
 
         public sealed class BattleResultEntrySnapshot

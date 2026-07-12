@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.ComponentInterfaces;
@@ -108,10 +109,21 @@ namespace CoopSpectator.DedicatedServer.MissionOverrides
                 return false;
 
             string missionMode = mission.Mode.ToString();
-            if (string.Equals(missionMode, "StartUp", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(missionMode, "StartUp", StringComparison.OrdinalIgnoreCase) &&
+                !IsExactSiegeStartupCasualtyContext())
+            {
                 return false;
+            }
 
             return true;
+        }
+
+        private static bool IsExactSiegeStartupCasualtyContext()
+        {
+            BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            return snapshot?.CasualtyRulesVersion == CampaignCasualtyProbabilityCalculator.CurrentRulesVersion &&
+                   snapshot.ScenarioContext?.IsSiegeBattle == true &&
+                   BattleSnapshotRuntimeState.GetState() != null;
         }
 
         private static string GetInactiveReason(TaleWorlds.MountAndBlade.Mission mission)
@@ -124,7 +136,10 @@ namespace CoopSpectator.DedicatedServer.MissionOverrides
 
             string missionMode = mission.Mode.ToString();
             if (string.Equals(missionMode, "StartUp", StringComparison.OrdinalIgnoreCase))
-                return "MissionMode=StartUp";
+            {
+                return "MissionMode=StartUp ExactSiegeCasualtyContext=" +
+                       IsExactSiegeStartupCasualtyContext();
+            }
 
             return "unknown";
         }
@@ -180,6 +195,17 @@ namespace CoopSpectator.DedicatedServer.MissionOverrides
                 WeaponFlags weaponFlags,
                 out float useSurgeryProbability)
             {
+                if (TryGetCampaignCasualtyProbability(
+                        affectorAgent,
+                        affectedAgent,
+                        damageType,
+                        weaponFlags,
+                        out float campaignDeathProbability))
+                {
+                    useSurgeryProbability = 1f;
+                    return campaignDeathProbability;
+                }
+
                 float innerUseSurgeryProbability;
                 float result = _inner.GetAgentStateProbability(
                     affectorAgent,
@@ -195,13 +221,59 @@ namespace CoopSpectator.DedicatedServer.MissionOverrides
                 }
 
                 useSurgeryProbability = 0f;
-                ModLogger.Info(
-                    "DedicatedKnockoutOutcomeModelOverride: forced blunt knockout to unconscious. " +
-                    "Victim=" + DescribeAgent(affectedAgent) +
-                    " Affector=" + DescribeAgent(affectorAgent) +
-                    " DamageType=" + damageType +
-                    " WeaponFlags=" + weaponFlags + ".");
                 return 0f;
+            }
+
+            private static bool TryGetCampaignCasualtyProbability(
+                Agent affectorAgent,
+                Agent affectedAgent,
+                DamageTypes damageType,
+                WeaponFlags weaponFlags,
+                out float deathProbability)
+            {
+                deathProbability = 1f;
+                if (affectedAgent == null || !affectedAgent.IsHuman || affectedAgent.IsMount)
+                    return false;
+
+                BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+                BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+                if (snapshot?.StoryModeTutorialProtectionEnabled == true &&
+                    affectedAgent.Team != null &&
+                    Mission.Current != null &&
+                    Mission.Current.GetMemberCountOfSide(affectedAgent.Team.Side) > 4)
+                {
+                    deathProbability = 0f;
+                    return true;
+                }
+
+                if (snapshot?.CasualtyRulesVersion != CampaignCasualtyProbabilityCalculator.CurrentRulesVersion ||
+                    snapshot.ScenarioContext?.IsSiegeBattle != true ||
+                    runtimeState == null ||
+                    !CoopMissionSpawnLogic.TryGetMaterializedBattleResultEntryId(affectedAgent, out string victimEntryId))
+                {
+                    return false;
+                }
+
+                RosterEntryState victimEntry = BattleSnapshotRuntimeState.GetEntryState(victimEntryId);
+                if (victimEntry == null)
+                    return false;
+
+                RosterEntryState attackerEntry = null;
+                if (affectorAgent != null &&
+                    affectorAgent.IsHuman &&
+                    CoopMissionSpawnLogic.TryGetMaterializedBattleResultEntryId(affectorAgent, out string attackerEntryId))
+                {
+                    attackerEntry = BattleSnapshotRuntimeState.GetEntryState(attackerEntryId);
+                }
+
+                return CampaignCasualtyProbabilityCalculator.TryCalculateDeathProbability(
+                    snapshot,
+                    runtimeState,
+                    victimEntry,
+                    attackerEntry,
+                    damageType,
+                    weaponFlags,
+                    out deathProbability);
             }
 
             private static bool ShouldForceBluntKnockout(Agent affectedAgent, DamageTypes damageType, WeaponFlags weaponFlags)
@@ -218,14 +290,6 @@ namespace CoopSpectator.DedicatedServer.MissionOverrides
                 return true;
             }
 
-            private static string DescribeAgent(Agent agent)
-            {
-                if (agent == null)
-                    return "none";
-
-                string character = agent.Character?.StringId ?? "no-character";
-                return "Index=" + agent.Index + " Character=" + character;
-            }
         }
     }
 }

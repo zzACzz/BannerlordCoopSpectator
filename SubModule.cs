@@ -409,6 +409,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                     starter.AddBehavior(new SpectatorStateReceiver()); // Ð”Ð¾Ð´Ð°Ñ”Ð¼Ð¾ behavior ÐºÐ»Ñ–Ñ”Ð½Ñ‚Ð° (Ð²Ñ–Ð½ Ð±ÑƒÐ´Ðµ Ð¿Ñ€Ð¸Ð¹Ð¼Ð°Ñ‚Ð¸ STATE Ñ‚Ñ–Ð»ÑŒÐºÐ¸ ÐºÐ¾Ð»Ð¸ Ð¼Ð¸ Client)
                     starter.AddBehavior(new ClientBattleNotification()); // ÐšÐ»Ñ–Ñ”Ð½Ñ‚: ÑÐ»ÑƒÑ…Ð°Ñ” BATTLE_START Ñ– Ð¿Ð¾ÐºÐ°Ð·ÑƒÑ” countdown/notification
                     starter.AddBehavior(new MainThreadDispatcherPumpBehavior()); // Pump dispatcher from campaign tick for reliable UI feedback
+                    starter.AddBehavior(new BattleResultWritebackJournalBehavior());
                     ModLogger.Info("Campaign behaviors Ð´Ð¾Ð´Ð°Ð½Ð¾ (HostStateBroadcaster + SpectatorStateReceiver)."); // Ð›Ð¾Ð³ÑƒÑ”Ð¼Ð¾ Ñ„Ð°ÐºÑ‚ Ð´Ð¾Ð´Ð°Ð²Ð°Ð½Ð½Ñ behaviors Ð´Ð»Ñ Ð´ÐµÐ±Ð°Ð³Ñƒ
                 } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº if
                 else if (!EnableCampaignBehaviors)

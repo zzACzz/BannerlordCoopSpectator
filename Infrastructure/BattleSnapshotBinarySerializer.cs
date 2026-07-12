@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 11;
+        private const int SchemaVersion = 12;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -69,6 +69,7 @@ namespace CoopSpectator.Infrastructure
                         schemaVersion != 8 &&
                         schemaVersion != 9 &&
                         schemaVersion != 10 &&
+                        schemaVersion != 11 &&
                         schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
@@ -93,6 +94,12 @@ namespace CoopSpectator.Infrastructure
         private static void WriteBattleSnapshot(BinaryWriter writer, BattleSnapshotMessage snapshot)
         {
             WriteString(writer, snapshot.BattleId);
+            WriteString(writer, snapshot.BattleInstanceId);
+            writer.Write(snapshot.CasualtyRulesVersion);
+            writer.Write(snapshot.BattleDeathDifficulty);
+            writer.Write(snapshot.ClanMemberDeathChanceMultiplier);
+            writer.Write(snapshot.IsPlayerMapEvent);
+            writer.Write(snapshot.StoryModeTutorialProtectionEnabled);
             WriteString(writer, snapshot.BattleType);
             WriteString(writer, snapshot.MapScene);
             WriteString(writer, snapshot.WorldMapScene);
@@ -125,6 +132,12 @@ namespace CoopSpectator.Infrastructure
             return new BattleSnapshotMessage
             {
                 BattleId = ReadString(reader),
+                BattleInstanceId = schemaVersion >= 12 ? ReadString(reader) : null,
+                CasualtyRulesVersion = schemaVersion >= 12 ? reader.ReadInt32() : 0,
+                BattleDeathDifficulty = schemaVersion >= 12 ? reader.ReadInt32() : 2,
+                ClanMemberDeathChanceMultiplier = schemaVersion >= 12 ? reader.ReadSingle() : 0f,
+                IsPlayerMapEvent = schemaVersion >= 12 && reader.ReadBoolean(),
+                StoryModeTutorialProtectionEnabled = schemaVersion >= 12 && reader.ReadBoolean(),
                 BattleType = ReadString(reader),
                 MapScene = ReadString(reader),
                 WorldMapScene = ReadString(reader),
@@ -476,6 +489,7 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, party?.PartyId);
             WriteString(writer, party?.PartyName);
             writer.Write(party?.IsMainParty ?? false);
+            writer.Write(party?.HasMobileParty ?? false);
             writer.Write(party?.TotalManCount ?? 0);
             WriteBattlePartyModifier(writer, party?.Modifiers ?? new BattlePartyModifierSnapshotMessage());
             WriteList(writer, party?.Troops, WriteTroopStack);
@@ -488,8 +502,9 @@ namespace CoopSpectator.Infrastructure
                 PartyId = ReadString(reader),
                 PartyName = ReadString(reader),
                 IsMainParty = reader.ReadBoolean(),
+                HasMobileParty = schemaVersion >= 12 && reader.ReadBoolean(),
                 TotalManCount = reader.ReadInt32(),
-                Modifiers = ReadBattlePartyModifier(reader) ?? new BattlePartyModifierSnapshotMessage(),
+                Modifiers = ReadBattlePartyModifier(reader, schemaVersion) ?? new BattlePartyModifierSnapshotMessage(),
                 Troops = ReadList(reader, itemReader => ReadTroopStack(itemReader, schemaVersion)) ?? new List<TroopStackInfo>()
             };
         }
@@ -519,9 +534,10 @@ namespace CoopSpectator.Infrastructure
             WriteList(writer, modifier?.QuartermasterPerkIds, WriteString);
             WriteList(writer, modifier?.EngineerPerkIds, WriteString);
             WriteList(writer, modifier?.SurgeonPerkIds, WriteString);
+            writer.Write(modifier?.SurvivalMedicineSkill ?? 0);
         }
 
-        private static BattlePartyModifierSnapshotMessage ReadBattlePartyModifier(BinaryReader reader)
+        private static BattlePartyModifierSnapshotMessage ReadBattlePartyModifier(BinaryReader reader, int schemaVersion)
         {
             return new BattlePartyModifierSnapshotMessage
             {
@@ -547,7 +563,8 @@ namespace CoopSpectator.Infrastructure
                 ScoutPerkIds = ReadList(reader, ReadString) ?? new List<string>(),
                 QuartermasterPerkIds = ReadList(reader, ReadString) ?? new List<string>(),
                 EngineerPerkIds = ReadList(reader, ReadString) ?? new List<string>(),
-                SurgeonPerkIds = ReadList(reader, ReadString) ?? new List<string>()
+                SurgeonPerkIds = ReadList(reader, ReadString) ?? new List<string>(),
+                SurvivalMedicineSkill = schemaVersion >= 12 ? reader.ReadInt32() : 0
             };
         }
 
@@ -625,6 +642,12 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, troop?.CombatItem2ModifierId);
             WriteString(writer, troop?.CombatItem3CraftedWeaponKey);
             WriteString(writer, troop?.CombatItem3ModifierId);
+            writer.Write(troop?.CharacterLevel ?? 0);
+            writer.Write(troop?.HeroTotalArmorSum ?? 0f);
+            writer.Write(troop?.IsPlayerCharacter ?? false);
+            writer.Write(troop?.IsPlayerClanHero ?? false);
+            writer.Write(troop?.HeroCanDieInBattle ?? true);
+            writer.Write(troop?.ForceUnconscious ?? false);
         }
 
         private static TroopStackInfo ReadTroopStack(BinaryReader reader, int schemaVersion)
@@ -709,6 +732,21 @@ namespace CoopSpectator.Infrastructure
                 troop.CombatItem2ModifierId = ReadString(reader);
                 troop.CombatItem3CraftedWeaponKey = ReadString(reader);
                 troop.CombatItem3ModifierId = ReadString(reader);
+            }
+
+            if (schemaVersion >= 12)
+            {
+                troop.CharacterLevel = reader.ReadInt32();
+                troop.HeroTotalArmorSum = reader.ReadSingle();
+                troop.IsPlayerCharacter = reader.ReadBoolean();
+                troop.IsPlayerClanHero = reader.ReadBoolean();
+                troop.HeroCanDieInBattle = reader.ReadBoolean();
+                troop.ForceUnconscious = reader.ReadBoolean();
+            }
+            else
+            {
+                troop.CharacterLevel = troop.HeroLevel > 0 ? troop.HeroLevel : troop.Tier;
+                troop.HeroCanDieInBattle = true;
             }
 
             return troop;

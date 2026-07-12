@@ -31,6 +31,12 @@ namespace CoopSpectator.Network.Messages
     public sealed class BattleSnapshotMessage
     {
         public string BattleId { get; set; }
+        public string BattleInstanceId { get; set; }
+        public int CasualtyRulesVersion { get; set; }
+        public int BattleDeathDifficulty { get; set; } = 2;
+        public float ClanMemberDeathChanceMultiplier { get; set; }
+        public bool IsPlayerMapEvent { get; set; }
+        public bool StoryModeTutorialProtectionEnabled { get; set; }
         public string BattleType { get; set; }
         public string MapScene { get; set; }
         public string WorldMapScene { get; set; }
@@ -267,6 +273,7 @@ namespace CoopSpectator.Network.Messages
         public string PartyId { get; set; }
         public string PartyName { get; set; }
         public bool IsMainParty { get; set; }
+        public bool HasMobileParty { get; set; }
         public int TotalManCount { get; set; }
         public BattlePartyModifierSnapshotMessage Modifiers { get; set; } = new BattlePartyModifierSnapshotMessage();
         public List<TroopStackInfo> Troops { get; set; } = new List<TroopStackInfo>();
@@ -290,6 +297,7 @@ namespace CoopSpectator.Network.Messages
         public int QuartermasterStewardSkill { get; set; }
         public int EngineerEngineeringSkill { get; set; }
         public int SurgeonMedicineSkill { get; set; }
+        public int SurvivalMedicineSkill { get; set; }
         public List<string> PartyLeaderPerkIds { get; set; } = new List<string>();
         public List<string> ArmyCommanderPerkIds { get; set; } = new List<string>();
         public List<string> CaptainPerkIds { get; set; } = new List<string>();
@@ -319,6 +327,12 @@ namespace CoopSpectator.Network.Messages
         public int HeroLevel { get; set; }
         public float HeroAge { get; set; }
         public bool HeroIsFemale { get; set; }
+        public int CharacterLevel { get; set; }
+        public float HeroTotalArmorSum { get; set; }
+        public bool IsPlayerCharacter { get; set; }
+        public bool IsPlayerClanHero { get; set; }
+        public bool HeroCanDieInBattle { get; set; } = true;
+        public bool ForceUnconscious { get; set; }
         public int Tier { get; set; }
         public bool IsMounted { get; set; }
         public bool IsRanged { get; set; }
