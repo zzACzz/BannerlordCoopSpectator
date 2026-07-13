@@ -17,6 +17,10 @@ namespace CoopSpectator.Network.Messages
         public string MultiplayerGameType { get; set; }
         public string MultiplayerSceneResolverSource { get; set; }
         public int BattleSizeBudget { get; set; }
+        public int RequestedBattleSize { get; set; }
+        public int ResolvedBattleSize { get; set; }
+        public bool RemoveCorpsesImmediately { get; set; }
+        public bool CullRiderlessMounts { get; set; }
         public int ReinforcementWaveCount { get; set; }
         public string BattleSizeBudgetSource { get; set; }
         public float MapX { get; set; }
@@ -51,6 +55,10 @@ namespace CoopSpectator.Network.Messages
         public string MultiplayerGameType { get; set; }
         public string MultiplayerSceneResolverSource { get; set; }
         public int BattleSizeBudget { get; set; }
+        public int RequestedBattleSize { get; set; }
+        public int ResolvedBattleSize { get; set; }
+        public bool RemoveCorpsesImmediately { get; set; }
+        public bool CullRiderlessMounts { get; set; }
         public int ReinforcementWaveCount { get; set; }
         public string BattleSizeBudgetSource { get; set; }
         public string PlayerSide { get; set; }

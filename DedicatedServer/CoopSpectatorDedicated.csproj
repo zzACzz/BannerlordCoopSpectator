@@ -105,6 +105,7 @@
     <Compile Include="..\Infrastructure\CoopBattlePhaseBridgeFile.cs" Link="Infrastructure\CoopBattlePhaseBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePhaseRuntimeState.cs" Link="Infrastructure\CoopBattlePhaseRuntimeState.cs" />
     <Compile Include="..\Infrastructure\BattleSnapshotRuntimeState.cs" Link="Infrastructure\BattleSnapshotRuntimeState.cs" />
+    <Compile Include="..\Infrastructure\BattleAgentCapacityPolicy.cs" Link="Infrastructure\BattleAgentCapacityPolicy.cs" />
     <Compile Include="..\Infrastructure\GlobalCaptainPerkRuntimeState.cs" Link="Infrastructure\GlobalCaptainPerkRuntimeState.cs" />
     <Compile Include="..\Infrastructure\ExactSiegeMoraleDiagnostics.cs" Link="Infrastructure\ExactSiegeMoraleDiagnostics.cs" />
     <Compile Include="..\Infrastructure\CoopBattleAuthorityState.cs" Link="Infrastructure\CoopBattleAuthorityState.cs" />

@@ -22,6 +22,10 @@ namespace CoopSpectator.Infrastructure
     {
         public BattleSnapshotMessage Snapshot { get; set; }
         public int BattleSizeBudget { get; set; }
+        public int RequestedBattleSize { get; set; }
+        public int ResolvedBattleSize { get; set; }
+        public bool RemoveCorpsesImmediately { get; set; }
+        public bool CullRiderlessMounts { get; set; }
         public int ReinforcementWaveCount { get; set; }
         public string BattleSizeBudgetSource { get; set; }
         public float PlayerTroopsReceivedDamageMultiplier { get; set; } = 1f;
@@ -427,6 +431,36 @@ namespace CoopSpectator.Infrastructure
             lock (Sync)
             {
                 return _state;
+            }
+        }
+
+        public static void ApplyResolvedBattleSize(
+            int requestedBattleSize,
+            int resolvedBattleSize,
+            string source)
+        {
+            requestedBattleSize = Math.Max(1, requestedBattleSize);
+            resolvedBattleSize = Math.Max(1, resolvedBattleSize);
+
+            lock (Sync)
+            {
+                if (_current != null)
+                {
+                    _current.RequestedBattleSize = requestedBattleSize;
+                    _current.ResolvedBattleSize = resolvedBattleSize;
+                    _current.BattleSizeBudget = resolvedBattleSize;
+                    _current.BattleSizeBudgetSource = source ?? _current.BattleSizeBudgetSource;
+                }
+
+                if (_state != null)
+                {
+                    _state.RequestedBattleSize = requestedBattleSize;
+                    _state.ResolvedBattleSize = resolvedBattleSize;
+                    _state.BattleSizeBudget = resolvedBattleSize;
+                    _state.BattleSizeBudgetSource = source ?? _state.BattleSizeBudgetSource;
+                }
+
+                _updatedUtc = DateTime.UtcNow;
             }
         }
 
@@ -1623,6 +1657,10 @@ namespace CoopSpectator.Infrastructure
             {
                 Snapshot = projection?.Snapshot,
                 BattleSizeBudget = projection?.Snapshot?.BattleSizeBudget ?? 0,
+                RequestedBattleSize = projection?.Snapshot?.RequestedBattleSize ?? 0,
+                ResolvedBattleSize = projection?.Snapshot?.ResolvedBattleSize ?? 0,
+                RemoveCorpsesImmediately = projection?.Snapshot?.RemoveCorpsesImmediately ?? false,
+                CullRiderlessMounts = projection?.Snapshot?.CullRiderlessMounts ?? false,
                 ReinforcementWaveCount = projection?.Snapshot?.ReinforcementWaveCount ?? 0,
                 BattleSizeBudgetSource = projection?.Snapshot?.BattleSizeBudgetSource,
                 PlayerTroopsReceivedDamageMultiplier = projection?.Snapshot?.PlayerTroopsReceivedDamageMultiplier ?? 1f,

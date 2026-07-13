@@ -150,7 +150,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                    string.Equals(left.AdminPassword ?? string.Empty, right.AdminPassword ?? string.Empty, System.StringComparison.Ordinal) &&
                    left.MaxPlayerCount == right.MaxPlayerCount &&
                    left.HostingMode == right.HostingMode &&
-                   string.Equals(left.AdvertisedHostAddress ?? string.Empty, right.AdvertisedHostAddress ?? string.Empty, System.StringComparison.OrdinalIgnoreCase);
+                   string.Equals(left.AdvertisedHostAddress ?? string.Empty, right.AdvertisedHostAddress ?? string.Empty, System.StringComparison.OrdinalIgnoreCase) &&
+                   left.RequestedBattleSize == right.RequestedBattleSize &&
+                   left.RemoveCorpsesImmediately == right.RemoveCorpsesImmediately &&
+                   left.CullRiderlessMounts == right.CullRiderlessMounts;
         }
 
         private static void PersistLaunchSettings(DedicatedServerLaunchSettings settings, string source)
@@ -170,7 +173,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                         settings.AdminPassword ?? string.Empty,
                         settings.MaxPlayerCount.ToString(),
                         ((int)settings.HostingMode).ToString(),
-                        settings.AdvertisedHostAddress ?? string.Empty
+                        settings.AdvertisedHostAddress ?? string.Empty,
+                        settings.RequestedBattleSize.ToString(),
+                        settings.RemoveCorpsesImmediately.ToString(),
+                        settings.CullRiderlessMounts.ToString()
                     });
 
                 ModLogger.Info(
@@ -201,6 +207,15 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
 
                 int.TryParse(lines[3], out int maxPlayerCount);
                 int.TryParse(lines[4], out int hostingModeValue);
+                int requestedBattleSize = 0;
+                bool removeCorpsesImmediately = false;
+                bool cullRiderlessMounts = false;
+                if (lines.Length >= 7)
+                    int.TryParse(lines[6], out requestedBattleSize);
+                if (lines.Length >= 8)
+                    bool.TryParse(lines[7], out removeCorpsesImmediately);
+                if (lines.Length >= 9)
+                    bool.TryParse(lines[8], out cullRiderlessMounts);
 
                 settings = new DedicatedServerLaunchSettings
                 {
@@ -211,7 +226,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                     HostingMode = System.Enum.IsDefined(typeof(DedicatedServerHostingMode), hostingModeValue)
                         ? (DedicatedServerHostingMode)hostingModeValue
                         : DedicatedServerHostingMode.PublicListed,
-                    AdvertisedHostAddress = lines[5] ?? string.Empty
+                    AdvertisedHostAddress = lines[5] ?? string.Empty,
+                    RequestedBattleSize = requestedBattleSize,
+                    RemoveCorpsesImmediately = removeCorpsesImmediately,
+                    CullRiderlessMounts = cullRiderlessMounts
                 };
 
                 ModLogger.Info(

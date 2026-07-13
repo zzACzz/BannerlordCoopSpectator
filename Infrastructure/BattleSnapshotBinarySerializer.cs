@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 15;
+        private const int SchemaVersion = 16;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -73,6 +73,7 @@ namespace CoopSpectator.Infrastructure
                         schemaVersion != 12 &&
                         schemaVersion != 13 &&
                         schemaVersion != 14 &&
+                        schemaVersion != 15 &&
                         schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
@@ -130,6 +131,10 @@ namespace CoopSpectator.Infrastructure
             WriteList(writer, snapshot.Sides, WriteBattleSide);
             WriteList(writer, snapshot.FrozenCaptainEntryIds, WriteString);
             WriteList(writer, snapshot.FrozenCaptainCombatGroups, WriteFrozenCaptainCombatGroup);
+            writer.Write(snapshot.RequestedBattleSize);
+            writer.Write(snapshot.ResolvedBattleSize);
+            writer.Write(snapshot.RemoveCorpsesImmediately);
+            writer.Write(snapshot.CullRiderlessMounts);
         }
 
         private static BattleSnapshotMessage ReadBattleSnapshot(BinaryReader reader, int schemaVersion)
@@ -175,7 +180,11 @@ namespace CoopSpectator.Infrastructure
                     : new List<string>(),
                 FrozenCaptainCombatGroups = schemaVersion >= 14
                     ? ReadList(reader, ReadFrozenCaptainCombatGroup) ?? new List<FrozenCaptainCombatGroupSnapshotMessage>()
-                    : new List<FrozenCaptainCombatGroupSnapshotMessage>()
+                    : new List<FrozenCaptainCombatGroupSnapshotMessage>(),
+                RequestedBattleSize = schemaVersion >= 16 ? reader.ReadInt32() : 0,
+                ResolvedBattleSize = schemaVersion >= 16 ? reader.ReadInt32() : 0,
+                RemoveCorpsesImmediately = schemaVersion >= 16 && reader.ReadBoolean(),
+                CullRiderlessMounts = schemaVersion >= 16 && reader.ReadBoolean()
             };
         }
 

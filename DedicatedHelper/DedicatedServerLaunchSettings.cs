@@ -7,6 +7,8 @@ namespace CoopSpectator.DedicatedHelper
     public sealed class DedicatedServerLaunchSettings
     {
         private const int DefaultMaxPlayerCount = 100;
+        public const int MinRequestedBattleSize = 150;
+        public const int MaxRequestedBattleSize = 2040;
         private const string OfficialBootstrapPlayerCountGameType = "TeamDeathmatch";
         private const int OfficialBootstrapPlayerCountLimitFallback = 120;
 
@@ -16,6 +18,9 @@ namespace CoopSpectator.DedicatedHelper
         public int MaxPlayerCount { get; set; }
         public DedicatedServerHostingMode HostingMode { get; set; }
         public string AdvertisedHostAddress { get; set; }
+        public int RequestedBattleSize { get; set; }
+        public bool RemoveCorpsesImmediately { get; set; }
+        public bool CullRiderlessMounts { get; set; }
 
         public DedicatedServerLaunchSettings Clone()
         {
@@ -26,7 +31,10 @@ namespace CoopSpectator.DedicatedHelper
                 AdminPassword = AdminPassword,
                 MaxPlayerCount = MaxPlayerCount,
                 HostingMode = HostingMode,
-                AdvertisedHostAddress = AdvertisedHostAddress
+                AdvertisedHostAddress = AdvertisedHostAddress,
+                RequestedBattleSize = RequestedBattleSize,
+                RemoveCorpsesImmediately = RemoveCorpsesImmediately,
+                CullRiderlessMounts = CullRiderlessMounts
             };
         }
 
@@ -52,6 +60,17 @@ namespace CoopSpectator.DedicatedHelper
             return value;
         }
 
+        public static int ClampToAllowedBattleSize(int value)
+        {
+            if (value < MinRequestedBattleSize)
+                return MinRequestedBattleSize;
+
+            if (value > MaxRequestedBattleSize)
+                return MaxRequestedBattleSize;
+
+            return value;
+        }
+
         public static DedicatedServerLaunchSettings CreateDefault(string defaultServerName, string defaultAdminPassword)
         {
             return new DedicatedServerLaunchSettings
@@ -61,7 +80,10 @@ namespace CoopSpectator.DedicatedHelper
                 AdminPassword = NormalizeSingleLine(defaultAdminPassword),
                 MaxPlayerCount = ClampToAllowedPlayerCount(DefaultMaxPlayerCount),
                 HostingMode = DedicatedServerHostingMode.PublicListed,
-                AdvertisedHostAddress = string.Empty
+                AdvertisedHostAddress = string.Empty,
+                RequestedBattleSize = 0,
+                RemoveCorpsesImmediately = false,
+                CullRiderlessMounts = false
             };
         }
 
@@ -82,6 +104,11 @@ namespace CoopSpectator.DedicatedHelper
                 normalized.MaxPlayerCount = ClampToAllowedPlayerCount(source.MaxPlayerCount);
                 normalized.HostingMode = NormalizeHostingMode(source.HostingMode);
                 normalized.AdvertisedHostAddress = NormalizeHostAddress(source.AdvertisedHostAddress);
+                normalized.RequestedBattleSize = source.RequestedBattleSize > 0
+                    ? ClampToAllowedBattleSize(source.RequestedBattleSize)
+                    : 0;
+                normalized.RemoveCorpsesImmediately = source.RemoveCorpsesImmediately;
+                normalized.CullRiderlessMounts = source.CullRiderlessMounts;
             }
 
             if (string.IsNullOrWhiteSpace(normalized.ServerName))

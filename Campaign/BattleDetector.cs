@@ -119,6 +119,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private sealed class CampaignBattleSpawnBudgetContext
         {
             public int BattleSizeBudget { get; set; }
+            public int RequestedBattleSize { get; set; }
+            public bool RemoveCorpsesImmediately { get; set; }
+            public bool CullRiderlessMounts { get; set; }
             public int ReinforcementWaveCount { get; set; }
             public string Source { get; set; }
         }
@@ -4075,11 +4078,19 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 message.Snapshot,
                 message.ArmySize);
             message.BattleSizeBudget = battleSpawnBudget?.BattleSizeBudget ?? 0;
+            message.RequestedBattleSize = battleSpawnBudget?.RequestedBattleSize ?? message.BattleSizeBudget;
+            message.ResolvedBattleSize = 0;
+            message.RemoveCorpsesImmediately = battleSpawnBudget?.RemoveCorpsesImmediately ?? false;
+            message.CullRiderlessMounts = battleSpawnBudget?.CullRiderlessMounts ?? false;
             message.ReinforcementWaveCount = battleSpawnBudget?.ReinforcementWaveCount ?? 0;
             message.BattleSizeBudgetSource = battleSpawnBudget?.Source ?? "unknown";
             if (message.Snapshot != null)
             {
                 message.Snapshot.BattleSizeBudget = message.BattleSizeBudget;
+                message.Snapshot.RequestedBattleSize = message.RequestedBattleSize;
+                message.Snapshot.ResolvedBattleSize = message.ResolvedBattleSize;
+                message.Snapshot.RemoveCorpsesImmediately = message.RemoveCorpsesImmediately;
+                message.Snapshot.CullRiderlessMounts = message.CullRiderlessMounts;
                 message.Snapshot.ReinforcementWaveCount = message.ReinforcementWaveCount;
                 message.Snapshot.BattleSizeBudgetSource = message.BattleSizeBudgetSource;
             }
@@ -4117,6 +4128,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             ModLogger.Info(
                 "BattleDetector: campaign battle spawn budget resolved. " +
                 "BattleSizeBudget=" + message.BattleSizeBudget +
+                " RequestedBattleSize=" + message.RequestedBattleSize +
+                " RemoveCorpsesImmediately=" + message.RemoveCorpsesImmediately +
+                " CullRiderlessMounts=" + message.CullRiderlessMounts +
                 " ReinforcementWaveCount=" + message.ReinforcementWaveCount +
                 " TotalArmySize=" + message.ArmySize +
                 " Source=" + (message.BattleSizeBudgetSource ?? "unknown") + ".");
@@ -4694,6 +4708,28 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 ModLogger.Info("BattleDetector: failed to read BannerlordConfig reinforcement wave count: " + ex.Message);
             }
 
+            bool removeCorpsesImmediately = false;
+            bool cullRiderlessMounts = false;
+            try
+            {
+                DedicatedServerLaunchSettings coopSettings = DedicatedHelperLauncher.GetCurrentLaunchSettings();
+                if (coopSettings != null)
+                {
+                    removeCorpsesImmediately = coopSettings.RemoveCorpsesImmediately;
+                    cullRiderlessMounts = coopSettings.CullRiderlessMounts;
+                    if (coopSettings.RequestedBattleSize > 0)
+                    {
+                        battleSizeBudget = DedicatedServerLaunchSettings.ClampToAllowedBattleSize(
+                            coopSettings.RequestedBattleSize);
+                        battleSizeSource = "coop-server-settings";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleDetector: failed to read coop battle capacity settings: " + ex.Message);
+            }
+
             if (battleSizeBudget <= 0)
             {
                 battleSizeBudget = fallbackArmySize;
@@ -4713,6 +4749,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             return new CampaignBattleSpawnBudgetContext
             {
                 BattleSizeBudget = Math.Max(1, battleSizeBudget),
+                RequestedBattleSize = Math.Max(1, battleSizeBudget),
+                RemoveCorpsesImmediately = removeCorpsesImmediately,
+                CullRiderlessMounts = cullRiderlessMounts,
                 ReinforcementWaveCount = Math.Max(0, reinforcementWaveCount),
                 Source = (battleSizeSource ?? "unknown") + ";reinforcement=" + (reinforcementSource ?? "unknown")
             };

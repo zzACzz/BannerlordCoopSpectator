@@ -3,6 +3,7 @@ using System.Diagnostics;
 using CoopSpectator.DedicatedHelper;
 using CoopSpectator.Infrastructure;
 using TaleWorlds.Library;
+using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.Campaign
 {
@@ -19,6 +20,9 @@ namespace CoopSpectator.Campaign
         private string _tokenHelpText;
         private DedicatedServerHostingMode _hostingMode;
         private string _advertisedHostAddress;
+        private int _requestedBattleSize;
+        private bool _removeCorpsesImmediately;
+        private bool _cullRiderlessMounts;
         private bool _isServerPasswordObfuscated = true;
         private bool _isAdminPasswordObfuscated = true;
         private bool _canStartServer;
@@ -36,6 +40,9 @@ namespace CoopSpectator.Campaign
             _maxPlayerCount = DedicatedServerLaunchSettings.ClampToAllowedPlayerCount(currentSettings.MaxPlayerCount);
             _hostingMode = currentSettings.HostingMode;
             _advertisedHostAddress = currentSettings.AdvertisedHostAddress;
+            _requestedBattleSize = ResolveInitialRequestedBattleSize(currentSettings.RequestedBattleSize);
+            _removeCorpsesImmediately = currentSettings.RemoveCorpsesImmediately;
+            _cullRiderlessMounts = currentSettings.CullRiderlessMounts;
             _statusText = "Ready.";
 
             ModLogger.Info(
@@ -63,6 +70,10 @@ namespace CoopSpectator.Campaign
         [DataSourceProperty] public string VpnOverlayHostingButtonText => IsVpnOverlayHostingMode ? "VPN/Overlay (Current)" : "Use VPN/Overlay";
         [DataSourceProperty] public string AdvertisedHostAddressLabelText => "Advertised Host Address";
         [DataSourceProperty] public string AdvertisedHostAddressHelpText => "Enter the host address visible to other players on the same overlay, for example a Radmin/Tailscale IP. Do not use http:// or localhost.";
+        [DataSourceProperty] public string BattleSizeHintText =>
+            "Requested active troop count for coop campaign battles. The server resolves the safe value from the 2040 physical-agent limit; mounted troops consume one rider and one horse slot.";
+        [DataSourceProperty] public string CorpseCleanupHintText =>
+            "Immediate cleanup frees physical agent slots sooner. Riderless mount cleanup also prevents abandoned horses from occupying reinforcement capacity.";
 
         [DataSourceProperty]
         public string ServerName
@@ -103,6 +114,8 @@ namespace CoopSpectator.Campaign
 
         [DataSourceProperty] public int MinPlayerCount => DedicatedServerLaunchSettings.GetMinAllowedPlayerCount();
         [DataSourceProperty] public int MaxAllowedPlayerCount => DedicatedServerLaunchSettings.GetMaxAllowedPlayerCount();
+        [DataSourceProperty] public int MinRequestedBattleSize => DedicatedServerLaunchSettings.MinRequestedBattleSize;
+        [DataSourceProperty] public int MaxRequestedBattleSize => DedicatedServerLaunchSettings.MaxRequestedBattleSize;
         [DataSourceProperty] public string StatusText { get => _statusText; private set => SetField(ref _statusText, value, nameof(StatusText)); }
         [DataSourceProperty] public string TokenStatusText { get => _tokenStatusText; private set => SetField(ref _tokenStatusText, value, nameof(TokenStatusText)); }
         [DataSourceProperty] public string TokenHelpText { get => _tokenHelpText; private set => SetField(ref _tokenHelpText, value, nameof(TokenHelpText)); }
@@ -120,6 +133,52 @@ namespace CoopSpectator.Campaign
         {
             get => _advertisedHostAddress;
             set => SetTextField(ref _advertisedHostAddress, value, nameof(AdvertisedHostAddress));
+        }
+
+        [DataSourceProperty]
+        public int RequestedBattleSize
+        {
+            get => _requestedBattleSize;
+            set
+            {
+                int normalized = DedicatedServerLaunchSettings.ClampToAllowedBattleSize(value);
+                if (_requestedBattleSize == normalized)
+                    return;
+
+                _requestedBattleSize = normalized;
+                OnPropertyChanged(nameof(RequestedBattleSize));
+                UpdateStartAvailability();
+            }
+        }
+
+        [DataSourceProperty]
+        public bool RemoveCorpsesImmediately
+        {
+            get => _removeCorpsesImmediately;
+            set
+            {
+                if (_removeCorpsesImmediately == value)
+                    return;
+
+                _removeCorpsesImmediately = value;
+                OnPropertyChanged(nameof(RemoveCorpsesImmediately));
+                UpdateStartAvailability();
+            }
+        }
+
+        [DataSourceProperty]
+        public bool CullRiderlessMounts
+        {
+            get => _cullRiderlessMounts;
+            set
+            {
+                if (_cullRiderlessMounts == value)
+                    return;
+
+                _cullRiderlessMounts = value;
+                OnPropertyChanged(nameof(CullRiderlessMounts));
+                UpdateStartAvailability();
+            }
         }
 
         public void ExecuteStartServer()
@@ -154,6 +213,9 @@ namespace CoopSpectator.Campaign
                 " serverPasswordSet=" + (!string.IsNullOrWhiteSpace(ServerPassword)) +
                 " adminPasswordSet=" + (!string.IsNullOrWhiteSpace(AdminPassword)) +
                 " maxPlayers=" + MaxPlayerCount +
+                " requestedBattleSize=" + RequestedBattleSize +
+                " removeCorpsesImmediately=" + RemoveCorpsesImmediately +
+                " cullRiderlessMounts=" + CullRiderlessMounts +
                 " hostingMode=" + _hostingMode +
                 " advertisedHostAddress=" + (string.IsNullOrWhiteSpace(AdvertisedHostAddress) ? "(default)" : AdvertisedHostAddress) + ".");
 
@@ -307,7 +369,10 @@ namespace CoopSpectator.Campaign
                 AdminPassword = AdminPassword,
                 MaxPlayerCount = MaxPlayerCount,
                 HostingMode = _hostingMode,
-                AdvertisedHostAddress = AdvertisedHostAddress
+                AdvertisedHostAddress = AdvertisedHostAddress,
+                RequestedBattleSize = RequestedBattleSize,
+                RemoveCorpsesImmediately = RemoveCorpsesImmediately,
+                CullRiderlessMounts = CullRiderlessMounts
             };
         }
 
@@ -317,6 +382,11 @@ namespace CoopSpectator.Campaign
             ServerPassword = settings.ServerPassword;
             AdminPassword = settings.AdminPassword;
             MaxPlayerCount = settings.MaxPlayerCount;
+            RequestedBattleSize = settings.RequestedBattleSize > 0
+                ? settings.RequestedBattleSize
+                : ResolveInitialRequestedBattleSize(0);
+            RemoveCorpsesImmediately = settings.RemoveCorpsesImmediately;
+            CullRiderlessMounts = settings.CullRiderlessMounts;
             _hostingMode = settings.HostingMode;
             _advertisedHostAddress = settings.AdvertisedHostAddress;
             RefreshHostingModeBindings();
@@ -359,6 +429,22 @@ namespace CoopSpectator.Campaign
             field = normalized;
             OnPropertyChanged(propertyName);
             UpdateStartAvailability();
+        }
+
+        private static int ResolveInitialRequestedBattleSize(int persistedValue)
+        {
+            if (persistedValue > 0)
+                return DedicatedServerLaunchSettings.ClampToAllowedBattleSize(persistedValue);
+
+            try
+            {
+                return DedicatedServerLaunchSettings.ClampToAllowedBattleSize(
+                    BannerlordConfig.GetRealBattleSizeForSiege());
+            }
+            catch
+            {
+                return DedicatedServerLaunchSettings.MinRequestedBattleSize;
+            }
         }
     }
 }

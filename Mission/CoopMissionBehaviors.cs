@@ -5466,6 +5466,7 @@ namespace CoopSpectator.MissionBehaviors
         {
             base.OnMissionTick(dt);
             if (!_hasLoggedStart) return;
+            BattleAgentCapacityPolicy.Tick(Mission, "CoopMissionSpawnLogic.OnMissionTick");
             ExactSiegeMoraleDiagnostics.Tick(Mission, "CoopMissionSpawnLogic.OnMissionTick");
             TryRestoreExpiredMaterializedPossessionProtection(Mission, "CoopMissionSpawnLogic.OnMissionTick");
             _timeUntilNextPeerLog -= dt;
@@ -5906,6 +5907,7 @@ namespace CoopSpectator.MissionBehaviors
                 affectedAgent?.Index ?? -1,
                 "CoopMissionSpawnLogic.OnAgentRemoved");
             TryCompleteBattleIfResolved(Mission, "server behavior agent-removed");
+            BattleAgentCapacityPolicy.OnAgentRemoved(affectedAgent);
             base.OnAgentRemoved(affectedAgent, affectorAgent, agentState, blow);
         }
 
@@ -16848,6 +16850,35 @@ namespace CoopSpectator.MissionBehaviors
                 }
 
                 remainingSideNeed = siegeWaveBudget;
+
+                int requiredPhysicalSlots = GetMaterializedReinforcementWavePhysicalCost(
+                    mission,
+                    side,
+                    candidates,
+                    remainingSideNeed);
+                if (requiredPhysicalSlots > 0 &&
+                    !BattleAgentCapacityPolicy.CanSpawnPhysicalAgents(
+                        mission,
+                        requiredPhysicalSlots,
+                        (source ?? "unknown") + " reinforcement-wave-preflight"))
+                {
+                    if (siegeWaveState != null)
+                    {
+                        ExactSiegeMoraleDiagnostics.RecordReinforcementWaveDecision(
+                            mission,
+                            side,
+                            siegeWaveState.InitialActiveCount,
+                            activeForSide,
+                            spawnableReserveForSide,
+                            siegeWaveState.WaveSize,
+                            siegeWaveState.MaximumWaveCount,
+                            siegeWaveState.SpawnedWaveCount,
+                            0,
+                            "physical-capacity-deferred",
+                            source);
+                    }
+                    return 0;
+                }
             }
 
             int spawnedCountForSide = 0;
@@ -16944,6 +16975,68 @@ namespace CoopSpectator.MissionBehaviors
             return spawnedCountForSide;
         }
 
+        private static int GetMaterializedReinforcementWavePhysicalCost(
+            Mission mission,
+            BattleSideEnum side,
+            IReadOnlyList<MaterializedArmyReinforcementCandidate> candidates,
+            int requestedTroopCount)
+        {
+            if (mission == null || candidates == null || requestedTroopCount <= 0)
+                return 0;
+
+            int remaining = requestedTroopCount;
+            int physicalCost = 0;
+            var queuedByEntryId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (MaterializedArmyReinforcementCandidate candidate in candidates.Where(item => item.ActiveCount <= 0))
+            {
+                if (remaining <= 0)
+                    break;
+
+                int count = GetReinforcementSpawnCount(candidate, queuedByEntryId, remaining, seedOneBody: true);
+                if (count <= 0)
+                    continue;
+
+                string entryId = candidate.EntryState?.EntryId ?? string.Empty;
+                queuedByEntryId[entryId] = GetQueuedReinforcementCount(queuedByEntryId, entryId) + count;
+                physicalCost += count * GetMaterializedCandidatePhysicalCost(mission, side, candidate);
+                remaining -= count;
+            }
+
+            foreach (MaterializedArmyReinforcementCandidate candidate in candidates)
+            {
+                if (remaining <= 0)
+                    break;
+
+                int count = GetReinforcementSpawnCount(candidate, queuedByEntryId, remaining, seedOneBody: false);
+                if (count <= 0)
+                    continue;
+
+                string entryId = candidate.EntryState?.EntryId ?? string.Empty;
+                queuedByEntryId[entryId] = GetQueuedReinforcementCount(queuedByEntryId, entryId) + count;
+                physicalCost += count * GetMaterializedCandidatePhysicalCost(mission, side, candidate);
+                remaining -= count;
+            }
+
+            return remaining > 0 ? int.MaxValue : physicalCost;
+        }
+
+        private static int GetMaterializedCandidatePhysicalCost(
+            Mission mission,
+            BattleSideEnum side,
+            MaterializedArmyReinforcementCandidate candidate)
+        {
+            FormationClass formationClass = candidate?.Troop?.DefaultFormationClass ?? FormationClass.Infantry;
+            bool fallbackMounted =
+                formationClass == FormationClass.Cavalry ||
+                formationClass == FormationClass.HorseArcher;
+            return BattleAgentCapacityPolicy.GetExpectedTroopPhysicalCost(
+                mission,
+                side,
+                candidate?.EntryState,
+                fallbackMounted);
+        }
+
         private static int GetReinforcementSpawnCount(
             MaterializedArmyReinforcementCandidate candidate,
             IReadOnlyDictionary<string, int> queuedByEntryId,
@@ -16984,12 +17077,7 @@ namespace CoopSpectator.MissionBehaviors
             if (availableCount <= 0 || totalRemainingCount <= 0)
                 return 0;
 
-            if (ShouldUseMaterializedSiegeReinforcements(mission))
-                return Math.Max(0, Math.Min(totalRemainingCount, availableCount - activeCount));
-
-            return Math.Max(
-                0,
-                Math.Min(availableCount, GetMaterializedAgentsPerEntryCap(side, requestedEntryCount)) - activeCount);
+            return Math.Max(0, Math.Min(totalRemainingCount, availableCount - activeCount));
         }
 
         private static bool TryGetMaterializedSiegeReinforcementWaveBudget(
@@ -17274,18 +17362,9 @@ namespace CoopSpectator.MissionBehaviors
             if (entryStates != null && entryStates.Count > 0)
             {
                 int sideCap = GetMaterializedArmyAgentsPerSideCap(side, entryStates.Count);
-                int perEntryCap = GetMaterializedAgentsPerEntryCap(side, entryStates.Count);
-                int totalSpawnableUnderEntryCaps = 0;
-                foreach (RosterEntryState entryState in entryStates)
-                {
-                    int availableCount = Math.Max(0, (entryState?.Count ?? 0) - (entryState?.WoundedCount ?? 0));
-                    if (availableCount <= 0)
-                        continue;
-
-                    totalSpawnableUnderEntryCaps += Math.Min(availableCount, perEntryCap);
-                }
-
-                return Math.Max(0, Math.Min(sideCap, totalSpawnableUnderEntryCaps));
+                int totalAvailable = entryStates.Sum(entryState =>
+                    Math.Max(0, (entryState?.Count ?? 0) - (entryState?.WoundedCount ?? 0)));
+                return Math.Max(0, Math.Min(sideCap, totalAvailable));
             }
 
             IReadOnlyList<string> troopIds = GetGenericMaterializedTroopFallbackIds(side);
@@ -17950,6 +18029,39 @@ namespace CoopSpectator.MissionBehaviors
                         source + " character=" + resolvedTroopSource + " pass=fill");
                 }
 
+                // Final spillover pass: the equal per-entry cap is only a representation
+                // preference. Small stacks must not leave the configured side budget empty
+                // while another roster entry still has healthy troops available.
+                foreach ((RosterEntryState entryState, BasicCharacterObject troop, int availableCount, string resolvedTroopSource) in materializableEntries)
+                {
+                    int remainingCapacity = sideCap - (currentSpawnedForSide + spawnedCount);
+                    int remainingPulseBudget = maxSpawnCount - spawnedCount;
+                    if (remainingCapacity <= 0 || remainingPulseBudget <= 0)
+                        break;
+
+                    _materializedBattleResultEntriesByEntryId.TryGetValue(entryState.EntryId ?? string.Empty, out MaterializedBattleResultEntryRuntimeState runtimeState);
+                    int alreadySpawnedCount = Math.Max(0, runtimeState?.MaterializedSpawnCount ?? 0);
+                    int remainingAvailableCount = Math.Max(0, availableCount - alreadySpawnedCount);
+                    if (remainingAvailableCount <= 0)
+                        continue;
+
+                    int spilloverCount = Math.Min(
+                        remainingAvailableCount,
+                        Math.Min(remainingCapacity, remainingPulseBudget));
+                    if (spilloverCount <= 0)
+                        continue;
+
+                    spawnedCount += SpawnMaterializedAgentsForEntry(
+                        mission,
+                        team,
+                        side,
+                        troop,
+                        entryState,
+                        spilloverCount,
+                        currentSpawnedForSide + spawnedCount,
+                        source + " character=" + resolvedTroopSource + " pass=spillover");
+                }
+
                 return spawnedCount;
             }
 
@@ -18022,10 +18134,14 @@ namespace CoopSpectator.MissionBehaviors
             if (totalBattleBudget <= 0 || totalAvailable <= 0 || sideAvailable <= 0)
                 return MaxMaterializedArmyAgentsPerSide;
 
-            int sideCap = (int)Math.Round((double)totalBattleBudget * sideAvailable / totalAvailable, MidpointRounding.AwayFromZero);
-            sideCap = Math.Max(1, sideCap);
-            sideCap = Math.Min(sideAvailable, sideCap);
-            return sideCap;
+            BattleAgentCapacityPolicy.AllocateInitialTroops(
+                defenderAvailable,
+                attackerAvailable,
+                totalBattleBudget,
+                out int defenderCap,
+                out int attackerCap);
+            int sideCap = side == BattleSideEnum.Attacker ? attackerCap : defenderCap;
+            return Math.Max(0, Math.Min(sideAvailable, sideCap));
         }
 
         private static int GetMaterializedAgentsPerEntryCap(BattleSideEnum side, int requestedEntryCount)
@@ -18060,6 +18176,12 @@ namespace CoopSpectator.MissionBehaviors
 
         private static int GetConfiguredBattleSizeBudget()
         {
+            int resolvedBudget = BattleAgentCapacityPolicy.GetResolvedBattleSize(
+                Mission.Current,
+                "CoopMissionSpawnLogic.GetConfiguredBattleSizeBudget");
+            if (resolvedBudget > 0)
+                return resolvedBudget;
+
             BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
             int snapshotBudget = runtimeState?.BattleSizeBudget ?? BattleSnapshotRuntimeState.GetCurrent()?.BattleSizeBudget ?? 0;
             if (snapshotBudget > 0)
@@ -18316,6 +18438,7 @@ namespace CoopSpectator.MissionBehaviors
             if (entryStates != null && entryStates.Count > 0)
             {
                 var materializableEntries = new List<(RosterEntryState EntryState, BasicCharacterObject Troop, int AvailableCount)>();
+                var plannedByEntryId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 foreach (RosterEntryState entryState in entryStates)
                 {
                     string spawnTemplateId = ResolveEntrySpawnTemplateId(entryState);
@@ -18352,6 +18475,9 @@ namespace CoopSpectator.MissionBehaviors
                         seedCount,
                         ref plannedAgents,
                         ref hasMountedUnits);
+                    string entryId = entryState.EntryId ?? string.Empty;
+                    plannedByEntryId[entryId] =
+                        (plannedByEntryId.TryGetValue(entryId, out int existingSeedCount) ? existingSeedCount : 0) + seedCount;
                 }
 
                 foreach ((RosterEntryState entryState, BasicCharacterObject troop, int availableCount) in materializableEntries)
@@ -18360,7 +18486,13 @@ namespace CoopSpectator.MissionBehaviors
                     if (remainingCapacity <= 0)
                         break;
 
-                    int remainingEntryCapacity = Math.Min(availableCount, GetMaterializedAgentsPerEntryCap(side, entryStates.Count)) - 1;
+                    string entryId = entryState.EntryId ?? string.Empty;
+                    int alreadyPlannedForEntry = plannedByEntryId.TryGetValue(entryId, out int existingPlannedCount)
+                        ? existingPlannedCount
+                        : 0;
+                    int remainingEntryCapacity =
+                        Math.Min(availableCount, GetMaterializedAgentsPerEntryCap(side, entryStates.Count)) -
+                        alreadyPlannedForEntry;
                     if (remainingEntryCapacity <= 0)
                         continue;
 
@@ -18377,6 +18509,34 @@ namespace CoopSpectator.MissionBehaviors
                         extraCount,
                         ref plannedAgents,
                         ref hasMountedUnits);
+                    plannedByEntryId[entryId] = alreadyPlannedForEntry + extraCount;
+                }
+
+                foreach ((RosterEntryState entryState, BasicCharacterObject troop, int availableCount) in materializableEntries)
+                {
+                    int remainingCapacity = sideCap - plannedAgents;
+                    if (remainingCapacity <= 0)
+                        break;
+
+                    string entryId = entryState.EntryId ?? string.Empty;
+                    int alreadyPlannedForEntry = plannedByEntryId.TryGetValue(entryId, out int existingPlannedCount)
+                        ? existingPlannedCount
+                        : 0;
+                    int remainingAvailableCount = Math.Max(0, availableCount - alreadyPlannedForEntry);
+                    int spilloverCount = Math.Min(remainingAvailableCount, remainingCapacity);
+                    if (spilloverCount <= 0)
+                        continue;
+
+                    AccumulateMaterializedDeploymentCount(
+                        formationCounts,
+                        mission,
+                        side,
+                        troop,
+                        entryState,
+                        spilloverCount,
+                        ref plannedAgents,
+                        ref hasMountedUnits);
+                    plannedByEntryId[entryId] = alreadyPlannedForEntry + spilloverCount;
                 }
 
                 return formationCounts;
@@ -19013,6 +19173,23 @@ namespace CoopSpectator.MissionBehaviors
                 " Source=" + (source ?? "unknown"));
             for (int i = 0; i < spawnCount; i++)
             {
+                bool fallbackMounted =
+                    entryState?.IsMounted == true ||
+                    formationClass == FormationClass.Cavalry ||
+                    formationClass == FormationClass.HorseArcher;
+                int requiredPhysicalAgentCount = BattleAgentCapacityPolicy.GetExpectedTroopPhysicalCost(
+                    mission,
+                    side,
+                    entryState,
+                    fallbackMounted);
+                if (!BattleAgentCapacityPolicy.CanSpawnPhysicalAgents(
+                        mission,
+                        requiredPhysicalAgentCount,
+                        (source ?? "unknown") + " materialized-entry"))
+                {
+                    break;
+                }
+
                 int absoluteIndex = sideOffset + spawnedCount;
                 bool useSiegeReinforcementSpread =
                     isReinforcement &&

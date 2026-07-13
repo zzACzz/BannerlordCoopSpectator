@@ -736,6 +736,7 @@ namespace CoopSpectator.Infrastructure
                 initializationStep = "build-native-wave-spawn-settings";
                 MissionSpawnSettings spawnSettings = CreateNativeCampaignBattleWaveSpawnSettings();
                 ComputeInitialSpawnCounts(
+                    mission,
                     defenderTotal,
                     attackerTotal,
                     out int defenderInitial,
@@ -3548,6 +3549,7 @@ namespace CoopSpectator.Infrastructure
         }
 
         private static void ComputeInitialSpawnCounts(
+            Mission mission,
             int defenderTotal,
             int attackerTotal,
             out int defenderInitial,
@@ -3558,7 +3560,11 @@ namespace CoopSpectator.Infrastructure
             attackerTotal = Math.Max(0, attackerTotal);
             int total = defenderTotal + attackerTotal;
 
-            battleSizeBudget = BattleSnapshotRuntimeState.GetState()?.BattleSizeBudget ?? 0;
+            battleSizeBudget = BattleAgentCapacityPolicy.GetResolvedBattleSize(
+                mission,
+                "ExactCampaignArmyBootstrap.ComputeInitialSpawnCounts");
+            if (battleSizeBudget <= 0)
+                battleSizeBudget = BattleSnapshotRuntimeState.GetState()?.BattleSizeBudget ?? 0;
             if (battleSizeBudget <= 0)
                 battleSizeBudget = total;
 
@@ -3570,35 +3576,12 @@ namespace CoopSpectator.Infrastructure
             }
 
             battleSizeBudget = Math.Max(1, battleSizeBudget);
-
-            defenderInitial = defenderTotal > 0
-                ? Math.Max(1, (int)Math.Round((double)battleSizeBudget * defenderTotal / total, MidpointRounding.AwayFromZero))
-                : 0;
-            defenderInitial = Math.Min(defenderTotal, defenderInitial);
-
-            attackerInitial = Math.Min(attackerTotal, Math.Max(0, battleSizeBudget - defenderInitial));
-            if (attackerTotal > 0 && attackerInitial <= 0)
-            {
-                attackerInitial = 1;
-                if (defenderInitial > 1)
-                    defenderInitial--;
-            }
-
-            if (defenderTotal > 0 && defenderInitial <= 0)
-            {
-                defenderInitial = 1;
-                if (attackerInitial > 1)
-                    attackerInitial--;
-            }
-
-            int overflow = defenderInitial + attackerInitial - battleSizeBudget;
-            if (overflow > 0)
-            {
-                if (defenderInitial >= attackerInitial && defenderInitial > 1)
-                    defenderInitial = Math.Max(1, defenderInitial - overflow);
-                else if (attackerInitial > 1)
-                    attackerInitial = Math.Max(1, attackerInitial - overflow);
-            }
+            BattleAgentCapacityPolicy.AllocateInitialTroops(
+                defenderTotal,
+                attackerTotal,
+                battleSizeBudget,
+                out defenderInitial,
+                out attackerInitial);
         }
 
         private static MissionSpawnSettings CreateNativeCampaignBattleWaveSpawnSettings()
@@ -3654,7 +3637,10 @@ namespace CoopSpectator.Infrastructure
 
             try
             {
-                MissionAgentSpawnLogicBattleSizeField.SetValue(spawnLogic, battleSizeBudget);
+                int safeBattleSize = Math.Min(
+                    battleSizeBudget,
+                    BattleAgentCapacityPolicy.GetMaximumPhysicalAgentCount());
+                MissionAgentSpawnLogicBattleSizeField.SetValue(spawnLogic, safeBattleSize);
                 diagnostics = "ok";
                 return true;
             }
