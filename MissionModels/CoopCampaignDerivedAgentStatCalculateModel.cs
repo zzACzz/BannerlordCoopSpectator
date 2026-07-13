@@ -61,6 +61,7 @@ namespace CoopSpectator.MissionModels
             TryApplyExactMeleeDrivenPropertyOverrides(agent, agentDrivenProperties);
             if (!exactRangedDrivenPropertiesApplied)
                 TryApplyExactRangedDrivenPropertyOverrides(agent, agentDrivenProperties);
+            TryApplyGlobalCaptainDrivenProperties(agent, agentDrivenProperties);
         }
 
         public override float GetDifficultyModifier()
@@ -101,10 +102,22 @@ namespace CoopSpectator.MissionModels
 
         public override float GetWeaponInaccuracy(Agent agent, WeaponComponentData weapon, int weaponSkill)
         {
+            float inaccuracy;
             if (TryResolveExactRangedSkillForWeapon(agent, weapon, out int exactSkill, out _))
-                return ComputeCampaignRangedWeaponInaccuracy(weapon, exactSkill);
+                inaccuracy = ComputeCampaignRangedWeaponInaccuracy(weapon, exactSkill);
+            else
+                inaccuracy = _baseModel.GetWeaponInaccuracy(agent, weapon, weaponSkill);
 
-            return _baseModel.GetWeaponInaccuracy(agent, weapon, weaponSkill);
+            if (weapon?.RelevantSkill == DefaultSkills.Bow &&
+                TryResolveGlobalCaptainEntryId(agent, out string entryId))
+            {
+                var accumulator = new CaptainPerkBonusAccumulator(inaccuracy);
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "BowQuickAdjustments", accumulator);
+                if (accumulator.HasEffects)
+                    inaccuracy = accumulator.Result;
+            }
+
+            return Math.Max(0f, inaccuracy);
         }
 
         public override float GetDetachmentCostMultiplierOfAgent(Agent agent, IDetachment detachment)
@@ -125,11 +138,14 @@ namespace CoopSpectator.MissionModels
         public override int GetEffectiveSkill(Agent agent, SkillObject skill)
         {
             int fallbackSkill = _baseModel.GetEffectiveSkill(agent, skill);
-            if (!TryResolveExactSkillOverride(agent, skill, fallbackSkill, out int exactSkill, out string entryId))
-                return fallbackSkill;
+            int resolvedSkill = fallbackSkill;
+            if (TryResolveExactSkillOverride(agent, skill, fallbackSkill, out int exactSkill, out string entryId))
+            {
+                TryLogExactSkillOverride(agent, skill, fallbackSkill, exactSkill, entryId);
+                resolvedSkill = exactSkill;
+            }
 
-            TryLogExactSkillOverride(agent, skill, fallbackSkill, exactSkill, entryId);
-            return exactSkill;
+            return ApplyGlobalCaptainSkillEffects(agent, skill, resolvedSkill);
         }
 
         public override int GetEffectiveSkillForWeapon(Agent agent, WeaponComponentData weapon)
@@ -204,6 +220,236 @@ namespace CoopSpectator.MissionModels
         public override string GetMissionDebugInfoForAgent(Agent agent)
         {
             return _baseModel.GetMissionDebugInfoForAgent(agent);
+        }
+
+        private static int ApplyGlobalCaptainSkillEffects(Agent agent, SkillObject skill, int baseSkill)
+        {
+            if (agent == null || skill == null || !TryResolveGlobalCaptainEntryId(agent, out string entryId))
+                return baseSkill;
+
+            var accumulator = new CaptainPerkBonusAccumulator(baseSkill);
+            string skillId = skill.StringId ?? string.Empty;
+            bool isMounted = agent.HasMount || agent.MountAgent != null;
+            bool isMeleeSkill =
+                string.Equals(skillId, "OneHanded", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(skillId, "TwoHanded", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase);
+            bool isRangedSkill =
+                string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(skillId, "Crossbow", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(skillId, "Throwing", StringComparison.OrdinalIgnoreCase);
+
+            if ((agent.Character?.IsInfantry == true && isRangedSkill) ||
+                (agent.Character?.IsRanged == true && isMeleeSkill))
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingFlexibleFighter", accumulator);
+            }
+
+            if (string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase))
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "BowDeadAim", accumulator);
+                if (isMounted)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "BowHorseMaster", accumulator);
+            }
+            else if (string.Equals(skillId, "Throwing", StringComparison.OrdinalIgnoreCase))
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "AthleticsStrongArms", accumulator);
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingRunningThrow", accumulator);
+            }
+            else if (string.Equals(skillId, "Crossbow", StringComparison.OrdinalIgnoreCase))
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "CrossbowDonkeysSwiftness", accumulator);
+            }
+            else if (string.Equals(skillId, "Riding", StringComparison.OrdinalIgnoreCase) && isMounted)
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RidingNimbleSteed", accumulator);
+            }
+
+            if (!isMounted)
+            {
+                if (string.Equals(skillId, "OneHanded", StringComparison.OrdinalIgnoreCase))
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "OneHandedWrappedHandles", accumulator);
+                else if (string.Equals(skillId, "TwoHanded", StringComparison.OrdinalIgnoreCase))
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedStrongGrip", accumulator);
+                else if (string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase))
+                {
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmCleanThrust", accumulator);
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmCounterWeight", accumulator);
+                }
+            }
+
+            return accumulator.HasEffects ? Math.Max(0, (int)accumulator.Result) : baseSkill;
+        }
+
+        private static void TryApplyGlobalCaptainDrivenProperties(
+            Agent agent,
+            AgentDrivenProperties agentDrivenProperties)
+        {
+            if (agent == null || agentDrivenProperties == null || !agent.IsHuman ||
+                !TryResolveGlobalCaptainEntryId(agent, out string entryId))
+            {
+                return;
+            }
+
+            bool isMounted = agent.HasMount || agent.MountAgent != null;
+            WeaponComponentData weapon = ResolveCurrentWeapon(agent);
+            string skillId = weapon?.RelevantSkill?.StringId ?? string.Empty;
+            int troopTier = Math.Max(0, BattleSnapshotRuntimeState.GetEntryState(entryId)?.Tier ?? 0);
+
+            if (!isMounted)
+            {
+                ApplyGlobalCaptainEffects(
+                    entryId,
+                    agentDrivenProperties,
+                    DrivenProperty.HandlingMultiplier,
+                    "AthleticsFury");
+                ApplyGlobalCaptainEffects(
+                    entryId,
+                    agentDrivenProperties,
+                    DrivenProperty.SwingSpeedMultiplier,
+                    "TwoHandedOnTheEdge",
+                    "TwoHandedBladeMaster",
+                    "PolearmSwiftSwing");
+                ApplyGlobalCaptainEffects(
+                    entryId,
+                    agentDrivenProperties,
+                    DrivenProperty.ThrustOrRangedReadySpeedMultiplier,
+                    "TwoHandedBladeMaster");
+            }
+
+            if (isMounted)
+            {
+                ApplyGlobalCaptainEffects(
+                    entryId,
+                    agentDrivenProperties,
+                    DrivenProperty.ArmorTorso,
+                    "RidingToughSteed");
+                ApplyGlobalCaptainEffects(
+                    entryId,
+                    agentDrivenProperties,
+                    DrivenProperty.WeaponWorstMobileAccuracyPenalty,
+                    "RidingSagittarius");
+                ApplyGlobalCaptainEffects(
+                    entryId,
+                    agentDrivenProperties,
+                    DrivenProperty.WeaponWorstUnsteadyAccuracyPenalty,
+                    "RidingSagittarius");
+            }
+
+            if (string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyGlobalCaptainEffects(entryId, agentDrivenProperties, DrivenProperty.ReloadSpeed, "BowRapidFire");
+                if (!isMounted)
+                {
+                    ApplyGlobalCaptainEffects(
+                        entryId,
+                        agentDrivenProperties,
+                        DrivenProperty.ReloadMovementPenaltyFactor,
+                        "BowNockingPoint");
+                }
+            }
+            else if (string.Equals(skillId, "Crossbow", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyGlobalCaptainEffects(entryId, agentDrivenProperties, DrivenProperty.ReloadSpeed, "CrossbowWindWinder");
+                ApplyGlobalCaptainEffects(
+                    entryId,
+                    agentDrivenProperties,
+                    DrivenProperty.WeaponWorstMobileAccuracyPenalty,
+                    "CrossbowLooseAndMove");
+            }
+            else if (string.Equals(skillId, "Throwing", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyGlobalCaptainEffects(entryId, agentDrivenProperties, DrivenProperty.ReloadSpeed, "ThrowingQuickDraw");
+                ApplyGlobalCaptainEffects(entryId, agentDrivenProperties, DrivenProperty.MissileSpeedMultiplier, "ThrowingPerfectTechnique");
+            }
+
+            if (agent.Formation != null && (int)agent.Formation.ArrangementOrder.OrderEnum == 5)
+            {
+                ApplyGlobalCaptainEffects(
+                    entryId,
+                    agentDrivenProperties,
+                    DrivenProperty.AttributeShieldMissileCollisionBodySizeAdder,
+                    "OneHandedShieldWall");
+            }
+            ApplyGlobalCaptainEffects(
+                entryId,
+                agentDrivenProperties,
+                DrivenProperty.AttributeShieldMissileCollisionBodySizeAdder,
+                "OneHandedArrowCatcher");
+
+            var movementPerks = new List<string>
+            {
+                "AthleticsMorningExercise",
+                "OneHandedShieldBearer",
+                "OneHandedFleetOfFoot",
+                "TwoHandedRecklessCharge",
+                "PolearmFootwork"
+            };
+            if (troopTier >= 3)
+                movementPerks.Add("AthleticsFormFittingArmor");
+            if (agent.Character?.IsInfantry == true)
+                movementPerks.Add("AthleticsSprint");
+            if (agent.Formation != null && agent.Formation.CountOfUnits <= 15)
+                movementPerks.Add("TacticsSmallUnitTactics");
+            if (agent.Mission?.HasValidTerrainType == true)
+            {
+                int terrainType = (int)agent.Mission.TerrainType;
+                if (terrainType == 3 || terrainType == 4)
+                    movementPerks.Add("TacticsExtendedSkirmish");
+                else if (terrainType == 1 || terrainType == 2 || terrainType == 5)
+                    movementPerks.Add("TacticsDecisiveBattle");
+            }
+            ApplyGlobalCaptainEffects(
+                entryId,
+                agentDrivenProperties,
+                DrivenProperty.MaxSpeedMultiplier,
+                movementPerks.ToArray());
+
+            if (troopTier >= 3)
+            {
+                ApplyGlobalCaptainEffects(
+                    entryId,
+                    agentDrivenProperties,
+                    DrivenProperty.ArmorEncumbrance,
+                    "AthleticsFormFittingArmor");
+            }
+        }
+
+        private static void ApplyGlobalCaptainEffects(
+            string entryId,
+            AgentDrivenProperties agentDrivenProperties,
+            DrivenProperty property,
+            params string[] perkIds)
+        {
+            if (string.IsNullOrWhiteSpace(entryId) || agentDrivenProperties == null || perkIds == null)
+                return;
+
+            var accumulator = new CaptainPerkBonusAccumulator(agentDrivenProperties.GetStat(property));
+            foreach (string perkId in perkIds)
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, perkId, accumulator);
+
+            if (accumulator.HasEffects)
+                agentDrivenProperties.SetStat(property, Math.Max(0f, accumulator.Result));
+        }
+
+        private static bool TryResolveGlobalCaptainEntryId(Agent agent, out string entryId)
+        {
+            entryId = null;
+            return agent != null &&
+                CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                !string.IsNullOrWhiteSpace(entryId);
+        }
+
+        private static WeaponComponentData ResolveCurrentWeapon(Agent agent)
+        {
+            if (agent?.Equipment == null)
+                return null;
+
+            EquipmentIndex wieldedIndex = agent.GetPrimaryWieldedItemIndex();
+            if (wieldedIndex == EquipmentIndex.None)
+                return null;
+
+            return agent.Equipment[wieldedIndex].CurrentUsageItem;
         }
 
         private bool TryResolveExactSkillOverride(

@@ -58,6 +58,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private DateTime _nextBattleStartAttemptUtc;
         private DateTime _nextBattleStartWaitLogUtc;
         private static string _activeBattleInstanceId;
+        private static readonly List<string> _pendingLordsHallCaptainEntryIds = new List<string>();
+        private static readonly List<FrozenCaptainCombatGroupSnapshotMessage> _pendingLordsHallCaptainCombatGroups = new List<FrozenCaptainCombatGroupSnapshotMessage>();
+        private static readonly List<CoopBattleResultBridgeFile.BattleResultEntrySnapshot> _pendingLordsHallPrisonerEntries = new List<CoopBattleResultBridgeFile.BattleResultEntrySnapshot>();
         private static SyntheticRosterMode _syntheticRosterMode;
         private static readonly Dictionary<string, object> CachedDefaultSkillObjects = new Dictionary<string, object>(StringComparer.Ordinal);
         private static readonly Dictionary<string, object> CachedDefaultCharacterAttributeObjects = new Dictionary<string, object>(StringComparer.Ordinal);
@@ -313,6 +316,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public CharacterObject Character { get; set; }
             public Hero Hero { get; set; }
             public int Weight { get; set; }
+            public List<CaptainPerkEffectSnapshotMessage> GlobalCaptainPerkEffects { get; set; } = new List<CaptainPerkEffectSnapshotMessage>();
         }
 
         private sealed class TroopCombatXpAccumulator
@@ -617,12 +621,6 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     return true;
                 }
 
-                if ((isSiegeAssault && isLordsHallSiegeState) || (looksLikeKeepScene && encounterSettlement?.IsFortification == true))
-                {
-                    reason = "siege-lords-hall";
-                    return true;
-                }
-
                 return false;
             }
             catch (Exception ex)
@@ -720,6 +718,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         : null,
                     string.Equals(_cachedHostAftermathMainPartyPreviewResultKey, resultKey, StringComparison.Ordinal) &&
                     _cachedHostAftermathMainPartyPreviewHeroHpApplied);
+                if (ShouldDeferFinalBattleAftermath(result))
+                {
+                    CapturePendingLordsHallStageState(result);
+                }
+                else if (string.Equals(result.BattleStage, "LordsHall", StringComparison.OrdinalIgnoreCase))
+                {
+                    ClearPendingLordsHallStageState();
+                }
                 BattleResultWritebackJournalBehavior.MarkConsumed(resultKey);
 
                 ApplyRewardStateAuditDeltas(rewardAuditBefore, writebackSummary);
@@ -878,6 +884,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             TryApplyCombatXpWriteback(result, encounterParties, summary);
+            if (ShouldDeferFinalBattleAftermath(result))
+            {
+                AddWritebackSample(summary.AdjustedSamples, "IntermediateSiegeStage:final-aftermath-deferred");
+                return summary;
+            }
             TryBuildMainPartyRewardProjection(result, encounterParties, summary, cachedRewardProjection);
             TryApplyMainPartyRewardWriteback(encounterParties, summary);
             TryBuildMainPartyLootAftermathAudit(summary, cachedLootAftermath);
@@ -1343,7 +1354,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         damage,
                         combatEvent.IsFatal,
                         CombatXpModel.MissionTypeEnum.Battle);
-                    int troopXp = Math.Max(0, (int)Math.Round(Math.Max(0f, explained.ResultNumber), MidpointRounding.AwayFromZero));
+                    float exactTroopXp = ApplyFrozenCaptainXpEffects(
+                        Math.Max(0f, explained.ResultNumber),
+                        attackerEntry?.GlobalCaptainPerkEffects);
+                    int troopXp = Math.Max(0, (int)Math.Round(exactTroopXp, MidpointRounding.AwayFromZero));
                     if (troopXp > 0)
                         AccumulateTroopCombatXp(troopXpAccumulators, partyState, attackerCharacter, troopXp);
                 }
@@ -1399,7 +1413,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 {
                     Character = participantCharacter,
                     Hero = participantHero,
-                    Weight = weight
+                    Weight = weight,
+                    GlobalCaptainPerkEffects = entry.GlobalCaptainPerkEffects ?? new List<CaptainPerkEffectSnapshotMessage>()
                 });
                 totalWeight += weight;
             }
@@ -1437,13 +1452,15 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     {
                         ExplainedNumber explained = combatXpModel.GetXpFromHit(
                             participant.Character,
-                            partyState.CaptainCharacter,
+                            null,
                             attackedCharacter,
                             partyState.PartyBase,
                             damage,
                             true,
                             CombatXpModel.MissionTypeEnum.Battle);
-                        xpFromCasualty = Math.Max(0f, explained.ResultNumber);
+                        xpFromCasualty = ApplyFrozenCaptainXpEffects(
+                            Math.Max(0f, explained.ResultNumber),
+                            participant.GlobalCaptainPerkEffects);
                     }
                     catch (Exception ex)
                     {
@@ -2338,7 +2355,15 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             var prisonerNamesByCharacterId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             int totalUnconscious = 0;
 
-            foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry in result.Entries.Where(item => item != null && item.UnconsciousCount > 0))
+            IEnumerable<CoopBattleResultBridgeFile.BattleResultEntrySnapshot> prisonerSourceEntries =
+                result.Entries.Where(item => item != null);
+            if (string.Equals(result.BattleStage, "LordsHall", StringComparison.OrdinalIgnoreCase) &&
+                _pendingLordsHallPrisonerEntries.Count > 0)
+            {
+                prisonerSourceEntries = prisonerSourceEntries.Concat(_pendingLordsHallPrisonerEntries);
+            }
+
+            foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry in prisonerSourceEntries.Where(item => item.UnconsciousCount > 0))
             {
                 if (TryResolveBattleSideEnumLoose(entry.SideId) != defeatedSide)
                     continue;
@@ -3141,11 +3166,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (string.Equals(_lastMissionExitRequestedBattleResultKey, resultKey, StringComparison.Ordinal))
                 return;
 
-            TryCacheHostAftermathRewardProjection(result, resultKey);
-            TryCacheHostAftermathRewardAuditSnapshot(resultKey);
-            TryCacheHostAftermathLootSummary(result, resultKey);
+            bool deferFinalAftermath = ShouldDeferFinalBattleAftermath(result);
+            if (!deferFinalAftermath)
+            {
+                TryCacheHostAftermathRewardProjection(result, resultKey);
+                TryCacheHostAftermathRewardAuditSnapshot(resultKey);
+                TryCacheHostAftermathLootSummary(result, resultKey);
+            }
             TryInjectMainPartyBattleResultPreviewIntoLiveEncounter(result, resultKey);
-            TryInjectMainPartyPrisonerAftermathIntoLiveMapEvent(result);
+            if (!deferFinalAftermath)
+                TryInjectMainPartyPrisonerAftermathIntoLiveMapEvent(result);
 
             bool encounterPrepared = TryPrepareAuthoritativeEncounterResultBridge(result);
             bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
@@ -3520,7 +3550,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     return false;
                 }
 
-                BattleState winnerBattleState = TryResolveWinnerBattleState(result.WinnerSide);
+                BattleState winnerBattleState = result.DefenderPushedBack
+                    ? BattleState.DefenderPullBack
+                    : TryResolveWinnerBattleState(result.WinnerSide);
                 if (winnerBattleState == BattleState.None)
                 {
                     ModLogger.Info(
@@ -3530,7 +3562,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     return false;
                 }
 
-                CampaignBattleResult campaignBattleResult = CampaignBattleResult.GetResult(winnerBattleState, enemyRetreated: true);
+                bool enemyRetreated = !result.DefenderPushedBack && result.RoutedDefenderCount > 0;
+                CampaignBattleResult campaignBattleResult = CampaignBattleResult.GetResult(
+                    winnerBattleState,
+                    enemyRetreated: enemyRetreated);
                 if (campaignBattleResult == null)
                 {
                     ModLogger.Info(
@@ -3541,6 +3576,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 }
 
                 PlayerEncounter.CampaignBattleResult = campaignBattleResult;
+                string settlementId = BattleSnapshotRuntimeState.GetCurrent()?
+                    .ScenarioContext?
+                    .SiegeContext?
+                    .SettlementId;
+                ExactSiegeStageOutcomeRuntimeState.Arm(result, settlementId);
                 bool continueReset = TrySetMemberValue(encounter, "_doesBattleContinue", false);
 
                 ModLogger.Info(
@@ -3658,6 +3698,73 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (!string.IsNullOrWhiteSpace(result.BattleInstanceId))
                 return result.BattleInstanceId;
             return (result.BattleId ?? "null") + "|" + result.UpdatedUtc.ToString("O");
+        }
+
+        private static bool ShouldDeferFinalBattleAftermath(CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        {
+            return result?.DefenderPushedBack == true && !result.IsFinalStage;
+        }
+
+        private static void CapturePendingLordsHallStageState(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        {
+            _pendingLordsHallCaptainEntryIds.Clear();
+            _pendingLordsHallCaptainEntryIds.AddRange(
+                (result?.FrozenCaptainEntryIds ?? new List<string>())
+                .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
+                .Distinct(StringComparer.Ordinal));
+
+            _pendingLordsHallCaptainCombatGroups.Clear();
+            _pendingLordsHallCaptainCombatGroups.AddRange(
+                CloneFrozenCaptainCombatGroups(result?.FrozenCaptainCombatGroups));
+
+            _pendingLordsHallPrisonerEntries.Clear();
+            foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry in
+                result?.Entries?.Where(item => item != null && item.UnconsciousCount > 0) ??
+                Enumerable.Empty<CoopBattleResultBridgeFile.BattleResultEntrySnapshot>())
+            {
+                _pendingLordsHallPrisonerEntries.Add(new CoopBattleResultBridgeFile.BattleResultEntrySnapshot
+                {
+                    EntryId = entry.EntryId,
+                    SideId = entry.SideId,
+                    PartyId = entry.PartyId,
+                    CharacterId = entry.CharacterId,
+                    OriginalCharacterId = entry.OriginalCharacterId,
+                    SpawnTemplateId = entry.SpawnTemplateId,
+                    TroopName = entry.TroopName,
+                    HeroId = entry.HeroId,
+                    IsHero = entry.IsHero,
+                    UnconsciousCount = entry.UnconsciousCount
+                });
+            }
+        }
+
+        private static void ClearPendingLordsHallStageState()
+        {
+            _pendingLordsHallCaptainEntryIds.Clear();
+            _pendingLordsHallCaptainCombatGroups.Clear();
+            _pendingLordsHallPrisonerEntries.Clear();
+        }
+
+        private static List<FrozenCaptainCombatGroupSnapshotMessage> CloneFrozenCaptainCombatGroups(
+            IEnumerable<FrozenCaptainCombatGroupSnapshotMessage> groups)
+        {
+            return (groups ?? Enumerable.Empty<FrozenCaptainCombatGroupSnapshotMessage>())
+                .Where(group => group != null && !string.IsNullOrWhiteSpace(group.CombatGroupId))
+                .Select(group => new FrozenCaptainCombatGroupSnapshotMessage
+                {
+                    CombatGroupId = group.CombatGroupId,
+                    Effects = (group.Effects ?? new List<CaptainPerkEffectSnapshotMessage>())
+                        .Where(effect => effect != null && !string.IsNullOrWhiteSpace(effect.PerkId))
+                        .Select(effect => new CaptainPerkEffectSnapshotMessage
+                        {
+                            PerkId = effect.PerkId,
+                            Bonus = effect.Bonus,
+                            IncrementType = effect.IncrementType
+                        })
+                        .ToList()
+                })
+                .ToList();
         }
 
         private static string SafeMissionSceneName(Mission mission)
@@ -3914,6 +4021,25 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     _activeBattleInstanceId = Guid.NewGuid().ToString("N");
 
                 message.Snapshot.BattleInstanceId = _activeBattleInstanceId;
+                if (string.Equals(
+                        message.Snapshot.ScenarioContext?.SiegeContext?.SiegeSubtype,
+                        "LordsHall",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    if (_pendingLordsHallCaptainEntryIds.Count == 0 ||
+                        _pendingLordsHallCaptainCombatGroups.Count == 0)
+                    {
+                        CoopBattleResultBridgeFile.BattleResultSnapshot previousStageResult =
+                            CoopBattleResultBridgeFile.ReadResult(logRead: false);
+                        if (ShouldDeferFinalBattleAftermath(previousStageResult))
+                            CapturePendingLordsHallStageState(previousStageResult);
+                    }
+
+                    message.Snapshot.FrozenCaptainEntryIds =
+                        _pendingLordsHallCaptainEntryIds.Distinct(StringComparer.Ordinal).ToList();
+                    message.Snapshot.FrozenCaptainCombatGroups =
+                        CloneFrozenCaptainCombatGroups(_pendingLordsHallCaptainCombatGroups);
+                }
                 message.Snapshot.CasualtyRulesVersion = 1;
                 message.Snapshot.BattleDeathDifficulty = (int)CampaignOptions.BattleDeath;
                 message.Snapshot.ClanMemberDeathChanceMultiplier =
@@ -4143,7 +4269,37 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             PopulateMissionInitializerContext(siegeContext);
             PopulateSiegeEngineContext(encounterSettlement?.SiegeEvent, siegeContext);
+            PopulateSiegeLordsHallFightModelContext(siegeContext);
             return siegeContext;
+        }
+
+        private static void PopulateSiegeLordsHallFightModelContext(BattleSiegeContextMessage siegeContext)
+        {
+            if (siegeContext == null)
+                return;
+
+            try
+            {
+                var model = TaleWorlds.CampaignSystem.Campaign.Current?.Models?.SiegeLordsHallFightModel;
+                if (model == null)
+                    return;
+
+                siegeContext.DefenderTroopNumberForSuccessfulPullBack =
+                    model.DefenderTroopNumberForSuccessfulPullBack;
+                siegeContext.LordsHallAreaLostRatio = model.AreaLostRatio;
+                siegeContext.LordsHallAttackerDefenderTroopCountRatio =
+                    model.AttackerDefenderTroopCountRatio;
+                siegeContext.LordsHallDefenderMaxArcherRatio = model.DefenderMaxArcherRatio;
+                siegeContext.LordsHallMaxDefenderSideTroopCount = model.MaxDefenderSideTroopCount;
+                siegeContext.LordsHallMaxDefenderArcherCount = model.MaxDefenderArcherCount;
+                siegeContext.LordsHallMaxAttackerSideTroopCount = model.MaxAttackerSideTroopCount;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleDetector: failed to capture SiegeLordsHallFightModel parameters; defaults retained. " +
+                    "Error=" + ex.Message);
+            }
         }
 
         private static string ResolveSettlementKind(Settlement settlement)
@@ -4328,6 +4484,23 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     " InterpolatedAtmosphereName=" + (hasAtmosphere ? atmosphere.InterpolatedAtmosphereName ?? "null" : "n/a") +
                     " AtmosphereSource=" + (string.IsNullOrWhiteSpace(atmosphereSource) ? "none" : atmosphereSource) + ".");
             }
+        }
+
+        private static float ApplyFrozenCaptainXpEffects(
+            float baseXp,
+            IEnumerable<CaptainPerkEffectSnapshotMessage> effects)
+        {
+            var accumulator = new CaptainPerkBonusAccumulator(baseXp);
+            foreach (CaptainPerkEffectSnapshotMessage effect in effects ?? Enumerable.Empty<CaptainPerkEffectSnapshotMessage>())
+            {
+                if (effect != null &&
+                    string.Equals(effect.PerkId, "LeadershipInspiringLeader", StringComparison.OrdinalIgnoreCase))
+                {
+                    accumulator.Add(effect);
+                }
+            }
+
+            return accumulator.HasEffects ? Math.Max(0f, accumulator.Result) : Math.Max(0f, baseXp);
         }
 
         private static bool IsCampaignAtmosphereUsable(AtmosphereInfo atmosphere)
@@ -7277,6 +7450,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 SkillAthletics = troop.SkillAthletics,
                 BaseHitPoints = troop.BaseHitPoints,
                 PerkIds = troop.PerkIds != null ? new List<string>(troop.PerkIds) : new List<string>(),
+                CaptainPerkEffects = troop.CaptainPerkEffects != null
+                    ? troop.CaptainPerkEffects
+                        .Where(effect => effect != null)
+                        .Select(effect => new CaptainPerkEffectSnapshotMessage
+                        {
+                            PerkId = effect.PerkId,
+                            Bonus = effect.Bonus,
+                            IncrementType = effect.IncrementType
+                        })
+                        .ToList()
+                    : new List<CaptainPerkEffectSnapshotMessage>(),
                 CombatItem0Id = definition.ItemIds != null && definition.ItemIds.Length > 0 ? definition.ItemIds[0] : null,
                 CombatItem0Amount = troop.CombatItem0Amount,
                 CombatItem1Id = definition.ItemIds != null && definition.ItemIds.Length > 1 ? definition.ItemIds[1] : null,
@@ -7849,6 +8033,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 PartyId = MobileParty.MainParty?.StringId ?? "main_party",
                 PartyName = MobileParty.MainParty?.Name?.ToString() ?? "Main Party",
+                CombatGroupId = TryResolveCombatGroupId(
+                    MobileParty.MainParty,
+                    MobileParty.MainParty?.Party,
+                    mainPartySide.SideId,
+                    MobileParty.MainParty?.StringId ?? "main_party"),
                 IsMainParty = true,
                 HasMobileParty = MobileParty.MainParty != null,
                 Modifiers = TryBuildPartyModifierSnapshot(MobileParty.MainParty, MobileParty.MainParty?.Party),
@@ -8461,12 +8650,49 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 PartyId = partyId,
                 PartyName = partyName,
+                CombatGroupId = TryResolveCombatGroupId(partyObject, partyBase, sideId, partyId),
                 IsMainParty = isMainParty,
                 HasMobileParty = TryResolveMobileParty(partyObject, partyBase) != null,
                 TotalManCount = troops.Sum(t => t?.Count ?? 0),
                 Modifiers = TryBuildPartyModifierSnapshot(partyObject, partyBase),
                 Troops = troops
             };
+        }
+
+        private static string TryResolveCombatGroupId(
+            object partyObject,
+            object partyBase,
+            string sideId,
+            string partyId)
+        {
+            string sideKey = string.IsNullOrWhiteSpace(sideId) ? "side" : sideId.Trim();
+            string resolvedPartyId = string.IsNullOrWhiteSpace(partyId) ? "unknown-party" : partyId.Trim();
+            object mobileParty = TryResolveMobileParty(partyObject, partyBase);
+            object army = TryGetPropertyValue(mobileParty, "Army");
+            object armyLeaderParty = TryGetPropertyValue(army, "LeaderParty");
+            string armyLeaderPartyId = TryGetStringId(armyLeaderParty) ??
+                TryGetStringId(TryGetPropertyValue(armyLeaderParty, "Party"));
+            if (!string.IsNullOrWhiteSpace(armyLeaderPartyId))
+                return sideKey + "|army|" + armyLeaderPartyId.Trim();
+
+            bool isDefender = sideKey.IndexOf("defend", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool isSettlementDefenseParty =
+                TryGetBoolProperty(mobileParty, "IsGarrison") ||
+                TryGetBoolProperty(mobileParty, "IsMilitia") ||
+                resolvedPartyId.IndexOf("garrison", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                resolvedPartyId.IndexOf("militia", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (isDefender && isSettlementDefenseParty)
+            {
+                object settlement =
+                    TryGetPropertyValue(partyBase, "Settlement") ??
+                    TryGetPropertyValue(mobileParty, "CurrentSettlement") ??
+                    TryGetPropertyValue(mobileParty, "HomeSettlement");
+                string settlementId = TryGetStringId(settlement);
+                if (!string.IsNullOrWhiteSpace(settlementId))
+                    return sideKey + "|settlement-defense|" + settlementId.Trim();
+            }
+
+            return sideKey + "|party|" + resolvedPartyId;
         }
 
         private static string TryResolveSideLeaderPartyId(object sideObject)
@@ -10661,6 +10887,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             troop.BaseHitPoints = TryGetCharacterBaseHitPoints(characterObject);
             troop.CharacterLevel = TryGetIntProperty(characterObject, "Level");
             troop.PerkIds = TryGetCharacterPerkIds(characterObject);
+            troop.CaptainPerkEffects = TryGetCharacterCaptainPerkEffects(characterObject);
         }
 
         private static void BackfillDerivedCombatAttributes(TroopStackInfo troop)
@@ -10893,6 +11120,45 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             return perkIds;
+        }
+
+        private static List<CaptainPerkEffectSnapshotMessage> TryGetCharacterCaptainPerkEffects(object instance)
+        {
+            Hero hero = TryResolveHeroObject(instance);
+            if (hero == null)
+                return new List<CaptainPerkEffectSnapshotMessage>();
+
+            var effects = new List<CaptainPerkEffectSnapshotMessage>();
+            var seenPerkIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (object perkObject in GetCachedPerkObjects())
+            {
+                if (perkObject == null || !TryHeroHasPerk(hero, perkObject))
+                    continue;
+
+                string primaryRole = TryGetPropertyValue(perkObject, "PrimaryRole")?.ToString();
+                string secondaryRole = TryGetPropertyValue(perkObject, "SecondaryRole")?.ToString();
+                bool captainIsPrimary = string.Equals(primaryRole, "Captain", StringComparison.OrdinalIgnoreCase);
+                bool captainIsSecondary = string.Equals(secondaryRole, "Captain", StringComparison.OrdinalIgnoreCase);
+                if (!captainIsPrimary && !captainIsSecondary)
+                    continue;
+
+                string perkId = TryGetStringId(perkObject);
+                if (string.IsNullOrWhiteSpace(perkId) || !seenPerkIds.Add(perkId))
+                    continue;
+
+                string bonusProperty = captainIsPrimary ? "PrimaryBonus" : "SecondaryBonus";
+                string incrementProperty = captainIsPrimary ? "PrimaryIncrementType" : "SecondaryIncrementType";
+                effects.Add(new CaptainPerkEffectSnapshotMessage
+                {
+                    PerkId = perkId,
+                    Bonus = TryConvertToFloat(TryGetPropertyValue(perkObject, bonusProperty)),
+                    IncrementType = TryGetPropertyValue(perkObject, incrementProperty)?.ToString()
+                });
+            }
+
+            return effects
+                .OrderBy(effect => effect.PerkId, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         private static List<string> TryGetHeroPerkIdsByPartyRoles(Hero hero, params string[] roleNames)

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Newtonsoft.Json;
+using CoopSpectator.Network.Messages;
 
 namespace CoopSpectator.Infrastructure
 {
@@ -20,12 +21,19 @@ namespace CoopSpectator.Infrastructure
             public string Source { get; set; }
             public string WinnerSide { get; set; }
             public string PlayerSide { get; set; }
+            public string BattleStage { get; set; }
+            public string CompletionReason { get; set; }
+            public bool DefenderPushedBack { get; set; }
+            public bool IsFinalStage { get; set; }
+            public int RoutedDefenderCount { get; set; }
             public bool IsSynthetic { get; set; }
             public DateTime UpdatedUtc { get; set; }
             public List<BattleResultEntrySnapshot> Entries { get; set; } = new List<BattleResultEntrySnapshot>();
             public int DroppedCombatEventCount { get; set; }
             public List<BattleResultCombatEventSnapshot> CombatEvents { get; set; } = new List<BattleResultCombatEventSnapshot>();
             public List<BattleResultCasualtyEventSnapshot> CasualtyEvents { get; set; } = new List<BattleResultCasualtyEventSnapshot>();
+            public List<string> FrozenCaptainEntryIds { get; set; } = new List<string>();
+            public List<FrozenCaptainCombatGroupSnapshotMessage> FrozenCaptainCombatGroups { get; set; } = new List<FrozenCaptainCombatGroupSnapshotMessage>();
         }
 
         public sealed class BattleResultCasualtyEventSnapshot
@@ -76,6 +84,7 @@ namespace CoopSpectator.Infrastructure
             public int RoutedInflictedCount { get; set; }
             public float DamageDealt { get; set; }
             public float DamageTaken { get; set; }
+            public List<CaptainPerkEffectSnapshotMessage> GlobalCaptainPerkEffects { get; set; } = new List<CaptainPerkEffectSnapshotMessage>();
         }
 
         public sealed class BattleResultCombatEventSnapshot

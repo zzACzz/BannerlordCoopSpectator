@@ -78,7 +78,7 @@ namespace CoopSpectator.Commands
             {
                 return "Coop test battle is " +
                        Campaign.BattleDetector.GetCoopTestBattleStatusSummary() +
-                       ". Usage: coop.test_battle <on|off|status|roster matrix_only|roster campaign_all|roster campaign_mirror_all|roster campaign_mirror_heroes|roster campaign_mirror_heroes_combat|roster shield_banners|roster mixed|roster five_mode_matrix|roster role_matrix_stream|roster role_matrix_stream_mounted|matrix on|matrix off|five_mode_protocol on|five_mode_protocol off|campaign_ai on|campaign_ai off|weapon_priority on|weapon_priority all|weapon_priority suspects|weapon_priority off|crafted_weapons safe|crafted_weapons create_time|debug possession on|limit N|active_limit N|wave_lifetime seconds|priority_lifetime seconds|matrix_progress|matrix_progress reset|matrix_unsafe list|matrix_unsafe add M00001 [reason]|matrix_unsafe add_last [reason]|matrix_unsafe remove M00001|matrix_unsafe clear>.";
+                       ". Usage: coop.test_battle <on|off|status|roster matrix_only|roster campaign_all|roster campaign_mirror_all|roster campaign_mirror_heroes|roster campaign_mirror_heroes_combat|roster shield_banners|roster mixed|roster five_mode_matrix|roster role_matrix_stream|roster role_matrix_stream_mounted|matrix on|matrix off|five_mode_protocol on|five_mode_protocol off|campaign_ai on|campaign_ai off|weapon_priority on|weapon_priority all|weapon_priority suspects|weapon_priority off|crafted_weapons safe|crafted_weapons create_time|debug possession on|debug morale on|limit N|active_limit N|wave_lifetime seconds|priority_lifetime seconds|matrix_progress|matrix_progress reset|matrix_unsafe list|matrix_unsafe add M00001 [reason]|matrix_unsafe add_last [reason]|matrix_unsafe remove M00001|matrix_unsafe clear>.";
             }
 
             string action = (args[0] ?? string.Empty).Trim().ToLowerInvariant();
@@ -227,6 +227,33 @@ namespace CoopSpectator.Commands
                     }
 
                     return "Usage: coop.test_battle debug possession <on|off|status|reset>.";
+                }
+
+                if (debugTarget == "morale" || debugTarget == "panic" || debugTarget == "retreat")
+                {
+                    string debugAction = args.Count >= 3 ? (args[2] ?? string.Empty).Trim().ToLowerInvariant() : "status";
+                    if (debugAction == "status")
+                        return CoopDebugConfig.GetMoraleDiagnosticsStatus() + ".";
+
+                    if (debugAction == "on" || debugAction == "enable" || debugAction == "1" || debugAction == "true")
+                    {
+                        CoopDebugConfig.SetMoraleDiagnosticsRuntimeOverride(true);
+                        return "Morale diagnostics enabled. " + CoopDebugConfig.GetMoraleDiagnosticsStatus() + ".";
+                    }
+
+                    if (debugAction == "off" || debugAction == "disable" || debugAction == "0" || debugAction == "false")
+                    {
+                        CoopDebugConfig.SetMoraleDiagnosticsRuntimeOverride(false);
+                        return "Morale diagnostics disabled. " + CoopDebugConfig.GetMoraleDiagnosticsStatus() + ".";
+                    }
+
+                    if (debugAction == "reset" || debugAction == "env" || debugAction == "inherit")
+                    {
+                        CoopDebugConfig.SetMoraleDiagnosticsRuntimeOverride(null);
+                        return "Morale diagnostics runtime override cleared. " + CoopDebugConfig.GetMoraleDiagnosticsStatus() + ".";
+                    }
+
+                    return "Usage: coop.test_battle debug morale <on|off|status|reset>.";
                 }
             }
 

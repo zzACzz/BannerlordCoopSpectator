@@ -58,6 +58,7 @@ namespace CoopSpectator.Infrastructure
         public string PartyId { get; set; }
         public string PartyName { get; set; }
         public string SideId { get; set; }
+        public string CombatGroupId { get; set; }
         public bool IsMainParty { get; set; }
         public bool HasMobileParty { get; set; }
         public int TotalManCount { get; set; }
@@ -140,6 +141,7 @@ namespace CoopSpectator.Infrastructure
         public int SkillAthletics { get; set; }
         public int BaseHitPoints { get; set; }
         public List<string> PerkIds { get; set; } = new List<string>();
+        public List<CaptainPerkEffectSnapshotMessage> CaptainPerkEffects { get; set; } = new List<CaptainPerkEffectSnapshotMessage>();
         public string CombatItem0Id { get; set; }
         public int? CombatItem0Amount { get; set; }
         public string CombatItem0CraftedWeaponKey { get; set; }
@@ -201,6 +203,7 @@ namespace CoopSpectator.Infrastructure
         public string PartyId { get; set; }
         public string PartyName { get; set; }
         public string SideId { get; set; }
+        public string CombatGroupId { get; set; }
         public bool IsMainParty { get; set; }
         public bool HasMobileParty { get; set; }
         public int TotalManCount { get; set; }
@@ -283,6 +286,7 @@ namespace CoopSpectator.Infrastructure
         public int SkillAthletics { get; set; }
         public int BaseHitPoints { get; set; }
         public List<string> PerkIds { get; set; } = new List<string>();
+        public List<CaptainPerkEffectSnapshotMessage> CaptainPerkEffects { get; set; } = new List<CaptainPerkEffectSnapshotMessage>();
         public string CombatItem0Id { get; set; }
         public int? CombatItem0Amount { get; set; }
         public string CombatItem0CraftedWeaponKey { get; set; }
@@ -1520,6 +1524,9 @@ namespace CoopSpectator.Infrastructure
                         PartyId = partyId,
                         PartyName = partySnapshot.PartyName,
                         SideId = sideProjection.CanonicalSideKey,
+                        CombatGroupId = string.IsNullOrWhiteSpace(partySnapshot.CombatGroupId)
+                            ? sideProjection.CanonicalSideKey + "|party|" + partyId
+                            : partySnapshot.CombatGroupId,
                         IsMainParty = partySnapshot.IsMainParty,
                         HasMobileParty = partySnapshot.HasMobileParty,
                         TotalManCount = partySnapshot.TotalManCount,
@@ -1655,6 +1662,7 @@ namespace CoopSpectator.Infrastructure
                         PartyId = partyProjection.PartyId,
                         PartyName = partyProjection.PartyName,
                         SideId = partyProjection.SideId,
+                        CombatGroupId = partyProjection.CombatGroupId,
                         IsMainParty = partyProjection.IsMainParty,
                         HasMobileParty = partyProjection.HasMobileParty,
                         TotalManCount = partyProjection.TotalManCount,
@@ -1712,6 +1720,7 @@ namespace CoopSpectator.Infrastructure
                         SkillAthletics = entryProjection.SkillAthletics,
                         BaseHitPoints = entryProjection.BaseHitPoints,
                         PerkIds = entryProjection.PerkIds != null ? new List<string>(entryProjection.PerkIds) : new List<string>(),
+                        CaptainPerkEffects = CloneCaptainPerkEffects(entryProjection.CaptainPerkEffects),
                         CombatItem0Id = entryProjection.CombatItem0Id,
                         CombatItem0Amount = entryProjection.CombatItem0Amount,
                         CombatItem0CraftedWeaponKey = entryProjection.CombatItem0CraftedWeaponKey,
@@ -1833,6 +1842,7 @@ namespace CoopSpectator.Infrastructure
                 SkillAthletics = troop.SkillAthletics,
                 BaseHitPoints = troop.BaseHitPoints,
                 PerkIds = troop.PerkIds != null ? new List<string>(troop.PerkIds) : new List<string>(),
+                CaptainPerkEffects = CloneCaptainPerkEffects(troop.CaptainPerkEffects),
                 CombatItem0Id = troop.CombatItem0Id,
                 CombatItem0Amount = troop.CombatItem0Amount,
                 CombatItem0CraftedWeaponKey = troop.CombatItem0CraftedWeaponKey,
@@ -1868,6 +1878,20 @@ namespace CoopSpectator.Infrastructure
                 ServerCreateEffectiveProfile = troop.ServerCreateEffectiveProfile,
                 Tier = troop.Tier
             };
+        }
+
+        private static List<CaptainPerkEffectSnapshotMessage> CloneCaptainPerkEffects(
+            IEnumerable<CaptainPerkEffectSnapshotMessage> effects)
+        {
+            return effects?
+                .Where(effect => effect != null && !string.IsNullOrWhiteSpace(effect.PerkId))
+                .Select(effect => new CaptainPerkEffectSnapshotMessage
+                {
+                    PerkId = effect.PerkId,
+                    Bonus = effect.Bonus,
+                    IncrementType = effect.IncrementType
+                })
+                .ToList() ?? new List<CaptainPerkEffectSnapshotMessage>();
         }
 
         private static BattlePartyModifierProjectionState BuildPartyModifierProjection(BattlePartyModifierSnapshotMessage modifierSnapshot)

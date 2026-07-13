@@ -5155,6 +5155,23 @@ namespace CoopSpectator.MissionBehaviors
             return formationIndices.Count > 0;
         }
 
+        internal static IReadOnlyList<string> GetDelegatedCaptainEntryIds(Mission mission)
+        {
+            if (mission == null)
+                return Array.Empty<string>();
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null)
+                return Array.Empty<string>();
+
+            return bridge._delegatedCaptainEntryIdByFormationIndexAndSide.Values
+                .Where(assignments => assignments != null)
+                .SelectMany(assignments => assignments.Values)
+                .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+        }
+
         internal static bool TryResolveAuthorizedFormationIndices(
             Mission mission,
             Team team,

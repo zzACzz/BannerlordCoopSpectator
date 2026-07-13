@@ -62,6 +62,8 @@ namespace CoopSpectator.Network.Messages
         public BattleScenarioContextMessage ScenarioContext { get; set; }
         public List<CraftedWeaponSnapshotMessage> CraftedWeapons { get; set; } = new List<CraftedWeaponSnapshotMessage>();
         public List<BattleSideSnapshotMessage> Sides { get; set; } = new List<BattleSideSnapshotMessage>();
+        public List<string> FrozenCaptainEntryIds { get; set; } = new List<string>();
+        public List<FrozenCaptainCombatGroupSnapshotMessage> FrozenCaptainCombatGroups { get; set; } = new List<FrozenCaptainCombatGroupSnapshotMessage>();
     }
 
     public sealed class CampaignAtmosphereSnapshotMessage
@@ -181,6 +183,13 @@ namespace CoopSpectator.Network.Messages
         public List<BattleSiegeEngineSnapshotMessage> DefenderSiegeEngines { get; set; } = new List<BattleSiegeEngineSnapshotMessage>();
         public List<string> AttackerSiegeEngineTypeIds { get; set; } = new List<string>();
         public List<string> DefenderSiegeEngineTypeIds { get; set; } = new List<string>();
+        public int DefenderTroopNumberForSuccessfulPullBack { get; set; } = 20;
+        public float LordsHallAreaLostRatio { get; set; } = 3f;
+        public float LordsHallAttackerDefenderTroopCountRatio { get; set; } = 0.7f;
+        public float LordsHallDefenderMaxArcherRatio { get; set; } = 0.7f;
+        public int LordsHallMaxDefenderSideTroopCount { get; set; } = 27;
+        public int LordsHallMaxDefenderArcherCount { get; set; } = 19;
+        public int LordsHallMaxAttackerSideTroopCount { get; set; } = 19;
 
         public BattleSiegeContextMessage Clone()
         {
@@ -208,7 +217,14 @@ namespace CoopSpectator.Network.Messages
                 AttackerSiegeEngines = CloneSiegeEngineList(AttackerSiegeEngines),
                 DefenderSiegeEngines = CloneSiegeEngineList(DefenderSiegeEngines),
                 AttackerSiegeEngineTypeIds = AttackerSiegeEngineTypeIds != null ? new List<string>(AttackerSiegeEngineTypeIds) : new List<string>(),
-                DefenderSiegeEngineTypeIds = DefenderSiegeEngineTypeIds != null ? new List<string>(DefenderSiegeEngineTypeIds) : new List<string>()
+                DefenderSiegeEngineTypeIds = DefenderSiegeEngineTypeIds != null ? new List<string>(DefenderSiegeEngineTypeIds) : new List<string>(),
+                DefenderTroopNumberForSuccessfulPullBack = DefenderTroopNumberForSuccessfulPullBack,
+                LordsHallAreaLostRatio = LordsHallAreaLostRatio,
+                LordsHallAttackerDefenderTroopCountRatio = LordsHallAttackerDefenderTroopCountRatio,
+                LordsHallDefenderMaxArcherRatio = LordsHallDefenderMaxArcherRatio,
+                LordsHallMaxDefenderSideTroopCount = LordsHallMaxDefenderSideTroopCount,
+                LordsHallMaxDefenderArcherCount = LordsHallMaxDefenderArcherCount,
+                LordsHallMaxAttackerSideTroopCount = LordsHallMaxAttackerSideTroopCount
             };
         }
 
@@ -272,6 +288,7 @@ namespace CoopSpectator.Network.Messages
     {
         public string PartyId { get; set; }
         public string PartyName { get; set; }
+        public string CombatGroupId { get; set; }
         public bool IsMainParty { get; set; }
         public bool HasMobileParty { get; set; }
         public int TotalManCount { get; set; }
@@ -305,6 +322,19 @@ namespace CoopSpectator.Network.Messages
         public List<string> QuartermasterPerkIds { get; set; } = new List<string>();
         public List<string> EngineerPerkIds { get; set; } = new List<string>();
         public List<string> SurgeonPerkIds { get; set; } = new List<string>();
+    }
+
+    public sealed class CaptainPerkEffectSnapshotMessage
+    {
+        public string PerkId { get; set; }
+        public float Bonus { get; set; }
+        public string IncrementType { get; set; }
+    }
+
+    public sealed class FrozenCaptainCombatGroupSnapshotMessage
+    {
+        public string CombatGroupId { get; set; }
+        public List<CaptainPerkEffectSnapshotMessage> Effects { get; set; } = new List<CaptainPerkEffectSnapshotMessage>();
     }
 
     public sealed class TroopStackInfo
@@ -351,6 +381,7 @@ namespace CoopSpectator.Network.Messages
         public int SkillAthletics { get; set; }
         public int BaseHitPoints { get; set; }
         public List<string> PerkIds { get; set; } = new List<string>();
+        public List<CaptainPerkEffectSnapshotMessage> CaptainPerkEffects { get; set; } = new List<CaptainPerkEffectSnapshotMessage>();
         public string CombatItem0Id { get; set; }
         public int? CombatItem0Amount { get; set; }
         public string CombatItem0CraftedWeaponKey { get; set; }

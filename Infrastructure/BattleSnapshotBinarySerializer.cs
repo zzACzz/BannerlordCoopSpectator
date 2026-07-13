@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 12;
+        private const int SchemaVersion = 15;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -70,6 +70,9 @@ namespace CoopSpectator.Infrastructure
                         schemaVersion != 9 &&
                         schemaVersion != 10 &&
                         schemaVersion != 11 &&
+                        schemaVersion != 12 &&
+                        schemaVersion != 13 &&
+                        schemaVersion != 14 &&
                         schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
@@ -125,6 +128,8 @@ namespace CoopSpectator.Infrastructure
             WriteBattleScenarioContext(writer, snapshot.ScenarioContext);
             WriteList(writer, snapshot.CraftedWeapons, WriteCraftedWeaponSnapshot);
             WriteList(writer, snapshot.Sides, WriteBattleSide);
+            WriteList(writer, snapshot.FrozenCaptainEntryIds, WriteString);
+            WriteList(writer, snapshot.FrozenCaptainCombatGroups, WriteFrozenCaptainCombatGroup);
         }
 
         private static BattleSnapshotMessage ReadBattleSnapshot(BinaryReader reader, int schemaVersion)
@@ -164,7 +169,30 @@ namespace CoopSpectator.Infrastructure
                 CraftedWeapons = schemaVersion >= 9
                     ? ReadList(reader, ReadCraftedWeaponSnapshot) ?? new List<CraftedWeaponSnapshotMessage>()
                     : new List<CraftedWeaponSnapshotMessage>(),
-                Sides = ReadList(reader, itemReader => ReadBattleSide(itemReader, schemaVersion)) ?? new List<BattleSideSnapshotMessage>()
+                Sides = ReadList(reader, itemReader => ReadBattleSide(itemReader, schemaVersion)) ?? new List<BattleSideSnapshotMessage>(),
+                FrozenCaptainEntryIds = schemaVersion >= 13
+                    ? ReadList(reader, ReadString) ?? new List<string>()
+                    : new List<string>(),
+                FrozenCaptainCombatGroups = schemaVersion >= 14
+                    ? ReadList(reader, ReadFrozenCaptainCombatGroup) ?? new List<FrozenCaptainCombatGroupSnapshotMessage>()
+                    : new List<FrozenCaptainCombatGroupSnapshotMessage>()
+            };
+        }
+
+        private static void WriteFrozenCaptainCombatGroup(
+            BinaryWriter writer,
+            FrozenCaptainCombatGroupSnapshotMessage group)
+        {
+            WriteString(writer, group?.CombatGroupId);
+            WriteList(writer, group?.Effects, WriteCaptainPerkEffect);
+        }
+
+        private static FrozenCaptainCombatGroupSnapshotMessage ReadFrozenCaptainCombatGroup(BinaryReader reader)
+        {
+            return new FrozenCaptainCombatGroupSnapshotMessage
+            {
+                CombatGroupId = ReadString(reader),
+                Effects = ReadList(reader, ReadCaptainPerkEffect) ?? new List<CaptainPerkEffectSnapshotMessage>()
             };
         }
 
@@ -385,6 +413,13 @@ namespace CoopSpectator.Infrastructure
             writer.Write(siegeContext.MissionInitializerSceneHasMapPatch);
             writer.Write(siegeContext.MissionInitializerDecalAtlasGroup);
             writer.Write(siegeContext.MissionInitializerTerrainType);
+            writer.Write(siegeContext.DefenderTroopNumberForSuccessfulPullBack);
+            writer.Write(siegeContext.LordsHallAreaLostRatio);
+            writer.Write(siegeContext.LordsHallAttackerDefenderTroopCountRatio);
+            writer.Write(siegeContext.LordsHallDefenderMaxArcherRatio);
+            writer.Write(siegeContext.LordsHallMaxDefenderSideTroopCount);
+            writer.Write(siegeContext.LordsHallMaxDefenderArcherCount);
+            writer.Write(siegeContext.LordsHallMaxAttackerSideTroopCount);
         }
 
         private static BattleSiegeContextMessage ReadBattleSiegeContext(BinaryReader reader, int schemaVersion)
@@ -420,7 +455,14 @@ namespace CoopSpectator.Infrastructure
                 MissionInitializerPlayingInCampaignMode = schemaVersion >= 7 && reader.ReadBoolean(),
                 MissionInitializerSceneHasMapPatch = schemaVersion >= 7 && reader.ReadBoolean(),
                 MissionInitializerDecalAtlasGroup = schemaVersion >= 7 ? reader.ReadInt32() : -1,
-                MissionInitializerTerrainType = schemaVersion >= 7 ? reader.ReadInt32() : -1
+                MissionInitializerTerrainType = schemaVersion >= 7 ? reader.ReadInt32() : -1,
+                DefenderTroopNumberForSuccessfulPullBack = schemaVersion >= 15 ? reader.ReadInt32() : 20,
+                LordsHallAreaLostRatio = schemaVersion >= 15 ? reader.ReadSingle() : 3f,
+                LordsHallAttackerDefenderTroopCountRatio = schemaVersion >= 15 ? reader.ReadSingle() : 0.7f,
+                LordsHallDefenderMaxArcherRatio = schemaVersion >= 15 ? reader.ReadSingle() : 0.7f,
+                LordsHallMaxDefenderSideTroopCount = schemaVersion >= 15 ? reader.ReadInt32() : 27,
+                LordsHallMaxDefenderArcherCount = schemaVersion >= 15 ? reader.ReadInt32() : 19,
+                LordsHallMaxAttackerSideTroopCount = schemaVersion >= 15 ? reader.ReadInt32() : 19
             };
         }
 
@@ -493,6 +535,7 @@ namespace CoopSpectator.Infrastructure
             writer.Write(party?.TotalManCount ?? 0);
             WriteBattlePartyModifier(writer, party?.Modifiers ?? new BattlePartyModifierSnapshotMessage());
             WriteList(writer, party?.Troops, WriteTroopStack);
+            WriteString(writer, party?.CombatGroupId);
         }
 
         private static BattlePartySnapshotMessage ReadBattleParty(BinaryReader reader, int schemaVersion)
@@ -505,7 +548,8 @@ namespace CoopSpectator.Infrastructure
                 HasMobileParty = schemaVersion >= 12 && reader.ReadBoolean(),
                 TotalManCount = reader.ReadInt32(),
                 Modifiers = ReadBattlePartyModifier(reader, schemaVersion) ?? new BattlePartyModifierSnapshotMessage(),
-                Troops = ReadList(reader, itemReader => ReadTroopStack(itemReader, schemaVersion)) ?? new List<TroopStackInfo>()
+                Troops = ReadList(reader, itemReader => ReadTroopStack(itemReader, schemaVersion)) ?? new List<TroopStackInfo>(),
+                CombatGroupId = schemaVersion >= 13 ? ReadString(reader) : null
             };
         }
 
@@ -648,6 +692,7 @@ namespace CoopSpectator.Infrastructure
             writer.Write(troop?.IsPlayerClanHero ?? false);
             writer.Write(troop?.HeroCanDieInBattle ?? true);
             writer.Write(troop?.ForceUnconscious ?? false);
+            WriteList(writer, troop?.CaptainPerkEffects, WriteCaptainPerkEffect);
         }
 
         private static TroopStackInfo ReadTroopStack(BinaryReader reader, int schemaVersion)
@@ -749,7 +794,31 @@ namespace CoopSpectator.Infrastructure
                 troop.HeroCanDieInBattle = true;
             }
 
+            if (schemaVersion >= 13)
+            {
+                troop.CaptainPerkEffects =
+                    ReadList(reader, ReadCaptainPerkEffect) ??
+                    new List<CaptainPerkEffectSnapshotMessage>();
+            }
+
             return troop;
+        }
+
+        private static void WriteCaptainPerkEffect(BinaryWriter writer, CaptainPerkEffectSnapshotMessage effect)
+        {
+            WriteString(writer, effect?.PerkId);
+            writer.Write(effect?.Bonus ?? 0f);
+            WriteString(writer, effect?.IncrementType);
+        }
+
+        private static CaptainPerkEffectSnapshotMessage ReadCaptainPerkEffect(BinaryReader reader)
+        {
+            return new CaptainPerkEffectSnapshotMessage
+            {
+                PerkId = ReadString(reader),
+                Bonus = reader.ReadSingle(),
+                IncrementType = ReadString(reader)
+            };
         }
 
         private static void WriteNullableInt32(BinaryWriter writer, int? value)

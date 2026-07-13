@@ -60,6 +60,7 @@
     <Compile Include="..\MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" Link="MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentApplyDamageModel.cs" Link="MissionModels\CoopCampaignDerivedAgentApplyDamageModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedMissionDifficultyModel.cs" Link="MissionModels\CoopCampaignDerivedMissionDifficultyModel.cs" />
+    <Compile Include="..\MissionModels\CoopCampaignDerivedBattleMoraleModel.cs" Link="MissionModels\CoopCampaignDerivedBattleMoraleModel.cs" />
     <Compile Include="Mission\DedicatedKnockoutOutcomeModelOverride.cs" Link="Mission\DedicatedKnockoutOutcomeModelOverride.cs" />
     <Compile Include="..\DedicatedHelper\DedicatedServerHostingMode.cs" Link="DedicatedHelper\DedicatedServerHostingMode.cs" />
     <Compile Include="..\DedicatedHelper\DedicatedServerLaunchSettings.cs" Link="DedicatedHelper\DedicatedServerLaunchSettings.cs" />
@@ -104,6 +105,8 @@
     <Compile Include="..\Infrastructure\CoopBattlePhaseBridgeFile.cs" Link="Infrastructure\CoopBattlePhaseBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePhaseRuntimeState.cs" Link="Infrastructure\CoopBattlePhaseRuntimeState.cs" />
     <Compile Include="..\Infrastructure\BattleSnapshotRuntimeState.cs" Link="Infrastructure\BattleSnapshotRuntimeState.cs" />
+    <Compile Include="..\Infrastructure\GlobalCaptainPerkRuntimeState.cs" Link="Infrastructure\GlobalCaptainPerkRuntimeState.cs" />
+    <Compile Include="..\Infrastructure\ExactSiegeMoraleDiagnostics.cs" Link="Infrastructure\ExactSiegeMoraleDiagnostics.cs" />
     <Compile Include="..\Infrastructure\CoopBattleAuthorityState.cs" Link="Infrastructure\CoopBattleAuthorityState.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePeerReconnectState.cs" Link="Infrastructure\CoopBattlePeerReconnectState.cs" />
     <Compile Include="..\Infrastructure\AtomicBridgeFileIO.cs" Link="Infrastructure\AtomicBridgeFileIO.cs" />

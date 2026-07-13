@@ -588,6 +588,7 @@ namespace CoopSpectator.Infrastructure
                             mission,
                             suppliers,
                             playerSide,
+                            scenarioContext,
                             defenderTotal,
                             attackerTotal,
                             out string lordsHallDiagnostics))
@@ -2641,6 +2642,7 @@ namespace CoopSpectator.Infrastructure
             Mission mission,
             IMissionTroopSupplier[] suppliers,
             BattleSideEnum playerSide,
+            BattleScenarioContextMessage scenarioContext,
             int defenderTotal,
             int attackerTotal,
             out string diagnostics)
@@ -2654,12 +2656,25 @@ namespace CoopSpectator.Infrastructure
             bool created = false;
             if (controller == null)
             {
+                BattleSiegeContextMessage siegeContext = scenarioContext?.SiegeContext;
+                float areaLostRatio = siegeContext?.LordsHallAreaLostRatio > 0f
+                    ? siegeContext.LordsHallAreaLostRatio
+                    : 3f;
+                float attackerDefenderRatio = siegeContext?.LordsHallAttackerDefenderTroopCountRatio > 0f
+                    ? siegeContext.LordsHallAttackerDefenderTroopCountRatio
+                    : 0.7f;
+                int maxAttackerCount = siegeContext?.LordsHallMaxAttackerSideTroopCount > 0
+                    ? siegeContext.LordsHallMaxAttackerSideTroopCount
+                    : 19;
+                int maxDefenderCount = siegeContext?.LordsHallMaxDefenderSideTroopCount > 0
+                    ? siegeContext.LordsHallMaxDefenderSideTroopCount
+                    : 27;
                 controller = new CoopExactCampaignLordsHallMissionController(
                     suppliers,
-                    3f,
-                    0.7f,
-                    Math.Min(19, Math.Max(0, attackerTotal)),
-                    Math.Min(27, Math.Max(0, defenderTotal)),
+                    areaLostRatio,
+                    attackerDefenderRatio,
+                    Math.Min(maxAttackerCount, Math.Max(0, attackerTotal)),
+                    Math.Min(maxDefenderCount, Math.Max(0, defenderTotal)),
                     playerSide);
                 mission.AddMissionBehavior(controller);
                 created = true;
@@ -3706,6 +3721,12 @@ namespace CoopSpectator.Infrastructure
             }
 
             bool useMissionReadyOnly = IsLordsHallSiegeSubtype(scenarioContext);
+            int maxDefenderEntries = scenarioContext?.SiegeContext?.LordsHallMaxDefenderSideTroopCount > 0
+                ? scenarioContext.SiegeContext.LordsHallMaxDefenderSideTroopCount
+                : 27;
+            int maxAttackerEntries = scenarioContext?.SiegeContext?.LordsHallMaxAttackerSideTroopCount > 0
+                ? scenarioContext.SiegeContext.LordsHallMaxAttackerSideTroopCount
+                : 19;
             string defenderDiagnostics;
             string attackerDiagnostics;
             ExactCampaignSnapshotTroopSupplier defenderSupplier = useMissionReadyOnly
@@ -3713,7 +3734,7 @@ namespace CoopSpectator.Infrastructure
                     runtimeState,
                     BattleSideEnum.Defender,
                     playerSide,
-                    maxEntries: 27,
+                    maxEntries: maxDefenderEntries,
                     out defenderTotal,
                     out defenderDiagnostics)
                 : BuildSupplier(runtimeState, BattleSideEnum.Defender, playerSide, out defenderTotal, out defenderDiagnostics);
@@ -3722,7 +3743,7 @@ namespace CoopSpectator.Infrastructure
                     runtimeState,
                     BattleSideEnum.Attacker,
                     playerSide,
-                    maxEntries: 19,
+                    maxEntries: maxAttackerEntries,
                     out attackerTotal,
                     out attackerDiagnostics)
                 : BuildSupplier(runtimeState, BattleSideEnum.Attacker, playerSide, out attackerTotal, out attackerDiagnostics);

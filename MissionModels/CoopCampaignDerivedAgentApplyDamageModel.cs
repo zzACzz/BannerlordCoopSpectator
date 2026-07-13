@@ -47,27 +47,40 @@ namespace CoopSpectator.MissionModels
         public override float ApplyDamageAmplifications(in AttackInformation attackInformation, in AttackCollisionData collisionData, float baseDamage)
         {
             float amplifiedDamage = _baseModel.ApplyDamageAmplifications(attackInformation, collisionData, baseDamage);
-            if (!TryApplyExactPersonalDamageAmplifications(
+            bool personalApplied = TryApplyExactPersonalDamageAmplifications(
                     attackInformation,
                     collisionData,
                     amplifiedDamage,
                     out float updatedDamage,
                     out string entryId,
                     out string skillId,
-                    out string factorSummary))
-            {
-                return amplifiedDamage;
-            }
+                    out string factorSummary);
+            if (!personalApplied)
+                updatedDamage = amplifiedDamage;
 
-            TryLogBattleActivation(attackInformation.AttackerAgent);
-            TryLogDamageAmplificationSample(
+            bool captainApplied = TryApplyGlobalCaptainDamageAmplifications(
                 attackInformation,
                 collisionData,
-                entryId,
-                skillId,
-                amplifiedDamage,
                 updatedDamage,
-                factorSummary);
+                out float captainUpdatedDamage);
+            if (captainApplied)
+                updatedDamage = captainUpdatedDamage;
+
+            if (!personalApplied && !captainApplied)
+                return amplifiedDamage;
+
+            if (personalApplied)
+            {
+                TryLogBattleActivation(attackInformation.AttackerAgent);
+                TryLogDamageAmplificationSample(
+                    attackInformation,
+                    collisionData,
+                    entryId,
+                    skillId,
+                    amplifiedDamage,
+                    updatedDamage,
+                    factorSummary);
+            }
             return updatedDamage;
         }
 
@@ -135,10 +148,38 @@ namespace CoopSpectator.MissionModels
                 totalFactor *= 0.5f;
             }
 
-            if (Math.Abs(totalFactor - 1f) < 0.0001f)
-                return reducedDamage;
+            float exactPersonalResult = MathF.Max(0f, reducedDamage * totalFactor);
+            if (!TryResolveGlobalCaptainEntryId(victimAgent, out string victimEntryId))
+                return exactPersonalResult;
 
-            return MathF.Max(0f, reducedDamage * totalFactor);
+            var captainAccumulator = new CaptainPerkBonusAccumulator(exactPersonalResult);
+            if (collisionData.IsMissile && attackerWeapon != null && attackerWeapon.IsConsumable)
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(victimEntryId, "ThrowingSkirmisher", captainAccumulator);
+                if (victimAgent.Character?.IsRanged == true)
+                    GlobalCaptainPerkRuntimeState.AddEffect(victimEntryId, "BowSkirmishPhaseMaster", captainAccumulator);
+                if (victimWeapon != null && IsCrossbowSkill(ResolveRelevantSkill(victimWeapon)?.StringId))
+                    GlobalCaptainPerkRuntimeState.AddEffect(victimEntryId, "CrossbowCounterFire", captainAccumulator);
+            }
+
+            if (IsShieldHit(collisionData))
+                GlobalCaptainPerkRuntimeState.AddEffect(victimEntryId, "OneHandedSteelCoreShields", captainAccumulator);
+            if (collisionData.IsHorseCharge)
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(victimEntryId, "PolearmSureFooted", captainAccumulator);
+                GlobalCaptainPerkRuntimeState.AddEffect(victimEntryId, "AthleticsBraced", captainAccumulator);
+            }
+            if (victimAgent.Formation != null &&
+                (int)victimAgent.Formation.ArrangementOrder.OrderEnum == 5 &&
+                attackerWeapon?.IsMeleeWeapon == true)
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(victimEntryId, "OneHandedBasher", captainAccumulator);
+            }
+            GlobalCaptainPerkRuntimeState.AddEffect(victimEntryId, "TacticsEliteReserves", captainAccumulator);
+
+            return captainAccumulator.HasEffects
+                ? MathF.Max(0f, captainAccumulator.Result)
+                : exactPersonalResult;
         }
 
         public override float ApplyGeneralDamageModifiers(in AttackInformation attackInformation, in AttackCollisionData collisionData, float baseDamage)
@@ -186,7 +227,18 @@ namespace CoopSpectator.MissionModels
 
         public override float CalculateStaggerThresholdDamage(Agent defenderAgent, in Blow blow)
         {
-            return _baseModel.CalculateStaggerThresholdDamage(defenderAgent, blow);
+            float threshold = _baseModel.CalculateStaggerThresholdDamage(defenderAgent, blow);
+            Agent humanDefender = ResolveHumanAgent(defenderAgent);
+            if (humanDefender == null || !TryResolveGlobalCaptainEntryId(humanDefender, out string entryId))
+                return threshold;
+
+            WeaponComponentData currentWeapon = ResolveCurrentWeapon(humanDefender);
+            if (currentWeapon == null || !IsCrossbowSkill(ResolveRelevantSkill(currentWeapon)?.StringId))
+                return threshold;
+
+            var accumulator = new CaptainPerkBonusAccumulator(threshold);
+            GlobalCaptainPerkRuntimeState.AddEffect(entryId, "CrossbowDeftHands", accumulator);
+            return accumulator.HasEffects ? MathF.Max(0f, accumulator.Result) : threshold;
         }
 
         public override float CalculateAlternativeAttackDamage(in AttackInformation attackInformation, in AttackCollisionData collisionData, WeaponComponentData weapon)
@@ -778,6 +830,153 @@ namespace CoopSpectator.MissionModels
 
             updatedDamage = MathF.Max(0f, baseDamage * totalFactor + additiveDamage);
             return Math.Abs(updatedDamage - baseDamage) > 0.0001f;
+        }
+
+        private static bool TryApplyGlobalCaptainDamageAmplifications(
+            in AttackInformation attackInformation,
+            in AttackCollisionData collisionData,
+            float baseDamage,
+            out float updatedDamage)
+        {
+            updatedDamage = baseDamage;
+            Agent attackerAgent = ResolveExactAttackerHumanAgent(attackInformation);
+            if (attackerAgent == null || !TryResolveGlobalCaptainEntryId(attackerAgent, out string entryId))
+                return false;
+
+            WeaponComponentData weapon = attackInformation.AttackerWeapon.CurrentUsageItem;
+            if (weapon != null && IsBallistaProjectileWeapon(attackInformation.AttackerWeapon))
+                return false;
+
+            string skillId = ResolveRelevantSkill(weapon)?.StringId ?? string.Empty;
+            bool isMounted = IsAgentMounted(attackerAgent);
+            bool isShieldHit = IsShieldHit(collisionData);
+            bool victimIsMount = attackInformation.IsVictimAgentMount;
+            Agent victimAgent = ResolveExactVictimHumanAgent(attackInformation);
+            var accumulator = new CaptainPerkBonusAccumulator(baseDamage);
+
+            if (string.Equals(skillId, "OneHanded", StringComparison.OrdinalIgnoreCase))
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RogueryCarver", accumulator);
+                GlobalCaptainPerkRuntimeState.AddEffect(
+                    entryId,
+                    isMounted ? "OneHandedCavalry" : "OneHandedDeadlyPurpose",
+                    accumulator);
+            }
+            else if (string.Equals(skillId, "TwoHanded", StringComparison.OrdinalIgnoreCase))
+            {
+                if (isShieldHit)
+                {
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedWoodChopper", accumulator);
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedShieldBreaker", accumulator);
+                }
+                if (victimIsMount)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedBeastSlayer", accumulator);
+                if (!isMounted)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedRecklessCharge", accumulator);
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedHeadBasher", accumulator);
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RogueryDashAndSlash", accumulator);
+            }
+            else if (string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase))
+            {
+                if (victimIsMount)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmSteedKiller", accumulator);
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmPhalanx", accumulator);
+                if (isMounted)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmCavalry", accumulator);
+                else
+                {
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmPikeman", accumulator);
+                    if (IsThrustCollision(collisionData))
+                    {
+                        GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmBraced", accumulator);
+                        GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmSharpenTheTip", accumulator);
+                    }
+                }
+            }
+            else if (string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase) && weapon?.IsConsumable == true)
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "BowBowControl", accumulator);
+                if ((BattleSnapshotRuntimeState.GetEntryState(entryId)?.Tier ?? 0) >= 3)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "BowStrongBows", accumulator);
+            }
+            else if (IsCrossbowSkill(skillId) && weapon?.IsConsumable == true)
+            {
+                if (victimIsMount)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "CrossbowUnhorser", accumulator);
+                if (victimAgent?.Character?.IsInfantry == true)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "CrossbowSheriff", accumulator);
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "CrossbowHammerBolts", accumulator);
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "EngineeringDreadfulSieger", accumulator);
+            }
+            else if (string.Equals(skillId, "Throwing", StringComparison.OrdinalIgnoreCase))
+            {
+                if (isShieldHit)
+                {
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingShieldBreaker", accumulator);
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingSplinters", accumulator);
+                }
+                if (victimIsMount)
+                {
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingHunter", accumulator);
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingKnockOff", accumulator);
+                }
+                if (isMounted)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingMountedSkirmisher", accumulator);
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingImpale", accumulator);
+            }
+
+            if (weapon?.IsMeleeWeapon == true)
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "AthleticsPowerful", accumulator);
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "EngineeringImprovedTools", accumulator);
+                if (isMounted)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RidingMountedWarrior", accumulator);
+            }
+
+            if (weapon?.IsConsumable == true && isMounted)
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RidingHorseArcher", accumulator);
+            if (collisionData.IsHorseCharge)
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RidingFullSpeed", accumulator);
+            if (isShieldHit)
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "EngineeringWallBreaker", accumulator);
+            if (collisionData.EntityExists)
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedVandal", accumulator);
+
+            if (victimAgent?.Character != null)
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TacticsCoaching", accumulator);
+                if (victimAgent.Character.Culture?.IsBandit == true)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TacticsLawKeeper", accumulator);
+                if (isMounted && victimAgent.Character.IsInfantry)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TacticsGensdarmes", accumulator);
+            }
+            if (attackerAgent.Character?.Culture?.IsBandit == true)
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RogueryPartnersInCrime", accumulator);
+
+            if (!accumulator.HasEffects)
+                return false;
+
+            updatedDamage = MathF.Max(0f, accumulator.Result);
+            return Math.Abs(updatedDamage - baseDamage) > 0.0001f;
+        }
+
+        private static bool TryResolveGlobalCaptainEntryId(Agent agent, out string entryId)
+        {
+            entryId = null;
+            return agent != null &&
+                CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                !string.IsNullOrWhiteSpace(entryId);
+        }
+
+        private static WeaponComponentData ResolveCurrentWeapon(Agent agent)
+        {
+            if (agent?.Equipment == null)
+                return null;
+
+            EquipmentIndex wieldedIndex = agent.GetPrimaryWieldedItemIndex();
+            return wieldedIndex == EquipmentIndex.None
+                ? null
+                : agent.Equipment[wieldedIndex].CurrentUsageItem;
         }
 
         private void TryLogBattleActivation(Agent agent)

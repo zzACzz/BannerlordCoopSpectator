@@ -98,6 +98,11 @@ namespace CoopSpectator.GameMode
                 "MissionAgentPanicHandler");
             AddOptional(
                 list,
+                MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies(
+                    "TaleWorlds.MountAndBlade.Source.Missions.Handlers.Logic.AgentMoraleInteractionLogic"),
+                "AgentMoraleInteractionLogic");
+            AddOptional(
+                list,
                 MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies("TaleWorlds.MountAndBlade.AgentHumanAILogic"),
                 "AgentHumanAILogic");
             AddOptional(

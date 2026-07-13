@@ -490,6 +490,7 @@ namespace CoopSpectator
             TryRegisterCoopCampaignDerivedStrikeMagnitudeModel(game, gameStarterObject, "dedicated");
             TryRegisterCoopCampaignDerivedAgentApplyDamageModel(game, gameStarterObject, "dedicated");
             TryRegisterCoopCampaignDerivedMissionDifficultyModel(game, gameStarterObject, "dedicated");
+            TryRegisterCoopCampaignDerivedBattleMoraleModel(game, gameStarterObject, "dedicated");
         }
 
         private static void TryApplyExactCampaignArmyBootstrapPatch()
@@ -918,6 +919,37 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopCampaignDerivedMissionDifficultyModel: registration failed on " + source + ": " + ex.Message);
+            }
+        }
+
+        private static void TryRegisterCoopCampaignDerivedBattleMoraleModel(Game game, IGameStarter gameStarterObject, string source)
+        {
+            try
+            {
+                BasicGameStarter basicStarter = gameStarterObject as BasicGameStarter;
+                if (basicStarter == null)
+                {
+                    ModLogger.Info(
+                        "CoopCampaignDerivedBattleMoraleModel: skip registration on " + source +
+                        " because starter is " + (gameStarterObject?.GetType().FullName ?? "null") + ".");
+                    return;
+                }
+
+                BattleMoraleModel baseModel = basicStarter.GetModel<BattleMoraleModel>();
+                if (baseModel is CoopCampaignDerivedBattleMoraleModel)
+                    return;
+
+                BattleMoraleModel effectiveBaseModel = baseModel ?? new MultiplayerBattleMoraleModel();
+                basicStarter.AddModel(new CoopCampaignDerivedBattleMoraleModel(effectiveBaseModel));
+                ModLogger.Info(
+                    "CoopCampaignDerivedBattleMoraleModel: registered on " + source +
+                    ". GameType=" + (game?.GameType?.GetType().FullName ?? "null") +
+                    " BaseModel=" + effectiveBaseModel.GetType().FullName +
+                    " BaseWasMissing=" + (baseModel == null) + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopCampaignDerivedBattleMoraleModel: registration failed on " + source + ": " + ex.Message);
             }
         }
 

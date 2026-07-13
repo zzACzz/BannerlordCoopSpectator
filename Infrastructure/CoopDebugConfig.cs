@@ -13,10 +13,14 @@ namespace CoopSpectator.Infrastructure
         private const string EnvDebugDedicatedStdio = "COOP_DEBUG_DEDICATED_STDIO";
         private const string EnvOrderOfBattleDiagnostics = "COOPSPECTATOR_OOB_DIAGNOSTICS";
         private const string EnvPossessionDiagnostics = "COOPSPECTATOR_POSSESSION_DIAGNOSTICS";
+        private const string EnvMoraleDiagnostics = "COOPSPECTATOR_MORALE_DIAGNOSTICS";
         private const double SharedDebugOverrideCacheSeconds = 1.0d;
         private const string SharedPossessionDiagnosticsKey = "possession";
+        private const string SharedMoraleDiagnosticsKey = "morale";
         private static bool? _possessionDiagnosticsRuntimeOverride;
+        private static bool? _moraleDiagnosticsRuntimeOverride;
         private static bool? _sharedPossessionDiagnosticsOverride;
+        private static bool? _sharedMoraleDiagnosticsOverride;
         private static DateTime _sharedDebugOverrideCacheExpiresUtc = DateTime.MinValue;
         private static readonly object SharedDebugOverrideLock = new object();
 
@@ -35,6 +39,12 @@ namespace CoopSpectator.Infrastructure
             GetSharedPossessionDiagnosticsOverride() ??
             GetEnvBool(EnvPossessionDiagnostics);
 
+        /// <summary>Enable focused exact-siege morale, panic, and retreat diagnostics.</summary>
+        public static bool MoraleDiagnostics =>
+            _moraleDiagnosticsRuntimeOverride ??
+            GetSharedMoraleDiagnosticsOverride() ??
+            GetEnvBool(EnvMoraleDiagnostics);
+
         public static void SetPossessionDiagnosticsRuntimeOverride(bool? enabled)
         {
             _possessionDiagnosticsRuntimeOverride = enabled;
@@ -51,10 +61,32 @@ namespace CoopSpectator.Infrastructure
             return "PossessionDiagnostics=" + (PossessionDiagnostics ? "ON" : "OFF") + " (" + runtimeState + ", " + sharedState + ")";
         }
 
+        public static void SetMoraleDiagnosticsRuntimeOverride(bool? enabled)
+        {
+            _moraleDiagnosticsRuntimeOverride = enabled;
+            SetSharedDebugOverride(SharedMoraleDiagnosticsKey, enabled);
+        }
+
+        public static string GetMoraleDiagnosticsStatus()
+        {
+            string runtimeState =
+                _moraleDiagnosticsRuntimeOverride.HasValue
+                    ? (_moraleDiagnosticsRuntimeOverride.Value ? "runtime-on" : "runtime-off")
+                    : "runtime-inherit-env";
+            string sharedState = FormatSharedOverrideState(GetSharedMoraleDiagnosticsOverride());
+            return "MoraleDiagnostics=" + (MoraleDiagnostics ? "ON" : "OFF") + " (" + runtimeState + ", " + sharedState + ")";
+        }
+
         private static bool? GetSharedPossessionDiagnosticsOverride()
         {
             RefreshSharedDebugOverrideCacheIfNeeded();
             return _sharedPossessionDiagnosticsOverride;
+        }
+
+        private static bool? GetSharedMoraleDiagnosticsOverride()
+        {
+            RefreshSharedDebugOverrideCacheIfNeeded();
+            return _sharedMoraleDiagnosticsOverride;
         }
 
         private static string FormatSharedOverrideState(bool? value)
@@ -77,6 +109,7 @@ namespace CoopSpectator.Infrastructure
                     return;
 
                 _sharedPossessionDiagnosticsOverride = null;
+                _sharedMoraleDiagnosticsOverride = null;
                 try
                 {
                     string path = GetSharedDebugOverridePath();
@@ -101,12 +134,15 @@ namespace CoopSpectator.Infrastructure
 
                             if (string.Equals(key, SharedPossessionDiagnosticsKey, StringComparison.OrdinalIgnoreCase))
                                 _sharedPossessionDiagnosticsOverride = parsedValue.Value;
+                            else if (string.Equals(key, SharedMoraleDiagnosticsKey, StringComparison.OrdinalIgnoreCase))
+                                _sharedMoraleDiagnosticsOverride = parsedValue.Value;
                         }
                     }
                 }
                 catch
                 {
                     _sharedPossessionDiagnosticsOverride = null;
+                    _sharedMoraleDiagnosticsOverride = null;
                 }
                 finally
                 {

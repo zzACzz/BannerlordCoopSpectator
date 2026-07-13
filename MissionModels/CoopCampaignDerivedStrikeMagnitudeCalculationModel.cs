@@ -35,17 +35,44 @@ namespace CoopSpectator.MissionModels
 
         public override float CalculateStrikeMagnitudeForSwing(in AttackInformation attackInformation, in AttackCollisionData collisionData, in MissionWeapon weapon, float swingSpeed, float impactPointAsPercent, float extraLinearSpeed)
         {
-            return _baseModel.CalculateStrikeMagnitudeForSwing(attackInformation, collisionData, weapon, swingSpeed, impactPointAsPercent, extraLinearSpeed);
+            float adjustedExtraLinearSpeed = ApplyGlobalCaptainLinearSpeedEffects(
+                attackInformation,
+                weapon.CurrentUsageItem,
+                extraLinearSpeed);
+            return _baseModel.CalculateStrikeMagnitudeForSwing(
+                attackInformation,
+                collisionData,
+                weapon,
+                swingSpeed,
+                impactPointAsPercent,
+                adjustedExtraLinearSpeed);
         }
 
         public override float CalculateStrikeMagnitudeForThrust(in AttackInformation attackInformation, in AttackCollisionData collisionData, in MissionWeapon weapon, float thrustSpeed, float extraLinearSpeed, bool isThrown = false)
         {
-            return _baseModel.CalculateStrikeMagnitudeForThrust(attackInformation, collisionData, weapon, thrustSpeed, extraLinearSpeed, isThrown);
+            float adjustedExtraLinearSpeed = ApplyGlobalCaptainLinearSpeedEffects(
+                attackInformation,
+                weapon.CurrentUsageItem,
+                extraLinearSpeed);
+            return _baseModel.CalculateStrikeMagnitudeForThrust(
+                attackInformation,
+                collisionData,
+                weapon,
+                thrustSpeed,
+                adjustedExtraLinearSpeed,
+                isThrown);
         }
 
         public override float CalculateBaseBlowMagnitudeForPassiveUsage(in AttackInformation attackInformation, in AttackCollisionData collisionData, float extraLinearSpeed)
         {
-            return _baseModel.CalculateBaseBlowMagnitudeForPassiveUsage(attackInformation, collisionData, extraLinearSpeed);
+            float adjustedExtraLinearSpeed = ApplyGlobalCaptainLinearSpeedEffects(
+                attackInformation,
+                attackInformation.AttackerWeapon.CurrentUsageItem,
+                extraLinearSpeed);
+            return _baseModel.CalculateBaseBlowMagnitudeForPassiveUsage(
+                attackInformation,
+                collisionData,
+                adjustedExtraLinearSpeed);
         }
 
         public override float ComputeRawDamage(DamageTypes damageType, float magnitude, float armorEffectiveness, float absorbedDamageRatio)
@@ -87,10 +114,87 @@ namespace CoopSpectator.MissionModels
         public override float CalculateAdjustedArmorForBlow(in AttackInformation attackInformation, in AttackCollisionData collisionData, float baseArmor, BasicCharacterObject attackerCharacter, BasicCharacterObject attackerCaptainCharacter, BasicCharacterObject victimCharacter, BasicCharacterObject victimCaptainCharacter, WeaponComponentData weaponComponent)
         {
             float adjustedArmor = _baseModel.CalculateAdjustedArmorForBlow(attackInformation, collisionData, baseArmor, attackerCharacter, attackerCaptainCharacter, victimCharacter, victimCaptainCharacter, weaponComponent);
-            if (!TryApplyExactPersonalArmorPenetration(attackInformation.AttackerAgent, collisionData, baseArmor, adjustedArmor, weaponComponent, out float exactAdjustedArmor))
-                return adjustedArmor;
+            if (TryApplyExactPersonalArmorPenetration(attackInformation.AttackerAgent, collisionData, baseArmor, adjustedArmor, weaponComponent, out float exactPersonalArmor))
+                adjustedArmor = exactPersonalArmor;
+            if (TryApplyGlobalCaptainArmorPenetration(
+                    attackInformation.AttackerAgent,
+                    baseArmor,
+                    adjustedArmor,
+                    weaponComponent,
+                    out float exactGlobalCaptainArmor))
+            {
+                adjustedArmor = exactGlobalCaptainArmor;
+            }
 
-            return exactAdjustedArmor;
+            return adjustedArmor;
+        }
+
+        private static float ApplyGlobalCaptainLinearSpeedEffects(
+            in AttackInformation attackInformation,
+            WeaponComponentData weaponComponent,
+            float extraLinearSpeed)
+        {
+            if (extraLinearSpeed <= 0f)
+                return extraLinearSpeed;
+
+            Agent attackerAgent = ResolveHumanAgent(attackInformation.AttackerAgent);
+            if (attackerAgent == null ||
+                !CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(attackerAgent, out string entryId) ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                return extraLinearSpeed;
+            }
+
+            var accumulator = new CaptainPerkBonusAccumulator(extraLinearSpeed);
+            bool isMounted = attackInformation.DoesAttackerHaveMountAgent ||
+                attackerAgent.HasMount ||
+                attackerAgent.MountAgent != null;
+            if (isMounted)
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RidingNomadicTraditions", accumulator);
+            else
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "AthleticsSurgingBlow", accumulator);
+
+            if (ResolveRelevantSkill(weaponComponent) == DefaultSkills.Polearm)
+            {
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmLancer", accumulator);
+                if (isMounted)
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmUnstoppableForce", accumulator);
+            }
+
+            return accumulator.HasEffects ? Math.Max(0f, accumulator.Result) : extraLinearSpeed;
+        }
+
+        private static bool TryApplyGlobalCaptainArmorPenetration(
+            Agent attackerAgent,
+            float baseArmor,
+            float adjustedArmor,
+            WeaponComponentData weaponComponent,
+            out float exactAdjustedArmor)
+        {
+            exactAdjustedArmor = adjustedArmor;
+            attackerAgent = ResolveHumanAgent(attackerAgent);
+            if (attackerAgent == null || weaponComponent == null || baseArmor <= 0f || adjustedArmor <= 0f ||
+                !CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(attackerAgent, out string entryId) ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                return false;
+            }
+
+            var accumulator = new CaptainPerkBonusAccumulator(baseArmor);
+            SkillObject relevantSkill = ResolveRelevantSkill(weaponComponent);
+            if (relevantSkill == DefaultSkills.Bow)
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "BowBodkin", accumulator);
+            else if (relevantSkill == DefaultSkills.Crossbow)
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "CrossbowPuncture", accumulator);
+            else if (relevantSkill == DefaultSkills.Throwing)
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingWeakSpot", accumulator);
+
+            if (!accumulator.HasEffects)
+                return false;
+
+            float armorReduction = accumulator.Result - baseArmor;
+            exactAdjustedArmor = Math.Max(0f, adjustedArmor - armorReduction);
+            return Math.Abs(exactAdjustedArmor - adjustedArmor) > 0.0001f;
         }
 
         private void TryLogMissileMagnitude(
