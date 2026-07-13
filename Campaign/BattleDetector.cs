@@ -51,6 +51,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private string _cachedHostAftermathLootResultKey;
         private BattleResultWritebackSummary.LootAftermathSummary _cachedHostAftermathLootSummary;
         private string _cachedHostAftermathMainPartyPreviewResultKey;
+        private string _cachedHostAftermathFinalSiegeDefenderPreviewResultKey;
         private bool _cachedHostAftermathMainPartyPreviewHeroHpApplied;
         private readonly Dictionary<string, int> _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private DateTime _missionEnteredUtc;
@@ -486,6 +487,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _cachedHostAftermathLootResultKey = null;
             _cachedHostAftermathLootSummary = null;
             _cachedHostAftermathMainPartyPreviewResultKey = null;
+            _cachedHostAftermathFinalSiegeDefenderPreviewResultKey = null;
             _cachedHostAftermathMainPartyPreviewHeroHpApplied = false;
             _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId.Clear();
             _nextMissionBattleResultPollUtc = DateTime.MinValue;
@@ -3177,6 +3179,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 TryCacheHostAftermathLootSummary(result, resultKey);
             }
             TryInjectMainPartyBattleResultPreviewIntoLiveEncounter(result, resultKey);
+            TryInjectFinalSiegeDefenderBattleResultPreviewIntoLiveEncounter(result, resultKey);
             if (!deferFinalAftermath)
                 TryInjectMainPartyPrisonerAftermathIntoLiveMapEvent(result);
 
@@ -3490,6 +3493,105 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
+        private void TryInjectFinalSiegeDefenderBattleResultPreviewIntoLiveEncounter(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            string resultKey)
+        {
+            if (result?.Entries == null ||
+                string.IsNullOrWhiteSpace(resultKey) ||
+                result.DefenderPushedBack ||
+                !string.Equals(result.BattleStage, "SiegeAssault", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(result.WinnerSide, "Attacker", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (string.Equals(
+                    _cachedHostAftermathFinalSiegeDefenderPreviewResultKey,
+                    resultKey,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            try
+            {
+                var defenderPartyIds = new HashSet<string>(
+                    result.Entries
+                        .Where(entry =>
+                            entry != null &&
+                            string.Equals(entry.SideId, "Defender", StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(entry.PartyId))
+                        .Select(entry => entry.PartyId),
+                    StringComparer.OrdinalIgnoreCase);
+                if (defenderPartyIds.Count == 0)
+                    return;
+
+                Dictionary<string, EncounterPartyWritebackState> encounterParties = ResolveEncounterPartyWritebackStates();
+                Dictionary<string, BattleResultCharacterAggregate> aggregates = BuildBattleResultCharacterAggregates(result);
+                var summary = new BattleResultWritebackSummary
+                {
+                    Aggregates = aggregates.Count,
+                    EncounterParties = encounterParties.Count
+                };
+
+                foreach (BattleResultCharacterAggregate aggregate in aggregates.Values
+                             .Where(item =>
+                                 item != null &&
+                                 defenderPartyIds.Contains(item.PartyId ?? string.Empty))
+                             .OrderBy(item => item.PartyId, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(item => item.HeroId, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(item => item.OriginalCharacterId, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(item => item.CharacterId, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (!encounterParties.TryGetValue(
+                            aggregate.PartyId ?? string.Empty,
+                            out EncounterPartyWritebackState partyState) ||
+                        partyState?.MemberRoster == null)
+                    {
+                        summary.UnresolvedPartyAggregates++;
+                        AddWritebackSample(
+                            summary.UnresolvedSamples,
+                            "MissingDefenderParty:" +
+                            (aggregate.PartyId ?? "null") + "/" +
+                            (aggregate.TroopName ?? aggregate.IdentityKey ?? "entry"));
+                        continue;
+                    }
+
+                    // The main-party preview immediately above already applies this same absolute roster state.
+                    if (partyState.IsMainParty)
+                        continue;
+
+                    // Healthy heroes do not affect the casualty preview; avoid applying their partial HP early.
+                    if (aggregate.IsHero && !aggregate.HeroShouldBeKilled && !aggregate.HeroShouldBeWounded)
+                        continue;
+
+                    summary.ResolvedPartyAggregates++;
+                    TryApplyAggregateToPartyRoster(partyState, aggregate, summary);
+                }
+
+                _cachedHostAftermathFinalSiegeDefenderPreviewResultKey = resultKey;
+                ModLogger.Info(
+                    "BattleDetector: injected final siege defender battle_result preview before mission exit. " +
+                    "BattleId=" + (result.BattleId ?? "null") +
+                    " ResultKey=" + resultKey +
+                    " DefenderParties=" + defenderPartyIds.Count +
+                    " RoutedDefenders=" + result.RoutedDefenderCount +
+                    " TroopsAdjusted=" + summary.RegularTroopsAdjusted +
+                    " HeroDeaths=" + summary.HeroDeathsApplied +
+                    " HeroWounds=" + summary.HeroWoundsApplied +
+                    " Unresolved=" + summary.UnresolvedPartyAggregates +
+                    " AdjustedSamples=[" + string.Join("; ", summary.AdjustedSamples) + "]" +
+                    " UnresolvedSamples=[" + string.Join("; ", summary.UnresolvedSamples) + "].");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleDetector: failed to inject final siege defender battle_result preview before mission exit: " +
+                    ex.Message);
+            }
+        }
+
         private void TryMaintainMainPartyBattleResultPreviewAfterMissionExit()
         {
             if (string.IsNullOrWhiteSpace(_cachedHostAftermathMainPartyPreviewResultKey) ||
@@ -3797,6 +3899,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _cachedHostAftermathLootResultKey = null;
             _cachedHostAftermathLootSummary = null;
             _cachedHostAftermathMainPartyPreviewResultKey = null;
+            _cachedHostAftermathFinalSiegeDefenderPreviewResultKey = null;
             _cachedHostAftermathMainPartyPreviewHeroHpApplied = false;
             _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId.Clear();
             _nextMissionBattleResultPollUtc = DateTime.MinValue;

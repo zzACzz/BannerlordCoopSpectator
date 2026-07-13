@@ -629,8 +629,6 @@ namespace CoopSpectator.MissionBehaviors
 
             boundaryPointCount += pointList.Count;
             List<GameEntity> markers = new List<GameEntity>();
-            if (TryCreateBoundaryWallEntity(pointList, side, markers, key))
-                createdWallCount++;
 
             for (int i = 0; i < pointList.Count; i++)
             {

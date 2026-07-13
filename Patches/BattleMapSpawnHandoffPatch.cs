@@ -13306,9 +13306,9 @@ namespace CoopSpectator.Patches
                 TryCanonicalizeStrictMountedHeroSynchronizeAgentEquipmentPayload(
                     synchronizeAgentSpawnEquipment,
                     agent);
-                TryCanonicalizeMountedRangedSynchronizeAgentEquipmentPayload(
-                    synchronizeAgentSpawnEquipment,
-                    agent);
+                // SynchronizeAgentSpawnEquipment and every later weapon-state message use the
+                // server's slot indices as one shared contract. Reordering a non-hero payload
+                // only on the client makes a later SetWieldedItemIndex target another item.
 
                 if (agent != null &&
                     ShouldSuppressCorruptedClientSynchronizeAgentEquipmentPayload(
@@ -16393,6 +16393,15 @@ namespace CoopSpectator.Patches
             if (mission == null || agent == null || agent.IsMount || setWieldedItemIndex == null)
                 return false;
 
+            if (IsExactSiegeClientRequestedAmmoSlotUnsafe(
+                    mission,
+                    agent,
+                    setWieldedItemIndex,
+                    out suppressReason))
+            {
+                return true;
+            }
+
             if (!IsUnsafeIncompleteClientSetWieldedItemIndex(agent, setWieldedItemIndex, out suppressReason))
                 return false;
 
@@ -16421,6 +16430,41 @@ namespace CoopSpectator.Patches
                 return false;
 
             suppressReason += "|PostRepair=" + (postRepairReason ?? "unsafe-incomplete-loadout");
+            return true;
+        }
+
+        private static bool IsExactSiegeClientRequestedAmmoSlotUnsafe(
+            Mission mission,
+            Agent agent,
+            SetWieldedItemIndex setWieldedItemIndex,
+            out string reason)
+        {
+            reason = null;
+            if (mission == null ||
+                agent == null ||
+                setWieldedItemIndex == null ||
+                GameNetwork.IsServer ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty) ||
+                setWieldedItemIndex.WieldedItemIndex < EquipmentIndex.Weapon0 ||
+                setWieldedItemIndex.WieldedItemIndex > EquipmentIndex.Weapon3)
+            {
+                return false;
+            }
+
+            MissionEquipment missionEquipment = agent.Equipment;
+            if (missionEquipment == null)
+                return false;
+
+            MissionWeapon requestedWeapon = missionEquipment[setWieldedItemIndex.WieldedItemIndex];
+            ItemObject requestedItem = requestedWeapon.Item;
+            WeaponComponentData primaryWeapon = requestedItem?.PrimaryWeapon;
+            if (requestedItem == null || primaryWeapon?.IsAmmo != true)
+                return false;
+
+            reason =
+                "exact-siege-requested-ammo-slot" +
+                "|Slot=" + setWieldedItemIndex.WieldedItemIndex +
+                "|Item=" + requestedItem.StringId;
             return true;
         }
 
@@ -16621,9 +16665,6 @@ namespace CoopSpectator.Patches
             {
                 return false;
             }
-
-            if (CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission))
-                return false;
 
             Equipment expectedEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
                 entryState,
