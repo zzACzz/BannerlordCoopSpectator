@@ -5503,6 +5503,38 @@ namespace CoopSpectator.UI
             TrySetInstanceProperty(missionScreen, "LastFollowedAgentVisuals", null);
         }
 
+        private void LogAiControlCameraRestoreDiagnostics(string stage)
+        {
+            if (!CoopDebugConfig.CombatModelDiagnostics)
+                return;
+
+            try
+            {
+                MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+                Agent lastFollowedAgent = TryGetInstancePropertyValue(MissionScreen, "LastFollowedAgent") as Agent;
+                object customCamera = TryGetInstancePropertyValue(MissionScreen, "CustomCamera");
+                ModLogger.Info(
+                    "CoopMissionSelectionView: AI-control camera restore diagnostics. " +
+                    "Stage=" + (stage ?? "unknown") +
+                    " ObservedAgentIndex=" + _activeAiObservationAgentIndex +
+                    " MainAgentIndex=" + (Mission?.MainAgent?.Index.ToString() ?? "null") +
+                    " MainAgentPosition=" + (Mission?.MainAgent?.Position.ToString() ?? "null") +
+                    " MainAgentServerIndex=" + (Mission?.MainAgentServer?.Index.ToString() ?? "null") +
+                    " LastFollowedAgentIndex=" + (lastFollowedAgent?.Index.ToString() ?? "null") +
+                    " LastFollowedAgentPosition=" + (lastFollowedAgent?.Position.ToString() ?? "null") +
+                    " PeerFollowedAgentIndex=" + (localMissionPeer?.FollowedAgent?.Index.ToString() ?? "null") +
+                    " PeerControlledAgentIndex=" + (localMissionPeer?.ControlledAgent?.Index.ToString() ?? "null") +
+                    " CustomCamera=" + (customCamera == null ? "null" : customCamera.GetType().Name));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSelectionView: AI-control camera restore diagnostics failed. " +
+                    "Stage=" + (stage ?? "unknown") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
         private void LogCameraPreviewState(string key, string message)
         {
             if (string.IsNullOrWhiteSpace(key) ||
@@ -5644,11 +5676,17 @@ namespace CoopSpectator.UI
                     }
                 }
 
-                TryResetMissionScreenCameraPreviewState(MissionScreen);
                 if (playerControlRestored)
                 {
+                    LogAiControlCameraRestoreDiagnostics("before-reset");
+                    TryResetMissionScreenCameraPreviewState(MissionScreen);
+                    LogAiControlCameraRestoreDiagnostics("after-reset");
                     InformationManager.DisplayMessage(
                         new InformationMessage("Coop Battle: control returned."));
+                }
+                else
+                {
+                    TryResetMissionScreenCameraPreviewState(MissionScreen);
                 }
             }
 

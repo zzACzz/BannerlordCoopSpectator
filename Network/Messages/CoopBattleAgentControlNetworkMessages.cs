@@ -83,6 +83,8 @@ namespace CoopSpectator.Network.Messages
             Side = state.Side;
             TeamIndex = state.TeamIndex;
             FormationIndex = state.FormationIndex;
+            WasGeneral = state.WasGeneral;
+            WasCaptain = state.WasCaptain;
             Revision = state.Revision;
             AcknowledgedRequestId = state.LastRequestId;
         }
@@ -98,6 +100,8 @@ namespace CoopSpectator.Network.Messages
         public BattleSideEnum Side { get; private set; }
         public int TeamIndex { get; private set; }
         public int FormationIndex { get; private set; }
+        public bool WasGeneral { get; private set; }
+        public bool WasCaptain { get; private set; }
         public int Revision { get; private set; }
         public int AcknowledgedRequestId { get; private set; }
 
@@ -110,6 +114,8 @@ namespace CoopSpectator.Network.Messages
             Side = (BattleSideEnum)ReadIntFromPacket(BattleSideCompression, ref valid);
             TeamIndex = ReadIntFromPacket(TeamIndexCompression, ref valid);
             FormationIndex = ReadIntFromPacket(FormationIndexCompression, ref valid);
+            WasGeneral = ReadBoolFromPacket(ref valid);
+            WasCaptain = ReadBoolFromPacket(ref valid);
             Revision = ReadIntFromPacket(RevisionCompression, ref valid);
             AcknowledgedRequestId = ReadIntFromPacket(RevisionCompression, ref valid);
             return valid;
@@ -123,6 +129,8 @@ namespace CoopSpectator.Network.Messages
             WriteIntToPacket((int)Side, BattleSideCompression);
             WriteIntToPacket(TeamIndex, TeamIndexCompression);
             WriteIntToPacket(FormationIndex, FormationIndexCompression);
+            WriteBoolToPacket(WasGeneral);
+            WriteBoolToPacket(WasCaptain);
             WriteIntToPacket(Revision, RevisionCompression);
             WriteIntToPacket(AcknowledgedRequestId, RevisionCompression);
         }
@@ -133,6 +141,8 @@ namespace CoopSpectator.Network.Messages
         {
             return "CoopBattleAgentControlState Mode=" + Mode +
                    " AgentIndex=" + AgentIndex +
+                   " WasGeneral=" + WasGeneral +
+                   " WasCaptain=" + WasCaptain +
                    " Revision=" + Revision +
                    " AckRequestId=" + AcknowledgedRequestId;
         }

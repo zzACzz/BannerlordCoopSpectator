@@ -1752,6 +1752,11 @@ namespace CoopSpectator.MissionBehaviors
         private DateTime _nextBootstrapDependentPeerPayloadSyncUtc = DateTime.MinValue;
         private int _lastClientBattleReconnectFinalizeReadyAckTransmissionId;
         private string _lastClientBattleReconnectFinalizeReadinessSummary = string.Empty;
+        private bool _delayedClientAgentControlDiagnosticsPending;
+        private int _delayedClientAgentControlDiagnosticsTicksRemaining;
+        private CoopBattleAgentControlState _delayedClientAgentControlDiagnosticsState;
+        private string _delayedClientAgentControlFormationOwnershipSyncResult = string.Empty;
+        private string _delayedClientAgentControlMainAgentSyncResult = string.Empty;
 
         internal static bool TryGetClientBattleSnapshotProgress(out ClientBattleSnapshotProgressInfo progress)
         {
@@ -1865,6 +1870,7 @@ namespace CoopSpectator.MissionBehaviors
         {
             base.OnPreMissionTick(dt);
             TryRunClientBattleSnapshotRecoveryTick();
+            TryRunDelayedClientAgentControlDiagnostics();
         }
 
         public override void OnMissionTick(float dt)
@@ -2386,6 +2392,8 @@ namespace CoopSpectator.MissionBehaviors
                 message.Side,
                 message.TeamIndex,
                 message.FormationIndex,
+                message.WasGeneral,
+                message.WasCaptain,
                 message.Revision,
                 message.AcknowledgedRequestId,
                 "CoopMissionNetworkBridge server state",
@@ -2399,6 +2407,9 @@ namespace CoopSpectator.MissionBehaviors
                 synchronizedAgentIndex = acceptedState.AgentIndex;
             }
 
+            string formationOwnershipSyncResult = NormalizeClientNonCommanderControlOwnership(
+                Mission,
+                acceptedState);
             TrySynchronizeClientMainAgentWithControlState(
                 Mission,
                 synchronizedMode,
@@ -2414,7 +2425,152 @@ namespace CoopSpectator.MissionBehaviors
                 " AgentIndex=" + message.AgentIndex +
                 " Revision=" + message.Revision +
                 " AckRequestId=" + message.AcknowledgedRequestId +
+                " FormationOwnershipSync=" + formationOwnershipSyncResult +
                 " MainAgentSync=" + mainAgentSyncResult);
+            LogClientAgentControlTransitionDiagnostics(
+                Mission,
+                acceptedState,
+                formationOwnershipSyncResult,
+                mainAgentSyncResult,
+                "immediate");
+            ScheduleDelayedClientAgentControlDiagnostics(
+                acceptedState,
+                formationOwnershipSyncResult,
+                mainAgentSyncResult);
+        }
+
+        private void ScheduleDelayedClientAgentControlDiagnostics(
+            CoopBattleAgentControlState state,
+            string formationOwnershipSyncResult,
+            string mainAgentSyncResult)
+        {
+            if (!CoopDebugConfig.CombatModelDiagnostics ||
+                !GameNetwork.IsClient ||
+                state.Mode != CoopBattleAgentControlMode.PlayerControlled)
+            {
+                _delayedClientAgentControlDiagnosticsPending = false;
+                return;
+            }
+
+            _delayedClientAgentControlDiagnosticsState = state;
+            _delayedClientAgentControlFormationOwnershipSyncResult = formationOwnershipSyncResult ?? string.Empty;
+            _delayedClientAgentControlMainAgentSyncResult = mainAgentSyncResult ?? string.Empty;
+            _delayedClientAgentControlDiagnosticsTicksRemaining = 2;
+            _delayedClientAgentControlDiagnosticsPending = true;
+        }
+
+        private void TryRunDelayedClientAgentControlDiagnostics()
+        {
+            if (!_delayedClientAgentControlDiagnosticsPending)
+                return;
+
+            if (!CoopDebugConfig.CombatModelDiagnostics || !GameNetwork.IsClient || Mission == null)
+            {
+                _delayedClientAgentControlDiagnosticsPending = false;
+                return;
+            }
+
+            if (--_delayedClientAgentControlDiagnosticsTicksRemaining > 0)
+                return;
+
+            _delayedClientAgentControlDiagnosticsPending = false;
+            if (!CoopBattleAgentControlRuntimeState.TryGetClientState(out CoopBattleAgentControlState currentState) ||
+                currentState.Revision != _delayedClientAgentControlDiagnosticsState.Revision ||
+                currentState.Mode != CoopBattleAgentControlMode.PlayerControlled)
+            {
+                return;
+            }
+
+            LogClientAgentControlTransitionDiagnostics(
+                Mission,
+                currentState,
+                _delayedClientAgentControlFormationOwnershipSyncResult,
+                _delayedClientAgentControlMainAgentSyncResult,
+                "delayed-two-pre-mission-ticks");
+        }
+
+        private static string NormalizeClientNonCommanderControlOwnership(
+            Mission mission,
+            CoopBattleAgentControlState state)
+        {
+            if (!GameNetwork.IsClient || mission == null)
+                return "client-mission-unavailable";
+
+            if (state.WasGeneral || state.WasCaptain)
+                return "preserved-authoritative-commander-role";
+
+            MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+            if (localMissionPeer == null)
+                return "local-mission-peer-unavailable";
+
+            if (!CoopBattleAgentControlRuntimeState.TryResolveAgent(
+                    mission,
+                    state.AgentIndex,
+                    requireActive: true,
+                    out Agent controlledAgent))
+            {
+                localMissionPeer.ControlledFormation = null;
+                return "controlled-agent-unavailable-peer-formation-cleared";
+            }
+
+            Team team = controlledAgent.Team ?? localMissionPeer.Team;
+            if (team == null)
+            {
+                localMissionPeer.ControlledFormation = null;
+                return "team-unavailable-peer-formation-cleared";
+            }
+
+            int clearedPlayerOwners = 0;
+            int clearedCaptains = 0;
+            foreach (Formation formation in team.FormationsIncludingSpecialAndEmpty)
+            {
+                if (formation == null)
+                    continue;
+
+                if (AreSameAgents(formation.PlayerOwner, controlledAgent))
+                {
+                    formation.PlayerOwner = null;
+                    clearedPlayerOwners++;
+                }
+
+                if (AreSameAgents(formation.Captain, controlledAgent))
+                {
+                    formation.Captain = null;
+                    clearedCaptains++;
+                }
+            }
+
+            int clearedOrderControllers = 0;
+            OrderController playerOrderController = team.PlayerOrderController;
+            if (playerOrderController != null && AreSameAgents(playerOrderController.Owner, controlledAgent))
+            {
+                playerOrderController.ClearSelectedFormations();
+                playerOrderController.Owner = null;
+                clearedOrderControllers++;
+            }
+
+            OrderController agentOrderController = team.GetOrderControllerOf(controlledAgent);
+            if (agentOrderController != null &&
+                !ReferenceEquals(agentOrderController, playerOrderController) &&
+                AreSameAgents(agentOrderController.Owner, controlledAgent))
+            {
+                agentOrderController.ClearSelectedFormations();
+                agentOrderController.Owner = null;
+                clearedOrderControllers++;
+            }
+
+            localMissionPeer.ControlledFormation = null;
+            return
+                "cleared-non-commander" +
+                ":player-owners=" + clearedPlayerOwners +
+                ":captains=" + clearedCaptains +
+                ":order-controllers=" + clearedOrderControllers;
+        }
+
+        private static bool AreSameAgents(Agent left, Agent right)
+        {
+            return ReferenceEquals(left, right) ||
+                   (left != null && right != null && left.Index == right.Index);
         }
 
         internal static bool TrySynchronizeClientMainAgentWithControlState(
@@ -2496,6 +2652,9 @@ namespace CoopSpectator.MissionBehaviors
                     return false;
                 }
 
+                controlledAgent.ClearTargetFrame();
+                controlledAgent.SetAutomaticTargetSelection(false);
+
                 bool changed = false;
                 if (!ReferenceEquals(mission.MainAgent, controlledAgent))
                 {
@@ -2520,6 +2679,95 @@ namespace CoopSpectator.MissionBehaviors
             {
                 result = "exception:" + ex.GetType().Name;
                 return false;
+            }
+        }
+
+        private static void LogClientAgentControlTransitionDiagnostics(
+            Mission mission,
+            CoopBattleAgentControlState state,
+            string formationOwnershipSyncResult,
+            string mainAgentSyncResult,
+            string stage)
+        {
+            if (!CoopDebugConfig.CombatModelDiagnostics || mission == null)
+                return;
+
+            try
+            {
+                MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+                CoopBattleAgentControlRuntimeState.TryResolveAgent(
+                    mission,
+                    state.AgentIndex,
+                    requireActive: false,
+                    out Agent agent);
+                MissionBehavior mainAgentController = mission.MissionBehaviors?.FirstOrDefault(behavior =>
+                    behavior != null &&
+                    (behavior.GetType().FullName ?? behavior.GetType().Name)
+                        .IndexOf("MissionMainAgentController", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                string mainAgentControllerState = "missing";
+                if (mainAgentController != null)
+                {
+                    Type controllerType = mainAgentController.GetType();
+                    object activated = controllerType
+                        .GetField("_activated", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                        ?.GetValue(mainAgentController);
+                    object playerAgentAdded = controllerType
+                        .GetField("_isPlayerAgentAdded", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                        ?.GetValue(mainAgentController);
+                    object disabled = controllerType
+                        .GetProperty("IsDisabled", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                        ?.GetValue(mainAgentController);
+                    mainAgentControllerState =
+                        "Activated=" + (activated?.ToString() ?? "unknown") +
+                        "/IsDisabled=" + (disabled?.ToString() ?? "unknown") +
+                        "/PlayerAgentAdded=" + (playerAgentAdded?.ToString() ?? "unknown");
+                }
+
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: client agent control transition diagnostics. " +
+                    "Stage=" + (stage ?? "unknown") +
+                    " Mode=" + state.Mode +
+                    " Revision=" + state.Revision +
+                    " AgentIndex=" + state.AgentIndex +
+                    " AgentState=" + (agent?.State.ToString() ?? "null") +
+                    " Controller=" + (agent?.Controller.ToString() ?? "null") +
+                    " IsPlayerControlled=" + (agent?.IsPlayerControlled.ToString() ?? "null") +
+                    " IsAIControlled=" + (agent?.IsAIControlled.ToString() ?? "null") +
+                    " CombatActionsEnabled=" + (agent?.CombatActionsEnabled.ToString() ?? "null") +
+                    " Position=" + (agent?.Position.ToString() ?? "null") +
+                    " VisualPosition=" + (agent?.VisualPosition.ToString() ?? "null") +
+                    " LookDirection=" + (agent?.LookDirection.ToString() ?? "null") +
+                    " FormationIndex=" + (agent?.Formation?.Index.ToString() ?? "null") +
+                    " AuthoritativeFormationIndex=" + state.FormationIndex +
+                    " PeerControlledFormationIndex=" + (localMissionPeer?.ControlledFormation?.Index.ToString() ?? "null") +
+                    " MissionPeerControlledAgentIndex=" + (localMissionPeer?.ControlledAgent?.Index.ToString() ?? "null") +
+                    " NetworkPeerControlledAgentIndex=" + (GameNetwork.MyPeer?.ControlledAgent?.Index.ToString() ?? "null") +
+                    " AgentMissionPeer=" + (agent?.MissionPeer?.GetNetworkPeer()?.UserName ?? "null") +
+                    " IsCameraAttachable=" + (agent?.IsCameraAttachable().ToString() ?? "null") +
+                    " MainAgentIndex=" + (mission.MainAgent?.Index.ToString() ?? "null") +
+                    " MainAgentServerIndex=" + (mission.MainAgentServer?.Index.ToString() ?? "null") +
+                    " MovementFlags=" + (agent?.MovementFlags.ToString() ?? "null") +
+                    " EventControlFlags=" + (agent?.EventControlFlags.ToString() ?? "null") +
+                    " WieldedMain=" + (agent?.WieldedWeapon.Item?.StringId ?? "none") +
+                    " WieldedOffhand=" + (agent?.WieldedOffhandWeapon.Item?.StringId ?? "none") +
+                    " Action0=" + (agent?.GetCurrentAction(0).ToString() ?? "null") +
+                    " ActionStage0=" + (agent?.GetCurrentActionStage(0).ToString() ?? "null") +
+                    " Action1=" + (agent?.GetCurrentAction(1).ToString() ?? "null") +
+                    " ActionStage1=" + (agent?.GetCurrentActionStage(1).ToString() ?? "null") +
+                    " WasGeneral=" + state.WasGeneral +
+                    " WasCaptain=" + state.WasCaptain +
+                    " FormationOwnershipSync=" + (formationOwnershipSyncResult ?? "unknown") +
+                    " MainAgentSync=" + (mainAgentSyncResult ?? "unknown") +
+                    " MainAgentController={" + mainAgentControllerState + "}");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: client agent control transition diagnostics failed. " +
+                    "Mode=" + state.Mode +
+                    " AgentIndex=" + state.AgentIndex +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
             }
         }
 

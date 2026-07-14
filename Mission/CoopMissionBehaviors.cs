@@ -33407,6 +33407,12 @@ namespace CoopSpectator.MissionBehaviors
                     wasCaptain,
                     requestId,
                     source + " delegate-to-ai");
+                LogAgentControlTransitionDiagnostics(
+                    controlledAgent,
+                    missionPeer,
+                    peer,
+                    state,
+                    "delegate-complete");
                 CoopBattleSpawnRuntimeState.MarkSpawned(
                     missionPeer,
                     (controlledAgent.Character as BasicCharacterObject)?.StringId,
@@ -33504,23 +33510,21 @@ namespace CoopSpectator.MissionBehaviors
                     out _,
                     out _);
 
-                if (peer.IsConnectionActive && !peer.IsServerPeer)
+                PrepareExistingAgentForPlayerControl(targetAgent);
+                Agent reclaimedAgent = mission.ReplaceBotWithPlayer(targetAgent, missionPeer);
+                if (reclaimedAgent == null)
                 {
-                    GameNetwork.BeginModuleEventAsServer(peer);
-                    GameNetwork.WriteMessage(new NetworkMessages.FromServer.ReplaceBotWithPlayer(
-                        peer,
-                        targetAgent.Index,
-                        targetAgent.Health,
-                        targetAgent.MountAgent?.Health ?? -1f));
-                    GameNetwork.EndModuleEventAsServer();
+                    reason = "native-replace-bot-returned-null";
+                    TryRollbackFailedAgentReclaim(missionPeer, peer, targetAgent, source + " native-replace-bot-returned-null");
+                    return false;
                 }
 
-                targetAgent.SetOwningAgentMissionPeer(null);
-                targetAgent.MissionPeer = missionPeer;
-                missionPeer.ControlledAgent = targetAgent;
-                peer.ControlledAgent = targetAgent;
+                targetAgent = reclaimedAgent;
+                if (!ReferenceEquals(missionPeer.ControlledAgent, targetAgent))
+                    missionPeer.ControlledAgent = targetAgent;
+                if (!ReferenceEquals(peer.ControlledAgent, targetAgent))
+                    peer.ControlledAgent = targetAgent;
                 targetAgent.Formation = formation;
-                targetAgent.Controller = AgentControllerType.Player;
                 missionPeer.FollowedAgent = targetAgent;
                 missionPeer.WantsToSpawnAsBot = false;
 
@@ -33570,9 +33574,15 @@ namespace CoopSpectator.MissionBehaviors
                     targetAgent,
                     requestId,
                     source + " reclaim");
+                LogAgentControlTransitionDiagnostics(
+                    targetAgent,
+                    missionPeer,
+                    peer,
+                    state,
+                    "reclaim-complete");
                 reason = "reclaimed-from-ai";
                 ModLogger.Info(
-                    "CoopMissionSpawnLogic: reclaimed AI-observed agent without resetting live combat state. " +
+                    "CoopMissionSpawnLogic: reclaimed AI-observed existing agent through peer/controller handoff without resetting live combat state. " +
                     "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
                     " AgentIndex=" + targetAgent.Index +
                     " Formation=" + formation.FormationIndex +
@@ -33639,6 +33649,71 @@ namespace CoopSpectator.MissionBehaviors
             agent.SetAutomaticTargetSelection(true);
             agent.SetFiringOrder(FiringOrder.RangedWeaponUsageOrderEnum.FireAtWill);
             agent.ForceAiBehaviorSelection();
+        }
+
+        private static void PrepareExistingAgentForPlayerControl(Agent agent)
+        {
+            if (agent == null || !agent.IsActive())
+                return;
+
+            agent.ClearTargetFrame();
+            agent.SetIsAIPaused(false);
+            agent.SetAutomaticTargetSelection(false);
+            agent.MovementInputVector = Vec2.Zero;
+            agent.MovementFlags = Agent.MovementControlFlag.None;
+        }
+
+        private static void LogAgentControlTransitionDiagnostics(
+            Agent agent,
+            MissionPeer missionPeer,
+            NetworkCommunicator peer,
+            CoopBattleAgentControlState state,
+            string transition)
+        {
+            if (!CoopDebugConfig.CombatModelDiagnostics || agent == null)
+                return;
+
+            try
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: agent control transition diagnostics. " +
+                    "Transition=" + (transition ?? "unknown") +
+                    " Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Mode=" + state.Mode +
+                    " Revision=" + state.Revision +
+                    " AgentIndex=" + agent.Index +
+                    " AgentState=" + agent.State +
+                    " Controller=" + agent.Controller +
+                    " IsPlayerControlled=" + agent.IsPlayerControlled +
+                    " IsAIControlled=" + agent.IsAIControlled +
+                    " CombatActionsEnabled=" + agent.CombatActionsEnabled +
+                    " Position=" + agent.Position +
+                    " VisualPosition=" + agent.VisualPosition +
+                    " LookDirection=" + agent.LookDirection +
+                    " FormationIndex=" + (agent.Formation?.Index.ToString() ?? "null") +
+                    " PeerControlledFormationIndex=" + (missionPeer?.ControlledFormation?.Index.ToString() ?? "null") +
+                    " MissionPeerControlledAgentIndex=" + (missionPeer?.ControlledAgent?.Index.ToString() ?? "null") +
+                    " NetworkPeerControlledAgentIndex=" + (peer?.ControlledAgent?.Index.ToString() ?? "null") +
+                    " AgentMissionPeer=" + (agent.MissionPeer?.GetNetworkPeer()?.UserName ?? "null") +
+                    " MovementFlags=" + agent.MovementFlags +
+                    " EventControlFlags=" + agent.EventControlFlags +
+                    " WieldedMain=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
+                    " WieldedOffhand=" + (agent.WieldedOffhandWeapon.Item?.StringId ?? "none") +
+                    " Action0=" + agent.GetCurrentAction(0) +
+                    " ActionStage0=" + agent.GetCurrentActionStage(0) +
+                    " Action1=" + agent.GetCurrentAction(1) +
+                    " ActionStage1=" + agent.GetCurrentActionStage(1) +
+                    " WasGeneral=" + state.WasGeneral +
+                    " WasCaptain=" + state.WasCaptain);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: agent control transition diagnostics failed. " +
+                    "Transition=" + (transition ?? "unknown") +
+                    " AgentIndex=" + agent.Index +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
         }
 
         private static CoopBattleAgentControlState AcknowledgeCurrentAgentControlState(
