@@ -20,6 +20,9 @@ namespace CoopSpectator.Infrastructure
             DateTime snapshotUpdatedUtc,
             string source)
         {
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                return;
+
             try
             {
                 Directory.CreateDirectory(GetCoopFolderPath());
@@ -50,7 +53,7 @@ namespace CoopSpectator.Infrastructure
 
         public static void AppendRecord(string line)
         {
-            if (string.IsNullOrWhiteSpace(line))
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics || string.IsNullOrWhiteSpace(line))
                 return;
 
             try

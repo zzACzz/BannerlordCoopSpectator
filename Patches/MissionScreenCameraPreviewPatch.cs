@@ -129,7 +129,7 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                if (!CoopMissionSelectionView.TryGetActiveCameraPreviewAgent(out Agent previewAgent))
+                if (!CoopMissionSelectionView.TryGetActiveCameraFollowAgent(out Agent previewAgent))
                     return;
 
                 MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
@@ -212,7 +212,8 @@ namespace CoopSpectator.Patches
                     !GameNetwork.IsClient ||
                     !GameNetwork.IsSessionActive ||
                     !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(__instance.Mission.SceneName) ||
-                    !CoopMissionSelectionView.IsCommanderDeploymentPlacementInputActive())
+                    (!CoopMissionSelectionView.IsCommanderDeploymentPlacementInputActive() &&
+                     !CoopMissionSelectionView.IsAiControlObservationActive()))
                 {
                     return true;
                 }

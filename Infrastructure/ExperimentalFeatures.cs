@@ -57,7 +57,8 @@ namespace CoopSpectator.Infrastructure
         /// around MissionLobbyComponent.EarlyStart and Mission.Teams.Add without
         /// changing team creation or synchronization behavior.
         /// </summary>
-        public const bool EnableSiegeReplayTeamAddDiagnostics = true;
+        public static readonly bool EnableSiegeReplayTeamAddDiagnostics =
+            IsEnvironmentFlagEnabled("COOPSPECTATOR_SIEGE_TEAM_ADD_DIAGNOSTICS");
 
         /// <summary>
         /// Siege replay server fix: create native-like attacker/defender teams
@@ -112,7 +113,8 @@ namespace CoopSpectator.Infrastructure
         /// resolution for control `mp_battle_map_*` scenes and target `battle_terrain_*`
         /// scenes. Safe because it only logs and does not alter scene pairing.
         /// </summary>
-        public const bool EnableDedicatedSceneContractProbe = true;
+        public static readonly bool EnableDedicatedSceneContractProbe =
+            IsEnvironmentFlagEnabled("COOPSPECTATOR_DEDICATED_SCENE_CONTRACT_DIAGNOSTICS");
 
         /// <summary>
         /// Dedicated-only exact campaign scene bootstrap probe. Extends the base
@@ -123,7 +125,8 @@ namespace CoopSpectator.Infrastructure
         /// Intended to gather hard facts for exact-scene hosting, not to alter
         /// mission startup behavior.
         /// </summary>
-        public const bool EnableDedicatedExactCampaignSceneBootstrapProbe = true;
+        public static readonly bool EnableDedicatedExactCampaignSceneBootstrapProbe =
+            IsEnvironmentFlagEnabled("COOPSPECTATOR_EXACT_SCENE_BOOTSTRAP_DIAGNOSTICS");
 
         /// <summary>
         /// Explicit investigation switch for surrogate troop names inside the
@@ -131,7 +134,15 @@ namespace CoopSpectator.Infrastructure
         /// reruns because it emits extra logs from snapshot and class-list refresh
         /// paths.
         /// </summary>
-        public static readonly bool EnableBattleSelectionDisplayNameDiagnostics = true;
+        public static readonly bool EnableBattleSelectionDisplayNameDiagnostics =
+            IsEnvironmentFlagEnabled("COOPSPECTATOR_BATTLE_SELECTION_NAME_DIAGNOSTICS");
+
+        /// <summary>
+        /// Detailed selectable-entry and battle-start readiness audits emitted
+        /// while entry-status snapshots are built. Disabled by default.
+        /// </summary>
+        public static readonly bool EnableBattleEntryStatusDiagnostics =
+            IsEnvironmentFlagEnabled("COOPSPECTATOR_BATTLE_ENTRY_STATUS_DIAGNOSTICS");
 
         /// <summary>
         /// Full contract diagnostics for battle-map runtime: MissionState.OpenNew overloads,
@@ -139,7 +150,30 @@ namespace CoopSpectator.Infrastructure
         /// deployment-plan / formation-plan / scene-spawn-entry summaries.
         /// This is intentionally log-heavy and meant for diagnosis, not steady-state play.
         /// </summary>
-        public const bool EnableBattleMapFullContractDiagnostics = true;
+        public static readonly bool EnableBattleMapFullContractDiagnostics =
+            IsEnvironmentFlagEnabled("COOPSPECTATOR_BATTLE_MAP_CONTRACT_DIAGNOSTICS");
+
+        /// <summary>
+        /// Targeted mission-startup diagnostics for battle-shell lifecycle and
+        /// Mission.IsLoadingFinished observations. Disabled by default because
+        /// the observed property is queried from a hot loading path.
+        /// </summary>
+        public static readonly bool EnableBattleShellStartupDiagnostics =
+            IsEnvironmentFlagEnabled("COOPSPECTATOR_BATTLE_SHELL_DIAGNOSTICS");
+
+        /// <summary>
+        /// Targeted runtime diagnostics for exact campaign army materialization.
+        /// Disabled by default because it scans the live mission agent set.
+        /// </summary>
+        public static readonly bool EnableExactCampaignArmyRuntimeDiagnostics =
+            IsEnvironmentFlagEnabled("COOPSPECTATOR_EXACT_ARMY_RUNTIME_DIAGNOSTICS");
+
+        /// <summary>
+        /// Detailed exact-agent contract trace and runtime bundle files. Disabled
+        /// by default because materialized-agent events can write once per agent.
+        /// </summary>
+        public static readonly bool EnableExactBattleAgentContractDiagnostics =
+            IsEnvironmentFlagEnabled("COOPSPECTATOR_EXACT_AGENT_CONTRACT_DIAGNOSTICS");
 
         /// <summary>
         /// Exact campaign scene bootstrap path: replace the hybrid delayed
@@ -207,10 +241,7 @@ namespace CoopSpectator.Infrastructure
         /// object bursts.
         /// </summary>
         public static readonly bool EnableExactSiegeMissionObjectSyncDiagnostics =
-            string.Equals(
-                global::System.Environment.GetEnvironmentVariable("COOPSPECTATOR_EXACT_SIEGE_SYNC_DIAGNOSTICS"),
-                "1",
-                global::System.StringComparison.Ordinal);
+            IsEnvironmentFlagEnabled("COOPSPECTATOR_EXACT_SIEGE_SYNC_DIAGNOSTICS");
 
         /// <summary>
         /// Targeted hot-path diagnostics for exact CreateAgent payload comparison.
@@ -218,9 +249,14 @@ namespace CoopSpectator.Infrastructure
         /// for every materialized agent.
         /// </summary>
         public static readonly bool EnableExactCreateAgentCorridorDiagnostics =
-            string.Equals(
-                global::System.Environment.GetEnvironmentVariable("COOPSPECTATOR_EXACT_CREATE_AGENT_DIAGNOSTICS"),
+            IsEnvironmentFlagEnabled("COOPSPECTATOR_EXACT_CREATE_AGENT_DIAGNOSTICS");
+
+        private static bool IsEnvironmentFlagEnabled(string variableName)
+        {
+            return string.Equals(
+                global::System.Environment.GetEnvironmentVariable(variableName),
                 "1",
                 global::System.StringComparison.Ordinal);
+        }
     }
 }

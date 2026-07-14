@@ -285,6 +285,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                             if (EnableManualPatchMissionFlowBattleRuntimeCameraPreview)
                             {
                                 MissionScreenCameraPreviewPatch.Apply(harmony);
+                                CoopBattleEscapeMenuAiControlPatch.Apply(harmony);
                                 OrderOfBattleSiegeProjectedCountsPatch.Apply(harmony);
                                 CommanderDeploymentMissionNetworkComponentPatch.Apply(harmony);
                             }
@@ -377,6 +378,11 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         if (loadedAssemblyName == "TaleWorlds.MountAndBlade.Multiplayer.View")
                         {
                             CoopBattleDisplayNameConsumerPatch.Apply(harmony);
+                        }
+
+                        if (loadedAssemblyName == "TaleWorlds.MountAndBlade.Multiplayer.GauntletUI")
+                        {
+                            CoopBattleEscapeMenuAiControlPatch.Apply(harmony);
                         }
                     };
                 }

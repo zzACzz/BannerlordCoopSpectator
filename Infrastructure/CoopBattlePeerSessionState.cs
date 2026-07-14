@@ -130,6 +130,17 @@ namespace CoopSpectator.Infrastructure
             CoopBattlePeerLifecycleRuntimeState.TryGetState(missionPeer, out PeerLifecycleRuntimeState lifecycleRuntimeState);
 
             Agent controlledAgent = missionPeer.ControlledAgent;
+            Mission effectiveMission = mission ?? Mission.Current;
+            if ((controlledAgent == null || !controlledAgent.IsActive()) &&
+                GameNetwork.IsServer &&
+                CoopBattleAgentControlRuntimeState.TryGetActiveServerObservedAgent(
+                    effectiveMission,
+                    missionPeer,
+                    out Agent observedAgent,
+                    out _))
+            {
+                controlledAgent = observedAgent;
+            }
             bool hasActiveControlledAgent = controlledAgent != null && controlledAgent.IsActive();
             string controlledEntryId = null;
             if (hasActiveControlledAgent)

@@ -184,7 +184,29 @@ namespace CoopSpectator.MissionModels
 
         public override float ApplyGeneralDamageModifiers(in AttackInformation attackInformation, in AttackCollisionData collisionData, float baseDamage)
         {
-            return _baseModel.ApplyGeneralDamageModifiers(attackInformation, collisionData, baseDamage);
+            if (!ShouldUseCampaignDamageRules(attackInformation))
+                return _baseModel.ApplyGeneralDamageModifiers(attackInformation, collisionData, baseDamage);
+
+            Agent attackerAgent = attackInformation.AttackerAgent;
+            if (attackerAgent == null)
+                return baseDamage;
+
+            float adjustedDamage = baseDamage;
+            WeaponComponentData weapon = attackInformation.AttackerWeapon.CurrentUsageItem;
+            if (weapon != null)
+            {
+                if (weapon.RelevantSkill == DefaultSkills.Throwing)
+                {
+                    adjustedDamage *= 1f + attackerAgent.AgentDrivenProperties.ThrowingWeaponDamageMultiplierBonus;
+                }
+                else if (weapon.IsMeleeWeapon)
+                {
+                    adjustedDamage *= 1f + attackerAgent.AgentDrivenProperties.MeleeWeaponDamageMultiplierBonus;
+                }
+            }
+
+            adjustedDamage *= 1f + attackerAgent.AgentDrivenProperties.DamageMultiplierBonus;
+            return adjustedDamage;
         }
 
         public override void DecideMissileWeaponFlags(Agent attackerAgent, in MissionWeapon missileWeapon, ref WeaponFlags missileWeaponFlags)
@@ -281,6 +303,9 @@ namespace CoopSpectator.MissionModels
 
         public override float CalculateShieldDamage(in AttackInformation attackInformation, float baseDamage)
         {
+            if (ShouldUseCampaignDamageRules(attackInformation))
+                return baseDamage;
+
             return _baseModel.CalculateShieldDamage(attackInformation, baseDamage);
         }
 
@@ -421,6 +446,16 @@ namespace CoopSpectator.MissionModels
             return mission != null &&
                    MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) &&
                    MissionGameModels.Current?.AgentApplyDamageModel is CoopCampaignDerivedAgentApplyDamageModel;
+        }
+
+        private static bool ShouldUseCampaignDamageRules(in AttackInformation attackInformation)
+        {
+            Mission mission =
+                attackInformation.AttackerAgent?.Mission ??
+                attackInformation.VictimAgent?.Mission ??
+                Mission.Current;
+            return mission != null &&
+                MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName);
         }
 
         private bool TryApplyExactPersonalDamageAmplifications(
@@ -1000,6 +1035,9 @@ namespace CoopSpectator.MissionModels
             float updatedDamage,
             string factorSummary)
         {
+            if (!CoopDebugConfig.CombatModelDiagnostics)
+                return;
+
             Agent attackerAgent = attackInformation.AttackerAgent;
             Agent victimAgent = attackInformation.VictimAgent;
             WeaponComponentData weapon = attackInformation.AttackerWeapon.CurrentUsageItem;

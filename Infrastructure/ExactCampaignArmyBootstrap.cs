@@ -3204,13 +3204,16 @@ namespace CoopSpectator.Infrastructure
             if (!UsesSpawnLogicRuntimeMode(_activeMode) || _activeSpawnLogic == null || mission == null)
                 return;
 
-            ModLogger.Info(
-                "ExactCampaignArmyBootstrap: native reinforcement batch spawned. " +
-                "Scene=" + (mission.SceneName ?? "null") +
-                " Side=" + side +
-                " SpawnedCount=" + spawnedCount +
-                " PlayerSide=" + _activePlayerSide);
-            TryLogRuntimeDiagnostics(mission, "native-reinforcements-spawned", force: true);
+            if (ExperimentalFeatures.EnableExactCampaignArmyRuntimeDiagnostics)
+            {
+                ModLogger.Info(
+                    "ExactCampaignArmyBootstrap: native reinforcement batch spawned. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " Side=" + side +
+                    " SpawnedCount=" + spawnedCount +
+                    " PlayerSide=" + _activePlayerSide);
+                TryLogRuntimeDiagnostics(mission, "native-reinforcements-spawned", force: true);
+            }
         }
 
         private static void OnMissionBeforeAgentRemoved(
@@ -3257,8 +3260,13 @@ namespace CoopSpectator.Infrastructure
                 return;
             }
 
-            int defenderRemovedBefore = GetActiveRemovedTroopCount(BattleSideEnum.Defender);
-            int attackerRemovedBefore = GetActiveRemovedTroopCount(BattleSideEnum.Attacker);
+            bool diagnosticsEnabled = ExperimentalFeatures.EnableExactCampaignArmyRuntimeDiagnostics;
+            int defenderRemovedBefore = diagnosticsEnabled
+                ? GetActiveRemovedTroopCount(BattleSideEnum.Defender)
+                : 0;
+            int attackerRemovedBefore = diagnosticsEnabled
+                ? GetActiveRemovedTroopCount(BattleSideEnum.Attacker)
+                : 0;
 
             switch (agentState)
             {
@@ -3272,6 +3280,9 @@ namespace CoopSpectator.Infrastructure
                     affectedAgent.Origin.SetRouted(isOrderRetreat: false);
                     break;
             }
+
+            if (!diagnosticsEnabled)
+                return;
 
             int defenderRemovedAfter = GetActiveRemovedTroopCount(BattleSideEnum.Defender);
             int attackerRemovedAfter = GetActiveRemovedTroopCount(BattleSideEnum.Attacker);
@@ -3464,7 +3475,7 @@ namespace CoopSpectator.Infrastructure
 
         public static void TryLogRuntimeDiagnostics(Mission mission, string source, bool force = false)
         {
-            if (!IsActive(mission))
+            if (!ExperimentalFeatures.EnableExactCampaignArmyRuntimeDiagnostics || !IsActive(mission))
                 return;
 
             DateTime nowUtc = DateTime.UtcNow;

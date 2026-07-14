@@ -13,7 +13,15 @@ namespace CoopSpectator.Infrastructure
         private const string StatusFileName = "battle_entry_status.txt";
         private const char EncodedListSeparator = '|';
         private static readonly object SnapshotCacheLock = new object();
+        private static readonly TimeSpan StatusFileSignatureCheckInterval = TimeSpan.FromMilliseconds(100);
+        private static readonly TimeSpan StatusFileHeartbeatInterval = TimeSpan.FromSeconds(2);
         private static EntryStatusSnapshot _lastValidSnapshot;
+        private static string _lastWrittenComparisonKey = string.Empty;
+        private static string _lastObservedStatusPath = string.Empty;
+        private static DateTime _lastObservedStatusWriteUtc = DateTime.MinValue;
+        private static long _lastObservedStatusLength = -1;
+        private static DateTime _nextStatusFileSignatureCheckUtc = DateTime.MinValue;
+        private static DateTime _lastStatusFileWriteUtc = DateTime.MinValue;
 
         public sealed class EntryStatusSnapshot
         {
@@ -183,7 +191,6 @@ namespace CoopSpectator.Infrastructure
 
             try
             {
-                Directory.CreateDirectory(GetCoopFolderPath());
                 string[] lines =
                 {
                     "MissionName=" + (snapshot.MissionName ?? string.Empty),
@@ -242,7 +249,28 @@ namespace CoopSpectator.Infrastructure
                     "DefenderSelectableEntrySource=" + (snapshot.DefenderSelectableEntrySource ?? string.Empty),
                     "UpdatedUtc=" + snapshot.UpdatedUtc.ToString("O")
                 };
-                AtomicBridgeFileIO.WriteAllLines(GetStatusFilePath(), lines);
+                string comparisonKey = string.Join(
+                    "\n",
+                    lines.Where(line =>
+                        !line.StartsWith("Source=", StringComparison.Ordinal) &&
+                        !line.StartsWith("UpdatedUtc=", StringComparison.Ordinal)));
+                string path = GetStatusFilePath();
+
+                lock (SnapshotCacheLock)
+                {
+                    DateTime nowUtc = DateTime.UtcNow;
+                    if (string.Equals(_lastObservedStatusPath, path, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(_lastWrittenComparisonKey, comparisonKey, StringComparison.Ordinal) &&
+                        nowUtc - _lastStatusFileWriteUtc < StatusFileHeartbeatInterval)
+                        return;
+
+                    Directory.CreateDirectory(GetCoopFolderPath());
+                    AtomicBridgeFileIO.WriteAllLines(path, lines);
+                    _lastWrittenComparisonKey = comparisonKey;
+                    _lastValidSnapshot = CloneSnapshot(snapshot);
+                    _lastStatusFileWriteUtc = nowUtc;
+                    RememberObservedFileSignature(path);
+                }
             }
             catch (Exception ex)
             {
@@ -255,8 +283,33 @@ namespace CoopSpectator.Infrastructure
             try
             {
                 string path = GetStatusFilePath();
+                DateTime nowUtc = DateTime.UtcNow;
+                lock (SnapshotCacheLock)
+                {
+                    if (_lastValidSnapshot != null &&
+                        string.Equals(_lastObservedStatusPath, path, StringComparison.OrdinalIgnoreCase) &&
+                        nowUtc < _nextStatusFileSignatureCheckUtc)
+                    {
+                        return CloneSnapshot(_lastValidSnapshot);
+                    }
+                }
+
                 if (!File.Exists(path))
                     return GetLastValidSnapshot();
+
+                DateTime observedWriteUtc = File.GetLastWriteTimeUtc(path);
+                long observedLength = new FileInfo(path).Length;
+                lock (SnapshotCacheLock)
+                {
+                    if (_lastValidSnapshot != null &&
+                        string.Equals(_lastObservedStatusPath, path, StringComparison.OrdinalIgnoreCase) &&
+                        _lastObservedStatusWriteUtc == observedWriteUtc &&
+                        _lastObservedStatusLength == observedLength)
+                    {
+                        _nextStatusFileSignatureCheckUtc = nowUtc + StatusFileSignatureCheckInterval;
+                        return CloneSnapshot(_lastValidSnapshot);
+                    }
+                }
 
                 string[] lines = AtomicBridgeFileIO.ReadAllLinesShared(path);
                 EntryStatusSnapshot snapshot = new EntryStatusSnapshot
@@ -514,6 +567,13 @@ namespace CoopSpectator.Infrastructure
                     return GetLastValidSnapshot();
 
                 RememberSnapshot(snapshot);
+                lock (SnapshotCacheLock)
+                {
+                    _lastObservedStatusPath = path;
+                    _lastObservedStatusWriteUtc = observedWriteUtc;
+                    _lastObservedStatusLength = observedLength;
+                    _nextStatusFileSignatureCheckUtc = nowUtc + StatusFileSignatureCheckInterval;
+                }
                 return snapshot;
             }
             catch (Exception ex)
@@ -619,6 +679,23 @@ namespace CoopSpectator.Infrastructure
         public static string GetStatusFilePath()
         {
             return Path.Combine(GetCoopFolderPath(), GetScopedStatusFileName());
+        }
+
+        private static void RememberObservedFileSignature(string path)
+        {
+            _lastObservedStatusPath = path ?? string.Empty;
+            try
+            {
+                _lastObservedStatusWriteUtc = File.GetLastWriteTimeUtc(path);
+                _lastObservedStatusLength = new FileInfo(path).Length;
+            }
+            catch
+            {
+                _lastObservedStatusWriteUtc = DateTime.MinValue;
+                _lastObservedStatusLength = -1;
+            }
+
+            _nextStatusFileSignatureCheckUtc = DateTime.UtcNow + StatusFileSignatureCheckInterval;
         }
 
         private static string GetCoopFolderPath()

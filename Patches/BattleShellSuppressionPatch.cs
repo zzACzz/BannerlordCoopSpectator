@@ -154,16 +154,19 @@ namespace CoopSpectator.Patches
                 "set_CurrentState",
                 nameof(Mission_set_CurrentState_Prefix),
                 AccessTools.TypeByName("TaleWorlds.MountAndBlade.Mission+State")) ? 1 : 0;
-            patchedCount += TryPatchMethod(
-                harmony,
-                "TaleWorlds.MountAndBlade.Mission",
-                "get_IsLoadingFinished",
-                nameof(Mission_get_IsLoadingFinished_Prefix)) ? 1 : 0;
-            patchedCount += TryPatchMethod(
-                harmony,
-                "TaleWorlds.MountAndBlade.Mission",
-                "get_IsLoadingFinished",
-                nameof(Mission_get_IsLoadingFinished_Postfix)) ? 1 : 0;
+            if (ExperimentalFeatures.EnableBattleShellStartupDiagnostics)
+            {
+                patchedCount += TryPatchMethod(
+                    harmony,
+                    "TaleWorlds.MountAndBlade.Mission",
+                    "get_IsLoadingFinished",
+                    nameof(Mission_get_IsLoadingFinished_Prefix)) ? 1 : 0;
+                patchedCount += TryPatchMethod(
+                    harmony,
+                    "TaleWorlds.MountAndBlade.Mission",
+                    "get_IsLoadingFinished",
+                    nameof(Mission_get_IsLoadingFinished_Postfix)) ? 1 : 0;
+            }
             patchedCount += TryPatchMethod(
                 harmony,
                 "TaleWorlds.MountAndBlade.Mission",
@@ -367,58 +370,61 @@ namespace CoopSpectator.Patches
         {
             _runtimeHarmony = harmony;
             int patchedCount = 0;
-            patchedCount += TryPatchMethod(
-                harmony,
-                "TaleWorlds.MountAndBlade.MissionState",
-                "LoadMission",
-                nameof(MissionState_LoadMission_DiagnosticsOnly_Prefix)) ? 1 : 0;
-            patchedCount += TryPatchPostfixMethod(
-                harmony,
-                "TaleWorlds.MountAndBlade.MissionState",
-                "LoadMission",
-                nameof(MissionState_LoadMission_DiagnosticsOnly_Postfix)) ? 1 : 0;
-            patchedCount += TryPatchMethod(
-                harmony,
-                "TaleWorlds.MountAndBlade.MissionState",
-                "TickLoading",
-                nameof(MissionState_TickLoading_Prefix),
-                typeof(float)) ? 1 : 0;
-            patchedCount += TryPatchPostfixMethod(
-                harmony,
-                "TaleWorlds.MountAndBlade.MissionState",
-                "TickLoading",
-                nameof(MissionState_TickLoading_Postfix),
-                typeof(float)) ? 1 : 0;
-            patchedCount += TryPatchMethod(
-                harmony,
-                "TaleWorlds.MountAndBlade.Mission",
-                "Initialize",
-                nameof(Mission_Initialize_Prefix)) ? 1 : 0;
-            patchedCount += TryPatchPostfixMethod(
-                harmony,
-                "TaleWorlds.MountAndBlade.Mission",
-                "Initialize",
-                nameof(Mission_Initialize_Postfix)) ? 1 : 0;
-            patchedCount += TryPatchMethod(
-                harmony,
-                "TaleWorlds.MountAndBlade.Mission",
-                "get_IsLoadingFinished",
-                nameof(Mission_get_IsLoadingFinished_Prefix)) ? 1 : 0;
-            patchedCount += TryPatchPostfixMethod(
-                harmony,
-                "TaleWorlds.MountAndBlade.Mission",
-                "get_IsLoadingFinished",
-                nameof(Mission_get_IsLoadingFinished_Postfix)) ? 1 : 0;
+            if (ExperimentalFeatures.EnableBattleShellStartupDiagnostics)
+            {
+                patchedCount += TryPatchMethod(
+                    harmony,
+                    "TaleWorlds.MountAndBlade.MissionState",
+                    "LoadMission",
+                    nameof(MissionState_LoadMission_DiagnosticsOnly_Prefix)) ? 1 : 0;
+                patchedCount += TryPatchPostfixMethod(
+                    harmony,
+                    "TaleWorlds.MountAndBlade.MissionState",
+                    "LoadMission",
+                    nameof(MissionState_LoadMission_DiagnosticsOnly_Postfix)) ? 1 : 0;
+                patchedCount += TryPatchMethod(
+                    harmony,
+                    "TaleWorlds.MountAndBlade.MissionState",
+                    "TickLoading",
+                    nameof(MissionState_TickLoading_Prefix),
+                    typeof(float)) ? 1 : 0;
+                patchedCount += TryPatchPostfixMethod(
+                    harmony,
+                    "TaleWorlds.MountAndBlade.MissionState",
+                    "TickLoading",
+                    nameof(MissionState_TickLoading_Postfix),
+                    typeof(float)) ? 1 : 0;
+                patchedCount += TryPatchMethod(
+                    harmony,
+                    "TaleWorlds.MountAndBlade.Mission",
+                    "Initialize",
+                    nameof(Mission_Initialize_Prefix)) ? 1 : 0;
+                patchedCount += TryPatchPostfixMethod(
+                    harmony,
+                    "TaleWorlds.MountAndBlade.Mission",
+                    "Initialize",
+                    nameof(Mission_Initialize_Postfix)) ? 1 : 0;
+                patchedCount += TryPatchMethod(
+                    harmony,
+                    "TaleWorlds.MountAndBlade.Mission",
+                    "get_IsLoadingFinished",
+                    nameof(Mission_get_IsLoadingFinished_Prefix)) ? 1 : 0;
+                patchedCount += TryPatchPostfixMethod(
+                    harmony,
+                    "TaleWorlds.MountAndBlade.Mission",
+                    "get_IsLoadingFinished",
+                    nameof(Mission_get_IsLoadingFinished_Postfix)) ? 1 : 0;
+                patchedCount += TryPatchMethod(
+                    harmony,
+                    "TaleWorlds.MountAndBlade.MissionBehavior",
+                    "OnMissionScreenPreLoad",
+                    nameof(MissionBehavior_OnMissionScreenPreLoad_DiagnosticsOnly_Prefix)) ? 1 : 0;
+            }
             patchedCount += TryPatchMethod(
                 harmony,
                 "TaleWorlds.MountAndBlade.MissionState",
                 "FinishMissionLoading",
                 nameof(MissionState_FinishMissionLoading_DiagnosticsOnly_Prefix)) ? 1 : 0;
-            patchedCount += TryPatchMethod(
-                harmony,
-                "TaleWorlds.MountAndBlade.MissionBehavior",
-                "OnMissionScreenPreLoad",
-                nameof(MissionBehavior_OnMissionScreenPreLoad_DiagnosticsOnly_Prefix)) ? 1 : 0;
             patchedCount += TryPatchMethod(
                 harmony,
                 "TaleWorlds.MountAndBlade.View.MissionViews.Sound.MusicBattleMissionView",
@@ -2279,6 +2285,9 @@ namespace CoopSpectator.Patches
 
         private static bool ShouldLogMissionStartupObservation(Mission mission)
         {
+            if (!ExperimentalFeatures.EnableBattleShellStartupDiagnostics)
+                return false;
+
             if (mission == null)
                 return false;
 

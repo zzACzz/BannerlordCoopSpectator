@@ -1,0 +1,12 @@
+<Prefab>
+  <Constants />
+  <VisualDefinitions />
+  <Window>
+    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" DoNotAcceptEvents="true">
+      <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="250" SuggestedHeight="42" Position="@Position" PositionXOffset="-125" PositionYOffset="-54" IsVisible="@IsVisible" DoNotAcceptEvents="true">
+        <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="BlankWhiteSquare_9" Color="#11100EE0" DoNotAcceptEvents="true" />
+        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Brush="ScoreboardDefaultFontBrush" Brush.FontSize="22" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@HintText" DoNotAcceptEvents="true" />
+      </Widget>
+    </Widget>
+  </Window>
+</Prefab>

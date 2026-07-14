@@ -39,6 +39,7 @@ namespace CoopSpectator.UI
         private const string CommanderDeploymentMovieName = "OrderOfBattle";
         private const string CommanderDeploymentOrderMovieName = "OrderRadial";
         private const string CommanderSiegeMachineDeploymentMovieName = "Siege";
+        private const string AiControlHintMovieName = "CoopBattleAiControlHint";
         private static readonly bool EnableManualSiegeCommanderDeployment = true;
         private const float RefreshIntervalSeconds = 0.15f;
         private const float InitialOverlayDelaySeconds = 0.75f;
@@ -53,20 +54,25 @@ namespace CoopSpectator.UI
         private static readonly TimeSpan LocalSpawnOverlaySuppressionDuration = TimeSpan.FromSeconds(2.5);
         private static readonly TimeSpan LocalSpawnPendingTimeout = TimeSpan.FromSeconds(20);
         private static readonly TimeSpan LocalSpawnPendingResendInterval = TimeSpan.FromSeconds(1.5);
+        private static readonly TimeSpan AgentControlRequestTimeout = TimeSpan.FromSeconds(5);
         private const int LocalSpawnPendingMaxRequestAttempts = 8;
         private static int _activeCameraPreviewAgentIndex = -1;
         private static string _activeCameraPreviewEntryId = string.Empty;
+        private static int _activeAiObservationAgentIndex = -1;
         private static bool _commanderDeploymentOrderOfBattleActive;
         private static bool _commanderDeploymentPlacementInputActive;
         private static bool _commanderBattleOrderActive;
         private float _commanderDeploymentBoundaryRefreshTimer;
 
         private GauntletLayer _gauntletLayer;
+        private GauntletLayer _aiControlHintLayer;
         private GauntletMovieIdentifier _movie;
+        private GauntletMovieIdentifier _aiControlHintMovie;
         private GauntletMovieIdentifier _commanderDeploymentOrderMovie;
         private GauntletMovieIdentifier _commanderBattleOrderMovie;
         private GauntletMovieIdentifier _commanderSiegeMachineDeploymentMovie;
         private ViewModel _viewModel;
+        private CoopBattleAiControlHintVM _aiControlHintVm;
         private OrderOfBattleVM _commanderDeploymentViewModel;
         private MissionOrderVM _commanderDeploymentOrderVm;
         private MissionOrderVM _commanderBattleOrderVm;
@@ -103,6 +109,8 @@ namespace CoopSpectator.UI
         private bool _spectatorOverlayHidden;
         private DateTime _overlaySuppressedUntilUtc = DateTime.MinValue;
         private float _reopenSelectionHotkeyCooldown;
+        private float _agentControlHotkeyCooldown;
+        private bool _wasAiObservationActive;
         private string _lastAppliedRefreshKey = string.Empty;
         private bool _localSpawnPending;
         private bool _localSpawnPendingWaitsForDeployment;
@@ -150,6 +158,9 @@ namespace CoopSpectator.UI
             _commanderBattleFocusedFormationsCache = null;
             _commanderDeploymentPlacementInputActive = false;
             _commanderBattleOrderActive = false;
+            _activeAiObservationAgentIndex = -1;
+            _wasAiObservationActive = false;
+            _agentControlHotkeyCooldown = 0f;
             ClearLocalSpawnPending("mission-screen-initialize");
             ResetSelectionFlow("mission-screen-initialize");
             ModLogger.Info("CoopMissionSelectionView: OnMissionScreenInitialize, coop selection shell init deferred.");
@@ -162,8 +173,12 @@ namespace CoopSpectator.UI
             if (!GameNetwork.IsClient || !ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
                 return;
 
+            CoopBattleAgentControlRuntimeState.ExpirePendingClientRequest(AgentControlRequestTimeout);
             bool hasLocalControlledAgent = HasLocalControlledAgent();
-            if (_hadLocalControlledAgent && !hasLocalControlledAgent)
+            bool aiControlHotkeyConsumed = TryHandleAiControlHotkey(dt);
+            bool suppressAgentLossFlow = CoopBattleAgentControlRuntimeState.IsClientAiObservationOrTransitionActive();
+            TryTickAiControlObservationPresentation();
+            if (_hadLocalControlledAgent && !hasLocalControlledAgent && !suppressAgentLossFlow)
             {
                 ClearLocalSpawnPending("lost-local-agent");
                 _overlaySuppressedUntilUtc = DateTime.MinValue;
@@ -176,9 +191,11 @@ namespace CoopSpectator.UI
             }
 
             _hadLocalControlledAgent = hasLocalControlledAgent;
-            TryHandleStartBattleHotkey(dt, hasLocalControlledAgent);
+            if (!aiControlHotkeyConsumed)
+                TryHandleStartBattleHotkey(dt, hasLocalControlledAgent);
             TryShowStartBattleInstruction(hasLocalControlledAgent);
-            TryHandleReopenSelectionHotkey(dt, hasLocalControlledAgent);
+            if (!aiControlHotkeyConsumed)
+                TryHandleReopenSelectionHotkey(dt, hasLocalControlledAgent);
             TryTickCommanderDeploymentViewModel();
             TryCompleteAutoDeployCaptainAssignmentRestoration();
             TryTickCommanderDeploymentBoundaries(dt);
@@ -212,6 +229,7 @@ namespace CoopSpectator.UI
                 ReleaseOverlayInput();
                 ReleaseCommanderBattleOrderBridge("mission-screen-finalize");
                 ReleaseCurrentMovie();
+                ReleaseAiControlHintLayer();
                 CoopSiegeDeploymentBoundaryRuntime.TryRemoveVisibleDeploymentBoundaryMarkers(
                     Mission,
                     MissionScreen,
@@ -233,6 +251,8 @@ namespace CoopSpectator.UI
             }
 
             _currentScreen = CoopSelectionScreen.None;
+            _activeAiObservationAgentIndex = -1;
+            _wasAiObservationActive = false;
             _reconnectSelectionContractActive = false;
             _lastReconnectSelectionContractLogKey = string.Empty;
             _lastCommanderBattleOrderBridgeContextKey = string.Empty;
@@ -312,6 +332,14 @@ namespace CoopSpectator.UI
         {
             if (_gauntletLayer == null)
                 return;
+
+            if (CoopBattleAgentControlRuntimeState.IsClientAiObservationOrTransitionActive())
+            {
+                ReleaseOverlayInput();
+                ReleaseCurrentMovie();
+                UpdateOverlayInputState(false);
+                return;
+            }
 
             CoopSelectionUiSnapshot snapshot = BuildCurrentSnapshot(hasLocalControlledAgent);
             CoopSelectionScreen desiredScreen = DetermineDesiredScreen(snapshot);
@@ -1970,9 +1998,19 @@ namespace CoopSpectator.UI
                 IsSameAgent(orderController.Owner, mainAgent);
             Agent localMainAgent = mainAgent;
             bool hasDelegatedFormationControl =
+                CoopMissionNetworkBridge.TryResolveAuthorizedFormationIndices(
+                    mission,
+                    team,
+                    controlledEntryId,
+                    out List<int> authorizedFormationIndices,
+                    out string authorityRole) &&
+                authorizedFormationIndices.Count > 0 &&
+                string.Equals(authorityRole, "delegated-captain", StringComparison.Ordinal) &&
                 IsSameAgent(orderController.Owner, mainAgent) &&
                 team.FormationsIncludingEmpty.Any(formation =>
-                    formation != null && IsSameAgent(formation.PlayerOwner, localMainAgent));
+                    formation != null &&
+                    authorizedFormationIndices.Contains(formation.Index) &&
+                    IsSameAgent(formation.PlayerOwner, localMainAgent));
             if (!isExactCommanderEntry && !hasDelegatedFormationControl)
             {
                 unavailableReason = "not-local-commander-or-delegated-captain";
@@ -5010,6 +5048,7 @@ namespace CoopSpectator.UI
                 ReleaseOverlayInput();
                 ReleaseCommanderBattleOrderBridge("cleanup-layer-state");
                 ReleaseCurrentMovie();
+                ReleaseAiControlHintLayer();
 
                 if (_gauntletLayer != null)
                 {
@@ -5342,14 +5381,41 @@ namespace CoopSpectator.UI
                 return false;
 
             if (followedAgent == null)
-                return _activeCameraPreviewAgentIndex >= 0;
+                return _activeCameraPreviewAgentIndex >= 0 || _activeAiObservationAgentIndex >= 0;
 
             if (!followedAgent.IsActive())
                 return false;
 
-            return TryGetActiveCameraPreviewAgent(out Agent previewAgent) &&
+            return TryGetActiveCameraFollowAgent(out Agent previewAgent) &&
                    previewAgent != null &&
                    previewAgent.Index == followedAgent.Index;
+        }
+
+        internal static bool TryGetActiveCameraFollowAgent(out Agent agent)
+        {
+            if (TryGetActiveCameraPreviewAgent(out agent))
+                return true;
+
+            agent = null;
+            Mission mission = Mission.Current;
+            if (_activeAiObservationAgentIndex < 0 || mission == null)
+                return false;
+
+            if (!CoopBattleAgentControlRuntimeState.TryGetActiveClientObservedAgent(mission, out Agent observedAgent) ||
+                observedAgent.Index != _activeAiObservationAgentIndex ||
+                !observedAgent.IsCameraAttachable())
+            {
+                return false;
+            }
+
+            agent = observedAgent;
+            return true;
+        }
+
+        internal static bool IsAiControlObservationActive()
+        {
+            return _activeAiObservationAgentIndex >= 0 &&
+                   CoopBattleAgentControlRuntimeState.IsClientAiObserved();
         }
 
         private static void SetActiveCameraPreviewTarget(Agent previewAgent, string entryId)
@@ -5478,9 +5544,172 @@ namespace CoopSpectator.UI
             return snapshot.ClassRefreshKey ?? string.Empty;
         }
 
+        private bool TryHandleAiControlHotkey(float dt)
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return false;
+
+            _agentControlHotkeyCooldown -= dt;
+            if (!CoopBattleAgentControlRuntimeState.TryGetClientState(out CoopBattleAgentControlState state) ||
+                !state.IsAiObserved ||
+                !Input.IsKeyPressed(InputKey.H))
+            {
+                return false;
+            }
+
+            if (_agentControlHotkeyCooldown > 0f ||
+                CoopBattleAgentControlRuntimeState.IsClientReclaimTransitionPending())
+            {
+                return true;
+            }
+
+            _agentControlHotkeyCooldown = ReopenSelectionHotkeyCooldownSeconds;
+            if (CoopBattleNetworkRequestTransport.TryReclaimAiObservedAgent(
+                    state.AgentIndex,
+                    "AI observation H hotkey"))
+            {
+                InformationManager.DisplayMessage(
+                    new InformationMessage("Coop Battle: returning control..."));
+            }
+
+            return true;
+        }
+
+        private void TryTickAiControlObservationPresentation()
+        {
+            Agent observedAgent = null;
+            bool hasActiveObservedAgent =
+                CoopBattleAgentControlRuntimeState.IsClientAiObserved() &&
+                CoopBattleAgentControlRuntimeState.TryGetActiveClientObservedAgent(Mission, out observedAgent) &&
+                observedAgent != null &&
+                observedAgent.IsCameraAttachable();
+
+            if (hasActiveObservedAgent)
+            {
+                bool targetChanged = _activeAiObservationAgentIndex != observedAgent.Index;
+                if (!_wasAiObservationActive || targetChanged)
+                {
+                    ReleaseOverlayInput();
+                    ReleaseCurrentMovie();
+                    _activeAiObservationAgentIndex = observedAgent.Index;
+
+                    try
+                    {
+                        if (Mission != null)
+                        {
+                            Mission.MainAgent = null;
+                            Mission.MainAgentServer = null;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        ModLogger.Info("CoopMissionSelectionView: failed to release local main agent for AI camera: " + ex.Message);
+                    }
+
+                    TrySetMissionScreenPreviewFollowTarget(MissionScreen, observedAgent);
+                    if (!_wasAiObservationActive)
+                    {
+                        InformationManager.DisplayMessage(
+                            new InformationMessage("Coop Battle: AI has control. Press H to return control."));
+                    }
+                }
+
+                TryEnsureAiControlHintLayer();
+                _aiControlHintVm?.Update(observedAgent, ResolveMissionScreenCombatCamera());
+                _wasAiObservationActive = true;
+                return;
+            }
+
+            _aiControlHintVm?.Hide();
+            if (_wasAiObservationActive)
+            {
+                bool playerControlRestored = false;
+                if (CoopBattleAgentControlRuntimeState.TryGetClientState(out CoopBattleAgentControlState state) &&
+                    state.Mode == CoopBattleAgentControlMode.PlayerControlled &&
+                    state.AgentIndex >= 0)
+                {
+                    playerControlRestored = CoopMissionNetworkBridge.TrySynchronizeClientMainAgentWithControlState(
+                        Mission,
+                        state.Mode,
+                        state.AgentIndex,
+                        out _);
+                    if (!playerControlRestored &&
+                        CoopBattleAgentControlRuntimeState.TryResolveAgent(
+                            Mission,
+                            state.AgentIndex,
+                            requireActive: true,
+                            out _))
+                    {
+                        return;
+                    }
+                }
+
+                TryResetMissionScreenCameraPreviewState(MissionScreen);
+                if (playerControlRestored)
+                {
+                    InformationManager.DisplayMessage(
+                        new InformationMessage("Coop Battle: control returned."));
+                }
+            }
+
+            _activeAiObservationAgentIndex = -1;
+            _wasAiObservationActive = false;
+        }
+
+        private void TryEnsureAiControlHintLayer()
+        {
+            if (_aiControlHintLayer != null || MissionScreen == null)
+                return;
+
+            try
+            {
+                _aiControlHintLayer = new GauntletLayer("CoopAiControlHintLayer", ViewOrderPriority + 1, false)
+                {
+                    IsFocusLayer = false
+                };
+                MissionScreen.AddLayer(_aiControlHintLayer);
+                _aiControlHintVm = new CoopBattleAiControlHintVM();
+                _aiControlHintMovie = _aiControlHintLayer.LoadMovie(AiControlHintMovieName, _aiControlHintVm);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: failed to initialize AI control hint layer: " + ex.Message);
+                ReleaseAiControlHintLayer();
+            }
+        }
+
+        private void ReleaseAiControlHintLayer()
+        {
+            try
+            {
+                _aiControlHintVm?.Hide();
+                if (_aiControlHintLayer != null && _aiControlHintMovie != null)
+                    _aiControlHintLayer.ReleaseMovie(_aiControlHintMovie);
+
+                _aiControlHintMovie = null;
+                _aiControlHintVm?.OnFinalize();
+                _aiControlHintVm = null;
+                if (_aiControlHintLayer != null)
+                {
+                    MissionScreen?.RemoveLayer(_aiControlHintLayer);
+                    _aiControlHintLayer = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionSelectionView: failed to release AI control hint layer: " + ex.Message);
+                _aiControlHintMovie = null;
+                _aiControlHintVm = null;
+                _aiControlHintLayer = null;
+            }
+        }
+
         private void TryHandleStartBattleHotkey(float dt, bool hasLocalControlledAgent)
         {
             if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
+                return;
+
+            if (CoopBattleAgentControlRuntimeState.IsClientAiObservationOrTransitionActive())
                 return;
 
             _startBattleHotkeyCooldown -= dt;
@@ -5567,6 +5796,9 @@ namespace CoopSpectator.UI
             if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
                 return;
 
+            if (CoopBattleAgentControlRuntimeState.IsClientAiObservationOrTransitionActive())
+                return;
+
             _reopenSelectionHotkeyCooldown -= dt;
             if (_reopenSelectionHotkeyCooldown > 0f || hasLocalControlledAgent || !_spectatorOverlayHidden || !Input.IsKeyPressed(InputKey.H))
                 return;
@@ -5580,6 +5812,9 @@ namespace CoopSpectator.UI
         internal static bool HasLocalControlledAgent()
         {
             if (!GameNetwork.IsClient)
+                return false;
+
+            if (CoopBattleAgentControlRuntimeState.IsClientAiObserved())
                 return false;
 
             Agent mainAgent = Agent.Main;

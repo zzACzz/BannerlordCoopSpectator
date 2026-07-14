@@ -259,6 +259,7 @@ namespace CoopSpectator.Infrastructure
                 migrated |= CoopBattleSpawnRuntimeState.TryMigratePeerIndex(previousPeerIndex, currentPeerIndex, source);
                 migrated |= CoopBattlePeerLifecycleRuntimeState.TryMigratePeerIndex(previousPeerIndex, currentPeerIndex, source);
                 migrated |= CoopBattlePeerSessionState.TryMigratePeerIndex(previousPeerIndex, currentPeerIndex, source);
+                migrated |= CoopBattleAgentControlRuntimeState.TryMigratePeerIndex(previousPeerIndex, currentPeerIndex, source);
                 migrated |= TryMigrateActiveBattleReconnectFinalizeGate(previousPeerIndex, currentPeerIndex, source);
 
                 _playerIdByPeerIndex.Remove(previousPeerIndex);

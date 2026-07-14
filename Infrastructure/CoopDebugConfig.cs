@@ -14,6 +14,7 @@ namespace CoopSpectator.Infrastructure
         private const string EnvOrderOfBattleDiagnostics = "COOPSPECTATOR_OOB_DIAGNOSTICS";
         private const string EnvPossessionDiagnostics = "COOPSPECTATOR_POSSESSION_DIAGNOSTICS";
         private const string EnvMoraleDiagnostics = "COOPSPECTATOR_MORALE_DIAGNOSTICS";
+        private const string EnvCombatModelDiagnostics = "COOPSPECTATOR_COMBAT_MODEL_DIAGNOSTICS";
         private const double SharedDebugOverrideCacheSeconds = 1.0d;
         private const string SharedPossessionDiagnosticsKey = "possession";
         private const string SharedMoraleDiagnosticsKey = "morale";
@@ -44,6 +45,9 @@ namespace CoopSpectator.Infrastructure
             _moraleDiagnosticsRuntimeOverride ??
             GetSharedMoraleDiagnosticsOverride() ??
             GetEnvBool(EnvMoraleDiagnostics);
+
+        /// <summary>Enable per-agent combat-model damage and projectile samples.</summary>
+        public static bool CombatModelDiagnostics => GetEnvBool(EnvCombatModelDiagnostics);
 
         public static void SetPossessionDiagnosticsRuntimeOverride(bool? enabled)
         {

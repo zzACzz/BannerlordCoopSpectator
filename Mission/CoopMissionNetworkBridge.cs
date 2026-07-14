@@ -284,6 +284,61 @@ namespace CoopSpectator.MissionBehaviors
             return CoopBattleSpawnBridgeFile.WriteForceRespawnableRequest(source ?? "network-fallback force-respawnable");
         }
 
+        public static bool TryDelegateCurrentAgentToAi(int expectedAgentIndex, string source)
+        {
+            return TrySendAgentControlRequest(
+                CoopBattleAgentControlRequestKind.DelegateToAi,
+                expectedAgentIndex,
+                source);
+        }
+
+        public static bool TryReclaimAiObservedAgent(int expectedAgentIndex, string source)
+        {
+            return TrySendAgentControlRequest(
+                CoopBattleAgentControlRequestKind.ReclaimFromAi,
+                expectedAgentIndex,
+                source);
+        }
+
+        private static bool TrySendAgentControlRequest(
+            CoopBattleAgentControlRequestKind requestKind,
+            int expectedAgentIndex,
+            string source)
+        {
+            if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive || expectedAgentIndex < 0)
+                return false;
+
+            int requestId = CoopBattleAgentControlRuntimeState.BeginClientRequest(requestKind, expectedAgentIndex);
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(new CoopBattleAgentControlRequestMessage(
+                    requestKind,
+                    expectedAgentIndex,
+                    requestId));
+                GameNetwork.EndModuleEventAsClient();
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: sent agent control request. " +
+                    "Kind=" + requestKind +
+                    " ExpectedAgentIndex=" + expectedAgentIndex +
+                    " RequestId=" + requestId +
+                    " Source=" + (source ?? "unknown"));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                CoopBattleAgentControlRuntimeState.CancelPendingClientRequest(requestId);
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: agent control request send failed. " +
+                    "Kind=" + requestKind +
+                    " ExpectedAgentIndex=" + expectedAgentIndex +
+                    " RequestId=" + requestId +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.Message);
+                return false;
+            }
+        }
+
         public static bool TryAcknowledgeBattleSnapshot(int transmissionId, string source)
         {
             if (transmissionId <= 0)
@@ -1620,6 +1675,7 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly TimeSpan BattleSnapshotAssemblyIdleTimeout = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan BattleSnapshotBootstrapRequestRetryDelay = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan BattleReconnectFinalizeReadyAckRetryDelay = TimeSpan.FromMilliseconds(900);
+        private static readonly TimeSpan BootstrapDependentPeerPayloadSyncInterval = TimeSpan.FromMilliseconds(200);
         private static readonly FieldInfo FormationEnforceNotSplittableByAiField =
             typeof(Formation).GetField("_enforceNotSplittableByAI", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo CommanderDeploymentPointWeaponsField =
@@ -1654,6 +1710,7 @@ namespace CoopSpectator.MissionBehaviors
         private readonly Dictionary<int, string> _lastSentBattleSnapshotPayloadByPeer = new Dictionary<int, string>();
         private readonly Dictionary<int, DateTime> _lastCompletedBattleSnapshotTransmissionUtcByPeer = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, DateTime> _lastBattleSnapshotRetryUtcByPeer = new Dictionary<int, DateTime>();
+        private readonly Dictionary<int, int> _lastSentAgentControlRevisionByPeer = new Dictionary<int, int>();
         private readonly Dictionary<string, PendingPayloadTransmission> _pendingPayloadsByKey = new Dictionary<string, PendingPayloadTransmission>(StringComparer.Ordinal);
         private readonly Dictionary<string, PayloadAssemblyState> _clientPayloadAssemblies = new Dictionary<string, PayloadAssemblyState>(StringComparer.Ordinal);
         private readonly Dictionary<int, BattleSnapshotTransportState> _battleSnapshotTransportStatesByPeer = new Dictionary<int, BattleSnapshotTransportState>();
@@ -1666,6 +1723,8 @@ namespace CoopSpectator.MissionBehaviors
             new Dictionary<BattleSideEnum, string>();
         private readonly Dictionary<string, int> _lastObservedFormationUnitCountByTeamAndIndex =
             new Dictionary<string, int>(StringComparer.Ordinal);
+        private readonly Dictionary<NetworkCommunicator, HashSet<string>> _sentSiegeMissionObjectMapKeysByPeer =
+            new Dictionary<NetworkCommunicator, HashSet<string>>();
         private static readonly Dictionary<int, int> _expectedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _acknowledgedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private static int _clientObservedBattleSnapshotTransmissionId;
@@ -1683,10 +1742,14 @@ namespace CoopSpectator.MissionBehaviors
         private string _cachedBattleSnapshotV2PayloadHash = string.Empty;
         private CoopBattleSnapshotCompressionKind _cachedBattleSnapshotV2CompressionKind = CoopBattleSnapshotCompressionKind.None;
         private CoopBattleSnapshotPayloadEncoding _cachedBattleSnapshotV2PayloadEncoding = CoopBattleSnapshotPayloadEncoding.JsonUtf8;
+        private long _cachedMaterializedAgentEntryContentRevision = -1;
+        private CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot _cachedMaterializedAgentEntrySnapshot;
+        private string _cachedMaterializedAgentEntryComparisonJson = string.Empty;
         private int _nextTransmissionId = 1;
         private bool _persistedHostedLocalPeerMarker;
         private DateTime _lastClientBattleSnapshotBootstrapRequestUtc = DateTime.MinValue;
         private DateTime _lastClientBattleReconnectFinalizeReadyAckUtc = DateTime.MinValue;
+        private DateTime _nextBootstrapDependentPeerPayloadSyncUtc = DateTime.MinValue;
         private int _lastClientBattleReconnectFinalizeReadyAckTransmissionId;
         private string _lastClientBattleReconnectFinalizeReadinessSummary = string.Empty;
 
@@ -1704,8 +1767,6 @@ namespace CoopSpectator.MissionBehaviors
             CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
             if (bridge == null || bridge._clientBattleSnapshotAssembliesByTransmission.Count <= 0)
                 return false;
-
-            bridge.TryRunClientBattleSnapshotRecoveryTick();
 
             BattleSnapshotClientAssemblyState assemblyState = bridge._clientBattleSnapshotAssembliesByTransmission.Values
                 .Where(state => state != null)
@@ -1760,6 +1821,7 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsServer)
             {
                 registerer.RegisterBaseHandler<CoopBattleSelectionClientRequestMessage>(HandleClientSelectionRequest);
+                registerer.RegisterBaseHandler<CoopBattleAgentControlRequestMessage>(HandleClientAgentControlRequest);
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentFormationAssignmentsMessage>(HandleClientCommanderDeploymentFormationAssignments);
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentSiegeMachineSelectionMessage>(HandleClientCommanderDeploymentSiegeMachineSelection);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotChunkRequestMessage>(HandleClientBattleSnapshotChunkRequest);
@@ -1772,6 +1834,7 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsClient)
             {
                 registerer.RegisterBaseHandler<CoopBattlePayloadChunkMessage>(HandleServerPayloadChunk);
+                registerer.RegisterBaseHandler<CoopBattleAgentControlStateMessage>(HandleServerAgentControlState);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotManifestMessage>(HandleServerBattleSnapshotManifest);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotChunkV2Message>(HandleServerBattleSnapshotChunkV2);
                 registerer.RegisterBaseHandler<CoopDelegatedCaptainAssignmentsStateMessage>(HandleServerDelegatedCaptainAssignmentsState);
@@ -1787,6 +1850,13 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             TrySyncBattleSnapshotPayloads();
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (nowUtc < _nextBootstrapDependentPeerPayloadSyncUtc)
+                return;
+
+            _nextBootstrapDependentPeerPayloadSyncUtc = nowUtc + BootstrapDependentPeerPayloadSyncInterval;
+            TrySyncAgentControlStates();
             TrySyncMaterializedAgentEntryPayloads();
             TrySyncEntryStatusPayloads();
         }
@@ -1800,7 +1870,6 @@ namespace CoopSpectator.MissionBehaviors
         public override void OnMissionTick(float dt)
         {
             base.OnMissionTick(dt);
-            TryRunClientBattleSnapshotRecoveryTick();
         }
 
         private void TryRunClientBattleSnapshotRecoveryTick()
@@ -1996,6 +2065,7 @@ namespace CoopSpectator.MissionBehaviors
             _lastSentBattleSnapshotPayloadByPeer.Remove(networkPeer.Index);
             _lastCompletedBattleSnapshotTransmissionUtcByPeer.Remove(networkPeer.Index);
             _lastBattleSnapshotRetryUtcByPeer.Remove(networkPeer.Index);
+            _lastSentAgentControlRevisionByPeer.Remove(networkPeer.Index);
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot));
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.EntryStatusSnapshot));
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.BattleSnapshot));
@@ -2016,6 +2086,7 @@ namespace CoopSpectator.MissionBehaviors
             _lastSentBattleSnapshotPayloadByPeer.Clear();
             _lastCompletedBattleSnapshotTransmissionUtcByPeer.Clear();
             _lastBattleSnapshotRetryUtcByPeer.Clear();
+            _lastSentAgentControlRevisionByPeer.Clear();
             _pendingPayloadsByKey.Clear();
             _clientPayloadAssemblies.Clear();
             _battleSnapshotTransportStatesByPeer.Clear();
@@ -2034,7 +2105,72 @@ namespace CoopSpectator.MissionBehaviors
             _lastClientBattleReconnectFinalizeReadyAckUtc = DateTime.MinValue;
             _lastClientBattleReconnectFinalizeReadyAckTransmissionId = 0;
             _lastClientBattleReconnectFinalizeReadinessSummary = string.Empty;
+            _cachedMaterializedAgentEntryContentRevision = -1;
+            _cachedMaterializedAgentEntrySnapshot = null;
+            _cachedMaterializedAgentEntryComparisonJson = string.Empty;
+            if (GameNetwork.IsServer)
+                CoopBattleAgentControlRuntimeState.ResetServer("CoopMissionNetworkBridge.OnRemoveBehavior");
+            if (GameNetwork.IsClient)
+                CoopBattleAgentControlRuntimeState.ResetClient("CoopMissionNetworkBridge.OnRemoveBehavior");
             base.OnRemoveBehavior();
+        }
+
+        private bool HandleClientAgentControlRequest(NetworkCommunicator peer, GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopBattleAgentControlRequestMessage message))
+                return false;
+
+            try
+            {
+                bool applied = CoopMissionSpawnLogic.TryHandleAgentControlRequest(
+                    Mission,
+                    peer,
+                    message.RequestKind,
+                    message.ExpectedAgentIndex,
+                    message.RequestId,
+                    "CoopMissionNetworkBridge",
+                    out CoopBattleAgentControlState state,
+                    out string reason);
+
+                if (state.PeerIndex < 0)
+                {
+                    MissionPeer missionPeer = peer?.GetComponent<MissionPeer>();
+                    Agent controlledAgent = missionPeer?.ControlledAgent;
+                    state = new CoopBattleAgentControlState(
+                        peer?.Index ?? -1,
+                        CoopBattleAgentControlMode.PlayerControlled,
+                        controlledAgent?.Index ?? -1,
+                        CoopBattleAuthorityState.GetSelectedEntryId(missionPeer),
+                        (controlledAgent?.Character as BasicCharacterObject)?.StringId,
+                        controlledAgent?.Team?.Side ?? BattleSideEnum.None,
+                        controlledAgent?.Team?.TeamIndex ?? -1,
+                        controlledAgent?.Formation?.Index ?? -1,
+                        false,
+                        false,
+                        0,
+                        message.RequestId,
+                        reason ?? string.Empty,
+                        DateTime.UtcNow);
+                }
+
+                TrySendAgentControlStateToPeer(peer, state, force: true);
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: handled agent control request. " +
+                    "Peer=" + (peer?.UserName ?? "null") +
+                    " Kind=" + message.RequestKind +
+                    " ExpectedAgentIndex=" + message.ExpectedAgentIndex +
+                    " RequestId=" + message.RequestId +
+                    " Applied=" + applied +
+                    " ResultMode=" + state.Mode +
+                    " ResultAgentIndex=" + state.AgentIndex +
+                    " Reason=" + (reason ?? "unknown"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopMissionNetworkBridge: agent control request handling failed: " + ex.Message);
+            }
+
+            return true;
         }
 
         private bool HandleClientSelectionRequest(NetworkCommunicator peer, GameNetworkMessage baseMessage)
@@ -2233,6 +2369,157 @@ namespace CoopSpectator.MissionBehaviors
                         "Side=" + message.AssignmentSide +
                         " Error=" + ex.GetType().Name + ":" + ex.Message);
                 }
+            }
+        }
+
+        private void HandleServerAgentControlState(GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopBattleAgentControlStateMessage message))
+                return;
+
+            NetworkCommunicator localPeer = GameNetwork.MyPeer;
+            bool changed = CoopBattleAgentControlRuntimeState.ApplyClientAuthoritativeState(
+                localPeer?.Index ?? -1,
+                message.Mode,
+                message.AgentIndex,
+                message.EntryId,
+                message.Side,
+                message.TeamIndex,
+                message.FormationIndex,
+                message.Revision,
+                message.AcknowledgedRequestId,
+                "CoopMissionNetworkBridge server state",
+                out CoopBattleAgentControlState previousState);
+
+            CoopBattleAgentControlMode synchronizedMode = message.Mode;
+            int synchronizedAgentIndex = message.AgentIndex;
+            if (CoopBattleAgentControlRuntimeState.TryGetClientState(out CoopBattleAgentControlState acceptedState))
+            {
+                synchronizedMode = acceptedState.Mode;
+                synchronizedAgentIndex = acceptedState.AgentIndex;
+            }
+
+            TrySynchronizeClientMainAgentWithControlState(
+                Mission,
+                synchronizedMode,
+                synchronizedAgentIndex,
+                out string mainAgentSyncResult);
+            if (!changed)
+                return;
+
+            ModLogger.Info(
+                "CoopMissionNetworkBridge: applied authoritative local agent control state. " +
+                "PreviousMode=" + previousState.Mode +
+                " Mode=" + message.Mode +
+                " AgentIndex=" + message.AgentIndex +
+                " Revision=" + message.Revision +
+                " AckRequestId=" + message.AcknowledgedRequestId +
+                " MainAgentSync=" + mainAgentSyncResult);
+        }
+
+        internal static bool TrySynchronizeClientMainAgentWithControlState(
+            Mission mission,
+            CoopBattleAgentControlMode mode,
+            int agentIndex,
+            out string result)
+        {
+            result = "not-applied";
+            if (!GameNetwork.IsClient || mission == null)
+            {
+                result = "client-mission-unavailable";
+                return false;
+            }
+
+            try
+            {
+                if (mode == CoopBattleAgentControlMode.AiObserved)
+                {
+                    bool controllerDetached = true;
+                    if (CoopBattleAgentControlRuntimeState.TryResolveAgent(
+                            mission,
+                            agentIndex,
+                            requireActive: true,
+                            out Agent observedAgent))
+                    {
+                        if (observedAgent.Controller == AgentControllerType.Player)
+                            observedAgent.Controller = AgentControllerType.None;
+
+                        controllerDetached = observedAgent.Controller != AgentControllerType.Player;
+                    }
+
+                    Agent currentMainAgent = mission.MainAgent;
+                    if (currentMainAgent != null && currentMainAgent.Index == agentIndex)
+                        mission.MainAgent = null;
+                    if (mission.MainAgentServer != null && mission.MainAgentServer.Index == agentIndex)
+                        mission.MainAgentServer = null;
+
+                    bool mainAgentDetached =
+                        (mission.MainAgent == null || mission.MainAgent.Index != agentIndex) &&
+                        (mission.MainAgentServer == null || mission.MainAgentServer.Index != agentIndex);
+                    bool detached = controllerDetached && mainAgentDetached;
+                    result = detached
+                        ? "ai-observed-client-control-detached"
+                        : (!controllerDetached
+                            ? "ai-observed-controller-detach-pending"
+                            : "ai-observed-main-agent-detach-pending");
+                    return detached;
+                }
+
+                if (mode != CoopBattleAgentControlMode.PlayerControlled || agentIndex < 0)
+                {
+                    result = "state-does-not-own-agent";
+                    return false;
+                }
+
+                if (!CoopBattleAgentControlRuntimeState.TryResolveAgent(
+                        mission,
+                        agentIndex,
+                        requireActive: true,
+                        out Agent controlledAgent))
+                {
+                    result = "controlled-agent-unavailable";
+                    return false;
+                }
+
+                MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+                if (localMissionPeer == null)
+                {
+                    result = "local-mission-peer-unavailable";
+                    return false;
+                }
+
+                if (!ReferenceEquals(localMissionPeer.ControlledAgent, controlledAgent) ||
+                    !ReferenceEquals(controlledAgent.MissionPeer, localMissionPeer) ||
+                    controlledAgent.Controller != AgentControllerType.Player)
+                {
+                    result = "native-control-attachment-pending";
+                    return false;
+                }
+
+                bool changed = false;
+                if (!ReferenceEquals(mission.MainAgent, controlledAgent))
+                {
+                    mission.MainAgent = controlledAgent;
+                    changed = true;
+                }
+                if (!ReferenceEquals(mission.MainAgentServer, controlledAgent))
+                {
+                    mission.MainAgentServer = controlledAgent;
+                    changed = true;
+                }
+
+                bool synchronized =
+                    ReferenceEquals(mission.MainAgent, controlledAgent) &&
+                    ReferenceEquals(mission.MainAgentServer, controlledAgent);
+                result = synchronized
+                    ? (changed ? "player-main-agent-restored" : "player-main-agent-already-current")
+                    : "player-main-agent-restore-pending";
+                return synchronized;
+            }
+            catch (Exception ex)
+            {
+                result = "exception:" + ex.GetType().Name;
+                return false;
             }
         }
 
@@ -2846,6 +3133,7 @@ namespace CoopSpectator.MissionBehaviors
                 side,
                 out string mapBuildDiagnostics);
             int sentCount = 0;
+            int skippedCount = 0;
             int failedCount = 0;
             var details = new List<string>();
             foreach (NetworkCommunicator peer in peers)
@@ -2853,10 +3141,26 @@ namespace CoopSpectator.MissionBehaviors
                 if (peer == null)
                     continue;
 
+                if (!_sentSiegeMissionObjectMapKeysByPeer.TryGetValue(peer, out HashSet<string> sentKeys))
+                {
+                    sentKeys = new HashSet<string>(StringComparer.Ordinal);
+                    _sentSiegeMissionObjectMapKeysByPeer[peer] = sentKeys;
+                }
+
                 foreach (SiegeMissionObjectIdMapEntry entry in entries)
                 {
                     if (entry == null || entry.MissionObjectId.Id < 0 || string.IsNullOrWhiteSpace(entry.Signature))
                         continue;
+
+                    string entryKey =
+                        entry.ObjectSide + "|" +
+                        entry.MissionObjectId.Id + "|" +
+                        entry.Signature;
+                    if (sentKeys.Contains(entryKey))
+                    {
+                        skippedCount++;
+                        continue;
+                    }
 
                     try
                     {
@@ -2868,6 +3172,7 @@ namespace CoopSpectator.MissionBehaviors
                             entry.ObjectTypeName,
                             entry.EntityName));
                         GameNetwork.EndModuleEventAsServer();
+                        sentKeys.Add(entryKey);
                         sentCount++;
                     }
                     catch (Exception ex)
@@ -2891,6 +3196,7 @@ namespace CoopSpectator.MissionBehaviors
                 " Entries=" + entries.Count +
                 " Peers=" + peers.Count +
                 " Sent=" + sentCount +
+                " SkippedAlreadySent=" + skippedCount +
                 " Failed=" + failedCount +
                 " Source=" + (source ?? "unknown") +
                 " Build={" + mapBuildDiagnostics + "}" +
@@ -5282,11 +5588,6 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
-            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
-            bridge?.ReapplyDelegatedFormationOwnership(
-                team,
-                "exact-battle-order-authority-resolve");
-
             TryResolveAuthorizedFormationIndices(
                 mission,
                 team,
@@ -5598,7 +5899,15 @@ namespace CoopSpectator.MissionBehaviors
                     ReferenceEquals(captainPeer.ControlledAgent, captainAgent) &&
                     captainAgent.IsActive())
                 {
-                    team.AssignPlayerAsSergeantOfFormation(captainPeer, formation.FormationIndex);
+                    OrderController captainOrderController = team.GetOrderControllerOf(captainAgent);
+                    bool requiresNativeSergeantAssignment =
+                        !ReferenceEquals(formation.PlayerOwner, captainAgent) ||
+                        captainOrderController == null ||
+                        !ReferenceEquals(captainOrderController.Owner, captainAgent) ||
+                        captainPeer.ControlledFormation == null;
+                    if (requiresNativeSergeantAssignment)
+                        team.AssignPlayerAsSergeantOfFormation(captainPeer, formation.FormationIndex);
+
                     formation.PlayerOwner = captainAgent;
                     if (voluntarilyAiControlledFormationIndices.Contains(formation.Index))
                         EnsureDelegatedFormationAiControl(formation);
@@ -7281,6 +7590,9 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.NetworkPeers == null)
                 return;
 
+            if (!TryGetCachedMaterializedAgentEntryPayload(out CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot snapshot, out string comparisonJson))
+                return;
+
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
                 if (!IsEligibleRemotePeer(peer))
@@ -7289,7 +7601,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (!AreBootstrapDependentPeerPayloadsReady(peer, out _))
                     continue;
 
-                TrySendMaterializedAgentEntrySnapshotToPeer(peer, force: false);
+                TrySendMaterializedAgentEntrySnapshotToPeer(peer, force: false, snapshot, comparisonJson);
             }
         }
 
@@ -7309,8 +7621,68 @@ namespace CoopSpectator.MissionBehaviors
 
             TrySendMaterializedAgentEntrySnapshotToPeer(peer, force: true);
             TrySendEntryStatusToPeer(peer, force: true);
+            TrySendAgentControlStateToPeer(peer, force: true);
             foreach (BattleSideEnum side in _delegatedCaptainEntryIdByFormationIndexAndSide.Keys.ToArray())
                 TrySendDelegatedCaptainAssignmentStateToPeer(peer, side);
+        }
+
+        private void TrySyncAgentControlStates()
+        {
+            if (!GameNetwork.IsServer || GameNetwork.NetworkPeers == null)
+                return;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (!IsEligibleRemotePeer(peer))
+                    continue;
+
+                TrySendAgentControlStateToPeer(peer, force: false);
+            }
+        }
+
+        private void TrySendAgentControlStateToPeer(NetworkCommunicator peer, bool force)
+        {
+            if (peer == null ||
+                !CoopBattleAgentControlRuntimeState.TryGetServerState(peer.Index, out CoopBattleAgentControlState state))
+            {
+                return;
+            }
+
+            TrySendAgentControlStateToPeer(peer, state, force);
+        }
+
+        private void TrySendAgentControlStateToPeer(
+            NetworkCommunicator peer,
+            CoopBattleAgentControlState state,
+            bool force)
+        {
+            if (!IsEligibleRemotePeer(peer))
+                return;
+
+            if (!force &&
+                _lastSentAgentControlRevisionByPeer.TryGetValue(peer.Index, out int lastRevision) &&
+                lastRevision == state.Revision)
+            {
+                return;
+            }
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsServer(peer);
+                GameNetwork.WriteMessage(new CoopBattleAgentControlStateMessage(state));
+                GameNetwork.EndModuleEventAsServer();
+                _lastSentAgentControlRevisionByPeer[peer.Index] = state.Revision;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: failed to send agent control state. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " Mode=" + state.Mode +
+                    " AgentIndex=" + state.AgentIndex +
+                    " Revision=" + state.Revision +
+                    " Error=" + ex.Message);
+            }
         }
 
         private bool AreBootstrapDependentPeerPayloadsReady(NetworkCommunicator peer, out string readinessSummary)
@@ -7341,14 +7713,56 @@ namespace CoopSpectator.MissionBehaviors
             if (!IsEligibleRemotePeer(peer) || Mission == null)
                 return;
 
-            CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot snapshot =
-                CoopMissionSpawnLogic.BuildAuthoritativeMaterializedAgentEntrySnapshot(Mission, "CoopMissionNetworkBridge");
-            if (snapshot == null)
+            if (!TryGetCachedMaterializedAgentEntryPayload(out CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot snapshot, out string comparisonJson))
                 return;
 
-            string comparisonJson = SerializeComparableMaterializedAgentEntryPayload(snapshot);
-            if (string.IsNullOrWhiteSpace(comparisonJson))
+            TrySendMaterializedAgentEntrySnapshotToPeer(peer, force, snapshot, comparisonJson);
+        }
+
+        private bool TryGetCachedMaterializedAgentEntryPayload(
+            out CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot snapshot,
+            out string comparisonJson)
+        {
+            snapshot = CoopMissionSpawnLogic.BuildAuthoritativeMaterializedAgentEntrySnapshot(
+                Mission,
+                "CoopMissionNetworkBridge",
+                out long contentRevision);
+            comparisonJson = string.Empty;
+            if (snapshot == null)
+                return false;
+
+            if (_cachedMaterializedAgentEntrySnapshot == null ||
+                _cachedMaterializedAgentEntryContentRevision != contentRevision)
+            {
+                string rebuiltComparisonJson = SerializeComparableMaterializedAgentEntryPayload(snapshot);
+                if (string.IsNullOrWhiteSpace(rebuiltComparisonJson))
+                    return false;
+
+                _cachedMaterializedAgentEntryContentRevision = contentRevision;
+                _cachedMaterializedAgentEntrySnapshot = snapshot;
+                _cachedMaterializedAgentEntryComparisonJson = rebuiltComparisonJson;
+            }
+            else
+            {
+                snapshot = _cachedMaterializedAgentEntrySnapshot;
+            }
+
+            comparisonJson = _cachedMaterializedAgentEntryComparisonJson;
+            return !string.IsNullOrWhiteSpace(comparisonJson);
+        }
+
+        private void TrySendMaterializedAgentEntrySnapshotToPeer(
+            NetworkCommunicator peer,
+            bool force,
+            CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot snapshot,
+            string comparisonJson)
+        {
+            if (!IsEligibleRemotePeer(peer) ||
+                snapshot == null ||
+                string.IsNullOrWhiteSpace(comparisonJson))
+            {
                 return;
+            }
 
             string transmissionKey = BuildPendingTransmissionKey(peer.Index, CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot);
             bool hasPending = _pendingPayloadsByKey.TryGetValue(transmissionKey, out PendingPayloadTransmission pendingTransmission) &&
@@ -7383,17 +7797,20 @@ namespace CoopSpectator.MissionBehaviors
                     return;
 
                 _pendingPayloadsByKey[transmissionKey] = pendingTransmission;
-                ModLogger.Info(
-                    "CoopMissionNetworkBridge: queued payload transmission. " +
-                    "Peer=" + (peer.UserName ?? "null") +
-                    " Kind=" + CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot +
-                    " TransmissionId=" + pendingTransmission.TransmissionId +
-                    " Bytes=" + pendingTransmission.TotalBytes +
-                    (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
-                        ? " LogicalBytes=" + pendingTransmission.LogicalBytes
-                        : string.Empty) +
-                    " Chunks=" + pendingTransmission.ChunkCount +
-                    " ChunkBytes=" + CoopBattlePayloadChunkMessage.MaxChunkBytes);
+                if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: queued payload transmission. " +
+                        "Peer=" + (peer.UserName ?? "null") +
+                        " Kind=" + CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot +
+                        " TransmissionId=" + pendingTransmission.TransmissionId +
+                        " Bytes=" + pendingTransmission.TotalBytes +
+                        (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
+                            ? " LogicalBytes=" + pendingTransmission.LogicalBytes
+                            : string.Empty) +
+                        " Chunks=" + pendingTransmission.ChunkCount +
+                        " ChunkBytes=" + CoopBattlePayloadChunkMessage.MaxChunkBytes);
+                }
             }
 
             if (!TryFlushPendingPayload(peer, pendingTransmission))
@@ -7404,17 +7821,20 @@ namespace CoopSpectator.MissionBehaviors
 
             _pendingPayloadsByKey.Remove(transmissionKey);
             _lastSentMaterializedAgentEntryPayloadByPeer[peer.Index] = comparisonJson;
-            ModLogger.Info(
-                "CoopMissionNetworkBridge: completed payload transmission. " +
-                "Peer=" + (peer.UserName ?? "null") +
-                " Kind=" + CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot +
-                " TransmissionId=" + pendingTransmission.TransmissionId +
-                " Bytes=" + pendingTransmission.TotalBytes +
-                (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
-                    ? " LogicalBytes=" + pendingTransmission.LogicalBytes
-                    : string.Empty) +
-                " Chunks=" + pendingTransmission.ChunkCount +
-                " EntryCount=" + snapshot.EntryCount);
+            if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: completed payload transmission. " +
+                    "Peer=" + (peer.UserName ?? "null") +
+                    " Kind=" + CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot +
+                    " TransmissionId=" + pendingTransmission.TransmissionId +
+                    " Bytes=" + pendingTransmission.TotalBytes +
+                    (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
+                        ? " LogicalBytes=" + pendingTransmission.LogicalBytes
+                        : string.Empty) +
+                    " Chunks=" + pendingTransmission.ChunkCount +
+                    " EntryCount=" + snapshot.EntryCount);
+            }
         }
 
         private void TrySendEntryStatusToPeer(NetworkCommunicator peer, bool force)
@@ -7468,17 +7888,20 @@ namespace CoopSpectator.MissionBehaviors
                     return;
 
                 _pendingPayloadsByKey[transmissionKey] = pendingTransmission;
-                ModLogger.Info(
-                    "CoopMissionNetworkBridge: queued payload transmission. " +
-                    "Peer=" + (peer.UserName ?? "null") +
-                    " Kind=" + CoopBattlePayloadKind.EntryStatusSnapshot +
-                    " TransmissionId=" + pendingTransmission.TransmissionId +
-                    " Bytes=" + pendingTransmission.TotalBytes +
-                    (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
-                        ? " LogicalBytes=" + pendingTransmission.LogicalBytes
-                        : string.Empty) +
-                    " Chunks=" + pendingTransmission.ChunkCount +
-                    " ChunkBytes=" + CoopBattlePayloadChunkMessage.MaxChunkBytes);
+                if (ExperimentalFeatures.EnableBattleEntryStatusDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: queued payload transmission. " +
+                        "Peer=" + (peer.UserName ?? "null") +
+                        " Kind=" + CoopBattlePayloadKind.EntryStatusSnapshot +
+                        " TransmissionId=" + pendingTransmission.TransmissionId +
+                        " Bytes=" + pendingTransmission.TotalBytes +
+                        (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
+                            ? " LogicalBytes=" + pendingTransmission.LogicalBytes
+                            : string.Empty) +
+                        " Chunks=" + pendingTransmission.ChunkCount +
+                        " ChunkBytes=" + CoopBattlePayloadChunkMessage.MaxChunkBytes);
+                }
             }
 
             if (!TryFlushPendingPayload(peer, pendingTransmission))
@@ -7489,16 +7912,19 @@ namespace CoopSpectator.MissionBehaviors
 
             _pendingPayloadsByKey.Remove(transmissionKey);
             _lastSentStatusPayloadByPeer[peer.Index] = comparisonJson;
-            ModLogger.Info(
-                "CoopMissionNetworkBridge: completed payload transmission. " +
-                "Peer=" + (peer.UserName ?? "null") +
-                " Kind=" + CoopBattlePayloadKind.EntryStatusSnapshot +
-                " TransmissionId=" + pendingTransmission.TransmissionId +
-                " Bytes=" + pendingTransmission.TotalBytes +
-                (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
-                    ? " LogicalBytes=" + pendingTransmission.LogicalBytes
-                    : string.Empty) +
-                " Chunks=" + pendingTransmission.ChunkCount);
+            if (ExperimentalFeatures.EnableBattleEntryStatusDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: completed payload transmission. " +
+                    "Peer=" + (peer.UserName ?? "null") +
+                    " Kind=" + CoopBattlePayloadKind.EntryStatusSnapshot +
+                    " TransmissionId=" + pendingTransmission.TransmissionId +
+                    " Bytes=" + pendingTransmission.TotalBytes +
+                    (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
+                        ? " LogicalBytes=" + pendingTransmission.LogicalBytes
+                        : string.Empty) +
+                    " Chunks=" + pendingTransmission.ChunkCount);
+            }
         }
 
         private void TrySyncBattleSnapshotPayloads()
@@ -8220,16 +8646,25 @@ namespace CoopSpectator.MissionBehaviors
                 lastSentPayloadByPeer[peer.Index] = pendingTransmission.ComparisonKey;
             if (pendingTransmission.PayloadKind == CoopBattlePayloadKind.BattleSnapshot)
                 MarkBattleSnapshotTransmissionCompleted(peer.Index);
-            ModLogger.Info(
-                "CoopMissionNetworkBridge: completed payload transmission. " +
-                "Peer=" + (peer.UserName ?? "null") +
-                " Kind=" + pendingTransmission.PayloadKind +
-                " TransmissionId=" + pendingTransmission.TransmissionId +
-                " Bytes=" + pendingTransmission.TotalBytes +
-                (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
-                    ? " LogicalBytes=" + pendingTransmission.LogicalBytes
-                    : string.Empty) +
-                " Chunks=" + pendingTransmission.ChunkCount);
+            bool logCompletion =
+                pendingTransmission.PayloadKind == CoopBattlePayloadKind.BattleSnapshot ||
+                (pendingTransmission.PayloadKind == CoopBattlePayloadKind.EntryStatusSnapshot &&
+                 ExperimentalFeatures.EnableBattleEntryStatusDiagnostics) ||
+                (pendingTransmission.PayloadKind == CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot &&
+                 ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics);
+            if (logCompletion)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: completed payload transmission. " +
+                    "Peer=" + (peer.UserName ?? "null") +
+                    " Kind=" + pendingTransmission.PayloadKind +
+                    " TransmissionId=" + pendingTransmission.TransmissionId +
+                    " Bytes=" + pendingTransmission.TotalBytes +
+                    (pendingTransmission.LogicalBytes != pendingTransmission.TotalBytes
+                        ? " LogicalBytes=" + pendingTransmission.LogicalBytes
+                        : string.Empty) +
+                    " Chunks=" + pendingTransmission.ChunkCount);
+            }
             pendingTransmission = null;
             return true;
         }

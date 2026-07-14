@@ -113,7 +113,20 @@ namespace CoopSpectator.MissionModels
 
         public override float CalculateAdjustedArmorForBlow(in AttackInformation attackInformation, in AttackCollisionData collisionData, float baseArmor, BasicCharacterObject attackerCharacter, BasicCharacterObject attackerCaptainCharacter, BasicCharacterObject victimCharacter, BasicCharacterObject victimCaptainCharacter, WeaponComponentData weaponComponent)
         {
-            float adjustedArmor = _baseModel.CalculateAdjustedArmorForBlow(attackInformation, collisionData, baseArmor, attackerCharacter, attackerCaptainCharacter, victimCharacter, victimCaptainCharacter, weaponComponent);
+            if (!ShouldUseSandboxArmorFormula())
+            {
+                return _baseModel.CalculateAdjustedArmorForBlow(
+                    attackInformation,
+                    collisionData,
+                    baseArmor,
+                    attackerCharacter,
+                    attackerCaptainCharacter,
+                    victimCharacter,
+                    victimCaptainCharacter,
+                    weaponComponent);
+            }
+
+            float adjustedArmor = baseArmor;
             if (TryApplyExactPersonalArmorPenetration(attackInformation.AttackerAgent, collisionData, baseArmor, adjustedArmor, weaponComponent, out float exactPersonalArmor))
                 adjustedArmor = exactPersonalArmor;
             if (TryApplyGlobalCaptainArmorPenetration(
@@ -204,6 +217,9 @@ namespace CoopSpectator.MissionModels
             float missileSpeed,
             float magnitude)
         {
+            if (!CoopDebugConfig.CombatModelDiagnostics)
+                return;
+
             if (attackerAgent == null || weaponComponent == null)
                 return;
 

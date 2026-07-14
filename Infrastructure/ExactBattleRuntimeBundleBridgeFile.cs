@@ -18,6 +18,9 @@ namespace CoopSpectator.Infrastructure
 
         public static void ResetBundle(string source)
         {
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                return;
+
             try
             {
                 Directory.CreateDirectory(GetCoopFolderPath());
@@ -106,6 +109,9 @@ namespace CoopSpectator.Infrastructure
             string source,
             string additionalDetails = null)
         {
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                return;
+
             AppendRecord(
                 "Utc=" + DateTime.UtcNow.ToString("O") +
                 " Event=mission-context" +
@@ -117,6 +123,9 @@ namespace CoopSpectator.Infrastructure
 
         public static void AppendContractEvent(string eventName, string details)
         {
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                return;
+
             AppendRecord(
                 "Utc=" + DateTime.UtcNow.ToString("O") +
                 " Event=" + (eventName ?? string.Empty) +
@@ -125,7 +134,7 @@ namespace CoopSpectator.Infrastructure
 
         private static void AppendRecord(string line)
         {
-            if (string.IsNullOrWhiteSpace(line))
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics || string.IsNullOrWhiteSpace(line))
                 return;
 
             try

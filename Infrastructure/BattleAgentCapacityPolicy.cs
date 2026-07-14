@@ -14,6 +14,7 @@ namespace CoopSpectator.Infrastructure
         private const float MaximumBattleSideRatio = 0.75f;
         private const float ImmediateCorpseFadeSeconds = 0.05f;
         private const float RiderlessMountGraceSeconds = 0.5f;
+        private const float RiderlessMountScanIntervalSeconds = 0.25f;
 
         private static Mission _mission;
         private static string _battleIdentity = string.Empty;
@@ -26,6 +27,7 @@ namespace CoopSpectator.Infrastructure
         private static bool _corpsePolicyApplied;
         private static bool _policySummaryLogged;
         private static float _nextCapacityBlockedLogMissionTime;
+        private static float _nextRiderlessMountScanMissionTime;
         private static int _culledRiderlessMountCount;
         private static readonly Dictionary<Agent, float> RiderlessMountFirstSeenTimes =
             new Dictionary<Agent, float>();
@@ -298,6 +300,11 @@ namespace CoopSpectator.Infrastructure
             if (phase < CoopBattlePhase.BattleActive || phase >= CoopBattlePhase.BattleEnded)
                 return;
 
+            if (mission.CurrentTime < _nextRiderlessMountScanMissionTime)
+                return;
+
+            _nextRiderlessMountScanMissionTime = mission.CurrentTime + RiderlessMountScanIntervalSeconds;
+
             CullStableRiderlessMounts(mission, source);
         }
 
@@ -328,6 +335,7 @@ namespace CoopSpectator.Infrastructure
             _corpsePolicyApplied = false;
             _policySummaryLogged = false;
             _nextCapacityBlockedLogMissionTime = 0f;
+            _nextRiderlessMountScanMissionTime = 0f;
             _culledRiderlessMountCount = 0;
             RiderlessMountFirstSeenTimes.Clear();
             CulledRiderlessMounts.Clear();
@@ -345,6 +353,7 @@ namespace CoopSpectator.Infrastructure
             _cullRiderlessMounts = false;
             _corpsePolicyApplied = false;
             _policySummaryLogged = false;
+            _nextRiderlessMountScanMissionTime = 0f;
             _culledRiderlessMountCount = 0;
             RiderlessMountFirstSeenTimes.Clear();
             CulledRiderlessMounts.Clear();

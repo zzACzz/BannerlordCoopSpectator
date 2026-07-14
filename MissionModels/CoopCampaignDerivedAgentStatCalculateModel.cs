@@ -36,6 +36,7 @@ namespace CoopSpectator.MissionModels
         public override void InitializeAgentStats(Agent agent, Equipment spawnEquipment, AgentDrivenProperties agentDrivenProperties, AgentBuildData agentBuildData)
         {
             _baseModel.InitializeAgentStats(agent, spawnEquipment, agentDrivenProperties, agentBuildData);
+            TryApplyCampaignEquipmentArmor(agent, spawnEquipment, agentDrivenProperties);
         }
 
         public override void InitializeMissionEquipment(Agent agent)
@@ -56,6 +57,7 @@ namespace CoopSpectator.MissionModels
         public override void UpdateAgentStats(Agent agent, AgentDrivenProperties agentDrivenProperties)
         {
             _baseModel.UpdateAgentStats(agent, agentDrivenProperties);
+            TryApplyCampaignEquipmentArmor(agent, agent?.SpawnEquipment, agentDrivenProperties);
             bool exactRangedDrivenPropertiesApplied = TryApplyExactHeroRangedCampaignDrivenPropertyOverrides(agent, agentDrivenProperties);
             TryApplyExactDefenseDrivenPropertyOverrides(agent, agentDrivenProperties);
             TryApplyExactMeleeDrivenPropertyOverrides(agent, agentDrivenProperties);
@@ -322,11 +324,6 @@ namespace CoopSpectator.MissionModels
                 ApplyGlobalCaptainEffects(
                     entryId,
                     agentDrivenProperties,
-                    DrivenProperty.ArmorTorso,
-                    "RidingToughSteed");
-                ApplyGlobalCaptainEffects(
-                    entryId,
-                    agentDrivenProperties,
                     DrivenProperty.WeaponWorstMobileAccuracyPenalty,
                     "RidingSagittarius");
                 ApplyGlobalCaptainEffects(
@@ -405,14 +402,6 @@ namespace CoopSpectator.MissionModels
                 DrivenProperty.MaxSpeedMultiplier,
                 movementPerks.ToArray());
 
-            if (troopTier >= 3)
-            {
-                ApplyGlobalCaptainEffects(
-                    entryId,
-                    agentDrivenProperties,
-                    DrivenProperty.ArmorEncumbrance,
-                    "AthleticsFormFittingArmor");
-            }
         }
 
         private static void ApplyGlobalCaptainEffects(
@@ -438,6 +427,102 @@ namespace CoopSpectator.MissionModels
             return agent != null &&
                 CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
                 !string.IsNullOrWhiteSpace(entryId);
+        }
+
+        private static void TryApplyCampaignEquipmentArmor(
+            Agent agent,
+            Equipment spawnEquipment,
+            AgentDrivenProperties agentDrivenProperties)
+        {
+            if (agent == null || spawnEquipment == null || agentDrivenProperties == null ||
+                agent.Mission == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(agent.Mission.SceneName))
+            {
+                return;
+            }
+
+            if (agent.IsHuman)
+            {
+                bool isMounted = agent.HasMount || agent.MountAgent != null;
+                bool hasPersonalIgnorePain =
+                    !isMounted &&
+                    CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(agent, "AthleticsIgnorePain", out _);
+                float personalArmorFactor = hasPersonalIgnorePain ? 1.1f : 1f;
+                string entryId = null;
+                TryResolveGlobalCaptainEntryId(agent, out entryId);
+
+                agentDrivenProperties.ArmorHead = ResolveCampaignHumanArmor(
+                    spawnEquipment.GetHeadArmorSum(),
+                    entryId,
+                    isMounted,
+                    personalArmorFactor);
+                agentDrivenProperties.ArmorTorso = ResolveCampaignHumanArmor(
+                    spawnEquipment.GetHumanBodyArmorSum(),
+                    entryId,
+                    isMounted,
+                    personalArmorFactor);
+                agentDrivenProperties.ArmorArms = ResolveCampaignHumanArmor(
+                    spawnEquipment.GetArmArmorSum(),
+                    entryId,
+                    isMounted,
+                    personalArmorFactor);
+                agentDrivenProperties.ArmorLegs = ResolveCampaignHumanArmor(
+                    spawnEquipment.GetLegArmorSum(),
+                    entryId,
+                    isMounted,
+                    personalArmorFactor);
+                return;
+            }
+
+            if (!agent.IsMount)
+                return;
+
+            float mountArmor = 0f;
+            for (int slotIndex = 1; slotIndex < (int)EquipmentIndex.NumEquipmentSetSlots; slotIndex++)
+            {
+                EquipmentElement equipmentElement = spawnEquipment[(EquipmentIndex)slotIndex];
+                if (equipmentElement.Item != null)
+                    mountArmor += equipmentElement.GetModifiedMountBodyArmor();
+            }
+
+            Agent riderAgent = agent.RiderAgent;
+            if (riderAgent != null)
+            {
+                if (TryResolveGlobalCaptainEntryId(riderAgent, out string riderEntryId))
+                {
+                    var captainAccumulator = new CaptainPerkBonusAccumulator(mountArmor);
+                    GlobalCaptainPerkRuntimeState.AddEffect(riderEntryId, "RidingToughSteed", captainAccumulator);
+                    if (captainAccumulator.HasEffects)
+                        mountArmor = captainAccumulator.Result;
+                }
+
+                if (CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(riderAgent, "RidingToughSteed", out _))
+                    mountArmor *= 1.2f;
+            }
+
+            agentDrivenProperties.ArmorTorso = Math.Max(0f, mountArmor);
+        }
+
+        private static float ResolveCampaignHumanArmor(
+            float equipmentArmor,
+            string entryId,
+            bool isMounted,
+            float personalArmorFactor)
+        {
+            float armor = Math.Max(0f, equipmentArmor);
+            if (!string.IsNullOrWhiteSpace(entryId))
+            {
+                var accumulator = new CaptainPerkBonusAccumulator(armor);
+                GlobalCaptainPerkRuntimeState.AddEffect(
+                    entryId,
+                    isMounted ? "RidingDauntlessSteed" : "AthleticsIgnorePain",
+                    accumulator);
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "EngineeringMetallurgy", accumulator);
+                if (accumulator.HasEffects)
+                    armor = accumulator.Result;
+            }
+
+            return Math.Max(0f, armor * Math.Max(0f, personalArmorFactor));
         }
 
         private static WeaponComponentData ResolveCurrentWeapon(Agent agent)
@@ -550,11 +635,18 @@ namespace CoopSpectator.MissionModels
                 return false;
 
             skillId = relevantSkill.StringId ?? "null";
-            if (!TryResolveExactSkillOverride(agent, relevantSkill, 0, out _, out entryId))
+            if (!CoopMissionSpawnLogic.TryGetMaterializedCombatProfileSkillValue(
+                    agent,
+                    relevantSkill,
+                    out int materializedSkill,
+                    out entryId))
+            {
                 return false;
+            }
 
-            float candidateMultiplier = Math.Max(0f, baseMultiplier);
-            if (!CoopMissionSpawnLogic.TryApplyWeaponDamageMultiplierCombatProfile(agent, weapon, ref candidateMultiplier))
+            int effectiveSkill = ApplyGlobalCaptainSkillEffects(agent, relevantSkill, materializedSkill);
+            float candidateMultiplier = ComputeCampaignWeaponDamageMultiplier(relevantSkill, effectiveSkill);
+            if (candidateMultiplier <= 0f)
                 return false;
 
             if (Math.Abs(candidateMultiplier - baseMultiplier) < 0.0001f)
@@ -562,6 +654,26 @@ namespace CoopSpectator.MissionModels
 
             updatedMultiplier = candidateMultiplier;
             return true;
+        }
+
+        private static float ComputeCampaignWeaponDamageMultiplier(SkillObject relevantSkill, int effectiveSkill)
+        {
+            if (relevantSkill == null || effectiveSkill <= 0)
+                return 1f;
+
+            string skillId = relevantSkill.StringId ?? string.Empty;
+            if (string.Equals(skillId, "OneHanded", StringComparison.OrdinalIgnoreCase))
+                return 1f + effectiveSkill * 0.0015f;
+            if (string.Equals(skillId, "TwoHanded", StringComparison.OrdinalIgnoreCase))
+                return 1f + effectiveSkill * 0.0016f;
+            if (string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase))
+                return 1f + effectiveSkill * 0.0007f;
+            if (string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase))
+                return 1f + effectiveSkill * 0.0011f;
+            if (string.Equals(skillId, "Throwing", StringComparison.OrdinalIgnoreCase))
+                return 1f + effectiveSkill * 0.0006f;
+
+            return 1f;
         }
 
         private static bool IsExactSiegeBallistaProjectileWeapon(Mission mission, WeaponComponentData weapon)
@@ -583,6 +695,9 @@ namespace CoopSpectator.MissionModels
             float baseMultiplier,
             float updatedMultiplier)
         {
+            if (!CoopDebugConfig.CombatModelDiagnostics)
+                return;
+
             string logKey =
                 (agent?.Index ?? -1).ToString() + "|" +
                 (skillId ?? "null") + "|" +
@@ -733,24 +848,6 @@ namespace CoopSpectator.MissionModels
                         baseArmorEncumbrance.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
                         "->" +
                         exactArmorEncumbrance.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
-                    applied = true;
-                }
-            }
-
-            if (!(agent.HasMount || agent.MountAgent != null) &&
-                CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(agent, "AthleticsIgnorePain", out string ignorePainEntryId))
-            {
-                bool armorScaled = false;
-                armorScaled |= TryApplyExactDefenseDrivenPropertyScale(agent, agentDrivenProperties, DrivenProperty.ArmorHead, 1.1f);
-                armorScaled |= TryApplyExactDefenseDrivenPropertyScale(agent, agentDrivenProperties, DrivenProperty.ArmorTorso, 1.1f);
-                armorScaled |= TryApplyExactDefenseDrivenPropertyScale(agent, agentDrivenProperties, DrivenProperty.ArmorArms, 1.1f);
-                armorScaled |= TryApplyExactDefenseDrivenPropertyScale(agent, agentDrivenProperties, DrivenProperty.ArmorLegs, 1.1f);
-                if (armorScaled)
-                {
-                    if (string.IsNullOrWhiteSpace(entryId))
-                        entryId = ignorePainEntryId;
-
-                    summary = AppendAppliedPerkSummary(summary, "IgnorePain Armor=1.1");
                     applied = true;
                 }
             }

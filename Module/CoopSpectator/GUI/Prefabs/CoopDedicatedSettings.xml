@@ -154,7 +154,7 @@
                                     <TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" Brush="Popup.Description.Text" Text="Requested Battle Size" />
                                     <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="620" SuggestedHeight="70" HorizontalAlignment="Center" MarginTop="6" Sprite="General\CharacterCreation\name_input_area">
                                       <Children>
-                                        <IntegerInputTextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="12" MarginRight="12" MarginTop="12" MarginBottom="12" Brush="Review.NameInput.Text" IntText="@RequestedBattleSize" MinInt="@MinRequestedBattleSize" MaxInt="@MaxRequestedBattleSize" EnableClamp="true" MaxLength="4" />
+                                        <IntegerInputTextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="12" MarginRight="12" MarginTop="12" MarginBottom="12" Brush="Review.NameInput.Text" IntText="@RequestedBattleSize" MinInt="@MinRequestedBattleSize" MaxInt="@MaxRequestedBattleSize" EnableClamp="true" UpdateValueOnDone="true" MaxLength="4" />
                                       </Children>
                                     </Widget>
                                   </Children>
