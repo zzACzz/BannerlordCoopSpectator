@@ -6,6 +6,7 @@ namespace CoopSpectator.Infrastructure
     {
         private const string SiegeMissionWithDeployment = "SiegeMissionWithDeployment";
         private const string SiegeMissionNoDeployment = "SiegeMissionNoDeployment";
+        private const string SiegeLordsHallFightMission = "SiegeLordsHallFightMission";
 
         private static readonly object Sync = new object();
         private static readonly TimeSpan CaptureTtl = TimeSpan.FromMinutes(2);
@@ -87,7 +88,8 @@ namespace CoopSpectator.Infrastructure
         public static bool IsKnownSiegeMissionShell(string missionShell)
         {
             return string.Equals(missionShell, SiegeMissionWithDeployment, StringComparison.Ordinal) ||
-                   string.Equals(missionShell, SiegeMissionNoDeployment, StringComparison.Ordinal);
+                   string.Equals(missionShell, SiegeMissionNoDeployment, StringComparison.Ordinal) ||
+                   string.Equals(missionShell, SiegeLordsHallFightMission, StringComparison.Ordinal);
         }
 
         public static bool IsWithDeploymentMissionShell(string missionShell)
@@ -98,6 +100,11 @@ namespace CoopSpectator.Infrastructure
         public static bool IsNoDeploymentMissionShell(string missionShell)
         {
             return string.Equals(missionShell, SiegeMissionNoDeployment, StringComparison.Ordinal);
+        }
+
+        public static bool IsLordsHallMissionShell(string missionShell)
+        {
+            return string.Equals(missionShell, SiegeLordsHallFightMission, StringComparison.Ordinal);
         }
 
         private static void ClearNoLock(string source)

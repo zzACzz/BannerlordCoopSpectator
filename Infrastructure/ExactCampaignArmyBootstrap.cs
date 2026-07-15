@@ -4,7 +4,9 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using CoopSpectator.GameMode;
+using CoopSpectator.Infrastructure.LordsHall;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.MissionBehaviors.LordsHall;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -559,6 +561,26 @@ namespace CoopSpectator.Infrastructure
 
                 if (useLordsHallController)
                 {
+                    initializationStep = "prepare-lords-hall-runtime";
+                    if (!LordsHallMissionRuntime.TryPrepare(
+                            mission,
+                            scenarioContext,
+                            out string lordsHallRuntimeDiagnostics))
+                    {
+                        reason = lordsHallRuntimeDiagnostics ?? "lords-hall-runtime-contract-failed";
+                        return false;
+                    }
+
+                    initializationStep = "prepare-lords-hall-deployment-plan";
+                    if (!TryPrepareLordsHallDeploymentPlanContract(
+                            mission,
+                            source,
+                            out string lordsHallDeploymentPlanDiagnostics))
+                    {
+                        reason = lordsHallDeploymentPlanDiagnostics ?? "lords-hall-deployment-plan-failed";
+                        return false;
+                    }
+
                     initializationStep = "validate-lords-hall-contract";
                     if (mission.GetMissionBehavior<BattleSpawnLogic>() != null)
                     {
@@ -579,6 +601,7 @@ namespace CoopSpectator.Infrastructure
                         playerSide,
                         supplierDiagnostics +
                         " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                        " DeploymentPlan={" + lordsHallDeploymentPlanDiagnostics + "}" +
                         " RuntimeContract={LordsHall MissionReadyOnly=true}",
                         "pre-init-lords-hall-controller",
                         source);
@@ -623,6 +646,9 @@ namespace CoopSpectator.Infrastructure
                         " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
                         " ObjectCatalog={" + ExactCampaignObjectCatalogBootstrap.LastSummary + "}" +
                         " SupplierDiagnostics=" + supplierDiagnostics +
+                        " RuntimeDiagnostics={" + lordsHallRuntimeDiagnostics + "}" +
+                        " TeamAIDiagnostics={" + teamAiDiagnostics + "}" +
+                        " DeploymentPlanDiagnostics={" + lordsHallDeploymentPlanDiagnostics + "}" +
                         " ControllerDiagnostics=" + lordsHallDiagnostics +
                         " Source=" + (source ?? "unknown"));
                     return true;
@@ -1099,7 +1125,7 @@ namespace CoopSpectator.Infrastructure
                 return true;
             }
 
-            if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(siegeSubtype, LordsHallScenarioContract.SiegeSubtype, StringComparison.OrdinalIgnoreCase))
             {
                 battleSpawnTag = BattleSpawnLogic.BattleTag;
                 battleSizeType = Mission.BattleSizeType.Siege;
@@ -1126,8 +1152,7 @@ namespace CoopSpectator.Infrastructure
 
         private static bool IsLordsHallSiegeSubtype(BattleScenarioContextMessage scenarioContext)
         {
-            string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
-            return string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase);
+            return LordsHallScenarioContract.IsLordsHallScenario(scenarioContext);
         }
 
         private static bool IsSallyOutSiegeSubtype(BattleScenarioContextMessage scenarioContext)
@@ -1166,8 +1191,10 @@ namespace CoopSpectator.Infrastructure
             if (ExactCampaignSiegeAssaultNoDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
                 return Mission.MissionTeamAITypeEnum.FieldBattle;
 
-            if (string.Equals(scenarioContext.SiegeContext?.SiegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(scenarioContext.SiegeContext?.SiegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
+            if (LordsHallScenarioContract.IsLordsHallScenario(scenarioContext))
+                return Mission.MissionTeamAITypeEnum.NoTeamAI;
+
+            if (string.Equals(scenarioContext.SiegeContext?.SiegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
                 return Mission.MissionTeamAITypeEnum.NoTeamAI;
 
             return Mission.MissionTeamAITypeEnum.Siege;
@@ -1339,6 +1366,9 @@ namespace CoopSpectator.Infrastructure
             if (mission == null)
                 return false;
 
+            if (missionTeamAiType == Mission.MissionTeamAITypeEnum.NoTeamAI)
+                return TrySuppressMissionTeamAiContract(mission, missionTeamAiType, out diagnostics);
+
             if (missionTeamAiType != Mission.MissionTeamAITypeEnum.Siege &&
                 missionTeamAiType != Mission.MissionTeamAITypeEnum.SallyOut)
             {
@@ -1397,6 +1427,53 @@ namespace CoopSpectator.Infrastructure
                 " " + secondLabel + "={" + secondDiagnostics + "}" +
                 " Source=" + (source ?? "unknown");
             return firstReady && secondReady;
+        }
+
+        private static bool TryPrepareLordsHallDeploymentPlanContract(
+            Mission mission,
+            string source,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            if (!TryEnsureDeploymentPlanTeamPlans(
+                    mission,
+                    source,
+                    out string teamPlanDiagnostics))
+            {
+                diagnostics = "TeamPlans={" + (teamPlanDiagnostics ?? "unknown") + "}";
+                return false;
+            }
+
+            try
+            {
+                mission.DeploymentPlan.MakeDefaultDeploymentPlans();
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "TeamPlans={" + (teamPlanDiagnostics ?? "unknown") + "}" +
+                    " MakeDefaultFailed=" + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+
+            Team attackerTeam = mission.AttackerTeam;
+            Team defenderTeam = mission.DefenderTeam;
+            bool attackerPlanMade =
+                attackerTeam != null && mission.DeploymentPlan.IsPlanMade(attackerTeam);
+            bool defenderPlanMade =
+                defenderTeam != null && mission.DeploymentPlan.IsPlanMade(defenderTeam);
+
+            diagnostics =
+                "TeamPlans={" + (teamPlanDiagnostics ?? "unknown") + "}" +
+                " AttackerTeam=" + (attackerTeam == null ? "null" : "#" + attackerTeam.TeamIndex) +
+                " AttackerPlanMade=" + attackerPlanMade +
+                " DefenderTeam=" + (defenderTeam == null ? "null" : "#" + defenderTeam.TeamIndex) +
+                " DefenderPlanMade=" + defenderPlanMade +
+                " Source=" + (source ?? "unknown");
+            return attackerPlanMade && defenderPlanMade;
         }
 
         private static bool IsSiegeAssaultWithDeploymentScenario(Mission mission)
@@ -1820,6 +1897,10 @@ namespace CoopSpectator.Infrastructure
 
             switch (missionTeamAiType)
             {
+                case Mission.MissionTeamAITypeEnum.FieldBattle:
+                    return mission.AttackerTeam?.TeamAI is TeamAIGeneral &&
+                           mission.DefenderTeam?.TeamAI is TeamAIGeneral;
+
                 case Mission.MissionTeamAITypeEnum.Siege:
                     return mission.AttackerTeam?.TeamAI is TeamAISiegeAttacker &&
                            mission.DefenderTeam?.TeamAI is TeamAISiegeDefender;
@@ -2589,6 +2670,10 @@ namespace CoopSpectator.Infrastructure
 
             switch (missionTeamAiType)
             {
+                case Mission.MissionTeamAITypeEnum.FieldBattle:
+                    teamAi.AddTacticOption(new TacticCharge(team));
+                    break;
+
                 case Mission.MissionTeamAITypeEnum.Siege:
                     if (team.Side == BattleSideEnum.Attacker)
                         teamAi.AddTacticOption(new TacticBreachWalls(team));

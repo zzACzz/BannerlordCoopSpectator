@@ -1,5 +1,6 @@
 using System;
 using CoopSpectator.Campaign;
+using CoopSpectator.Infrastructure.LordsHall;
 using CoopSpectator.Network.Messages;
 using System.Reflection;
 using TaleWorlds.Core;
@@ -194,7 +195,7 @@ namespace CoopSpectator.Infrastructure
                     return;
                 }
 
-                if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase) ||
+                if (LordsHallScenarioContract.IsLordsHallScenario(snapshot.ScenarioContext) ||
                     string.Equals(siegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
                 {
                     ModLogger.Info(
@@ -530,8 +531,28 @@ namespace CoopSpectator.Infrastructure
                 return;
 
             string siegeSubtype = snapshot.ScenarioContext.SiegeContext?.SiegeSubtype ?? string.Empty;
-            if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(siegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
+            if (LordsHallScenarioContract.IsLordsHallScenario(snapshot.ScenarioContext))
+            {
+                BattleSiegeContextMessage lordsHallContext = snapshot.ScenarioContext.SiegeContext;
+                string lordsHallExactSceneLevels = lordsHallContext?.MissionInitializerSceneLevels ?? string.Empty;
+                string lordsHallDesiredSceneLevels = !string.IsNullOrWhiteSpace(lordsHallExactSceneLevels)
+                    ? lordsHallExactSceneLevels
+                    : LordsHallScenarioContract.MissionSceneLevels;
+                if (string.Equals(record.SceneLevels, lordsHallDesiredSceneLevels, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                string previousSceneLevels = record.SceneLevels;
+                record.SceneLevels = lordsHallDesiredSceneLevels;
+                ModLogger.Info(
+                    source + ": applied native lords-hall scene-level context. " +
+                    "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                    " PreviousSceneLevels=" + (previousSceneLevels ?? "null") +
+                    " SceneLevels=" + (record.SceneLevels ?? "null") +
+                    " ExactSource=" + (lordsHallContext?.MissionInitializerSource ?? "fallback-native-contract") + ".");
+                return;
+            }
+
+            if (string.Equals(siegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
@@ -841,8 +862,10 @@ namespace CoopSpectator.Infrastructure
                 return Mission.MissionTeamAITypeEnum.FieldBattle;
 
             string siegeSubtype = scenarioContext.SiegeContext?.SiegeSubtype ?? string.Empty;
-            if (string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(siegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
+            if (LordsHallScenarioContract.IsLordsHallScenario(scenarioContext))
+                return Mission.MissionTeamAITypeEnum.NoTeamAI;
+
+            if (string.Equals(siegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
                 return Mission.MissionTeamAITypeEnum.NoTeamAI;
 
             if (string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase) ||

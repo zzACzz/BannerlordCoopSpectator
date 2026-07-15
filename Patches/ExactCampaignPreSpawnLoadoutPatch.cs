@@ -59,7 +59,7 @@ namespace CoopSpectator.Patches
 
             string sceneName = mission.SceneName ?? string.Empty;
             return MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(sceneName) ||
-                   SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(sceneName);
+                   SceneRuntimeClassifier.IsExactCampaignArmyMaterializationScene(sceneName);
         }
 
         private static void Mission_SpawnAgent_Prefix(AgentBuildData agentBuildData, bool spawnFromAgentVisuals)

@@ -1,4 +1,5 @@
 using System;
+using CoopSpectator.Infrastructure.LordsHall;
 using CoopSpectator.Network.Messages;
 
 namespace CoopSpectator.Infrastructure
@@ -84,6 +85,34 @@ namespace CoopSpectator.Infrastructure
             return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
         }
 
+        public static bool IsValidatedLordsHallScene(string sceneName)
+        {
+            if (string.IsNullOrWhiteSpace(sceneName))
+                return false;
+
+            try
+            {
+                BattleScenarioContextMessage scenarioContext =
+                    BattleSnapshotRuntimeState.GetScenarioContext() ??
+                    BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                    BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                return LordsHallScenarioContract.IsValidatedScenario(
+                    scenarioContext,
+                    sceneName,
+                    out _);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static bool IsExactCampaignArmyMaterializationScene(string sceneName)
+        {
+            return IsExactSiegeAssaultWithDeploymentScene(sceneName) ||
+                   IsValidatedLordsHallScene(sceneName);
+        }
+
         private static bool IsCurrentSiegeScenarioScene(string sceneName)
         {
             if (string.IsNullOrWhiteSpace(sceneName))
@@ -94,6 +123,15 @@ namespace CoopSpectator.Infrastructure
                 BattleScenarioContextMessage scenarioContext = BattleSnapshotRuntimeState.GetScenarioContext();
                 if (scenarioContext?.IsSiegeBattle != true)
                     return false;
+
+                if (LordsHallScenarioContract.IsLordsHallScenario(scenarioContext) &&
+                    !LordsHallScenarioContract.IsValidatedScenario(
+                        scenarioContext,
+                        sceneName,
+                        out _))
+                {
+                    return false;
+                }
 
                 BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
                 return SceneNamesMatch(sceneName, snapshot?.MapScene) ||

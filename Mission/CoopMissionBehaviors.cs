@@ -19,6 +19,7 @@ using TaleWorlds.ObjectSystem; // MBObjectManager
 using CoopSpectator.Campaign; // BattleRosterFileHelper (варіант A: roster з кампанії)
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback
+using CoopSpectator.Infrastructure.LordsHall;
 using CoopSpectator.MissionModels;
 using CoopSpectator.Network.Messages;
 using CoopSpectator.Patches;
@@ -4574,6 +4575,75 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            public static bool ShouldTreatClientHeroVisualAsServerPreSpawnResolved(
+                Agent agent,
+                RosterEntryState entryState,
+                out string reason,
+                out bool includesWeapons)
+            {
+                reason = null;
+                includesWeapons = false;
+                Mission mission = agent?.Mission ?? Mission.Current;
+                if (GameNetwork.IsServer ||
+                    mission == null ||
+                    agent == null ||
+                    agent.IsMount ||
+                    !agent.IsHuman ||
+                    !agent.IsActive() ||
+                    entryState == null ||
+                    !IsHeroEntryEligibleForExactPersonalPerks(entryState) ||
+                    !SceneRuntimeClassifier.IsExactCampaignArmyMaterializationScene(
+                        mission.SceneName ?? string.Empty))
+                {
+                    return false;
+                }
+
+                bool requiresWeapons = HasAnySnapshotWeapons(entryState);
+                if (!entryState.ServerCreateContractResolved ||
+                    !entryState.ServerCreateInjectEquipment)
+                {
+                    reason = "server-create-contract-not-injected";
+                    return false;
+                }
+
+                if (requiresWeapons && !entryState.ServerCreatePreSpawnIncludesWeapons)
+                {
+                    reason = "server-create-contract-missing-weapons";
+                    return false;
+                }
+
+                if (!entryState.ServerCreatePreSpawnIncludesArmorVisuals)
+                {
+                    reason = "server-create-contract-missing-armor";
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(entryState.CombatCapeId) &&
+                    !entryState.ServerCreatePreSpawnIncludesCapeVisual)
+                {
+                    reason = "server-create-contract-missing-cape";
+                    return false;
+                }
+
+                if (!IsClientExactVisualRefreshAlreadySatisfied(
+                        agent,
+                        entryState,
+                        includeWeapons: requiresWeapons,
+                        includeArmorVisuals: true,
+                        includeMountVisuals: false,
+                        out string satisfiedReason))
+                {
+                    reason = "server-pre-spawn-exact-hero-pending:" +
+                             (satisfiedReason ?? "unknown");
+                    return false;
+                }
+
+                includesWeapons = entryState.ServerCreatePreSpawnIncludesWeapons || !requiresWeapons;
+                reason = "server-pre-spawn-exact-campaign-hero:" +
+                         (satisfiedReason ?? "ready");
+                return true;
+            }
+
             public static int ResolveServerPreSpawnResolvedPendingOverlays(
                 Mission mission,
                 string source)
@@ -4802,14 +4872,16 @@ namespace CoopSpectator.MissionBehaviors
             public static bool ShouldUseCreateTimeMissionEquipment(Mission mission)
             {
                 return mission != null &&
-                       SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
+                       SceneRuntimeClassifier.IsExactCampaignArmyMaterializationScene(
+                           mission.SceneName ?? string.Empty);
             }
 
             private static bool IsExactSiegeWithDeploymentMaterialization(Mission mission)
             {
                 return mission != null &&
                        !ShouldUseFieldMaterializedSiegeReplayRuntime(mission) &&
-                       SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
+                       SceneRuntimeClassifier.IsExactCampaignArmyMaterializationScene(
+                           mission.SceneName ?? string.Empty);
             }
         }
 
@@ -7181,6 +7253,41 @@ namespace CoopSpectator.MissionBehaviors
             if (entryState == null)
                 return false;
 
+            bool exactHeroEntry = IsHeroEntryEligibleForExactPersonalPerks(entryState);
+            if (exactHeroEntry && !IsExactCampaignHeroClientVisualBattleDataReady(mission))
+                return false;
+
+            if (exactHeroEntry &&
+                ExactSiegeMaterializationModule.ShouldTreatClientHeroVisualAsServerPreSpawnResolved(
+                    agent,
+                    entryState,
+                    out string serverPreSpawnReason,
+                    out bool serverPreSpawnIncludesWeapons))
+            {
+                MarkClientHeroVisualAsServerPreSpawnResolved(
+                    agent,
+                    entryId,
+                    entryState,
+                    serverPreSpawnIncludesWeapons,
+                    source ?? "client exact visual queue",
+                    serverPreSpawnReason);
+                return false;
+            }
+
+            if (exactHeroEntry &&
+                SceneRuntimeClassifier.IsValidatedLordsHallScene(
+                    mission.SceneName ?? string.Empty))
+            {
+                MarkClientHeroVisualAsServerPreSpawnResolved(
+                    agent,
+                    entryId,
+                    entryState,
+                    true,
+                    source ?? "client exact visual queue",
+                    "lordshall-server-create-time-equipment-owned-no-destructive-recovery");
+                return false;
+            }
+
             if (ShouldSuppressCampaignMirrorHeroesClientDestructiveVisualOverlay(
                     mission,
                     agent,
@@ -7358,6 +7465,73 @@ namespace CoopSpectator.MissionBehaviors
                 " DelaySeconds=" + Math.Max(0.01, (notBeforeUtc - DateTime.UtcNow).TotalSeconds).ToString("0.00") +
                 " Source=" + (source ?? "unknown"));
             return true;
+        }
+
+        private static bool IsExactCampaignHeroClientVisualBattleDataReady(Mission mission)
+        {
+            if (mission == null ||
+                !SceneRuntimeClassifier.IsExactCampaignArmyMaterializationScene(
+                    mission.SceneName ?? string.Empty))
+            {
+                return true;
+            }
+
+            if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out _))
+                return false;
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status =
+                CoopBattleEntryStatusBridgeFile.ReadStatus();
+            return status?.BattleDataReady == true;
+        }
+
+        private static void MarkClientHeroVisualAsServerPreSpawnResolved(
+            Agent agent,
+            string entryId,
+            RosterEntryState entryState,
+            bool includesWeapons,
+            string source,
+            string reason)
+        {
+            if (agent == null || agent.Index < 0)
+                return;
+
+            bool alreadyResolved =
+                _exactNativeClientVisualOverlayAppliedAgentIndices.Contains(agent.Index) &&
+                _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.TryGetValue(
+                    agent.Index,
+                    out bool appliedIncludesWeapons) &&
+                (!includesWeapons || appliedIncludesWeapons);
+
+            _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agent.Index);
+            _exactNativeClientVisualOverlayAgentByIndex[agent.Index] = agent;
+            if (!string.IsNullOrWhiteSpace(entryId))
+            {
+                _materializedArmyEntryIdByAgentIndex[agent.Index] = entryId;
+                _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = entryId;
+            }
+
+            _exactNativeClientVisualOverlayAppliedAgentIndices.Add(agent.Index);
+            _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex[agent.Index] = includesWeapons;
+            _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Remove(agent.Index);
+            _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Remove(agent.Index);
+            UpdateStrictExactHeroTransferVisualAppliedState(
+                agent.Index,
+                entryId,
+                includesWeapons,
+                (source ?? "server pre-spawn exact hero") + " resolved");
+
+            if (alreadyResolved)
+                return;
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: accepted server pre-spawn exact hero visuals without destructive client refresh. " +
+                "AgentIndex=" + agent.Index +
+                " EntryId=" + (entryId ?? "null") +
+                " TroopId=" + (agent.Character?.StringId ?? "null") +
+                " Hero=" + (entryState?.IsHero ?? false) +
+                " IncludesWeapons=" + includesWeapons +
+                " Reason=" + (reason ?? "unknown") +
+                " Source=" + (source ?? "unknown"));
         }
 
         private static bool ShouldSuppressCampaignMirrorHeroesClientDestructiveVisualOverlay(
@@ -10481,6 +10655,10 @@ namespace CoopSpectator.MissionBehaviors
             DropPendingClientExactVisualOverlaysForReconnectFinalize("client-hero-exact-visual-watchdog");
             if (ShouldPauseClientExactVisualOverlaysForReconnectFinalize(out _))
                 return;
+            if (!IsExactCampaignHeroClientVisualBattleDataReady(mission))
+                return;
+            if (ShouldPausePendingClientExactVisualOverlaysForSelectionScreen(out _))
+                return;
 
             DateTime nowUtc = DateTime.UtcNow;
             for (int i = 0; i < mission.AllAgents.Count; i++)
@@ -10504,6 +10682,33 @@ namespace CoopSpectator.MissionBehaviors
                 RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
                 if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
                     continue;
+                if (ExactSiegeMaterializationModule.ShouldTreatClientHeroVisualAsServerPreSpawnResolved(
+                        agent,
+                        entryState,
+                        out string serverPreSpawnReason,
+                        out bool serverPreSpawnIncludesWeapons))
+                {
+                    MarkClientHeroVisualAsServerPreSpawnResolved(
+                        agent,
+                        entryId,
+                        entryState,
+                        serverPreSpawnIncludesWeapons,
+                        "client hero exact visual watchdog",
+                        serverPreSpawnReason);
+                    continue;
+                }
+                if (SceneRuntimeClassifier.IsValidatedLordsHallScene(
+                        mission.SceneName ?? string.Empty))
+                {
+                    MarkClientHeroVisualAsServerPreSpawnResolved(
+                        agent,
+                        entryId,
+                        entryState,
+                        true,
+                        "client hero exact visual watchdog",
+                        "lordshall-server-create-time-equipment-owned-no-destructive-recovery");
+                    continue;
+                }
                 if (ShouldSuppressCampaignMirrorHeroesClientDestructiveVisualOverlay(
                         mission,
                         agent,
@@ -12076,9 +12281,50 @@ namespace CoopSpectator.MissionBehaviors
 
             bool clientVisualOnly = overlayMode == ExactCampaignSnapshotOverlayMode.ClientVisualOnly;
             bool clientHeroEntry = IsHeroEntryEligibleForExactPersonalPerks(entryState);
+            Mission clientVisualMission = agent.Mission ?? Mission.Current;
+            if (clientVisualOnly &&
+                clientHeroEntry &&
+                !IsExactCampaignHeroClientVisualBattleDataReady(clientVisualMission))
+            {
+                return false;
+            }
+
+            if (clientVisualOnly &&
+                clientHeroEntry &&
+                ExactSiegeMaterializationModule.ShouldTreatClientHeroVisualAsServerPreSpawnResolved(
+                    agent,
+                    entryState,
+                    out string serverPreSpawnReason,
+                    out bool serverPreSpawnIncludesWeapons))
+            {
+                MarkClientHeroVisualAsServerPreSpawnResolved(
+                    agent,
+                    entryId,
+                    entryState,
+                    serverPreSpawnIncludesWeapons,
+                    source ?? "client exact visual apply",
+                    serverPreSpawnReason);
+                return true;
+            }
+
+            if (clientVisualOnly &&
+                clientHeroEntry &&
+                SceneRuntimeClassifier.IsValidatedLordsHallScene(
+                    clientVisualMission?.SceneName ?? string.Empty))
+            {
+                MarkClientHeroVisualAsServerPreSpawnResolved(
+                    agent,
+                    entryId,
+                    entryState,
+                    true,
+                    source ?? "client exact visual apply",
+                    "lordshall-server-create-time-equipment-owned-no-destructive-recovery");
+                return true;
+            }
+
             if (clientVisualOnly &&
                 ShouldSuppressCampaignMirrorHeroesClientDestructiveVisualOverlay(
-                    agent.Mission ?? Mission.Current,
+                    clientVisualMission,
                     agent,
                     entryState,
                     source ?? "client exact visual apply",
@@ -13903,7 +14149,15 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
-            if (currentPhase < CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
+            CoopExactCampaignLordsHallMissionController lordsHallController =
+                mission.GetMissionBehavior<CoopExactCampaignLordsHallMissionController>();
+            bool allowResolvedLordsHallPreBattle =
+                currentPhase >= CoopBattlePhase.PreBattleHold &&
+                currentPhase < CoopBattlePhase.BattleActive &&
+                lordsHallController?.HasStarted == true &&
+                lordsHallController.HasMaterializedBothSides;
+            if ((!allowResolvedLordsHallPreBattle && currentPhase < CoopBattlePhase.BattleActive) ||
+                currentPhase >= CoopBattlePhase.BattleEnded)
                 return;
 
             if (_hasTriggeredAuthoritativeBattleCompletion)
@@ -13923,7 +14177,14 @@ namespace CoopSpectator.MissionBehaviors
             int attackerReserve;
             int defenderReserve;
             string reserveSource;
-            if (IsUsingNativeExactCampaignArmyBootstrap(mission) &&
+            if (lordsHallController?.HasStarted == true &&
+                !lordsHallController.ReinforcementsEnabled)
+            {
+                attackerReserve = 0;
+                defenderReserve = 0;
+                reserveSource = "lords-hall-reinforcements-disabled";
+            }
+            else if (IsUsingNativeExactCampaignArmyBootstrap(mission) &&
                 !ShouldUseMaterializedSiegeReinforcements(mission) &&
                 ExactCampaignArmyBootstrap.TryGetRemainingTroopCounts(
                     mission,
@@ -13999,6 +14260,8 @@ namespace CoopSpectator.MissionBehaviors
             bool shouldHoldFormations = currentPhase >= CoopBattlePhase.SideSelection && currentPhase < CoopBattlePhase.BattleActive;
             bool shouldReleaseAndPulse = currentPhase >= CoopBattlePhase.BattleActive;
             bool useNativeExactSiegeFormationAi = ShouldUseMaterializedSiegeReinforcements(mission);
+            bool useNativeLordsHallController =
+                mission.GetMissionBehavior<CoopExactCampaignLordsHallMissionController>()?.HasStarted == true;
 
             if (!ReferenceEquals(_lastBattlePhaseAiHoldMission, mission))
             {
@@ -14037,7 +14300,9 @@ namespace CoopSpectator.MissionBehaviors
                         int unitCount = formation.CountOfUnits;
                         bool wasHeld = _battlePhaseHeldFormationKeys.Contains(formationKey);
                         bool hadTrackedUnitCount = _battlePhaseHeldFormationUnitCounts.TryGetValue(formationKey, out int trackedUnitCount);
-                        if (ShouldSkipBattlePhaseFormationHold(mission, team, formation) && wasHeld)
+                        if (!useNativeLordsHallController &&
+                            ShouldSkipBattlePhaseFormationHold(mission, team, formation) &&
+                            wasHeld)
                             continue;
 
                         formation.SetMovementOrder(MovementOrder.MovementOrderStop);
@@ -14057,7 +14322,13 @@ namespace CoopSpectator.MissionBehaviors
                         _battlePhaseHeldFormationUnitCounts.Remove(formationKey);
                         bool isPlayerOwnedFormation = formation.PlayerOwner != null;
                         int pulsedFormationAgents = 0;
-                        if (isPlayerOwnedFormation)
+                        if (useNativeLordsHallController)
+                        {
+                            // Lords-hall movement and firing orders are owned by the dedicated
+                            // controller. Keep the formation detached from field-battle TeamAI.
+                            formation.SetControlledByAI(false, false);
+                        }
+                        else if (isPlayerOwnedFormation)
                         {
                             formation.SetControlledByAI(false, false);
                         }
@@ -14100,6 +14371,7 @@ namespace CoopSpectator.MissionBehaviors
                 }
 
                 if (shouldReleaseAndPulse &&
+                    !useNativeLordsHallController &&
                     team.HasTeamAi &&
                     team.HasAnyEnemyTeamsWithAgents(false))
                 {
@@ -22896,8 +23168,7 @@ namespace CoopSpectator.MissionBehaviors
 
             ReconcileMaterializedBattleResultStateFromMission(mission, source);
 
-            string siegeSubtype = snapshot?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
-            bool isLordsHallStage = string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase);
+            bool isLordsHallStage = LordsHallScenarioContract.IsLordsHallScenario(snapshot?.ScenarioContext);
             string battleStage = isLordsHallStage
                 ? "LordsHall"
                 : snapshot?.ScenarioContext?.IsSiegeBattle == true ? "SiegeAssault" : "Battle";
@@ -32189,9 +32460,7 @@ namespace CoopSpectator.MissionBehaviors
 
         private static bool ShouldRestrictAllowedControlEntriesToMissionReadyRoster(BattleRuntimeState rosterState)
         {
-            string siegeSubtype = rosterState?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
-            return rosterState?.ScenarioContext?.IsSiegeBattle == true &&
-                   string.Equals(siegeSubtype, "LordsHall", StringComparison.OrdinalIgnoreCase);
+            return LordsHallScenarioContract.IsLordsHallScenario(rosterState?.ScenarioContext);
         }
 
         private static void RefreshAuthorityStateFromAllowedTroops(string source, string mode)

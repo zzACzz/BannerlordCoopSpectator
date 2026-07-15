@@ -209,11 +209,11 @@ namespace CoopSpectator.Infrastructure
                         ref includeMountVisuals,
                         ref canInjectBodyPropertiesAtCreateAgentTime);
                     weaponDecisionReason = includeWeapons
-                        ? "siege-with-deployment full-army pre-spawn weapon policy"
-                        : "siege-with-deployment full-army pre-spawn weapon policy disabled";
+                        ? "exact campaign army pre-spawn weapon policy"
+                        : "exact campaign army pre-spawn weapon policy disabled";
                     capeDecisionReason = includeCape
-                        ? "siege-with-deployment full-army pre-spawn cape policy"
-                        : "siege-with-deployment full-army pre-spawn cape policy disabled";
+                        ? "exact campaign army pre-spawn cape policy"
+                        : "exact campaign army pre-spawn cape policy disabled";
                 }
                 if (allowExactSiegePreSpawnEquipmentInjection)
                 {
@@ -309,7 +309,8 @@ namespace CoopSpectator.Infrastructure
                 return !spawnHorses;
             }
 
-            return SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
+            return SceneRuntimeClassifier.IsExactCampaignArmyMaterializationScene(
+                mission.SceneName ?? string.Empty);
         }
 
         private static bool ShouldAllowExactSiegePreSpawnEquipmentInjectionOnDedicated(
@@ -328,7 +329,8 @@ namespace CoopSpectator.Infrastructure
 
             Mission mission = Mission.Current;
             return mission != null &&
-                   SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
+                   SceneRuntimeClassifier.IsExactCampaignArmyMaterializationScene(
+                       mission.SceneName ?? string.Empty);
         }
 
         private static bool ShouldAllowExactSiegeWithDeploymentFullArmyPreSpawnEquipmentInjectionOnDedicated(
@@ -344,18 +346,27 @@ namespace CoopSpectator.Infrastructure
             }
 
             Mission mission = Mission.Current;
-            if (mission == null ||
-                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            if (mission == null)
             {
                 return false;
             }
+
+            string sceneName = mission.SceneName ?? string.Empty;
+            bool exactSiegeAssaultWithDeployment =
+                SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(sceneName);
+            bool validatedLordsHall = SceneRuntimeClassifier.IsValidatedLordsHallScene(sceneName);
+            if (!exactSiegeAssaultWithDeployment && !validatedLordsHall)
+                return false;
 
             BattleScenarioContextMessage scenarioContext =
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            if (exactSiegeAssaultWithDeployment &&
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            {
                 return false;
+            }
 
             if (contract.Mount?.IsMounted == true ||
                 contract.Identity?.IsMountedExpected == true ||
@@ -386,12 +397,12 @@ namespace CoopSpectator.Infrastructure
                 return;
 
             payloadDiagnostic.IsActive = true;
-            payloadDiagnostic.Reason = "siege-with-deployment-full-army-pre-spawn";
+            payloadDiagnostic.Reason = "exact-campaign-army-full-pre-spawn";
             payloadDiagnostic.RequestedProfile = ExactCreateAgentPayloadDiagnosticProfile.FullExact;
             payloadDiagnostic.Profile = ExactCreateAgentPayloadDiagnosticProfile.FullExact;
             payloadDiagnostic.RequestedProfileClientSafe = true;
             payloadDiagnostic.ClientCreateAgentSafe = true;
-            payloadDiagnostic.ClientCreateAgentSafeReason = "server-pre-spawn-full-army-siege-with-deployment";
+            payloadDiagnostic.ClientCreateAgentSafeReason = "server-pre-spawn-full-exact-campaign-army";
             payloadDiagnostic.IncludeWeapons = includeWeapons;
             payloadDiagnostic.IncludeArmorVisuals = includeArmorVisuals;
             payloadDiagnostic.IncludeCape = includeCape;

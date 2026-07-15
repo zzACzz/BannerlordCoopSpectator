@@ -105,7 +105,8 @@ namespace CoopSpectator.Patches
             Mission mission = __instance?.Mission;
             if (mission == null ||
                 !ExactCampaignArmyBootstrap.IsActive(mission) ||
-                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+                !SceneRuntimeClassifier.IsExactCampaignArmyMaterializationScene(
+                    mission.SceneName ?? string.Empty))
             {
                 return true;
             }
@@ -231,7 +232,7 @@ namespace CoopSpectator.Patches
                 }
 
                 ModLogger.Info(
-                    "ExactCampaignArmyBootstrapPatch: suppressed exact siege BattlePowerCalculationLogic.CalculateTeamPowers failure. " +
+                    "ExactCampaignArmyBootstrapPatch: suppressed exact campaign army BattlePowerCalculationLogic.CalculateTeamPowers failure. " +
                     "Scene=" + (mission.SceneName ?? "null") +
                     " Error=" + ex.GetType().Name + ":" + ex.Message);
                 return false;
@@ -247,7 +248,8 @@ namespace CoopSpectator.Patches
             if (mission == null ||
                 team == null ||
                 !ExactCampaignArmyBootstrap.IsActive(mission) ||
-                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty) ||
+                !SceneRuntimeClassifier.IsExactCampaignArmyMaterializationScene(
+                    mission.SceneName ?? string.Empty) ||
                 TryGetBattlePowerSideIndex(team.Side, out _))
             {
                 return true;
@@ -284,7 +286,7 @@ namespace CoopSpectator.Patches
 
             _lastBattlePowerSafeCalculationKey = key;
             ModLogger.Info(
-                "ExactCampaignArmyBootstrapPatch: calculated exact siege team powers with side filter. " +
+                "ExactCampaignArmyBootstrapPatch: calculated exact campaign army team powers with side filter. " +
                 "Scene=" + (mission?.SceneName ?? "null") +
                 " AttackerTeams=" + (sidePowerData != null && sidePowerData.Length > 0 ? sidePowerData[0]?.Count ?? 0 : 0) +
                 " DefenderTeams=" + (sidePowerData != null && sidePowerData.Length > 1 ? sidePowerData[1]?.Count ?? 0 : 0) +

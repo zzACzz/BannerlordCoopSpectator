@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using CoopSpectator.Infrastructure;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.Library;
@@ -21,7 +22,9 @@ namespace CoopSpectator.MissionBehaviors
             private readonly BattleSideEnum _side;
             private readonly IMissionTroopSupplier _troopSupplier;
             private readonly bool _isPlayerSide;
+            private readonly List<Agent> _spawnedAgents = new List<Agent>();
             private bool _troopSpawningActive = true;
+            private bool _combatActivated;
             private int _numberOfSpawnedTroops;
 
             public MissionSide(BattleSideEnum side, IMissionTroopSupplier troopSupplier, bool isPlayerSide)
@@ -34,6 +37,8 @@ namespace CoopSpectator.MissionBehaviors
             public bool TroopSpawningActive => _troopSpawningActive;
 
             public int NumberOfActiveTroops => _numberOfSpawnedTroops - (_troopSupplier?.NumRemovedTroops ?? 0);
+
+            public int NumberOfSpawnedTroops => _numberOfSpawnedTroops;
 
             public int NumberOfRemainingTroops => Math.Max(0, _troopSupplier?.NumTroopsNotSupplied ?? 0);
 
@@ -107,11 +112,9 @@ namespace CoopSpectator.MissionBehaviors
                         continue;
 
                     _numberOfSpawnedTroops++;
+                    _spawnedAgents.Add(agent);
                     AgentFlag agentFlags = agent.GetAgentFlags();
                     agent.SetAgentFlags((AgentFlag)((uint)agentFlags & 0xFFEFFFFFu));
-                    agent.WieldInitialWeapons(Agent.WeaponWieldActionType.Instant);
-                    agent.SetWatchState(Agent.WatchState.Alarmed);
-                    agent.SetBehaviorValueSet(HumanAIComponent.BehaviorValueSet.DefensiveArrangementMove);
                     spawnPoint.AssignAgent(agent);
                 }
             }
@@ -135,15 +138,38 @@ namespace CoopSpectator.MissionBehaviors
                         isReinforcement,
                         spawnCount,
                         index,
-                        isAlarmed: true,
-                        wieldInitialWeapons: true,
+                        isAlarmed: _combatActivated,
+                        wieldInitialWeapons: _combatActivated,
                         null,
                         null);
                     if (agent == null)
                         continue;
 
                     _numberOfSpawnedTroops++;
+                    _spawnedAgents.Add(agent);
                 }
+            }
+
+            public int ActivateCombat()
+            {
+                if (_combatActivated)
+                    return 0;
+
+                _combatActivated = true;
+                int activatedCount = 0;
+                foreach (Agent agent in _spawnedAgents)
+                {
+                    if (agent == null || !agent.IsActive())
+                        continue;
+
+                    agent.WieldInitialWeapons(Agent.WeaponWieldActionType.Instant);
+                    agent.SetWatchState(Agent.WatchState.Alarmed);
+                    if (_side == BattleSideEnum.Defender)
+                        agent.SetBehaviorValueSet(HumanAIComponent.BehaviorValueSet.DefensiveArrangementMove);
+                    activatedCount++;
+                }
+
+                return activatedCount;
             }
         }
 
@@ -258,6 +284,7 @@ namespace CoopSpectator.MissionBehaviors
         private bool _initialized;
         private bool _started;
         private bool _reinforcementsEnabled;
+        private bool _combatActivated;
         private int _removedAllyCounter;
 
         public CoopExactCampaignLordsHallMissionController(
@@ -288,6 +315,10 @@ namespace CoopSpectator.MissionBehaviors
 
         public bool ReinforcementsEnabled => _reinforcementsEnabled;
 
+        public bool HasMaterializedBothSides =>
+            _missionSides[(int)BattleSideEnum.Attacker].NumberOfSpawnedTroops > 0 &&
+            _missionSides[(int)BattleSideEnum.Defender].NumberOfSpawnedTroops > 0;
+
         public BattleSideEnum PlayerSide => _playerSide;
 
         public void EnsureInitializedAndStarted()
@@ -315,6 +346,7 @@ namespace CoopSpectator.MissionBehaviors
                 "Mode=LordsHall" +
                 " Started=" + _started +
                 " MissionInitialized=" + _isMissionInitialized +
+                " CombatActivated=" + _combatActivated +
                 " ReinforcementsEnabled=" + _reinforcementsEnabled +
                 " Attacker[Active=" + attackerActive +
                 ",SpawnActive=" + attacker.TroopSpawningActive +
@@ -363,6 +395,15 @@ namespace CoopSpectator.MissionBehaviors
                 InitializeMission();
                 _isMissionInitialized = true;
                 return;
+            }
+
+            if (!_combatActivated)
+            {
+                CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+                if (currentPhase < CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
+                    return;
+
+                ActivateCombat();
             }
 
             if (_setChargeOrderNextFrame)
@@ -538,13 +579,43 @@ namespace CoopSpectator.MissionBehaviors
                         formation.SetFormOrder(FormOrder.FormOrderDeep);
                     }
 
-                    formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
+                    formation.SetMovementOrder(MovementOrder.MovementOrderStop);
                     formation.SetFiringOrder(FiringOrder.FiringOrderHoldYourFire);
 
                     if (playerOwnsAttackerTeam)
                         formation.PlayerOwner = Mission.Current.MainAgent;
                 }
             }
+        }
+
+        private void ActivateCombat()
+        {
+            if (_combatActivated)
+                return;
+
+            int defenderActivated = _missionSides[(int)BattleSideEnum.Defender].ActivateCombat();
+            int attackerActivated = _missionSides[(int)BattleSideEnum.Attacker].ActivateCombat();
+            foreach (Team team in _attackerTeams ?? Array.Empty<Team>())
+            {
+                if (team == null)
+                    continue;
+
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (formation == null || formation.CountOfUnits <= 0)
+                        continue;
+
+                    formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
+                    formation.SetFiringOrder(FiringOrder.FiringOrderHoldYourFire);
+                    formation.SetControlledByAI(false, false);
+                }
+            }
+
+            _combatActivated = true;
+            ModLogger.Info(
+                "CoopExactCampaignLordsHallMissionController: activated lords-hall combat after battle start. " +
+                "Attackers=" + attackerActivated +
+                " Defenders=" + defenderActivated + ".");
         }
 
         private void CheckForReinforcement()

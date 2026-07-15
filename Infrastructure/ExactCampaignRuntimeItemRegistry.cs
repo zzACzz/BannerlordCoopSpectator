@@ -182,8 +182,11 @@ namespace CoopSpectator.Infrastructure
                         "].");
                 }
 
-                if (CoopTestBattleOptions.IsCampaignMirrorHeroesSnapshot(runtimeState.Snapshot))
+                if (runtimeState.Snapshot?.CraftedWeapons != null &&
+                    runtimeState.Snapshot.CraftedWeapons.Count > 0)
+                {
                     EnsureCraftedMirrorItemsLoadedFromSnapshotLocked(objectManager, runtimeState.Snapshot, source);
+                }
 
                 if (CoopTestBattleOptions.IsCampaignMirrorSnapshot(runtimeState.Snapshot))
                     EnsureMirrorItemsLoadedFromStateLocked(objectManager, runtimeState, source);

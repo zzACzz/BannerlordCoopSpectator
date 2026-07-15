@@ -54,6 +54,7 @@
     <Compile Include="..\GameMode\MissionBehaviorDiagnostic.cs" Link="GameMode\MissionBehaviorDiagnostic.cs" />
     <Compile Include="..\Mission\CoopMissionBehaviors.cs" Link="Mission\CoopMissionBehaviors.cs" />
     <Compile Include="..\Mission\CoopExactCampaignLordsHallMissionController.cs" Link="Mission\CoopExactCampaignLordsHallMissionController.cs" />
+    <Compile Include="..\Mission\LordsHall\LordsHallMissionRuntime.cs" Link="Mission\LordsHall\LordsHallMissionRuntime.cs" />
     <Compile Include="..\Mission\CoopExactCampaignSiegeAmbushMissionController.cs" Link="Mission\CoopExactCampaignSiegeAmbushMissionController.cs" />
     <Compile Include="..\Mission\CoopMissionNetworkBridge.cs" Link="Mission\CoopMissionNetworkBridge.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
@@ -76,6 +77,7 @@
     <Compile Include="..\Infrastructure\BattleSnapshotBinarySerializer.cs" Link="Infrastructure\BattleSnapshotBinarySerializer.cs" />
     <Compile Include="..\Infrastructure\CampaignCasualtyProbabilityCalculator.cs" Link="Infrastructure\CampaignCasualtyProbabilityCalculator.cs" />
     <Compile Include="..\Infrastructure\CampaignMissionShellRuntimeState.cs" Link="Infrastructure\CampaignMissionShellRuntimeState.cs" />
+    <Compile Include="..\Infrastructure\LordsHall\LordsHallScenarioContract.cs" Link="Infrastructure\LordsHall\LordsHallScenarioContract.cs" />
     <Compile Include="..\Infrastructure\CampaignMapPatchMissionInit.cs" Link="Infrastructure\CampaignMapPatchMissionInit.cs" />
     <Compile Include="..\Infrastructure\CampaignMultiplayerHeroClassResolver.cs" Link="Infrastructure\CampaignMultiplayerHeroClassResolver.cs" />
     <Compile Include="..\Infrastructure\ExactBattleAgentSpawnTraceBridgeFile.cs" Link="Infrastructure\ExactBattleAgentSpawnTraceBridgeFile.cs" />
