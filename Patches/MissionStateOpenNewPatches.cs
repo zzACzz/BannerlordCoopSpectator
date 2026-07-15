@@ -88,19 +88,22 @@ namespace CoopSpectator.Patches
                 rec.SceneName,
                 "MissionState.OpenNew prefix");
 
-            SiegeAssaultMissionOpenBridge.PreOpenContract preOpenContract =
-                SiegeAssaultMissionOpenBridge.Resolve(rec.SceneName, missionName ?? string.Empty);
-            if (preOpenContract.IsValid && preOpenContract.IsSiegeAssaultWithDeployment)
-            {
-                SiegeAssaultMissionOpenBridge.Capture(
-                    preOpenContract,
-                    "MissionState.OpenNew prefix");
-            }
-
             bool isOfficialBattleMission = string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal);
             bool isCoopBattleFactory = IsCoopBattleBehaviorFactory(handler);
             bool isNativeSiegeWithDeploymentMission =
                 string.Equals(missionName, SiegeMissionWithDeploymentMissionName, StringComparison.Ordinal);
+            if (isOfficialBattleMission || isNativeSiegeWithDeploymentMission)
+            {
+                SiegeAssaultMissionOpenBridge.PreOpenContract preOpenContract =
+                    SiegeAssaultMissionOpenBridge.Resolve(rec.SceneName, missionName ?? string.Empty);
+                if (preOpenContract.IsValid && preOpenContract.IsSiegeAssaultWithDeployment)
+                {
+                    SiegeAssaultMissionOpenBridge.Capture(
+                        preOpenContract,
+                        "MissionState.OpenNew prefix");
+                }
+            }
+
             if (GameNetwork.IsServer && (isOfficialBattleMission || isNativeSiegeWithDeploymentMission))
                 PendingBattleMissionStartupState.Arm(rec.SceneName, "MissionState.OpenNew prefix");
 

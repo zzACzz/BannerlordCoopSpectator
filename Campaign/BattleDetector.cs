@@ -451,7 +451,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (Mission.Current != null && _wasInMissionLastTick)
                 TryHandleBattleResultMissionExit();
 
-            bool isInMissionNow = Mission.Current != null; // Визначаємо чи зараз є активна місія (битва/сцена)
+            bool isInMissionNow = IsCooperativeBattleMission(Mission.Current); // Визначаємо чи зараз є активна бойова місія
 
             if (!isInMissionNow) // Якщо місії немає, значить ми не в битві (або вже вийшли з неї)
             { // Починаємо блок if
@@ -503,6 +503,33 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             TryStartMissionForCurrentRole();
         } // Завершуємо блок методу
 
+        private static bool IsCooperativeBattleMission(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            try
+            {
+                MapEvent battle =
+                    PlayerEncounter.Battle ??
+                    PlayerEncounter.EncounteredBattle ??
+                    MobileParty.MainParty?.MapEvent;
+                if (battle != null)
+                    return true;
+            }
+            catch
+            {
+            }
+
+            string sceneName = SafeMissionSceneName(mission);
+            bool isExplicitBattleRuntime =
+                GameNetwork.IsClient ||
+                GameNetwork.IsServer ||
+                CoopTestBattleOptions.Enabled;
+            return isExplicitBattleRuntime &&
+                   SceneRuntimeClassifier.IsSceneAwareBattleRuntimeScene(sceneName);
+        }
+
         private static bool ShouldSendBattleStart() // Перевіряємо чи поточний інстанс гри має право надсилати BATTLE_START
         { // Починаємо блок методу
             if (CoopRuntime.Network == null) // Перевіряємо що NetworkManager ініціалізований
@@ -533,7 +560,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
         private void ResetIfMissionEnded() // Helper: тримаємо внутрішній стан коректним, коли місія завершилась
         { // Починаємо блок методу
-            if (Mission.Current != null) // Якщо місія активна, ми нічого не скидаємо
+            if (IsCooperativeBattleMission(Mission.Current)) // Якщо бойова місія активна, ми нічого не скидаємо
             { // Починаємо блок if
                 return; // Виходимо, бо ми все ще в місії
             } // Завершуємо блок if
